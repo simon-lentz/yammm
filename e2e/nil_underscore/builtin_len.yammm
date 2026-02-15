@@ -1,0 +1,14 @@
+schema "builtin_len"
+
+// Schema for testing builtin Len function via pipe operator in invariants.
+// This exercises the VisitFcall → callBuiltin path (Issue 9, Bug 1).
+type Record {
+    id          String primary
+    name        String required
+    description String
+
+    // Invariant using pipe operator with Len builtin:
+    // description is nil OR its length is > 0
+    ! "description_when_present"
+        description == _ || description -> Len > 0
+}

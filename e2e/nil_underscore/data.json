@@ -1,0 +1,18 @@
+{
+    "Record": [
+        {
+            "id": "valid-with-desc",
+            "name": "Has Description",
+            "description": "A non-empty description"
+        },
+        {
+            "id": "valid-no-desc",
+            "name": "No Description"
+        },
+        {
+            "id": "invalid-empty-desc",
+            "name": "Empty Description",
+            "description": ""
+        }
+    ]
+}

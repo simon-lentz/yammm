@@ -1,0 +1,13 @@
+// Test fixture for navigation testing (parts module).
+// Used to test go-to-definition for imported types.
+schema "parts"
+
+type Wheel {
+	diameter Integer
+	brand String
+}
+
+type Engine {
+	horsepower Integer
+	cylinders Integer
+}

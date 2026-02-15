@@ -1,0 +1,13 @@
+schema "keyword_nil"
+
+// Schema for testing nil keyword as nil literal in invariants.
+type Record {
+    id          String primary
+    name        String required
+    description String
+
+    // Invariant using nil for nil check:
+    // description is nil OR description is not empty string
+    ! "description_when_present"
+        description == nil || description != ""
+}

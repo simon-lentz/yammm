@@ -1,0 +1,7 @@
+// Test fixture for parse error diagnostics.
+// Expected: E_SYNTAX error on line 6 (missing opening brace).
+schema "parse_error"
+
+type Person
+	name String
+}

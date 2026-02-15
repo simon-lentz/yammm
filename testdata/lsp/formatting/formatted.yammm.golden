@@ -1,0 +1,14 @@
+// Test fixture for formatting - expected formatted output.
+// Contains: tab indentation, no trailing whitespace, single blank lines.
+schema "formatting"
+
+type Person {
+	name String required
+	age Integer
+}
+
+type Address {
+	street String
+	city String
+	zip String
+}

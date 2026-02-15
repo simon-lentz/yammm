@@ -1,0 +1,286 @@
+package lsp
+
+import (
+	"fmt"
+
+	"github.com/tliron/glsp"
+	protocol "github.com/tliron/glsp/protocol_3_16"
+)
+
+// textDocumentDocumentSymbol handles textDocument/documentSymbol requests.
+//
+//nolint:nilnil // LSP protocol: nil result means no symbols
+func (s *Server) textDocumentDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
+	uri := params.TextDocument.URI
+
+	s.logger.Debug("documentSymbol request",
+		"uri", uri,
+	)
+
+	snapshot := s.workspace.LatestSnapshot(uri)
+	if snapshot == nil {
+		return nil, nil
+	}
+
+	// Get document snapshot for canonical SourceID (symlink-resolved at open time)
+	doc := s.workspace.GetDocumentSnapshot(uri)
+	if doc == nil {
+		return nil, nil
+	}
+
+	// Log staleness for debugging (per design doc §3.5, we still serve stale data)
+	if snapshot.EntryVersion != doc.Version {
+		s.logger.Debug("serving stale snapshot for documentSymbol",
+			"uri", uri,
+			"snapshot_version", snapshot.EntryVersion,
+			"doc_version", doc.Version,
+		)
+	}
+
+	// Get the symbol index for this source using canonical SourceID
+	idx := snapshot.SymbolIndexAt(doc.SourceID)
+	if idx == nil {
+		return nil, nil
+	}
+
+	// Build hierarchical document symbols
+	symbols := s.buildDocumentSymbols(idx, snapshot)
+
+	return symbols, nil
+}
+
+// symbolParentKey creates a unique key for parent lookup to prevent name collisions.
+// Uses kind:name format to ensure types and schemas with the same name don't collide.
+func symbolParentKey(kind SymbolKind, name string) string {
+	return fmt.Sprintf("%d:%s", kind, name)
+}
+
+// docSymWithKey wraps a DocumentSymbol with its parent key for hierarchical building.
+type docSymWithKey struct {
+	sym protocol.DocumentSymbol
+	key string // composite key (kind:name) for looking up children
+}
+
+// buildDocumentSymbols converts a SymbolIndex to hierarchical DocumentSymbols.
+func (s *Server) buildDocumentSymbols(idx *SymbolIndex, snapshot *Snapshot) []protocol.DocumentSymbol {
+	if idx == nil || len(idx.Symbols) == 0 {
+		return nil
+	}
+
+	// Group symbols by parent using composite key (kind:name) to prevent collisions
+	// when a schema name equals a type name.
+
+	// First pass: identify top-level symbols (schema, imports, types, datatypes)
+	var topLevel []docSymWithKey
+	childrenByParent := make(map[string][]docSymWithKey)
+
+	// Find the schema name and build its key - first pass for order-independent detection
+	var schemaKey string
+	var hasSchemaSymbol bool
+	for i := range idx.Symbols {
+		sym := &idx.Symbols[i]
+		if sym.Kind == SymbolSchema {
+			schemaKey = symbolParentKey(SymbolSchema, sym.Name)
+			hasSchemaSymbol = true
+			break
+		}
+	}
+
+	// Check for orphan imports (only if no schema found) - second pass.
+	// Orphan imports indicate a parse error where the schema declaration failed
+	// but imports were successfully extracted. In this case, create a synthetic
+	// root to keep the outline stable.
+	var hasOrphanImports bool
+	var useSyntheticSchema bool
+	if !hasSchemaSymbol {
+		for i := range idx.Symbols {
+			if idx.Symbols[i].Kind == SymbolImport {
+				hasOrphanImports = true
+				break
+			}
+		}
+		useSyntheticSchema = hasOrphanImports
+	}
+
+	// If no schema symbol exists but there are orphan imports, create a synthetic
+	// root to maintain consistent hierarchy in the document outline. When synthetic
+	// schema is created, ALL orphan symbols (imports, types, datatypes) are nested
+	// under it to keep the outline stable and predictable during partial parses.
+	const syntheticSchemaName = "(schema)"
+	if useSyntheticSchema {
+		schemaKey = symbolParentKey(SymbolSchema, syntheticSchemaName)
+		detail := "parse error"
+		topLevel = append(topLevel, docSymWithKey{
+			sym: protocol.DocumentSymbol{
+				Name:   syntheticSchemaName,
+				Detail: &detail,
+				Kind:   protocol.SymbolKindModule,
+				Range: protocol.Range{
+					Start: protocol.Position{Line: 0, Character: 0},
+					End:   protocol.Position{Line: 0, Character: 0},
+				},
+				SelectionRange: protocol.Range{
+					Start: protocol.Position{Line: 0, Character: 0},
+					End:   protocol.Position{Line: 0, Character: 0},
+				},
+			},
+			key: schemaKey,
+		})
+	}
+
+	// Process all symbols
+	for i := range idx.Symbols {
+		sym := &idx.Symbols[i]
+		docSym := s.symbolToDocumentSymbol(sym, snapshot)
+		symKey := symbolParentKey(sym.Kind, sym.Name)
+
+		switch sym.Kind {
+		case SymbolSchema:
+			// Schema is always top-level, will contain imports
+			topLevel = append(topLevel, docSymWithKey{sym: docSym, key: symKey})
+
+		case SymbolImport:
+			// Imports are children of schema (real or synthetic)
+			if schemaKey != "" {
+				childrenByParent[schemaKey] = append(childrenByParent[schemaKey], docSymWithKey{sym: docSym, key: symKey})
+			} else {
+				topLevel = append(topLevel, docSymWithKey{sym: docSym, key: symKey})
+			}
+
+		case SymbolType, SymbolDataType:
+			// Types and datatypes are children of schema (real or synthetic in error states).
+			// In synthetic mode, all types are nested under the synthetic root for stability.
+			switch {
+			case useSyntheticSchema:
+				// Synthetic mode: nest all types under synthetic schema
+				childrenByParent[schemaKey] = append(childrenByParent[schemaKey], docSymWithKey{sym: docSym, key: symKey})
+			case schemaKey != "":
+				// Real schema exists: nest types that belong to it
+				parentKey := symbolParentKey(SymbolSchema, sym.ParentName)
+				if parentKey == schemaKey {
+					childrenByParent[schemaKey] = append(childrenByParent[schemaKey], docSymWithKey{sym: docSym, key: symKey})
+				} else {
+					topLevel = append(topLevel, docSymWithKey{sym: docSym, key: symKey})
+				}
+			default:
+				topLevel = append(topLevel, docSymWithKey{sym: docSym, key: symKey})
+			}
+
+		case SymbolProperty, SymbolAssociation, SymbolComposition, SymbolInvariant:
+			// These are children of their parent type
+			if sym.ParentName != "" {
+				// Parent is a type, not a schema
+				parentKey := symbolParentKey(SymbolType, sym.ParentName)
+				childrenByParent[parentKey] = append(childrenByParent[parentKey], docSymWithKey{sym: docSym, key: symKey})
+			}
+		}
+	}
+
+	// Second pass: attach children to parents
+	result := s.attachChildren(topLevel, childrenByParent)
+
+	return result
+}
+
+// attachChildren recursively attaches children to parent symbols.
+func (s *Server) attachChildren(symbols []docSymWithKey, childrenByParent map[string][]docSymWithKey) []protocol.DocumentSymbol {
+	result := make([]protocol.DocumentSymbol, len(symbols))
+
+	for i, dsym := range symbols {
+		result[i] = dsym.sym
+		if children, ok := childrenByParent[dsym.key]; ok {
+			// Recursively attach children to these children
+			attachedChildren := s.attachChildren(children, childrenByParent)
+			result[i].Children = attachedChildren
+		}
+	}
+
+	return result
+}
+
+// symbolToDocumentSymbol converts a Symbol to a protocol.DocumentSymbol.
+func (s *Server) symbolToDocumentSymbol(sym *Symbol, snapshot *Snapshot) protocol.DocumentSymbol {
+	kind := s.symbolKindToLSP(sym.Kind)
+
+	// Build detail string
+	detail := sym.Detail
+	if detail == "" {
+		detail = sym.Kind.String()
+	}
+
+	// Convert spans using proper UTF-16 conversion
+	enc := s.workspace.PositionEncoding()
+
+	rangeStart, rangeEnd, rangeOk := SpanToLSPRange(snapshot.Sources, sym.Range, enc)
+	selStart, selEnd, selOk := SpanToLSPRange(snapshot.Sources, sym.Selection, enc)
+
+	// Build ranges (fallback to naive conversion if needed)
+	var symRange, selRange protocol.Range
+	if rangeOk {
+		symRange = protocol.Range{
+			Start: protocol.Position{Line: toUInteger(rangeStart[0]), Character: toUInteger(rangeStart[1])},
+			End:   protocol.Position{Line: toUInteger(rangeEnd[0]), Character: toUInteger(rangeEnd[1])},
+		}
+	} else {
+		symRange = protocol.Range{
+			Start: protocol.Position{
+				Line:      toUInteger(sym.Range.Start.Line - 1),
+				Character: toUInteger(sym.Range.Start.Column - 1),
+			},
+			End: protocol.Position{
+				Line:      toUInteger(sym.Range.End.Line - 1),
+				Character: toUInteger(sym.Range.End.Column - 1),
+			},
+		}
+	}
+
+	if selOk {
+		selRange = protocol.Range{
+			Start: protocol.Position{Line: toUInteger(selStart[0]), Character: toUInteger(selStart[1])},
+			End:   protocol.Position{Line: toUInteger(selEnd[0]), Character: toUInteger(selEnd[1])},
+		}
+	} else {
+		selRange = protocol.Range{
+			Start: protocol.Position{
+				Line:      toUInteger(sym.Selection.Start.Line - 1),
+				Character: toUInteger(sym.Selection.Start.Column - 1),
+			},
+			End: protocol.Position{
+				Line:      toUInteger(sym.Selection.End.Line - 1),
+				Character: toUInteger(sym.Selection.End.Column - 1),
+			},
+		}
+	}
+
+	return protocol.DocumentSymbol{
+		Name:           sym.Name,
+		Detail:         &detail,
+		Kind:           kind,
+		Range:          symRange,
+		SelectionRange: selRange,
+	}
+}
+
+// symbolKindToLSP converts our SymbolKind to LSP SymbolKind.
+func (s *Server) symbolKindToLSP(kind SymbolKind) protocol.SymbolKind {
+	switch kind {
+	case SymbolSchema:
+		return protocol.SymbolKindModule
+	case SymbolImport:
+		return protocol.SymbolKindPackage
+	case SymbolType:
+		return protocol.SymbolKindClass
+	case SymbolDataType:
+		return protocol.SymbolKindTypeParameter
+	case SymbolProperty:
+		return protocol.SymbolKindField
+	case SymbolAssociation:
+		return protocol.SymbolKindProperty
+	case SymbolComposition:
+		return protocol.SymbolKindProperty
+	case SymbolInvariant:
+		return protocol.SymbolKindEvent
+	default:
+		return protocol.SymbolKindVariable
+	}
+}

@@ -1,0 +1,18 @@
+// Test fixture for formatting - unformatted input.
+// Contains: trailing whitespace, space indentation, extra blank lines.
+schema "formatting"
+
+
+type Person   {
+    name String  required
+    age Integer
+
+
+}
+
+
+type   Address{
+    street String
+    city   String
+    zip String
+}

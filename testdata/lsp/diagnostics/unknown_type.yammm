@@ -1,0 +1,9 @@
+// Test fixture for unknown type reference diagnostics.
+// Expected: E_UNKNOWN_TYPE error on line 8 (UnknownType not defined).
+schema "unknown_type"
+
+type Order {
+	customer String
+	// UnknownType is not defined
+	*-> ITEMS (many) UnknownType
+}

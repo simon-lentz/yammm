@@ -1,0 +1,111 @@
+{
+  "name": "yammm",
+  "displayName": "YAMMM",
+  "description": "Language support for YAMMM schema files",
+  "version": "0.1.0",
+  "publisher": "simon-lentz",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simon-lentz/yammm"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "yammm",
+        "aliases": [
+          "YAMMM",
+          "yammm"
+        ],
+        "extensions": [
+          ".yammm"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "yammm",
+        "scopeName": "source.yammm",
+        "path": "./syntaxes/yammm.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "yammm",
+        "path": "./snippets/yammm.json"
+      }
+    ],
+    "configuration": {
+      "title": "YAMMM",
+      "properties": {
+        "yammm.lsp.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the yammm-lsp binary. If empty, uses the bundled binary."
+        },
+        "yammm.lsp.logFile": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a log file for the language server. If empty, logs to stderr. Useful for debugging."
+        },
+        "yammm.lsp.logLevel": {
+          "type": "string",
+          "default": "info",
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug",
+            "trace"
+          ],
+          "description": "Log level for the language server."
+        },
+        "yammm.lsp.moduleRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Override the module root for import resolution. If empty, uses workspace root."
+        },
+        "yammm.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace communication between VS Code and the YAMMM language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile:prod",
+    "compile": "node esbuild.mjs",
+    "compile:prod": "node esbuild.mjs --production",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.24.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0"
+  }
+}

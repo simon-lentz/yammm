@@ -1,0 +1,10 @@
+// Test fixture for import cycle detection (file B).
+// This file imports a.yammm which imports b.yammm.
+// Expected: E_IMPORT_CYCLE error.
+schema "cycle_b"
+
+import "./a" as a
+
+type TypeB {
+	ref a.TypeA
+}

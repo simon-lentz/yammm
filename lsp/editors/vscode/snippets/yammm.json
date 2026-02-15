@@ -1,0 +1,177 @@
+{
+  "Schema Declaration": {
+    "prefix": "schema",
+    "body": [
+      "schema \"${1:name}\"",
+      "",
+      "$0"
+    ],
+    "description": "Create a new schema declaration"
+  },
+  "Import Statement": {
+    "prefix": "import",
+    "body": [
+      "import \"${1:./path}\"${2: as ${3:alias}}"
+    ],
+    "description": "Import another schema file (alias is optional)"
+  },
+  "Type Declaration": {
+    "prefix": "type",
+    "body": [
+      "type ${1:Name} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Create a new type"
+  },
+  "Abstract Type": {
+    "prefix": "abstract",
+    "body": [
+      "abstract type ${1:Name} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Create an abstract type"
+  },
+  "Part Type": {
+    "prefix": "part",
+    "body": [
+      "part type ${1:Name} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Create a part type (for composition)"
+  },
+  "Type with Extends": {
+    "prefix": "typeext",
+    "body": [
+      "type ${1:Name} extends ${2:Parent} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Create a type that extends another"
+  },
+  "Datatype Alias": {
+    "prefix": "datatype",
+    "body": [
+      "type ${1:Name} = ${2|String,Integer,Float,Boolean,UUID,Date,Timestamp,Vector,Enum,Pattern|}"
+    ],
+    "description": "Create a datatype alias"
+  },
+  "Datatype with Constraint": {
+    "prefix": "datatype-constraint",
+    "body": [
+      "type ${1:Name} = ${2|String,Integer|}[${3:min}, ${4:max}]"
+    ],
+    "description": "Create a datatype alias with numeric constraints"
+  },
+  "String Property": {
+    "prefix": "propstring",
+    "body": [
+      "${1:name} String${2:[${3:1}, ${4:100}]}${5|, required, primary|}"
+    ],
+    "description": "String property with optional constraint"
+  },
+  "Integer Property": {
+    "prefix": "propint",
+    "body": [
+      "${1:name} Integer${2:[${3:0}, ${4:_}]}${5|, required|}"
+    ],
+    "description": "Integer property with optional constraint"
+  },
+  "Boolean Property": {
+    "prefix": "propbool",
+    "body": [
+      "${1:name} Boolean${2|, required|}"
+    ],
+    "description": "Boolean property"
+  },
+  "UUID Property": {
+    "prefix": "propuuid",
+    "body": [
+      "${1:id} UUID${2|, primary|}"
+    ],
+    "description": "UUID property (often used as primary key)"
+  },
+  "Timestamp Property": {
+    "prefix": "proptime",
+    "body": [
+      "${1:createdAt} Timestamp${2|, required|}"
+    ],
+    "description": "Timestamp property"
+  },
+  "Date Property": {
+    "prefix": "propdate",
+    "body": [
+      "${1:date} Date${2|, required|}"
+    ],
+    "description": "Date property"
+  },
+  "Enum Property": {
+    "prefix": "propenum",
+    "body": [
+      "${1:status} Enum[\"${2:active}\", \"${3:inactive}\"]${4|, required|}"
+    ],
+    "description": "Enum property with values"
+  },
+  "Association (one)": {
+    "prefix": "assocone",
+    "body": [
+      "--> ${1:NAME} (one) ${2:TargetType}"
+    ],
+    "description": "One-to-one association"
+  },
+  "Association (many)": {
+    "prefix": "assocmany",
+    "body": [
+      "--> ${1:NAME} (many) ${2:TargetType}"
+    ],
+    "description": "One-to-many association"
+  },
+  "Composition (one)": {
+    "prefix": "compone",
+    "body": [
+      "*-> ${1:CONTAINS} (one) ${2:PartType}"
+    ],
+    "description": "Composition with one part"
+  },
+  "Composition (many)": {
+    "prefix": "compmany",
+    "body": [
+      "*-> ${1:CONTAINS} (many) ${2:PartType}"
+    ],
+    "description": "Composition with many parts"
+  },
+  "Invariant": {
+    "prefix": "invariant",
+    "body": [
+      "! \"${1:message}\" ${2:expression}"
+    ],
+    "description": "Add an invariant constraint"
+  },
+  "Full Type Template": {
+    "prefix": "typefull",
+    "body": [
+      "// ${1:Description of the type}",
+      "type ${2:Name} {",
+      "\t${3:id} UUID primary",
+      "\t${4:name} String[1, 100] required",
+      "\t$0",
+      "}"
+    ],
+    "description": "Full type with common properties"
+  },
+  "Entity Type Template": {
+    "prefix": "entity",
+    "body": [
+      "// ${1:Description}",
+      "type ${2:Name} {",
+      "\tid UUID primary",
+      "\tcreatedAt Timestamp required",
+      "\tupdatedAt Timestamp required",
+      "\t$0",
+      "}"
+    ],
+    "description": "Entity type with audit fields"
+  }
+}

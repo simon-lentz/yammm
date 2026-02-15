@@ -1,0 +1,183 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "YAMMM",
+  "scopeName": "source.yammm",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#schema" },
+    { "include": "#import" },
+    { "include": "#datatype" },
+    { "include": "#type-declaration" },
+    { "include": "#strings" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.yammm",
+          "begin": "/\\*",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.line.double-slash.yammm",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "schema": {
+      "match": "^\\s*(schema)\\s+(\"[^\"]*\"|'[^']*')",
+      "captures": {
+        "1": { "name": "keyword.control.schema.yammm" },
+        "2": { "name": "string.quoted.yammm" }
+      }
+    },
+    "import": {
+      "comment": "Import statement with optional 'as alias' clause (grammar makes alias optional)",
+      "match": "^\\s*(import)\\s+(\"[^\"]*\"|'[^']*')(?:\\s+(as)\\s+([a-zA-Z_][a-zA-Z0-9_]*))?",
+      "captures": {
+        "1": { "name": "keyword.control.import.yammm" },
+        "2": { "name": "string.quoted.yammm" },
+        "3": { "name": "keyword.control.as.yammm" },
+        "4": { "name": "entity.name.namespace.yammm" }
+      }
+    },
+    "type-declaration": {
+      "begin": "^\\s*(abstract\\s+)?(part\\s+)?(type)\\s+([A-Z][a-zA-Z0-9_]*)(?:\\s+(extends)\\s+)?",
+      "beginCaptures": {
+        "1": { "name": "storage.modifier.abstract.yammm" },
+        "2": { "name": "storage.modifier.part.yammm" },
+        "3": { "name": "keyword.declaration.type.yammm" },
+        "4": { "name": "entity.name.type.yammm" },
+        "5": { "name": "keyword.other.extends.yammm" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.block.end.yammm" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#type-reference" },
+        { "include": "#type-body" }
+      ]
+    },
+    "type-reference": {
+      "match": "([a-zA-Z_][a-zA-Z0-9_]*)(\\.)([A-Z][a-zA-Z0-9_]*)|([A-Z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "entity.name.namespace.yammm" },
+        "2": { "name": "punctuation.accessor.yammm" },
+        "3": { "name": "entity.name.type.yammm" },
+        "4": { "name": "entity.name.type.yammm" }
+      }
+    },
+    "type-body": {
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.block.begin.yammm" }
+      },
+      "end": "(?=\\})",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#invariant" },
+        { "include": "#association" },
+        { "include": "#composition" },
+        { "include": "#property" }
+      ]
+    },
+    "property": {
+      "comment": "Property declaration with name, type, optional constraint, and modifiers. Uses begin/end to allow each modifier to be captured independently.",
+      "begin": "^\\s*([a-z_][a-zA-Z0-9_]*)\\s+",
+      "beginCaptures": {
+        "1": { "name": "variable.other.property.yammm" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#property-type" },
+        { "include": "#property-constraint" },
+        { "include": "#property-modifier" }
+      ]
+    },
+    "property-type": {
+      "comment": "Property type: built-in types or user types (qualified with lowercase alias allowed, e.g., parts.Wheel).",
+      "match": "\\b(String|Integer|Float|Boolean|UUID|Date|Timestamp|Vector|Enum|Pattern|(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)\\b",
+      "name": "support.type.yammm"
+    },
+    "property-constraint": {
+      "match": "\\[[^\\]]*\\]",
+      "name": "meta.constraint.yammm"
+    },
+    "property-modifier": {
+      "comment": "Property modifiers per grammar: only 'required' or 'primary' (not 'optional')",
+      "match": "\\b(required|primary)\\b",
+      "name": "storage.modifier.yammm"
+    },
+    "association": {
+      "comment": "Association declaration with optional multiplicity. Type reference allows lowercase qualifier for imports (e.g., parts.Wheel).",
+      "match": "^\\s*(-->)\\s+([A-Z_][A-Z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.operator.association.yammm" },
+        "2": { "name": "entity.name.function.relation.yammm" },
+        "3": { "name": "punctuation.definition.parameters.begin.yammm" },
+        "4": { "name": "constant.language.multiplicity.yammm" },
+        "5": { "name": "punctuation.definition.parameters.end.yammm" },
+        "6": { "name": "entity.name.type.yammm" }
+      }
+    },
+    "composition": {
+      "comment": "Composition declaration with optional multiplicity. Type reference allows lowercase qualifier for imports (e.g., parts.Wheel).",
+      "match": "^\\s*(\\*->)\\s+([A-Z_][A-Z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.operator.composition.yammm" },
+        "2": { "name": "entity.name.function.relation.yammm" },
+        "3": { "name": "punctuation.definition.parameters.begin.yammm" },
+        "4": { "name": "constant.language.multiplicity.yammm" },
+        "5": { "name": "punctuation.definition.parameters.end.yammm" },
+        "6": { "name": "entity.name.type.yammm" }
+      }
+    },
+    "invariant": {
+      "match": "^\\s*(!)\\s+(\"[^\"]*\"|'[^']*')\\s+(.*)$",
+      "captures": {
+        "1": { "name": "keyword.operator.invariant.yammm" },
+        "2": { "name": "string.quoted.invariant-message.yammm" },
+        "3": { "name": "meta.expression.yammm" }
+      }
+    },
+    "datatype": {
+      "match": "^\\s*(type)\\s+([A-Z][a-zA-Z0-9_]*)\\s*(=)\\s*(String|Integer|Float|Boolean|UUID|Date|Timestamp|Vector|Enum|Pattern)(\\[[^\\]]*\\])?",
+      "captures": {
+        "1": { "name": "keyword.declaration.type.yammm" },
+        "2": { "name": "entity.name.type.yammm" },
+        "3": { "name": "keyword.operator.assignment.yammm" },
+        "4": { "name": "support.type.yammm" },
+        "5": { "name": "meta.constraint.yammm" }
+      }
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.yammm",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.yammm",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.yammm",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.yammm",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

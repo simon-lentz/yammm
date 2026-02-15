@@ -1,0 +1,23 @@
+// Test fixture for navigation testing (main module).
+// Tests: go-to-definition for imports, types, properties, relations.
+schema "main"
+
+import "./parts" as parts
+
+type Vehicle {
+	vin String primary
+	make String required
+	model String required
+}
+
+type Car extends Vehicle {
+	doors Integer
+	// Test navigation to imported type
+	*-> WHEELS (many) parts.Wheel
+	*-> ENGINE (one) parts.Engine
+}
+
+type Motorcycle extends Vehicle {
+	cc Integer
+	*-> WHEELS (many) parts.Wheel
+}

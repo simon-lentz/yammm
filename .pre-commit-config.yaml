@@ -1,0 +1,62 @@
+repos:
+  # Generic text hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+      - id: check-yaml
+      - id: check-json
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.8
+    hooks:
+      - id: actionlint
+        name: actionlint (GHA)
+        files: ^\.github/workflows/.*\.ya?ml$
+  # Go formatting + basic Go workflows
+  - repo: local
+    hooks:
+      # YAML formatting
+      - id: yamlfmt
+        name: yamlfmt
+        description: This hook uses github.com/google/yamlfmt to format yaml files. Requires Go >1.18 to be installed.
+        entry: yamlfmt
+        language: golang
+        types: [yaml]
+      # Stricter gofmt
+      - id: gofumpt
+        name: gofumpt
+        entry: gofumpt
+        language: system
+        types: [go]
+        args: ["-w"]
+      # Imports: add/remove + format (optional but nice)
+      - id: goimports
+        name: goimports
+        entry: goimports
+        language: system
+        types: [go]
+        args: ["-w"]
+      # Keep go.mod/go.sum tidy (run on push, not every commit)
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: bash -c 'cd "$(git rev-parse --show-toplevel)" && go mod tidy'
+        language: system
+        pass_filenames: false
+        files: ^go\.(mod|sum)$
+        stages: [pre-commit, pre-push]
+      # Run all tests including integration on push
+      - id: go-test
+        name: go test
+        entry: go test ./...
+        language: system
+        pass_filenames: false
+        stages: [pre-commit, pre-push]
+      # Static analysis
+      - id: golangci-lint
+        name: golangci-lint
+        entry: make lint
+        language: system
+        pass_filenames: false
+        stages: [pre-commit, pre-push]

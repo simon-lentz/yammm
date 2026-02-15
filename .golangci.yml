@@ -1,0 +1,89 @@
+# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.jsonschema.json
+version: "2"
+run:
+  # Analyze tests as well.
+  tests: true
+  # Don't let tools mutate go.mod/go.sum.
+  modules-download-mode: readonly
+issues:
+  # Don't cap number of issues reported.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # CI should stay read-only -> run `make lint-fix` locally for auto-fixes.
+  fix: false
+linters:
+  default: standard
+  enable:
+    - staticcheck # deep static analysis / bug finder
+    - gosec # security checks
+    - errcheck
+    - wrapcheck
+    - ineffassign
+    - errorlint # proper Go 1.13 error wrapping
+    - errchkjson # JSON encoding/decoding misuse
+    - nilerr # 'if err != nil { return nil }' style bugs
+    - nilnil # no (nil, nil) or invalid value with nil error
+    - nilnesserr # extra guard for nil-error combinations
+    - containedctx # no context.Context fields in structs
+    - contextcheck # no non-derived background contexts
+    - noctx # flag calls that should use context.Context
+    - asciicheck # identifiers stay ASCII
+    - bidichk # dangerous bidi sequences
+    - unconvert
+    - exptostd
+    - paralleltest # safe use of t.Parallel
+    - tparallel
+    - thelper
+    - modernize
+    - perfsprint
+    - unparam # unused parameters
+    - intrange
+    - unused
+    - gocritic
+    - nolintlint # enforce good //nolint usage
+    # - revive # configurable style linter (better golint)
+    # - gochecknoinits # ban init() functions
+    # - gochecknoglobals # ban globals
+    # - exhaustive # enum-style switch exhaustiveness
+  disable:
+    - lll # long lines
+    - funlen # function length
+    - gocognit # cognitive complexity
+    - revive # temporaryly disabled
+  exclusions:
+    generated: strict
+    presets:
+      - comments
+      - std-error-handling
+      - common-false-positives
+    rules:
+      - path: "yammm/.*"
+        linters:
+          - wrapcheck
+      - path: "expr/.*"
+        linters:
+          - wrapcheck
+      - path: '(.+)_test\.go'
+        linters:
+          - revive
+          - errcheck
+          - errchkjson
+          - wrapcheck
+          - gochecknoinits
+          - gochecknoglobals
+  settings:
+    nolintlint:
+      require-specific: true # //nolint:<linter>
+      require-explanation: true # //nolint:<linter> // because ...
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        - encoding/json.Marshal
+        - encoding/json.MarshalIndent
+        - "(*encoding/json.Encoder).Encode"
+    errchkjson:
+      check-error-free-encoding: true
+    paralleltest:
+      ignore-missing: true
+      ignore-missing-subtests: true
