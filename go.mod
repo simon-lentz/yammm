@@ -9,7 +9,7 @@ require (
 	github.com/tidwall/jsonc v0.3.2
 	github.com/tliron/commonlog v0.2.21
 	github.com/tliron/glsp v0.2.2
-	golang.org/x/text v0.33.0
+	golang.org/x/text v0.34.0
 )
 
 require (
