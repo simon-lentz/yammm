@@ -45,3 +45,7 @@ out/
 .vscode-test/
 lsp/editors/vscode/bin/*
 yammm-lsp
+
+# LSP log output
+lsp/log/*
+!lsp/log/.gitkeep
