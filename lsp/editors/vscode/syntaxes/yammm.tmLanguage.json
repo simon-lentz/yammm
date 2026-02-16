@@ -103,8 +103,21 @@
       "name": "support.type.yammm"
     },
     "property-constraint": {
-      "match": "\\[[^\\]]*\\]",
-      "name": "meta.constraint.yammm"
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.bracket.begin.yammm" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.bracket.end.yammm" }
+      },
+      "name": "meta.constraint.yammm",
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#expression-keywords" },
+        { "include": "#comments" }
+      ]
     },
     "property-modifier": {
       "comment": "Property modifiers per grammar: only 'required' or 'primary' (not 'optional')",
@@ -113,9 +126,9 @@
     },
     "association": {
       "comment": "Association declaration with optional multiplicity. Type reference allows lowercase qualifier for imports (e.g., parts.Wheel).",
-      "match": "^\\s*(-->)\\s+([A-Z_][A-Z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
+      "match": "^\\s*(-->)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
       "captures": {
-        "1": { "name": "keyword.operator.association.yammm" },
+        "1": { "name": "entity.name.function.relation.yammm" },
         "2": { "name": "entity.name.function.relation.yammm" },
         "3": { "name": "punctuation.definition.parameters.begin.yammm" },
         "4": { "name": "constant.language.multiplicity.yammm" },
@@ -125,9 +138,9 @@
     },
     "composition": {
       "comment": "Composition declaration with optional multiplicity. Type reference allows lowercase qualifier for imports (e.g., parts.Wheel).",
-      "match": "^\\s*(\\*->)\\s+([A-Z_][A-Z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
+      "match": "^\\s*(\\*->)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
       "captures": {
-        "1": { "name": "keyword.operator.composition.yammm" },
+        "1": { "name": "entity.name.function.relation.yammm" },
         "2": { "name": "entity.name.function.relation.yammm" },
         "3": { "name": "punctuation.definition.parameters.begin.yammm" },
         "4": { "name": "constant.language.multiplicity.yammm" },
@@ -136,22 +149,89 @@
       }
     },
     "invariant": {
-      "match": "^\\s*(!)\\s+(\"[^\"]*\"|'[^']*')\\s+(.*)$",
-      "captures": {
-        "1": { "name": "keyword.operator.invariant.yammm" },
-        "2": { "name": "string.quoted.invariant-message.yammm" },
-        "3": { "name": "meta.expression.yammm" }
-      }
+      "comment": "Invariant declaration. begin matches ! and message string. end lookahead terminates when next declaration starts (property, invariant, relationship, or closing brace).",
+      "begin": "^\\s*(!)\\s+(\"[^\"]*\"|'[^']*')",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.invariant.yammm" },
+        "2": { "name": "string.quoted.invariant-message.yammm" }
+      },
+      "end": "(?=^\\s*(?:!\\s+\"|[a-z_]\\w*\\s+[A-Z]|-->|\\*->|\\}))",
+      "name": "meta.invariant-expression.yammm",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#regex-literal" },
+        { "include": "#numbers" },
+        { "include": "#expression-operators" },
+        { "include": "#expression-keywords" },
+        { "include": "#expression-identifiers" }
+      ]
     },
     "datatype": {
-      "match": "^\\s*(type)\\s+([A-Z][a-zA-Z0-9_]*)\\s*(=)\\s*(String|Integer|Float|Boolean|UUID|Date|Timestamp|Vector|Enum|Pattern)(\\[[^\\]]*\\])?",
-      "captures": {
+      "comment": "Datatype alias: type Name = BaseType[constraint]. Uses begin/end so constraint delegates to #property-constraint for nested highlighting.",
+      "begin": "^\\s*(type)\\s+([A-Z][a-zA-Z0-9_]*)\\s*(=)\\s*(String|Integer|Float|Boolean|UUID|Date|Timestamp|Vector|Enum|Pattern)",
+      "beginCaptures": {
         "1": { "name": "keyword.declaration.type.yammm" },
         "2": { "name": "entity.name.type.yammm" },
         "3": { "name": "keyword.operator.assignment.yammm" },
-        "4": { "name": "support.type.yammm" },
-        "5": { "name": "meta.constraint.yammm" }
-      }
+        "4": { "name": "support.type.yammm" }
+      },
+      "end": "(?<=\\])|$",
+      "patterns": [
+        { "include": "#property-constraint" },
+        { "include": "#comments" }
+      ]
+    },
+    "expression-operators": {
+      "comment": "Expression operators. Multi-char operators listed before single-char to avoid partial matches. \\|\\| matches literal ||.",
+      "match": "==|!=|>=|<=|=~|!~|\\|\\||&&|->|[><+\\-*/%!^]|\\bin\\b",
+      "name": "keyword.operator.yammm"
+    },
+    "expression-keywords": {
+      "comment": "Expression keyword literals. \\b_\\b matches standalone _ (nil) but not _ inside identifiers like is_active.",
+      "match": "\\b(true|false|nil|_)\\b",
+      "name": "constant.language.yammm"
+    },
+    "expression-identifiers": {
+      "patterns": [
+        {
+          "comment": "Lambda parameter variable ($name)",
+          "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*",
+          "name": "variable.parameter.lambda.yammm"
+        },
+        {
+          "comment": "Function name (uppercase-initial, e.g., Len, IsNil, Contains)",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b",
+          "name": "entity.name.function.yammm"
+        },
+        {
+          "comment": "Property name or identifier (lowercase-initial)",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b",
+          "name": "variable.other.expression.yammm"
+        }
+      ]
+    },
+    "numbers": {
+      "match": "\\b\\d+(\\.\\d+)?\\b",
+      "name": "constant.numeric.yammm"
+    },
+    "regex-literal": {
+      "comment": "Regex literal delimited by forward slashes (used with =~ and !~ operators). Takes priority over expression-operators to prevent regex content being tokenized as individual operators/identifiers.",
+      "begin": "/",
+      "end": "/",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.yammm" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.yammm" }
+      },
+      "name": "string.regexp.yammm",
+      "patterns": [
+        {
+          "name": "constant.character.escape.yammm",
+          "match": "\\\\."
+        }
+      ]
     },
     "strings": {
       "patterns": [

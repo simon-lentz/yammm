@@ -86,7 +86,8 @@ async function restartLanguageClient(context: ExtensionContext): Promise<void> {
 
 function getServerPath(context: ExtensionContext): string | undefined {
     // First check user configuration
-    const config = workspace.getConfiguration('yammm.lsp');
+    // Pass first workspace folder as scope so folder-level .vscode/settings.json is included
+    const config = workspace.getConfiguration('yammm.lsp', workspace.workspaceFolders?.[0]?.uri);
     const configuredPath = config.get<string>('serverPath');
     if (configuredPath && configuredPath.length > 0) {
         // Handle ~ expansion for user home directory
@@ -245,12 +246,14 @@ function getServerPath(context: ExtensionContext): string | undefined {
 }
 
 function startLanguageServer(context: ExtensionContext, serverPath: string) {
-    const config = workspace.getConfiguration('yammm.lsp');
+    // Pass first workspace folder as scope so folder-level .vscode/settings.json is included
+    const folderScope = workspace.workspaceFolders?.[0]?.uri;
+    const config = workspace.getConfiguration('yammm.lsp', folderScope);
     const logLevel = config.get<string>('logLevel', 'info');
     const logFileConfig = config.get<string>('logFile', '');
     const moduleRootConfig = config.get<string>('moduleRoot', '');
     // Read trace setting (3.4)
-    const traceConfig = workspace.getConfiguration('yammm.trace');
+    const traceConfig = workspace.getConfiguration('yammm.trace', folderScope);
     const traceLevel = traceConfig.get<string>('server', 'off');
 
     // Resolve moduleRoot with ~ expansion and relative path handling
