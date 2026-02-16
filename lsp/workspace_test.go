@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
 	"github.com/simon-lentz/yammm/location"
+	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
 func TestURIToPath_Valid(t *testing.T) {

@@ -4,10 +4,10 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/simon-lentz/yammm/instance/eval"
 	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEvaluator_Literals(t *testing.T) {

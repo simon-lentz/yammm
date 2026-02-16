@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/simon-lentz/yammm/internal/ident"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestToLowerSnake_SpecExamples tests all examples from the architecture spec.

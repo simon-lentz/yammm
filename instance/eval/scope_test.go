@@ -3,9 +3,9 @@ package eval_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/eval"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestEmptyScope(t *testing.T) {

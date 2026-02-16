@@ -103,8 +103,20 @@
       "name": "support.type.yammm"
     },
     "property-constraint": {
-      "match": "\\[[^\\]]*\\]",
-      "name": "meta.constraint.yammm"
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.bracket.begin.yammm" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.bracket.end.yammm" }
+      },
+      "name": "meta.constraint.yammm",
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#comments" }
+      ]
     },
     "property-modifier": {
       "comment": "Property modifiers per grammar: only 'required' or 'primary' (not 'optional')",
@@ -152,6 +164,10 @@
         "4": { "name": "support.type.yammm" },
         "5": { "name": "meta.constraint.yammm" }
       }
+    },
+    "numbers": {
+      "match": "\\b\\d+(\\.\\d+)?\\b",
+      "name": "constant.numeric.yammm"
     },
     "strings": {
       "patterns": [
