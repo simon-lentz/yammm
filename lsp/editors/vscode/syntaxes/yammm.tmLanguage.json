@@ -125,7 +125,7 @@
     },
     "association": {
       "comment": "Association declaration with optional multiplicity. Type reference allows lowercase qualifier for imports (e.g., parts.Wheel).",
-      "match": "^\\s*(-->)\\s+([A-Z_][A-Z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
+      "match": "^\\s*(-->)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
       "captures": {
         "1": { "name": "keyword.operator.association.yammm" },
         "2": { "name": "entity.name.function.relation.yammm" },
@@ -137,7 +137,7 @@
     },
     "composition": {
       "comment": "Composition declaration with optional multiplicity. Type reference allows lowercase qualifier for imports (e.g., parts.Wheel).",
-      "match": "^\\s*(\\*->)\\s+([A-Z_][A-Z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
+      "match": "^\\s*(\\*->)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[A-Z][a-zA-Z0-9_]*)",
       "captures": {
         "1": { "name": "keyword.operator.composition.yammm" },
         "2": { "name": "entity.name.function.relation.yammm" },
@@ -156,14 +156,19 @@
       }
     },
     "datatype": {
-      "match": "^\\s*(type)\\s+([A-Z][a-zA-Z0-9_]*)\\s*(=)\\s*(String|Integer|Float|Boolean|UUID|Date|Timestamp|Vector|Enum|Pattern)(\\[[^\\]]*\\])?",
-      "captures": {
+      "comment": "Datatype alias: type Name = BaseType[constraint]. Uses begin/end so constraint delegates to #property-constraint for nested highlighting.",
+      "begin": "^\\s*(type)\\s+([A-Z][a-zA-Z0-9_]*)\\s*(=)\\s*(String|Integer|Float|Boolean|UUID|Date|Timestamp|Vector|Enum|Pattern)",
+      "beginCaptures": {
         "1": { "name": "keyword.declaration.type.yammm" },
         "2": { "name": "entity.name.type.yammm" },
         "3": { "name": "keyword.operator.assignment.yammm" },
-        "4": { "name": "support.type.yammm" },
-        "5": { "name": "meta.constraint.yammm" }
-      }
+        "4": { "name": "support.type.yammm" }
+      },
+      "end": "(?<=\\])|$",
+      "patterns": [
+        { "include": "#property-constraint" },
+        { "include": "#comments" }
+      ]
     },
     "numbers": {
       "match": "\\b\\d+(\\.\\d+)?\\b",
