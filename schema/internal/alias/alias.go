@@ -48,6 +48,9 @@ var reservedKeywords = map[string]bool{
 	// Boolean literals
 	"true":  true,
 	"false": true,
+
+	// Nil literal keyword
+	"nil": true,
 }
 
 // ReservedKeywords returns a copy of all reserved keywords that cannot be used

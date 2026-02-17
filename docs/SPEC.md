@@ -562,11 +562,11 @@ Represents signed integer values with optional bounds:
 
 ```text
 IntegerT = "Integer" [ "[" min "," max "]" ] .
-min      = "_" | INTEGER .
-max      = "_" | INTEGER .
+min      = "_" | [ "-" ] INTEGER .
+max      = "_" | [ "-" ] INTEGER .
 ```
 
-The underscore `_` represents an unbounded limit.
+The underscore `_` represents an unbounded limit. An optional leading `-` allows negative bounds.
 
 Examples:
 
@@ -575,6 +575,7 @@ age Integer                  // unbounded integer
 age Integer[0, 150]          // 0 to 150 inclusive
 count Integer[1, _]          // minimum 1, no maximum
 index Integer[_, 99]         // no minimum, maximum 99
+temperature Integer[-40, 50] // negative lower bound
 ```
 
 Validation accepts signed and unsigned integers, including named/alias types and pointer values. Unsigned inputs larger than `int64` are rejected before bound checks.
@@ -585,8 +586,8 @@ Represents floating-point values with optional bounds:
 
 ```text
 FloatT = "Float" [ "[" min "," max "]" ] .
-min    = "_" | INTEGER | FLOAT .
-max    = "_" | INTEGER | FLOAT .
+min    = "_" | [ "-" ] ( INTEGER | FLOAT ) .
+max    = "_" | [ "-" ] ( INTEGER | FLOAT ) .
 ```
 
 Examples:
@@ -595,6 +596,7 @@ Examples:
 temperature Float            // unbounded float
 percentage Float[0.0, 100.0] // 0 to 100 inclusive
 ratio Float[0, 1.0]          // 0 to 1 inclusive
+latitude Float[-90.0, 90.0]  // negative lower bound
 ```
 
 #### Boolean

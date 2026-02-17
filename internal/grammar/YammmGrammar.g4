@@ -52,8 +52,8 @@ built_in:
   integerT | floatT | boolT | stringT | enumT | patternT | timestampT | dateT | uuidT | vectorT
   ;
 
-integerT: 'Integer' (LBRACK min=(USCORE | INTEGER) COMMA max=(USCORE | INTEGER) RBRACK)?;
-floatT: 'Float'     (LBRACK min=(USCORE | INTEGER | FLOAT) COMMA max=(USCORE | INTEGER | FLOAT) RBRACK)?;
+integerT: 'Integer' (LBRACK (negMin=MINUS)? min=(USCORE | INTEGER) COMMA (negMax=MINUS)? max=(USCORE | INTEGER) RBRACK)?;
+floatT: 'Float'     (LBRACK (negMin=MINUS)? min=(USCORE | INTEGER | FLOAT) COMMA (negMax=MINUS)? max=(USCORE | INTEGER | FLOAT) RBRACK)?;
 boolT: 'Boolean' ;
 stringT: 'String'   (LBRACK min=(USCORE | INTEGER) COMMA max=(USCORE | INTEGER) RBRACK)?;
 enumT: 'Enum'       LBRACK STRING (COMMA STRING)+ COMMA? RBRACK ;
@@ -93,7 +93,7 @@ expr
   | left=property_name # name
   | left=datatypeKeyword # datatypeName // shadows relation names by design.
   | left=UC_WORD # relationName
-  | USCORE # literalNil
+  | (USCORE | 'nil') # literalNil
   ;
 
 arguments: LPAR (args+=expr (COMMA args+=expr)*)? COMMA? RPAR;

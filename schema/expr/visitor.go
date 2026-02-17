@@ -207,11 +207,7 @@ func (v *Visitor) VisitPeriod(ctx *grammar.PeriodContext) Expression {
 
 // VisitName handles property name references.
 func (v *Visitor) VisitName(ctx *grammar.NameContext) Expression {
-	s := ctx.GetLeft().GetText()
-	if s == "nil" {
-		return NewLiteral(nil)
-	}
-	return SExpr{Op("p"), NewLiteral(s)}
+	return SExpr{Op("p"), NewLiteral(ctx.GetLeft().GetText())}
 }
 
 // VisitRelationName handles relation name references.

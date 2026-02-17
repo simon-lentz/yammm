@@ -36,10 +36,11 @@ func TestParse_FloatConstraints(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		source  string
-		wantOK  bool
-		checkFn func(t *testing.T, model *parse.Model)
+		name         string
+		source       string
+		wantOK       bool
+		wantWarnings bool
+		checkFn      func(t *testing.T, model *parse.Model)
 	}{
 		{
 			name: "float with min only",
@@ -101,6 +102,104 @@ type Thing {
 				assert.Equal(t, schema.KindFloat, prop.Constraint.Kind())
 			},
 		},
+		{
+			name: "float with negative min",
+			source: `schema "test"
+type Thing {
+	value Float[-90.0, 90.0]
+}`,
+			wantOK: true,
+			checkFn: func(t *testing.T, model *parse.Model) {
+				t.Helper()
+				require.Len(t, model.Types, 1)
+				require.Len(t, model.Types[0].Properties, 1)
+				prop := model.Types[0].Properties[0]
+				fc, ok := prop.Constraint.(schema.FloatConstraint)
+				require.True(t, ok, "expected FloatConstraint")
+				min, hasMin := fc.Min()
+				assert.True(t, hasMin)
+				assert.Equal(t, -90.0, min)
+				max, hasMax := fc.Max()
+				assert.True(t, hasMax)
+				assert.Equal(t, 90.0, max)
+			},
+		},
+		{
+			name: "float with both negative bounds",
+			source: `schema "test"
+type Thing {
+	value Float[-180.0, -1.0]
+}`,
+			wantOK: true,
+			checkFn: func(t *testing.T, model *parse.Model) {
+				t.Helper()
+				require.Len(t, model.Types, 1)
+				require.Len(t, model.Types[0].Properties, 1)
+				prop := model.Types[0].Properties[0]
+				fc, ok := prop.Constraint.(schema.FloatConstraint)
+				require.True(t, ok, "expected FloatConstraint")
+				min, hasMin := fc.Min()
+				assert.True(t, hasMin)
+				assert.Equal(t, -180.0, min)
+				max, hasMax := fc.Max()
+				assert.True(t, hasMax)
+				assert.Equal(t, -1.0, max)
+			},
+		},
+		{
+			name: "float with negative min unbounded max",
+			source: `schema "test"
+type Thing {
+	value Float[-90.0, _]
+}`,
+			wantOK: true,
+			checkFn: func(t *testing.T, model *parse.Model) {
+				t.Helper()
+				require.Len(t, model.Types, 1)
+				require.Len(t, model.Types[0].Properties, 1)
+				prop := model.Types[0].Properties[0]
+				fc, ok := prop.Constraint.(schema.FloatConstraint)
+				require.True(t, ok, "expected FloatConstraint")
+				min, hasMin := fc.Min()
+				assert.True(t, hasMin)
+				assert.Equal(t, -90.0, min)
+				_, hasMax := fc.Max()
+				assert.False(t, hasMax)
+			},
+		},
+		{
+			name: "float with negative bounds inverted",
+			source: `schema "test"
+type Thing {
+	value Float[10.0, -10.0]
+}`,
+			wantOK: false,
+		},
+		{
+			name: "float with minus before unbounded min warns",
+			source: `schema "test"
+type Thing {
+	value Float[-_, 100.0]
+}`,
+			wantOK: true,
+			checkFn: func(t *testing.T, _ *parse.Model) {
+				t.Helper()
+				// Warning is checked via wantWarnings in the test loop
+			},
+			wantWarnings: true,
+		},
+		{
+			name: "float with minus before unbounded max warns",
+			source: `schema "test"
+type Thing {
+	value Float[0.0, -_]
+}`,
+			wantOK: true,
+			checkFn: func(t *testing.T, _ *parse.Model) {
+				t.Helper()
+			},
+			wantWarnings: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -114,6 +213,9 @@ type Thing {
 				}
 			} else {
 				assert.False(t, result.OK(), "expected errors")
+			}
+			if tt.wantWarnings {
+				assert.True(t, result.HasWarnings(), "expected warnings, got: %v", result)
 			}
 		})
 	}
@@ -453,9 +555,11 @@ func TestParse_IntegerConstraintEdgeCases(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		source string
-		wantOK bool
+		name         string
+		source       string
+		wantOK       bool
+		wantWarnings bool
+		checkFn      func(t *testing.T, model *parse.Model)
 	}{
 		{
 			name: "integer with min only",
@@ -489,6 +593,72 @@ type Thing {
 }`,
 			wantOK: true,
 		},
+		{
+			name: "integer with negative min",
+			source: `schema "test"
+type Thing {
+	value Integer[-100, 100]
+}`,
+			wantOK: true,
+			checkFn: func(t *testing.T, model *parse.Model) {
+				t.Helper()
+				prop := model.Types[0].Properties[0]
+				ic, ok := prop.Constraint.(schema.IntegerConstraint)
+				require.True(t, ok, "expected IntegerConstraint")
+				min, hasMin := ic.Min()
+				assert.True(t, hasMin)
+				assert.Equal(t, int64(-100), min)
+				max, hasMax := ic.Max()
+				assert.True(t, hasMax)
+				assert.Equal(t, int64(100), max)
+			},
+		},
+		{
+			name: "integer with both negative bounds",
+			source: `schema "test"
+type Thing {
+	value Integer[-200, -1]
+}`,
+			wantOK: true,
+			checkFn: func(t *testing.T, model *parse.Model) {
+				t.Helper()
+				prop := model.Types[0].Properties[0]
+				ic, ok := prop.Constraint.(schema.IntegerConstraint)
+				require.True(t, ok, "expected IntegerConstraint")
+				min, hasMin := ic.Min()
+				assert.True(t, hasMin)
+				assert.Equal(t, int64(-200), min)
+				max, hasMax := ic.Max()
+				assert.True(t, hasMax)
+				assert.Equal(t, int64(-1), max)
+			},
+		},
+		{
+			name: "integer with negative bounds inverted",
+			source: `schema "test"
+type Thing {
+	value Integer[10, -10]
+}`,
+			wantOK: false,
+		},
+		{
+			name: "integer with minus before unbounded min warns",
+			source: `schema "test"
+type Thing {
+	value Integer[-_, 100]
+}`,
+			wantOK:       true,
+			wantWarnings: true,
+		},
+		{
+			name: "integer with minus before unbounded max warns",
+			source: `schema "test"
+type Thing {
+	value Integer[0, -_]
+}`,
+			wantOK:       true,
+			wantWarnings: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -502,8 +672,14 @@ type Thing {
 				require.Len(t, model.Types[0].Properties, 1)
 				prop := model.Types[0].Properties[0]
 				assert.Equal(t, schema.KindInteger, prop.Constraint.Kind())
+				if tt.checkFn != nil {
+					tt.checkFn(t, model)
+				}
 			} else {
 				assert.False(t, result.OK(), "expected errors")
+			}
+			if tt.wantWarnings {
+				assert.True(t, result.HasWarnings(), "expected warnings, got: %v", result)
 			}
 		})
 	}

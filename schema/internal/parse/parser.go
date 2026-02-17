@@ -481,32 +481,58 @@ func (b *astBuilder) ExitInvariant(ctx *grammar.InvariantContext) {
 
 // --- Constraint builders ---
 
+// boundSpan returns a span covering a bound value, including the optional
+// leading minus sign. When neg is nil, it falls back to spanning only the
+// value token.
+func (b *astBuilder) boundSpan(neg, value antlr.Token) location.Span {
+	if neg != nil {
+		return b.spans.FromTokens(neg, value)
+	}
+	return b.spans.FromToken(value)
+}
+
 func (b *astBuilder) ExitIntegerT(ctx *grammar.IntegerTContext) {
 	var min, max int64
 	hasMin, hasMax := false, false
 	parseErr := false
 
 	if minToken := ctx.GetMin(); minToken != nil && minToken.GetText() != "_" {
-		v, err := strconv.ParseInt(minToken.GetText(), 10, 64)
+		minText := minToken.GetText()
+		if ctx.GetNegMin() != nil {
+			minText = "-" + minText
+		}
+		v, err := strconv.ParseInt(minText, 10, 64)
 		if err != nil {
 			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
 				fmt.Sprintf("invalid integer bound: %v", err)).
-				WithSpan(b.spans.FromToken(minToken)).Build())
+				WithSpan(b.boundSpan(ctx.GetNegMin(), minToken)).Build())
 			parseErr = true
 		} else {
 			min, hasMin = v, true
 		}
+	} else if minToken != nil && minToken.GetText() == "_" && ctx.GetNegMin() != nil {
+		b.collector.Collect(diag.NewIssue(diag.Warning, diag.E_INVALID_CONSTRAINT,
+			"minus sign before '_' (unbounded) has no effect").
+			WithSpan(b.spans.FromToken(ctx.GetNegMin())).Build())
 	}
 	if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() != "_" {
-		v, err := strconv.ParseInt(maxToken.GetText(), 10, 64)
+		maxText := maxToken.GetText()
+		if ctx.GetNegMax() != nil {
+			maxText = "-" + maxText
+		}
+		v, err := strconv.ParseInt(maxText, 10, 64)
 		if err != nil {
 			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
 				fmt.Sprintf("invalid integer bound: %v", err)).
-				WithSpan(b.spans.FromToken(maxToken)).Build())
+				WithSpan(b.boundSpan(ctx.GetNegMax(), maxToken)).Build())
 			parseErr = true
 		} else {
 			max, hasMax = v, true
 		}
+	} else if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() == "_" && ctx.GetNegMax() != nil {
+		b.collector.Collect(diag.NewIssue(diag.Warning, diag.E_INVALID_CONSTRAINT,
+			"minus sign before '_' (unbounded) has no effect").
+			WithSpan(b.spans.FromToken(ctx.GetNegMax())).Build())
 	}
 
 	// Validate min <= max when both are present
@@ -525,26 +551,42 @@ func (b *astBuilder) ExitFloatT(ctx *grammar.FloatTContext) {
 	parseErr := false
 
 	if minToken := ctx.GetMin(); minToken != nil && minToken.GetText() != "_" {
-		v, err := strconv.ParseFloat(minToken.GetText(), 64)
+		minText := minToken.GetText()
+		if ctx.GetNegMin() != nil {
+			minText = "-" + minText
+		}
+		v, err := strconv.ParseFloat(minText, 64)
 		if err != nil {
 			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
 				fmt.Sprintf("invalid float bound: %v", err)).
-				WithSpan(b.spans.FromToken(minToken)).Build())
+				WithSpan(b.boundSpan(ctx.GetNegMin(), minToken)).Build())
 			parseErr = true
 		} else {
 			min, hasMin = v, true
 		}
+	} else if minToken != nil && minToken.GetText() == "_" && ctx.GetNegMin() != nil {
+		b.collector.Collect(diag.NewIssue(diag.Warning, diag.E_INVALID_CONSTRAINT,
+			"minus sign before '_' (unbounded) has no effect").
+			WithSpan(b.spans.FromToken(ctx.GetNegMin())).Build())
 	}
 	if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() != "_" {
-		v, err := strconv.ParseFloat(maxToken.GetText(), 64)
+		maxText := maxToken.GetText()
+		if ctx.GetNegMax() != nil {
+			maxText = "-" + maxText
+		}
+		v, err := strconv.ParseFloat(maxText, 64)
 		if err != nil {
 			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
 				fmt.Sprintf("invalid float bound: %v", err)).
-				WithSpan(b.spans.FromToken(maxToken)).Build())
+				WithSpan(b.boundSpan(ctx.GetNegMax(), maxToken)).Build())
 			parseErr = true
 		} else {
 			max, hasMax = v, true
 		}
+	} else if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() == "_" && ctx.GetNegMax() != nil {
+		b.collector.Collect(diag.NewIssue(diag.Warning, diag.E_INVALID_CONSTRAINT,
+			"minus sign before '_' (unbounded) has no effect").
+			WithSpan(b.spans.FromToken(ctx.GetNegMax())).Build())
 	}
 
 	// Validate min <= max when both are present
