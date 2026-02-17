@@ -1,0 +1,107 @@
+name: Publish VS Code Extension
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >
+          Version to publish (e.g., 0.2.0). Leave empty to use the version in package.json.
+
+        required: false
+        type: string
+      pre_release:
+        description: Publish as pre-release
+        required: false
+        type: boolean
+        default: false
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            bin_dir: darwin-arm64
+          - target: darwin-x64
+            goos: darwin
+            goarch: amd64
+            bin_dir: darwin-amd64
+          - target: linux-x64
+            goos: linux
+            goarch: amd64
+            bin_dir: linux-amd64
+          - target: linux-arm64
+            goos: linux
+            goarch: arm64
+            bin_dir: linux-arm64
+          - target: win32-x64
+            goos: windows
+            goarch: amd64
+            bin_dir: windows-amd64
+            ext: .exe
+          - target: win32-arm64
+            goos: windows
+            goarch: arm64
+            bin_dir: windows-arm64
+            ext: .exe
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build LSP binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p lsp/editors/vscode/bin/${{ matrix.bin_dir }}
+          go build -trimpath -ldflags="-s -w" \
+            -o lsp/editors/vscode/bin/${{ matrix.bin_dir }}/yammm-lsp${{ matrix.ext }} \
+            ./lsp/cmd/yammm-lsp
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: lsp/editors/vscode
+        run: npm ci
+      - name: Update version
+        if: inputs.version != ''
+        working-directory: lsp/editors/vscode
+        env:
+          PUBLISH_VERSION: ${{ inputs.version }}
+        run: npm version "$PUBLISH_VERSION" --no-git-tag-version
+      - name: Package VSIX
+        working-directory: lsp/editors/vscode
+        env:
+          PRE_RELEASE: ${{ inputs.pre_release && '--pre-release' || '' }}
+        run: npx vsce package --target ${{ matrix.target }} --no-dependencies $PRE_RELEASE
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: lsp/editors/vscode/*.vsix
+  publish:
+    name: Publish to Marketplace
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+      - name: Download all VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+          path: vsix
+      - name: List VSIX files
+        run: ls -la vsix/
+      - name: Publish
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: vsce publish --packagePath vsix/*.vsix -p "$VSCE_PAT"

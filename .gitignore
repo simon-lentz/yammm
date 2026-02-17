@@ -3,8 +3,6 @@ _private/
 TODO_*.md
 DEV_*.md
 FEAT_*.md
-MIGRATION.md
-CUE_SPEC.md
 
 # LLMs
 .claude/
@@ -44,7 +42,7 @@ out/
 *.vsix
 .vscode-test/
 lsp/editors/vscode/bin/*
-yammm-lsp
+/yammm-lsp
 
 # LSP log output
 lsp/log/*
