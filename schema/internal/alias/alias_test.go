@@ -50,6 +50,9 @@ func TestIsReservedKeyword(t *testing.T) {
 		{name: "true", input: "true", expected: true},
 		{name: "false", input: "false", expected: true},
 
+		// Nil literal keyword
+		{name: "nil", input: "nil", expected: true},
+
 		// Non-keywords
 		{name: "parts", input: "parts", expected: false},
 		{name: "User", input: "User", expected: false},

@@ -1,0 +1,22 @@
+{
+    "GeoPoint": [
+        {
+            "id": "valid-positive",
+            "name": "Billings, MT",
+            "latitude": 45.7833,
+            "longitude": 108.5007
+        },
+        {
+            "id": "valid-negative",
+            "name": "Buenos Aires",
+            "latitude": -34.6037,
+            "longitude": -58.3816
+        },
+        {
+            "id": "valid-edge",
+            "name": "South Pole",
+            "latitude": -90.0,
+            "longitude": 0.0
+        }
+    ]
+}
