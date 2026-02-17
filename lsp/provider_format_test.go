@@ -72,8 +72,8 @@ func TestFormatDocument_NormalizeCR(t *testing.T) {
 func TestFormatDocument_PreservesBlankLines(t *testing.T) {
 	t.Parallel()
 
-	// Blank lines are preserved because their count affects comment attachment semantics
-	// (a comment separated by 2+ blank lines from a declaration is NOT a doc comment)
+	// Blank lines are preserved as a conservative aesthetic choice to maintain visual
+	// structure. Note: DOC_COMMENT attachment is channel-based and whitespace-agnostic.
 	input := `schema "test"
 
 

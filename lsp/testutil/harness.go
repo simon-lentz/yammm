@@ -277,6 +277,9 @@ func (h *Harness) Formatting(path string) ([]protocol.TextEdit, error) {
 		TextDocument: protocol.TextDocumentIdentifier{
 			URI: uri,
 		},
+		// Options are sent per the LSP protocol but intentionally ignored by
+		// the formatter — yammm formatting is canonical (like gofmt). These
+		// values match the hardcoded behavior for documentation purposes only.
 		Options: protocol.FormattingOptions{
 			"tabSize":      4,
 			"insertSpaces": false,
