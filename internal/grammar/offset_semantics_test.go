@@ -239,7 +239,7 @@ func TestInputStreamIndexIsRuneBased(t *testing.T) {
 
 	// LA(1) at position 1 should return the rune value of '日'
 	if got := is.LA(1); got != int('日') {
-		t.Errorf("LA(1) at position 1 = %d (%c), want %d (%c)", got, rune(got), int('日'), '日')
+		t.Errorf("LA(1) at position 1 = %d (%c), want %d (%c)", got, got, int('日'), '日')
 	}
 }
 
@@ -295,7 +295,7 @@ func TestLexerTokenOffsetsAreRuneBased(t *testing.T) {
 			byteStart:     7,
 			byteStop:      12, // same for ASCII
 		},
-		{
+		{ //nolint:gosec // G101 false positive: test data for offset arithmetic, not credentials
 			name:          "Japanese schema name",
 			input:         `schema "日本語"`,
 			tokenText:     `"日本語"`,
