@@ -4,11 +4,11 @@ schema "formatting"
 
 type Person {
 	name String required
-	age Integer
+	age  Integer
 }
 
 type Address {
 	street String
-	city String
-	zip String
+	city   String
+	zip    String
 }

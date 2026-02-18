@@ -236,12 +236,21 @@ type Person {
 		t.Errorf("formatDocument: indentation should be preserved, got:\n%q", result)
 	}
 
+	// formatTokenStream aligns name column within same-kind groups
+	tsExpected := `schema "test"
+
+type Person {
+	name String
+	age  Integer
+	--> EMPLOYER (one) Company
+}
+`
 	tsResult, err := formatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
-	if tsResult != input {
-		t.Errorf("formatTokenStream: indentation should be preserved, got:\n%q", tsResult)
+	if tsResult != tsExpected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, tsExpected)
 	}
 }
 
@@ -401,8 +410,8 @@ type Email=Pattern["^.+@.+$"]
 	expected := `schema "test"
 
 type Address {
-	name String required
-	age Integer[0, _]
+	name  String required
+	age   Integer[0, _]
 	score Float[-90.0, 90.0]
 	--> REL (one) Target / owned_by (one)
 }
@@ -579,7 +588,7 @@ type Person {
 
 type Person {
 	name String
-	age Integer
+	age  Integer
 }
 `
 
@@ -607,7 +616,7 @@ type Person {
 
 type Person {
 	name String
-	age Integer
+	age  Integer
 }
 `
 
@@ -760,7 +769,7 @@ type T {
 type T {
 	--> REL (one) Target {
 		weight Float required
-		score Integer
+		score  Integer
 	}
 }
 `
@@ -929,7 +938,7 @@ type T {
 	expected := `schema "test"
 
 type T {
-	--> REL (_:many) Target
+	--> REL  (_:many) Target
 	--> REL2 (_:one) Target
 	*-> REL3 (one:many) Target
 }
@@ -1255,8 +1264,8 @@ type Person {
     age Integer
 }
 `
-	// Expected output uses tab indentation
-	expected := `schema "test"
+	// formatDocument: tab indentation, no alignment
+	fdExpected := `schema "test"
 
 type Person {
 	name String required
@@ -1265,16 +1274,24 @@ type Person {
 `
 
 	result := formatDocument(input)
-	if result != expected {
-		t.Errorf("formatDocument: spaces should be converted to tabs:\ngot:\n%q\nwant:\n%q", result, expected)
+	if result != fdExpected {
+		t.Errorf("formatDocument: spaces should be converted to tabs:\ngot:\n%q\nwant:\n%q", result, fdExpected)
 	}
 
+	// formatTokenStream: tab indentation + name column alignment
+	tsExpected := `schema "test"
+
+type Person {
+	name String required
+	age  Integer
+}
+`
 	tsResult, err := formatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
-	if tsResult != expected {
-		t.Errorf("formatTokenStream: spaces should be converted to tabs:\ngot:\n%q\nwant:\n%q", tsResult, expected)
+	if tsResult != tsExpected {
+		t.Errorf("formatTokenStream: spaces should be converted to tabs:\ngot:\n%q\nwant:\n%q", tsResult, tsExpected)
 	}
 }
 
@@ -1689,5 +1706,177 @@ func TestFormatting_UTF8PositionEncoding(t *testing.T) {
 			// The test primarily verifies that the call completes without panic
 			// and returns a valid edit when the encoding is switched
 		})
+	}
+}
+
+// =============================================================================
+// Column Alignment (Phase 3) Unit Tests
+// =============================================================================
+
+func TestAlignColumns_PropertyNamePadding(t *testing.T) {
+	t.Parallel()
+
+	input := "\tname String required\n\tage Integer\n\tscore Float[0.0, 100.0]\n"
+	expected := "\tname  String required\n\tage   Integer\n\tscore Float[0.0, 100.0]\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_PropertyInlineCommentAlignment(t *testing.T) {
+	t.Parallel()
+
+	input := "\tname String required // the name\n\tage Integer // age\n"
+	// name(4), age(3) → max 4. Comments align to common column.
+	// name content: "\tname String required" (21 chars)
+	// age content:  "\tage  Integer" (13 chars)
+	// comment col = 21 + 1 = 22
+	expected := "\tname String required // the name\n\tage  Integer         // age\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_RelationshipNamePadding(t *testing.T) {
+	t.Parallel()
+
+	input := "\t--> REL (_:many) Target\n\t--> REL2 (_:one) Target\n\t*-> REL3 (one:many) Target\n"
+	// REL(3), REL2(4), REL3(4) → max 4
+	expected := "\t--> REL  (_:many) Target\n\t--> REL2 (_:one) Target\n\t*-> REL3 (one:many) Target\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_AliasNamePadding(t *testing.T) {
+	t.Parallel()
+
+	input := "type Email = Pattern[\"^.+@.+$\"]\ntype StateFP = String[2, 2]\n"
+	// Email(5), StateFP(7) → max 7
+	expected := "type Email   = Pattern[\"^.+@.+$\"]\ntype StateFP = String[2, 2]\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_GroupBreakAtBlankLine(t *testing.T) {
+	t.Parallel()
+
+	input := "\tname String\n\n\tage Integer\n"
+	// Blank line splits into two singleton groups → no alignment
+	expected := "\tname String\n\n\tage Integer\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_GroupBreakAtComment(t *testing.T) {
+	t.Parallel()
+
+	input := "\tname String\n\t// standalone comment\n\tage Integer\n"
+	// Comment-only line splits properties into separate groups
+	expected := "\tname String\n\t// standalone comment\n\tage Integer\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_GroupBreakAtKindChange(t *testing.T) {
+	t.Parallel()
+
+	input := "\tname String\n\tage Integer\n\t--> REL (one) Target\n\t--> REL2 (many) Target\n"
+	// Properties: name(4), age(3) → max 4
+	// Then kind change → relationships: REL(3), REL2(4) → max 4
+	expected := "\tname String\n\tage  Integer\n\t--> REL  (one) Target\n\t--> REL2 (many) Target\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_MultilineBreaksGroup(t *testing.T) {
+	t.Parallel()
+
+	// Unbalanced [ on a line → excluded from alignment, breaks groups
+	input := "\tname String\n\tstatus Enum[\n\t\t\"a\",\n\t\t\"b\"\n\t]\n\tage Integer\n"
+	// name and age are in separate groups (multiline in between)
+	expected := "\tname String\n\tstatus Enum[\n\t\t\"a\",\n\t\t\"b\"\n\t]\n\tage Integer\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_EdgePropertyBlockAlignment(t *testing.T) {
+	t.Parallel()
+
+	// Properties inside { } edge blocks aligned at indent level 2
+	input := "\t--> REL (one) Target {\n\t\tweight Float required\n\t\tscore Integer\n\t}\n"
+	// Edge block: weight(6), score(5) → max 6
+	expected := "\t--> REL (one) Target {\n\t\tweight Float required\n\t\tscore  Integer\n\t}\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_SingleMemberNoChange(t *testing.T) {
+	t.Parallel()
+
+	input := "\tname String required\n"
+	expected := "\tname String required\n"
+
+	result := alignColumns(input)
+	if result != expected {
+		t.Errorf("alignColumns() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestAlignColumns_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	inputs := []string{
+		"\tname String required\n\tage Integer\n\tscore Float\n",
+		"\t--> REL (_:many) Target\n\t--> REL2 (_:one) Target\n",
+		"type Email = Pattern[\"^.+@.+$\"]\ntype StateFP = String[2, 2]\n",
+		"\tname String // the name\n\tage Integer // age\n",
+	}
+
+	for _, input := range inputs {
+		first := alignColumns(input)
+		second := alignColumns(first)
+		if first != second {
+			t.Errorf("alignColumns not idempotent for input:\n%q\nfirst:\n%q\nsecond:\n%q", input, first, second)
+		}
+	}
+}
+
+func TestAlignColumns_EmptyAndPassthrough(t *testing.T) {
+	t.Parallel()
+
+	// Empty string
+	if result := alignColumns(""); result != "" {
+		t.Errorf("empty input should return empty, got: %q", result)
+	}
+
+	// Non-alignable content passes through unchanged
+	nonAlignable := "schema \"test\"\n\n// comment\n! \"msg\" expr\n}\n"
+	if result := alignColumns(nonAlignable); result != nonAlignable {
+		t.Errorf("non-alignable input should pass through unchanged:\ngot:\n%q\nwant:\n%q", result, nonAlignable)
 	}
 }
