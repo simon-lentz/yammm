@@ -95,8 +95,17 @@ func formatTokenStream(text string) (string, error) {
 		if inExpr {
 			if pendingWS != "" {
 				if prev != nil && !prevInExpr {
-					sep := declarationSeparator(prev, tok, pendingWS, indentLevel, true)
-					writeText(&out, sep, &lineStart)
+					// Bridge from declaration context to expression context.
+					// When there's a newline, this is a multiline invariant
+					// whose continuation indentation was set by wrapInvariantAtOps.
+					// Preserve the original whitespace so that the indent level
+					// (which only tracks brace depth) doesn't flatten it.
+					if strings.Contains(pendingWS, "\n") {
+						writeExprWhitespace(&out, pendingWS, &lineStart)
+					} else {
+						sep := declarationSeparator(prev, tok, pendingWS, indentLevel, true)
+						writeText(&out, sep, &lineStart)
+					}
 				} else {
 					writeExprWhitespace(&out, pendingWS, &lineStart)
 				}
@@ -1777,12 +1786,13 @@ type logicalOp struct {
 }
 
 // findTopLevelLogicalOps finds byte offsets of top-level `&&` and `||` in an expression.
-// Respects string literals, parentheses, and braces.
+// Respects string literals, parentheses, braces, and brackets.
 func findTopLevelLogicalOps(expr string) []logicalOp {
 	var ops []logicalOp
 	inString := false
 	parenDepth := 0
 	braceDepth := 0
+	bracketDepth := 0
 
 	for i := 0; i < len(expr); i++ {
 		ch := expr[i]
@@ -1821,11 +1831,17 @@ func findTopLevelLogicalOps(expr string) []logicalOp {
 			continue
 		}
 		if ch == '[' {
-			// Also track brackets for completeness
+			bracketDepth++
+			continue
+		}
+		if ch == ']' {
+			if bracketDepth > 0 {
+				bracketDepth--
+			}
 			continue
 		}
 
-		if parenDepth == 0 && braceDepth == 0 && i+1 < len(expr) {
+		if parenDepth == 0 && braceDepth == 0 && bracketDepth == 0 && i+1 < len(expr) {
 			two := expr[i : i+2]
 			if two == "&&" || two == "||" {
 				ops = append(ops, logicalOp{offset: i, length: 2, op: two})

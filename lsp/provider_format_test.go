@@ -2371,6 +2371,32 @@ func TestWrapLongLines_InvariantBraceExprPreserved(t *testing.T) {
 	}
 }
 
+func TestWrapLongLines_InvariantBracketExprPreserved(t *testing.T) {
+	t.Parallel()
+
+	// && and || inside [] (list literals) should NOT be top-level wrap points
+	input := "\t! \"list_logic\" value in [cond_a && cond_b, cond_c || cond_d] || very_long_field_name_that_pushes_past_the_one_hundred_character_threshold > 0\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	// Should wrap at the top-level || but NOT at && or || inside brackets
+	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected multiple lines, got %d:\n%s", len(lines), result)
+	}
+
+	for _, line := range lines[1:] {
+		trimmed := strings.TrimSpace(line)
+		// No continuation line should contain bracketed operators split out
+		if strings.HasPrefix(trimmed, "cond_a &&") || strings.HasPrefix(trimmed, "cond_c ||") {
+			t.Errorf("operator inside brackets was treated as top-level wrap point: %q", trimmed)
+		}
+	}
+}
+
 // --- Integration / edge case tests ---
 
 func TestWrapLongLines_NonWrappable(t *testing.T) {

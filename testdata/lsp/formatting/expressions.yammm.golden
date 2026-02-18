@@ -21,6 +21,7 @@ type RuleSet {
 	! "replace_check" name -> Replace("old", "new") != ""
 	! "not_disabled" !active || confidence > 0.5
 	! "grouping" (count > 0) && (confidence < 1.0)
+	! "ternary_check" active ? { confidence : 0.0 } > 0.0
 }
 
 part type LineItem {
