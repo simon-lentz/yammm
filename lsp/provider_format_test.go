@@ -1880,3 +1880,581 @@ func TestAlignColumns_EmptyAndPassthrough(t *testing.T) {
 		t.Errorf("non-alignable input should pass through unchanged:\ngot:\n%q\nwant:\n%q", result, nonAlignable)
 	}
 }
+
+// =============================================================================
+// Phase 4: Long Line Wrapping Tests
+// =============================================================================
+
+// --- displayWidth ---
+
+func TestDisplayWidth(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  int
+	}{
+		{"empty", "", 0},
+		{"ascii", "hello", 5},
+		{"tab", "\t", 4},
+		{"tab_and_text", "\tname String", 15},
+		{"two_tabs", "\t\tvalue", 13},
+		{"mixed", "\t  abc", 9},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := displayWidth(tt.input)
+			if got != tt.want {
+				t.Errorf("displayWidth(%q) = %d; want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// --- Enum wrapping tests ---
+
+func TestWrapLongLines_ShortEnumUnchanged(t *testing.T) {
+	t.Parallel()
+
+	// Short Enum (well under 100 chars) should pass through unchanged
+	input := "\tstatus Enum[\"active\", \"inactive\"] required\n"
+	result := wrapLongLines(input)
+	if result != input {
+		t.Errorf("short Enum should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestWrapLongLines_LongEnumWraps(t *testing.T) {
+	t.Parallel()
+
+	// Build a long Enum that exceeds 100 chars
+	input := "\tstatus Enum[\"pending_review\", \"approved\", \"rejected\", \"needs_revision\", \"escalated\", \"archived\", \"deleted\"] required\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	// Should be wrapped: Enum[ on first line, values indented, ] with modifier
+	if !strings.Contains(result, "Enum[\n") {
+		t.Errorf("expected Enum[ on first line with newline after:\n%s", result)
+	}
+	if !strings.Contains(result, "\t\t\"pending_review\",\n") {
+		t.Errorf("expected values indented with trailing commas:\n%s", result)
+	}
+	if !strings.Contains(result, "\t\t\"deleted\",\n") {
+		t.Errorf("expected last value with trailing comma:\n%s", result)
+	}
+	if !strings.Contains(result, "\t] required\n") {
+		t.Errorf("expected ] with modifier on closing line:\n%s", result)
+	}
+}
+
+func TestWrapLongLines_EnumCollapseToSingleLine(t *testing.T) {
+	t.Parallel()
+
+	// Multiline Enum that would fit on a single line
+	input := "\tstatus Enum[\n\t\t\"a\",\n\t\t\"b\",\n\t] required\n"
+	result := wrapLongLines(input)
+
+	// Should be collapsed to single line (no trailing comma in single-line form)
+	expected := "\tstatus Enum[\"a\", \"b\"] required\n"
+	if result != expected {
+		t.Errorf("multiline Enum should collapse:\ngot:\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestWrapLongLines_EnumCollapseStillLong(t *testing.T) {
+	t.Parallel()
+
+	// Multiline Enum that's still too long when collapsed → re-canonicalize
+	input := "\tstatus Enum[\n\t\t\"pending_review\",\n\t\t\"approved\",\n\t\t\"rejected\",\n\t\t\"needs_revision\",\n\t\t\"escalated\",\n\t\t\"archived\",\n\t\t\"deleted\",\n\t] required\n"
+
+	result := wrapLongLines(input)
+
+	// Should stay multiline with canonical form
+	if !strings.Contains(result, "Enum[\n") {
+		t.Errorf("long Enum should stay multiline:\n%s", result)
+	}
+	if !strings.Contains(result, "\t] required\n") {
+		t.Errorf("expected ] with modifier:\n%s", result)
+	}
+}
+
+func TestWrapLongLines_EnumEscapedQuotes(t *testing.T) {
+	t.Parallel()
+
+	// Values with escaped quotes should not break the parser
+	input := "\tval Enum[\"say \\\"hello\\\"\", \"say \\\"bye\\\"\", \"normal\", \"another\", \"more_values\", \"extra_long_value_here\", \"padding_it\"] required\n"
+	result := wrapLongLines(input)
+
+	if displayWidth(strings.TrimSuffix(input, "\n")) > lineWidthThreshold {
+		// Should be wrapped
+		if !strings.Contains(result, "Enum[\n") {
+			t.Errorf("long Enum with escaped quotes should wrap:\n%s", result)
+		}
+		// Escaped quotes preserved
+		if !strings.Contains(result, "\\\"hello\\\"") {
+			t.Errorf("escaped quotes should be preserved:\n%s", result)
+		}
+	}
+}
+
+func TestWrapLongLines_EnumInlineComment(t *testing.T) {
+	t.Parallel()
+
+	// Enum with inline comment — comment should reattach to ] line
+	input := "\tstatus Enum[\"pending_review\", \"approved\", \"rejected\", \"needs_revision\", \"escalated\", \"archived\"] required // status field\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	// Comment should be on the closing line
+	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
+	lastLine := lines[len(lines)-1]
+	if !strings.Contains(lastLine, "] required // status field") {
+		t.Errorf("inline comment should reattach to ] line, got last line:\n%q", lastLine)
+	}
+}
+
+// --- Extends wrapping tests ---
+
+func TestWrapLongLines_ShortExtendsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	input := "type Concrete extends Base, Audit {\n"
+	result := wrapLongLines(input)
+	if result != input {
+		t.Errorf("short extends should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestWrapLongLines_LongExtendsWraps(t *testing.T) {
+	t.Parallel()
+
+	input := "type ComplexEntity extends Auditable, Trackable, Validatable, Serializable, Cacheable, Observable, Publishable {\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	if !strings.Contains(result, "type ComplexEntity extends\n") {
+		t.Errorf("expected header on first line:\n%s", result)
+	}
+	if !strings.Contains(result, "\tAuditable,\n") {
+		t.Errorf("expected types indented with trailing comma:\n%s", result)
+	}
+	if !strings.Contains(result, "\tPublishable,\n") {
+		t.Errorf("expected last type with trailing comma:\n%s", result)
+	}
+	// { on own line
+	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
+	lastLine := strings.TrimSpace(lines[len(lines)-1])
+	if lastLine != "{" {
+		t.Errorf("expected { on own line, got: %q", lastLine)
+	}
+}
+
+func TestWrapLongLines_ExtendsCollapseToSingleLine(t *testing.T) {
+	t.Parallel()
+
+	// Multiline extends that fits on one line
+	input := "type Concrete extends\n\tBase,\n\tAudit,\n{\n"
+	result := wrapLongLines(input)
+
+	expected := "type Concrete extends Base, Audit {\n"
+	if result != expected {
+		t.Errorf("multiline extends should collapse:\ngot:\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestWrapLongLines_ExtendsCollapseStillLong(t *testing.T) {
+	t.Parallel()
+
+	// Multiline extends that's still too long when collapsed
+	input := "type ComplexEntity extends\n\tAuditable,\n\tTrackable,\n\tValidatable,\n\tSerializable,\n\tCacheable,\n\tObservable,\n\tPublishable,\n{\n"
+	result := wrapLongLines(input)
+
+	// Should stay multiline
+	if !strings.Contains(result, "type ComplexEntity extends\n") {
+		t.Errorf("long extends should stay multiline:\n%s", result)
+	}
+	if !strings.Contains(result, "{\n") {
+		t.Errorf("expected { on last line:\n%s", result)
+	}
+}
+
+func TestWrapLongLines_ExtendsQualifiedTypes(t *testing.T) {
+	t.Parallel()
+
+	// Extends with qualified types (base.Type)
+	input := "type ComplexEntity extends base.Auditable, other.Trackable, third.Validatable, fourth.Serializable, fifth.Cacheable {\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	if !strings.Contains(result, "\tbase.Auditable,\n") {
+		t.Errorf("qualified types should be preserved:\n%s", result)
+	}
+	if !strings.Contains(result, "\tother.Trackable,\n") {
+		t.Errorf("qualified types should be preserved:\n%s", result)
+	}
+}
+
+func TestWrapLongLines_ExtendsAbstractType(t *testing.T) {
+	t.Parallel()
+
+	input := "abstract type ComplexEntity extends Auditable, Trackable, Validatable, Serializable, Cacheable, Observable {\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		// This is 108 chars with "abstract " prefix — should exceed threshold
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	if !strings.Contains(result, "abstract type ComplexEntity extends\n") {
+		t.Errorf("abstract prefix should be preserved:\n%s", result)
+	}
+}
+
+// --- Datatype alias tests ---
+
+func TestWrapLongLines_ShortDatatypeAliasUnchanged(t *testing.T) {
+	t.Parallel()
+
+	input := "type Status = Enum[\"active\", \"inactive\"]\n"
+	result := wrapLongLines(input)
+	if result != input {
+		t.Errorf("short alias should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestWrapLongLines_LongDatatypeAliasWraps(t *testing.T) {
+	t.Parallel()
+
+	input := "type DeactivatedReason = Enum[\"removed_from_source\", \"matured\", \"merged\", \"manual\", \"superseded\", \"error_corrected\"]\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	if !strings.Contains(result, "= Enum[\n") {
+		t.Errorf("expected Enum[ on first line:\n%s", result)
+	}
+	if !strings.Contains(result, "\t\"removed_from_source\",\n") {
+		t.Errorf("expected values indented:\n%s", result)
+	}
+}
+
+func TestWrapLongLines_DatatypeAliasCollapses(t *testing.T) {
+	t.Parallel()
+
+	// Multiline alias that fits on one line
+	input := "type Status = Enum[\n\t\"a\",\n\t\"b\",\n]\n"
+	result := wrapLongLines(input)
+
+	expected := "type Status = Enum[\"a\", \"b\"]\n"
+	if result != expected {
+		t.Errorf("multiline alias should collapse:\ngot:\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+// --- Invariant wrapping tests ---
+
+func TestWrapLongLines_ShortInvariantUnchanged(t *testing.T) {
+	t.Parallel()
+
+	input := "\t! \"check\" a > 0 && b < 100\n"
+	result := wrapLongLines(input)
+	if result != input {
+		t.Errorf("short invariant should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestWrapLongLines_LongInvariantWrapsAtOr(t *testing.T) {
+	t.Parallel()
+
+	input := "\t! \"geo_check\" (geo_type == \"state\" && Len(geoid) == 2) || (geo_type == \"county\" && Len(geoid) == 5) || (geo_type == \"place\" && Len(geoid) == 7)\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	// First line should be just the prefix
+	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected multiple lines, got %d:\n%s", len(lines), result)
+	}
+	if strings.TrimSpace(lines[0]) != "! \"geo_check\"" {
+		t.Errorf("first line should be just the prefix, got: %q", lines[0])
+	}
+	// Operator should be at end of line
+	if !strings.HasSuffix(strings.TrimSpace(lines[1]), "||") {
+		t.Errorf("operator should be at end of line, got: %q", lines[1])
+	}
+}
+
+func TestWrapLongLines_LongInvariantWrapsAtAnd(t *testing.T) {
+	t.Parallel()
+
+	input := "\t! \"complex_check\" very_long_field_name_one == \"expected_value_one\" && very_long_field_name_two == \"expected_value_two\" && third_field > 0\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d:\n%s", len(lines), result)
+	}
+	// Check operators at end of continuation lines
+	for _, line := range lines[1 : len(lines)-1] {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasSuffix(trimmed, "&&") && !strings.HasSuffix(trimmed, "||") {
+			t.Errorf("continuation line should end with operator, got: %q", trimmed)
+		}
+	}
+}
+
+func TestWrapLongLines_InvariantNeverCollapse(t *testing.T) {
+	t.Parallel()
+
+	// Multiline invariant should pass through unchanged — never collapse
+	input := "\t! \"check\"\n\t\ta > 0 &&\n\t\tb < 100\n"
+	result := wrapLongLines(input)
+	if result != input {
+		t.Errorf("multiline invariant should not be collapsed:\ngot:\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestWrapLongLines_InvariantNestedOpsSkipped(t *testing.T) {
+	t.Parallel()
+
+	// && inside () should NOT be a wrap point — only top-level operators
+	input := "\t! \"check\" (very_long_condition_name && another_very_long_condition_name) || (yet_another_long_condition && final_long_condition_name)\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	// Should wrap at || but NOT at && inside parens
+	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
+
+	// Verify the || is a wrap point
+	foundOr := false
+	for _, line := range lines[1:] {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasSuffix(trimmed, "||") {
+			foundOr = true
+		}
+		// Continuation lines containing && should also contain surrounding parens
+		// (meaning the && is nested, not top-level)
+		if strings.Contains(trimmed, "&&") && !strings.Contains(trimmed, "(") {
+			t.Errorf("&& outside parens should not appear on a continuation line: %q", trimmed)
+		}
+	}
+	if !foundOr {
+		t.Errorf("expected || as wrap point:\n%s", result)
+	}
+}
+
+func TestWrapLongLines_InvariantNoTopLevelOps(t *testing.T) {
+	t.Parallel()
+
+	// Very long invariant with no top-level && or || → left as-is
+	input := "\t! \"check\" Len(very_long_field_name_that_makes_line_exceed_one_hundred_characters_by_quite_a_bit_actually) > 0\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input should exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	// Should pass through unchanged (no operators to wrap at)
+	if result != input {
+		t.Errorf("invariant with no top-level ops should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestWrapLongLines_InvariantBraceExprPreserved(t *testing.T) {
+	t.Parallel()
+
+	// && inside { } braces (lambdas) should not be wrap points
+	input := "\t! \"all_valid\" ITEMS -> All |$item| { $item.qty > 0 && $item.price > 0 }\n"
+	result := wrapLongLines(input)
+
+	// Under 100 chars, should pass through unchanged
+	if result != input {
+		t.Errorf("invariant with brace expr should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
+	}
+}
+
+// --- Integration / edge case tests ---
+
+func TestWrapLongLines_NonWrappable(t *testing.T) {
+	t.Parallel()
+
+	// Long Pattern or long string — not wrappable, left as-is
+	input := "\tregex Pattern[\"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}$\"] required // this is a very very long line that exceeds\n"
+
+	result := wrapLongLines(input)
+	if result != input {
+		t.Errorf("non-wrappable line should pass through:\ngot:\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestWrapLongLines_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	inputs := []string{
+		// Long Enum
+		"\tstatus Enum[\"pending_review\", \"approved\", \"rejected\", \"needs_revision\", \"escalated\", \"archived\", \"deleted\"] required\n",
+		// Long extends
+		"type ComplexEntity extends Auditable, Trackable, Validatable, Serializable, Cacheable, Observable, Publishable {\n",
+		// Long alias
+		"type DeactivatedReason = Enum[\"removed_from_source\", \"matured\", \"merged\", \"manual\", \"superseded\", \"error_corrected\"]\n",
+		// Long invariant
+		"\t! \"geo_check\" (geo_type == \"state\" && Len(geoid) == 2) || (geo_type == \"county\" && Len(geoid) == 5) || (geo_type == \"place\" && Len(geoid) == 7)\n",
+		// Multiline Enum (collapsible)
+		"\tstatus Enum[\n\t\t\"a\",\n\t\t\"b\",\n\t] required\n",
+		// Multiline extends (collapsible)
+		"type Concrete extends\n\tBase,\n\tAudit,\n{\n",
+		// Short (unchanged)
+		"\tname String required\n",
+	}
+
+	for _, input := range inputs {
+		first := wrapLongLines(input)
+		second := wrapLongLines(first)
+		if first != second {
+			t.Errorf("wrapLongLines not idempotent for input:\n%q\nfirst:\n%q\nsecond:\n%q", input, first, second)
+		}
+	}
+}
+
+func TestWrapLongLines_EmptyAndPassthrough(t *testing.T) {
+	t.Parallel()
+
+	// Empty string
+	if result := wrapLongLines(""); result != "" {
+		t.Errorf("empty input should return empty, got: %q", result)
+	}
+
+	// Non-wrappable content passes through unchanged
+	input := "schema \"test\"\n\ntype T {\n\tname String\n}\n"
+	if result := wrapLongLines(input); result != input {
+		t.Errorf("short content should pass through:\ngot:\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestWrapLongLines_ExactlyAtThreshold(t *testing.T) {
+	t.Parallel()
+
+	// Build a line that's exactly 100 chars — should NOT be wrapped
+	// "\tstatus Enum[...]" — pad to exactly 100 display width
+	// Tab = 4, so we need 96 more chars after tab
+	line := "\t" + strings.Repeat("x", 96) + "\n"
+	if displayWidth(strings.TrimSuffix(line, "\n")) != 100 {
+		t.Fatalf("test line should be exactly 100 chars, got %d", displayWidth(strings.TrimSuffix(line, "\n")))
+	}
+
+	result := wrapLongLines(line)
+	if result != line {
+		t.Errorf("line at exactly 100 chars should NOT be wrapped:\ngot:\n%q", result)
+	}
+}
+
+// --- Full pipeline tests ---
+
+func TestFormatTokenStream_WrapLongEnum(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type T {
+	status Enum["pending_review", "approved", "rejected", "needs_revision", "escalated", "archived", "deleted"] required
+}
+`
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+
+	// Should be wrapped
+	if !strings.Contains(result, "Enum[\n") {
+		t.Errorf("long Enum should be wrapped in full pipeline:\n%s", result)
+	}
+	if !strings.Contains(result, "] required\n") {
+		t.Errorf("modifier should be on closing line:\n%s", result)
+	}
+}
+
+func TestFormatTokenStream_CollapseShortMultilineEnum(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type T {
+	status Enum[
+		"a",
+		"b",
+	] required
+}
+`
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+
+	// Should be collapsed to single line
+	if strings.Contains(result, "Enum[\n") {
+		t.Errorf("short multiline Enum should be collapsed:\n%s", result)
+	}
+	if !strings.Contains(result, `Enum["a", "b"] required`) {
+		t.Errorf("expected collapsed Enum, got:\n%s", result)
+	}
+}
+
+func TestFormatTokenStream_WrapAndAlignInteraction(t *testing.T) {
+	t.Parallel()
+
+	// Wrapped Enum should break alignment group
+	input := `schema "test"
+
+type T {
+	name String required
+	status Enum["pending_review", "approved", "rejected", "needs_revision", "escalated", "archived", "deleted"] required
+	age Integer
+}
+`
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+
+	// Wrapped Enum should break alignment between name and age
+	// (they're in separate groups now)
+	if !strings.Contains(result, "Enum[\n") {
+		t.Errorf("long Enum should wrap:\n%s", result)
+	}
+
+	// Verify idempotency of full pipeline
+	second, err := formatTokenStream(result)
+	if err != nil {
+		t.Fatalf("formatTokenStream second pass returned error: %v", err)
+	}
+	if result != second {
+		t.Errorf("full pipeline should be idempotent:\nfirst:\n%q\nsecond:\n%q", result, second)
+	}
+}
