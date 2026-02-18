@@ -1786,10 +1786,11 @@ type logicalOp struct {
 }
 
 // findTopLevelLogicalOps finds byte offsets of top-level `&&` and `||` in an expression.
-// Respects string literals, parentheses, braces, and brackets.
+// Respects string literals, regex literals, parentheses, braces, and brackets.
 func findTopLevelLogicalOps(expr string) []logicalOp {
 	var ops []logicalOp
 	inString := false
+	inRegex := false
 	parenDepth := 0
 	braceDepth := 0
 	bracketDepth := 0
@@ -1806,8 +1807,22 @@ func findTopLevelLogicalOps(expr string) []logicalOp {
 			}
 			continue
 		}
+		if inRegex {
+			if ch == '\\' && i+1 < len(expr) {
+				i++ // skip escaped char inside regex
+				continue
+			}
+			if ch == '/' {
+				inRegex = false
+			}
+			continue
+		}
 		if ch == '"' {
 			inString = true
+			continue
+		}
+		if ch == '/' {
+			inRegex = true
 			continue
 		}
 		if ch == '(' {
@@ -1841,7 +1856,7 @@ func findTopLevelLogicalOps(expr string) []logicalOp {
 			continue
 		}
 
-		if parenDepth == 0 && braceDepth == 0 && bracketDepth == 0 && i+1 < len(expr) {
+		if parenDepth == 0 && braceDepth == 0 && bracketDepth == 0 && !inRegex && i+1 < len(expr) {
 			two := expr[i : i+2]
 			if two == "&&" || two == "||" {
 				ops = append(ops, logicalOp{offset: i, length: 2, op: two})

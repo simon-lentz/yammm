@@ -2397,6 +2397,25 @@ func TestWrapLongLines_InvariantBracketExprPreserved(t *testing.T) {
 	}
 }
 
+func TestWrapLongLines_InvariantRegexLiteralPreserved(t *testing.T) {
+	t.Parallel()
+
+	// || inside /regex/ must NOT be treated as a top-level wrap point
+	input := "\t! \"pattern_check\" field =~ /very_long_pattern_foo||bar_baz_qux/ && other_very_long_field_name_exceeding_threshold > 0\n"
+	if displayWidth(strings.TrimSuffix(input, "\n")) <= lineWidthThreshold {
+		t.Fatal("test input must exceed threshold")
+	}
+
+	result := wrapLongLines(input)
+
+	for line := range strings.SplitSeq(strings.TrimSuffix(result, "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.Count(trimmed, "/")%2 != 0 {
+			t.Errorf("regex literal split across lines: %q", trimmed)
+		}
+	}
+}
+
 // --- Integration / edge case tests ---
 
 func TestWrapLongLines_NonWrappable(t *testing.T) {
