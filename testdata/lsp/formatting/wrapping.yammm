@@ -1,0 +1,22 @@
+schema "wrapping"
+
+type ShortEnum = Enum["A", "B", "C"]
+type LongEnum = Enum["active", "inactive", "pending", "suspended", "terminated", "archived", "deleted", "expired", "revoked"]
+
+type Record {
+    id String primary
+    status ShortEnum required
+    long_status Enum["active", "inactive", "pending_review", "suspended_temporarily", "terminated_permanently", "archived_readonly", "deleted_soft"] required
+    short_status Enum["A", "B", "C"] required
+
+    ! "id_valid" id != ""
+    ! "status_check" status == "active" || status == "inactive"
+}
+
+abstract type VeryLongBaseTypeName extends LongParentNameOne, LongParentNameTwo, AnotherVeryLongParentTypeName, YetAnotherParentType {
+    base_field String
+}
+
+type ShortExtends extends BaseType {
+    value String
+}

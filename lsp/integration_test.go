@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -11,6 +12,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/simon-lentz/yammm/lsp/testutil"
+	"github.com/simon-lentz/yammm/schema/load"
 )
 
 // newTestHarness creates a harness for integration testing with a real LSP server.
@@ -538,5 +540,130 @@ type User extends types.Entity {
 		}
 	default:
 		t.Fatalf("Unexpected definition result type: %T", result)
+	}
+}
+
+// =============================================================================
+// Formatting Round-Trip Tests
+// =============================================================================
+
+func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
+	// Not parallel: newTestHarness calls NewServer which calls commonlog.Configure,
+	// which has a known data race in the commonlog library when called concurrently.
+
+	unformatted, err := os.ReadFile("../testdata/lsp/formatting/unformatted.yammm")
+	if err != nil {
+		t.Fatalf("failed to read unformatted fixture: %v", err)
+	}
+	golden, err := os.ReadFile("../testdata/lsp/formatting/formatted.yammm.golden")
+	if err != nil {
+		t.Fatalf("failed to read golden fixture: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "main.yammm")
+	if err := os.WriteFile(filePath, unformatted, 0o600); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	h := newTestHarness(t, tmpDir)
+	defer h.Close()
+
+	if err := h.Initialize(); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	if err := h.OpenDocument("main.yammm", string(unformatted)); err != nil {
+		t.Fatalf("OpenDocument failed: %v", err)
+	}
+
+	edits, err := h.Formatting("main.yammm")
+	if err != nil {
+		t.Fatalf("Formatting failed: %v", err)
+	}
+
+	testutil.AssertFormattingApplied(t, edits)
+
+	// Apply edits and verify result matches golden file.
+	// Server defaults to UTF-16 encoding.
+	result := testutil.ApplyEdits(string(unformatted), edits, "utf-16")
+	if result != string(golden) {
+		t.Errorf("round-trip result != golden\ngot:\n%s\nwant:\n%s", result, string(golden))
+	}
+}
+
+func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
+	// Not parallel: NewServer calls commonlog.Configure which has a known
+	// data race in the commonlog library when called concurrently.
+
+	// CJK characters: 3 bytes UTF-8, 1 UTF-16 code unit each.
+	// Emoji 😀: 4 bytes UTF-8, 2 UTF-16 code units (surrogate pair).
+	// Emoji on the last line exercises the end-range computation at provider_format.go:73-88.
+	unformatted := "schema \"日本語\"\n\ntype   Person{\n    name String  required // 名前\n    tag String\n}\n// 最後 😀\n"
+	expected := "schema \"日本語\"\n\ntype Person {\n\tname String required // 名前\n\ttag  String\n}\n// 最後 😀\n"
+
+	tests := []struct {
+		name     string
+		encoding PositionEncoding
+	}{
+		{"UTF-16", PositionEncodingUTF16},
+		{"UTF-8", PositionEncodingUTF8},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Not parallel: NewServer calls commonlog.Configure which has a
+			// known data race in the commonlog library when called concurrently.
+
+			tmpDir := t.TempDir()
+			filePath := filepath.Join(tmpDir, "test.yammm")
+			if err := os.WriteFile(filePath, []byte(unformatted), 0o600); err != nil {
+				t.Fatalf("failed to write file: %v", err)
+			}
+
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			server := NewServer(logger, Config{ModuleRoot: tmpDir})
+			server.workspace.SetPositionEncoding(tt.encoding)
+
+			uri := PathToURI(filePath)
+			err := server.textDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
+				TextDocument: protocol.TextDocumentItem{
+					URI:        uri,
+					LanguageID: "yammm",
+					Version:    1,
+					Text:       unformatted,
+				},
+			})
+			if err != nil {
+				t.Fatalf("textDocumentDidOpen failed: %v", err)
+			}
+
+			edits, err := server.textDocumentFormatting(nil, &protocol.DocumentFormattingParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			})
+			if err != nil {
+				t.Fatalf("textDocumentFormatting failed: %v", err)
+			}
+
+			if len(edits) == 0 {
+				t.Fatal("expected formatting edits, got none")
+			}
+
+			// Apply edits with the test encoding.
+			result := testutil.ApplyEdits(unformatted, edits, string(tt.encoding))
+			if result != expected {
+				t.Errorf("round-trip result != expected\ngot:\n%q\nwant:\n%q", result, expected)
+			}
+
+			// Verify the result parses and has the expected schema name.
+			ctx := context.Background()
+			s, _, err := load.LoadString(ctx, result, "test.yammm")
+			if err != nil {
+				t.Fatalf("formatted output failed to parse: %v", err)
+			}
+			if s.Name() != "日本語" {
+				t.Errorf("schema name = %q; want %q", s.Name(), "日本語")
+			}
+		})
 	}
 }

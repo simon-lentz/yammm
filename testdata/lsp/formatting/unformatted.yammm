@@ -1,18 +1,29 @@
 // Test fixture for formatting - unformatted input.
-// Contains: trailing whitespace, space indentation, extra blank lines.
+// Contains: trailing whitespace, space indentation, extra blank lines,
+// alignment candidates, relationships, inline comments.
 schema "formatting"
 
+
+import "./other" as other
+
+
+type StateFP = String[2, 2]
+type CountyFP = String[3,3]
 
 type Person   {
     name String  required
     age Integer
+    bio String   // personal bio
 
 
 }
 
 
 type   Address{
-    street String
-    city   String
+    street String  required  // street address
+    city   String required
     zip String
+    state_fp StateFP required
+    --> IN_STATE (one) other.GeoState
+    --> NEAR_COUNTY (_:many) other.GeoCounty // nearby
 }

@@ -821,6 +821,77 @@ func TestFormatTokenStream_GoldenIdempotent(t *testing.T) {
 	}
 }
 
+func TestFormatTokenStream_GoldenFixtures(t *testing.T) {
+	t.Parallel()
+
+	fixtures := []string{
+		"alignment",
+		"wrapping",
+		"expressions",
+		"edge_cases",
+		"comprehensive",
+	}
+
+	for _, name := range fixtures {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			inputPath := filepath.Join("..", "testdata", "lsp", "formatting", name+".yammm")
+			goldenPath := filepath.Join("..", "testdata", "lsp", "formatting", name+".yammm.golden")
+
+			input, err := os.ReadFile(inputPath)
+			if err != nil {
+				t.Fatalf("failed to read fixture %s: %v", name, err)
+			}
+			golden, err := os.ReadFile(goldenPath)
+			if err != nil {
+				t.Fatalf("failed to read golden %s: %v", name, err)
+			}
+
+			result, err := formatTokenStream(string(input))
+			if err != nil {
+				t.Fatalf("formatTokenStream returned error: %v", err)
+			}
+			if result != string(golden) {
+				t.Errorf("formatTokenStream(%s) != golden\ngot:\n%s\nwant:\n%s", name, result, string(golden))
+			}
+		})
+	}
+}
+
+func TestFormatTokenStream_GoldenIdempotentAll(t *testing.T) {
+	t.Parallel()
+
+	goldenFiles := []string{
+		"formatted.yammm.golden",
+		"alignment.yammm.golden",
+		"wrapping.yammm.golden",
+		"expressions.yammm.golden",
+		"edge_cases.yammm.golden",
+		"comprehensive.yammm.golden",
+	}
+
+	for _, name := range goldenFiles {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			goldenPath := filepath.Join("..", "testdata", "lsp", "formatting", name)
+			golden, err := os.ReadFile(goldenPath)
+			if err != nil {
+				t.Fatalf("failed to read golden %s: %v", name, err)
+			}
+
+			result, err := formatTokenStream(string(golden))
+			if err != nil {
+				t.Fatalf("formatTokenStream returned error: %v", err)
+			}
+			if result != string(golden) {
+				t.Errorf("formatTokenStream(%s) not idempotent\ngot:\n%s\nwant:\n%s", name, result, string(golden))
+			}
+		})
+	}
+}
+
 func TestFormatTokenStream_BlankLineCollapsingIdempotent(t *testing.T) {
 	t.Parallel()
 
