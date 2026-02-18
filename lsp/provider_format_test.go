@@ -101,8 +101,6 @@ func TestFormatDocument_NormalizeCR(t *testing.T) {
 func TestFormatDocument_PreservesBlankLines(t *testing.T) {
 	t.Parallel()
 
-	// Blank lines are preserved as a conservative aesthetic choice to maintain visual
-	// structure. Note: DOC_COMMENT attachment is channel-based and whitespace-agnostic.
 	input := `schema "test"
 
 
@@ -118,8 +116,8 @@ type Company {
 }
 `
 
-	// Blank lines should be preserved (trailing blank lines at EOF are still removed)
-	expected := `schema "test"
+	// formatDocument preserves blank lines (conservative aesthetic choice)
+	fdExpected := `schema "test"
 
 
 
@@ -133,19 +131,28 @@ type Company {
 	title String
 }
 `
-
 	result := formatDocument(input)
-	if result != expected {
-		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, expected)
+	if result != fdExpected {
+		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, fdExpected)
 	}
 
-	// formatTokenStream also preserves blank lines in Phase 1 (collapsing is Phase 2)
+	// formatTokenStream collapses blank lines (Phase 2: max 1 blank between declarations)
+	tsExpected := `schema "test"
+
+type Person {
+	name String
+}
+
+type Company {
+	title String
+}
+`
 	tsResult, err := formatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
-	if tsResult != expected {
-		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
+	if tsResult != tsExpected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, tsExpected)
 	}
 }
 
@@ -323,8 +330,8 @@ type Car extends Vehicle {
 
 `
 
-	// Blank lines are preserved (trailing blank lines at EOF are removed)
-	expected := `schema "vehicles"
+	// formatDocument preserves blank lines (trailing blank lines at EOF removed)
+	fdExpected := `schema "vehicles"
 
 
 import "./parts" as parts
@@ -345,18 +352,35 @@ type Car extends Vehicle {
 	*-> WHEELS (many) parts.Wheel
 }
 `
-
 	result := formatDocument(input)
-	if result != expected {
-		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, expected)
+	if result != fdExpected {
+		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, fdExpected)
 	}
 
+	// formatTokenStream collapses double blanks to single
+	tsExpected := `schema "vehicles"
+
+import "./parts" as parts
+
+// Abstract vehicle type
+abstract type Vehicle {
+	vin String[17, 17] primary
+
+	--> MANUFACTURER (one) Manufacturer
+}
+
+// Concrete car type
+type Car extends Vehicle {
+	model String required
+	*-> WHEELS (many) parts.Wheel
+}
+`
 	tsResult, err := formatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
-	if tsResult != expected {
-		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
+	if tsResult != tsExpected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, tsExpected)
 	}
 }
 
@@ -471,7 +495,7 @@ type Person {
 	}
 }
 
-func TestFormatTokenStream_PreservesBlankLines(t *testing.T) {
+func TestFormatTokenStream_CollapsesBlankLines(t *testing.T) {
 	t.Parallel()
 
 	input := `schema "test"
@@ -491,19 +515,362 @@ type Company{
     title String
 }
 `
+	expected := `schema "test"
+
+type Person {
+	name String
+
+	age Integer
+}
+
+type Company {
+	title String
+}
+`
+
 	result, err := formatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
 
-	if !strings.Contains(result, "schema \"test\"\n\n\n\ntype Person {") {
-		t.Errorf("expected blank lines before first type to be preserved, got:\n%s", result)
+func TestFormatTokenStream_BlankLinesAtStartOfFile(t *testing.T) {
+	t.Parallel()
+
+	input := `
+
+schema "test"
+
+type Person {
+	name String
+}
+`
+	expected := `schema "test"
+
+type Person {
+	name String
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
-	if !strings.Contains(result, "\n\tname String\n\n\n\tage Integer\n") {
-		t.Errorf("expected blank lines in type body to be preserved, got:\n%s", result)
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
-	if !strings.Contains(result, "}\n\n\n\ntype Company {") {
-		t.Errorf("expected blank lines between declarations to be preserved, got:\n%s", result)
+}
+
+func TestFormatTokenStream_NoBlankAfterOpenBrace(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type Person {
+
+	name String
+	age Integer
+}
+`
+	expected := `schema "test"
+
+type Person {
+	name String
+	age Integer
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_NoBlankBeforeCloseBrace(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type Person {
+	name String
+	age Integer
+
+}
+`
+	expected := `schema "test"
+
+type Person {
+	name String
+	age Integer
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_EnsureBlankAfterSchema(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+type Person {
+	name String
+}
+`
+	expected := `schema "test"
+
+type Person {
+	name String
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_EnsureBlankAfterImportBlock(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+import "./other" as other
+type Person {
+	name String
+}
+`
+	expected := `schema "test"
+
+import "./other" as other
+
+type Person {
+	name String
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_ImportGroupingPreserved(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+import "./a" as a
+
+import "./b" as b
+
+type T {
+	name String
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != input {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestFormatTokenStream_CommentNotCollapsedAsBlank(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type Person {
+	name String
+}
+
+// This is a comment between types
+type Company {
+	title String
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != input {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestFormatTokenStream_DocCommentMultilineNotCollapsed(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+/* This is a
+multiline doc
+comment */
+type Person {
+	name String
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != input {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, input)
+	}
+}
+
+func TestFormatTokenStream_EdgePropertyBlockBlanks(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type T {
+	--> REL (one) Target {
+
+		weight Float required
+		score Integer
+
+	}
+}
+`
+	expected := `schema "test"
+
+type T {
+	--> REL (one) Target {
+		weight Float required
+		score Integer
+	}
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_GoldenFile(t *testing.T) {
+	t.Parallel()
+
+	unformatted, err := os.ReadFile("../testdata/lsp/formatting/unformatted.yammm")
+	if err != nil {
+		t.Fatalf("failed to read unformatted fixture: %v", err)
+	}
+	golden, err := os.ReadFile("../testdata/lsp/formatting/formatted.yammm.golden")
+	if err != nil {
+		t.Fatalf("failed to read golden fixture: %v", err)
+	}
+
+	result, err := formatTokenStream(string(unformatted))
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != string(golden) {
+		t.Errorf("formatTokenStream(unformatted) !=golden\ngot:\n%q\nwant:\n%q", result, string(golden))
+	}
+}
+
+func TestFormatTokenStream_GoldenIdempotent(t *testing.T) {
+	t.Parallel()
+
+	golden, err := os.ReadFile("../testdata/lsp/formatting/formatted.yammm.golden")
+	if err != nil {
+		t.Fatalf("failed to read golden fixture: %v", err)
+	}
+
+	result, err := formatTokenStream(string(golden))
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != string(golden) {
+		t.Errorf("formatTokenStream(golden) != golden\ngot:\n%q\nwant:\n%q", result, string(golden))
+	}
+}
+
+func TestFormatTokenStream_BlankLineCollapsingIdempotent(t *testing.T) {
+	t.Parallel()
+
+	input := `
+
+
+
+schema "test"
+
+
+
+import "./a" as a
+import "./b" as b
+
+
+
+// Comment
+abstract type Base {
+
+
+
+	id String primary
+
+
+
+	name String required
+
+
+
+}
+
+
+
+type Concrete extends Base {
+	--> REL (one) Target {
+
+
+		weight Float
+
+
+	}
+}
+
+
+
+`
+
+	first, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream first pass returned error: %v", err)
+	}
+
+	second, err := formatTokenStream(first)
+	if err != nil {
+		t.Fatalf("formatTokenStream second pass returned error: %v", err)
+	}
+
+	if first != second {
+		t.Errorf("blank line collapsing should be idempotent:\nfirst:\n%q\nsecond:\n%q", first, second)
 	}
 }
 
