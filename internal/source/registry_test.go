@@ -2,6 +2,7 @@ package source
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -1013,8 +1014,8 @@ func TestRegistry_ConcurrentRegisterAndRead(t *testing.T) {
 	for i := range numSources {
 		go func(idx int) {
 			defer wg.Done()
-			sourceID := location.MustNewSourceID("test://source" + string(rune('0'+idx)) + ".yammm")
-			content := []byte("content for source " + string(rune('0'+idx)))
+			sourceID := location.MustNewSourceID(fmt.Sprintf("test://source%d.yammm", idx))
+			content := fmt.Appendf(nil, "content for source %d", idx)
 			_ = reg.Register(sourceID, content)
 		}(i)
 	}
@@ -1026,7 +1027,7 @@ func TestRegistry_ConcurrentRegisterAndRead(t *testing.T) {
 			defer wg.Done()
 			// Read operations on potentially non-existent sources
 			for i := range numSources {
-				sourceID := location.MustNewSourceID("test://source" + string(rune('0'+i)) + ".yammm")
+				sourceID := location.MustNewSourceID(fmt.Sprintf("test://source%d.yammm", i))
 				_, _ = reg.ContentBySource(sourceID)
 				_ = reg.PositionAt(sourceID, 0)
 				_ = reg.Has(sourceID)

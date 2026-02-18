@@ -12,6 +12,9 @@ import (
 )
 
 // textDocumentFormatting handles textDocument/formatting requests.
+// params.Options (FormattingOptions) is intentionally ignored: yammm formatting
+// is canonical (like gofmt) — tabs for indentation, trailing whitespace trimmed,
+// final newline enforced. All style decisions are hardcoded.
 func (s *Server) textDocumentFormatting(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
 	uri := params.TextDocument.URI
 
@@ -46,8 +49,16 @@ func (s *Server) textDocumentFormatting(_ *glsp.Context, params *protocol.Docume
 		return []protocol.TextEdit{}, nil
 	}
 
-	// Format the document
-	formatted := formatDocument(doc.Text)
+	// Format the document with parse-aware token spacing. Fall back to the
+	// conservative line-by-line formatter if internal formatting fails.
+	formatted, formatErr := formatTokenStream(doc.Text)
+	if formatErr != nil {
+		s.logger.Debug("token-stream formatting failed, falling back",
+			"uri", uri,
+			"error", formatErr,
+		)
+		formatted = formatDocument(doc.Text)
+	}
 
 	// If no changes, return empty edits
 	if formatted == doc.Text {
@@ -103,7 +114,7 @@ func (s *Server) textDocumentFormatting(_ *glsp.Context, params *protocol.Docume
 // - Tabs for indentation (spaces converted to tabs: 4 spaces = 1 tab)
 // - LF line endings
 // - No trailing whitespace
-// - Preserve blank lines (count affects comment attachment semantics)
+// - Preserve blank lines (conservative: maintains visual structure between declarations)
 // - Preserve comment text and line positions (indentation is normalized)
 func formatDocument(text string) string {
 	// Normalize line endings to LF
@@ -124,7 +135,7 @@ func formatDocument(text string) string {
 		isBlank := strings.TrimSpace(line) == ""
 
 		if isBlank {
-			// Preserve all blank lines - count affects comment attachment
+			// Preserve all blank lines - maintains visual structure between declarations
 			result = append(result, "")
 		} else {
 			result = append(result, normalized)

@@ -239,7 +239,7 @@ func TestInputStreamIndexIsRuneBased(t *testing.T) {
 
 	// LA(1) at position 1 should return the rune value of '日'
 	if got := is.LA(1); got != int('日') {
-		t.Errorf("LA(1) at position 1 = %d (%c), want %d (%c)", got, rune(got), int('日'), '日')
+		t.Errorf("LA(1) at position 1 = %d (%c), want %d (%c)", got, got, int('日'), '日')
 	}
 }
 
@@ -295,7 +295,7 @@ func TestLexerTokenOffsetsAreRuneBased(t *testing.T) {
 			byteStart:     7,
 			byteStop:      12, // same for ASCII
 		},
-		{
+		{ //nolint:gosec // G101 false positive: test data for offset arithmetic, not credentials
 			name:          "Japanese schema name",
 			input:         `schema "日本語"`,
 			tokenText:     `"日本語"`,
@@ -363,6 +363,135 @@ func TestLexerTokenOffsetsAreRuneBased(t *testing.T) {
 			// Verify GetText returns the expected string content
 			if got := stringToken.GetText(); got != tt.tokenText {
 				t.Errorf("GetText() = %q, want %q", got, tt.tokenText)
+			}
+		})
+	}
+}
+
+// TestSLCommentTokensHiddenChannelAndNewlineOwnership verifies that SL_COMMENT
+// tokens are preserved on the hidden channel and no longer include trailing
+// newlines (newlines belong to adjacent WS tokens).
+func TestSLCommentTokensHiddenChannelAndNewlineOwnership(t *testing.T) {
+	tests := []struct {
+		name                string
+		input               string
+		commentText         string
+		expectedStart       int
+		expectedStop        int
+		expectedByteStop    int
+		expectNextWSNewline bool
+	}{
+		{
+			name:                "Standalone comment line",
+			input:               "schema \"x\"\n// c1\ntype T {}\n",
+			commentText:         "// c1",
+			expectedStart:       11,
+			expectedStop:        15,
+			expectedByteStop:    15,
+			expectNextWSNewline: true,
+		},
+		{
+			name:                "Inline comment",
+			input:               "schema \"x\"\ntype T {\n\tname String // c2\n}\n",
+			commentText:         "// c2",
+			expectedStart:       33,
+			expectedStop:        37,
+			expectedByteStop:    37,
+			expectNextWSNewline: true,
+		},
+		{
+			name:                "Comment at EOF without trailing newline",
+			input:               "schema \"x\"\n// eof",
+			commentText:         "// eof",
+			expectedStart:       11,
+			expectedStop:        16,
+			expectedByteStop:    16,
+			expectNextWSNewline: false,
+		},
+		{
+			name:                "Multibyte comment content",
+			input:               "schema \"x\"\n// 日本🎉\n",
+			commentText:         "// 日本🎉",
+			expectedStart:       11,
+			expectedStop:        16,
+			expectedByteStop:    23,
+			expectNextWSNewline: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := antlr.NewInputStream(tt.input)
+			lexer := NewYammmGrammarLexer(input)
+			stream := antlr.NewCommonTokenStream(lexer, 0)
+			stream.Fill()
+
+			tokens := stream.GetAllTokens()
+
+			var commentToken antlr.Token
+			commentTokenIdx := -1
+			commentCount := 0
+			for i, tok := range tokens {
+				if tok.GetTokenType() == YammmGrammarLexerSL_COMMENT {
+					commentCount++
+					if tok.GetText() == tt.commentText {
+						commentToken = tok
+						commentTokenIdx = i
+					}
+				}
+			}
+
+			if commentCount != 1 {
+				t.Fatalf("expected exactly 1 SL_COMMENT token, got %d", commentCount)
+			}
+			if commentToken == nil {
+				t.Fatalf("SL_COMMENT token %q not found", tt.commentText)
+			}
+			if commentTokenIdx < 0 {
+				t.Fatalf("SL_COMMENT token index not found for %q", tt.commentText)
+			}
+
+			if got := commentToken.GetTokenType(); got != YammmGrammarLexerSL_COMMENT {
+				t.Errorf("SL_COMMENT token type = %d, want %d", got, YammmGrammarLexerSL_COMMENT)
+			}
+			if got := commentToken.GetChannel(); got != antlr.TokenHiddenChannel {
+				t.Errorf("SL_COMMENT channel = %d, want hidden channel %d", got, antlr.TokenHiddenChannel)
+			}
+			if strings.Contains(commentToken.GetText(), "\n") || strings.Contains(commentToken.GetText(), "\r") {
+				t.Errorf("SL_COMMENT text contains newline: %q", commentToken.GetText())
+			}
+
+			if got := commentToken.GetStart(); got != tt.expectedStart {
+				t.Errorf("SL_COMMENT GetStart() = %d, want %d (rune-based)", got, tt.expectedStart)
+			}
+			if got := commentToken.GetStop(); got != tt.expectedStop {
+				t.Errorf("SL_COMMENT GetStop() = %d, want %d (rune-based)", got, tt.expectedStop)
+				if got == tt.expectedByteStop && tt.expectedByteStop != tt.expectedStop {
+					t.Errorf(
+						"  (got byte-based value %d instead of rune-based %d)",
+						tt.expectedByteStop,
+						tt.expectedStop,
+					)
+				}
+			}
+
+			if tt.expectNextWSNewline {
+				if commentTokenIdx+1 >= len(tokens) {
+					t.Fatalf("expected token after SL_COMMENT, but comment is last token")
+				}
+
+				next := tokens[commentTokenIdx+1]
+				if next.GetTokenType() != YammmGrammarLexerWS {
+					t.Fatalf("token after SL_COMMENT type = %d, want WS (%d)", next.GetTokenType(), YammmGrammarLexerWS)
+				}
+				if !strings.HasPrefix(next.GetText(), "\n") {
+					t.Errorf("WS token after SL_COMMENT should start with newline, got %q", next.GetText())
+				}
+			} else if commentTokenIdx+1 < len(tokens) {
+				next := tokens[commentTokenIdx+1]
+				if next.GetTokenType() == YammmGrammarLexerWS && strings.HasPrefix(next.GetText(), "\n") {
+					t.Errorf("did not expect newline WS token after EOF SL_COMMENT, got %q", next.GetText())
+				}
 			}
 		})
 	}

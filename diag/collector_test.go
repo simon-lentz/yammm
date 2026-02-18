@@ -2,6 +2,7 @@ package diag
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -281,8 +282,8 @@ func TestCollector_ThreadSafety(t *testing.T) {
 			for j := range issuesPerGoroutine {
 				issue := NewIssue(Error, E_SYNTAX, "test").
 					WithPath("data.json", "$.item").
-					WithDetails(Detail{Key: "id", Value: string(rune('0' + id))}).
-					WithDetails(Detail{Key: "j", Value: string(rune('0' + j%10))}).
+					WithDetails(Detail{Key: "id", Value: strconv.Itoa(id)}).
+					WithDetails(Detail{Key: "j", Value: strconv.Itoa(j % 10)}).
 					Build()
 				c.Collect(issue)
 			}

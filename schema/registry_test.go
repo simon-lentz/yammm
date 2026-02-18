@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -225,7 +226,7 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			for range 100 {
-				srcID := location.MustNewSourceID("test://pre" + string(rune('a'+idx)) + ".yammm")
+				srcID := location.MustNewSourceID(fmt.Sprintf("test://pre%c.yammm", 'a'+idx))
 				_, _ = r.LookupBySourceID(srcID)
 				_ = r.Len()
 			}

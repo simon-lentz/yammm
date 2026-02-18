@@ -20,10 +20,10 @@ $(ANTLR_JAR):
 .PHONY: lint lint-fix
 
 lint:
-	golangci-lint run
+	go tool golangci-lint run
 
 lint-fix:
-	golangci-lint run --fix
+	go tool golangci-lint run --fix
 
 PUBLIC_TEST_PACKAGES := .
 

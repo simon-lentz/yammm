@@ -272,7 +272,7 @@ func escapeString(s string) string {
 		default:
 			if r < 0x20 {
 				// Control character: use \uXXXX
-				sb.WriteString(fmt.Sprintf(`\u%04x`, r))
+				fmt.Fprintf(&sb, `\u%04x`, r)
 			} else {
 				sb.WriteRune(r)
 			}

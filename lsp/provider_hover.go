@@ -261,18 +261,18 @@ func (s *Server) hoverForType(sym *Symbol, snapshot *Snapshot) string {
 	b.WriteString("\n---\n\n")
 
 	if propCount > 0 {
-		b.WriteString(fmt.Sprintf("- Properties: %d\n", propCount))
+		fmt.Fprintf(&b, "- Properties: %d\n", propCount)
 	}
 	if assocCount > 0 {
-		b.WriteString(fmt.Sprintf("- Associations: %d\n", assocCount))
+		fmt.Fprintf(&b, "- Associations: %d\n", assocCount)
 	}
 	if compCount > 0 {
-		b.WriteString(fmt.Sprintf("- Compositions: %d\n", compCount))
+		fmt.Fprintf(&b, "- Compositions: %d\n", compCount)
 	}
 
 	// Source location
 	if !sym.SourceID.IsZero() {
-		b.WriteString(fmt.Sprintf("- Source: `%s`\n", s.relativeSourcePath(sym.SourceID, snapshot)))
+		fmt.Fprintf(&b, "- Source: `%s`\n", s.relativeSourcePath(sym.SourceID, snapshot))
 	}
 
 	return b.String()
