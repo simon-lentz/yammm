@@ -49,8 +49,16 @@ func (s *Server) textDocumentFormatting(_ *glsp.Context, params *protocol.Docume
 		return []protocol.TextEdit{}, nil
 	}
 
-	// Format the document
-	formatted := formatDocument(doc.Text)
+	// Format the document with parse-aware token spacing. Fall back to the
+	// conservative line-by-line formatter if internal formatting fails.
+	formatted, formatErr := formatTokenStream(doc.Text)
+	if formatErr != nil {
+		s.logger.Debug("token-stream formatting failed, falling back",
+			"uri", uri,
+			"error", formatErr,
+		)
+		formatted = formatDocument(doc.Text)
+	}
 
 	// If no changes, return empty edits
 	if formatted == doc.Text {

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -24,9 +25,16 @@ type Person {
 }
 `
 	result := formatDocument(input)
-
 	if result != input {
-		t.Errorf("expected no changes, got:\n%q", result)
+		t.Errorf("formatDocument: expected no changes, got:\n%q", result)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != input {
+		t.Errorf("formatTokenStream: expected no changes, got:\n%q", tsResult)
 	}
 }
 
@@ -37,9 +45,16 @@ func TestFormatDocument_TrailingWhitespace(t *testing.T) {
 	expected := "schema \"test\"\n\ntype Person {\n\tname String required\n}\n"
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -50,9 +65,16 @@ func TestFormatDocument_NormalizeCRLF(t *testing.T) {
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -63,9 +85,16 @@ func TestFormatDocument_NormalizeCR(t *testing.T) {
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -106,9 +135,17 @@ type Company {
 `
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, expected)
+	}
+
+	// formatTokenStream also preserves blank lines in Phase 1 (collapsing is Phase 2)
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -119,9 +156,16 @@ func TestFormatDocument_RemoveTrailingBlankLines(t *testing.T) {
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -132,9 +176,16 @@ func TestFormatDocument_EnsureTrailingNewline(t *testing.T) {
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -149,9 +200,16 @@ type Person {
 }
 `
 	result := formatDocument(input)
-
 	if result != input {
-		t.Errorf("comments should be preserved, got:\n%q", result)
+		t.Errorf("formatDocument: comments should be preserved, got:\n%q", result)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != input {
+		t.Errorf("formatTokenStream: comments should be preserved, got:\n%q", tsResult)
 	}
 }
 
@@ -167,9 +225,16 @@ type Person {
 }
 `
 	result := formatDocument(input)
-
 	if result != input {
-		t.Errorf("indentation should be preserved, got:\n%q", result)
+		t.Errorf("formatDocument: indentation should be preserved, got:\n%q", result)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != input {
+		t.Errorf("formatTokenStream: indentation should be preserved, got:\n%q", tsResult)
 	}
 }
 
@@ -210,14 +275,24 @@ type Person {
 
 `
 
-	// Format once
+	// formatDocument idempotency
 	first := formatDocument(input)
-
-	// Format again
 	second := formatDocument(first)
-
 	if first != second {
-		t.Errorf("formatting should be idempotent:\nfirst:\n%q\nsecond:\n%q", first, second)
+		t.Errorf("formatDocument should be idempotent:\nfirst:\n%q\nsecond:\n%q", first, second)
+	}
+
+	// formatTokenStream idempotency
+	tsFirst, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream first pass returned error: %v", err)
+	}
+	tsSecond, err := formatTokenStream(tsFirst)
+	if err != nil {
+		t.Fatalf("formatTokenStream second pass returned error: %v", err)
+	}
+	if tsFirst != tsSecond {
+		t.Errorf("formatTokenStream should be idempotent:\nfirst:\n%q\nsecond:\n%q", tsFirst, tsSecond)
 	}
 }
 
@@ -272,9 +347,474 @@ type Car extends Vehicle {
 `
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() =\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
+	}
+}
+
+func TestFormatTokenStream_DeclarationSpacing(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type   Address{
+    name String  required
+    age Integer [ 0 , _ ]
+    score Float[- 90.0, 90.0]
+    -->  REL ( one ) Target / owned_by(one)
+}
+
+type Email=Pattern["^.+@.+$"]
+`
+	expected := `schema "test"
+
+type Address {
+	name String required
+	age Integer[0, _]
+	score Float[-90.0, 90.0]
+	--> REL (one) Target / owned_by (one)
+}
+
+type Email = Pattern["^.+@.+$"]
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_ExpressionPreservation(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type   RuleSet{
+    ! "all_positive" ITEMS -> All |$item| { $item.qty > 0 }
+    ! "adult_status" age >= 18 ? { "adult" : "minor" } == category
+    ! "must_be_enabled" !disabled && active
+    ! "grouping" (a > 0) && (b < 100)
+    ! "replace" items -> Replace("old", "new")
+}
+`
+	expected := `schema "test"
+
+type RuleSet {
+	! "all_positive" ITEMS -> All |$item| { $item.qty > 0 }
+	! "adult_status" age >= 18 ? { "adult" : "minor" } == category
+	! "must_be_enabled" !disabled && active
+	! "grouping" (a > 0) && (b < 100)
+	! "replace" items -> Replace("old", "new")
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+
+	if !strings.Contains(result, `! "must_be_enabled" !disabled && active`) {
+		t.Errorf("logical NOT spacing should be preserved, got:\n%s", result)
+	}
+	if !strings.Contains(result, `{ "adult" : "minor" }`) {
+		t.Errorf("ternary brace/colon spacing should be preserved, got:\n%s", result)
+	}
+}
+
+func TestFormatTokenStream_CommentHandling(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+/* Doc
+block
+*/
+type   Person{
+    // standalone
+    name String // inline
+}
+`
+	expected := `schema "test"
+
+/* Doc
+block
+*/
+type Person {
+	// standalone
+	name String // inline
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_PreservesBlankLines(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+
+
+type   Person{
+    name String
+
+
+    age Integer
+}
+
+
+
+type Company{
+    title String
+}
+`
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+
+	if !strings.Contains(result, "schema \"test\"\n\n\n\ntype Person {") {
+		t.Errorf("expected blank lines before first type to be preserved, got:\n%s", result)
+	}
+	if !strings.Contains(result, "\n\tname String\n\n\n\tage Integer\n") {
+		t.Errorf("expected blank lines in type body to be preserved, got:\n%s", result)
+	}
+	if !strings.Contains(result, "}\n\n\n\ntype Company {") {
+		t.Errorf("expected blank lines between declarations to be preserved, got:\n%s", result)
+	}
+}
+
+func TestFormatTokenStream_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type   Person{
+    name String  required
+    ! "must_be_enabled" !disabled && active
+}
+`
+
+	first, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream first pass returned error: %v", err)
+	}
+
+	second, err := formatTokenStream(first)
+	if err != nil {
+		t.Fatalf("formatTokenStream second pass returned error: %v", err)
+	}
+
+	if first != second {
+		t.Errorf("formatTokenStream should be idempotent:\nfirst:\n%q\nsecond:\n%q", first, second)
+	}
+}
+
+func TestFormatTokenStream_InvalidInputReturnsError(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type Person {
+	name String
+`
+
+	_, err := formatTokenStream(input)
+	if err == nil {
+		t.Fatal("expected formatTokenStream to return error for malformed input")
+	}
+}
+
+func TestFormatTokenStream_ColonInMultiplicity(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type T {
+	--> REL (_ : many) Target
+	--> REL2 ( _:one ) Target
+	*-> REL3 ( one : many ) Target
+}
+`
+	expected := `schema "test"
+
+type T {
+	--> REL (_:many) Target
+	--> REL2 (_:one) Target
+	*-> REL3 (one:many) Target
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_QualifiedReferences(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+import "./other" as other
+
+type T {
+	--> REL (one) other . Target
+	name other . CustomType
+}
+`
+	expected := `schema "test"
+
+import "./other" as other
+
+type T {
+	--> REL (one) other.Target
+	name other.CustomType
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_ImportSpacing(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+import   "./path"   as   alias
+import"./other"as other
+
+type T {
+	name String
+}
+`
+	expected := `schema "test"
+
+import "./path" as alias
+import "./other" as other
+
+type T {
+	name String
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_ExtendsMultipleTypes(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+abstract type Base {
+	id String primary
+}
+
+abstract type Auditable {
+	ts Timestamp required
+}
+
+type Concrete extends  Base ,Auditable {
+	name String required
+}
+`
+	expected := `schema "test"
+
+abstract type Base {
+	id String primary
+}
+
+abstract type Auditable {
+	ts Timestamp required
+}
+
+type Concrete extends Base, Auditable {
+	name String required
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_AllConstraintBracketTypes(t *testing.T) {
+	t.Parallel()
+
+	input := `schema "test"
+
+type T {
+	a String [1, 255]
+	b Integer [0, _]
+	c Float [0.0, 100.0]
+	d Enum ["x", "y", "z"]
+	e Pattern ["^[a-z]+$"]
+	f Timestamp ["2006-01-02"]
+	g Vector [128]
+}
+`
+	expected := `schema "test"
+
+type T {
+	a String[1, 255]
+	b Integer[0, _]
+	c Float[0.0, 100.0]
+	d Enum["x", "y", "z"]
+	e Pattern["^[a-z]+$"]
+	f Timestamp["2006-01-02"]
+	g Vector[128]
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_DOCCommentNewlineAfter(t *testing.T) {
+	t.Parallel()
+
+	// Verify DOC_COMMENT always gets a newline before the next declaration token.
+	input := `schema "test"
+
+/* Entity doc */
+type T {
+	/* Field doc */
+	name String
+}
+`
+	expected := `schema "test"
+
+/* Entity doc */
+type T {
+	/* Field doc */
+	name String
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_TrailingCommaInConstraints(t *testing.T) {
+	t.Parallel()
+
+	// Trailing comma inside Enum is grammar-legal and should be tight before RBRACK.
+	input := `schema "test"
+
+type T {
+	status Enum["a", "b", "c",]
+}
+`
+	expected := `schema "test"
+
+type T {
+	status Enum["a", "b", "c",]
+}
+`
+
+	result, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	content := "schema \"test\"\n\ntype   A{\n\tname String\n}\n"
+	filePath := filepath.Join(tmpDir, "test.yammm")
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(logger, Config{ModuleRoot: tmpDir})
+	uri := PathToURI(filePath)
+
+	if err := server.textDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        uri,
+			LanguageID: "yammm",
+			Version:    1,
+			Text:       content,
+		},
+	}); err != nil {
+		t.Fatalf("textDocumentDidOpen failed: %v", err)
+	}
+
+	edits, err := server.textDocumentFormatting(nil, &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+	})
+	if err != nil {
+		t.Fatalf("textDocumentFormatting failed: %v", err)
+	}
+
+	if len(edits) == 0 {
+		t.Fatal("expected formatting edits for intra-line spacing normalization")
+	}
+
+	edit := edits[0]
+	if edit.Range.Start.Line != 0 || edit.Range.Start.Character != 0 {
+		t.Errorf("edit range should start at 0,0; got %d,%d", edit.Range.Start.Line, edit.Range.Start.Character)
+	}
+	if !strings.Contains(edit.NewText, "type A {") {
+		t.Errorf("expected formatted text to normalize type spacing, got:\n%s", edit.NewText)
 	}
 }
 
@@ -358,9 +898,16 @@ type Person {
 `
 
 	result := formatDocument(input)
-
 	if result != expected {
-		t.Errorf("spaces should be converted to tabs:\ngot:\n%q\nwant:\n%q", result, expected)
+		t.Errorf("formatDocument: spaces should be converted to tabs:\ngot:\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream: spaces should be converted to tabs:\ngot:\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -374,8 +921,8 @@ type Person {
       name String
 }
 `
-	// Expected output normalizes to 1 tab + 2 spaces
-	expected := `schema "test"
+	// formatDocument normalizes to 1 tab + 2 spaces (preserves residual)
+	expectedLineByLine := `schema "test"
 
 type Person {
 	  name String
@@ -383,9 +930,24 @@ type Person {
 `
 
 	result := formatDocument(input)
+	if result != expectedLineByLine {
+		t.Errorf("formatDocument: mixed indent should be normalized:\ngot:\n%q\nwant:\n%q", result, expectedLineByLine)
+	}
 
-	if result != expected {
-		t.Errorf("mixed indent should be normalized:\ngot:\n%q\nwant:\n%q", result, expected)
+	// formatTokenStream uses canonical brace-depth indentation (1 tab at depth 1)
+	expectedCanonical := `schema "test"
+
+type Person {
+	name String
+}
+`
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expectedCanonical {
+		t.Errorf("formatTokenStream: mixed indent should use brace-depth indentation:\ngot:\n%q\nwant:\n%q", tsResult, expectedCanonical)
 	}
 }
 
@@ -521,9 +1083,16 @@ type User {
 `
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() with CJK content:\ngot:\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() with CJK content:\ngot:\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -545,9 +1114,16 @@ type User {
 `
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() with emoji:\ngot:\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() with emoji:\ngot:\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -580,9 +1156,16 @@ type MixedType {
 `
 
 	result := formatDocument(input)
-
 	if result != expected {
 		t.Errorf("formatDocument() with mixed content:\ngot:\n%q\nwant:\n%q", result, expected)
+	}
+
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	if tsResult != expected {
+		t.Errorf("formatTokenStream() with mixed content:\ngot:\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -600,23 +1183,39 @@ type JapaneseUser {
 
 	result := formatDocument(input)
 
-	// Verify the result is still valid YAMMM by parsing it
+	// Verify formatDocument result is still valid YAMMM
 	ctx := context.Background()
 	s, diagResult, err := load.LoadString(ctx, result, "test")
 	if err != nil {
-		t.Fatalf("formatted output failed to load: %v", err)
+		t.Fatalf("formatDocument output failed to load: %v", err)
 	}
-
 	if !diagResult.OK() {
 		for issue := range diagResult.Issues() {
 			t.Logf("issue: %v", issue)
 		}
-		t.Error("formatted multibyte content should be parseable without errors")
+		t.Error("formatDocument: formatted multibyte content should be parseable without errors")
+	}
+	if s != nil && s.Name() != "CJKテスト" {
+		t.Errorf("formatDocument: schema name = %q; want CJKテスト", s.Name())
 	}
 
-	// Verify schema name preserved (contains CJK characters)
-	if s != nil && s.Name() != "CJKテスト" {
-		t.Errorf("schema name = %q; want CJKテスト", s.Name())
+	// Verify formatTokenStream result is also parseable
+	tsResult, err := formatTokenStream(input)
+	if err != nil {
+		t.Fatalf("formatTokenStream returned error: %v", err)
+	}
+	s2, diagResult2, err := load.LoadString(ctx, tsResult, "test")
+	if err != nil {
+		t.Fatalf("formatTokenStream output failed to load: %v", err)
+	}
+	if !diagResult2.OK() {
+		for issue := range diagResult2.Issues() {
+			t.Logf("issue: %v", issue)
+		}
+		t.Error("formatTokenStream: formatted multibyte content should be parseable without errors")
+	}
+	if s2 != nil && s2.Name() != "CJKテスト" {
+		t.Errorf("formatTokenStream: schema name = %q; want CJKテスト", s2.Name())
 	}
 }
 
