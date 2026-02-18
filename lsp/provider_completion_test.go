@@ -800,17 +800,14 @@ func TestBuiltinTypes_Complete(t *testing.T) {
 	}
 }
 
-func TestStrPtr(t *testing.T) {
+func TestNewExprPtr(t *testing.T) {
 	t.Parallel()
 
 	s := "test"
-	ptr := strPtr(s)
+	ptr := new(s)
 
-	if ptr == nil {
-		t.Fatal("strPtr returned nil")
-	}
 	if *ptr != s {
-		t.Errorf("strPtr() = %q; want %q", *ptr, s)
+		t.Errorf("new(s) = %q; want %q", *ptr, s)
 	}
 }
 

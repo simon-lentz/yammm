@@ -67,7 +67,7 @@ func (v Value) IsNil() bool {
 	// Check for typed nils (e.g., var p *int; Wrap(p))
 	rv := reflect.ValueOf(v.val)
 	switch rv.Kind() {
-	case reflect.Ptr, reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Slice:
+	case reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Slice:
 		return rv.IsNil()
 	}
 	return false

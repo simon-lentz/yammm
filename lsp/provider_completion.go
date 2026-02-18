@@ -663,7 +663,7 @@ func (s *Server) typeBodyCompletions() []protocol.CompletionItem {
 			Label:    t,
 			Kind:     &kind,
 			SortText: &sortText,
-			Detail:   strPtr("Built-in type"),
+			Detail:   new("Built-in type"),
 		})
 	}
 
@@ -687,7 +687,7 @@ func (s *Server) typeCompletions(snapshot *Snapshot, sourceID location.SourceID)
 			Label:    name,
 			Kind:     &kind,
 			SortText: &sortText,
-			Detail:   strPtr("Type"),
+			Detail:   new("Type"),
 		})
 	}
 
@@ -711,7 +711,7 @@ func (s *Server) typeCompletions(snapshot *Snapshot, sourceID location.SourceID)
 						Label:    qualifiedName,
 						Kind:     &kind,
 						SortText: &sortText,
-						Detail:   strPtr("Imported type from " + alias),
+						Detail:   new("Imported type from " + alias),
 					})
 				}
 			}
@@ -734,7 +734,7 @@ func (s *Server) propertyTypeCompletions(snapshot *Snapshot, sourceID location.S
 			Label:    t,
 			Kind:     &kind,
 			SortText: &sortText,
-			Detail:   strPtr("Built-in type"),
+			Detail:   new("Built-in type"),
 		})
 	}
 
@@ -750,7 +750,7 @@ func (s *Server) propertyTypeCompletions(snapshot *Snapshot, sourceID location.S
 			Label:    name,
 			Kind:     &kind,
 			SortText: &sortText,
-			Detail:   strPtr("Datatype"),
+			Detail:   new("Datatype"),
 		})
 	}
 
@@ -774,7 +774,7 @@ func (s *Server) propertyTypeCompletions(snapshot *Snapshot, sourceID location.S
 						Label:    qualifiedName,
 						Kind:     &kind,
 						SortText: &sortText,
-						Detail:   strPtr("Imported datatype from " + alias),
+						Detail:   new("Imported datatype from " + alias),
 					})
 				}
 			}
@@ -821,9 +821,4 @@ func (s *Server) snippetCompletion(label, insertText, detail string) protocol.Co
 		InsertTextFormat: &format,
 		SortText:         &sortText,
 	}
-}
-
-// strPtr returns a pointer to a string.
-func strPtr(s string) *string {
-	return &s
 }
