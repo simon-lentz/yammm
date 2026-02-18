@@ -999,7 +999,7 @@ func builtinIsNil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 	}
 	// Check for nil interface values
 	rv := reflect.ValueOf(lhs)
-	if rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface ||
+	if rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface ||
 		rv.Kind() == reflect.Map || rv.Kind() == reflect.Slice ||
 		rv.Kind() == reflect.Chan || rv.Kind() == reflect.Func {
 		return rv.IsNil(), nil

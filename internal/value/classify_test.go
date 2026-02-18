@@ -715,7 +715,6 @@ func TestClassify_EdgeCases(t *testing.T) {
 }
 
 // Helper functions for pointer tests
-func ptr[T any](v T) *T { return &v }
 
 func ptrptr[T any](v T) **T {
 	p := &v
@@ -725,7 +724,7 @@ func ptrptr[T any](v T) **T {
 func TestClassify_PointerDereferencing(t *testing.T) {
 	// ClassifyWithRegistry should automatically dereference pointers
 	t.Run("*int returns IntKind", func(t *testing.T) {
-		input := ptr(42)
+		input := new(42)
 		kind, norm := value.Classify(input)
 		if kind != value.IntKind {
 			t.Errorf("expected IntKind for *int, got %v", kind)
@@ -736,7 +735,7 @@ func TestClassify_PointerDereferencing(t *testing.T) {
 	})
 
 	t.Run("*string returns StringKind", func(t *testing.T) {
-		input := ptr("hello")
+		input := new("hello")
 		kind, norm := value.Classify(input)
 		if kind != value.StringKind {
 			t.Errorf("expected StringKind for *string, got %v", kind)
@@ -747,7 +746,7 @@ func TestClassify_PointerDereferencing(t *testing.T) {
 	})
 
 	t.Run("*float64 returns FloatKind", func(t *testing.T) {
-		input := ptr(3.14)
+		input := new(3.14)
 		kind, norm := value.Classify(input)
 		if kind != value.FloatKind {
 			t.Errorf("expected FloatKind for *float64, got %v", kind)
@@ -758,7 +757,7 @@ func TestClassify_PointerDereferencing(t *testing.T) {
 	})
 
 	t.Run("*bool returns BoolKind", func(t *testing.T) {
-		input := ptr(true)
+		input := new(true)
 		kind, norm := value.Classify(input)
 		if kind != value.BoolKind {
 			t.Errorf("expected BoolKind for *bool, got %v", kind)
