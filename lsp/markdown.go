@@ -11,11 +11,12 @@ import (
 // SourceID is intentionally zero-valued after extraction; Phase 2's workspace
 // integration populates it via VirtualSourceID.
 type CodeBlock struct {
-	Content   string            // Block content (without fences), lines joined by "\n"
-	SourceID  location.SourceID // Virtual SourceID — zero-value from ExtractCodeBlocks
-	StartLine int               // 0-based line where content starts (line after opening fence)
-	EndLine   int               // 0-based line of closing fence
-	FenceChar byte              // '`' or '~'
+	Content     string            // Block content (without fences), lines joined by "\n"
+	SourceID    location.SourceID // Virtual SourceID — zero-value from ExtractCodeBlocks
+	StartLine   int               // 0-based line where content starts (line after opening fence)
+	EndLine     int               // 0-based line of closing fence
+	FenceChar   byte              // '`' or '~'
+	PrefixLines int               // Synthetic lines prepended to Content for analysis (0 = none)
 }
 
 // markdownState represents the current state of the markdown parser.
@@ -120,6 +121,19 @@ func VirtualSourceID(markdownPath string, blockIndex int) (location.SourceID, er
 	return id, nil
 }
 
+// hasSchemaDeclaration reports whether content contains a schema declaration line.
+// Conservative: matches even inside comments, avoiding false negatives that would
+// cause a duplicate schema parse error from prepending a synthetic declaration.
+func hasSchemaDeclaration(content string) bool {
+	for line := range strings.SplitSeq(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "schema ") || strings.HasPrefix(trimmed, "schema\t") {
+			return true
+		}
+	}
+	return false
+}
+
 // scanFenceChars returns the fence character and count of consecutive fence
 // characters from the start of the line. Returns (0, 0) if the line doesn't
 // start with '`' or '~'.
@@ -196,13 +210,15 @@ type BlockPosition struct {
 
 // MarkdownPositionToBlock converts a markdown position to block-local coordinates.
 // Only line numbers are adjusted; character offsets pass through unchanged.
+// When PrefixLines > 0, the local line is shifted to account for synthetic prefix
+// content prepended during analysis (e.g., a synthetic schema declaration).
 func (snap *MarkdownDocumentSnapshot) MarkdownPositionToBlock(line, char int) *BlockPosition {
 	for i, block := range snap.Blocks {
 		contentEndLine := block.EndLine - 1
 		if line >= block.StartLine && line <= contentEndLine {
 			return &BlockPosition{
 				BlockIndex: i,
-				LocalLine:  line - block.StartLine,
+				LocalLine:  line - block.StartLine + block.PrefixLines,
 				LocalChar:  char,
 			}
 		}
@@ -212,11 +228,13 @@ func (snap *MarkdownDocumentSnapshot) MarkdownPositionToBlock(line, char int) *B
 
 // BlockPositionToMarkdown converts block-local coordinates to markdown position.
 // Only line numbers are adjusted; character offsets pass through unchanged.
+// When PrefixLines > 0, the local line is shifted back to account for synthetic
+// prefix content, converting from prefixed-content coordinates to markdown coordinates.
 func (snap *MarkdownDocumentSnapshot) BlockPositionToMarkdown(blockIndex, localLine, localChar int) (int, int) {
 	if blockIndex < 0 || blockIndex >= len(snap.Blocks) {
 		return -1, -1
 	}
-	return snap.Blocks[blockIndex].StartLine + localLine, localChar
+	return snap.Blocks[blockIndex].StartLine + localLine - snap.Blocks[blockIndex].PrefixLines, localChar
 }
 
 // buildBlockDocumentSnapshot creates a DocumentSnapshot for a single code block

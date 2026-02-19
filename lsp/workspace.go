@@ -1353,6 +1353,17 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(notify Notifier, analyzeCtx contex
 		validBlocks = append(validBlocks, block)
 	}
 
+	// Prepend synthetic schema declaration for snippet blocks that lack one.
+	// This allows documentation snippets (e.g., type definitions without a schema
+	// header) to get full LSP features without spurious E_SYNTAX errors.
+	const snippetPrefix = "schema \"_snippet\"\n"
+	for i := range validBlocks {
+		if !hasSchemaDeclaration(validBlocks[i].Content) {
+			validBlocks[i].Content = snippetPrefix + validBlocks[i].Content
+			validBlocks[i].PrefixLines = 1
+		}
+	}
+
 	// Analyze each block
 	snapshots := make([]*Snapshot, len(validBlocks))
 	for i, block := range validBlocks {
@@ -1415,6 +1426,19 @@ func (w *Workspace) publishMarkdownDiagnostics(notify Notifier, snap *MarkdownDo
 
 		for _, uriDiag := range snapshot.LSPDiagnostics {
 			diag := uriDiag.Diagnostic
+
+			// Skip diagnostics that reference synthetic prefix content
+			if int(diag.Range.Start.Line) < snap.Blocks[i].PrefixLines {
+				continue
+			}
+
+			// Downgrade E_IMPORT_NOT_ALLOWED to Hint in markdown blocks
+			if diag.Code != nil {
+				if codeVal, ok := diag.Code.Value.(string); ok && codeVal == "E_IMPORT_NOT_ALLOWED" {
+					hint := protocol.DiagnosticSeverityHint
+					diag.Severity = &hint
+				}
+			}
 
 			// Convert primary range from block-local to markdown coordinates
 			startLine, startChar := snap.BlockPositionToMarkdown(i,

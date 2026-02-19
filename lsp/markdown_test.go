@@ -587,6 +587,71 @@ func TestExtractCodeBlocks_FixtureIndented_Details(t *testing.T) {
 	assert.Contains(t, block.Content, "type IndentClose")
 }
 
+// --- hasSchemaDeclaration tests ---
+
+func TestHasSchemaDeclaration(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name:    "standard schema declaration",
+			content: "schema \"test\"\n\ntype Foo {\n    id String primary\n}",
+			want:    true,
+		},
+		{
+			name:    "no schema declaration",
+			content: "type Foo {\n    id String primary\n}",
+			want:    false,
+		},
+		{
+			name:    "indented schema declaration",
+			content: "  schema \"test\"",
+			want:    true,
+		},
+		{
+			name:    "tab after schema keyword",
+			content: "schema\t\"test\"",
+			want:    true,
+		},
+		{
+			name:    "commented schema (conservative match)",
+			content: "// schema \"test\"",
+			want:    false, // Comments don't start with "schema " after trim
+		},
+		{
+			name:    "empty content",
+			content: "",
+			want:    false,
+		},
+		{
+			name:    "whitespace only",
+			content: "   \n\n  ",
+			want:    false,
+		},
+		{
+			name:    "schema in field name does not match",
+			content: "type Foo {\n    schema_name String required\n}",
+			want:    false, // "schema_name" doesn't match "schema " or "schema\t"
+		},
+		{
+			name:    "schema at middle of file",
+			content: "// header\n\nschema \"test\"\n\ntype Foo {}",
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, hasSchemaDeclaration(tt.content))
+		})
+	}
+}
+
 // --- Position conversion tests ---
 
 func TestMarkdownPositionToBlock(t *testing.T) {
@@ -760,6 +825,158 @@ func TestBlockPositionToMarkdown(t *testing.T) {
 			line, char := snap.BlockPositionToMarkdown(tt.blockIndex, tt.localLine, tt.localChar)
 			assert.Equal(t, tt.wantLine, line)
 			assert.Equal(t, tt.wantChar, char)
+		})
+	}
+}
+
+func TestMarkdownPositionToBlock_WithPrefixLines(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		blocks    []CodeBlock
+		line      int
+		char      int
+		wantNil   bool
+		wantBlock int
+		wantLine  int
+		wantChar  int
+	}{
+		{
+			name: "snippet block first content line maps to prefixed line 1",
+			blocks: []CodeBlock{
+				{StartLine: 5, EndLine: 10, PrefixLines: 1},
+			},
+			line:      5,
+			char:      0,
+			wantBlock: 0,
+			wantLine:  1, // 5 - 5 + 1 = 1 (line 0 is synthetic schema)
+			wantChar:  0,
+		},
+		{
+			name: "snippet block middle line",
+			blocks: []CodeBlock{
+				{StartLine: 5, EndLine: 10, PrefixLines: 1},
+			},
+			line:      7,
+			char:      10,
+			wantBlock: 0,
+			wantLine:  3, // 7 - 5 + 1 = 3
+			wantChar:  10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			snap := &MarkdownDocumentSnapshot{Blocks: tt.blocks}
+			pos := snap.MarkdownPositionToBlock(tt.line, tt.char)
+
+			if tt.wantNil {
+				assert.Nil(t, pos)
+				return
+			}
+
+			require.NotNil(t, pos)
+			assert.Equal(t, tt.wantBlock, pos.BlockIndex)
+			assert.Equal(t, tt.wantLine, pos.LocalLine)
+			assert.Equal(t, tt.wantChar, pos.LocalChar)
+		})
+	}
+}
+
+func TestBlockPositionToMarkdown_WithPrefixLines(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		blocks     []CodeBlock
+		blockIndex int
+		localLine  int
+		localChar  int
+		wantLine   int
+		wantChar   int
+	}{
+		{
+			name: "prefixed line 1 maps back to block start",
+			blocks: []CodeBlock{
+				{StartLine: 5, EndLine: 10, PrefixLines: 1},
+			},
+			blockIndex: 0,
+			localLine:  1,
+			localChar:  0,
+			wantLine:   5, // 5 + 1 - 1 = 5
+			wantChar:   0,
+		},
+		{
+			name: "prefixed line 3 maps to StartLine+2",
+			blocks: []CodeBlock{
+				{StartLine: 5, EndLine: 10, PrefixLines: 1},
+			},
+			blockIndex: 0,
+			localLine:  3,
+			localChar:  10,
+			wantLine:   7, // 5 + 3 - 1 = 7
+			wantChar:   10,
+		},
+		{
+			name: "synthetic line 0 maps to fence line (StartLine-1)",
+			blocks: []CodeBlock{
+				{StartLine: 5, EndLine: 10, PrefixLines: 1},
+			},
+			blockIndex: 0,
+			localLine:  0,
+			localChar:  0,
+			wantLine:   4, // 5 + 0 - 1 = 4 (fence line, will be filtered)
+			wantChar:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			snap := &MarkdownDocumentSnapshot{Blocks: tt.blocks}
+			line, char := snap.BlockPositionToMarkdown(tt.blockIndex, tt.localLine, tt.localChar)
+			assert.Equal(t, tt.wantLine, line)
+			assert.Equal(t, tt.wantChar, char)
+		})
+	}
+}
+
+func TestPositionConversion_RoundTrip_WithPrefixLines(t *testing.T) {
+	t.Parallel()
+
+	snap := &MarkdownDocumentSnapshot{
+		Blocks: []CodeBlock{
+			{StartLine: 5, EndLine: 10, PrefixLines: 1},
+			{StartLine: 15, EndLine: 20, PrefixLines: 0},
+		},
+	}
+
+	tests := []struct {
+		name string
+		line int
+		char int
+	}{
+		{"snippet block start", 5, 0},
+		{"snippet block middle", 7, 5},
+		{"snippet block last content", 9, 3},
+		{"normal block start", 15, 0},
+		{"normal block middle", 17, 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			pos := snap.MarkdownPositionToBlock(tt.line, tt.char)
+			require.NotNil(t, pos)
+
+			gotLine, gotChar := snap.BlockPositionToMarkdown(pos.BlockIndex, pos.LocalLine, pos.LocalChar)
+			assert.Equal(t, tt.line, gotLine)
+			assert.Equal(t, tt.char, gotChar)
 		})
 	}
 }
@@ -1051,16 +1268,73 @@ func TestAnalyzeMarkdownAndPublish_ImportRejection(t *testing.T) {
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")
 
 	// Check that at least one diagnostic has E_IMPORT_NOT_ALLOWED code
+	// and that it has been downgraded to Hint severity
 	var found bool
 	for _, d := range diags {
 		if d.Code != nil {
 			if codeVal, ok := d.Code.Value.(string); ok && codeVal == "E_IMPORT_NOT_ALLOWED" {
 				found = true
+				require.NotNil(t, d.Severity, "E_IMPORT_NOT_ALLOWED diagnostic should have severity set")
+				assert.Equal(t, protocol.DiagnosticSeverityHint, *d.Severity,
+					"E_IMPORT_NOT_ALLOWED should be downgraded to Hint in markdown")
 				break
 			}
 		}
 	}
 	assert.True(t, found, "expected E_IMPORT_NOT_ALLOWED diagnostic, got: %+v", diags)
+}
+
+func TestAnalyzeMarkdownAndPublish_SnippetBlock(t *testing.T) {
+	t.Parallel()
+
+	w := NewWorkspace(slog.Default(), Config{})
+	uri := "file:///test/snippet.md"
+	collector := &notificationCollector{}
+
+	// A snippet block with no schema declaration — just a type definition
+	content := "# Snippet Example\n\n```yammm\ntype Foo {\n    id String primary\n    name String required\n}\n```\n"
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+
+	snap := w.GetMarkdownDocumentSnapshot(uri)
+	require.NotNil(t, snap)
+	require.Len(t, snap.Blocks, 1)
+	require.Len(t, snap.Snapshots, 1)
+
+	// Block should have PrefixLines=1 (synthetic schema was prepended)
+	assert.Equal(t, 1, snap.Blocks[0].PrefixLines, "snippet block should have PrefixLines=1")
+
+	// Snapshot should be non-nil and have a valid schema
+	require.NotNil(t, snap.Snapshots[0], "snapshot should be non-nil for snippet block")
+	assert.True(t, snap.Snapshots[0].Result.OK(), "snippet block should produce no errors, got: %v", snap.Snapshots[0].Result)
+
+	// Diagnostics should have no Fatal/Error entries
+	diags := collector.diagnosticsFor(uri)
+	for _, d := range diags {
+		if d.Severity != nil {
+			assert.NotEqual(t, protocol.DiagnosticSeverityError, *d.Severity,
+				"snippet block should not produce Error diagnostics: %s", d.Message)
+		}
+	}
+}
+
+func TestAnalyzeMarkdownAndPublish_SnippetBlockWithSchemaSkipsPrefix(t *testing.T) {
+	t.Parallel()
+
+	w := NewWorkspace(slog.Default(), Config{})
+	uri := "file:///test/full.md"
+
+	// A block WITH a schema declaration — should NOT get a prefix
+	content := "# Full Schema\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(nil, context.Background(), uri)
+
+	snap := w.GetMarkdownDocumentSnapshot(uri)
+	require.NotNil(t, snap)
+	require.Len(t, snap.Blocks, 1)
+
+	// Block should have PrefixLines=0 (no synthetic prefix needed)
+	assert.Equal(t, 0, snap.Blocks[0].PrefixLines, "block with schema declaration should have PrefixLines=0")
 }
 
 func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
@@ -1341,6 +1615,53 @@ func TestMarkdownHover_InCodeBlock(t *testing.T) {
 	// Verify the range is in markdown coordinates (not block-local)
 	if result.Range != nil {
 		assert.GreaterOrEqual(t, int(result.Range.Start.Line), 3, "hover range should be in markdown coordinates")
+	}
+
+	// Verify hover content mentions the type
+	mc, ok := result.Contents.(protocol.MarkupContent)
+	if ok {
+		assert.Contains(t, mc.Value, "Foo")
+	}
+}
+
+func TestMarkdownHover_SnippetBlock(t *testing.T) {
+	t.Parallel()
+
+	s := testServerWithLogger()
+	uri := "file:///test/hover_snippet.md"
+
+	// Snippet block without schema declaration
+	// Line 0: "# Test"
+	// Line 1: ""
+	// Line 2: "```yammm"
+	// Line 3: type Foo {           <- visible line 0, prefixed line 1
+	// Line 4:     id String primary <- visible line 1, prefixed line 2
+	// Line 5: }                    <- visible line 2, prefixed line 3
+	// Line 6: "```"
+	content := "# Test\n\n```yammm\ntype Foo {\n    id String primary\n}\n```\n"
+	mdSnap := analyzeMarkdownForTest(t, s, uri, content)
+
+	require.Len(t, mdSnap.Blocks, 1)
+	assert.Equal(t, 1, mdSnap.Blocks[0].PrefixLines, "snippet block should have PrefixLines=1")
+	require.Len(t, mdSnap.Snapshots, 1)
+	require.NotNil(t, mdSnap.Snapshots[0])
+
+	// Hover over "Foo" at line 3, character 5 (markdown coords)
+	params := &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Position:     protocol.Position{Line: 3, Character: 5},
+		},
+	}
+
+	result, err := s.markdownHover(params, mdSnap)
+	require.NoError(t, err)
+	require.NotNil(t, result, "expected hover result for type name in snippet block")
+
+	// Verify the range is in markdown coordinates
+	if result.Range != nil {
+		assert.GreaterOrEqual(t, int(result.Range.Start.Line), 3,
+			"hover range should be in markdown coordinates")
 	}
 
 	// Verify hover content mentions the type

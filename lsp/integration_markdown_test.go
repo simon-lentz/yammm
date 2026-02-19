@@ -335,6 +335,66 @@ func TestMarkdownIntegration_IgnoreNonMarkdownExtension(t *testing.T) {
 	assert.Nil(t, hover, "expected nil hover for .txt file")
 }
 
+func TestMarkdownIntegration_SnippetBlockNoSchema(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	h := newMarkdownTestHarness(t, tmpDir)
+	defer h.Close()
+
+	// Snippet block without schema declaration — just type definitions
+	// Line 0: "# Snippet Example"
+	// Line 1: ""
+	// Line 2: "```yammm"
+	// Line 3: type Foo {           <- content starts here
+	// Line 4:     id String primary
+	// Line 5:     name String required
+	// Line 6: }
+	// Line 7: "```"
+	content := "# Snippet Example\n\n```yammm\ntype Foo {\n    id String primary\n    name String required\n}\n```\n"
+	mdPath := filepath.Join(tmpDir, "snippet.md")
+	require.NoError(t, os.WriteFile(mdPath, []byte(content), 0o600))
+
+	err := h.OpenMarkdownDocument(mdPath, content)
+	require.NoError(t, err)
+
+	// Hover over "Foo" at line 3, char 5 — should work despite no schema declaration
+	hover, err := h.Hover(mdPath, 3, 5)
+	require.NoError(t, err)
+	require.NotNil(t, hover, "expected hover result for type name in snippet block")
+
+	// Verify hover range is in markdown coordinates (not prefixed-content)
+	if hover.Range != nil {
+		assert.GreaterOrEqual(t, int(hover.Range.Start.Line), 3,
+			"hover range should be in markdown coordinates")
+	}
+
+	// Symbols should include Foo
+	symbols, err := h.DocumentSymbols(mdPath)
+	require.NoError(t, err)
+	require.NotNil(t, symbols, "expected document symbols for snippet block")
+
+	// Verify Foo symbol has correct markdown-coordinate range
+	if syms, ok := symbols.([]protocol.DocumentSymbol); ok {
+		var foundFoo bool
+		for _, sym := range syms {
+			if sym.Name == "Foo" {
+				foundFoo = true
+				assert.GreaterOrEqual(t, int(sym.Range.Start.Line), 3,
+					"Foo symbol range should be in markdown coordinates")
+				break
+			}
+			for _, child := range sym.Children {
+				if child.Name == "Foo" {
+					foundFoo = true
+					break
+				}
+			}
+		}
+		assert.True(t, foundFoo, "expected Foo symbol in document symbols")
+	}
+}
+
 func TestMarkdownIntegration_OnlySessionStartup(t *testing.T) {
 	t.Parallel()
 
