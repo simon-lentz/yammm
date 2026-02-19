@@ -218,3 +218,26 @@ func (snap *MarkdownDocumentSnapshot) BlockPositionToMarkdown(blockIndex, localL
 	}
 	return snap.Blocks[blockIndex].StartLine + localLine, localChar
 }
+
+// buildBlockDocumentSnapshot creates a DocumentSnapshot for a single code block
+// within a markdown document. This is the shared utility used by all feature
+// providers (hover, completion, definition, symbols) to bridge between
+// markdown-level state and block-level analysis.
+//
+// URI and SourceID intentionally differ: URI is the markdown file URI (for
+// display/logging), while SourceID is the virtual block identifier (for source
+// registry lookups in position conversion).
+func (s *Server) buildBlockDocumentSnapshot(mdSnap *MarkdownDocumentSnapshot, block CodeBlock) *DocumentSnapshot {
+	depths, inComment := ComputeBraceDepths(block.Content)
+	return &DocumentSnapshot{
+		URI:      mdSnap.URI,
+		SourceID: block.SourceID,
+		Version:  mdSnap.Version,
+		Text:     block.Content,
+		LineState: &LineState{
+			Version:        mdSnap.Version,
+			BraceDepth:     depths,
+			InBlockComment: inComment,
+		},
+	}
+}

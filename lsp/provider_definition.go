@@ -21,6 +21,10 @@ func (s *Server) textDocumentDefinition(_ *glsp.Context, params *protocol.Defini
 		"character", params.Position.Character,
 	)
 
+	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
+		return s.markdownDefinition(params, mdSnap)
+	}
+
 	snapshot := s.workspace.LatestSnapshot(uri)
 	if snapshot == nil {
 		s.logger.Debug("no snapshot for definition", "uri", uri)
@@ -35,6 +39,53 @@ func (s *Server) textDocumentDefinition(_ *glsp.Context, params *protocol.Defini
 
 	return s.definitionAtPosition(snapshot, doc,
 		int(params.Position.Line), int(params.Position.Character))
+}
+
+// markdownDefinition handles definition requests within yammm code blocks in markdown files.
+//
+//nolint:nilnil // LSP protocol: nil result means "no definition found"
+func (s *Server) markdownDefinition(params *protocol.DefinitionParams, mdSnap *MarkdownDocumentSnapshot) (any, error) {
+	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
+	if blockPos == nil {
+		return nil, nil
+	}
+
+	if blockPos.BlockIndex >= len(mdSnap.Snapshots) || mdSnap.Snapshots[blockPos.BlockIndex] == nil {
+		return nil, nil
+	}
+	snapshot := mdSnap.Snapshots[blockPos.BlockIndex]
+	block := mdSnap.Blocks[blockPos.BlockIndex]
+
+	blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, block)
+
+	result, err := s.definitionAtPosition(snapshot, blockDocSnap, blockPos.LocalLine, blockPos.LocalChar)
+	if err != nil || result == nil {
+		return result, err
+	}
+
+	// Remap the location URI and range if it points to the virtual block SourceID
+	loc, ok := result.(*protocol.Location)
+	if !ok || loc == nil {
+		return result, nil
+	}
+
+	// Decode the location URI to check if it matches our virtual block path.
+	// symbolToLocation calls RemapPathToURI which percent-encodes '#' in virtual
+	// paths (e.g., /path/to/README.md%23block-0). URIToPath reverses this.
+	locPath, pathErr := URIToPath(loc.URI)
+	if pathErr == nil && locPath == block.SourceID.String() {
+		loc.URI = mdSnap.URI
+		startLine, startChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
+			int(loc.Range.Start.Line), int(loc.Range.Start.Character))
+		endLine, endChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
+			int(loc.Range.End.Line), int(loc.Range.End.Character))
+		loc.Range = protocol.Range{
+			Start: protocol.Position{Line: toUInteger(startLine), Character: toUInteger(startChar)},
+			End:   protocol.Position{Line: toUInteger(endLine), Character: toUInteger(endChar)},
+		}
+	}
+
+	return loc, nil
 }
 
 // definitionAtPosition returns the definition location for the symbol at the given position.

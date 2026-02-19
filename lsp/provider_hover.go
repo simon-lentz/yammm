@@ -24,6 +24,10 @@ func (s *Server) textDocumentHover(_ *glsp.Context, params *protocol.HoverParams
 		"character", params.Position.Character,
 	)
 
+	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
+		return s.markdownHover(params, mdSnap)
+	}
+
 	snapshot := s.workspace.LatestSnapshot(uri)
 	if snapshot == nil {
 		return nil, nil
@@ -36,6 +40,42 @@ func (s *Server) textDocumentHover(_ *glsp.Context, params *protocol.HoverParams
 
 	return s.hoverAtPosition(snapshot, doc,
 		int(params.Position.Line), int(params.Position.Character))
+}
+
+// markdownHover handles hover requests within yammm code blocks in markdown files.
+//
+//nolint:nilnil // LSP protocol: nil result means "no hover info"
+func (s *Server) markdownHover(params *protocol.HoverParams, mdSnap *MarkdownDocumentSnapshot) (*protocol.Hover, error) {
+	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
+	if blockPos == nil {
+		return nil, nil
+	}
+
+	if blockPos.BlockIndex >= len(mdSnap.Snapshots) || mdSnap.Snapshots[blockPos.BlockIndex] == nil {
+		return nil, nil
+	}
+	snapshot := mdSnap.Snapshots[blockPos.BlockIndex]
+
+	blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[blockPos.BlockIndex])
+
+	result, err := s.hoverAtPosition(snapshot, blockDocSnap, blockPos.LocalLine, blockPos.LocalChar)
+	if err != nil || result == nil {
+		return result, err
+	}
+
+	// Remap the hover range from block-local to markdown coordinates
+	if result.Range != nil {
+		startLine, startChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
+			int(result.Range.Start.Line), int(result.Range.Start.Character))
+		endLine, endChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
+			int(result.Range.End.Line), int(result.Range.End.Character))
+		result.Range = &protocol.Range{
+			Start: protocol.Position{Line: toUInteger(startLine), Character: toUInteger(startChar)},
+			End:   protocol.Position{Line: toUInteger(endLine), Character: toUInteger(endChar)},
+		}
+	}
+
+	return result, nil
 }
 
 // hoverAtPosition returns hover info for the given position within a document.

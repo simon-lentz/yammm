@@ -182,6 +182,17 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //   - error == nil && snapshot.Result.OK(): Success. The schema is valid.
 //     The snapshot may still contain warnings (check Result.Warnings()).
 //
+// The opts parameter accepts optional [load.Option] values that are forwarded
+// to [load.LoadSourcesWithEntry]. For example, callers may pass
+// [load.WithDisallowImports] to reject import declarations.
+//
+// Source-registry invariance: The Analyzer creates its own [source.Registry],
+// pre-registers overlay content, and stores it in the resulting [Snapshot].
+// This registry is authoritative for position conversion and symbol indexing.
+// The Analyzer always appends [load.WithSourceRegistry] after caller-supplied
+// opts (last-write-wins), so callers must not pass [load.WithSourceRegistry]
+// — it will be silently overridden.
+//
 // The overlays map provides in-memory content that takes precedence over
 // disk files. Keys should be canonical absolute paths (matching SourceID.String()).
 // Files not in overlays are read from disk during import resolution.

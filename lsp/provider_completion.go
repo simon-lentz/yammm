@@ -50,6 +50,10 @@ func (s *Server) textDocumentCompletion(_ *glsp.Context, params *protocol.Comple
 		"character", params.Position.Character,
 	)
 
+	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
+		return s.markdownCompletion(params, mdSnap)
+	}
+
 	snapshot := s.workspace.LatestSnapshot(uri)
 
 	doc := s.workspace.GetDocumentSnapshot(uri)
@@ -59,6 +63,30 @@ func (s *Server) textDocumentCompletion(_ *glsp.Context, params *protocol.Comple
 
 	return s.completionAtPosition(snapshot, doc,
 		int(params.Position.Line), int(params.Position.Character))
+}
+
+// markdownCompletion handles completion requests within yammm code blocks in markdown files.
+//
+//nolint:nilnil // LSP protocol: nil result means no completions
+func (s *Server) markdownCompletion(params *protocol.CompletionParams, mdSnap *MarkdownDocumentSnapshot) (any, error) {
+	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
+	if blockPos == nil {
+		return nil, nil
+	}
+
+	// Extract snapshot (may be nil — completionAtPosition gracefully degrades
+	// to keywords, snippets, and built-in types without a snapshot).
+	var snapshot *Snapshot
+	if blockPos.BlockIndex < len(mdSnap.Snapshots) {
+		snapshot = mdSnap.Snapshots[blockPos.BlockIndex]
+	}
+
+	if blockPos.BlockIndex >= len(mdSnap.Blocks) {
+		return nil, nil
+	}
+	blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[blockPos.BlockIndex])
+
+	return s.completionAtPosition(snapshot, blockDocSnap, blockPos.LocalLine, blockPos.LocalChar)
 }
 
 // completionAtPosition returns completion items for the given position.

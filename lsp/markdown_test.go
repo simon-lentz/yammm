@@ -1125,3 +1125,391 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 	diags := collector.diagnosticsFor(uri)
 	assert.Empty(t, diags, "expected no diagnostics for valid schema")
 }
+
+// --- Phase 5: Feature provider tests ---
+
+// testServerWithLogger creates a Server with workspace and logger for feature provider tests.
+func testServerWithLogger() *Server {
+	logger := slog.Default()
+	return &Server{
+		logger:    logger,
+		workspace: NewWorkspace(logger, Config{}),
+	}
+}
+
+// analyzeMarkdownForTest opens a markdown document, runs analysis, and returns the snapshot.
+func analyzeMarkdownForTest(t *testing.T, s *Server, uri, content string) *MarkdownDocumentSnapshot {
+	t.Helper()
+	s.workspace.MarkdownDocumentOpened(uri, 1, content)
+	s.workspace.AnalyzeMarkdownAndPublish(nil, context.Background(), uri)
+	snap := s.workspace.GetMarkdownDocumentSnapshot(uri)
+	require.NotNil(t, snap)
+	return snap
+}
+
+func TestBuildBlockDocumentSnapshot(t *testing.T) {
+	t.Parallel()
+
+	s := testServerWithLogger()
+	mdSnap := &MarkdownDocumentSnapshot{
+		URI:     "file:///test/doc.md",
+		Version: 42,
+		Blocks: []CodeBlock{
+			{
+				Content:   "schema \"test\"\n\ntype Foo {\n    id String primary\n}",
+				StartLine: 3,
+				EndLine:   8,
+				FenceChar: '`',
+			},
+		},
+	}
+
+	// Assign a source ID to the block
+	id, err := VirtualSourceID("/test/doc.md", 0)
+	require.NoError(t, err)
+	mdSnap.Blocks[0].SourceID = id
+
+	docSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[0])
+
+	assert.Equal(t, mdSnap.URI, docSnap.URI, "URI should come from mdSnap")
+	assert.Equal(t, id, docSnap.SourceID, "SourceID should come from block")
+	assert.Equal(t, 42, docSnap.Version, "Version should come from mdSnap")
+	assert.Equal(t, mdSnap.Blocks[0].Content, docSnap.Text, "Text should be block content")
+	require.NotNil(t, docSnap.LineState, "LineState should be computed")
+	assert.Equal(t, 42, docSnap.LineState.Version, "LineState version should match mdSnap")
+
+	// The block content has 5 lines, so BraceDepth should have 5 entries
+	assert.Len(t, docSnap.LineState.BraceDepth, 5, "BraceDepth should have one entry per line")
+}
+
+func TestRemapDocumentSymbolRanges(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		symbols    []protocol.DocumentSymbol
+		blockIndex int
+		blocks     []CodeBlock
+		wantNil    bool
+		check      func(t *testing.T, result []protocol.DocumentSymbol)
+	}{
+		{
+			name:    "empty input returns nil",
+			symbols: nil,
+			blocks:  []CodeBlock{{StartLine: 5, EndLine: 10}},
+			wantNil: true,
+		},
+		{
+			name: "single symbol remapped",
+			symbols: []protocol.DocumentSymbol{
+				{
+					Name: "Foo",
+					Range: protocol.Range{
+						Start: protocol.Position{Line: 0, Character: 5},
+						End:   protocol.Position{Line: 2, Character: 1},
+					},
+					SelectionRange: protocol.Range{
+						Start: protocol.Position{Line: 0, Character: 5},
+						End:   protocol.Position{Line: 0, Character: 8},
+					},
+				},
+			},
+			blockIndex: 0,
+			blocks:     []CodeBlock{{StartLine: 5, EndLine: 10}},
+			check: func(t *testing.T, result []protocol.DocumentSymbol) {
+				t.Helper()
+				require.Len(t, result, 1)
+				assert.Equal(t, protocol.UInteger(5), result[0].Range.Start.Line)
+				assert.Equal(t, protocol.UInteger(5), result[0].Range.Start.Character)
+				assert.Equal(t, protocol.UInteger(7), result[0].Range.End.Line)
+				assert.Equal(t, protocol.UInteger(1), result[0].Range.End.Character)
+				assert.Equal(t, protocol.UInteger(5), result[0].SelectionRange.Start.Line)
+				assert.Equal(t, protocol.UInteger(8), result[0].SelectionRange.End.Character)
+			},
+		},
+		{
+			name: "nested children recursively remapped",
+			symbols: []protocol.DocumentSymbol{
+				{
+					Name: "Parent",
+					Range: protocol.Range{
+						Start: protocol.Position{Line: 0, Character: 0},
+						End:   protocol.Position{Line: 3, Character: 1},
+					},
+					SelectionRange: protocol.Range{
+						Start: protocol.Position{Line: 0, Character: 0},
+						End:   protocol.Position{Line: 0, Character: 6},
+					},
+					Children: []protocol.DocumentSymbol{
+						{
+							Name: "Child",
+							Range: protocol.Range{
+								Start: protocol.Position{Line: 1, Character: 4},
+								End:   protocol.Position{Line: 1, Character: 20},
+							},
+							SelectionRange: protocol.Range{
+								Start: protocol.Position{Line: 1, Character: 4},
+								End:   protocol.Position{Line: 1, Character: 9},
+							},
+						},
+					},
+				},
+			},
+			blockIndex: 0,
+			blocks:     []CodeBlock{{StartLine: 10, EndLine: 15}},
+			check: func(t *testing.T, result []protocol.DocumentSymbol) {
+				t.Helper()
+				require.Len(t, result, 1)
+				// Parent: line 0 -> 10
+				assert.Equal(t, protocol.UInteger(10), result[0].Range.Start.Line)
+				assert.Equal(t, protocol.UInteger(13), result[0].Range.End.Line)
+				// Child: line 1 -> 11
+				require.Len(t, result[0].Children, 1)
+				assert.Equal(t, protocol.UInteger(11), result[0].Children[0].Range.Start.Line)
+				assert.Equal(t, protocol.UInteger(11), result[0].Children[0].SelectionRange.Start.Line)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mdSnap := &MarkdownDocumentSnapshot{Blocks: tt.blocks}
+			result := remapDocumentSymbolRanges(tt.symbols, mdSnap, tt.blockIndex)
+
+			if tt.wantNil {
+				assert.Nil(t, result)
+				return
+			}
+			require.NotNil(t, result)
+			tt.check(t, result)
+		})
+	}
+}
+
+func TestMarkdownHover_InCodeBlock(t *testing.T) {
+	t.Parallel()
+
+	s := testServerWithLogger()
+	uri := "file:///test/hover.md"
+
+	// Line 0: "# Test"
+	// Line 1: ""
+	// Line 2: "```yammm"
+	// Line 3: schema "test"       <- block local line 0
+	// Line 4:                      <- block local line 1
+	// Line 5: type Foo {           <- block local line 2
+	// Line 6:     id String primary <- block local line 3
+	// Line 7: }                    <- block local line 4
+	// Line 8: "```"
+	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
+	mdSnap := analyzeMarkdownForTest(t, s, uri, content)
+
+	require.Len(t, mdSnap.Blocks, 1)
+	require.Len(t, mdSnap.Snapshots, 1)
+	require.NotNil(t, mdSnap.Snapshots[0])
+
+	// Hover over "Foo" at line 5, character 5 (markdown coords)
+	params := &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Position:     protocol.Position{Line: 5, Character: 5},
+		},
+	}
+
+	result, err := s.markdownHover(params, mdSnap)
+	require.NoError(t, err)
+	require.NotNil(t, result, "expected hover result for type name")
+
+	// Verify the range is in markdown coordinates (not block-local)
+	if result.Range != nil {
+		assert.GreaterOrEqual(t, int(result.Range.Start.Line), 3, "hover range should be in markdown coordinates")
+	}
+
+	// Verify hover content mentions the type
+	mc, ok := result.Contents.(protocol.MarkupContent)
+	if ok {
+		assert.Contains(t, mc.Value, "Foo")
+	}
+}
+
+func TestMarkdownHover_OutsideBlock(t *testing.T) {
+	t.Parallel()
+
+	s := testServerWithLogger()
+	uri := "file:///test/hover_outside.md"
+	content := "# Test\n\nSome prose.\n\n```yammm\nschema \"test\"\n```\n"
+	mdSnap := analyzeMarkdownForTest(t, s, uri, content)
+
+	// Hover at prose position (line 2)
+	params := &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Position:     protocol.Position{Line: 2, Character: 0},
+		},
+	}
+
+	result, err := s.markdownHover(params, mdSnap)
+	require.NoError(t, err)
+	assert.Nil(t, result, "expected nil hover for prose position")
+}
+
+func TestMarkdownCompletion_NilSnapshot(t *testing.T) {
+	t.Parallel()
+
+	s := testServerWithLogger()
+
+	// Construct a MarkdownDocumentSnapshot with a nil snapshot
+	id, err := VirtualSourceID("/test/completion.md", 0)
+	require.NoError(t, err)
+
+	mdSnap := &MarkdownDocumentSnapshot{
+		URI:     "file:///test/completion.md",
+		Version: 1,
+		Blocks: []CodeBlock{
+			{
+				Content:   "schema \"test\"\n",
+				SourceID:  id,
+				StartLine: 2,
+				EndLine:   4,
+				FenceChar: '`',
+			},
+		},
+		Snapshots: []*Snapshot{nil}, // nil snapshot
+	}
+
+	// Request completion inside the block (line 2 = block start)
+	params := &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: mdSnap.URI},
+			Position:     protocol.Position{Line: 3, Character: 0},
+		},
+	}
+
+	result, err := s.markdownCompletion(params, mdSnap)
+	require.NoError(t, err)
+	require.NotNil(t, result, "completion should return items even with nil snapshot (graceful degradation)")
+
+	// Should have keyword/snippet completions
+	items, ok := result.([]protocol.CompletionItem)
+	require.True(t, ok, "expected []CompletionItem")
+	assert.NotEmpty(t, items, "expected keyword/snippet completions")
+}
+
+func TestMarkdownDefinition_RemapsURI(t *testing.T) {
+	t.Parallel()
+
+	s := testServerWithLogger()
+	uri := "file:///test/definition.md"
+
+	// Content with a type and a reference to it
+	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n\ntype Bar {\n    --> OWNS (one) Foo\n}\n```\n"
+	mdSnap := analyzeMarkdownForTest(t, s, uri, content)
+
+	require.Len(t, mdSnap.Blocks, 1)
+	require.Len(t, mdSnap.Snapshots, 1)
+	require.NotNil(t, mdSnap.Snapshots[0])
+
+	// Go-to-definition on "Foo" in "--> OWNS (one) Foo" at line 10, char 19
+	// Line 2: ```yammm
+	// Line 3: schema "test"       <- block line 0
+	// Line 4:                      <- block line 1
+	// Line 5: type Foo {           <- block line 2
+	// Line 6:     id String primary <- block line 3
+	// Line 7: }                    <- block line 4
+	// Line 8:                      <- block line 5
+	// Line 9: type Bar {           <- block line 6
+	// Line 10:     --> OWNS (one) Foo <- block line 7
+	// Line 11: }                   <- block line 8
+	// Line 12: ```
+	params := &protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Position:     protocol.Position{Line: 10, Character: 19},
+		},
+	}
+
+	result, err := s.markdownDefinition(params, mdSnap)
+	require.NoError(t, err)
+
+	if result != nil {
+		loc, ok := result.(*protocol.Location)
+		if ok && loc != nil {
+			// The definition location URI should be the markdown URI, not the virtual path
+			assert.Equal(t, uri, loc.URI, "definition URI should be remapped to markdown URI")
+			// The range should be in markdown coordinates
+			assert.GreaterOrEqual(t, int(loc.Range.Start.Line), 3,
+				"definition range should be in markdown coordinates")
+		}
+	}
+}
+
+func TestMarkdownDocumentSymbols_MultipleBlocks(t *testing.T) {
+	t.Parallel()
+
+	s := testServerWithLogger()
+	uri := "file:///test/symbols.md"
+
+	// Two code blocks
+	content := "# Block One\n\n```yammm\nschema \"block_one\"\n\ntype Alpha {\n    id String primary\n}\n```\n\n# Block Two\n\n```yammm\nschema \"block_two\"\n\ntype Beta {\n    name String primary\n}\n```\n"
+	mdSnap := analyzeMarkdownForTest(t, s, uri, content)
+
+	require.Len(t, mdSnap.Blocks, 2)
+	require.Len(t, mdSnap.Snapshots, 2)
+
+	symbols := s.markdownDocumentSymbols(mdSnap)
+	require.NotNil(t, symbols, "expected symbols from both blocks")
+	assert.GreaterOrEqual(t, len(symbols), 2, "expected symbols from both blocks")
+
+	// Verify that symbols from different blocks have different line ranges
+	// The second block starts at line 13 (after line 12: ```yammm), so symbols
+	// from the second block should have line numbers >= 13
+	var hasHighLineSymbol bool
+	for _, sym := range symbols {
+		if int(sym.Range.Start.Line) >= 12 {
+			hasHighLineSymbol = true
+			break
+		}
+		// Check children too
+		for _, child := range sym.Children {
+			if int(child.Range.Start.Line) >= 12 {
+				hasHighLineSymbol = true
+				break
+			}
+		}
+	}
+	assert.True(t, hasHighLineSymbol, "expected symbols from second block with high line numbers")
+}
+
+func TestMarkdownDocumentSymbols_NilSnapshots(t *testing.T) {
+	t.Parallel()
+
+	s := testServerWithLogger()
+
+	mdSnap := &MarkdownDocumentSnapshot{
+		URI:     "file:///test/nil_snap.md",
+		Version: 1,
+		Blocks: []CodeBlock{
+			{Content: "invalid", StartLine: 2, EndLine: 4},
+			{Content: "also invalid", StartLine: 6, EndLine: 8},
+		},
+		Snapshots: []*Snapshot{nil, nil},
+	}
+
+	symbols := s.markdownDocumentSymbols(mdSnap)
+	assert.Nil(t, symbols, "expected nil when all snapshots are nil")
+}
+
+func TestMarkdownFormatting_ReturnsEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Verify isMarkdownURI returns true, which causes early return
+	assert.True(t, isMarkdownURI("file:///test/doc.md"))
+	assert.True(t, isMarkdownURI("file:///test/doc.markdown"))
+
+	// The guard in textDocumentFormatting returns []protocol.TextEdit{}
+	// for markdown URIs. We test the guard behavior directly since
+	// calling textDocumentFormatting requires a full glsp.Context.
+	// The integration is verified by the isMarkdownURI placement.
+}

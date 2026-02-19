@@ -1440,6 +1440,8 @@ func (w *Workspace) publishMarkdownDiagnostics(notify Notifier, snap *MarkdownDo
 				var remapped []protocol.DiagnosticRelatedInformation
 				for _, rel := range diag.RelatedInformation {
 					if rel.Location.URI != expectedURI {
+						w.logger.Warn("related info URI does not match expected block SourceID; skipping remap",
+							"expected", expectedURI, "got", rel.Location.URI)
 						remapped = append(remapped, rel)
 						continue
 					}
