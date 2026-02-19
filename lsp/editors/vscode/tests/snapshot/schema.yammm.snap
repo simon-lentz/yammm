@@ -1,0 +1,159 @@
+>// Grammar snapshot test: exercises key TextMate scopes for the standalone yammm grammar.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ source.yammm comment.line.double-slash.yammm
+>
+>schema "snapshot_test"
+#^^^^^^ source.yammm keyword.control.schema.yammm
+#      ^ source.yammm
+#       ^^^^^^^^^^^^^^^ source.yammm string.quoted.yammm
+>
+>import "./sibling" as sib
+#^^^^^^ source.yammm keyword.control.import.yammm
+#      ^ source.yammm
+#       ^^^^^^^^^^^ source.yammm string.quoted.yammm
+#                  ^ source.yammm
+#                   ^^ source.yammm keyword.control.as.yammm
+#                     ^ source.yammm
+#                      ^^^ source.yammm entity.name.namespace.yammm
+>
+>// A type alias
+#^^^^^^^^^^^^^^^ source.yammm comment.line.double-slash.yammm
+>type Email = Pattern["^[a-z]+@[a-z]+\\.[a-z]{2,}$"]
+#^^^^ source.yammm keyword.declaration.type.yammm
+#    ^ source.yammm
+#     ^^^^^ source.yammm entity.name.type.yammm
+#          ^ source.yammm
+#           ^ source.yammm keyword.operator.assignment.yammm
+#            ^ source.yammm
+#             ^^^^^^^ source.yammm support.type.yammm
+#                    ^ source.yammm meta.constraint.yammm punctuation.definition.bracket.begin.yammm
+#                     ^ source.yammm meta.constraint.yammm string.quoted.double.yammm
+#                      ^^^^^^^^^^^^^^ source.yammm meta.constraint.yammm string.quoted.double.yammm
+#                                    ^^ source.yammm meta.constraint.yammm string.quoted.double.yammm constant.character.escape.yammm
+#                                      ^^^^^^^^^^^ source.yammm meta.constraint.yammm string.quoted.double.yammm
+#                                                 ^ source.yammm meta.constraint.yammm string.quoted.double.yammm
+#                                                  ^ source.yammm meta.constraint.yammm punctuation.definition.bracket.end.yammm
+>
+>abstract type Auditable {
+#^^^^^^^^^ source.yammm storage.modifier.abstract.yammm
+#         ^^^^ source.yammm keyword.declaration.type.yammm
+#             ^ source.yammm
+#              ^^^^^^^^^ source.yammm entity.name.type.yammm
+#                       ^ source.yammm
+#                        ^ source.yammm punctuation.definition.block.begin.yammm
+>	created_at Timestamp required
+#^ source.yammm
+# ^^^^^^^^^^ source.yammm variable.other.property.yammm
+#           ^ source.yammm
+#            ^^^^^^^^^ source.yammm support.type.yammm
+#                     ^ source.yammm
+#                      ^^^^^^^^ source.yammm storage.modifier.yammm
+>}
+#^ source.yammm punctuation.definition.block.end.yammm
+>
+>type Person extends Auditable {
+#^^^^ source.yammm keyword.declaration.type.yammm
+#    ^ source.yammm
+#     ^^^^^^ source.yammm entity.name.type.yammm
+#           ^ source.yammm
+#            ^^^^^^^ source.yammm keyword.other.extends.yammm
+#                   ^ source.yammm
+#                    ^^^^^^^^^ source.yammm entity.name.type.yammm
+#                             ^ source.yammm
+#                              ^ source.yammm punctuation.definition.block.begin.yammm
+>	id     String primary
+#^ source.yammm
+# ^^ source.yammm variable.other.property.yammm
+#   ^^^^^ source.yammm
+#        ^^^^^^ source.yammm support.type.yammm
+#              ^ source.yammm
+#               ^^^^^^^ source.yammm storage.modifier.yammm
+>	name   String[1, 255] required
+#^ source.yammm
+# ^^^^ source.yammm variable.other.property.yammm
+#     ^^^ source.yammm
+#        ^^^^^^ source.yammm support.type.yammm
+#              ^ source.yammm meta.constraint.yammm punctuation.definition.bracket.begin.yammm
+#               ^ source.yammm meta.constraint.yammm constant.numeric.yammm
+#                ^^ source.yammm meta.constraint.yammm
+#                  ^^^ source.yammm meta.constraint.yammm constant.numeric.yammm
+#                     ^ source.yammm meta.constraint.yammm punctuation.definition.bracket.end.yammm
+#                      ^ source.yammm
+#                       ^^^^^^^^ source.yammm storage.modifier.yammm
+>	age    Integer[0, 150]
+#^ source.yammm
+# ^^^ source.yammm variable.other.property.yammm
+#    ^^^^ source.yammm
+#        ^^^^^^^ source.yammm support.type.yammm
+#               ^ source.yammm meta.constraint.yammm punctuation.definition.bracket.begin.yammm
+#                ^ source.yammm meta.constraint.yammm constant.numeric.yammm
+#                 ^^ source.yammm meta.constraint.yammm
+#                   ^^^ source.yammm meta.constraint.yammm constant.numeric.yammm
+#                      ^ source.yammm meta.constraint.yammm punctuation.definition.bracket.end.yammm
+>	active Boolean
+#^ source.yammm
+# ^^^^^^ source.yammm variable.other.property.yammm
+#       ^ source.yammm
+#        ^^^^^^^ source.yammm support.type.yammm
+>
+>	--> FRIEND (_:many) Person
+#^ source.yammm
+# ^^^ source.yammm entity.name.function.relation.yammm
+#    ^ source.yammm
+#     ^^^^^^ source.yammm entity.name.function.relation.yammm
+#           ^ source.yammm
+#            ^ source.yammm punctuation.definition.parameters.begin.yammm
+#             ^^^^^^ source.yammm constant.language.multiplicity.yammm
+#                   ^ source.yammm punctuation.definition.parameters.end.yammm
+#                    ^ source.yammm
+#                     ^^^^^^ source.yammm entity.name.type.yammm
+>	--> HAS    sib.Sibling
+#^ source.yammm
+# ^^^ source.yammm entity.name.function.relation.yammm
+#    ^ source.yammm
+#     ^^^ source.yammm entity.name.function.relation.yammm
+#        ^^^^ source.yammm
+#            ^^^^^^^^^^^ source.yammm entity.name.type.yammm
+>	*-> OWNS   (many) Pet
+#^ source.yammm
+# ^^^ source.yammm entity.name.function.relation.yammm
+#    ^ source.yammm
+#     ^^^^ source.yammm entity.name.function.relation.yammm
+#         ^^^ source.yammm
+#            ^ source.yammm punctuation.definition.parameters.begin.yammm
+#             ^^^^ source.yammm constant.language.multiplicity.yammm
+#                 ^ source.yammm punctuation.definition.parameters.end.yammm
+#                  ^ source.yammm
+#                   ^^^ source.yammm entity.name.type.yammm
+>
+>	! "name_not_empty" name != ""
+#^ source.yammm meta.invariant-expression.yammm
+# ^ source.yammm meta.invariant-expression.yammm keyword.declaration.invariant.yammm
+#  ^ source.yammm meta.invariant-expression.yammm
+#   ^^^^^^^^^^^^^^^^ source.yammm meta.invariant-expression.yammm string.quoted.invariant-message.yammm
+#                   ^ source.yammm meta.invariant-expression.yammm
+#                    ^^^^ source.yammm meta.invariant-expression.yammm variable.other.expression.yammm
+#                        ^ source.yammm meta.invariant-expression.yammm
+#                         ^^ source.yammm meta.invariant-expression.yammm keyword.operator.yammm
+#                           ^ source.yammm meta.invariant-expression.yammm
+#                            ^ source.yammm meta.invariant-expression.yammm string.quoted.double.yammm
+#                             ^ source.yammm meta.invariant-expression.yammm string.quoted.double.yammm
+>}
+#^ source.yammm punctuation.definition.block.end.yammm
+>
+>part type Pet {
+#^^^^^ source.yammm storage.modifier.part.yammm
+#     ^^^^ source.yammm keyword.declaration.type.yammm
+#         ^ source.yammm
+#          ^^^ source.yammm entity.name.type.yammm
+#             ^ source.yammm
+#              ^ source.yammm punctuation.definition.block.begin.yammm
+>	name String required
+#^ source.yammm
+# ^^^^ source.yammm variable.other.property.yammm
+#     ^ source.yammm
+#      ^^^^^^ source.yammm support.type.yammm
+#            ^ source.yammm
+#             ^^^^^^^^ source.yammm storage.modifier.yammm
+>}
+#^ source.yammm punctuation.definition.block.end.yammm
+>

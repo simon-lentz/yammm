@@ -38,7 +38,7 @@ type Person {
 ```
 ````
 
-**Limitations**: Imports are not supported in markdown blocks (produces a diagnostic). Formatting is disabled for markdown files. Code blocks are analyzed in isolation with no cross-block references.
+**Limitations**: Imports are not supported in markdown blocks (produces a diagnostic). Formatting is disabled for markdown files. Code blocks are analyzed in isolation with no cross-block references. Files must use `.yammm`, `.md`, or `.markdown` extensions to receive LSP support — manually setting a file's language in VS Code (e.g., on a `.txt` file) does not activate LSP features; rename the file to use a supported extension.
 
 ## Requirements
 
@@ -84,12 +84,17 @@ Pre-built binaries are included for:
 
 ## Development
 
+Requires Node.js >= 20 (pinned in `.nvmrc`).
+
 ```bash
 # Install dependencies
 npm install
 
 # Compile TypeScript
 npm run compile
+
+# Run grammar snapshot tests
+npm run test:grammar
 
 # Package extension
 npm run package

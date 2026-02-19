@@ -1106,6 +1106,34 @@ func TestMergeIncrementalChanges(t *testing.T) {
 			},
 			want: "hello world",
 		},
+		{
+			name:    "out-of-bounds range triggers full-text fallback",
+			current: "hello world",
+			changes: []any{
+				protocol.TextDocumentContentChangeEvent{
+					Range: &protocol.Range{
+						Start: protocol.Position{Line: 99, Character: 0},
+						End:   protocol.Position{Line: 99, Character: 5},
+					},
+					Text: "fallback text",
+				},
+			},
+			want: "fallback text",
+		},
+		{
+			name:    "inverted range triggers full-text fallback",
+			current: "abc\ndef\nghi",
+			changes: []any{
+				protocol.TextDocumentContentChangeEvent{
+					Range: &protocol.Range{
+						Start: protocol.Position{Line: 2, Character: 0},
+						End:   protocol.Position{Line: 0, Character: 0},
+					},
+					Text: "replaced",
+				},
+			},
+			want: "replaced",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1210,6 +1238,37 @@ func TestMarkdownDocumentClosed_CleansUp(t *testing.T) {
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	assert.Nil(t, snap)
+}
+
+func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	w := NewWorkspace(slog.Default(), Config{})
+	uri := "file:///test/close_diag.md"
+	collector := &notificationCollector{}
+
+	// Open markdown with syntax error to produce diagnostics.
+	content := "# Test\n\n```yammm\nnot valid schema!!!\n```\n"
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+
+	// Verify non-empty diagnostics were published.
+	diags := collector.diagnosticsFor(uri)
+	require.NotEmpty(t, diags, "precondition: diagnostics published for invalid content")
+
+	// Close — should publish empty diagnostics to clear editor.
+	w.MarkdownDocumentClosed(collector.notify, uri)
+
+	// Verify snapshot cleared.
+	snap := w.GetMarkdownDocumentSnapshot(uri)
+	assert.Nil(t, snap)
+
+	// Verify empty diagnostics notification was published.
+	// diagnosticsFor scans in reverse — the latest entry should be the clear notification
+	// with Diagnostics: []protocol.Diagnostic{} (non-nil empty slice per workspace.go:755-756).
+	finalDiags := collector.diagnosticsFor(uri)
+	require.NotNil(t, finalDiags, "expected PublishDiagnostics notification after close")
+	assert.Empty(t, finalDiags, "expected empty diagnostics to clear editor squiggles")
 }
 
 func TestAnalyzeMarkdownAndPublish_ProducesDiagnostics(t *testing.T) {
@@ -1413,6 +1472,24 @@ func BenchmarkExtractCodeBlocks_ManyBlocks(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		_ = ExtractCodeBlocks(content)
+	}
+}
+
+func BenchmarkAnalyzeMarkdownAndPublish_ManyBlocks(b *testing.B) {
+	var sb strings.Builder
+	for i := range 50 {
+		fmt.Fprintf(&sb, "# Block %d\n\n```yammm\nschema \"block_%d\"\n\ntype Type%d {\n\tid String primary\n}\n```\n\n", i, i, i)
+	}
+	content := sb.String()
+
+	w := NewWorkspace(slog.Default(), Config{})
+	uri := "file:///bench/many_blocks.md"
+	w.MarkdownDocumentOpened(uri, 1, content)
+
+	ctx := context.Background()
+	b.ResetTimer()
+	for b.Loop() {
+		w.AnalyzeMarkdownAndPublish(nil, ctx, uri)
 	}
 }
 

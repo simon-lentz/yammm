@@ -122,8 +122,11 @@ func VirtualSourceID(markdownPath string, blockIndex int) (location.SourceID, er
 }
 
 // hasSchemaDeclaration reports whether content contains a schema declaration line.
-// Conservative: matches even inside comments, avoiding false negatives that would
-// cause a duplicate schema parse error from prepending a synthetic declaration.
+// Conservative: scans line-by-line after trimming whitespace, without attempting
+// to parse comments or string literals. A schema declaration inside a block comment
+// produces a false positive (safe: prefix synthesis is suppressed for an already-valid
+// block). A commented-out declaration like "// schema ..." does NOT match because the
+// trimmed line starts with "//", not "schema".
 func hasSchemaDeclaration(content string) bool {
 	for line := range strings.SplitSeq(content, "\n") {
 		trimmed := strings.TrimSpace(line)
