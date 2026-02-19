@@ -16,6 +16,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema/load"
 )
 
 // PositionEncoding represents the position encoding used for LSP communication.
@@ -182,6 +183,9 @@ type Workspace struct {
 	// Open documents keyed by URI
 	open map[string]*Document
 
+	// Open markdown documents keyed by URI
+	markdownDocs map[string]*MarkdownDocument
+
 	// Counter for deterministic document ordering (symlink disambiguation)
 	openCounter int
 
@@ -247,6 +251,7 @@ func NewWorkspace(logger *slog.Logger, cfg Config) *Workspace {
 		config:           cfg,
 		roots:            make([]string, 0),
 		open:             make(map[string]*Document),
+		markdownDocs:     make(map[string]*MarkdownDocument),
 		snapshots:        make(map[string]*Snapshot),
 		posEncoding:      PositionEncodingUTF16,
 		importsByEntry:   make(map[string]map[string]struct{}),
@@ -1185,4 +1190,299 @@ func (w *Workspace) remapToOpenDocURI(diagURI string, canonicalToDocURI map[stri
 		return PathToURI(path)
 	}
 	return diagURI
+}
+
+// MarkdownDocumentOpened creates a MarkdownDocument with normalized text and version.
+// Block extraction is deferred to AnalyzeMarkdownAndPublish.
+func (w *Workspace) MarkdownDocumentOpened(uri string, version int, text string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.markdownDocs[uri] = &MarkdownDocument{
+		URI:     uri,
+		Version: version,
+		Text:    normalizeLineEndings(text),
+	}
+}
+
+// MarkdownDocumentChanged updates text and version for a markdown document.
+// Ignores stale updates (version <= current unless either is 0).
+// Does NOT re-extract blocks — that is done atomically by AnalyzeMarkdownAndPublish.
+func (w *Workspace) MarkdownDocumentChanged(uri string, version int, text string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	md := w.markdownDocs[uri]
+	if md == nil {
+		return
+	}
+
+	if version != 0 && md.Version != 0 && version <= md.Version {
+		w.logger.Debug("ignoring stale markdown document change",
+			slog.String("uri", uri),
+			slog.Int("incoming_version", version),
+			slog.Int("current_version", md.Version),
+		)
+		return
+	}
+	md.Version = version
+	md.Text = normalizeLineEndings(text)
+}
+
+// MarkdownDocumentClosed removes a markdown document and clears its diagnostics.
+func (w *Workspace) MarkdownDocumentClosed(notify Notifier, uri string) {
+	w.mu.Lock()
+	delete(w.markdownDocs, uri)
+
+	hadPublished := w.publishedByEntry[uri] != nil
+	delete(w.publishedByEntry, uri)
+	w.mu.Unlock()
+
+	if hadPublished {
+		w.publishDiagnostics(notify, uri, nil)
+	}
+
+	w.cancelPendingAnalysis(uri)
+}
+
+// GetMarkdownDocumentSnapshot returns an immutable snapshot of a markdown document.
+func (w *Workspace) GetMarkdownDocumentSnapshot(uri string) *MarkdownDocumentSnapshot {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	md := w.markdownDocs[uri]
+	if md == nil {
+		return nil
+	}
+
+	blocks := make([]CodeBlock, len(md.Blocks))
+	copy(blocks, md.Blocks)
+
+	snapshots := make([]*Snapshot, len(md.Snapshots))
+	copy(snapshots, md.Snapshots)
+
+	return &MarkdownDocumentSnapshot{
+		URI:       md.URI,
+		Version:   md.Version,
+		Blocks:    blocks,
+		Snapshots: snapshots,
+	}
+}
+
+// GetMarkdownCurrentText returns the current text of a markdown document.
+func (w *Workspace) GetMarkdownCurrentText(uri string) (string, bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	md := w.markdownDocs[uri]
+	if md == nil {
+		return "", false
+	}
+	return md.Text, true
+}
+
+// ScheduleMarkdownAnalysis schedules a debounced analysis for a markdown document.
+func (w *Workspace) ScheduleMarkdownAnalysis(glspCtx *glsp.Context, uri string) {
+	w.debounceMu.Lock()
+	defer w.debounceMu.Unlock()
+
+	if existing, ok := w.debounces[uri]; ok {
+		existing.timer.Stop()
+		existing.cancel()
+	}
+
+	analyzeCtx, cancel := context.WithCancel(context.Background())
+	entry := &debounceEntry{cancel: cancel}
+
+	var notify Notifier
+	if glspCtx != nil {
+		notify = func(method string, params any) {
+			glspCtx.Notify(method, params)
+		}
+	}
+
+	entry.timer = time.AfterFunc(debounceDelay, func() {
+		select {
+		case <-analyzeCtx.Done():
+			return
+		default:
+			w.AnalyzeMarkdownAndPublish(notify, analyzeCtx, uri)
+			w.debounceMu.Lock()
+			if w.debounces[uri] == entry {
+				delete(w.debounces, uri)
+			}
+			w.debounceMu.Unlock()
+		}
+	})
+
+	w.debounces[uri] = entry
+}
+
+// AnalyzeMarkdownAndPublish analyzes a markdown document's code blocks and publishes diagnostics.
+func (w *Workspace) AnalyzeMarkdownAndPublish(notify Notifier, analyzeCtx context.Context, uri string) {
+	// Read text and version under lock
+	w.mu.RLock()
+	md := w.markdownDocs[uri]
+	if md == nil {
+		w.mu.RUnlock()
+		return
+	}
+	text := md.Text
+	entryVersion := md.Version
+	w.mu.RUnlock()
+
+	// Extract blocks
+	blocks := ExtractCodeBlocks(text)
+
+	// Assign virtual SourceIDs
+	path, err := URIToPath(uri)
+	if err != nil {
+		w.logger.Warn("failed to parse markdown URI", slog.String("uri", uri), slog.String("error", err.Error()))
+		return
+	}
+
+	validBlocks := make([]CodeBlock, 0, len(blocks))
+	for i, block := range blocks {
+		id, err := VirtualSourceID(path, i)
+		if err != nil {
+			w.logger.Warn("failed to create virtual source ID",
+				slog.String("uri", uri), slog.Int("block", i), slog.String("error", err.Error()))
+			continue
+		}
+		block.SourceID = id
+		validBlocks = append(validBlocks, block)
+	}
+
+	// Analyze each block
+	snapshots := make([]*Snapshot, len(validBlocks))
+	for i, block := range validBlocks {
+		virtualPath := block.SourceID.String()
+		overlays := map[string][]byte{
+			virtualPath: []byte(block.Content),
+		}
+		snapshot, err := w.analyzer.Analyze(analyzeCtx, virtualPath, overlays, "", load.WithDisallowImports())
+		if err != nil {
+			w.logger.Warn("markdown block analysis failed",
+				slog.String("uri", uri), slog.Int("block", i), slog.String("error", err.Error()))
+		}
+		snapshots[i] = snapshot
+	}
+
+	// Post-analysis cancellation check
+	if analyzeCtx.Err() != nil {
+		w.logger.Debug("markdown analysis cancelled", slog.String("uri", uri))
+		return
+	}
+
+	// Version-gate and store results atomically
+	w.mu.Lock()
+	md = w.markdownDocs[uri]
+	if md == nil || md.Version != entryVersion {
+		w.mu.Unlock()
+		w.logger.Debug("skipping stale markdown analysis results", slog.String("uri", uri))
+		return
+	}
+	md.Blocks = validBlocks
+	md.Snapshots = snapshots
+
+	snap := &MarkdownDocumentSnapshot{
+		URI:       md.URI,
+		Version:   md.Version,
+		Blocks:    make([]CodeBlock, len(validBlocks)),
+		Snapshots: make([]*Snapshot, len(snapshots)),
+	}
+	copy(snap.Blocks, validBlocks)
+	copy(snap.Snapshots, snapshots)
+	w.mu.Unlock()
+
+	// Publish diagnostics (no lock held)
+	w.publishMarkdownDiagnostics(notify, snap)
+}
+
+// publishMarkdownDiagnostics collects diagnostics from all block snapshots,
+// remaps positions from block-local to markdown coordinates, and publishes.
+func (w *Workspace) publishMarkdownDiagnostics(notify Notifier, snap *MarkdownDocumentSnapshot) {
+	if notify == nil {
+		return
+	}
+
+	var allDiagnostics []protocol.Diagnostic
+
+	for i, snapshot := range snap.Snapshots {
+		if snapshot == nil {
+			continue
+		}
+
+		for _, uriDiag := range snapshot.LSPDiagnostics {
+			diag := uriDiag.Diagnostic
+
+			// Convert primary range from block-local to markdown coordinates
+			startLine, startChar := snap.BlockPositionToMarkdown(i,
+				int(diag.Range.Start.Line), int(diag.Range.Start.Character))
+			endLine, endChar := snap.BlockPositionToMarkdown(i,
+				int(diag.Range.End.Line), int(diag.Range.End.Character))
+
+			diag.Range = protocol.Range{
+				Start: protocol.Position{
+					Line:      toUInteger(startLine),
+					Character: toUInteger(startChar),
+				},
+				End: protocol.Position{
+					Line:      toUInteger(endLine),
+					Character: toUInteger(endChar),
+				},
+			}
+
+			// Remap RelatedInformation URIs and ranges
+			if len(diag.RelatedInformation) > 0 {
+				block := snap.Blocks[i]
+				expectedURI := PathToURI(block.SourceID.String())
+				var remapped []protocol.DiagnosticRelatedInformation
+				for _, rel := range diag.RelatedInformation {
+					if rel.Location.URI != expectedURI {
+						remapped = append(remapped, rel)
+						continue
+					}
+
+					relStartLine, relStartChar := snap.BlockPositionToMarkdown(i,
+						int(rel.Location.Range.Start.Line), int(rel.Location.Range.Start.Character))
+					relEndLine, relEndChar := snap.BlockPositionToMarkdown(i,
+						int(rel.Location.Range.End.Line), int(rel.Location.Range.End.Character))
+
+					remapped = append(remapped, protocol.DiagnosticRelatedInformation{
+						Location: protocol.Location{
+							URI: snap.URI,
+							Range: protocol.Range{
+								Start: protocol.Position{
+									Line:      toUInteger(relStartLine),
+									Character: toUInteger(relStartChar),
+								},
+								End: protocol.Position{
+									Line:      toUInteger(relEndLine),
+									Character: toUInteger(relEndChar),
+								},
+							},
+						},
+						Message: rel.Message,
+					})
+				}
+				diag.RelatedInformation = remapped
+			}
+
+			allDiagnostics = append(allDiagnostics, diag)
+		}
+	}
+
+	// Update publishedByEntry tracking
+	w.mu.Lock()
+	w.publishedByEntry[snap.URI] = map[string]struct{}{snap.URI: {}}
+	w.mu.Unlock()
+
+	if allDiagnostics == nil {
+		allDiagnostics = []protocol.Diagnostic{}
+	}
+	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+		URI:         snap.URI,
+		Diagnostics: allDiagnostics,
+	})
 }

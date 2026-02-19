@@ -188,7 +188,7 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //
 // The ctx parameter supports cancellation; if cancelled, Analyze returns
 // early with a partial or nil snapshot.
-func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string) (*Snapshot, error) {
+func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, opts ...load.Option) (*Snapshot, error) {
 	a.logger.Debug("starting analysis",
 		slog.String("entry", entryPath),
 		slog.String("module_root", moduleRoot),
@@ -223,12 +223,16 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	// Perform the load with explicit entry path.
 	// This ensures the correct document is analyzed even when multiple
 	// documents are open (overlays from different files).
+	// Caller opts applied first; Analyzer's registry always wins (appended last).
+	allOpts := make([]load.Option, len(opts), len(opts)+1)
+	copy(allOpts, opts)
+	allOpts = append(allOpts, load.WithSourceRegistry(sourceRegistry))
 	schemaResult, diagResult, loadErr := load.LoadSourcesWithEntry(
 		ctx,
 		sources,
 		entryPath,
 		moduleRoot,
-		load.WithSourceRegistry(sourceRegistry),
+		allOpts...,
 	)
 
 	entrySourceID, idErr := location.SourceIDFromAbsolutePath(entryPath)

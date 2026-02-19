@@ -195,8 +195,8 @@ func Load(ctx context.Context, path string, opts ...Option) (*schema.Schema, dia
 // The sourceName is used as the display path in diagnostics. For
 // consistent error messages, use a meaningful path-like name.
 //
-// Imports are not supported when loading from a string unless
-// WithSourceRegistry is provided with pre-registered import sources.
+// Imports are not supported when loading from a string.
+// The loader always disallows imports for string sources, regardless of other options.
 //
 // ctx must not be nil. Passing nil will panic.
 // On error, Schema is nil but diag.Result may contain useful diagnostics.
@@ -207,6 +207,7 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Opti
 
 	cfg := defaultConfig()
 	applyOptions(cfg, opts)
+	cfg.disallowImports = true // Always disallow imports from string, even if user opts try to enable
 
 	// Create a synthetic source ID (NewSourceID returns just SourceID, no error)
 	sourceID := location.NewSourceID("string://" + sourceName)
@@ -216,7 +217,6 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Opti
 	if err != nil {
 		return nil, diag.Result{}, err
 	}
-	ldr.disallowImports = true // Imports not supported from string
 	s, result, err := ldr.loadSource(ctx, sourceID, []byte(sourceCode))
 	return s, result, err
 }
@@ -540,6 +540,7 @@ func newLoader(cfg *config, moduleRoot string) (*loader, error) {
 		sourceRegistry:  sourceReg,
 		collector:       diag.NewCollector(cfg.issueLimit),
 		logger:          logger,
+		disallowImports: cfg.disallowImports,
 		sourceContent:   make(map[location.SourceID][]byte),
 		loadedSchemas:   make(map[location.SourceID]*schema.Schema),
 		loadingSchemas:  make(map[location.SourceID]bool),
@@ -733,7 +734,7 @@ func (l *loader) validateImports(sourceID location.SourceID, model *parse.Model)
 		// Per spec: single E_IMPORT_NOT_ALLOWED issue with import_count detail,
 		// positioned at the first import declaration.
 		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_NOT_ALLOWED,
-			"import declarations are not supported in LoadString(); use Load() or LoadSources() for schemas with imports").
+			"import declarations are not allowed in this context").
 			WithSpan(model.Imports[0].Span).
 			WithDetail(diag.DetailKeyImportCount, strconv.Itoa(len(model.Imports))).Build())
 		return false
