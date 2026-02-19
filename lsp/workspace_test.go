@@ -1692,6 +1692,114 @@ func TestScheduleAnalysis_RescheduleWhilePending(t *testing.T) {
 	ws.cancelPendingAnalysis(uri)
 }
 
+// TestScheduleMarkdownAnalysis_EntryPointerIdentity verifies that the markdown
+// debounce cleanup uses pointer identity to avoid deleting newer entries.
+// This mirrors TestScheduleAnalysis_EntryPointerIdentity for the markdown path.
+func TestScheduleMarkdownAnalysis_EntryPointerIdentity(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ws := NewWorkspace(logger, Config{})
+
+	uri := "file:///test.md"
+
+	// Set up a markdown document so ScheduleMarkdownAnalysis has something to work with
+	ws.MarkdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
+
+	// Create entry0 (simulating first schedule)
+	ws.debounceMu.Lock()
+	entry0 := &debounceEntry{
+		timer:  time.NewTimer(1 * time.Hour),
+		cancel: func() {},
+	}
+	ws.debounces[uri] = entry0
+	ws.debounceMu.Unlock()
+
+	// Simulate: while entry0's callback is running, a new schedule happens
+	ws.debounceMu.Lock()
+	entry1 := &debounceEntry{
+		timer:  time.NewTimer(1 * time.Hour),
+		cancel: func() {},
+	}
+	ws.debounces[uri] = entry1
+	ws.debounceMu.Unlock()
+
+	// Simulate entry0's callback cleanup: should NOT delete entry1
+	ws.debounceMu.Lock()
+	if ws.debounces[uri] == entry0 {
+		delete(ws.debounces, uri)
+	}
+	ws.debounceMu.Unlock()
+
+	// Verify entry1 is still in the map
+	ws.debounceMu.Lock()
+	currentEntry := ws.debounces[uri]
+	ws.debounceMu.Unlock()
+
+	if currentEntry != entry1 {
+		t.Error("entry1 should still be in debounces map after entry0's cleanup attempt")
+	}
+
+	// entry1's cleanup should succeed
+	ws.debounceMu.Lock()
+	if ws.debounces[uri] == entry1 {
+		delete(ws.debounces, uri)
+	}
+	ws.debounceMu.Unlock()
+
+	ws.debounceMu.Lock()
+	_, hasEntry := ws.debounces[uri]
+	ws.debounceMu.Unlock()
+
+	if hasEntry {
+		t.Error("entry1's cleanup should have removed the entry")
+	}
+}
+
+// TestScheduleMarkdownAnalysis_RescheduleWhilePending verifies that calling
+// ScheduleMarkdownAnalysis while a previous timer is pending correctly
+// cancels the old entry and installs a new one.
+func TestScheduleMarkdownAnalysis_RescheduleWhilePending(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ws := NewWorkspace(logger, Config{})
+
+	uri := "file:///test.md"
+
+	// Set up a markdown document
+	ws.MarkdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
+
+	// First schedule
+	ws.ScheduleMarkdownAnalysis(nil, uri)
+
+	ws.debounceMu.Lock()
+	entry1 := ws.debounces[uri]
+	ws.debounceMu.Unlock()
+
+	if entry1 == nil {
+		t.Fatal("first ScheduleMarkdownAnalysis should create entry")
+	}
+
+	// Second schedule (while first timer is pending)
+	ws.ScheduleMarkdownAnalysis(nil, uri)
+
+	ws.debounceMu.Lock()
+	entry2 := ws.debounces[uri]
+	ws.debounceMu.Unlock()
+
+	if entry2 == nil {
+		t.Fatal("second ScheduleMarkdownAnalysis should create entry")
+	}
+
+	if entry1 == entry2 {
+		t.Error("second ScheduleMarkdownAnalysis should create a new entry, not reuse the old one")
+	}
+
+	// Clean up
+	ws.cancelPendingAnalysis(uri)
+}
+
 // =============================================================================
 // RemapPathToURI Tests: Outbound URIs in Definition Provider
 // =============================================================================
