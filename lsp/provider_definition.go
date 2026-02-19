@@ -1,6 +1,8 @@
 package lsp
 
 import (
+	"path/filepath"
+
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
@@ -50,7 +52,8 @@ func (s *Server) markdownDefinition(params *protocol.DefinitionParams, mdSnap *M
 		return nil, nil
 	}
 
-	if blockPos.BlockIndex >= len(mdSnap.Snapshots) || mdSnap.Snapshots[blockPos.BlockIndex] == nil {
+	if blockPos.BlockIndex >= len(mdSnap.Snapshots) || blockPos.BlockIndex >= len(mdSnap.Blocks) ||
+		mdSnap.Snapshots[blockPos.BlockIndex] == nil {
 		return nil, nil
 	}
 	snapshot := mdSnap.Snapshots[blockPos.BlockIndex]
@@ -73,7 +76,7 @@ func (s *Server) markdownDefinition(params *protocol.DefinitionParams, mdSnap *M
 	// symbolToLocation calls RemapPathToURI which percent-encodes '#' in virtual
 	// paths (e.g., /path/to/README.md%23block-0). URIToPath reverses this.
 	locPath, pathErr := URIToPath(loc.URI)
-	if pathErr == nil && locPath == block.SourceID.String() {
+	if pathErr == nil && filepath.ToSlash(locPath) == block.SourceID.String() {
 		loc.URI = mdSnap.URI
 		startLine, startChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
 			int(loc.Range.Start.Line), int(loc.Range.Start.Character))

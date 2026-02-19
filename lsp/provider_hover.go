@@ -51,7 +51,8 @@ func (s *Server) markdownHover(params *protocol.HoverParams, mdSnap *MarkdownDoc
 		return nil, nil
 	}
 
-	if blockPos.BlockIndex >= len(mdSnap.Snapshots) || mdSnap.Snapshots[blockPos.BlockIndex] == nil {
+	if blockPos.BlockIndex >= len(mdSnap.Snapshots) || blockPos.BlockIndex >= len(mdSnap.Blocks) ||
+		mdSnap.Snapshots[blockPos.BlockIndex] == nil {
 		return nil, nil
 	}
 	snapshot := mdSnap.Snapshots[blockPos.BlockIndex]
