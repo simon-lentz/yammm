@@ -1,4 +1,5 @@
-// Package lsp implements a Language Server Protocol (LSP) server for YAMMM schema files.
+// Package lsp implements a Language Server Protocol (LSP) server for YAMMM schema files
+// and YAMMM code blocks embedded in Markdown documents.
 //
 // The LSP server provides IDE features including:
 //   - Real-time diagnostics (parse errors, semantic errors, import issues)
@@ -11,6 +12,14 @@
 // The server communicates via JSON-RPC 2.0 over stdio and implements
 // LSP 3.16. It leverages the existing schema/load package for analysis
 // to ensure consistency between CLI and editor behavior.
+//
+// # Markdown Embedded Blocks
+//
+// YAMMM code blocks in Markdown files (.md, .markdown) receive diagnostics,
+// hover, completion, go-to-definition, and document symbols support. Each
+// code block is analyzed in isolation as an independent schema. Imports are
+// not supported in markdown blocks and produce an E_IMPORT_NOT_ALLOWED
+// diagnostic. Formatting is intentionally disabled for markdown files.
 //
 // # Architecture
 //

@@ -135,6 +135,28 @@ func (h *Harness) OpenDocument(path, content string) error {
 	})
 }
 
+// OpenMarkdownDocument opens a markdown document with the given content.
+// Sends languageID "markdown" for protocol fidelity. The server dispatches
+// by URI extension (.md/.markdown), not languageID.
+func (h *Harness) OpenMarkdownDocument(path, content string) error {
+	h.t.Helper()
+
+	absPath := path
+	if !filepath.IsAbs(path) {
+		absPath = filepath.Join(h.Root, path)
+	}
+
+	uri := PathToURI(absPath)
+	return h.handler.TextDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{ //nolint:wrapcheck // test utility
+		TextDocument: protocol.TextDocumentItem{
+			URI:        uri,
+			LanguageID: "markdown",
+			Version:    1,
+			Text:       content,
+		},
+	})
+}
+
 // ChangeDocument sends a document change notification.
 func (h *Harness) ChangeDocument(path, content string, version int) error {
 	h.t.Helper()
@@ -285,6 +307,11 @@ func (h *Harness) Formatting(path string) ([]protocol.TextEdit, error) {
 			"insertSpaces": false,
 		},
 	})
+}
+
+// Handler returns the protocol handler for low-level test access.
+func (h *Harness) Handler() *protocol.Handler {
+	return h.handler
 }
 
 // Close shuts down the harness.

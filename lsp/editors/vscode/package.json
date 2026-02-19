@@ -17,7 +17,7 @@
     "Programming Languages"
   ],
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": ["onLanguage:yammm", "onLanguage:markdown"],
   "contributes": {
     "languages": [
       {
@@ -37,6 +37,14 @@
         "language": "yammm",
         "scopeName": "source.yammm",
         "path": "./syntaxes/yammm.tmLanguage.json"
+      },
+      {
+        "scopeName": "markdown.yammm.codeblock",
+        "path": "./syntaxes/yammm.markdown.injection.json",
+        "injectTo": ["text.html.markdown"],
+        "embeddedLanguages": {
+          "meta.embedded.block.yammm": "yammm"
+        }
       }
     ],
     "snippets": [

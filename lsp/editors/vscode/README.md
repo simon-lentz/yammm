@@ -12,6 +12,33 @@ This extension provides language support for YAMMM (Yet Another Meta-Meta Model)
 - **Document Symbols**: Outline view and breadcrumbs
 - **Formatting**: Automatic code formatting
 - **Snippets**: Quick templates for common patterns
+- **Markdown Embedded Blocks**: Full language support for yammm code blocks in Markdown files
+
+## Markdown Support
+
+YAMMM code blocks in Markdown files receive full language support:
+
+- Syntax highlighting via TextMate injection grammar
+- Real-time diagnostics (parse errors, semantic errors)
+- Hover information with type details
+- Completions for keywords, types, and snippets
+- Go-to-definition for type references
+- Document symbols for outline and breadcrumbs
+
+Each code block is analyzed independently as a standalone schema. Use fenced code blocks with the `yammm` language identifier:
+
+````markdown
+```yammm
+schema "example"
+
+type Person {
+    id String primary
+    name String required
+}
+```
+````
+
+**Limitations**: Imports are not supported in markdown blocks (produces a diagnostic). Formatting is disabled for markdown files. Code blocks are analyzed in isolation with no cross-block references.
 
 ## Requirements
 

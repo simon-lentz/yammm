@@ -2,9 +2,11 @@ package lsp
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -1124,6 +1126,20 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 	// Diagnostics should be empty for a valid schema
 	diags := collector.diagnosticsFor(uri)
 	assert.Empty(t, diags, "expected no diagnostics for valid schema")
+}
+
+// --- Benchmarks ---
+
+func BenchmarkExtractCodeBlocks_ManyBlocks(b *testing.B) {
+	var sb strings.Builder
+	for i := range 50 {
+		fmt.Fprintf(&sb, "# Block %d\n\n```yammm\nschema \"block_%d\"\n\ntype Type%d {\n\tid String primary\n}\n```\n\n", i, i, i)
+	}
+	content := sb.String()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = ExtractCodeBlocks(content)
+	}
 }
 
 // --- Phase 5: Feature provider tests ---

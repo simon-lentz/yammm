@@ -54,7 +54,8 @@ type Config struct {
 	ModuleRoot string
 }
 
-// Server is the YAMMM language server.
+// Server is the YAMMM language server. It handles both standalone .yammm
+// files and YAMMM code blocks embedded in Markdown documents (.md, .markdown).
 type Server struct {
 	logger    *slog.Logger
 	config    Config
