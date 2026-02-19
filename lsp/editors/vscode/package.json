@@ -2,7 +2,7 @@
   "name": "yammm",
   "displayName": "YAMMM",
   "description": "Language support for YAMMM schema files",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "publisher": "simon-lentz",
   "license": "MIT",
   "icon": "icon.png",
@@ -17,7 +17,7 @@
     "Programming Languages"
   ],
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": ["onLanguage:yammm", "onLanguage:markdown"],
   "contributes": {
     "languages": [
       {
@@ -37,6 +37,14 @@
         "language": "yammm",
         "scopeName": "source.yammm",
         "path": "./syntaxes/yammm.tmLanguage.json"
+      },
+      {
+        "scopeName": "markdown.yammm.codeblock",
+        "path": "./syntaxes/yammm.markdown.injection.json",
+        "injectTo": ["text.html.markdown"],
+        "embeddedLanguages": {
+          "meta.embedded.block.yammm": "yammm"
+        }
       }
     ],
     "snippets": [
@@ -99,6 +107,12 @@
     "compile:prod": "node esbuild.mjs --production",
     "watch": "node esbuild.mjs --watch",
     "lint": "eslint src --ext ts",
+    "test:grammar": "npm run test:grammar:yammm && npm run test:grammar:injection",
+    "test:grammar:yammm": "vscode-tmgrammar-snap tests/snapshot/*.yammm",
+    "test:grammar:injection": "vscode-tmgrammar-snap -s text.html.markdown -g syntaxes/vendor/markdown.tmLanguage.json -g syntaxes/yammm.tmLanguage.json -g syntaxes/yammm.markdown.injection.json tests/snapshot/*.md",
+    "test:grammar:update": "npm run test:grammar:update:yammm && npm run test:grammar:update:injection",
+    "test:grammar:update:yammm": "vscode-tmgrammar-snap -u tests/snapshot/*.yammm",
+    "test:grammar:update:injection": "vscode-tmgrammar-snap -u -s text.html.markdown -g syntaxes/vendor/markdown.tmLanguage.json -g syntaxes/yammm.tmLanguage.json -g syntaxes/yammm.markdown.injection.json tests/snapshot/*.md",
     "package": "vsce package"
   },
   "dependencies": {
@@ -112,6 +126,7 @@
     "@vscode/vsce": "^3.7.0",
     "esbuild": "^0.24.0",
     "eslint": "^8.54.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vscode-tmgrammar-test": "^0.1.3"
   }
 }

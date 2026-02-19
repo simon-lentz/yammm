@@ -384,6 +384,7 @@ function startLanguageServer(context: ExtensionContext, serverPath: string) {
     const clientOptions: LanguageClientOptions = {
         documentSelector: [
             { scheme: 'file', language: 'yammm' },
+            { scheme: 'file', language: 'markdown' },
         ],
         synchronize: {
             fileEvents: workspace.createFileSystemWatcher('**/*.yammm'),

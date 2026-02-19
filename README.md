@@ -1,7 +1,7 @@
 # YAMMM
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/simon-lentz/yammm.svg)](https://pkg.go.dev/github.com/simon-lentz/yammm)
-[![Go Version](https://img.shields.io/badge/go-1.24+-blue.svg)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/go-1.26+-blue.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 YAMMM (Yet Another Meta-Meta Model) is a Go library for defining schemas in a small DSL (`.yammm` files) and validating Go data against them at runtime. It provides post-validation services including graph traversal and integrity checking.
@@ -22,7 +22,7 @@ YAMMM (Yet Another Meta-Meta Model) is a Go library for defining schemas in a sm
 go get github.com/simon-lentz/yammm
 ```
 
-Requires Go 1.24 or later.
+Requires Go 1.26 or later.
 
 ## Quick Start
 
@@ -182,6 +182,13 @@ type Person {
 Associations reference independent entities:
 
 ```yammm
+type Person {
+    id UUID primary              // primary key (implicitly required)
+    name String[1, 100] required // required with length constraint
+    email String                 // optional
+    age Integer[0, 150]          // optional with bounds
+}
+
 type Car {
     --> OWNER (one) Person              // required, single
     --> MECHANICS (many) Person         // optional, multiple
@@ -206,11 +213,12 @@ Invariants are constraint expressions evaluated at validation time:
 
 ```yammm
 type Person {
+    name String required
     startDate Date required
     endDate Date
 
     ! "end date must be after start date" endDate > startDate
-    ! "name cannot be empty" Len(name) > 0
+    ! "name cannot be empty" name -> Len > 0
 }
 ```
 
@@ -274,7 +282,7 @@ See [`lsp/editors/vscode/README.md`](lsp/editors/vscode/README.md) for VS Code e
 
 Get the full VS Code editing experience for `.yammm` files in a few steps:
 
-**Prerequisites**: Go 1.24+, Node.js 18+, npm
+**Prerequisites**: Go 1.26+, Node.js 18+, npm
 
 ```bash
 # Clone the repository

@@ -84,6 +84,44 @@ func TestLoadString_DisallowsImports(t *testing.T) {
 	assert.True(t, result.HasErrors())
 }
 
+func TestWithDisallowImports_LoadSourcesWithEntry(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	source := `schema "test"
+
+import "./foo" as f
+
+type Bar {
+	id String primary
+}`
+
+	sources := map[string][]byte{
+		filepath.Join(tmpDir, "test.yammm"): []byte(source),
+	}
+
+	s, result, err := load.LoadSourcesWithEntry(
+		ctx, sources, filepath.Join(tmpDir, "test.yammm"), tmpDir,
+		load.WithDisallowImports(),
+	)
+
+	require.NoError(t, err)
+	assert.Nil(t, s)
+	assert.True(t, result.HasErrors())
+
+	// Verify the specific diagnostic code
+	var foundCode bool
+	for issue := range result.Issues() {
+		if issue.Code() == diag.E_IMPORT_NOT_ALLOWED {
+			foundCode = true
+			break
+		}
+	}
+	assert.True(t, foundCode, "expected E_IMPORT_NOT_ALLOWED diagnostic")
+}
+
 func TestLoadString_DataTypeResolution_PreservesCase(t *testing.T) {
 	// M3 fix: Verify datatype references preserve declared case end-to-end
 	source := `schema "test"

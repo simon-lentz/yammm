@@ -21,11 +21,12 @@ type Option func(*config)
 
 // config holds configuration for schema loading.
 type config struct {
-	registry       *schema.Registry
-	moduleRoot     string
-	issueLimit     int
-	sourceRegistry SourceStore
-	logger         *slog.Logger
+	registry        *schema.Registry
+	moduleRoot      string
+	issueLimit      int
+	sourceRegistry  SourceStore
+	logger          *slog.Logger
+	disallowImports bool
 }
 
 // defaultConfig returns a config with sensible defaults.
@@ -97,6 +98,16 @@ type SourceStore interface {
 func WithSourceRegistry(store SourceStore) Option {
 	return func(c *config) {
 		c.sourceRegistry = store
+	}
+}
+
+// WithDisallowImports prevents import declarations from being processed.
+// When enabled, any import statements in the source produce an
+// E_IMPORT_NOT_ALLOWED diagnostic. Used by LoadString (unconditionally)
+// and by the LSP markdown analysis path (isolated blocks).
+func WithDisallowImports() Option {
+	return func(c *config) {
+		c.disallowImports = true
 	}
 }
 

@@ -1,0 +1,21 @@
+>schema "sibling"
+#^^^^^^ source.yammm keyword.control.schema.yammm
+#      ^ source.yammm
+#       ^^^^^^^^^ source.yammm string.quoted.yammm
+>
+>type Sibling {
+#^^^^ source.yammm keyword.declaration.type.yammm
+#    ^ source.yammm
+#     ^^^^^^^ source.yammm entity.name.type.yammm
+#            ^ source.yammm
+#             ^ source.yammm punctuation.definition.block.begin.yammm
+>	name String required
+#^ source.yammm
+# ^^^^ source.yammm variable.other.property.yammm
+#     ^ source.yammm
+#      ^^^^^^ source.yammm support.type.yammm
+#            ^ source.yammm
+#             ^^^^^^^^ source.yammm storage.modifier.yammm
+>}
+#^ source.yammm punctuation.definition.block.end.yammm
+>

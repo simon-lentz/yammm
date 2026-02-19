@@ -18,6 +18,10 @@ import (
 func (s *Server) textDocumentFormatting(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
 	uri := params.TextDocument.URI
 
+	if isMarkdownURI(uri) {
+		return []protocol.TextEdit{}, nil
+	}
+
 	s.logger.Debug("formatting request",
 		"uri", uri,
 	)

@@ -1,6 +1,8 @@
 package lsp
 
 import (
+	"path/filepath"
+
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
@@ -14,13 +16,16 @@ import (
 //nolint:nilnil // LSP protocol: nil result means "no definition found"
 func (s *Server) textDocumentDefinition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
 	uri := params.TextDocument.URI
-	pos := params.Position
 
 	s.logger.Debug("definition request",
 		"uri", uri,
-		"line", pos.Line,
-		"character", pos.Character,
+		"line", params.Position.Line,
+		"character", params.Position.Character,
 	)
+
+	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
+		return s.markdownDefinition(params, mdSnap)
+	}
 
 	snapshot := s.workspace.LatestSnapshot(uri)
 	if snapshot == nil {
@@ -28,56 +33,107 @@ func (s *Server) textDocumentDefinition(_ *glsp.Context, params *protocol.Defini
 		return nil, nil
 	}
 
-	// Get document snapshot for canonical SourceID (symlink-resolved at open time)
 	doc := s.workspace.GetDocumentSnapshot(uri)
 	if doc == nil {
 		s.logger.Debug("document not open for definition", "uri", uri)
 		return nil, nil
 	}
 
-	// Log staleness for debugging (per design doc §3.5, we still serve stale data)
+	return s.definitionAtPosition(snapshot, doc,
+		int(params.Position.Line), int(params.Position.Character))
+}
+
+// markdownDefinition handles definition requests within yammm code blocks in markdown files.
+//
+//nolint:nilnil // LSP protocol: nil result means "no definition found"
+func (s *Server) markdownDefinition(params *protocol.DefinitionParams, mdSnap *MarkdownDocumentSnapshot) (any, error) {
+	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
+	if blockPos == nil {
+		return nil, nil
+	}
+
+	if blockPos.BlockIndex >= len(mdSnap.Snapshots) || blockPos.BlockIndex >= len(mdSnap.Blocks) ||
+		mdSnap.Snapshots[blockPos.BlockIndex] == nil {
+		return nil, nil
+	}
+	snapshot := mdSnap.Snapshots[blockPos.BlockIndex]
+	block := mdSnap.Blocks[blockPos.BlockIndex]
+
+	blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, block)
+
+	result, err := s.definitionAtPosition(snapshot, blockDocSnap, blockPos.LocalLine, blockPos.LocalChar)
+	if err != nil || result == nil {
+		return result, err
+	}
+
+	// Remap the location URI and range if it points to the virtual block SourceID
+	loc, ok := result.(*protocol.Location)
+	if !ok || loc == nil {
+		return result, nil
+	}
+
+	// Decode the location URI to check if it matches our virtual block path.
+	// symbolToLocation calls RemapPathToURI which percent-encodes '#' in virtual
+	// paths (e.g., /path/to/README.md%23block-0). URIToPath reverses this.
+	locPath, pathErr := URIToPath(loc.URI)
+	if pathErr == nil && filepath.ToSlash(locPath) == block.SourceID.String() {
+		loc.URI = mdSnap.URI
+		startLine, startChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
+			int(loc.Range.Start.Line), int(loc.Range.Start.Character))
+		endLine, endChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
+			int(loc.Range.End.Line), int(loc.Range.End.Character))
+		loc.Range = protocol.Range{
+			Start: protocol.Position{Line: toUInteger(startLine), Character: toUInteger(startChar)},
+			End:   protocol.Position{Line: toUInteger(endLine), Character: toUInteger(endChar)},
+		}
+	}
+
+	return loc, nil
+}
+
+// definitionAtPosition returns the definition location for the symbol at the given position.
+// The line and char parameters are LSP-encoding coordinates.
+// Returns nil, nil when no definition is found.
+//
+//nolint:nilnil // LSP protocol: nil result means "no definition found"
+func (s *Server) definitionAtPosition(snapshot *Snapshot, doc *DocumentSnapshot, line, char int) (any, error) {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for definition",
-			"uri", uri,
+			"uri", doc.URI,
 			"snapshot_version", snapshot.EntryVersion,
 			"doc_version", doc.Version,
 		)
 	}
 
-	// Get the symbol index for this source using canonical SourceID
 	idx := snapshot.SymbolIndexAt(doc.SourceID)
 	if idx == nil {
 		s.logger.Debug("no symbol index for source", "source", doc.SourceID)
 		return nil, nil
 	}
 
-	// Convert LSP position to internal position using proper UTF-16 handling
 	internalPos, ok := PositionFromLSP(
 		snapshot.Sources,
 		doc.SourceID,
-		int(pos.Line),
-		int(pos.Character),
+		line,
+		char,
 		s.workspace.PositionEncoding(),
 	)
 	if !ok {
-		// Invalid position (stale line number, source not in registry)
 		return nil, nil
 	}
 
-	// First, check if cursor is on a reference
 	ref := idx.ReferenceAtPosition(internalPos)
 	if ref != nil {
 		return s.resolveReferenceDefinition(snapshot, ref, doc.SourceID)
 	}
 
-	// Check if cursor is on a symbol declaration
 	sym := idx.SymbolAtPosition(internalPos)
 	if sym != nil {
 		return s.resolveSymbolDefinition(snapshot, sym)
 	}
 
 	s.logger.Debug("no symbol or reference at position",
-		"uri", uri,
+		"uri", doc.URI,
 		"position", internalPos,
 	)
 	return nil, nil

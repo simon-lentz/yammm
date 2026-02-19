@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -22,6 +23,32 @@ import (
 	_ "github.com/tliron/commonlog/simple" // required backend for glsp
 )
 
+// silenceCommonLog configures commonlog exactly once. The commonlog library
+// uses unsynchronized global state in Configure(), so concurrent calls from
+// parallel tests cause data races. Using sync.Once ensures thread safety.
+var silenceCommonLog sync.Once
+
+// isMarkdownURI returns true if the URI refers to a markdown file (.md or .markdown).
+// Detection uses filepath.Ext on the filesystem path (not raw URI suffix) to avoid
+// false positives from query strings or fragments.
+func isMarkdownURI(uri string) bool {
+	path, err := URIToPath(uri)
+	if err != nil {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".md" || ext == ".markdown"
+}
+
+// isYammmURI returns true if the URI refers to a yammm file (.yammm).
+func isYammmURI(uri string) bool {
+	path, err := URIToPath(uri)
+	if err != nil {
+		return false
+	}
+	return strings.ToLower(filepath.Ext(path)) == ".yammm"
+}
+
 const (
 	serverName = "yammm-lsp"
 )
@@ -32,7 +59,8 @@ type Config struct {
 	ModuleRoot string
 }
 
-// Server is the YAMMM language server.
+// Server is the YAMMM language server. It handles both standalone .yammm
+// files and YAMMM code blocks embedded in Markdown documents (.md, .markdown).
 type Server struct {
 	logger    *slog.Logger
 	config    Config
@@ -61,7 +89,7 @@ func NewServer(logger *slog.Logger, cfg Config) *Server {
 	}
 
 	// Silence commonlog - glsp uses it internally but we use slog for all logging.
-	commonlog.Configure(0, nil)
+	silenceCommonLog.Do(func() { commonlog.Configure(0, nil) })
 
 	s.handler = protocol.Handler{
 		// Lifecycle
@@ -241,68 +269,89 @@ func (s *Server) cancelRequest(ctx *glsp.Context, params *protocol.CancelParams)
 
 // textDocumentDidOpen handles textDocument/didOpen.
 func (s *Server) textDocumentDidOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
+	uri := params.TextDocument.URI
 	s.logger.Debug("textDocument/didOpen",
-		slog.String("uri", params.TextDocument.URI),
+		slog.String("uri", uri),
 		slog.Int("version", int(params.TextDocument.Version)),
 	)
 
-	s.workspace.DocumentOpened(
-		params.TextDocument.URI,
-		int(params.TextDocument.Version),
-		params.TextDocument.Text,
-	)
-
-	// Trigger immediate analysis for didOpen to provide instant feedback.
-	// Note: This runs synchronously on the handler goroutine, which can block
-	// other LSP requests on large files. Converting to async would require
-	// integration test infrastructure changes to wait for analysis completion.
-	// Version gating in AnalyzeAndPublish prevents stale results.
 	var notify Notifier
 	if ctx != nil {
 		notify = func(method string, params any) { ctx.Notify(method, params) }
 	}
-	s.workspace.AnalyzeAndPublish(notify, context.Background(), params.TextDocument.URI)
+
+	switch {
+	case isYammmURI(uri):
+		s.workspace.DocumentOpened(uri, int(params.TextDocument.Version), params.TextDocument.Text)
+		s.workspace.AnalyzeAndPublish(notify, context.Background(), uri)
+
+	case isMarkdownURI(uri):
+		s.workspace.MarkdownDocumentOpened(uri, int(params.TextDocument.Version), params.TextDocument.Text)
+		s.workspace.AnalyzeMarkdownAndPublish(notify, context.Background(), uri)
+
+	default:
+		s.logger.Debug("ignoring didOpen for unsupported file type", slog.String("uri", uri))
+	}
 
 	return nil
 }
 
 // textDocumentDidChange handles textDocument/didChange.
 func (s *Server) textDocumentDidChange(ctx *glsp.Context, params *protocol.DidChangeTextDocumentParams) error {
+	uri := params.TextDocument.URI
 	s.logger.Debug("textDocument/didChange",
-		slog.String("uri", params.TextDocument.URI),
+		slog.String("uri", uri),
 		slog.Int("version", int(params.TextDocument.Version)),
 	)
 
-	// Full sync: apply the last full content change (some clients may send multiple)
-	if len(params.ContentChanges) > 0 {
-		// Find the last full change event in the list
-		var lastFullChange *protocol.TextDocumentContentChangeEventWhole
-		for _, rawChange := range params.ContentChanges {
-			if change, ok := rawChange.(protocol.TextDocumentContentChangeEventWhole); ok {
-				lastFullChange = &change
+	switch {
+	case isYammmURI(uri):
+		// Existing .yammm path
+		if len(params.ContentChanges) > 0 {
+			var lastFullChange *protocol.TextDocumentContentChangeEventWhole
+			for _, rawChange := range params.ContentChanges {
+				if change, ok := rawChange.(protocol.TextDocumentContentChangeEventWhole); ok {
+					lastFullChange = &change
+				}
+			}
+
+			if lastFullChange != nil {
+				s.workspace.DocumentChanged(uri, int(params.TextDocument.Version), lastFullChange.Text)
+			} else if _, ok := params.ContentChanges[0].(protocol.TextDocumentContentChangeEvent); ok {
+				s.logger.Warn("received incremental change but server advertises full sync",
+					slog.String("uri", uri), slog.Int("version", int(params.TextDocument.Version)))
+				s.applyIncrementalChanges(params)
 			}
 		}
+		s.workspace.ScheduleAnalysis(ctx, uri)
 
-		if lastFullChange != nil {
-			// Apply the last full change
-			s.workspace.DocumentChanged(
-				params.TextDocument.URI,
-				int(params.TextDocument.Version),
-				lastFullChange.Text,
-			)
-		} else if _, ok := params.ContentChanges[0].(protocol.TextDocumentContentChangeEvent); ok {
-			// Server advertises full sync but received only incremental changes.
-			// Apply incrementally to prevent stale content issues.
-			s.logger.Warn("received incremental change but server advertises full sync",
-				slog.String("uri", params.TextDocument.URI),
-				slog.Int("version", int(params.TextDocument.Version)),
-			)
-			s.applyIncrementalChanges(params)
+	case isMarkdownURI(uri):
+		if len(params.ContentChanges) > 0 {
+			var lastFullChange *protocol.TextDocumentContentChangeEventWhole
+			for _, rawChange := range params.ContentChanges {
+				if change, ok := rawChange.(protocol.TextDocumentContentChangeEventWhole); ok {
+					lastFullChange = &change
+				}
+			}
+
+			if lastFullChange != nil {
+				s.workspace.MarkdownDocumentChanged(uri, int(params.TextDocument.Version), lastFullChange.Text)
+			} else if _, ok := params.ContentChanges[0].(protocol.TextDocumentContentChangeEvent); ok {
+				s.logger.Warn("received incremental change but server advertises full sync (markdown)",
+					slog.String("uri", uri), slog.Int("version", int(params.TextDocument.Version)))
+				currentText, ok := s.workspace.GetMarkdownCurrentText(uri)
+				if ok {
+					merged := mergeIncrementalChanges(currentText, s.workspace.PositionEncoding(),
+						params.ContentChanges, s.logger)
+					s.workspace.MarkdownDocumentChanged(uri, int(params.TextDocument.Version), merged)
+				}
+			}
 		}
-	}
+		s.workspace.ScheduleMarkdownAnalysis(ctx, uri)
 
-	// Trigger debounced analysis
-	s.workspace.ScheduleAnalysis(ctx, params.TextDocument.URI)
+	default:
+		s.logger.Debug("ignoring didChange for unsupported file type", slog.String("uri", uri))
+	}
 
 	return nil
 }
@@ -319,46 +368,7 @@ func (s *Server) applyIncrementalChanges(params *protocol.DidChangeTextDocumentP
 		return
 	}
 
-	// Normalize line endings to LF for consistent offset calculation.
-	// Windows clients may send CRLF (\r\n) which would cause incorrect
-	// byte offset calculations since rangeToByteOffset assumes LF-only.
-	// We normalize once and work with normalized text throughout.
-	text := normalizeLineEndings(doc.Text)
-	enc := s.workspace.PositionEncoding()
-
-	// Apply each change in order
-	for _, rawChange := range params.ContentChanges {
-		change, ok := rawChange.(protocol.TextDocumentContentChangeEvent)
-		if !ok {
-			continue
-		}
-		if change.Range == nil {
-			// No range means full replacement - normalize the new text too
-			text = normalizeLineEndings(change.Text)
-			continue
-		}
-
-		// Convert LSP range to byte offsets using the negotiated encoding
-		lines := strings.Split(text, "\n")
-
-		startOffset := s.rangeToByteOffset(lines, int(change.Range.Start.Line), int(change.Range.Start.Character), enc)
-		endOffset := s.rangeToByteOffset(lines, int(change.Range.End.Line), int(change.Range.End.Character), enc)
-
-		// Splice in the new text (normalize incoming change text too)
-		if startOffset <= len(text) && endOffset <= len(text) && startOffset <= endOffset {
-			text = text[:startOffset] + normalizeLineEndings(change.Text) + text[endOffset:]
-		} else {
-			// Invalid range: log warning and fall back to full-text replace.
-			// This prevents silent document desync when clients send bad ranges.
-			s.logger.Warn("incremental change has invalid range, using full-text fallback",
-				slog.String("uri", params.TextDocument.URI),
-				slog.Int("start_offset", startOffset),
-				slog.Int("end_offset", endOffset),
-				slog.Int("text_len", len(text)),
-			)
-			text = normalizeLineEndings(change.Text)
-		}
-	}
+	text := mergeIncrementalChanges(doc.Text, s.workspace.PositionEncoding(), params.ContentChanges, s.logger)
 
 	s.workspace.DocumentChanged(
 		params.TextDocument.URI,
@@ -367,9 +377,44 @@ func (s *Server) applyIncrementalChanges(params *protocol.DidChangeTextDocumentP
 	)
 }
 
+// mergeIncrementalChanges applies incremental content changes to currentText
+// and returns the merged result. It is a pure function with no side effects.
+func mergeIncrementalChanges(currentText string, enc PositionEncoding, changes []any, logger *slog.Logger) string {
+	text := normalizeLineEndings(currentText)
+
+	for _, rawChange := range changes {
+		change, ok := rawChange.(protocol.TextDocumentContentChangeEvent)
+		if !ok {
+			continue
+		}
+		if change.Range == nil {
+			text = normalizeLineEndings(change.Text)
+			continue
+		}
+
+		lines := strings.Split(text, "\n")
+		startOffset := rangeToByteOffset(lines, int(change.Range.Start.Line), int(change.Range.Start.Character), enc)
+		endOffset := rangeToByteOffset(lines, int(change.Range.End.Line), int(change.Range.End.Character), enc)
+
+		if startOffset <= len(text) && endOffset <= len(text) && startOffset <= endOffset {
+			text = text[:startOffset] + normalizeLineEndings(change.Text) + text[endOffset:]
+		} else {
+			if logger != nil {
+				logger.Warn("incremental change has invalid range, using full-text fallback",
+					slog.Int("start_offset", startOffset),
+					slog.Int("end_offset", endOffset),
+					slog.Int("text_len", len(text)),
+				)
+			}
+			text = normalizeLineEndings(change.Text)
+		}
+	}
+	return text
+}
+
 // rangeToByteOffset converts an LSP position to a byte offset in the document.
 // The encoding parameter specifies how character positions are counted (UTF-16 or UTF-8).
-func (s *Server) rangeToByteOffset(lines []string, line, char int, enc PositionEncoding) int {
+func rangeToByteOffset(lines []string, line, char int, enc PositionEncoding) int {
 	offset := 0
 
 	// Sum lengths of preceding lines (including newlines)
@@ -408,15 +453,24 @@ func normalizeLineEndings(text string) string {
 
 // textDocumentDidClose handles textDocument/didClose.
 func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
-	s.logger.Debug("textDocument/didClose",
-		slog.String("uri", params.TextDocument.URI),
-	)
+	uri := params.TextDocument.URI
+	s.logger.Debug("textDocument/didClose", slog.String("uri", uri))
 
 	var notify Notifier
 	if ctx != nil {
 		notify = func(method string, params any) { ctx.Notify(method, params) }
 	}
-	s.workspace.DocumentClosed(notify, params.TextDocument.URI)
+
+	switch {
+	case isYammmURI(uri):
+		s.workspace.DocumentClosed(notify, uri)
+
+	case isMarkdownURI(uri):
+		s.workspace.MarkdownDocumentClosed(notify, uri)
+
+	default:
+		s.logger.Debug("ignoring didClose for unsupported file type", slog.String("uri", uri))
+	}
 
 	return nil
 }

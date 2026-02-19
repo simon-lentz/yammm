@@ -182,13 +182,24 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //   - error == nil && snapshot.Result.OK(): Success. The schema is valid.
 //     The snapshot may still contain warnings (check Result.Warnings()).
 //
+// The opts parameter accepts optional [load.Option] values that are forwarded
+// to [load.LoadSourcesWithEntry]. For example, callers may pass
+// [load.WithDisallowImports] to reject import declarations.
+//
+// Source-registry invariance: The Analyzer creates its own [source.Registry],
+// pre-registers overlay content, and stores it in the resulting [Snapshot].
+// This registry is authoritative for position conversion and symbol indexing.
+// The Analyzer always appends [load.WithSourceRegistry] after caller-supplied
+// opts (last-write-wins), so callers must not pass [load.WithSourceRegistry]
+// — it will be silently overridden.
+//
 // The overlays map provides in-memory content that takes precedence over
 // disk files. Keys should be canonical absolute paths (matching SourceID.String()).
 // Files not in overlays are read from disk during import resolution.
 //
 // The ctx parameter supports cancellation; if cancelled, Analyze returns
 // early with a partial or nil snapshot.
-func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string) (*Snapshot, error) {
+func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, opts ...load.Option) (*Snapshot, error) {
 	a.logger.Debug("starting analysis",
 		slog.String("entry", entryPath),
 		slog.String("module_root", moduleRoot),
@@ -223,12 +234,16 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	// Perform the load with explicit entry path.
 	// This ensures the correct document is analyzed even when multiple
 	// documents are open (overlays from different files).
+	// Caller opts applied first; Analyzer's registry always wins (appended last).
+	allOpts := make([]load.Option, len(opts), len(opts)+1)
+	copy(allOpts, opts)
+	allOpts = append(allOpts, load.WithSourceRegistry(sourceRegistry))
 	schemaResult, diagResult, loadErr := load.LoadSourcesWithEntry(
 		ctx,
 		sources,
 		entryPath,
 		moduleRoot,
-		load.WithSourceRegistry(sourceRegistry),
+		allOpts...,
 	)
 
 	entrySourceID, idErr := location.SourceIDFromAbsolutePath(entryPath)

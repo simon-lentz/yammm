@@ -21,7 +21,7 @@ func newTestHarness(t *testing.T, root string) *testutil.Harness {
 
 	// Use silent logging for tests
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	commonlog.SetMaxLevel(commonlog.None)
+	silenceCommonLog.Do(func() { commonlog.Configure(0, nil) })
 
 	// Create server with test configuration
 	server := NewServer(logger, Config{
@@ -548,8 +548,7 @@ type User extends types.Entity {
 // =============================================================================
 
 func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
-	// Not parallel: newTestHarness calls NewServer which calls commonlog.Configure,
-	// which has a known data race in the commonlog library when called concurrently.
+	t.Parallel()
 
 	unformatted, err := os.ReadFile("../testdata/lsp/formatting/unformatted.yammm")
 	if err != nil {
@@ -593,8 +592,7 @@ func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 }
 
 func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
-	// Not parallel: NewServer calls commonlog.Configure which has a known
-	// data race in the commonlog library when called concurrently.
+	t.Parallel()
 
 	// CJK characters: 3 bytes UTF-8, 1 UTF-16 code unit each.
 	// Emoji 😀: 4 bytes UTF-8, 2 UTF-16 code units (surrogate pair).
@@ -612,8 +610,7 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Not parallel: NewServer calls commonlog.Configure which has a
-			// known data race in the commonlog library when called concurrently.
+			t.Parallel()
 
 			tmpDir := t.TempDir()
 			filePath := filepath.Join(tmpDir, "test.yammm")

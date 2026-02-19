@@ -13,40 +13,105 @@ import (
 func (s *Server) textDocumentDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
 	uri := params.TextDocument.URI
 
-	s.logger.Debug("documentSymbol request",
-		"uri", uri,
-	)
+	s.logger.Debug("documentSymbol request", "uri", uri)
+
+	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
+		return s.markdownDocumentSymbols(mdSnap), nil
+	}
 
 	snapshot := s.workspace.LatestSnapshot(uri)
 	if snapshot == nil {
 		return nil, nil
 	}
 
-	// Get document snapshot for canonical SourceID (symlink-resolved at open time)
 	doc := s.workspace.GetDocumentSnapshot(uri)
 	if doc == nil {
 		return nil, nil
 	}
 
-	// Log staleness for debugging (per design doc §3.5, we still serve stale data)
+	symbols := s.documentSymbolsFor(snapshot, doc)
+	return symbols, nil
+}
+
+// markdownDocumentSymbols returns document symbols from all code blocks in a markdown file.
+// Unlike cursor-centric handlers, this iterates all blocks and aggregates symbols.
+func (s *Server) markdownDocumentSymbols(mdSnap *MarkdownDocumentSnapshot) []protocol.DocumentSymbol {
+	var allSymbols []protocol.DocumentSymbol
+
+	for i, snapshot := range mdSnap.Snapshots {
+		if snapshot == nil || i >= len(mdSnap.Blocks) {
+			continue
+		}
+
+		blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[i])
+		symbols := s.documentSymbolsFor(snapshot, blockDocSnap)
+		if len(symbols) > 0 {
+			remapped := remapDocumentSymbolRanges(symbols, mdSnap, i)
+			allSymbols = append(allSymbols, remapped...)
+		}
+	}
+
+	return allSymbols
+}
+
+// remapDocumentSymbolRanges remaps Range and SelectionRange of document symbols
+// from block-local coordinates to markdown coordinates. Recursively processes Children.
+// Returns nil for empty input. Creates copies to avoid mutating the originals.
+func remapDocumentSymbolRanges(symbols []protocol.DocumentSymbol, mdSnap *MarkdownDocumentSnapshot, blockIndex int) []protocol.DocumentSymbol {
+	if len(symbols) == 0 {
+		return nil
+	}
+
+	result := make([]protocol.DocumentSymbol, len(symbols))
+	for i, sym := range symbols {
+		result[i] = sym
+
+		// Remap Range
+		startLine, startChar := mdSnap.BlockPositionToMarkdown(blockIndex,
+			int(sym.Range.Start.Line), int(sym.Range.Start.Character))
+		endLine, endChar := mdSnap.BlockPositionToMarkdown(blockIndex,
+			int(sym.Range.End.Line), int(sym.Range.End.Character))
+		result[i].Range = protocol.Range{
+			Start: protocol.Position{Line: toUInteger(startLine), Character: toUInteger(startChar)},
+			End:   protocol.Position{Line: toUInteger(endLine), Character: toUInteger(endChar)},
+		}
+
+		// Remap SelectionRange
+		selStartLine, selStartChar := mdSnap.BlockPositionToMarkdown(blockIndex,
+			int(sym.SelectionRange.Start.Line), int(sym.SelectionRange.Start.Character))
+		selEndLine, selEndChar := mdSnap.BlockPositionToMarkdown(blockIndex,
+			int(sym.SelectionRange.End.Line), int(sym.SelectionRange.End.Character))
+		result[i].SelectionRange = protocol.Range{
+			Start: protocol.Position{Line: toUInteger(selStartLine), Character: toUInteger(selStartChar)},
+			End:   protocol.Position{Line: toUInteger(selEndLine), Character: toUInteger(selEndChar)},
+		}
+
+		// Recursively remap children
+		if len(sym.Children) > 0 {
+			result[i].Children = remapDocumentSymbolRanges(sym.Children, mdSnap, blockIndex)
+		}
+	}
+
+	return result
+}
+
+// documentSymbolsFor returns document symbols for the given document within a snapshot.
+// Returns nil when no symbols are available.
+func (s *Server) documentSymbolsFor(snapshot *Snapshot, doc *DocumentSnapshot) []protocol.DocumentSymbol {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for documentSymbol",
-			"uri", uri,
+			"uri", doc.URI,
 			"snapshot_version", snapshot.EntryVersion,
 			"doc_version", doc.Version,
 		)
 	}
 
-	// Get the symbol index for this source using canonical SourceID
 	idx := snapshot.SymbolIndexAt(doc.SourceID)
 	if idx == nil {
-		return nil, nil
+		return nil
 	}
 
-	// Build hierarchical document symbols
-	symbols := s.buildDocumentSymbols(idx, snapshot)
-
-	return symbols, nil
+	return s.buildDocumentSymbols(idx, snapshot)
 }
 
 // symbolParentKey creates a unique key for parent lookup to prevent name collisions.

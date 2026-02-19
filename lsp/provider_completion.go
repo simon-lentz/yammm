@@ -43,52 +43,80 @@ var builtinTypes = []string{
 //nolint:nilnil // LSP protocol: nil result means no completions
 func (s *Server) textDocumentCompletion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
 	uri := params.TextDocument.URI
-	pos := params.Position
 
 	s.logger.Debug("completion request",
 		"uri", uri,
-		"line", pos.Line,
-		"character", pos.Character,
+		"line", params.Position.Line,
+		"character", params.Position.Character,
 	)
+
+	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
+		return s.markdownCompletion(params, mdSnap)
+	}
 
 	snapshot := s.workspace.LatestSnapshot(uri)
 
-	// Get the document snapshot for context detection
 	doc := s.workspace.GetDocumentSnapshot(uri)
 	if doc == nil {
 		return nil, nil
 	}
 
-	// Log staleness for debugging (per design doc §3.5, we still serve stale data)
+	return s.completionAtPosition(snapshot, doc,
+		int(params.Position.Line), int(params.Position.Character))
+}
+
+// markdownCompletion handles completion requests within yammm code blocks in markdown files.
+//
+//nolint:nilnil // LSP protocol: nil result means no completions
+func (s *Server) markdownCompletion(params *protocol.CompletionParams, mdSnap *MarkdownDocumentSnapshot) (any, error) {
+	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
+	if blockPos == nil {
+		return nil, nil
+	}
+
+	// Extract snapshot (may be nil — completionAtPosition gracefully degrades
+	// to keywords, snippets, and built-in types without a snapshot).
+	var snapshot *Snapshot
+	if blockPos.BlockIndex < len(mdSnap.Snapshots) {
+		snapshot = mdSnap.Snapshots[blockPos.BlockIndex]
+	}
+
+	if blockPos.BlockIndex >= len(mdSnap.Blocks) {
+		return nil, nil
+	}
+	blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[blockPos.BlockIndex])
+
+	return s.completionAtPosition(snapshot, blockDocSnap, blockPos.LocalLine, blockPos.LocalChar)
+}
+
+// completionAtPosition returns completion items for the given position.
+// snapshot may be nil — graceful degradation provides keywords, snippets,
+// and built-in types without a schema.
+// The line and char parameters are LSP-encoding coordinates.
+func (s *Server) completionAtPosition(snapshot *Snapshot, doc *DocumentSnapshot, line, char int) (any, error) {
 	if snapshot != nil && snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for completion",
-			"uri", uri,
+			"uri", doc.URI,
 			"snapshot_version", snapshot.EntryVersion,
 			"doc_version", doc.Version,
 		)
 	}
 
-	// Convert UTF-16 character offset to byte offset for proper slicing.
-	// We use the ByteOffsetFromLSP helper for accurate conversion.
 	var byteOffset int
 	usedRegistry := false
 	if snapshot != nil && snapshot.Sources != nil {
 		if offset, ok := ByteOffsetFromLSP(
 			snapshot.Sources,
 			doc.SourceID,
-			int(pos.Line),
-			int(pos.Character),
+			line,
+			char,
 			s.workspace.PositionEncoding(),
 		); ok {
 			byteOffset = offset
 			usedRegistry = true
-			// Convert byte offset to position within line
-			lineStart, lineOk := snapshot.Sources.LineStartByte(doc.SourceID, int(pos.Line)+1)
+			lineStart, lineOk := snapshot.Sources.LineStartByte(doc.SourceID, line+1)
 			if lineOk {
 				byteOffset -= lineStart
-				// Defensive clamp to non-negative. With the current source.Registry,
-				// this cannot trigger (LineStartByte and ContentBySource use the same
-				// entry), but guards against future changes or edge cases.
 				if byteOffset < 0 {
 					byteOffset = 0
 				}
@@ -96,20 +124,13 @@ func (s *Server) textDocumentCompletion(_ *glsp.Context, params *protocol.Comple
 		}
 	}
 	if !usedRegistry {
-		// Fallback: compute byte offset from document text directly.
-		// This properly handles UTF-16 character offsets for non-ASCII content.
-		// Used when snapshot.Sources is nil or ByteOffsetFromLSP fails (stale position).
-		byteOffset = s.computeByteOffsetFromText(doc.Text, int(pos.Line), int(pos.Character))
+		byteOffset = s.computeByteOffsetFromText(doc.Text, line, char)
 	}
 
-	// Detect context from text around cursor
-	ctx := s.detectCompletionContext(doc, int(pos.Line), byteOffset)
+	ctx := s.detectCompletionContext(doc, line, byteOffset)
 
-	s.logger.Debug("completion context",
-		"context", ctx,
-	)
+	s.logger.Debug("completion context", "context", ctx)
 
-	// Build completions based on context
 	var items []protocol.CompletionItem
 
 	switch ctx {
@@ -124,17 +145,12 @@ func (s *Server) textDocumentCompletion(_ *glsp.Context, params *protocol.Comple
 	case ContextRelationTarget:
 		items = s.typeCompletions(snapshot, doc.SourceID)
 	case ContextImportPath:
-		// Import path completion would require filesystem scanning
-		// For now, just provide the snippet
 		items = s.importCompletions()
 	default:
-		// Provide a mix of likely completions
 		items = s.topLevelCompletions()
 	}
 
-	// Sort items for deterministic output
 	sort.Slice(items, func(i, j int) bool {
-		// Sort by sort text first, then label
 		if items[i].SortText != nil && items[j].SortText != nil {
 			return *items[i].SortText < *items[j].SortText
 		}
