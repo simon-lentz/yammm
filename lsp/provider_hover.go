@@ -17,12 +17,11 @@ import (
 //nolint:nilnil // LSP protocol: nil result means "no hover info"
 func (s *Server) textDocumentHover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
 	uri := params.TextDocument.URI
-	pos := params.Position
 
 	s.logger.Debug("hover request",
 		"uri", uri,
-		"line", pos.Line,
-		"character", pos.Character,
+		"line", params.Position.Line,
+		"character", params.Position.Character,
 	)
 
 	snapshot := s.workspace.LatestSnapshot(uri)
@@ -30,58 +29,58 @@ func (s *Server) textDocumentHover(_ *glsp.Context, params *protocol.HoverParams
 		return nil, nil
 	}
 
-	// Get document snapshot for canonical SourceID (symlink-resolved at open time)
 	doc := s.workspace.GetDocumentSnapshot(uri)
 	if doc == nil {
 		return nil, nil
 	}
 
-	// Log staleness for debugging (per design doc §3.5, we still serve stale data)
+	return s.hoverAtPosition(snapshot, doc,
+		int(params.Position.Line), int(params.Position.Character))
+}
+
+// hoverAtPosition returns hover info for the given position within a document.
+// The line and char parameters are LSP-encoding coordinates.
+// Returns nil, nil when no hover info is found.
+//
+//nolint:nilnil // LSP protocol: nil result means "no hover info"
+func (s *Server) hoverAtPosition(snapshot *Snapshot, doc *DocumentSnapshot, line, char int) (*protocol.Hover, error) {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for hover",
-			"uri", uri,
+			"uri", doc.URI,
 			"snapshot_version", snapshot.EntryVersion,
 			"doc_version", doc.Version,
 		)
 	}
 
-	// Get the symbol index for this source using canonical SourceID
 	idx := snapshot.SymbolIndexAt(doc.SourceID)
 	if idx == nil {
 		return nil, nil
 	}
 
-	// Convert LSP position to internal position using proper UTF-16 handling
 	internalPos, ok := PositionFromLSP(
 		snapshot.Sources,
 		doc.SourceID,
-		int(pos.Line),
-		int(pos.Character),
+		line,
+		char,
 		s.workspace.PositionEncoding(),
 	)
 	if !ok {
-		// Invalid position (stale line number, source not in registry)
 		return nil, nil
 	}
 
-	// First check for reference at position (e.g., extends, relation target)
 	ref := idx.ReferenceAtPosition(internalPos)
 	if ref != nil {
 		targetSym := snapshot.ResolveTypeReference(ref, doc.SourceID)
 		if targetSym != nil {
-			// When hovering a reference, use the reference's span (in the current document)
-			// for the hover range, not the target symbol's span (which may be in a different file).
 			return s.buildHoverForSymbolWithRange(targetSym, snapshot, &ref.Span)
 		}
 	}
 
-	// Check for symbol at position
 	sym := idx.SymbolAtPosition(internalPos)
 	if sym == nil {
 		return nil, nil
 	}
 
-	// For direct symbol hovers, use the symbol's own span
 	return s.buildHoverForSymbolWithRange(sym, snapshot, nil)
 }
 

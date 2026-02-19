@@ -13,40 +13,39 @@ import (
 func (s *Server) textDocumentDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
 	uri := params.TextDocument.URI
 
-	s.logger.Debug("documentSymbol request",
-		"uri", uri,
-	)
+	s.logger.Debug("documentSymbol request", "uri", uri)
 
 	snapshot := s.workspace.LatestSnapshot(uri)
 	if snapshot == nil {
 		return nil, nil
 	}
 
-	// Get document snapshot for canonical SourceID (symlink-resolved at open time)
 	doc := s.workspace.GetDocumentSnapshot(uri)
 	if doc == nil {
 		return nil, nil
 	}
 
-	// Log staleness for debugging (per design doc §3.5, we still serve stale data)
+	symbols := s.documentSymbolsFor(snapshot, doc)
+	return symbols, nil
+}
+
+// documentSymbolsFor returns document symbols for the given document within a snapshot.
+// Returns nil when no symbols are available.
+func (s *Server) documentSymbolsFor(snapshot *Snapshot, doc *DocumentSnapshot) []protocol.DocumentSymbol {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for documentSymbol",
-			"uri", uri,
+			"uri", doc.URI,
 			"snapshot_version", snapshot.EntryVersion,
 			"doc_version", doc.Version,
 		)
 	}
 
-	// Get the symbol index for this source using canonical SourceID
 	idx := snapshot.SymbolIndexAt(doc.SourceID)
 	if idx == nil {
-		return nil, nil
+		return nil
 	}
 
-	// Build hierarchical document symbols
-	symbols := s.buildDocumentSymbols(idx, snapshot)
-
-	return symbols, nil
+	return s.buildDocumentSymbols(idx, snapshot)
 }
 
 // symbolParentKey creates a unique key for parent lookup to prevent name collisions.
