@@ -1,0 +1,54 @@
+schema "non_lambda_builtins"
+
+// Tests non-lambda builtins called via pipe operator from .yammm source.
+// These exercise the VisitFcall -> callBuiltin path (Bug 1 regression).
+// Each invariant verifies correct transformation, not just non-emptiness.
+type Record {
+	id          String primary
+	name        String required
+	description String
+	code        String
+	score       Float
+
+	// --- String builtins via pipe ---
+	! "name_has_length" name -> Len > 0
+	! "description_when_present" description == _ || description -> Len > 0
+
+	// Trim: exact output, idempotence, and shrinkage checks
+	! "trim_exact" "  Alice  " -> Trim == "Alice"
+	! "trim_empty" "   " -> Trim == ""
+	! "trim_noop" "Alice" -> Trim == "Alice"
+	// Field: Trim is idempotent (double-trim == single-trim) and never grows the string
+	! "trim_idempotent" name -> Trim -> Trim == name -> Trim
+	! "trim_shrinks_or_equal" name -> Trim -> Len <= name -> Len
+
+	// Upper idempotence check (already discriminating)
+	! "code_upper_check" code == _ || code -> Upper == code
+
+	// --- Numeric builtins via pipe ---
+
+	// Floor: direction + integrality check (Ceil of an integer is itself)
+	! "score_floor"
+		score == _ ||
+		score -> Floor <= score &&
+		score -> Floor -> Ceil == score -> Floor
+
+	// Abs: exact behavior for positive and negative values
+	! "score_abs"
+		score == _ ||
+		score >= 0.0 &&
+		score -> Abs == score ||
+		score < 0.0 &&
+		score -> Abs == 0.0 - score
+
+	// --- Utility builtins ---
+	! "name_not_nil" name -> IsNil == false
+	! "name_type" name -> TypeOf == "string"
+
+	// --- Default: passthrough for non-nil, fallback for nil ---
+	! "desc_default_passthrough" description == _ || description -> Default("none") == description
+	! "desc_default_fallback" description != _ || description -> Default("none") == "none"
+
+	// StartsWith with positional arg
+	! "code_prefix" code == _ || code -> StartsWith("X")
+}

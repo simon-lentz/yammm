@@ -235,7 +235,7 @@ func builtinCount(ev builtinEvaluator, lhs any, _ []any, params []string, body e
 		paramName = params[0]
 	}
 
-	count := 0
+	var count int64
 	for _, elem := range slice {
 		childScope := scope.WithVar(paramName, elem)
 		val, err := ev.evaluate(body, childScope)
@@ -397,12 +397,12 @@ func builtinUnique(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expr
 func builtinLen(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	switch v := lhs.(type) {
 	case nil:
-		return 0, nil
+		return int64(0), nil
 	case string:
 		// Use rune count per SPEC: string length is counted in runes, not bytes
-		return utf8.RuneCountInString(v), nil
+		return int64(utf8.RuneCountInString(v)), nil
 	case []any:
-		return len(v), nil
+		return int64(len(v)), nil
 	}
 
 	rv := reflect.ValueOf(lhs)
@@ -413,16 +413,16 @@ func builtinLen(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 	switch rv.Kind() {
 	case reflect.Slice:
 		if rv.IsNil() {
-			return 0, nil
+			return int64(0), nil
 		}
-		return rv.Len(), nil
+		return int64(rv.Len()), nil
 	case reflect.Array:
-		return rv.Len(), nil
+		return int64(rv.Len()), nil
 	case reflect.Map:
 		if rv.IsNil() {
-			return 0, nil
+			return int64(0), nil
 		}
-		return rv.Len(), nil
+		return int64(rv.Len()), nil
 	}
 
 	return nil, fmt.Errorf("Len() unsupported for type %T", lhs)
@@ -435,7 +435,7 @@ func builtinSum(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 	}
 
 	if len(slice) == 0 {
-		return 0, nil
+		return int64(0), nil
 	}
 
 	// Determine if we should return int64 or float64 based on input types
@@ -742,7 +742,7 @@ func builtinCompare(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.
 	if err != nil {
 		return nil, fmt.Errorf("compare: %w", err)
 	}
-	return cmp, nil
+	return int64(cmp), nil
 }
 
 // --- String Builtin implementations ---

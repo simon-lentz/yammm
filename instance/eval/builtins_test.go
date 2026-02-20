@@ -31,7 +31,7 @@ func TestBuiltin_Len(t *testing.T) {
 	tests := []struct {
 		name     string
 		val      any
-		expected int
+		expected int64
 	}{
 		{"string", "hello", 5},
 		{"empty_string", "", 0},
@@ -281,7 +281,7 @@ func TestBuiltin_Compare(t *testing.T) {
 		name     string
 		left     any
 		right    any
-		expected int
+		expected int64
 	}{
 		{"equal", int64(5), int64(5), 0},
 		{"less", int64(3), int64(5), -1},
@@ -532,7 +532,7 @@ func TestBuiltin_Count(t *testing.T) {
 		e := makeBuiltinCall(list, "Count", []string{"x"}, body)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 3, result) // Count returns int, not int64
+		assert.Equal(t, int64(3), result)
 	})
 
 	t.Run("empty_list", func(t *testing.T) {
@@ -540,14 +540,14 @@ func TestBuiltin_Count(t *testing.T) {
 		e := makeBuiltinCall(emptyList, "Count", []string{"x"}, body)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 0, result) // Count returns int, not int64
+		assert.Equal(t, int64(0), result)
 	})
 
 	t.Run("nil_receiver", func(t *testing.T) {
 		e := makeBuiltinCall(expr.NewLiteral(nil), "Count", []string{"x"}, body)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 0, result) // Returns int(0), not int64(0)
+		assert.Equal(t, int64(0), result)
 	})
 }
 
@@ -732,7 +732,7 @@ func TestBuiltin_Len_WithSlice(t *testing.T) {
 	e := makeBuiltinCall(list, "Len", nil, nil)
 	result, err := ev.Evaluate(e, scope)
 	require.NoError(t, err)
-	assert.Equal(t, 3, result)
+	assert.Equal(t, int64(3), result)
 }
 
 func TestBuiltin_Len_Unsupported(t *testing.T) {
@@ -833,7 +833,7 @@ func TestBuiltin_Compare_Strings(t *testing.T) {
 		)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, -1, result)
+		assert.Equal(t, int64(-1), result)
 	})
 
 	t.Run("equal", func(t *testing.T) {
@@ -844,7 +844,7 @@ func TestBuiltin_Compare_Strings(t *testing.T) {
 		)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 0, result)
+		assert.Equal(t, int64(0), result)
 	})
 
 	t.Run("greater", func(t *testing.T) {
@@ -855,7 +855,7 @@ func TestBuiltin_Compare_Strings(t *testing.T) {
 		)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 1, result)
+		assert.Equal(t, int64(1), result)
 	})
 }
 
@@ -941,7 +941,7 @@ func TestBuiltin_Count_WithPredicate(t *testing.T) {
 	e := makeBuiltinCall(list, "Count", []string{"x"}, body)
 	result, err := ev.Evaluate(e, scope)
 	require.NoError(t, err)
-	assert.Equal(t, 2, result)
+	assert.Equal(t, int64(2), result)
 }
 
 // --- New Collection Builtins Tests ---
@@ -981,14 +981,14 @@ func TestBuiltin_Sum(t *testing.T) {
 		e := makeBuiltinCall(list, "Sum", nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 0, result) // Returns int(0) for empty
+		assert.Equal(t, int64(0), result)
 	})
 
 	t.Run("nil", func(t *testing.T) {
 		e := makeBuiltinCall(expr.NewLiteral(nil), "Sum", nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 0, result) // Returns int(0) for nil
+		assert.Equal(t, int64(0), result)
 	})
 }
 

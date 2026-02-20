@@ -1,0 +1,61 @@
+schema "string_builtins"
+
+// Tests string builtins: Lower, TrimPrefix, TrimSuffix, Join (via Split chain),
+// Substring, Match (capture group extraction), and the =~ regex match operator.
+// Literal-based invariants verify exact transformation outputs.
+// Field-based invariants prove builtins work on instance data with discriminating assertions.
+type StringRecord {
+	id     String primary
+	text   String required
+	csv    String
+	padded String
+
+	// --- Lower: converts string to lowercase ---
+
+	// Exact output for known input
+	! "lower_exact" "Hello World" -> Lower == "hello world"
+	! "lower_empty" "" -> Lower == ""
+	// Field: result contains no uppercase letters
+	! "lower_field" text -> Lower =~ /^[^A-Z]*$/
+
+	// --- TrimPrefix: removes prefix if present, unchanged otherwise ---
+
+	! "trim_prefix_removes" "Hello World" -> TrimPrefix("Hello") == " World"
+	! "trim_prefix_noop" "Farewell" -> TrimPrefix("Hello") == "Farewell"
+	! "trim_prefix_full" "Hello" -> TrimPrefix("Hello") == ""
+	// Field: if text starts with prefix, result no longer does
+	! "trim_prefix_field"
+		text -> StartsWith("Hello") == false ||
+		text -> TrimPrefix("Hello") -> StartsWith("Hello") == false
+
+	// --- TrimSuffix: removes suffix if present, unchanged otherwise ---
+
+	! "trim_suffix_removes" "Hello World" -> TrimSuffix("World") == "Hello "
+	! "trim_suffix_noop" "Farewell" -> TrimSuffix("World") == "Farewell"
+	! "trim_suffix_full" "World" -> TrimSuffix("World") == ""
+	// Field: if text ends with suffix, result no longer does
+	! "trim_suffix_field"
+		text -> EndsWith("World") == false ||
+		text -> TrimSuffix("World") -> EndsWith("World") == false
+
+	// --- Split + Join: split by one separator, rejoin with another ---
+
+	! "join_exact" "a,b,c" -> Split(",") -> Join("-") == "a-b-c"
+	! "join_single" "hello" -> Split(",") -> Join("-") == "hello"
+	// Field: split-rejoin preserves length (single-char separators)
+	! "join_field" csv == _ || csv -> Split(",") -> Join("-") -> Len == csv -> Len
+
+	// --- Substring: extract substring by index range ---
+
+	! "substring_exact" "Hello World" -> Substring(0, 5) == "Hello"
+	! "substring_mid" "Hello World" -> Substring(6, 11) == "World"
+	! "substring_empty" "Hello" -> Substring(5, 5) == ""
+	// Field: result length bounded by requested range (catches no-op on long input)
+	! "substring_field" text -> Substring(0, 5) -> Len <= 5
+
+	// --- Match: regex capture group extraction ---
+	! "match" text -> Match(/^(H)/) != _
+
+	// --- =~ regex match operator ---
+	! "regex_match" text =~ /^H/
+}

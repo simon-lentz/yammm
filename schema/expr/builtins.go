@@ -31,7 +31,7 @@ func defaultBuiltinNames() map[string]struct{} {
 		"Contains":  {}, // Contains(val) - checks if value is in collection
 
 		// String operations
-		"Length":     {}, // Length() - string or collection length
+		"Len":        {}, // Len() - string or collection length
 		"Upper":      {}, // Upper() - uppercase string
 		"Lower":      {}, // Lower() - lowercase string
 		"Trim":       {}, // Trim() - trim whitespace
@@ -43,25 +43,28 @@ func defaultBuiltinNames() map[string]struct{} {
 		"StartsWith": {}, // StartsWith(prefix) - checks prefix
 		"EndsWith":   {}, // EndsWith(suffix) - checks suffix
 		"Substring":  {}, // Substring(start, end?) - extracts substring
+		"Match":      {}, // Match(pattern) - regex match with captures
 
 		// Type checking
 		"TypeOf": {}, // TypeOf() - returns type name
 		"IsNil":  {}, // IsNil() - checks for nil
 
 		// Math
-		"Abs":   {}, // Abs() - absolute value
-		"Floor": {}, // Floor() - floor of float
-		"Ceil":  {}, // Ceil() - ceiling of float
-		"Round": {}, // Round() - round to nearest int
+		"Abs":     {}, // Abs() - absolute value
+		"Floor":   {}, // Floor() - floor of float
+		"Ceil":    {}, // Ceil() - ceiling of float
+		"Round":   {}, // Round() - round to nearest int
+		"Compare": {}, // Compare(a, b) - three-way comparison
 
-		// Date/Time
-		"Now":       {}, // Now() - current timestamp
-		"ParseDate": {}, // ParseDate(format) - parses date string
-		"Format":    {}, // Format(layout) - formats date/time
+		// Control flow
+		"Then": {}, // Then(fn) - execute body when non-nil
+		"Lest": {}, // Lest(fn) - execute body when nil
+		"With": {}, // With(fn) - bind value and execute
 
 		// Utilities
 		"Default":  {}, // Default(val) - returns val if nil
 		"Coalesce": {}, // Coalesce(vals...) - first non-nil
+		"Compact":  {}, // Compact() - remove nil entries
 	}
 }
 

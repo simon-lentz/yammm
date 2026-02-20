@@ -1,0 +1,65 @@
+schema "numeric_builtins"
+
+// Tests numeric builtins: Ceil, Round, Min (two-value + collection),
+// Max (two-value + collection), Compare.
+// Literal-based invariants verify exact algorithm outputs for known inputs.
+// Field-based invariants prove builtins work on instance data with
+// discriminating assertions that catch incorrect implementations.
+type NumericRecord {
+	id      String primary
+	int_val Integer required
+	flt_val Float required
+
+	// --- Ceil: smallest integer >= input ---
+
+	// Exact outputs for known inputs
+	! "ceil_positive_frac" 3.7 -> Ceil == 4.0
+	! "ceil_negative_frac" -2.3 -> Ceil == -2.0
+	! "ceil_half" 0.5 -> Ceil == 1.0
+	! "ceil_already_int" 5.0 -> Ceil == 5.0
+	// Field: result is in [flt_val, flt_val+1) — proves directionality and tightness
+	! "ceil_field" flt_val -> Ceil >= flt_val && flt_val -> Ceil < flt_val + 1.0
+
+	// --- Round: banker's rounding (round half to even) ---
+
+	// Exact outputs including half-to-even edge cases
+	! "round_up" 3.7 -> Round == 4.0
+	! "round_down" 3.2 -> Round == 3.0
+	! "round_negative" -2.3 -> Round == -2.0
+	! "round_half_even_to_zero" 0.5 -> Round == 0.0
+	! "round_half_even_to_two" 1.5 -> Round == 2.0
+	! "round_already_int" 5.0 -> Round == 5.0
+	// Field: result must be an integer — Floor(Round(x)) == Round(x)
+	! "round_field" flt_val -> Round -> Floor == flt_val -> Round
+
+	// --- Min (two-value): returns the smaller of two values ---
+
+	// Exact outputs prove both lhs-wins and rhs-wins paths
+	! "min_lhs_smaller" 3 -> Min(10) == 3
+	! "min_rhs_smaller" 10 -> Min(3) == 3
+	! "min_equal" 5 -> Min(5) == 5
+	// Field: result <= both operands (arg=10 exercises both selection paths)
+	! "min_field" int_val -> Min(10) <= int_val && int_val -> Min(10) <= 10
+
+	// --- Max (two-value): returns the larger of two values ---
+
+	// Exact outputs prove both lhs-wins and rhs-wins paths
+	! "max_lhs_larger" 10 -> Max(3) == 10
+	! "max_rhs_larger" 3 -> Max(10) == 10
+	! "max_equal" 5 -> Max(5) == 5
+	// Field: result >= both operands (arg=10 exercises both selection paths)
+	! "max_field" int_val -> Max(10) >= int_val && int_val -> Max(10) >= 10
+
+	// --- Compare: three-way comparison (-1, 0, 1) ---
+
+	// Exact outputs for each comparison outcome
+	! "compare_gt" 42 -> Compare(0) == 1
+	! "compare_eq" 0 -> Compare(0) == 0
+	! "compare_lt" -5 -> Compare(0) == -1
+	// Field: fails for negative int_val (discriminating fail case)
+	! "compare_field" int_val -> Compare(0) >= 0
+
+	// --- Min/Max (collection): exact values from known literal ---
+	! "min_collection" [3, 1, 2] -> Min == 1
+	! "max_collection" [3, 1, 2] -> Max == 3
+}

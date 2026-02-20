@@ -1,0 +1,43 @@
+schema "positional_args_builtins"
+
+// Tests builtins with positional arguments called from .yammm source.
+// Each invariant verifies correct transformation or value selection,
+// not just non-emptiness.
+type Entry {
+	id       String primary
+	name     String required
+	greeting String
+	value    Integer
+
+	// --- StartsWith / EndsWith: boolean prefix/suffix checks ---
+	! "name_starts_hello" name -> StartsWith("Hello")
+	! "name_ends_world" name -> EndsWith("World")
+
+	// --- Replace: replaces all occurrences of a substring ---
+
+	// Exact outputs for known inputs
+	! "replace_exact" "Good Morning" -> Replace(" ", "") == "GoodMorning"
+	! "replace_noop" "Hello" -> Replace(" ", "") == "Hello"
+	// Field: result is shorter when input contains the replaced substring
+	! "replace_field" greeting == _ || greeting -> Replace(" ", "") -> Len < greeting -> Len
+
+	// --- Default: returns fallback when nil ---
+
+	// Exact outputs for known inputs
+	! "default_non_nil" "Hello" -> Default("Fallback") == "Hello"
+	! "default_nil" _ -> Default("Hi") == "Hi"
+	// Field: non-nil passthrough — value returned unchanged
+	! "default_passthrough" greeting == _ || greeting -> Default("Hi") == greeting
+	// Field: nil fallback — exact fallback value returned
+	! "default_fallback" greeting != _ || greeting -> Default("Hi") == "Hi"
+
+	// --- Coalesce: returns first non-nil value ---
+
+	// Exact outputs for known inputs
+	! "coalesce_non_nil" 42 -> Coalesce(0) == 42
+	! "coalesce_nil" _ -> Coalesce(0) == 0
+	// Field: non-nil passthrough — value returned unchanged
+	! "coalesce_passthrough" value == _ || value -> Coalesce(0) == value
+	// Field: nil fallback — exact fallback value returned
+	! "coalesce_fallback" value != _ || value -> Coalesce(0) == 0
+}

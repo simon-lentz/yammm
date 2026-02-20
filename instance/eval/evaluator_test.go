@@ -628,7 +628,7 @@ func TestEvaluator_MemberAccess(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 5, result)
+		assert.Equal(t, int64(5), result)
 	})
 
 	t.Run("slice_len", func(t *testing.T) {
@@ -646,7 +646,7 @@ func TestEvaluator_MemberAccess(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 3, result)
+		assert.Equal(t, int64(3), result)
 	})
 }
 
@@ -999,7 +999,7 @@ func TestEvaluator_BuiltinLen(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 0, result)
+		assert.Equal(t, int64(0), result)
 	})
 
 	t.Run("string_len", func(t *testing.T) {
@@ -1010,7 +1010,7 @@ func TestEvaluator_BuiltinLen(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 5, result)
+		assert.Equal(t, int64(5), result)
 	})
 
 	t.Run("array_len", func(t *testing.T) {
@@ -1027,7 +1027,7 @@ func TestEvaluator_BuiltinLen(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 3, result)
+		assert.Equal(t, int64(3), result)
 	})
 }
 
@@ -1053,7 +1053,7 @@ func TestEvaluator_DirectBuiltinCall(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 5, result)
+		assert.Equal(t, int64(5), result)
 	})
 
 	t.Run("abs_direct", func(t *testing.T) {
@@ -1476,7 +1476,7 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 5, result)
+		assert.Equal(t, int64(5), result)
 	})
 
 	t.Run("typed_slice_string", func(t *testing.T) {
@@ -1488,7 +1488,7 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 3, result)
+		assert.Equal(t, int64(3), result)
 	})
 
 	t.Run("nil_slice_returns_zero", func(t *testing.T) {
@@ -1500,7 +1500,7 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 0, result)
+		assert.Equal(t, int64(0), result)
 	})
 
 	t.Run("array_type", func(t *testing.T) {
@@ -1512,7 +1512,7 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 4, result)
+		assert.Equal(t, int64(4), result)
 	})
 
 	t.Run("map_type", func(t *testing.T) {
@@ -1524,7 +1524,7 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 2, result)
+		assert.Equal(t, int64(2), result)
 	})
 
 	t.Run("nil_map_returns_zero", func(t *testing.T) {
@@ -1536,7 +1536,7 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 0, result)
+		assert.Equal(t, int64(0), result)
 	})
 
 	t.Run("unsupported_type_errors", func(t *testing.T) {
@@ -1839,7 +1839,7 @@ func TestEvaluator_MinMaxCompare(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, -1, result) // 5 < 10
+		assert.Equal(t, int64(-1), result) // 5 < 10
 	})
 
 	t.Run("compare_equal", func(t *testing.T) {
@@ -1850,7 +1850,7 @@ func TestEvaluator_MinMaxCompare(t *testing.T) {
 		}
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
-		assert.Equal(t, 0, result)
+		assert.Equal(t, int64(0), result)
 	})
 }
 

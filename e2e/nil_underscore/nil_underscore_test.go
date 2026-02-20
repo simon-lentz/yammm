@@ -110,14 +110,10 @@ func TestE2E_NilUnderscore(t *testing.T) {
 	}
 }
 
-// TestE2E_BuiltinLen_Bug1 reproduces Issue 9 Bug 1: VisitFcall body normalization
-// breaks callBuiltin validation. The Len builtin called via pipe operator
-// (description -> Len) fails with "Len does not accept a lambda expression"
-// because VisitFcall wraps the missing body as NewLiteral(nil) (non-nil pointer).
-//
-// This test documents the CURRENT BROKEN behavior. When Bug 1 is fixed,
-// the assertions marked "BUG 1" should be inverted (see inline comments).
-func TestE2E_BuiltinLen_Bug1(t *testing.T) {
+// TestE2E_BuiltinLen verifies that the Len builtin works correctly via pipe
+// operator from .yammm source text. This was previously broken by Bug 1
+// (VisitFcall body normalization), which has been fixed.
+func TestE2E_BuiltinLen(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -130,31 +126,16 @@ func TestE2E_BuiltinLen_Bug1(t *testing.T) {
 
 	validator := instance.NewValidator(s)
 
-	t.Run("non_nil_description_triggers_bug", func(t *testing.T) {
+	t.Run("non_empty_description_passes", func(t *testing.T) {
 		t.Parallel()
 		// Record with description="A non-empty description".
 		// The invariant: description == _ || description -> Len > 0
 		// description != nil, so the LHS of || is false.
-		// The RHS evaluates: description -> Len > 0
-		// Bug 1: Len receives a non-nil body (NewLiteral(nil)) and errors.
-		_, failure, err := validator.ValidateOne(ctx, "Record", records[0])
+		// The RHS evaluates: description -> Len > 0 → 24 > 0 → true.
+		valid, failure, err := validator.ValidateOne(ctx, "Record", records[0])
 		require.NoError(t, err)
-
-		// BUG 1: Should pass (Len("A non-empty description") == 24 > 0),
-		// but fails with E_EVAL_ERROR due to body normalization.
-		require.NotNil(t, failure, "Bug 1: Len rejects the phantom body")
-
-		hasEvalError := false
-		for issue := range failure.Result.Issues() {
-			if issue.Code() == diag.E_EVAL_ERROR {
-				hasEvalError = true
-				break
-			}
-		}
-		assert.True(t, hasEvalError,
-			"expected E_EVAL_ERROR from Len body rejection, got: %v", failure.Result.Messages())
-		assert.Contains(t, failure.Result.Messages()[0], "does not accept a lambda expression",
-			"Bug 1 signature error message")
+		assert.Nil(t, failure, "non-empty description should pass (Len > 0)")
+		assert.NotNil(t, valid)
 	})
 
 	t.Run("nil_description_short_circuits", func(t *testing.T) {
@@ -162,35 +143,31 @@ func TestE2E_BuiltinLen_Bug1(t *testing.T) {
 		// Record with no description field (nil).
 		// The invariant: description == _ || description -> Len > 0
 		// description == nil → LHS is true → || short-circuits.
-		// Len is never called, so Bug 1 is not triggered.
 		valid, failure, err := validator.ValidateOne(ctx, "Record", records[1])
 		require.NoError(t, err)
 		assert.Nil(t, failure, "nil description short-circuits past Len")
 		assert.NotNil(t, valid)
 	})
 
-	t.Run("empty_description_triggers_bug", func(t *testing.T) {
+	t.Run("empty_description_fails_invariant", func(t *testing.T) {
 		t.Parallel()
 		// Record with description="".
 		// description != nil → LHS of || is false.
-		// RHS evaluates: "" -> Len > 0
-		// Bug 1: Len errors with "does not accept a lambda expression".
-		// Note: The error is E_EVAL_ERROR, NOT E_INVARIANT_FAIL.
-		_, failure, err := validator.ValidateOne(ctx, "Record", records[2])
+		// RHS evaluates: "" -> Len > 0 → 0 > 0 → false.
+		// Invariant fails with E_INVARIANT_FAIL.
+		valid, failure, err := validator.ValidateOne(ctx, "Record", records[2])
 		require.NoError(t, err)
+		assert.Nil(t, valid, "empty description should fail invariant")
+		require.NotNil(t, failure, "expected validation failure for empty description")
 
-		// BUG 1: Should fail with E_INVARIANT_FAIL (Len("") == 0, not > 0),
-		// but instead fails with E_EVAL_ERROR.
-		require.NotNil(t, failure, "failure expected (either bug or correct invariant)")
-
-		hasEvalError := false
+		hasInvariantFailure := false
 		for issue := range failure.Result.Issues() {
-			if issue.Code() == diag.E_EVAL_ERROR {
-				hasEvalError = true
+			if issue.Code() == diag.E_INVARIANT_FAIL {
+				hasInvariantFailure = true
 				break
 			}
 		}
-		assert.True(t, hasEvalError,
-			"Bug 1: expected E_EVAL_ERROR, got: %v", failure.Result.Messages())
+		assert.True(t, hasInvariantFailure,
+			"expected E_INVARIANT_FAIL, got: %v", failure.Result.Messages())
 	})
 }

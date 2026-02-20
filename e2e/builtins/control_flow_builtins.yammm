@@ -1,0 +1,42 @@
+schema "control_flow_builtins"
+
+// Tests control flow builtins: Then, Lest, With.
+// Each invariant verifies correct transformation or value — not just non-emptiness.
+type ControlRecord {
+	id       String primary
+	name     String required
+	nickname String
+
+	// --- Then: execute body when non-nil, return nil when nil ---
+
+	// Verify body applies Upper transformation (not a no-op)
+	! "then_transforms" name -> Then |$x| { $x -> Upper } =~ /^[A-Z]+$/
+
+	// Verify lambda parameter receives the correct input value
+	! "then_binds_value" name -> Then |$x| { $x } == name
+
+	// Verify nil input short-circuits to nil (body must NOT execute)
+	! "then_nil_returns_nil" nickname != _ || nickname -> Then |$x| { "SHOULD_NOT_APPEAR" } == _
+
+	// Verify body executes for non-nil optional values
+	! "then_non_nil_executes" nickname == _ || nickname -> Then |$x| { $x -> Upper } =~ /^[A-Z]+$/
+
+	// --- Lest: return lhs when non-nil, evaluate body when nil ---
+
+	// Verify non-nil input passes through unchanged
+	! "lest_passthrough" nickname == _ || nickname -> Lest { "FALLBACK" } == nickname
+
+	// Verify nil input evaluates body and returns exact fallback value
+	! "lest_fallback" nickname != _ || nickname -> Lest { "FALLBACK" } == "FALLBACK"
+
+	// --- With: unconditionally bind value and execute body ---
+
+	// Verify body applies Lower transformation (distinct from Then's Upper)
+	! "with_transforms" name -> With |$x| { $x -> Lower } =~ /^[a-z]+$/
+
+	// Verify lambda parameter receives the correct input value
+	! "with_binds_value" name -> With |$x| { $x } == name
+
+	// Verify body executes even when input is nil (unlike Then)
+	! "with_nil_executes" nickname -> With |$x| { "REPLACED" } == "REPLACED"
+}

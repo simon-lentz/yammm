@@ -340,8 +340,13 @@ func (e *Evaluator) evalMethodCall(receiver any, methodName string, rest []expr.
 			params = paramList
 			continue
 		}
-		// Otherwise it's the body expression
-		body = child
+		// Otherwise it's the body expression.
+		// VisitFcall normalizes missing bodies to NewLiteral(nil) (a non-nil
+		// *Literal wrapping nil). Treat that as "no body" so callBuiltin's
+		// acceptBody validation works correctly for source-compiled ASTs.
+		if !expr.IsNilLiteral(child) {
+			body = child
+		}
 	}
 
 	// Use unified validation and dispatch
@@ -518,8 +523,13 @@ func (e *Evaluator) evalBuiltin(def builtinDef, children []expr.Expression, scop
 			continue
 		}
 
-		// Otherwise it's the body expression (don't evaluate yet)
-		body = child
+		// Otherwise it's the body expression (don't evaluate yet).
+		// VisitFcall normalizes missing bodies to NewLiteral(nil) (a non-nil
+		// *Literal wrapping nil). Treat that as "no body" so callBuiltin's
+		// acceptBody validation works correctly for source-compiled ASTs.
+		if !expr.IsNilLiteral(child) {
+			body = child
+		}
 	}
 
 	// Use unified validation and dispatch

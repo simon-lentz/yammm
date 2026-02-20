@@ -1,0 +1,82 @@
+schema "lambda_builtins"
+
+// Tests lambda-accepting builtins: All, Any, AllOrNone, Filter, Map, Count,
+// Reduce. Each builtin is tested with true/false/edge-case literals to prevent
+// semantic confusion (e.g., All behaving like Any, AllOrNone behaving like All).
+// Filter and Map use exact list equality to verify full output correctness.
+type LambdaRecord {
+	id   String primary
+	name String required
+	csv  String
+
+	// --- All: true iff every element satisfies the predicate ---
+
+	// All match → true
+	! "all_true" [1, 2, 3] -> All |$x| { $x > 0 }
+	// Not all match → false (discriminates from Any, which returns true here)
+	! "all_mixed_false" [1, -1, 3] -> All |$x| { $x > 0 } == false
+	// Empty → true (vacuous truth)
+	! "all_empty" [] -> All |$x| { $x > 0 }
+
+	// --- Any: true iff at least one element satisfies the predicate ---
+
+	// Some match → true (mixed input discriminates from All)
+	! "any_true" [0, 0, 1] -> Any |$x| { $x > 0 }
+	// None match → false (discriminates from always-true)
+	! "any_none_false" [0, 0, 0] -> Any |$x| { $x > 0 } == false
+	// Empty → false
+	! "any_empty" [] -> Any |$x| { $x > 0 } == false
+
+	// --- AllOrNone: true iff all match OR none match ---
+
+	// All match → true
+	! "all_or_none_all" [2, 4, 6] -> AllOrNone |$x| { $x % 2 == 0 }
+	// None match → true (discriminates from All, which returns false here)
+	! "all_or_none_none" [1, 3, 5] -> AllOrNone |$x| { $x % 2 == 0 }
+	// Mixed → false (discriminates from Any, which returns true here)
+	! "all_or_none_mixed" [2, 3, 6] -> AllOrNone |$x| { $x % 2 == 0 } == false
+	// Empty → true
+	! "all_or_none_empty" [] -> AllOrNone |$x| { $x % 2 == 0 }
+
+	// --- Filter: returns elements satisfying predicate ---
+
+	// Exact output for known input
+	! "filter_exact" [1, 2, 3, 4, 5] -> Filter |$x| { $x > 3 } == [4, 5]
+	// No matches → empty
+	! "filter_none" [1, 2, 3] -> Filter |$x| { $x > 10 } -> Len == 0
+	// All match → passthrough
+	! "filter_all" [1, 2, 3] -> Filter |$x| { $x > 0 } == [1, 2, 3]
+
+	// --- Map: transforms each element ---
+
+	// Exact output for known input
+	! "map_exact" [1, 2, 3] -> Map |$x| { $x * 2 } == [2, 4, 6]
+	// Length preservation
+	! "map_len" [1, 2, 3] -> Map |$x| { $x * 2 } -> Len == 3
+	// Empty → empty
+	! "map_empty" [] -> Map |$x| { $x * 2 } -> Len == 0
+
+	// --- Count: counts elements satisfying predicate ---
+
+	// Some match
+	! "count_some" [1, 2, 3, 4, 5] -> Count |$x| { $x > 3 } == 2
+	// None match
+	! "count_none" [1, 2, 3] -> Count |$x| { $x > 10 } == 0
+	// All match
+	! "count_all" [1, 2, 3] -> Count |$x| { $x > 0 } == 3
+
+	// --- Reduce: folds elements with accumulator ---
+
+	// Sum via reduce
+	! "reduce_sum" [1, 2, 3] -> Reduce(0) |$acc, $x| { $acc + $x } == 6
+	// Non-commutative subtraction (proves accumulator threading and left-to-right order)
+	// 10 - 1 - 2 - 3 = 4
+	! "reduce_subtract" [1, 2, 3] -> Reduce(10) |$acc, $x| { $acc - $x } == 4
+	// Single element
+	! "reduce_single" [42] -> Reduce(0) |$acc, $x| { $acc + $x } == 42
+
+	// --- Field integration: Split → Filter chain on instance data ---
+	! "split_filter"
+		csv == _ ||
+		csv -> Split(",") -> Filter |$x| { $x -> StartsWith("a") } -> Len > 0
+}

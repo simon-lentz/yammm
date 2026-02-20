@@ -2,8 +2,8 @@ schema "negative_bounds"
 
 // Schema for testing negative numeric bounds in constraint types.
 type GeoPoint {
-    id        String primary
-    name      String required
-    latitude  Float[-90.0, 90.0] required
-    longitude Float[-180.0, 180.0] required
+	id        String primary
+	name      String required
+	latitude  Float[-90.0, 90.0] required
+	longitude Float[-180.0, 180.0] required
 }

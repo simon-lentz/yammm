@@ -1,0 +1,117 @@
+{
+    "Record": [
+        {
+            "id": "valid-full",
+            "name": "  Alice  ",
+            "description": "A valid description",
+            "code": "XABC",
+            "score": 3.7
+        },
+        {
+            "id": "valid-minimal",
+            "name": "Bob",
+            "code": "XDEF",
+            "score": 0.0
+        },
+        {
+            "id": "invalid-empty-desc",
+            "name": "Charlie",
+            "description": "",
+            "code": "XGHI",
+            "score": -2.5
+        }
+    ],
+    "Entry": [
+        {
+            "id": "entry-valid",
+            "name": "Hello World",
+            "greeting": "Good Morning",
+            "value": 42
+        },
+        {
+            "id": "entry-minimal",
+            "name": "Hello World",
+            "value": 0
+        },
+        {
+            "id": "entry-invalid-name",
+            "name": "Goodbye World",
+            "value": 1
+        }
+    ],
+    "StringRecord": [
+        {
+            "id": "str-valid",
+            "text": "Hello World",
+            "csv": "a,b,c",
+            "padded": "  hi  "
+        },
+        {
+            "id": "str-minimal",
+            "text": "Hello"
+        },
+        {
+            "id": "str-fail",
+            "text": "Farewell",
+            "csv": "x,y"
+        }
+    ],
+    "NumericRecord": [
+        {
+            "id": "num-valid",
+            "int_val": 42,
+            "flt_val": 3.7
+        },
+        {
+            "id": "num-zero",
+            "int_val": 0,
+            "flt_val": 0.5
+        },
+        {
+            "id": "num-negative",
+            "int_val": -5,
+            "flt_val": -2.3
+        }
+    ],
+    "CollectionRecord": [
+        {
+            "id": "col-valid",
+            "csv": "a,b,c"
+        },
+        {
+            "id": "col-fail",
+            "csv": "x,y,z"
+        }
+    ],
+    "LambdaRecord": [
+        {
+            "id": "lam-valid",
+            "name": "Alice",
+            "csv": "apple,avocado,banana"
+        },
+        {
+            "id": "lam-nil-csv",
+            "name": "Bob"
+        },
+        {
+            "id": "lam-fail",
+            "name": "Carol",
+            "csv": "banana,cherry,date"
+        }
+    ],
+    "ControlRecord": [
+        {
+            "id": "ctrl-valid",
+            "name": "Alice",
+            "nickname": "Ali"
+        },
+        {
+            "id": "ctrl-minimal",
+            "name": "Bob"
+        },
+        {
+            "id": "ctrl-fail",
+            "name": ""
+        }
+    ]
+}

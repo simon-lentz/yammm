@@ -463,7 +463,7 @@ func TestBuiltinRegistry_NewBuiltinRegistry(t *testing.T) {
 	// Should have default builtins
 	assert.True(t, reg.Has("Count"), "should have Count builtin")
 	assert.True(t, reg.Has("Sum"), "should have Sum builtin")
-	assert.True(t, reg.Has("Length"), "should have Length builtin")
+	assert.True(t, reg.Has("Len"), "should have Len builtin")
 	assert.True(t, reg.Has("Upper"), "should have Upper builtin")
 }
 
