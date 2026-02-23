@@ -79,7 +79,7 @@ jobs:
           PRE_RELEASE: ${{ inputs.pre_release && '--pre-release' || '' }}
         run: npx vsce package --target ${{ matrix.target }} --no-dependencies $PRE_RELEASE
       - name: Upload VSIX
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vsix-${{ matrix.target }}
           path: lsp/editors/vscode/*.vsix
