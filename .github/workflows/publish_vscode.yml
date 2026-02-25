@@ -61,7 +61,7 @@ jobs:
           go build -trimpath -ldflags="-s -w" \
             -o lsp/editors/vscode/bin/${{ matrix.bin_dir }}/yammm-lsp${{ matrix.ext }} \
             ./lsp/cmd/yammm-lsp
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
       - name: Install dependencies
@@ -88,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
       - name: Install vsce
