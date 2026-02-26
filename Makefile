@@ -102,12 +102,12 @@ build-lsp-windows-arm64:
 # Build VS Code extension (native platform only, for development)
 .PHONY: build-vscode
 build-vscode: build-lsp-native
-	cd $(VSCODE_EXT) && npm install && npm run compile
+	cd $(VSCODE_EXT) && npm ci --no-audit && npm run compile
 
 # Build VS Code extension for all platforms (for releases)
 .PHONY: build-vscode-all
 build-vscode-all: build-lsp-all
-	cd $(VSCODE_EXT) && npm install && npm run compile
+	cd $(VSCODE_EXT) && npm ci --no-audit && npm run compile
 
 # Package VS Code extension
 .PHONY: package-vscode
