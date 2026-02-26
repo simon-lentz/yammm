@@ -1,8 +1,6 @@
 # Dev stuff
-_private/
-TODO_*.md
-DEV_*.md
-FEAT_*.md
+docs/
+!docs/SPEC.md
 
 # LLMs
 .claude/

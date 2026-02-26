@@ -304,7 +304,7 @@ Multiple inheritance is supported: a type can extend multiple parent types, sepa
 - All properties from parent types
 - All association relationships from parent types
 - All composition relationships from parent types
-- Invariants are NOT inherited (they belong to the declaring type)
+- Invariants are inherited from parent types (deduplicated by name, child wins)
 
 ### Constraint Narrowing Rules
 

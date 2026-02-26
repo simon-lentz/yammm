@@ -1,0 +1,54 @@
+schema "patterns_relationships"
+
+// Source: patterns.md, "Relationship Patterns"
+
+type User {
+    id UUID primary
+    username String[3, 50] required
+}
+
+type Profile {
+    id UUID primary
+    bio String[_, 1000]
+    --> BELONGS_TO (one) User
+}
+
+type Author {
+    id UUID primary
+    name String[1, 100] required
+}
+
+type Book {
+    id UUID primary
+    title String[1, 300] required
+    --> WRITTEN_BY (one) Author / BOOKS (many)
+}
+
+part type PhoneNumber {
+    number Pattern["^\\+?[0-9\\-\\s]+$"] required
+    label Enum["home", "work", "mobile"] required
+}
+
+type Contact {
+    id UUID primary
+    name String[1, 100] required
+    *-> PHONES (one:many) PhoneNumber
+}
+
+type Student {
+    id UUID primary
+    name String[1, 100] required
+}
+
+type Course {
+    id UUID primary
+    title String[1, 200] required
+}
+
+type ManyToManyEnrollment {
+    id UUID primary
+    enrolled_at Timestamp required
+    grade Float[0.0, 100.0]
+    --> STUDENT (one) Student
+    --> COURSE (one) Course
+}

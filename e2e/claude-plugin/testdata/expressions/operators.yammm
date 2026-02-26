@@ -1,0 +1,29 @@
+schema "expr_operators"
+
+// Source: expressions.md, "Operators" section
+
+type OpRecord {
+    id String primary
+    a Integer required
+    b Integer required
+    name String[1, 100] required
+    email String
+    value Integer
+    flag Boolean required
+
+    // Arithmetic
+    ! "sum_positive" a + b > 0
+    ! "modulo_check" a % 2 == 0
+
+    // Comparison
+    ! "a_less_b" a < b
+
+    // Logical
+    ! "flag_or_value" flag || value != nil
+
+    // Pattern match
+    ! "email_format" email == nil || email =~ /.+@.+/
+
+    // Type check
+    ! "a_is_integer" a =~ Integer
+}

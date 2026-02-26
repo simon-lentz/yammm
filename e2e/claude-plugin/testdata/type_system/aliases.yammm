@@ -1,0 +1,18 @@
+schema "type_system_aliases"
+
+// Source: type-system.md, "Custom Data Type Aliases" section
+
+type Email = Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
+type Percentage = Float[0.0, 100.0]
+type PositiveInt = Integer[1, _]
+type ShortCode = String[2, 10]
+type Priority = Enum["low", "medium", "high", "critical"]
+type Money = Float[0.0, _]
+
+type Product {
+    id UUID primary
+    name String[1, 200] required
+    price Money required
+    discount Percentage
+    priority Priority
+}

@@ -1,0 +1,13 @@
+schema "type_system_modifier_override_invalid"
+
+// Source: type-system.md, "Property Modifier Override"
+// Tests that removing obligation (required→optional) is rejected as E_PROPERTY_CONFLICT.
+
+abstract type Base {
+    name String required
+}
+
+type Lax extends Base {
+    id UUID primary
+    name String
+}

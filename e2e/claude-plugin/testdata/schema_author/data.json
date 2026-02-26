@@ -1,0 +1,22 @@
+{
+    "Customer": [
+        {"customer_id": "cust-001", "name": "Alice Smith", "email": "alice@example.com", "created_at": "2026-01-01T00:00:00Z"},
+        {"customer_id": "cust-002", "name": "Bob Jones", "email": "bob@example.com", "created_at": "2026-02-01T00:00:00Z"}
+    ],
+    "Customer__invalid_email": [
+        {"customer_id": "cust-003", "name": "Charlie", "email": "bad-email", "created_at": "2026-01-01T00:00:00Z"}
+    ],
+    "Address": [
+        {"address_id": "addr-001", "street": "123 Main St", "city": "Springfield", "zip": "62701"}
+    ],
+    "Address__invalid_zip": [
+        {"address_id": "addr-002", "street": "456 Oak Ave", "city": "Shelbyville", "zip": "1234"}
+    ],
+    "Order": [
+        {"order_id": "ord-001", "status": "pending", "created_at": "2026-01-15T10:00:00Z"},
+        {"order_id": "ord-002", "status": "shipped", "note": "Handle with care", "created_at": "2026-01-16T10:00:00Z"}
+    ],
+    "Order__invalid_status": [
+        {"order_id": "ord-003", "status": "cancelled", "created_at": "2026-01-17T10:00:00Z"}
+    ]
+}

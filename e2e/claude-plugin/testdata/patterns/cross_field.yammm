@@ -1,0 +1,39 @@
+schema "patterns_cross_field"
+
+// Source: patterns.md, "Cross-Field Validation Invariants"
+
+type Event {
+    id UUID primary
+    name String[1, 200] required
+    start_date Date required
+    end_date Date
+
+    ! "end_after_start" end_date == nil || end_date > start_date
+}
+
+type Payment {
+    id UUID primary
+    method Enum["card", "wire", "crypto"] required
+    card_number String
+    wire_reference String
+
+    ! "card_requires_number" method != "card" || card_number != nil
+    ! "wire_requires_ref" method != "wire" || wire_reference != nil
+}
+
+type Feature {
+    id String primary
+    is_deprecated Boolean required
+    is_experimental Boolean required
+
+    ! "not_both" !(is_deprecated && is_experimental)
+}
+
+type Allocation {
+    id UUID primary
+    equity_pct Float[0.0, 100.0] required
+    bond_pct Float[0.0, 100.0] required
+    cash_pct Float[0.0, 100.0] required
+
+    ! "pct_total" equity_pct + bond_pct + cash_pct == 100.0
+}

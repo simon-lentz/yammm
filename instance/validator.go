@@ -617,7 +617,7 @@ func (v *Validator) evaluateInvariants(ctx context.Context, typ *schema.Type, pr
 
 	scope := eval.PropertyScopeFromMap(props)
 
-	for inv := range typ.Invariants() {
+	for inv := range typ.AllInvariants() {
 		if err := ctx.Err(); err != nil {
 			return err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
 		}

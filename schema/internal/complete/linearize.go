@@ -226,6 +226,10 @@ func (c *completer) completeTypes() bool {
 		allComps := c.mergeRelations(t, t.CompositionsSlice(), supers, schema.RelationComposition)
 		t.SetAllCompositions(allComps)
 
+		// Merge invariants from ancestors
+		allInvs := c.mergeInvariants(t, supers)
+		t.SetAllInvariants(allInvs)
+
 		return ok
 	}
 
@@ -308,12 +312,16 @@ func (c *completer) resolveTypeID(id schema.TypeID) *schema.Type {
 // mergeProperties merges own properties with inherited properties.
 // Own properties come first, then inherited (left-to-right supertype order).
 // Identical properties from different ancestors are deduplicated (keep-first).
+// When a child re-declares a parent property, constraint narrowing is attempted:
+// the child's version is accepted if it narrows the parent's (via CanNarrowFrom).
 func (c *completer) mergeProperties(t *schema.Type, supers []schema.ResolvedTypeRef) []*schema.Property {
 	// Start with own properties
 	result := t.PropertiesSlice()
 	seen := make(map[string]*schema.Property)
+	ownProps := make(map[string]bool)
 	for _, p := range result {
 		seen[p.Name()] = p
+		ownProps[p.Name()] = true
 	}
 
 	// Add inherited properties in linearized order
@@ -324,17 +332,69 @@ func (c *completer) mergeProperties(t *schema.Type, supers []schema.ResolvedType
 		}
 
 		for _, p := range superType.AllPropertiesSlice() {
-			if existing, ok := seen[p.Name()]; ok {
-				// Already have this property - check if compatible
-				if !p.Equal(existing) {
-					c.errorf(t.Span(), diag.E_PROPERTY_CONFLICT,
-						"type %q inherits conflicting definitions of property %q from %s and %s",
-						t.Name(), p.Name(), existing.DeclaringScope(), p.DeclaringScope())
+			existing, ok := seen[p.Name()]
+			if !ok {
+				seen[p.Name()] = p
+				result = append(result, p)
+				continue
+			}
+
+			if p.Equal(existing) {
+				continue
+			}
+
+			// Check if existing (child's own or earlier ancestor) narrows the inherited
+			if existing.CanNarrowFrom(p) {
+				continue // Existing narrower version is already in result
+			}
+
+			// Check if inherited narrows the existing (from another ancestor).
+			// This branch only applies when the existing property was inherited
+			// from a different ancestor, NOT when it was declared by the child type
+			// itself. A child's explicit declaration that widens must be rejected.
+			if !ownProps[p.Name()] && p.CanNarrowFrom(existing) {
+				seen[p.Name()] = p
+				for i, r := range result {
+					if r.Name() == p.Name() {
+						result[i] = p
+						break
+					}
 				}
 				continue
 			}
-			seen[p.Name()] = p
-			result = append(result, p)
+
+			// Incompatible
+			c.errorf(t.Span(), diag.E_PROPERTY_CONFLICT,
+				"type %q inherits conflicting definitions of property %q from %s and %s",
+				t.Name(), p.Name(), existing.DeclaringScope(), p.DeclaringScope())
+		}
+	}
+
+	return result
+}
+
+// mergeInvariants merges own invariants with inherited invariants.
+// Own invariants come first, then inherited (left-to-right supertype order).
+// Deduplication by name: keep-first (child can override parent's invariant by name).
+func (c *completer) mergeInvariants(t *schema.Type, supers []schema.ResolvedTypeRef) []*schema.Invariant {
+	result := t.InvariantsSlice()
+	seen := make(map[string]bool)
+	for _, inv := range result {
+		seen[inv.Name()] = true
+	}
+
+	for _, superRef := range supers {
+		superType := c.resolveTypeID(superRef.ID())
+		if superType == nil {
+			continue
+		}
+
+		for _, inv := range superType.AllInvariantsSlice() {
+			if seen[inv.Name()] {
+				continue
+			}
+			seen[inv.Name()] = true
+			result = append(result, inv)
 		}
 	}
 

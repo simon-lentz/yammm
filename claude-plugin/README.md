@@ -4,20 +4,20 @@ Yammm DSL schema language support for Claude Code. Provides LSP intelligence, DS
 
 ## Prerequisites
 
-- **Go toolchain** (1.26+) for installing the `yammm-lsp` binary
 - **Claude Code** CLI
+- **VS Code** (strongly recommended) — the `yammm-lsp` is optimized for and designed with VS Code in mind
 
 ## Installation
 
 ### 1. Install the yammm-lsp language server
 
-From source (recommended):
+**Recommended: VS Code Marketplace extension**
 
-```bash
-go install github.com/simon-lentz/yammm/lsp/cmd/yammm-lsp@latest
-```
+The yammm-lsp binary is bundled with the VS Code extension. Install it from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm).
 
-Or build from a cloned repo:
+**Alternative: Build the standalone binary**
+
+If you need the LSP binary outside of VS Code, clone the repo and build it:
 
 ```bash
 git clone https://github.com/simon-lentz/yammm.git
@@ -30,6 +30,10 @@ Verify the binary is in your PATH:
 ```bash
 yammm-lsp --version
 ```
+
+**Local extension development**
+
+To develop the VS Code extension or yammm-lsp locally, follow the [LSP Quickstart](https://github.com/simon-lentz/yammm#lsp-quickstart) in the yammm README.
 
 ### 2. Install the plugin
 
@@ -65,8 +69,6 @@ Analyzes existing `.yammm` files against a 10-item review checklist covering syn
 | Command | Description |
 | ------- | ----------- |
 | `/new-schema` | Scaffold a new `.yammm` file with boilerplate type definitions |
-| `/validate-schema` | Quick structural check of a schema file (use editor LSP for full validation) |
-| `/format-schema` | Format a schema file using canonical yammm style |
 
 ### DSL Knowledge
 
@@ -76,6 +78,20 @@ The plugin includes a comprehensive yammm DSL skill with:
 - Expression language reference (operators, pipeline, lambdas, all built-in functions)
 - Type system reference (constraint types, bounds, aliases, abstract/part types, inheritance narrowing)
 - Common schema patterns (audit fields, soft delete, normalization, relationship idioms)
+
+### Settings
+
+The plugin supports per-project configuration via `.claude/yammm.local.md`. Copy the template to get started:
+
+```bash
+cp /path/to/yammm/claude-plugin/settings-template.local.md .claude/yammm.local.md
+```
+
+| Setting | Type | Default | Description |
+| ------- | ---- | ------- | ----------- |
+| `default_model` | `sonnet` \| `haiku` | `sonnet` | Model used by schema-author and schema-reviewer agents |
+| `auto_review` | `bool` | `false` | Automatically run schema-reviewer after schema-author writes a file |
+| `scaffold_audit_fields` | `bool` | `false` | Include an `Auditable` abstract type stub when `/new-schema` scaffolds a file |
 
 ## Usage Examples
 
@@ -88,8 +104,8 @@ The plugin includes a comprehensive yammm DSL skill with:
 **Scaffold and iterate:**
 > `/new-schema` to create the boilerplate, then ask the schema-author agent to fill in the details
 
-**Validate after editing:**
-> `/validate-schema` to check for errors after manual edits
+**Check for errors:**
+> Check your editor's LSP diagnostics panel after editing, or ask the schema-reviewer agent to audit a file
 
 ## Troubleshooting
 
@@ -97,9 +113,9 @@ The plugin includes a comprehensive yammm DSL skill with:
 
 The plugin checks for `yammm-lsp` at startup. If you see this warning:
 
-1. Install: `go install github.com/simon-lentz/yammm/lsp/cmd/yammm-lsp@latest`
-2. Verify it is in your PATH: `which yammm-lsp`
-3. If not found, ensure your Go bin directory is in `PATH` (typically `$(go env GOPATH)/bin`)
+1. Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) (recommended — the LSP binary is bundled)
+2. Or build the standalone binary: `git clone https://github.com/simon-lentz/yammm.git && cd yammm && make build-lsp`
+3. Verify it is in your PATH: `which yammm-lsp`
 
 ### No LSP diagnostics appearing
 

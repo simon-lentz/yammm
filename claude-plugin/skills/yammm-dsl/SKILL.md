@@ -48,7 +48,7 @@ part type Tag {
 **Type modifiers**:
 
 | Modifier | Meaning |
-|----------|---------|
+| -------- | ------- |
 | (none) | Concrete, instantiable type |
 | `abstract` | Cannot be instantiated; must be extended |
 | `part` | Composition-only; owned by a parent via `*->` |
@@ -68,7 +68,7 @@ field_name Type            // Optional (can be null)
 ### Built-in Constraint Types
 
 | Type | Syntax | Description |
-|------|--------|-------------|
+| ---- | ------ | ----------- |
 | `String` | `String[min, max]` | String with length bounds (runes) |
 | `Integer` | `Integer[min, max]` | Signed integer with bounds |
 | `Float` | `Float[min, max]` | Floating point with bounds |
@@ -126,7 +126,7 @@ Part types can only exist within compositions and cannot be instantiated directl
 ### Multiplicity
 
 | Syntax | Required | Cardinality |
-|--------|----------|-------------|
+| ------ | -------- | ----------- |
 | (omitted) | No | One |
 | `(_)` | No | One |
 | `(_:one)` | No | One |
@@ -163,9 +163,10 @@ Business logic constraints evaluated after type checking. Syntax: `! "error_mess
 
 ```yammm
 type Product {
-    name String[1, 100] required
-    price Float[0.0, _] required
-    discount Float[0.0, 100.0]
+    product_id String primary
+    name       String[1, 100] required
+    price      Float[0.0, _] required
+    discount   Float[0.0, 100.0]
 
     ! "name_not_blank" name != ""
     ! "discount_reasonable" discount == nil || discount <= 50.0
@@ -246,7 +247,7 @@ type Document extends Auditable, Named {
 }
 ```
 
-Multiple inheritance is supported. Properties, associations, and compositions are inherited from parents.
+Multiple inheritance is supported. Properties, associations, compositions, and invariants are inherited from parents. Invariants with the same name are deduplicated (child's version takes precedence).
 
 ### Constraint Narrowing
 
@@ -258,6 +259,7 @@ abstract type Entity {
 }
 
 type Adult extends Entity {
+    adult_id String primary
     age Integer[18, 150]    // Valid: min increased (narrowed)
 }
 ```

@@ -1,0 +1,26 @@
+schema "skill_core_inheritance"
+
+// Source: SKILL.md, "Inheritance" section
+
+abstract type Auditable {
+    created_at Timestamp required
+    updated_at Timestamp
+}
+
+abstract type Named {
+    name String[1, 200] required
+}
+
+type Document extends Auditable, Named {
+    id UUID primary
+    content String required
+}
+
+abstract type Entity {
+    age Integer[0, 150]
+}
+
+type Adult extends Entity {
+    id UUID primary
+    age Integer[18, 150]
+}

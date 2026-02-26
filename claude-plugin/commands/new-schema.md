@@ -1,10 +1,13 @@
 ---
+name: new-schema
 description: Scaffold a new .yammm schema file with boilerplate type definitions
 argument-hint: "<schema-name>"
 allowed-tools: ["Write", "Read", "Glob"]
 ---
 
 # new-schema
+
+**Settings:** If `.claude/yammm.local.md` exists, read its YAML frontmatter. When `scaffold_audit_fields` is `true`, include an `Auditable` abstract type stub in the generated schema.
 
 Scaffold a new yammm schema file. Ask the user for:
 
@@ -48,4 +51,4 @@ part type LineItem {
 }
 ```
 
-After writing the file, suggest the user run `/validate-schema` to check it, or invoke the schema-author agent for help filling in the details.
+After writing the file, suggest the user check the editor's LSP diagnostics panel for errors, or invoke the schema-author agent for help filling in the details.
