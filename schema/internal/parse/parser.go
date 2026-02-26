@@ -469,11 +469,15 @@ func (b *astBuilder) ExitInvariant(ctx *grammar.InvariantContext) {
 		)
 	}
 
-	// Note: Invariants don't have DOC_COMMENT in the grammar
+	var doc string
+	if ctx.DOC_COMMENT() != nil {
+		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
+	}
+
 	inv := &InvariantDecl{
 		Name:          name,
 		Expr:          compiledExpr,
-		Documentation: "", // Invariants use the message string itself
+		Documentation: doc,
 		Span:          b.spans.FromContext(ctx),
 	}
 	b.currentType.Invariants = append(b.currentType.Invariants, inv)

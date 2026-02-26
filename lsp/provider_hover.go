@@ -432,6 +432,21 @@ func (s *Server) hoverForRelation(sym *Symbol) string {
 	b.WriteString(mult)
 	b.WriteString(") ")
 	b.WriteString(r.Target().String())
+	if backref := r.Backref(); backref != "" {
+		revOpt, revMany := r.ReverseMultiplicity()
+		revMult := "one"
+		if revMany {
+			revMult = "many"
+		}
+		if revOpt {
+			revMult = "_:" + revMult
+		}
+		b.WriteString(" / ")
+		b.WriteString(backref)
+		b.WriteString(" (")
+		b.WriteString(revMult)
+		b.WriteString(")")
+	}
 	b.WriteString("\n```\n\n")
 
 	b.WriteString("- Target: `")
@@ -443,6 +458,24 @@ func (s *Server) hoverForRelation(sym *Symbol) string {
 
 	if r.IsOptional() {
 		b.WriteString("- Optional\n")
+	}
+
+	if backref := r.Backref(); backref != "" {
+		revOpt, revMany := r.ReverseMultiplicity()
+		revMult := "one"
+		if revMany {
+			revMult = "many"
+		}
+		if revOpt {
+			revMult = "_:" + revMult
+		}
+		b.WriteString("\n**Reverse clause** (metadata): from `")
+		b.WriteString(r.Target().String())
+		b.WriteString("`'s perspective, this relationship is named `")
+		b.WriteString(backref)
+		b.WriteString("` (")
+		b.WriteString(revMult)
+		b.WriteString("). The reverse name is declared here — it does not reference an existing relationship.\n")
 	}
 
 	// Documentation

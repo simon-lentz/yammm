@@ -19,6 +19,7 @@ type Person extends Auditable {
 
 	--> FRIEND (_:many) Person
 	--> HAS    sib.Sibling
+	--> KNOWS  (one) Person / KNOWN_BY (many)
 	*-> OWNS   (many) Pet
 
 	! "name_not_empty" name != ""

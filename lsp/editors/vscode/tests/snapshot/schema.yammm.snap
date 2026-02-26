@@ -113,6 +113,25 @@
 #     ^^^ source.yammm entity.name.function.relation.yammm
 #        ^^^^ source.yammm
 #            ^^^^^^^^^^^ source.yammm entity.name.type.yammm
+>	--> KNOWS  (one) Person / KNOWN_BY (many)
+#^ source.yammm
+# ^^^ source.yammm entity.name.function.relation.yammm
+#    ^ source.yammm
+#     ^^^^^ source.yammm entity.name.function.relation.yammm
+#          ^^ source.yammm
+#            ^ source.yammm punctuation.definition.parameters.begin.yammm
+#             ^^^ source.yammm constant.language.multiplicity.yammm
+#                ^ source.yammm punctuation.definition.parameters.end.yammm
+#                 ^ source.yammm
+#                  ^^^^^^ source.yammm entity.name.type.yammm
+#                        ^ source.yammm
+#                         ^ source.yammm punctuation.separator.reverse.yammm
+#                          ^ source.yammm
+#                           ^^^^^^^^ source.yammm variable.other.reverse.yammm
+#                                   ^ source.yammm
+#                                    ^ source.yammm punctuation.definition.parameters.begin.yammm
+#                                     ^^^^ source.yammm constant.language.multiplicity.yammm
+#                                         ^ source.yammm punctuation.definition.parameters.end.yammm
 >	*-> OWNS   (many) Pet
 #^ source.yammm
 # ^^^ source.yammm entity.name.function.relation.yammm
