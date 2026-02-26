@@ -11,11 +11,11 @@ Yammm DSL schema language support for Claude Code. Provides LSP intelligence, DS
 
 ### 1. Install the yammm-lsp language server
 
-**Recommended: VS Code Marketplace extension**
+**Recommended: VS Code Marketplace extension**:
 
 The yammm-lsp binary is bundled with the VS Code extension. Install it from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm).
 
-**Alternative: Build the standalone binary**
+**Alternative: Build the standalone binary**:
 
 If you need the LSP binary outside of VS Code, clone the repo and build it:
 
@@ -31,7 +31,7 @@ Verify the binary is in your PATH:
 yammm-lsp --version
 ```
 
-**Local extension development**
+**Local extension development**:
 
 To develop the VS Code extension or yammm-lsp locally, follow the [LSP Quickstart](https://github.com/simon-lentz/yammm#lsp-quickstart) in the yammm README.
 

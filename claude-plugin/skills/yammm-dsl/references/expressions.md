@@ -36,13 +36,13 @@ The expression language is used within invariant declarations (`! "message" expr
 
 **Regex matching** (right operand is a regex literal):
 
-```yammm
+```yammm-snippet
 ! "valid_email" email =~ /.+@.+\..+/
 ```
 
 **Type checking** (right operand is a datatype keyword):
 
-```yammm
+```yammm-snippet
 ! "must_be_integer" value =~ Integer
 ! "must_be_numeric" price =~ Float
 ! "not_a_string" data !~ String
@@ -82,7 +82,7 @@ Parentheses override precedence as usual.
 
 The `->` operator chains function calls. The left-hand side becomes the implicit first argument to the function on the right.
 
-```yammm
+```yammm-snippet
 // Simple chaining
 name -> Upper -> Trim
 
@@ -110,14 +110,14 @@ Lambdas define inline functions with parameters enclosed in `|...|` and a body i
 
 **Single parameter:**
 
-```yammm
+```yammm-snippet
 items -> Filter |$x| { $x.active }
 items -> Map |$item| { $item.price * $item.quantity }
 ```
 
 **Multiple parameters** (used with `Reduce`):
 
-```yammm
+```yammm-snippet
 values -> Reduce(0) |$acc, $val| { $acc + $val }
 ```
 
@@ -129,7 +129,7 @@ Lambda parameters shadow outer variables within their body.
 
 Properties are accessed with dot notation or bare names:
 
-```yammm
+```yammm-snippet
 name                // Implicit property reference
 $self.name          // Explicit self reference
 $item.price         // Lambda parameter property
@@ -143,7 +143,7 @@ Property lookups are strict: unknown properties and non-map dereferences raise e
 
 ## Indexing and Slicing
 
-```yammm
+```yammm-snippet
 items[0]            // First element
 name[0, 5]          // Substring: runes 0 through 4
 ```
@@ -165,7 +165,7 @@ Works on strings (rune-indexed) and arrays/slices. Invalid indices produce evalu
 
 In expressions, `_` and `nil` are interchangeable nil literals:
 
-```yammm
+```yammm-snippet
 ! "guard" end_date == nil || end_date > start_date
 ! "guard" end_date == _ || end_date > start_date
 ```
@@ -261,19 +261,19 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 
 ### Validate all active items have names
 
-```yammm
+```yammm-snippet
 ! "active_items_named" ITEMS -> Filter |$i| { $i.active } -> All |$i| { $i.name -> Len > 0 }
 ```
 
 ### Compute total and validate minimum
 
-```yammm
+```yammm-snippet
 ! "minimum_order_value" ITEMS -> Map |$i| { $i.price * $i.quantity } -> Sum >= 10.0
 ```
 
 ### Conditional validation with nil guard and pipeline
 
-```yammm
+```yammm-snippet
 ! "normalized_name_valid" name -> Lower -> Trim -> Then |$n| { $n -> Len > 0 } -> Default(true)
 ```
 

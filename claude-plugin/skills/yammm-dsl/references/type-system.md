@@ -17,7 +17,7 @@ Represents signed integer values with optional bounds.
 - Negative bounds are allowed with a leading `-`
 - Validation accepts signed and unsigned integers; unsigned inputs larger than `int64` are rejected before bound checks
 
-```yammm
+```yammm-snippet
 age Integer                     // Unbounded integer
 count Integer[0, _]             // Non-negative (0 or greater)
 priority Integer[1, 10]         // 1 through 10 inclusive
@@ -35,7 +35,7 @@ Represents floating-point values with optional bounds.
 - Both integer and float literals are valid as bounds
 - Negative bounds allowed
 
-```yammm
+```yammm-snippet
 temperature Float               // Unbounded float
 percentage Float[0.0, 100.0]    // 0 to 100 inclusive
 ratio Float[0, 1.0]             // 0 to 1 (integer bound is valid)
@@ -48,7 +48,7 @@ Represents true/false values. No parameters.
 
 **Syntax:** `Boolean`
 
-```yammm
+```yammm-snippet
 active Boolean
 is_published Boolean required
 ```
@@ -62,7 +62,7 @@ Represents UTF-8 string values with optional length bounds counted in runes (not
 - Bounds count Unicode runes
 - `_` means unbounded
 
-```yammm
+```yammm-snippet
 name String                     // Unbounded string
 name String[1, 100]             // 1 to 100 runes
 code String[3, 3]               // Exactly 3 runes
@@ -78,7 +78,7 @@ Represents a value from a fixed set of string options.
 - At least two options are required
 - Trailing comma is allowed
 
-```yammm
+```yammm-snippet
 status Enum["pending", "approved", "rejected"]
 priority Enum["low", "medium", "high", "critical"]
 color Enum["red", "green", "blue",]     // Trailing comma OK
@@ -93,7 +93,7 @@ Represents a string that must match one or more regular expressions.
 - Follows Go `regexp` package syntax
 - When two patterns are provided, the value must match both
 
-```yammm
+```yammm-snippet
 email Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
 phone Pattern["^\\d{3}-\\d{3}-\\d{4}$"]
 ```
@@ -107,7 +107,7 @@ Represents a date-time value with optional format specification.
 - Default format is RFC3339: `"2006-01-02T15:04:05Z07:00"`
 - Format string follows Go time formatting conventions
 
-```yammm
+```yammm-snippet
 created_at Timestamp                                    // RFC3339
 event_time Timestamp["2006-01-02T15:04:05Z07:00"]       // Explicit RFC3339
 log_time Timestamp["2006-01-02 15:04:05"]               // Custom format
@@ -119,7 +119,7 @@ Represents a date value without a time component. No parameters.
 
 **Syntax:** `Date`
 
-```yammm
+```yammm-snippet
 birth_date Date
 expiry_date Date required
 ```
@@ -130,7 +130,7 @@ Represents a universally unique identifier string. No parameters.
 
 **Syntax:** `UUID`
 
-```yammm
+```yammm-snippet
 id UUID primary
 external_ref UUID
 correlation_id UUID required
@@ -147,7 +147,7 @@ Represents a fixed-dimension numeric vector for embeddings, coordinates, etc.
 - NaN, Inf, and non-float elements are rejected
 - Cannot be used in relationship properties
 
-```yammm
+```yammm-snippet
 embedding Vector[768]           // 768-dimensional embedding
 coordinates Vector[3]           // 3D coordinates
 ```
@@ -194,7 +194,7 @@ type Priority = Enum["low", "medium", "high", "critical"]
 
 ### Usage
 
-```yammm
+```yammm-snippet
 type Money = Float[0.0, _]
 
 type Product {
@@ -312,7 +312,7 @@ A child type may override an inherited property by re-declaring it with a **narr
 
 **Valid narrowing** (tightening constraints):
 
-```yammm
+```yammm-snippet
 abstract type Base {
     age Integer[0, 150]
     name String[1, 100]
@@ -328,7 +328,7 @@ type Restricted extends Base {
 
 **Invalid widening** (rejected at load time):
 
-```yammm
+```yammm-snippet
 abstract type Base {
     age Integer[0, 150]
     name String[1, 100]
@@ -356,7 +356,7 @@ type Invalid extends Base {
 
 A child type can also promote an optional property to required:
 
-```yammm
+```yammm-snippet
 abstract type Base {
     description String          // Optional
 }
@@ -376,7 +376,7 @@ After inheritance, relationship definitions must be unique by name and target pa
 
 Types from imported schemas can be extended using qualified references:
 
-```yammm
+```yammm-snippet
 import "./base_types" as base
 
 type SpecialDocument extends base.Document {

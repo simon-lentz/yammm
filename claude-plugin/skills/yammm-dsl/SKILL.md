@@ -21,7 +21,7 @@ Yammm (Yet Another Meta-Meta Model) is a domain-specific language for expressing
 
 Every `.yammm` file defines a single schema. The file begins with a schema declaration, followed by optional imports, optional data type aliases, and type definitions.
 
-```yammm
+```yammm-snippet
 schema "inventory"
 
 import "./common" as common
@@ -59,7 +59,7 @@ part type Tag {
 
 Properties are the data fields of a type. Names must start with a lowercase letter.
 
-```yammm
+```yammm-snippet
 field_name Type primary    // Primary key (unique, implicitly required)
 field_name Type required   // Must be non-null
 field_name Type            // Optional (can be null)
@@ -108,7 +108,7 @@ Aliases are declared with uppercase names and can chain (A = B = built-in). Cycl
 
 References between independently existing types. Uses `-->` syntax.
 
-```yammm
+```yammm-snippet
 --> REL_TYPE (multiplicity) TargetType
 --> REL_TYPE (multiplicity) imported_schema.TargetType
 ```
@@ -117,7 +117,7 @@ References between independently existing types. Uses `-->` syntax.
 
 Embeds part-type children within their parent. Uses `*->` syntax.
 
-```yammm
+```yammm-snippet
 *-> REL_TYPE (multiplicity) PartType
 ```
 
@@ -140,7 +140,7 @@ Part types can only exist within compositions and cannot be instantiated directl
 
 Associations can carry their own properties:
 
-```yammm
+```yammm-snippet
 --> WORKS_AT (one) Company {
     start_date Date required
     title String
@@ -151,7 +151,7 @@ Associations can carry their own properties:
 
 Declares the inverse relationship name as metadata:
 
-```yammm
+```yammm-snippet
 --> OWNS (many) Asset / owned_by (one)
 ```
 
@@ -198,7 +198,7 @@ See `references/expressions.md` for the full expression language, operator prece
 
 ### Syntax
 
-```yammm
+```yammm-snippet
 import "./sibling_schema" as sibling       // Relative path
 import "../parent/schema" as parent        // Relative path (up)
 import "models/core/users" as users        // Module path (from module root)
@@ -214,7 +214,7 @@ import "models/core/users" as users        // Module path (from module root)
 
 ### Usage with Relationships
 
-```yammm
+```yammm-snippet
 import "./departments" as dept
 
 type Employee {
@@ -232,7 +232,7 @@ Imported data type aliases must also be qualified: `common.Money`.
 
 ### Abstract Types and extends
 
-```yammm
+```yammm-snippet
 abstract type Auditable {
     created_at Timestamp required
     updated_at Timestamp

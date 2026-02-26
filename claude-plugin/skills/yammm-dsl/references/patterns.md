@@ -44,13 +44,10 @@ abstract type SoftDeletable {
     deactivated_at Timestamp
     deactivated_reason Enum["removed", "expired", "merged", "manual"]
 
+    // The invariant ensures that inactive records always have a deactivation timestamp.
     ! "deactivation_consistency" is_active || deactivated_at != nil
 }
-```
 
-The invariant ensures that inactive records always have a deactivation timestamp.
-
-```yammm
 type Account extends SoftDeletable {
     id String primary
     name String[1, 100] required
@@ -382,7 +379,7 @@ type Company {
 
 ### Relative Import (Sibling Schema)
 
-```yammm
+```yammm-snippet
 schema "orders"
 
 import "./products" as products
@@ -396,7 +393,7 @@ type OrderLine {
 
 ### Module Import (From Module Root)
 
-```yammm
+```yammm-snippet
 schema "reports"
 
 import "models/core/users" as users
@@ -419,7 +416,7 @@ type Money = Float[0.0, _]
 type Percentage = Float[0.0, 100.0]
 ```
 
-```yammm
+```yammm-snippet
 // billing.yammm
 schema "billing"
 import "./common" as common
@@ -442,7 +439,7 @@ abstract type Auditable {
 }
 ```
 
-```yammm
+```yammm-snippet
 // domain.yammm
 schema "domain"
 import "./base" as base
