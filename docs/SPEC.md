@@ -1234,7 +1234,7 @@ type Person {
     *-> PARTS (many) Part
 
     // Required string length
-    ! "name is required" Len(name) > 0 && Len(name) <= 100
+    ! "name is required" name -> Len > 0 && name -> Len <= 100
 
     // Age range check
     ! "age must be valid" age >= 0 && age <= 130

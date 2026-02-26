@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v yammm-lsp >/dev/null 2>&1 || echo 'Warning: yammm-lsp binary not found in PATH. LSP features (diagnostics, completion, hover) will not work. Install with: go install github.com/simon-lentz/yammm/lsp/cmd/yammm-lsp@latest'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -80,6 +80,22 @@
         { "include": "#invariant" },
         { "include": "#association" },
         { "include": "#composition" },
+        { "include": "#rel-properties" },
+        { "include": "#property" }
+      ]
+    },
+    "rel-properties": {
+      "comment": "Edge property block for associations: --> REL (mult) Target { prop Type }. Must be scoped here so its closing } is not mistaken for the type body's closing }.",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.block.begin.yammm" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.block.end.yammm" }
+      },
+      "patterns": [
+        { "include": "#comments" },
         { "include": "#property" }
       ]
     },
