@@ -17,7 +17,7 @@
     "Programming Languages"
   ],
   "main": "./out/extension.js",
-  "activationEvents": ["onLanguage:yammm", "onLanguage:markdown"],
+  "activationEvents": ["onLanguage:markdown"],
   "contributes": {
     "languages": [
       {
