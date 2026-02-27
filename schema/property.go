@@ -194,6 +194,39 @@ func (p *Property) DeclaringScope() DeclaringScope {
 	return p.scope
 }
 
+// CanNarrowFrom reports whether this (child) property is a valid narrowing of
+// the parent property. A child narrows its parent when:
+//   - Names match (case-sensitive)
+//   - PK status is identical (structural, cannot change)
+//   - Optionality narrows: optional->required is allowed, required->optional is NOT
+//   - Constraint narrows: child's valid set is a subset of parent's (via NarrowsTo)
+//
+// Both nil returns true (nil == nil). One nil returns false.
+func (p *Property) CanNarrowFrom(parent *Property) bool {
+	if p == nil || parent == nil {
+		return p == parent
+	}
+	if p.name != parent.name {
+		return false
+	}
+	if p.isPrimaryKey != parent.isPrimaryKey {
+		return false
+	}
+	// Cannot widen: required -> optional
+	if !parent.optional && p.optional {
+		return false
+	}
+	// Both nil constraints: OK
+	if p.constraint == nil && parent.constraint == nil {
+		return true
+	}
+	// One nil, one non-nil: not compatible
+	if p.constraint == nil || parent.constraint == nil {
+		return false
+	}
+	return parent.constraint.NarrowsTo(p.constraint)
+}
+
 // Equal reports whether two properties are structurally equal.
 // Compares: name (case-sensitive), optionality, PK status, constraint.
 // NOT compared: span, docs, scope. Scope is excluded because properties

@@ -1,8 +1,6 @@
 # Dev stuff
-_private/
-TODO_*.md
-DEV_*.md
-FEAT_*.md
+docs/
+!docs/SPEC.md
 
 # LLMs
 .claude/
@@ -41,7 +39,8 @@ node_modules/
 out/
 *.vsix
 .vscode-test/
-lsp/editors/vscode/bin/*
+lsp/bin/
+lsp/editors/vscode/bin/
 /yammm-lsp
 
 # LSP log output

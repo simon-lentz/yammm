@@ -1,0 +1,66 @@
+{
+    "OpRecord": [
+        {
+            "id": "op-001",
+            "a": 2,
+            "b": 5,
+            "name": "test",
+            "email": "test@example.com",
+            "value": 10,
+            "flag": true
+        }
+    ],
+    "OpRecord__invalid_modulo": [
+        {
+            "id": "op-002",
+            "a": 3,
+            "b": 5,
+            "name": "test",
+            "flag": true,
+            "value": 1
+        }
+    ],
+    "PipeRecord": [
+        {
+            "id": "pipe-001",
+            "name": "  Alice  ",
+            "csv": "a,b,c",
+            "price": 5.0,
+            "quantity": 2
+        },
+        {
+            "id": "pipe-002",
+            "name": "Bob",
+            "price": 10.0,
+            "quantity": 1
+        }
+    ],
+    "PipeRecord__invalid_csv": [
+        {
+            "id": "pipe-003",
+            "name": "Charlie",
+            "csv": "a,,b",
+            "price": 5.0,
+            "quantity": 1
+        }
+    ],
+    "NilRecord": [
+        {
+            "id": "nil-001",
+            "name": "Alice",
+            "nickname": "Ali",
+            "score": 5
+        },
+        {
+            "id": "nil-002",
+            "name": "Bob"
+        }
+    ],
+    "NilRecord__invalid_empty_nickname": [
+        {
+            "id": "nil-003",
+            "name": "Charlie",
+            "nickname": ""
+        }
+    ]
+}

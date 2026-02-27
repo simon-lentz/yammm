@@ -1,0 +1,23 @@
+{
+  "name": "yammm",
+  "version": "0.1.0",
+  "description": "Yammm DSL schema language support - LSP intelligence, schema authoring, and review",
+  "author": {
+    "name": "simon-lentz"
+  },
+  "homepage": "https://github.com/simon-lentz/yammm",
+  "repository": "https://github.com/simon-lentz/yammm",
+  "license": "MIT",
+  "keywords": ["yammm", "dsl", "schema", "lsp", "validation"],
+  "lspServers": {
+    "yammm-lsp": {
+      "command": "yammm-lsp",
+      "args": ["--stdio"],
+      "extensionToLanguage": {
+        ".yammm": "yammm",
+        ".md": "markdown",
+        ".markdown": "markdown"
+      }
+    }
+  }
+}

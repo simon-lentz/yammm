@@ -1,0 +1,14 @@
+schema "type_system_modifier_override"
+
+// Source: type-system.md, "Property Modifier Override"
+// Promoting optional-to-required via re-declaration is accepted as
+// a valid narrowing operation. This schema should compile successfully.
+
+abstract type Base {
+    description String
+}
+
+type Strict extends Base {
+    id UUID primary
+    description String required
+}

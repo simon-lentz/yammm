@@ -1,0 +1,21 @@
+schema "patterns_audit"
+
+// Source: patterns.md, "Audit Field Patterns"
+
+abstract type Auditable {
+    created_at Timestamp required
+    updated_at Timestamp
+    created_by String
+}
+
+abstract type Trackable {
+    created_at Timestamp required
+    updated_at Timestamp
+    fetched_at Timestamp required
+}
+
+type Article extends Auditable {
+    id UUID primary
+    title String[1, 200] required
+    body String required
+}

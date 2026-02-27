@@ -1,0 +1,82 @@
+{
+    "Item": [
+        {"code": "ABC", "name": "Widget"},
+        {"code": "DEFGHIJ", "name": "Gadget with longer code"}
+    ],
+    "Item__invalid_bounds": [
+        {"code": "AB", "name": "Code too short"},
+        {"code": "ABCDEFGHIJK", "name": "Code too long"}
+    ],
+    "Item__invalid_required": [
+        {"code": "ABC"}
+    ],
+    "Record": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "name": "Alice",
+            "email": "alice@example.com",
+            "score": 85.5,
+            "rank": 1,
+            "code": "AB",
+            "active": true,
+            "created_at": "2026-01-15T10:30:00Z",
+            "birth_date": "1990-05-20"
+        },
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440001",
+            "name": "Bob"
+        }
+    ],
+    "Record__invalid_email": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440002",
+            "name": "Charlie",
+            "email": "not-an-email"
+        }
+    ],
+    "Record__invalid_score": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440003",
+            "name": "Diana",
+            "score": 101.0
+        }
+    ],
+    "Product": [
+        {"id": "550e8400-e29b-41d4-a716-446655440010", "name": "Widget", "price": 9.99, "discount": 10.0},
+        {"id": "550e8400-e29b-41d4-a716-446655440011", "name": "Gadget", "price": 19.99}
+    ],
+    "Product__invalid_discount": [
+        {"id": "550e8400-e29b-41d4-a716-446655440012", "name": "Expensive", "price": 99.99, "discount": 75.0}
+    ],
+    "Product__invalid_name": [
+        {"id": "550e8400-e29b-41d4-a716-446655440013", "name": "", "price": 5.0}
+    ],
+    "Document": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440020",
+            "name": "Spec Doc",
+            "content": "Hello world",
+            "created_at": "2026-01-01T00:00:00Z"
+        }
+    ],
+    "Document__invalid_missing_inherited": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440021",
+            "content": "Missing name and created_at"
+        }
+    ],
+    "Adult": [
+        {"id": "550e8400-e29b-41d4-a716-446655440030", "age": 25},
+        {"id": "550e8400-e29b-41d4-a716-446655440031", "age": 18}
+    ],
+    "Adult__invalid_parent_bounds": [
+        {"id": "550e8400-e29b-41d4-a716-446655440032", "age": -1},
+        {"id": "550e8400-e29b-41d4-a716-446655440033", "age": 10}
+    ],
+    "Company": [
+        {"id": "550e8400-e29b-41d4-a716-446655440040", "name": "Acme Corp"}
+    ],
+    "Employee": [
+        {"id": "550e8400-e29b-41d4-a716-446655440041", "name": "Alice"}
+    ]
+}

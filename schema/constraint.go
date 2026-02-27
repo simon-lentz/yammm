@@ -69,6 +69,19 @@ type Constraint interface {
 	// For AliasConstraint, compares the resolved underlying constraint.
 	Equal(other Constraint) bool
 
+	// NarrowsTo reports whether the child constraint is a valid narrowing of
+	// this (parent) constraint. Returns true when every value accepted by child
+	// would also be accepted by this constraint (child's valid set is a subset
+	// of parent's valid set).
+	//
+	// For bounds-based constraints (String, Integer, Float): child min >= parent min
+	// and child max <= parent max.
+	// For EnumConstraint: child values must be a subset of parent values.
+	// For parameterless or non-narrowable constraints (Boolean, Date, UUID,
+	// Timestamp, Pattern, Vector): delegates to Equal (no narrowing supported).
+	// For AliasConstraint: resolves alias chain first, then delegates.
+	NarrowsTo(child Constraint) bool
+
 	// IsResolved reports whether the constraint references are fully resolved.
 	// This method is primarily meaningful for AliasConstraint, which starts
 	// unresolved (referencing a DataType by name) and becomes resolved during
@@ -135,6 +148,22 @@ func (c StringConstraint) Equal(other Constraint) bool {
 	return ok && c == o
 }
 
+func (c StringConstraint) NarrowsTo(child Constraint) bool {
+	o, ok := resolveAlias(child).(StringConstraint)
+	if !ok {
+		return false
+	}
+	// Child min must be >= parent min (if parent has a min).
+	if c.hasMin && (!o.hasMin || o.minLen < c.minLen) {
+		return false
+	}
+	// Child max must be <= parent max (if parent has a max).
+	if c.hasMax && (!o.hasMax || o.maxLen > c.maxLen) {
+		return false
+	}
+	return true
+}
+
 func (StringConstraint) IsResolved() bool { return true }
 
 // IntegerConstraint constrains integer values with optional min/max bounds.
@@ -180,6 +209,22 @@ func (c IntegerConstraint) String() string {
 func (c IntegerConstraint) Equal(other Constraint) bool {
 	o, ok := resolveAlias(other).(IntegerConstraint)
 	return ok && c == o
+}
+
+func (c IntegerConstraint) NarrowsTo(child Constraint) bool {
+	o, ok := resolveAlias(child).(IntegerConstraint)
+	if !ok {
+		return false
+	}
+	// Child min must be >= parent min (if parent has a min).
+	if c.hasMin && (!o.hasMin || o.min < c.min) {
+		return false
+	}
+	// Child max must be <= parent max (if parent has a max).
+	if c.hasMax && (!o.hasMax || o.max > c.max) {
+		return false
+	}
+	return true
 }
 
 func (IntegerConstraint) IsResolved() bool { return true }
@@ -229,6 +274,22 @@ func (c FloatConstraint) Equal(other Constraint) bool {
 	return ok && c == o
 }
 
+func (c FloatConstraint) NarrowsTo(child Constraint) bool {
+	o, ok := resolveAlias(child).(FloatConstraint)
+	if !ok {
+		return false
+	}
+	// Child min must be >= parent min (if parent has a min).
+	if c.hasMin && (!o.hasMin || o.min < c.min) {
+		return false
+	}
+	// Child max must be <= parent max (if parent has a max).
+	if c.hasMax && (!o.hasMax || o.max > c.max) {
+		return false
+	}
+	return true
+}
+
 func (FloatConstraint) IsResolved() bool { return true }
 
 // BooleanConstraint constrains boolean values. It has no parameters.
@@ -247,6 +308,8 @@ func (c BooleanConstraint) Equal(other Constraint) bool {
 	_, ok := resolveAlias(other).(BooleanConstraint)
 	return ok
 }
+
+func (c BooleanConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
 
 func (BooleanConstraint) IsResolved() bool { return true }
 
@@ -282,6 +345,8 @@ func (c TimestampConstraint) Equal(other Constraint) bool {
 	return ok && c.format == o.format
 }
 
+func (c TimestampConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
+
 func (TimestampConstraint) IsResolved() bool { return true }
 
 // DateConstraint constrains date values. It has no parameters.
@@ -301,6 +366,8 @@ func (c DateConstraint) Equal(other Constraint) bool {
 	return ok
 }
 
+func (c DateConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
+
 func (DateConstraint) IsResolved() bool { return true }
 
 // UUIDConstraint constrains UUID values. It has no parameters.
@@ -319,6 +386,8 @@ func (c UUIDConstraint) Equal(other Constraint) bool {
 	_, ok := resolveAlias(other).(UUIDConstraint)
 	return ok
 }
+
+func (c UUIDConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
 
 func (UUIDConstraint) IsResolved() bool { return true }
 
@@ -362,6 +431,24 @@ func (c EnumConstraint) Equal(other Constraint) bool {
 	}
 	for _, v := range o.values {
 		if _, exists := set[v]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
+func (c EnumConstraint) NarrowsTo(child Constraint) bool {
+	o, ok := resolveAlias(child).(EnumConstraint)
+	if !ok {
+		return false
+	}
+	// Child values must be a subset of parent values.
+	parentSet := make(map[string]struct{}, len(c.values))
+	for _, v := range c.values {
+		parentSet[v] = struct{}{}
+	}
+	for _, v := range o.values {
+		if _, exists := parentSet[v]; !exists {
 			return false
 		}
 	}
@@ -442,6 +529,8 @@ func (c PatternConstraint) Equal(other Constraint) bool {
 	return slices.Equal(cp, op)
 }
 
+func (c PatternConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
+
 func (PatternConstraint) IsResolved() bool { return true }
 
 // VectorConstraint constrains vector values to a fixed dimension.
@@ -468,6 +557,8 @@ func (c VectorConstraint) Equal(other Constraint) bool {
 	o, ok := resolveAlias(other).(VectorConstraint)
 	return ok && c.dimension == o.dimension
 }
+
+func (c VectorConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
 
 func (VectorConstraint) IsResolved() bool { return true }
 
@@ -518,6 +609,25 @@ func (c AliasConstraint) Equal(other Constraint) bool {
 		return false // cycle or unresolved alias chain
 	}
 	return term.Equal(other)
+}
+
+// NarrowsTo delegates to the resolved underlying constraint's NarrowsTo method.
+// For unresolved aliases, returns false (cannot determine narrowing without resolution).
+//
+// This method is cycle-safe: it uses resolveAlias() to unwrap alias chains before
+// delegating to the terminal constraint's NarrowsTo method.
+func (c AliasConstraint) NarrowsTo(child Constraint) bool {
+	if c.resolved == nil {
+		return false
+	}
+	// Use resolveAlias for cycle-safety before delegating.
+	// If resolveAlias returns an AliasConstraint, a cycle was detected
+	// and we cannot determine narrowing - return false.
+	term := resolveAlias(c.resolved)
+	if _, ok := term.(AliasConstraint); ok {
+		return false // cycle or unresolved alias chain
+	}
+	return term.NarrowsTo(child)
 }
 
 // IsResolved reports whether the alias has been fully resolved to a terminal constraint.

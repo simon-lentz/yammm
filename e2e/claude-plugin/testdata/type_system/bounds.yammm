@@ -1,0 +1,13 @@
+schema "type_system_bounds"
+
+// Source: type-system.md, "Bound Syntax Rules" section
+
+type BoundVariations {
+    id UUID primary
+    non_negative Integer[0, _]
+    max_only Integer[_, 99]
+    exact_len String[5, 5]
+    negative_bounds Integer[-100, 100]
+    negative_float Float[-1.0, 1.0]
+    int_bound_float Float[0, 1.0]
+}

@@ -2,7 +2,7 @@
   "name": "yammm",
   "displayName": "YAMMM",
   "description": "Language support for YAMMM schema files",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "simon-lentz",
   "license": "MIT",
   "icon": "icon.png",
@@ -17,7 +17,7 @@
     "Programming Languages"
   ],
   "main": "./out/extension.js",
-  "activationEvents": ["onLanguage:yammm", "onLanguage:markdown"],
+  "activationEvents": ["onLanguage:markdown"],
   "contributes": {
     "languages": [
       {

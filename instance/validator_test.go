@@ -699,6 +699,7 @@ func makeTypeWithInvariant(invName string, invExpr expr.Expression, props ...*sc
 
 	inv := schema.NewInvariant(invName, invExpr, location.Span{}, "")
 	t.SetInvariants([]*schema.Invariant{inv})
+	t.SetAllInvariants([]*schema.Invariant{inv})
 
 	t.Seal()
 	return t

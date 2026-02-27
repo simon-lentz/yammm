@@ -69,7 +69,7 @@ datatypeKeyword
   ;
 // Invariants attach to types with a user-facing message and an expression; message is presented
 // when the invariant evaluates to false during runtime validation.
-invariant: EXCLAMATION message=STRING constraint=expr ;
+invariant: DOC_COMMENT? EXCLAMATION message=STRING constraint=expr ;
 
 expr
   : left=literal # value

@@ -1,0 +1,23 @@
+schema "patterns_identifiers"
+
+// Source: patterns.md, "Identifier Patterns"
+
+type User {
+    id UUID primary
+    email String required
+}
+
+type ExternalCode = String[6, 10]
+
+type Product {
+    sku ExternalCode primary
+    name String[1, 200] required
+}
+
+type Enrollment {
+    id UUID primary
+    student_id String required
+    course_id String required
+
+    ! "composite_populated" student_id -> Len > 0 && course_id -> Len > 0
+}

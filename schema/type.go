@@ -32,6 +32,7 @@ type Type struct {
 	primaryKeys     []*Property
 	allAssociations []*Relation
 	allCompositions []*Relation
+	allInvariants   []*Invariant
 
 	// Inheritance
 	inherits   []TypeRef         // declared extends clause
@@ -278,6 +279,22 @@ func (t *Type) InvariantsSlice() []*Invariant {
 	return slices.Clone(t.invariants)
 }
 
+// AllInvariants returns an iterator over all invariants (own and inherited).
+func (t *Type) AllInvariants() iter.Seq[*Invariant] {
+	return func(yield func(*Invariant) bool) {
+		for _, i := range t.allInvariants {
+			if !yield(i) {
+				return
+			}
+		}
+	}
+}
+
+// AllInvariantsSlice returns a defensive copy of all invariants (own and inherited).
+func (t *Type) AllInvariantsSlice() []*Invariant {
+	return slices.Clone(t.allInvariants)
+}
+
 // Inherits returns an iterator over the declared extends clause (syntactic refs).
 func (t *Type) Inherits() iter.Seq[TypeRef] {
 	return func(yield func(TypeRef) bool) {
@@ -439,6 +456,14 @@ func (t *Type) SetInvariants(invariants []*Invariant) {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.invariants = invariants
+}
+
+// SetAllInvariants sets all invariants including inherited (called during completion).
+func (t *Type) SetAllInvariants(all []*Invariant) {
+	if t.sealed {
+		panic("schema: cannot mutate sealed type")
+	}
+	t.allInvariants = all
 }
 
 // SetInherits sets the declared extends clause (called during completion).

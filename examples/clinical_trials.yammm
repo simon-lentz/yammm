@@ -1,0 +1,384 @@
+/* Clinical Trials Schema
+   Models participants, sites, investigators, and the trials that connect them.
+
+   Core entities:
+	 - ClinicalTrial   the protocol being studied
+	 - Patient         a human participant enrolled in one or more trials
+	 - Site            a facility where a trial is conducted
+	 - Investigator    a qualified person who runs or participates at a site
+
+   Junction types (independent, self-keyed):
+	 - Enrollment              one patient in one trial at one site
+	 - SiteActivation          one site participating in one trial
+	 - InvestigatorAssignment  one investigator assigned to one site for one trial
+
+   Part types (no independent existence):
+	 - AdverseEvent            safety event owned by an Enrollment
+	 - ContactInfo             reusable contact block embedded in Patient and Site
+
+   Uniqueness note: composite uniqueness for junction types (e.g. one SiteActivation
+   per trial+site pair) is enforced at the database level, not in the schema.
+*/
+schema "ClinicalTrials"
+
+// ---------------------------------------------------------------------------
+// Type aliases
+// ---------------------------------------------------------------------------
+
+/* NCT number: ClinicalTrials.gov identifier, e.g. "NCT01234567" */
+type NctId = Pattern["^NCT\\d{8}$"]
+
+/* IND number: Investigational New Drug application number */
+type IndNumber = Pattern["^\\d{1,6}$"]
+
+/* ISO 3166-1 alpha-2 country code */
+type CountryCode = String[2, 2]
+
+/* E.164-compatible phone number, e.g. "+12025551234" */
+type PhoneE164 = Pattern["^\\+[1-9]\\d{1,14}$"]
+
+/* RFC 5321 email address */
+type Email = Pattern["^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$"]
+
+/* Trial phase enum - includes "N/A" for observational studies */
+type TrialPhase = Enum["N/A", "Phase 1", "Phase 1/2", "Phase 2", "Phase 2/3", "Phase 3", "Phase 4"]
+
+/* Overall trial status following ClinicalTrials.gov vocabulary */
+type TrialStatus = Enum[
+	"Not Yet Recruiting",
+	"Recruiting",
+	"Enrolling by Invitation",
+	"Active, Not Recruiting",
+	"Completed",
+	"Suspended",
+	"Terminated",
+	"Withdrawn",
+]
+
+/* Per-patient enrollment status within a trial */
+type EnrollmentStatus = Enum[
+	"Screened",
+	"Screen Failed",
+	"Enrolled",
+	"Randomized",
+	"Completed",
+	"Withdrawn",
+	"Lost to Follow-up",
+]
+
+/* Site activation status for a given trial */
+type SiteStatus = Enum["Pending", "Active", "Closed", "Suspended"]
+
+/* Investigator role at a site */
+type InvestigatorRole = Enum["Principal Investigator", "Sub-Investigator", "Study Coordinator"]
+
+/* Adverse event severity per CTCAE grades */
+type AeSeverity = Enum["Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5"]
+
+/* Adverse event relationship to investigational product */
+type AeRelatedness = Enum["Unrelated", "Unlikely", "Possible", "Probable", "Definite"]
+
+/* Sex at birth for demographic and eligibility purposes */
+type BiologicalSex = Enum["Male", "Female", "Intersex", "Unknown"]
+
+/* Positive integer count, used for enrollment targets and capacities */
+type PositiveInt = Integer[1, _]
+
+/* Sponsor category following ClinicalTrials.gov vocabulary */
+type SponsorType = Enum["Industry", "NIH", "Other U.S. Federal Agency", "Academic", "Other"]
+
+// ---------------------------------------------------------------------------
+// Abstract base types
+// ---------------------------------------------------------------------------
+
+/* Audit fields inherited by all primary entities.
+   Both created and updated track actor + timestamp pairs. */
+abstract type Auditable {
+	created_at Timestamp required
+	created_by String[1, 100]
+	/* Nil means the record has not been modified since creation. */
+	updated_at Timestamp
+	updated_by String[1, 100]
+}
+
+// ---------------------------------------------------------------------------
+// Part types
+// ---------------------------------------------------------------------------
+
+/* Structured contact information; embedded in Patient and Site.
+   At least one communication channel (phone or email) is required.
+   Address fields are optional but must be internally consistent:
+   if an address line is provided, city must also be present. */
+part type ContactInfo {
+	phone   PhoneE164
+	email   Email
+	address String[1, 500]
+	city    String[1, 100]
+	state   String[1, 100]
+	country CountryCode required
+	zip     String[1, 20]
+
+	! "contact_has_channel" phone != nil || email != nil
+	! "address_requires_city" address == nil || city != nil
+}
+
+/* A safety or tolerability event experienced by an enrolled patient.
+   When action_taken is present it must contain a non-empty description;
+   use nil (not an empty string) to indicate no action was taken. */
+part type AdverseEvent {
+	ae_term         String[1, 300] required
+	onset_date      Date required
+	resolution_date Date
+	severity        AeSeverity required
+	relatedness     AeRelatedness required
+	serious         Boolean required
+	action_taken    String[1, 1000]
+	outcome         Enum["Recovered", "Recovering", "Not Recovered", "Fatal", "Unknown"] required
+
+	! "dates_valid" resolution_date == nil || resolution_date >= onset_date
+	/* CTCAE Grade 5 (fatal) must always be classified as a serious event. */
+	! "fatal_is_serious" severity != "Grade 5" || serious == true
+}
+
+// ---------------------------------------------------------------------------
+// Primary entity types
+// ---------------------------------------------------------------------------
+
+/* A clinical trial protocol. Primary key is the NCT number assigned by
+   ClinicalTrials.gov; internal UUID is also stored for systems that
+   generate records before registration.
+
+   target_enrollment is typed as PositiveInt (>= 1) and required, so it is
+   always positive by type constraint — no runtime invariant needed. */
+type ClinicalTrial extends Auditable {
+	nct_id                  NctId primary
+	internal_id             UUID required
+	title                   String[1, 500] required
+	acronym                 String[1, 50]
+	phase                   TrialPhase required
+	status                  TrialStatus required
+	indication              String[1, 300] required
+	investigational_product String[1, 300] required
+	ind_number              IndNumber
+	sponsor                 String[1, 300] required
+	sponsor_type            SponsorType required
+	protocol_version        String[1, 50] required
+	minimum_age_years       Integer[0, 130]
+	maximum_age_years       Integer[0, 130]
+	sex_eligibility         Enum["All", "Male", "Female"] required
+	healthy_volunteers      Boolean required
+	target_enrollment       PositiveInt required
+	start_date              Date required
+	primary_completion_date Date
+	completion_date         Date
+	brief_summary           String[1, 5000]
+	/* When present, must contain non-empty content; use nil for absent. */
+	detailed_description String[1, 50000]
+	primary_endpoint     String[1, 2000] required
+	/* When present, must contain non-empty content; use nil for absent. */
+	secondary_endpoints String[1, 5000]
+
+	! "completion_after_start"
+		completion_date == nil || completion_date >= start_date
+
+	! "primary_completion_before_or_at_completion"
+		primary_completion_date == nil ||
+		completion_date == nil ||
+		primary_completion_date <= completion_date
+
+	! "primary_completion_after_start"
+		primary_completion_date == nil ||
+		primary_completion_date >= start_date
+
+	! "age_range_valid"
+		minimum_age_years == nil ||
+		maximum_age_years == nil ||
+		maximum_age_years >= minimum_age_years
+}
+
+/* A human subject enrolled or screened for enrollment in clinical trials.
+   Date of birth drives eligibility calculations; demographics are retained
+   for safety monitoring. String[1, N] required fields already enforce
+   non-empty content at the type-constraint level. */
+type Patient extends Auditable {
+	patient_id    UUID primary
+	first_name    String[1, 100] required
+	last_name     String[1, 100] required
+	date_of_birth Date required
+	sex           BiologicalSex required
+	race          String[1, 100]
+	ethnicity     Enum["Hispanic or Latino", "Not Hispanic or Latino", "Unknown", "Not Reported"]
+	weight_kg     Float[1.0, 700.0]
+	height_cm     Float[20.0, 280.0]
+	active        Boolean required
+
+	*-> CONTACT (one) ContactInfo
+}
+
+/* A facility — hospital, clinic, research center — where one or more
+   trials are conducted. Identified by the combination of its facility
+   name and the regulatory site number assigned by the sponsor.
+   String[1, N] required fields already enforce non-empty content at the
+   type-constraint level. */
+type Site extends Auditable {
+	site_id       UUID primary
+	site_number   String[1, 50] required
+	facility_name String[1, 500] required
+	department    String[1, 200]
+	/* Zero is valid for newly registered sites before investigators are assigned. */
+	investigator_count   Integer[0, _]
+	max_patient_capacity PositiveInt
+
+	*-> CONTACT (one) ContactInfo
+}
+
+/* A medically qualified individual who designs, conducts, or supervises
+   a clinical trial at a site. The npi field holds the US National
+   Provider Identifier when applicable; it is optional for non-US
+   investigators. String[1, N] required fields already enforce non-empty
+   content at the type-constraint level. */
+type Investigator extends Auditable {
+	investigator_id UUID primary
+	first_name      String[1, 100] required
+	last_name       String[1, 100] required
+	degree          String[1, 100] required
+	specialty       String[1, 200]
+	institution     String[1, 500] required
+	npi             Pattern["^\\d{10}$"]
+	active          Boolean required
+}
+
+// ---------------------------------------------------------------------------
+// Junction types (independently keyed; no independent life-cycle meaning)
+//
+// Composite uniqueness (e.g. one SiteActivation per trial+site pair, one
+// InvestigatorAssignment per investigator+site+trial triple) is enforced
+// at the database constraint level, not in the schema.
+// ---------------------------------------------------------------------------
+
+/* Records that a Site is activated to run a specific ClinicalTrial.
+   The composite internal key is stored as a UUID; the meaningful
+   business identity is (trial_nct_id, site_id). */
+type SiteActivation extends Auditable {
+	activation_id       UUID primary
+	status              SiteStatus required
+	activation_date     Date
+	deactivation_date   Date
+	irb_approval_number String[1, 100]
+	irb_approval_date   Date
+	irb_expiry_date     Date
+
+	--> TRIAL (one) ClinicalTrial / SITE_ACTIVATIONS (many)
+	--> SITE  (one) Site / TRIAL_ACTIVATIONS (many)
+
+	! "deactivation_after_activation"
+		deactivation_date == nil ||
+		activation_date == nil   ||
+		deactivation_date >= activation_date
+
+	/* A deactivation date implies the site was previously activated. */
+	! "deactivation_requires_activation"
+		deactivation_date == nil || activation_date != nil
+
+	! "irb_expiry_after_approval"
+		irb_expiry_date == nil  ||
+		irb_approval_date == nil ||
+		irb_expiry_date > irb_approval_date
+
+	/* An IRB expiry date is meaningless without a corresponding approval date. */
+	! "irb_expiry_requires_approval_date"
+		irb_expiry_date == nil || irb_approval_date != nil
+
+	! "active_requires_irb_approval"
+		status != "Active" || irb_approval_number != nil
+}
+
+/* Links an Investigator to a Site for a particular ClinicalTrial,
+   capturing their role and tenure on that study at that location. */
+type InvestigatorAssignment extends Auditable {
+	assignment_id UUID primary
+	role          InvestigatorRole required
+	start_date    Date required
+	end_date      Date
+	cv_on_file    Boolean required
+	gcp_certified Boolean required
+
+	--> INVESTIGATOR (one) Investigator / ASSIGNMENTS (many)
+	--> SITE         (one) Site / SITE_INVESTIGATOR_ASSIGNMENTS (many)
+	--> TRIAL        (one) ClinicalTrial / TRIAL_INVESTIGATOR_ASSIGNMENTS (many)
+
+	! "end_after_start"
+		end_date == nil || end_date >= start_date
+
+	! "pi_must_have_cv"
+		role != "Principal Investigator" || cv_on_file == true
+
+	/* Study Coordinators are exempt from GCP (Good Clinical Practice)
+	   certification; PIs and Sub-Investigators must be GCP-certified. */
+	! "all_require_gcp"
+		gcp_certified == true || role == "Study Coordinator"
+}
+
+/* The central junction: one Patient enrolled (or screened) in one
+   ClinicalTrial at one Site. Adverse events are owned here because
+   they are contextual to a specific enrollment, not to the patient
+   globally.
+
+   When present, withdrawal_reason must contain non-empty content
+   (String[1, N]); use nil when no withdrawal has occurred. */
+type Enrollment extends Auditable {
+	enrollment_id      UUID primary
+	status             EnrollmentStatus required
+	screen_date        Date required
+	enrollment_date    Date
+	randomization_date Date
+	completion_date    Date
+	withdrawal_date    Date
+	withdrawal_reason  String[1, 1000]
+	randomization_code String[1, 50]
+	arm                String[1, 100]
+
+	--> PATIENT (one) Patient / ENROLLMENTS (many)
+	--> TRIAL   (one) ClinicalTrial / ENROLLMENTS (many)
+	--> SITE    (one) Site / ENROLLMENTS (many)
+
+	*-> ADVERSE_EVENTS (many) AdverseEvent
+
+	! "enrollment_after_screen"
+		enrollment_date == nil || enrollment_date >= screen_date
+
+	! "randomization_after_enrollment"
+		randomization_date == nil ||
+		enrollment_date == nil    ||
+		randomization_date >= enrollment_date
+
+	! "completion_after_enrollment"
+		completion_date == nil  ||
+		enrollment_date == nil  ||
+		completion_date >= enrollment_date
+
+	! "withdrawal_after_screen"
+		withdrawal_date == nil || withdrawal_date >= screen_date
+
+	! "withdrawal_requires_date"
+		status != "Withdrawn" || withdrawal_date != nil
+
+	! "withdrawal_requires_reason"
+		status != "Withdrawn" || withdrawal_reason != nil
+
+	! "completed_requires_enrollment_date"
+		status != "Completed" || enrollment_date != nil
+
+	! "randomized_requires_code"
+		status != "Randomized" || randomization_code != nil
+
+	! "randomized_requires_date"
+		status != "Randomized" || randomization_date != nil
+
+	! "screen_failed_has_no_enrollment_date"
+		status != "Screen Failed" || enrollment_date == nil
+
+	/* Treatment arm is only meaningful after randomization. */
+	! "arm_requires_randomization"
+		arm == nil || randomization_date != nil
+}

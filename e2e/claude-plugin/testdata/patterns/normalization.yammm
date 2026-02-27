@@ -1,0 +1,12 @@
+schema "patterns_normalization"
+
+// Source: patterns.md, "Normalization Pattern"
+
+type Organization {
+    id UUID primary
+    name_raw String[1, 500] required
+    name_norm String[1, 500] required
+
+    ! "norm_not_empty" name_norm -> Len > 0
+    ! "norm_is_lowercase" name_norm == name_norm -> Lower
+}

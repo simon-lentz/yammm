@@ -1,0 +1,116 @@
+{
+    "AllTypes": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "age": 30,
+            "count": 0,
+            "priority": 5,
+            "temperature_i": -10,
+            "temp_f": 3.14,
+            "percentage": 50.0,
+            "ratio": 0.5,
+            "latitude": 45.0,
+            "active": true,
+            "is_published": true,
+            "name": "test",
+            "bounded_name": "Alice",
+            "code": "ABC",
+            "notes": "Some notes",
+            "status": "pending",
+            "color": "red",
+            "email": "alice@example.com",
+            "created_at": "2026-01-15T10:30:00Z",
+            "log_time": "2026-01-15 10:30:00",
+            "birth_date": "1990-05-20",
+            "expiry_date": "2027-12-31",
+            "external_ref": "660e8400-e29b-41d4-a716-446655440000",
+            "embedding": [1.0, 2.0, 3.0]
+        }
+    ],
+    "AllTypes__invalid_integer_bounds": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440001",
+            "is_published": false,
+            "expiry_date": "2027-01-01",
+            "priority": 11
+        }
+    ],
+    "AllTypes__invalid_float_bounds": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440002",
+            "is_published": false,
+            "expiry_date": "2027-01-01",
+            "latitude": 91.0
+        }
+    ],
+    "AllTypes__invalid_string_bounds": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440003",
+            "is_published": false,
+            "expiry_date": "2027-01-01",
+            "code": "AB"
+        }
+    ],
+    "AllTypes__invalid_enum": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440004",
+            "is_published": false,
+            "expiry_date": "2027-01-01",
+            "status": "invalid_value"
+        }
+    ],
+    "AllTypes__invalid_pattern": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440005",
+            "is_published": false,
+            "expiry_date": "2027-01-01",
+            "email": "not-an-email"
+        }
+    ],
+    "AllTypes__invalid_vector_dims": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440006",
+            "is_published": false,
+            "expiry_date": "2027-01-01",
+            "embedding": [1.0, 2.0]
+        }
+    ],
+    "BoundVariations": [
+        {"id": "550e8400-e29b-41d4-a716-446655440010", "non_negative": 0, "max_only": 0, "exact_len": "ABCDE", "negative_bounds": -100, "negative_float": -1.0, "int_bound_float": 0.5},
+        {"id": "550e8400-e29b-41d4-a716-446655440011", "non_negative": 999999, "max_only": 99, "exact_len": "FGHIJ", "negative_bounds": 100, "negative_float": 1.0, "int_bound_float": 1.0}
+    ],
+    "BoundVariations__invalid": [
+        {"id": "550e8400-e29b-41d4-a716-446655440012", "non_negative": -1},
+        {"id": "550e8400-e29b-41d4-a716-446655440013", "max_only": 100},
+        {"id": "550e8400-e29b-41d4-a716-446655440014", "exact_len": "ABCD"},
+        {"id": "550e8400-e29b-41d4-a716-446655440015", "negative_bounds": -101}
+    ],
+    "Product": [
+        {"id": "550e8400-e29b-41d4-a716-446655440020", "name": "Widget", "price": 9.99, "discount": 50.0, "priority": "high"},
+        {"id": "550e8400-e29b-41d4-a716-446655440021", "name": "Gadget", "price": 0.0}
+    ],
+    "Product__invalid_money": [
+        {"id": "550e8400-e29b-41d4-a716-446655440022", "name": "Bad", "price": -1.0}
+    ],
+    "Restricted": [
+        {"id": "550e8400-e29b-41d4-a716-446655440030", "age": 30, "name": "Alice", "score": 75.0}
+    ],
+    "Restricted__invalid_parent_bounds": [
+        {"id": "550e8400-e29b-41d4-a716-446655440031", "age": -1, "name": "Bob", "score": 75.0},
+        {"id": "550e8400-e29b-41d4-a716-446655440032", "age": 30, "name": "Charlie", "score": 101.0}
+    ],
+    "Restricted__invalid_narrowed_bounds": [
+        {"id": "550e8400-e29b-41d4-a716-446655440033", "age": 10, "name": "Alice", "score": 75.0},
+        {"id": "550e8400-e29b-41d4-a716-446655440034", "age": 30, "name": "A", "score": 75.0},
+        {"id": "550e8400-e29b-41d4-a716-446655440035", "age": 30, "name": "Alice", "score": 96.0}
+    ],
+    "Customer": [
+        {"id": "550e8400-e29b-41d4-a716-446655440040", "name": "Acme Corp", "created_at": "2026-01-01T00:00:00Z"}
+    ],
+    "Strict": [
+        {"id": "550e8400-e29b-41d4-a716-446655440050", "description": "Required now"}
+    ],
+    "Strict__invalid_missing_required": [
+        {"id": "550e8400-e29b-41d4-a716-446655440051"}
+    ]
+}

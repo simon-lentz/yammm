@@ -1,0 +1,18 @@
+schema "patterns_enumerations"
+
+// Source: patterns.md, "Enumeration Patterns"
+
+type Task {
+    id UUID primary
+    title String[1, 200] required
+    status Enum["draft", "open", "in_progress", "done", "cancelled"] required
+}
+
+type Severity = Enum["low", "medium", "high", "critical"]
+
+type Incident {
+    id UUID primary
+    title String[1, 300] required
+    severity Severity required
+    resolved Boolean required
+}

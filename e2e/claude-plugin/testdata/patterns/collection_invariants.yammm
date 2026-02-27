@@ -1,0 +1,52 @@
+schema "patterns_collections"
+
+// Source: patterns.md, "Collection Invariants via Compositions"
+
+part type LineItem {
+    sku String[1, 50] required
+    quantity Integer[1, _] required
+    unit_price Float[0.0, _] required
+}
+
+type Order {
+    id UUID primary
+    customer_id String required
+
+    *-> ITEMS (one:many) LineItem
+
+    ! "has_items" ITEMS -> Len > 0
+    ! "all_positive_qty" ITEMS -> All |$i| { $i.quantity > 0 }
+    ! "all_priced" ITEMS -> All |$i| { $i.unit_price > 0.0 }
+    ! "max_line_items" ITEMS -> Len <= 100
+}
+
+part type Ingredient {
+    name String[1, 100] required
+    percentage Float[0.0, 100.0] required
+}
+
+type Recipe {
+    id UUID primary
+    name String[1, 200] required
+
+    *-> INGREDIENTS (one:many) Ingredient
+
+    ! "has_ingredients" INGREDIENTS -> Len > 0
+    ! "pct_total" INGREDIENTS -> Map |$i| { $i.percentage } -> Sum == 100.0
+    ! "unique_names" INGREDIENTS -> Map |$i| { $i.name } -> Unique -> Len == INGREDIENTS -> Len
+}
+
+part type TestResult {
+    name String[1, 100] required
+    passed Boolean required
+    score Float[0.0, 100.0]
+}
+
+type TestSuite {
+    id String primary
+
+    *-> RESULTS (many) TestResult
+
+    ! "all_passed" RESULTS -> All |$r| { $r.passed }
+    ! "min_passing_score" RESULTS -> Filter |$r| { $r.passed } -> All |$r| { $r.score >= 60.0 }
+}

@@ -1,0 +1,160 @@
+{
+    "Article": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "title": "Getting Started",
+            "body": "Introduction content",
+            "created_at": "2026-01-01T00:00:00Z"
+        }
+    ],
+    "Account": [
+        {"id": "acc-001", "name": "Active Account", "is_active": true},
+        {"id": "acc-002", "name": "Deactivated", "is_active": false, "deactivated_at": "2026-01-15T00:00:00Z", "deactivated_reason": "expired"}
+    ],
+    "Account__invalid_deactivation": [
+        {"id": "acc-003", "name": "Bad Deactivation", "is_active": false}
+    ],
+    "Organization": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440010",
+            "name_raw": "Acme Corporation",
+            "name_norm": "acme corporation"
+        }
+    ],
+    "Organization__invalid_mixed_case": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440011",
+            "name_raw": "Acme Corp",
+            "name_norm": "Acme Corp"
+        }
+    ],
+    "User": [
+        {"id": "550e8400-e29b-41d4-a716-446655440020", "email": "user@example.com"}
+    ],
+    "Product": [
+        {"sku": "PROD-001", "name": "Widget"},
+        {"sku": "PROD-0002", "name": "Gadget"}
+    ],
+    "Product__invalid_sku_bounds": [
+        {"sku": "SHORT", "name": "Bad SKU too short"},
+        {"sku": "TOOLONGSKU1", "name": "Bad SKU too long"}
+    ],
+    "Enrollment": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440030",
+            "student_id": "s-001",
+            "course_id": "c-001"
+        }
+    ],
+    "Enrollment__invalid_empty_id": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440031",
+            "student_id": "",
+            "course_id": "c-001"
+        }
+    ],
+    "Task": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440040",
+            "title": "Fix the bug",
+            "status": "open"
+        }
+    ],
+    "Task__invalid_enum": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440041",
+            "title": "Bad status",
+            "status": "invalid"
+        }
+    ],
+    "Incident": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440042",
+            "title": "Server outage",
+            "severity": "critical",
+            "resolved": false
+        }
+    ],
+    "Event": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440050",
+            "name": "Conference",
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-03"
+        },
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440051",
+            "name": "Open-ended",
+            "start_date": "2026-01-01"
+        }
+    ],
+    "Event__invalid_dates": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440052",
+            "name": "Backwards",
+            "start_date": "2026-12-31",
+            "end_date": "2026-01-01"
+        }
+    ],
+    "Payment": [
+        {"id": "550e8400-e29b-41d4-a716-446655440060", "method": "card", "card_number": "4111111111111111"},
+        {"id": "550e8400-e29b-41d4-a716-446655440061", "method": "wire", "wire_reference": "WIRE-REF-001"},
+        {"id": "550e8400-e29b-41d4-a716-446655440062", "method": "crypto"}
+    ],
+    "Payment__invalid_card_no_number": [
+        {"id": "550e8400-e29b-41d4-a716-446655440063", "method": "card"}
+    ],
+    "Payment__invalid_wire_no_ref": [
+        {"id": "550e8400-e29b-41d4-a716-446655440064", "method": "wire"}
+    ],
+    "Feature": [
+        {"id": "feat-001", "is_deprecated": true, "is_experimental": false},
+        {"id": "feat-002", "is_deprecated": false, "is_experimental": true},
+        {"id": "feat-003", "is_deprecated": false, "is_experimental": false}
+    ],
+    "Feature__invalid_both": [
+        {"id": "feat-004", "is_deprecated": true, "is_experimental": true}
+    ],
+    "Allocation": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440070",
+            "equity_pct": 60.0,
+            "bond_pct": 30.0,
+            "cash_pct": 10.0
+        }
+    ],
+    "Allocation__invalid_sum": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440071",
+            "equity_pct": 50.0,
+            "bond_pct": 30.0,
+            "cash_pct": 10.0
+        }
+    ],
+    "Author": [
+        {"id": "550e8400-e29b-41d4-a716-446655440080", "name": "Jane Austen"}
+    ],
+    "Book": [
+        {"id": "550e8400-e29b-41d4-a716-446655440081", "title": "Pride and Prejudice"}
+    ],
+    "Student": [
+        {"id": "550e8400-e29b-41d4-a716-446655440082", "name": "Alice"}
+    ],
+    "Course": [
+        {"id": "550e8400-e29b-41d4-a716-446655440083", "title": "Introduction to Yammm"}
+    ],
+    "ManyToManyEnrollment": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440084",
+            "enrolled_at": "2026-01-15T00:00:00Z",
+            "grade": 95.0
+        }
+    ],
+    "Person": [
+        {"id": "550e8400-e29b-41d4-a716-446655440090", "name": "Alice"},
+        {"id": "550e8400-e29b-41d4-a716-446655440091", "name": "Bob"}
+    ],
+    "Employee": [
+        {"id": "550e8400-e29b-41d4-a716-446655440092", "name": "Carol"}
+    ]
+}

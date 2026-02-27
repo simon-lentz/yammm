@@ -1,0 +1,19 @@
+schema "skill_core_structure"
+
+// Source: SKILL.md, "Schema Structure" section
+
+type ItemCode = String[3, 10]
+
+type Item {
+    code ItemCode primary
+    name String[1, 255] required
+}
+
+abstract type Auditable {
+    created_at Timestamp required
+    updated_at Timestamp
+}
+
+part type Tag {
+    label String[1, 50] required
+}

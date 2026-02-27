@@ -1,0 +1,44 @@
+schema "order_management"
+
+// Source: schema-author.md, "Syntax Quick Reference"
+
+type Email = Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
+
+abstract type Auditable {
+    created_at Timestamp required
+    updated_at Timestamp
+}
+
+type Customer extends Auditable {
+    customer_id String primary
+    name        String[1, 255] required
+    email       Email required
+}
+
+type Address {
+    address_id String primary
+    street     String[1, 255] required
+    city       String[1, 100] required
+    zip        String[5, 10] required
+}
+
+part type LineItem {
+    quantity Integer[1, _] required
+    price    Float[0.0, _] required
+}
+
+type Order extends Auditable {
+    order_id  String primary
+    status    Enum["pending", "shipped", "delivered"] required
+    note      String
+
+    *-> ITEMS (many) LineItem
+
+    --> PLACED_BY (one) Customer
+    --> SHIPPED_TO (one) Address {
+        tracking_number String
+    }
+
+    ! "has_items"        ITEMS -> Len > 0
+    ! "all_positive_qty" ITEMS -> All |$item| { $item.quantity > 0 }
+}
