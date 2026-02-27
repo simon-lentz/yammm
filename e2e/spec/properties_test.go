@@ -121,3 +121,129 @@ func TestProperties_VectorInRelPropertyRejected(t *testing.T) {
 	result := loadSchemaExpectError(t, "testdata/properties/vector_in_rel.yammm")
 	assertDiagHasCode(t, result, diag.E_INVALID_CONSTRAINT)
 }
+
+// =============================================================================
+// Primary key type restrictions
+// =============================================================================
+
+// TestProperties_PrimaryKeyAllowedTypes verifies that the allowed PK types
+// (String, UUID, Date, Timestamp) compile successfully as primary keys.
+// Source: SPEC.md, "Primary Key Types" section.
+func TestProperties_PrimaryKeyAllowedTypes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		schema string
+	}{
+		{"String", `schema "PKString"
+type R {
+    id String primary
+}`},
+		{"UUID", `schema "PKUUID"
+type R {
+    id UUID primary
+}`},
+		{"Date", `schema "PKDate"
+type R {
+    day Date primary
+}`},
+		{"Timestamp", `schema "PKTimestamp"
+type R {
+    ts Timestamp primary
+}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			loadSchemaString(t, tt.schema, "pk_allowed_"+tt.name)
+		})
+	}
+}
+
+// TestProperties_PrimaryKeyBannedTypes verifies that disallowed types produce
+// E_INVALID_PRIMARY_KEY_TYPE when used as primary keys.
+// Source: SPEC.md, "Primary Key Types" section.
+func TestProperties_PrimaryKeyBannedTypes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		schema string
+	}{
+		{"Integer", `schema "PKInteger"
+type R {
+    id Integer primary
+}`},
+		{"Float", `schema "PKFloat"
+type R {
+    val Float primary
+}`},
+		{"Boolean", `schema "PKBoolean"
+type R {
+    flag Boolean primary
+}`},
+		{"Enum", `schema "PKEnum"
+type R {
+    status Enum("a", "b") primary
+}`},
+		{"Pattern", `schema "PKPattern"
+type R {
+    code Pattern("^[A-Z]+$") primary
+}`},
+		{"Vector", `schema "PKVector"
+type R {
+    emb Vector[3] primary
+}`},
+		{"List", `schema "PKList"
+type R {
+    tags List<String> primary
+}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := loadSchemaStringExpectError(t, tt.schema, "pk_banned_"+tt.name)
+			assertDiagHasCode(t, result, diag.E_INVALID_PRIMARY_KEY_TYPE)
+		})
+	}
+}
+
+// TestProperties_PrimaryKeyAliasToAllowedType verifies that a DataType alias
+// resolving to an allowed PK type (e.g., String) is accepted.
+// Source: SPEC.md, "Alias resolution: if a property uses a DataType alias,
+// the resolved constraint is checked."
+func TestProperties_PrimaryKeyAliasToAllowedType(t *testing.T) {
+	t.Parallel()
+	loadSchemaString(t, `schema "PKAlias"
+type VIN = String[17, 17]
+type Car {
+    vin VIN primary
+}`, "pk_alias_allowed")
+}
+
+// TestProperties_PrimaryKeyAliasToBannedType verifies that a DataType alias
+// resolving to a banned PK type (e.g., Integer) is rejected.
+func TestProperties_PrimaryKeyAliasToBannedType(t *testing.T) {
+	t.Parallel()
+	result := loadSchemaStringExpectError(t, `schema "PKAliasBanned"
+type Count = Integer[0,]
+type R {
+    n Count primary
+}`, "pk_alias_banned")
+	assertDiagHasCode(t, result, diag.E_INVALID_PRIMARY_KEY_TYPE)
+}
+
+// TestProperties_CompositePrimaryKeyAllowed verifies that composite primary
+// keys with multiple allowed types compile successfully.
+func TestProperties_CompositePrimaryKeyAllowed(t *testing.T) {
+	t.Parallel()
+	loadSchemaString(t, `schema "PKComposite"
+type Enrollment {
+    region String primary
+    studentId UUID primary
+    day Date primary
+}`, "pk_composite_allowed")
+}

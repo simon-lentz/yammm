@@ -327,7 +327,7 @@ func TestList_BannedAsPrimaryKey(t *testing.T) {
 type R {
     tags List<String> primary
 }`, "list_pk")
-	assertDiagHasCode(t, result, diag.E_LIST_PRIMARY_KEY)
+	assertDiagHasCode(t, result, diag.E_INVALID_PRIMARY_KEY_TYPE)
 }
 
 // =============================================================================
@@ -364,4 +364,173 @@ type R {
 		"id":   "2",
 		"tags": []any{},
 	}), "must have tags")
+}
+
+// =============================================================================
+// List — Additional Element Types
+// =============================================================================
+
+func TestList_BooleanElements(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "ListBool"
+type R {
+    id String primary
+    flags List<Boolean> required
+}`, "list_bool")
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":    "1",
+		"flags": []any{true, false, true},
+	}))
+	assertInvalid(t, v, "R", raw(map[string]any{
+		"id":    "2",
+		"flags": []any{true, "not_bool"},
+	}), diag.E_TYPE_MISMATCH)
+}
+
+func TestList_FloatElements(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "ListFloat"
+type R {
+    id String primary
+    scores List<Float[0.0, 100.0]> required
+}`, "list_float")
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":     "1",
+		"scores": []any{0.0, 50.5, 100.0},
+	}))
+	assertInvalid(t, v, "R", raw(map[string]any{
+		"id":     "2",
+		"scores": []any{50.0, 100.1},
+	}), diag.E_CONSTRAINT_FAIL)
+}
+
+func TestList_DateElements(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "ListDate"
+type R {
+    id String primary
+    dates List<Date> required
+}`, "list_date")
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":    "1",
+		"dates": []any{"2026-01-01", "2026-12-31"},
+	}))
+	assertInvalid(t, v, "R", raw(map[string]any{
+		"id":    "2",
+		"dates": []any{"not-a-date"},
+	}), diag.E_CONSTRAINT_FAIL)
+}
+
+func TestList_TimestampElements(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "ListTimestamp"
+type R {
+    id String primary
+    events List<Timestamp> required
+}`, "list_ts")
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":     "1",
+		"events": []any{"2026-01-01T00:00:00Z", "2026-06-15T12:30:00Z"},
+	}))
+	assertInvalid(t, v, "R", raw(map[string]any{
+		"id":     "2",
+		"events": []any{"not-a-timestamp"},
+	}), diag.E_CONSTRAINT_FAIL)
+}
+
+func TestList_UUIDElements(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "ListUUID"
+type R {
+    id String primary
+    refs List<UUID> required
+}`, "list_uuid")
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":   "1",
+		"refs": []any{"550e8400-e29b-41d4-a716-446655440000", "6ba7b810-9dad-11d1-80b4-00c04fd430c8"},
+	}))
+	assertInvalid(t, v, "R", raw(map[string]any{
+		"id":   "2",
+		"refs": []any{"not-a-uuid"},
+	}), diag.E_CONSTRAINT_FAIL)
+}
+
+func TestList_PatternElements(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "ListPattern"
+type R {
+    id String primary
+    codes List<Pattern["^[A-Z]{3}$"]> required
+}`, "list_pattern")
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":    "1",
+		"codes": []any{"ABC", "XYZ"},
+	}))
+	assertInvalid(t, v, "R", raw(map[string]any{
+		"id":    "2",
+		"codes": []any{"ABC", "ab"},
+	}), diag.E_CONSTRAINT_FAIL)
+}
+
+func TestList_EnumElements(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "ListEnum"
+type R {
+    id String primary
+    statuses List<Enum["active", "inactive"]> required
+}`, "list_enum")
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":       "1",
+		"statuses": []any{"active", "inactive", "active"},
+	}))
+	assertInvalid(t, v, "R", raw(map[string]any{
+		"id":       "2",
+		"statuses": []any{"active", "unknown"},
+	}), diag.E_CONSTRAINT_FAIL)
+}
+
+// =============================================================================
+// List — One-Sided Bounds
+// =============================================================================
+
+func TestList_OneSidedMinBound(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "ListMinOnly"
+type R {
+    id String primary
+    tags List<String>[1, _] required
+}`, "list_min_only")
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":   "1",
+		"tags": []any{"a"},
+	}))
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":   "2",
+		"tags": []any{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+	}))
+	assertInvalid(t, v, "R", raw(map[string]any{
+		"id":   "3",
+		"tags": []any{},
+	}), diag.E_CONSTRAINT_FAIL)
+}
+
+func TestList_OneSidedMaxBound(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "ListMaxOnly"
+type R {
+    id String primary
+    tags List<String>[_, 3] required
+}`, "list_max_only")
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":   "1",
+		"tags": []any{},
+	}))
+	assertValid(t, v, "R", raw(map[string]any{
+		"id":   "2",
+		"tags": []any{"a", "b", "c"},
+	}))
+	assertInvalid(t, v, "R", raw(map[string]any{
+		"id":   "3",
+		"tags": []any{"a", "b", "c", "d"},
+	}), diag.E_CONSTRAINT_FAIL)
 }

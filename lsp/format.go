@@ -318,8 +318,9 @@ func declarationSpacingAction(prev antlr.Token, curr antlr.Token) spacingAction 
 	if currType == grammar.YammmGrammarLexerLBRACK && isConstraintBracketLeft(prev.GetText()) {
 		return spacingNone
 	}
-	// List type angle brackets: no space around < and >
-	if currType == grammar.YammmGrammarLexerLT {
+	// List type angle brackets: collapse spacing around < and > only in
+	// type contexts (e.g. List<String>), not in expression comparisons.
+	if currType == grammar.YammmGrammarLexerLT && isListAngleBracketLeft(prev.GetText()) {
 		return spacingNone
 	}
 	if prevType == grammar.YammmGrammarLexerLT {
@@ -357,6 +358,12 @@ func isConstraintBracketLeft(text string) bool {
 	default:
 		return false
 	}
+}
+
+// isListAngleBracketLeft returns true if the token text can precede a `<`
+// in List type syntax. Currently only "List" itself uses angle brackets.
+func isListAngleBracketLeft(text string) bool {
+	return text == "List"
 }
 
 func isCommentToken(tokenType int) bool {

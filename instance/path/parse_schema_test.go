@@ -17,12 +17,12 @@ func TestParseWithSchema_ValidPaths(t *testing.T) {
 		name  string
 		input string
 	}{
-		{"integer PK", "$.Person[id=42]"},
 		{"string PK", `$.User[email="test@example.com"]`},
-		{"boolean PK", "$.Flag[enabled=true]"},
-		{"composite PK", `$.Enrollment[region="us",studentId=12345]`},
-		{"float PK", "$.Metric[value=3.14]"},
-		{"nested path", "$.Person[id=1].WORKS_AT[0]"},
+		{"uuid PK", `$.Entity[uid="550e8400-e29b-41d4-a716-446655440000"]`},
+		{"date PK", `$.Report[day="2026-01-15"]`},
+		{"timestamp PK", `$.Event[ts="2026-01-15T10:30:00Z"]`},
+		{"composite PK", `$.Enrollment[region="us",studentId="12345"]`},
+		{"nested path", `$.Person[id="1"].WORKS_AT[0]`},
 	}
 
 	for _, tt := range tests {
@@ -42,9 +42,8 @@ func TestParseWithSchema_TypeMismatch(t *testing.T) {
 		input  string
 		errMsg string
 	}{
-		{"string for integer PK", `$.Person[id="42"]`, "expected integer"},
 		{"integer for string PK", `$.User[email=42]`, "expected string"},
-		{"string for boolean PK", `$.Flag[enabled="true"]`, "expected boolean"},
+		{"integer for uuid PK", `$.Entity[uid=42]`, "expected string"},
 	}
 
 	for _, tt := range tests {
@@ -59,7 +58,7 @@ func TestParseWithSchema_TypeMismatch(t *testing.T) {
 func TestParseWithSchema_UnknownPKField(t *testing.T) {
 	sch := buildTestSchema(t)
 
-	_, err := ParseWithSchema("$.Person[unknown=42]", sch)
+	_, err := ParseWithSchema(`$.Person[unknown="42"]`, sch)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not a primary key")
 }
@@ -67,13 +66,13 @@ func TestParseWithSchema_UnknownPKField(t *testing.T) {
 func TestParseWithSchema_TypeNotFound(t *testing.T) {
 	sch := buildTestSchema(t)
 
-	_, err := ParseWithSchema("$.NonExistent[id=42]", sch)
+	_, err := ParseWithSchema(`$.NonExistent[id="42"]`, sch)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found in schema")
 }
 
 func TestParseWithSchema_NilSchema(t *testing.T) {
-	_, err := ParseWithSchema("$.Person[id=42]", nil)
+	_, err := ParseWithSchema(`$.Person[id="42"]`, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "schema is nil")
 }
@@ -105,16 +104,6 @@ func TestParseWithSchema_ArrayIndexOnly(t *testing.T) {
 	assert.NotNil(t, b)
 }
 
-func TestParseWithSchema_FloatAcceptsInteger(t *testing.T) {
-	sch := buildTestSchema(t)
-
-	// Float constraints should accept integer values from the parser
-	// (since JSON doesn't distinguish between 3 and 3.0 without a decimal)
-	b, err := ParseWithSchema("$.Metric[value=3]", sch)
-	require.NoError(t, err)
-	assert.NotNil(t, b)
-}
-
 // buildTestSchema creates a test schema with various PK types.
 func buildTestSchema(t *testing.T) *schema.Schema {
 	t.Helper()
@@ -122,25 +111,28 @@ func buildTestSchema(t *testing.T) *schema.Schema {
 	sch, result := build.NewBuilder().
 		WithName("test").
 		AddType("Person").
-		WithPrimaryKey("id", schema.NewIntegerConstraint()).
+		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("name", schema.NewStringConstraint()).
 		WithRelation("WORKS_AT", schema.NewTypeRef("", "Company", location.Span{}), false, false).
 		Done().
 		AddType("User").
 		WithPrimaryKey("email", schema.NewStringConstraint()).
 		Done().
-		AddType("Flag").
-		WithPrimaryKey("enabled", schema.NewBooleanConstraint()).
+		AddType("Entity").
+		WithPrimaryKey("uid", schema.NewUUIDConstraint()).
+		Done().
+		AddType("Report").
+		WithPrimaryKey("day", schema.NewDateConstraint()).
+		Done().
+		AddType("Event").
+		WithPrimaryKey("ts", schema.NewTimestampConstraint()).
 		Done().
 		AddType("Enrollment").
 		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewIntegerConstraint()).
-		Done().
-		AddType("Metric").
-		WithPrimaryKey("value", schema.NewFloatConstraint()).
+		WithPrimaryKey("studentId", schema.NewStringConstraint()).
 		Done().
 		AddType("Company").
-		WithPrimaryKey("id", schema.NewIntegerConstraint()).
+		WithPrimaryKey("id", schema.NewStringConstraint()).
 		Done().
 		Build()
 

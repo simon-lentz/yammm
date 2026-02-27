@@ -367,7 +367,7 @@ import "./3rdparty" as thirdparty
 **Reserved keyword restriction:** Aliases cannot be reserved keywords because the lexer tokenizes them as literal tokens rather than identifiers. Reserved keywords include:
 
 - DSL keywords: `schema`, `import`, `as`, `type`, `datatype`, `required`, `primary`, `extends`, `includes`, `abstract`, `part`, `one`, `many`, `in`
-- Built-in type keywords: `Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`
+- Built-in type keywords: `Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`
 - Boolean literals: `true`, `false`
 
 **Qualified type references:** Imported types must be referenced with their alias qualifier:
@@ -525,6 +525,30 @@ type Person {
 
 Properties without modifiers are **optional** and may be omitted from instance data.
 
+#### Primary Key Types
+
+Only the following types may be used as primary keys:
+
+| Allowed | Why |
+|---------|-----|
+| `String` | Natural identifiers (names, codes, external IDs) |
+| `UUID` | Purpose-built for identity |
+| `Date` | Natural key for temporal data (daily reports, events) |
+| `Timestamp` | Natural key for time-series data (event logs) |
+
+All other types are rejected:
+
+| Banned | Why |
+|--------|-----|
+| `Integer`, `Float` | Numeric values are typically mutable; no auto-increment |
+| `Boolean` | Cardinality of 2, useless as identity |
+| `Enum` | Small finite set, poor identity |
+| `Pattern` | Constraint type, not a value type |
+| `Vector` | Collection, not comparable for identity |
+| `List` | Collection, not comparable for identity |
+
+DataType aliases are resolved before checking: `type VIN = String[17, 17]` followed by `vin VIN primary` is valid because `VIN` resolves to `String`.
+
 ### Relationship Properties
 
 Associations may have their own properties, declared within the relationship body:
@@ -542,7 +566,7 @@ type Person {
 }
 ```
 
-Relationship properties follow the same syntax as type properties but cannot use `Vector` data types and default to optional unless `required` is specified.
+Relationship properties follow the same syntax as type properties but cannot use `Vector` or `List` data types and default to optional unless `required` is specified.
 
 ## Data Types
 
@@ -763,7 +787,7 @@ Validation accepts JSON arrays where each element passes the element type's cons
 
 **Restrictions:**
 
-- List types cannot be used as primary keys.
+- List types cannot be used as primary keys (see [Primary Key Types](#primary-key-types)).
 - List types cannot be used in relationship (edge) properties.
 
 **Narrowing:**

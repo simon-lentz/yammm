@@ -172,8 +172,9 @@ var (
 	// E_LIST_ON_EDGE indicates a List type was used in a relationship property.
 	E_LIST_ON_EDGE = code("E_LIST_ON_EDGE", CategorySchema)
 
-	// E_LIST_PRIMARY_KEY indicates a List type was used as a primary key.
-	E_LIST_PRIMARY_KEY = code("E_LIST_PRIMARY_KEY", CategorySchema)
+	// E_INVALID_PRIMARY_KEY_TYPE indicates a type not allowed as a primary key.
+	// Only String, UUID, Date, and Timestamp are permitted as primary key types.
+	E_INVALID_PRIMARY_KEY_TYPE = code("E_INVALID_PRIMARY_KEY_TYPE", CategorySchema)
 )
 
 // Syntax codes.
@@ -333,7 +334,7 @@ var allCodes = []Code{
 	E_MISSING_SOURCE_ID,
 	E_INVALID_SYNTHETIC_ID,
 	E_LIST_ON_EDGE,
-	E_LIST_PRIMARY_KEY,
+	E_INVALID_PRIMARY_KEY_TYPE,
 	// Syntax
 	E_SYNTAX,
 	// Import

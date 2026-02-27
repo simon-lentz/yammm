@@ -437,6 +437,110 @@ type Embedding {
 }
 
 // =============================================================================
+// List Property Tests
+// =============================================================================
+
+func TestParse_ListProperty(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		source string
+		wantOK bool
+	}{
+		{
+			name: "basic list of strings",
+			source: `schema "test"
+type R {
+	tags List<String>
+}`,
+			wantOK: true,
+		},
+		{
+			name: "list with element constraints",
+			source: `schema "test"
+type R {
+	tags List<String[_, 6]>
+}`,
+			wantOK: true,
+		},
+		{
+			name: "list with length bounds",
+			source: `schema "test"
+type R {
+	tags List<String>[1, 5]
+}`,
+			wantOK: true,
+		},
+		{
+			name: "list with both constraints",
+			source: `schema "test"
+type R {
+	tags List<String[_, 6]>[1, 5]
+}`,
+			wantOK: true,
+		},
+		{
+			name: "nested list",
+			source: `schema "test"
+type R {
+	matrix List<List<Integer>>
+}`,
+			wantOK: true,
+		},
+		{
+			name: "list of vectors",
+			source: `schema "test"
+type R {
+	embeddings List<Vector[768]>
+}`,
+			wantOK: true,
+		},
+		{
+			name: "list with one-sided min bound",
+			source: `schema "test"
+type R {
+	tags List<String>[1, _]
+}`,
+			wantOK: true,
+		},
+		{
+			name: "list with one-sided max bound",
+			source: `schema "test"
+type R {
+	tags List<String>[_, 5]
+}`,
+			wantOK: true,
+		},
+		{
+			name: "list with inverted bounds",
+			source: `schema "test"
+type R {
+	tags List<String>[5, 1]
+}`,
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			model, result := parseSchema(t, tt.source)
+			if tt.wantOK {
+				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NotNil(t, model)
+				require.Len(t, model.Types, 1)
+				require.Len(t, model.Types[0].Properties, 1)
+				prop := model.Types[0].Properties[0]
+				assert.Equal(t, schema.KindList, prop.Constraint.Kind())
+			} else {
+				assert.False(t, result.OK(), "expected errors")
+			}
+		})
+	}
+}
+
+// =============================================================================
 // Relation Properties Tests
 // =============================================================================
 

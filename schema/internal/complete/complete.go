@@ -718,6 +718,29 @@ func isListConstraint(constraint schema.Constraint) bool {
 	}
 }
 
+// isPrimaryKeyAllowed returns true if the constraint's underlying type is
+// permitted as a primary key. Only String, UUID, Date, and Timestamp are
+// allowed. Aliases are unwrapped to check the resolved type.
+func isPrimaryKeyAllowed(constraint schema.Constraint) bool {
+	if constraint == nil {
+		return false
+	}
+	// Unwrap aliases to the resolved type.
+	for {
+		alias, ok := constraint.(schema.AliasConstraint)
+		if !ok || alias.Resolved() == nil {
+			break
+		}
+		constraint = alias.Resolved()
+	}
+	switch constraint.Kind() {
+	case schema.KindString, schema.KindUUID, schema.KindDate, schema.KindTimestamp:
+		return true
+	default:
+		return false
+	}
+}
+
 // errorf reports an error at the given span.
 func (c *completer) errorf(span location.Span, code diag.Code, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)

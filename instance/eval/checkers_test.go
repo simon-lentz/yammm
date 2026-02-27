@@ -1389,3 +1389,152 @@ func TestChecker_CoerceValue_VectorWithCustomTypes(t *testing.T) {
 		assert.Equal(t, []float64{1.0, 2.0, 3.0}, result)
 	})
 }
+
+// =============================================================================
+// List Constraint Tests
+// =============================================================================
+
+func TestCheckValue_List(t *testing.T) {
+	t.Parallel()
+	stringList := schema.NewListConstraint(schema.NewStringConstraint())
+	boundedList := schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 3)
+
+	tests := []struct {
+		name       string
+		val        any
+		constraint schema.Constraint
+		wantErr    bool
+	}{
+		{"valid string list", []any{"a", "b"}, stringList, false},
+		{"empty list unbounded", []any{}, stringList, false},
+		{"nil value passthrough", nil, stringList, false},
+		{"not a slice", "hello", stringList, true},
+		{"wrong element type", []any{123}, stringList, true},
+		{"mixed types", []any{"a", 123}, stringList, true},
+		{"within bounds", []any{"a", "b"}, boundedList, false},
+		{"at min bound", []any{"a"}, boundedList, false},
+		{"at max bound", []any{"a", "b", "c"}, boundedList, false},
+		{"below min bound", []any{}, boundedList, true},
+		{"above max bound", []any{"a", "b", "c", "d"}, boundedList, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := eval.CheckValue(tt.val, tt.constraint)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCheckValue_List_ElementConstraintViolation(t *testing.T) {
+	t.Parallel()
+	// String with max length 3
+	constraint := schema.NewListConstraint(schema.NewStringConstraintBounded(-1, 3))
+
+	t.Run("element within constraint", func(t *testing.T) {
+		t.Parallel()
+		err := eval.CheckValue([]any{"ab", "cd"}, constraint)
+		assert.NoError(t, err)
+	})
+
+	t.Run("element exceeds constraint", func(t *testing.T) {
+		t.Parallel()
+		err := eval.CheckValue([]any{"ab", "toolong"}, constraint)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "element [1]")
+	})
+}
+
+func TestCheckValue_List_Nested(t *testing.T) {
+	t.Parallel()
+	nested := schema.NewListConstraint(schema.NewListConstraint(schema.NewIntegerConstraint()))
+
+	t.Run("valid nested", func(t *testing.T) {
+		t.Parallel()
+		err := eval.CheckValue([]any{[]any{int64(1), int64(2)}, []any{int64(3)}}, nested)
+		assert.NoError(t, err)
+	})
+
+	t.Run("inner not a slice", func(t *testing.T) {
+		t.Parallel()
+		err := eval.CheckValue([]any{"not_a_list"}, nested)
+		assert.Error(t, err)
+	})
+
+	t.Run("inner element wrong type", func(t *testing.T) {
+		t.Parallel()
+		err := eval.CheckValue([]any{[]any{int64(1), "bad"}}, nested)
+		assert.Error(t, err)
+	})
+}
+
+func TestCoerceValue_List(t *testing.T) {
+	t.Parallel()
+	checker := eval.NewChecker(value.Registry{})
+
+	t.Run("coerce integer elements", func(t *testing.T) {
+		t.Parallel()
+		constraint := schema.NewListConstraint(schema.NewIntegerConstraint())
+		// float64 values (as from JSON) should coerce to int64
+		result, err := checker.CoerceValue([]any{float64(1), float64(2), float64(3)}, constraint)
+		require.NoError(t, err)
+		slice, ok := result.([]any)
+		require.True(t, ok)
+		assert.Len(t, slice, 3)
+		assert.Equal(t, int64(1), slice[0])
+		assert.Equal(t, int64(2), slice[1])
+		assert.Equal(t, int64(3), slice[2])
+	})
+
+	t.Run("coerce float elements", func(t *testing.T) {
+		t.Parallel()
+		constraint := schema.NewListConstraint(schema.NewFloatConstraint())
+		result, err := checker.CoerceValue([]any{float32(1.5), int(2)}, constraint)
+		require.NoError(t, err)
+		slice, ok := result.([]any)
+		require.True(t, ok)
+		assert.Len(t, slice, 2)
+		assert.Equal(t, float64(1.5), slice[0])
+		assert.Equal(t, float64(2), slice[1])
+	})
+
+	t.Run("coerce string elements passthrough", func(t *testing.T) {
+		t.Parallel()
+		constraint := schema.NewListConstraint(schema.NewStringConstraint())
+		result, err := checker.CoerceValue([]any{"hello", "world"}, constraint)
+		require.NoError(t, err)
+		slice, ok := result.([]any)
+		require.True(t, ok)
+		assert.Equal(t, []any{"hello", "world"}, slice)
+	})
+
+	t.Run("coerce empty list", func(t *testing.T) {
+		t.Parallel()
+		constraint := schema.NewListConstraint(schema.NewStringConstraint())
+		result, err := checker.CoerceValue([]any{}, constraint)
+		require.NoError(t, err)
+		slice, ok := result.([]any)
+		require.True(t, ok)
+		assert.Empty(t, slice)
+	})
+
+	t.Run("not a slice", func(t *testing.T) {
+		t.Parallel()
+		constraint := schema.NewListConstraint(schema.NewStringConstraint())
+		_, err := checker.CoerceValue("not_a_slice", constraint)
+		assert.Error(t, err)
+	})
+
+	t.Run("element coercion fails", func(t *testing.T) {
+		t.Parallel()
+		constraint := schema.NewListConstraint(schema.NewIntegerConstraint())
+		_, err := checker.CoerceValue([]any{"not_an_int"}, constraint)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "element [0]")
+	})
+}
