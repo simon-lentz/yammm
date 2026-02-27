@@ -1,0 +1,14 @@
+schema "spec_single_extends"
+
+// Source: SPEC.md, "Inheritance"
+// Types may extend one or more parent types.
+
+type Base {
+    id UUID primary
+    name String required
+    label String
+}
+
+type Child extends Base {
+    extra Integer
+}

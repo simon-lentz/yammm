@@ -1,0 +1,14 @@
+schema "GraphAssoc"
+
+// Source: SPEC.md, "Graph Construction" — association edge tests
+
+type Company {
+    id String primary
+    name String required
+}
+
+type Person {
+    id String primary
+    name String required
+    --> WORKS_AT Company
+}

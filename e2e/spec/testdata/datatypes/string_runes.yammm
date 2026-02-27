@@ -1,0 +1,6 @@
+schema "StringRunes"
+
+type RuneTest {
+    id String primary
+    name String[1, 4] required
+}

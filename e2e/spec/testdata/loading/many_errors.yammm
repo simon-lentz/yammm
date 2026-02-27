@@ -1,0 +1,9 @@
+schema "ManyErrors"
+
+type A {
+    x String
+    x String
+    x String
+    x String
+    x String
+}

@@ -1,0 +1,8 @@
+schema "MainImports"
+
+import "./parts"
+
+type Assembly {
+    name String required
+    --> parts_component parts.Component
+}

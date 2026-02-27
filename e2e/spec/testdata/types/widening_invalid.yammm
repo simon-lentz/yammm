@@ -1,0 +1,14 @@
+schema "spec_widening_invalid"
+
+// Source: SPEC.md, "Inheritance rules"
+// Child types may NOT widen inherited property constraints.
+// This schema should fail compilation.
+
+type Base {
+    id UUID primary
+    age Integer[0, 150]
+}
+
+type Wider extends Base {
+    age Integer[-10, 200]
+}

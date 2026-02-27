@@ -1,0 +1,2 @@
+schema "Bad"
+type { broken syntax here

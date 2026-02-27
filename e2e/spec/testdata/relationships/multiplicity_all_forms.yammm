@@ -1,0 +1,19 @@
+schema "spec_multiplicity"
+
+// Source: SPEC.md, "Multiplicity" — all 8 multiplicity forms
+
+type Target {
+    id String primary
+}
+
+type Source {
+    id String primary
+    --> REL_OMITTED Target
+    --> REL_OPTIONAL (_) Target
+    --> REL_OPTIONAL_ONE (_:one) Target
+    --> REL_OPTIONAL_MANY (_:many) Target
+    --> REL_REQUIRED (one) Target
+    --> REL_REQUIRED_ONE (one:one) Target
+    --> REL_REQUIRED_MANY (one:many) Target
+    --> REL_MANY (many) Target
+}

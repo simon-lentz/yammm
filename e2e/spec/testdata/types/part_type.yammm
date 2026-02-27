@@ -1,0 +1,14 @@
+schema "spec_part_type"
+
+// Source: SPEC.md, "Type Modifiers" — part types
+// Part types are used as composition targets.
+
+part type LineItem {
+    description String required
+    quantity Integer required
+}
+
+type Order {
+    id String primary
+    *-> ITEMS (_:many) LineItem
+}

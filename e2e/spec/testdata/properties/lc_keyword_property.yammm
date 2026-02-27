@@ -1,0 +1,10 @@
+schema "LcKeywordProperty"
+
+type Meta {
+    id String primary
+    schema String
+    type String
+    required String
+    primary String
+    extends String
+}

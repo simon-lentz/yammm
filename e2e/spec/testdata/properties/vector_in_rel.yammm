@@ -1,0 +1,12 @@
+schema "VectorInRel"
+
+type Target {
+    id String primary
+}
+
+type Source {
+    id String primary
+    --> LINKS_TO (one) Target {
+        embedding Vector[128]
+    }
+}

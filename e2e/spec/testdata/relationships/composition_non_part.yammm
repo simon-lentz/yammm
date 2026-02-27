@@ -1,0 +1,13 @@
+schema "spec_comp_non_part"
+
+// Source: SPEC.md, "Compositions" — target must be a concrete part type
+// This schema should fail: Regular is not a part type.
+
+type Regular {
+    name String required
+}
+
+type Container {
+    id String primary
+    *-> ITEMS (_:many) Regular
+}

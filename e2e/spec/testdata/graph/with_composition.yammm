@@ -1,0 +1,13 @@
+schema "GraphComp"
+
+// Source: SPEC.md, "Graph Construction" — composition for AddComposed tests
+
+part type LineItem {
+    description String required
+    quantity Integer required
+}
+
+type Order {
+    id String primary
+    *-> ITEMS (_:many) LineItem
+}

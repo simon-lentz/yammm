@@ -1,0 +1,14 @@
+schema "spec_reverse"
+
+// Source: SPEC.md, "Reverse Relationships" — reverse clause stores metadata
+
+type Company {
+    id String primary
+    name String required
+}
+
+type Person {
+    id String primary
+    name String required
+    --> WORKS_AT Company / EMPLOYS
+}

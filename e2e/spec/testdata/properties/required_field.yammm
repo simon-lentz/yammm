@@ -1,0 +1,6 @@
+schema "RequiredField"
+
+type Person {
+    name String required
+    age Integer
+}

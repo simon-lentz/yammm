@@ -1,0 +1,14 @@
+schema "spec_assoc_basic"
+
+// Source: SPEC.md, "Associations" — basic association syntax
+
+type Company {
+    id String primary
+    name String required
+}
+
+type Person {
+    id String primary
+    name String required
+    --> WORKS_AT Company
+}

@@ -1,0 +1,15 @@
+schema "RelProperties"
+
+type Company {
+    id String primary
+    name String required
+}
+
+type Person {
+    id String primary
+    name String required
+    --> WORKS_AT (one) Company {
+        role String required
+        since Timestamp
+    }
+}

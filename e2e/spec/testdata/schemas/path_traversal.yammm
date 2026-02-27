@@ -1,0 +1,7 @@
+schema "PathTraversal"
+
+import "../../../etc/passwd"
+
+type Exploit {
+    name String required
+}

@@ -1,0 +1,17 @@
+schema "spec_assoc_props"
+
+// Source: SPEC.md, "Associations" — association with edge properties
+
+type Company {
+    id String primary
+    name String required
+}
+
+type Person {
+    id String primary
+    name String required
+    --> WORKS_AT Company {
+        role String required
+        since Timestamp
+    }
+}

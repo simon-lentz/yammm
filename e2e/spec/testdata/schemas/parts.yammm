@@ -1,0 +1,6 @@
+schema "Parts"
+
+type Component {
+    id String primary
+    label String
+}

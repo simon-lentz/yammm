@@ -1,0 +1,16 @@
+schema "spec_assoc_data"
+
+// Source: SPEC.md, "Association Data in Instances" — _target_id convention
+
+type Company {
+    id String primary
+    name String required
+}
+
+type Person {
+    id String primary
+    name String required
+    --> WORKS_AT Company {
+        role String
+    }
+}

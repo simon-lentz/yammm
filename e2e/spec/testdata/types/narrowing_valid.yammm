@@ -1,0 +1,13 @@
+schema "spec_narrowing_valid"
+
+// Source: SPEC.md, "Inheritance rules"
+// Child types may override inherited properties with compatible narrower constraints.
+
+type Base {
+    id UUID primary
+    age Integer[0, 150]
+}
+
+type Restricted extends Base {
+    age Integer[18, 65]
+}
