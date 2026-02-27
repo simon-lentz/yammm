@@ -1335,7 +1335,7 @@ s, result := build.NewBuilder().
 
 ## Instance Validation
 
-The `instance` package validates Go data against compiled schemas.
+The `instance` package validates Go data against compiled schemas. Each instance is represented as an `instance.RawInstance` struct with a `Properties map[string]any` field. Go structs with typed fields must be marshaled to JSON and unmarshaled into `map[string]any` before validation.
 
 ### Validator Creation
 
@@ -1368,6 +1368,8 @@ if len(failures) > 0 {
 }
 // Process valid instances
 ```
+
+> **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (not a system error). This is consistent with the three-way return contract: `error` is reserved for catastrophic failures such as I/O errors or context cancellation.
 
 ### Expected Instance Shape
 
@@ -1477,7 +1479,7 @@ Codes are stable identifiers for programmatic matching. Categories include:
 
 ```go
 renderer := diag.NewRenderer()
-output := renderer.Render(result)
+output := renderer.FormatResult(result)
 ```
 
 ## JSON Adapter

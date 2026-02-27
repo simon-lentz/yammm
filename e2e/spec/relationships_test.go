@@ -110,8 +110,7 @@ func TestRelationships_MultiplicityAllForms(t *testing.T) {
 	require.True(t, ok, "schema should contain Source type")
 
 	// The multiplicity table from the SPEC maps to the parser's handleMultiplicity
-	// function. The implementation treats (one) as optional/one (matching the
-	// "(_)" and "(_:one)" behavior). Only (one:one) and (one:many) are required.
+	// function. All 8 forms are tested against the spec-defined behavior.
 	tests := []struct {
 		name         string
 		wantOptional bool
@@ -125,8 +124,8 @@ func TestRelationships_MultiplicityAllForms(t *testing.T) {
 		{"REL_OPTIONAL_ONE", true, false},
 		// (_:many) -> optional, many
 		{"REL_OPTIONAL_MANY", true, true},
-		// (one) -> optional, one (per implementation; SPEC says required)
-		{"REL_REQUIRED", true, false},
+		// (one) -> required, one
+		{"REL_REQUIRED", false, false},
 		// (one:one) -> required, one
 		{"REL_REQUIRED_ONE", false, false},
 		// (one:many) -> required, many
@@ -246,8 +245,7 @@ func TestRelationships_MultiplicityRequired_Check(t *testing.T) {
 	checkResult, err := g.Check(ctx)
 	require.NoError(t, err)
 
-	// Per implementation, only (one:one) and (one:many) are required.
-	// (one) is treated as optional by handleMultiplicity.
+	// (one), (one:one), and (one:many) are all required multiplicities.
 	assert.False(t, checkResult.OK(),
 		"Check should report errors for required associations")
 	assertDiagHasCode(t, checkResult, diag.E_UNRESOLVED_REQUIRED)

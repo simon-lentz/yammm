@@ -598,7 +598,7 @@ func (c *completer) validateRelationProperties() bool {
 	ok := true
 
 	for _, t := range c.schema.TypesSlice() {
-		for rel := range t.AllAssociations() {
+		for rel := range t.Associations() {
 			for _, p := range rel.PropertiesSlice() {
 				if isVectorConstraint(p.Constraint()) {
 					c.errorf(p.Span(), diag.E_INVALID_CONSTRAINT,

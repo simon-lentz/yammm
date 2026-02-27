@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/trace"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema/expr"
@@ -162,6 +163,8 @@ func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 	// Logical
 	case "!":
 		return e.not(args)
+	case "^":
+		return e.xor(args)
 
 	default:
 		return nil, fmt.Errorf("unknown operation: %s", op)
@@ -381,6 +384,31 @@ func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 			return nil, nil //nolint:nilnil // missing key returns nil
 		}
 		return val, nil
+	}
+
+	// Try as immutable.Map[string] (e.g. $self bound via WithSelf)
+	if m, ok := obj.(immutable.Map[string]); ok {
+		val, exists := m.Get(name)
+		if !exists {
+			// Case-insensitive fallback: pick alphabetically first key on collision
+			// for deterministic behavior (matches immutable.Properties.GetFold behavior)
+			lower := strings.ToLower(name)
+			var matchKey string
+			var matchVal immutable.Value
+			for k, v := range m.Range() {
+				if strings.ToLower(k) == lower {
+					if matchKey == "" || k < matchKey {
+						matchKey = k
+						matchVal = v
+					}
+				}
+			}
+			if matchKey != "" {
+				return matchVal.Unwrap(), nil
+			}
+			return nil, nil //nolint:nilnil // missing key returns nil
+		}
+		return val.Unwrap(), nil
 	}
 
 	return nil, fmt.Errorf("cannot access member on %T", obj)
@@ -818,6 +846,21 @@ func (e *Evaluator) not(args []any) (any, error) {
 		return nil, fmt.Errorf("! expects boolean, got %T", args[0])
 	}
 	return !b, nil
+}
+
+func (e *Evaluator) xor(args []any) (any, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("^ requires 2 operands, got %d", len(args))
+	}
+	left, ok := args[0].(bool)
+	if !ok {
+		return nil, fmt.Errorf("^ expects boolean operands, got %T", args[0])
+	}
+	right, ok := args[1].(bool)
+	if !ok {
+		return nil, fmt.Errorf("^ expects boolean operands, got %T", args[1])
+	}
+	return left != right, nil
 }
 
 // --- Helper functions ---

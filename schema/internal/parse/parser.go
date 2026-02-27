@@ -854,8 +854,10 @@ func handleMultiplicity(ctx grammar.IMultiplicityContext) (optional, many bool) 
 	}
 	text := ctx.GetText()
 	switch text {
-	case "(_)", "(_:one)", "(one)":
+	case "(_)", "(_:one)":
 		return true, false
+	case "(one)":
+		return false, false
 	case "(many)", "(_:many)":
 		return true, true
 	case "(one:one)":
