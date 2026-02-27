@@ -23,6 +23,7 @@ const (
 	KindEnum
 	KindPattern
 	KindVector
+	KindList  // ordered collection with element constraint
 	KindAlias // reference to DataType
 )
 
@@ -49,6 +50,8 @@ func (k ConstraintKind) String() string {
 		return "Pattern"
 	case KindVector:
 		return "Vector"
+	case KindList:
+		return "List"
 	case KindAlias:
 		return "Alias"
 	default:
@@ -561,6 +564,105 @@ func (c VectorConstraint) Equal(other Constraint) bool {
 func (c VectorConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
 
 func (VectorConstraint) IsResolved() bool { return true }
+
+// ListConstraint constrains list values with an element type and optional min/max length.
+type ListConstraint struct {
+	element Constraint
+	minLen  int64
+	maxLen  int64
+	hasMin  bool
+	hasMax  bool
+}
+
+// NewListConstraint creates a ListConstraint with no length bounds.
+func NewListConstraint(element Constraint) ListConstraint {
+	return ListConstraint{element: element}
+}
+
+// NewListConstraintBounded creates a ListConstraint with the given length bounds.
+// Pass -1 for minLen or maxLen to indicate no bound.
+func NewListConstraintBounded(element Constraint, minLen, maxLen int64) ListConstraint {
+	c := ListConstraint{element: element}
+	if minLen >= 0 {
+		c.minLen = minLen
+		c.hasMin = true
+	}
+	if maxLen >= 0 {
+		c.maxLen = maxLen
+		c.hasMax = true
+	}
+	return c
+}
+
+func (ListConstraint) Kind() ConstraintKind { return KindList }
+func (ListConstraint) constraint()          {}
+
+// Element returns the element constraint.
+func (c ListConstraint) Element() Constraint { return c.element }
+
+// MinLen returns the minimum list length and whether a minimum is set.
+func (c ListConstraint) MinLen() (int64, bool) { return c.minLen, c.hasMin }
+
+// MaxLen returns the maximum list length and whether a maximum is set.
+func (c ListConstraint) MaxLen() (int64, bool) { return c.maxLen, c.hasMax }
+
+func (c ListConstraint) String() string {
+	var sb strings.Builder
+	sb.WriteString("List<")
+	sb.WriteString(c.element.String())
+	sb.WriteString(">")
+	if c.hasMin || c.hasMax {
+		sb.WriteString("[")
+		if c.hasMin {
+			sb.WriteString(strconv.FormatInt(c.minLen, 10))
+		} else {
+			sb.WriteString("_")
+		}
+		sb.WriteString(", ")
+		if c.hasMax {
+			sb.WriteString(strconv.FormatInt(c.maxLen, 10))
+		} else {
+			sb.WriteString("_")
+		}
+		sb.WriteString("]")
+	}
+	return sb.String()
+}
+
+func (c ListConstraint) Equal(other Constraint) bool {
+	o, ok := resolveAlias(other).(ListConstraint)
+	if !ok {
+		return false
+	}
+	if c.hasMin != o.hasMin || c.hasMax != o.hasMax || c.minLen != o.minLen || c.maxLen != o.maxLen {
+		return false
+	}
+	return c.element.Equal(o.element)
+}
+
+func (c ListConstraint) NarrowsTo(child Constraint) bool {
+	o, ok := resolveAlias(child).(ListConstraint)
+	if !ok {
+		return false
+	}
+	// Element must narrow.
+	if !c.element.NarrowsTo(o.element) {
+		return false
+	}
+	// Child min must be >= parent min (if parent has a min).
+	if c.hasMin && (!o.hasMin || o.minLen < c.minLen) {
+		return false
+	}
+	// Child max must be <= parent max (if parent has a max).
+	if c.hasMax && (!o.hasMax || o.maxLen > c.maxLen) {
+		return false
+	}
+	return true
+}
+
+func (c ListConstraint) IsResolved() bool {
+	return c.element.IsResolved()
+}
 
 // AliasConstraint represents a reference to a named DataType.
 // The underlying constraint is resolved for equality comparisons.

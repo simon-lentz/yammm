@@ -100,6 +100,9 @@ type YammmGrammarListener interface {
 	// EnterUuidT is called when entering the uuidT production.
 	EnterUuidT(c *UuidTContext)
 
+	// EnterListT is called when entering the listT production.
+	EnterListT(c *ListTContext)
+
 	// EnterDatatypeKeyword is called when entering the datatypeKeyword production.
 	EnterDatatypeKeyword(c *DatatypeKeywordContext)
 
@@ -276,6 +279,9 @@ type YammmGrammarListener interface {
 
 	// ExitUuidT is called when exiting the uuidT production.
 	ExitUuidT(c *UuidTContext)
+
+	// ExitListT is called when exiting the listT production.
+	ExitListT(c *ListTContext)
 
 	// ExitDatatypeKeyword is called when exiting the datatypeKeyword production.
 	ExitDatatypeKeyword(c *DatatypeKeywordContext)

@@ -100,6 +100,9 @@ type YammmGrammarVisitor interface {
 	// Visit a parse tree produced by YammmGrammarParser#uuidT.
 	VisitUuidT(ctx *UuidTContext) interface{}
 
+	// Visit a parse tree produced by YammmGrammarParser#listT.
+	VisitListT(ctx *ListTContext) interface{}
+
 	// Visit a parse tree produced by YammmGrammarParser#datatypeKeyword.
 	VisitDatatypeKeyword(ctx *DatatypeKeywordContext) interface{}
 

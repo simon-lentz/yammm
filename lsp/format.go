@@ -318,6 +318,22 @@ func declarationSpacingAction(prev antlr.Token, curr antlr.Token) spacingAction 
 	if currType == grammar.YammmGrammarLexerLBRACK && isConstraintBracketLeft(prev.GetText()) {
 		return spacingNone
 	}
+	// List type angle brackets: no space around < and >
+	if currType == grammar.YammmGrammarLexerLT {
+		return spacingNone
+	}
+	if prevType == grammar.YammmGrammarLexerLT {
+		return spacingNone
+	}
+	if currType == grammar.YammmGrammarLexerGT {
+		return spacingNone
+	}
+	if prevType == grammar.YammmGrammarLexerGT {
+		if currType == grammar.YammmGrammarLexerLBRACK {
+			return spacingNone
+		}
+		return spacingSpace
+	}
 	if isKeywordWithRequiredSpaceAfter(prev.GetText()) {
 		return spacingSpace
 	}
@@ -336,7 +352,7 @@ func isKeywordWithRequiredSpaceAfter(text string) bool {
 
 func isConstraintBracketLeft(text string) bool {
 	switch text {
-	case "Integer", "Float", "String", "Enum", "Pattern", "Timestamp", "Vector":
+	case "Integer", "Float", "String", "Enum", "Pattern", "Timestamp", "Vector", "List":
 		return true
 	default:
 		return false

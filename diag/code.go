@@ -168,6 +168,12 @@ var (
 
 	// E_INVALID_SYNTHETIC_ID indicates a synthetic SourceID has an invalid format.
 	E_INVALID_SYNTHETIC_ID = code("E_INVALID_SYNTHETIC_ID", CategorySchema)
+
+	// E_LIST_ON_EDGE indicates a List type was used in a relationship property.
+	E_LIST_ON_EDGE = code("E_LIST_ON_EDGE", CategorySchema)
+
+	// E_LIST_PRIMARY_KEY indicates a List type was used as a primary key.
+	E_LIST_PRIMARY_KEY = code("E_LIST_PRIMARY_KEY", CategorySchema)
 )
 
 // Syntax codes.
@@ -326,6 +332,8 @@ var allCodes = []Code{
 	E_RELATION_COLLISION,
 	E_MISSING_SOURCE_ID,
 	E_INVALID_SYNTHETIC_ID,
+	E_LIST_ON_EDGE,
+	E_LIST_PRIMARY_KEY,
 	// Syntax
 	E_SYNTAX,
 	// Import

@@ -553,7 +553,7 @@ YAMMM provides a set of built-in data types and supports user-defined type alias
 ```text
 DataTypeRef = BuiltIn | QualifiedAlias .
 BuiltIn     = IntegerT | FloatT | BoolT | StringT | EnumT | PatternT |
-              TimestampT | DateT | UUIDT | VectorT .
+              TimestampT | DateT | UUIDT | VectorT | ListT .
 ```
 
 #### Integer
@@ -734,6 +734,61 @@ coordinates Vector[3]       // 3D coordinates
 ```
 
 Validation accepts float slices/arrays (`[]float32`/`[]float64`), including named types and pointers. NaN, Inf, and non-float elements are rejected.
+
+#### List
+
+Represents an ordered collection of typed values:
+
+```text
+ListT       = "List" "<" ElementType ">" [ "[" minLen "," maxLen "]" ] .
+ElementType = DataTypeRef .
+minLen      = "_" | INTEGER .
+maxLen      = "_" | INTEGER .
+```
+
+The element type can be any built-in type (including `List` for nesting), a `DataType` alias, or `Vector`. The underscore `_` represents an unbounded limit.
+
+Examples:
+
+```yammm-snippet
+tags List<String>                          // unbounded list of strings
+tags List<String[_, 6]>                    // each string max 6 runes
+tags List<String>[1, 5]                    // 1 to 5 elements
+tags List<String[_, 6]>[1, 5]             // element + length constrained
+matrix List<List<Integer>>                 // nested list
+embeddings List<Vector[768]>               // list of vectors
+```
+
+Validation accepts JSON arrays where each element passes the element type's constraint. Length bounds (when present) are checked against the array length.
+
+**Restrictions:**
+
+- List types cannot be used as primary keys.
+- List types cannot be used in relationship (edge) properties.
+
+**Narrowing:**
+
+When a child type re-declares a parent's List property, both the element constraint and the length bounds must narrow (element values form a subset, length range is a subrange):
+
+```yammm-snippet
+abstract type Base {
+    tags List<String>                      // unbounded
+}
+type Child extends Base {
+    tags List<String[1, 50]>[1, 10]       // element + bounds narrowed
+}
+```
+
+**Data Type Aliases:**
+
+List types can be used as DataType alias targets:
+
+```yammm-snippet
+type Tags = List<String[1, 50]>[1, 10]
+type Article {
+    tags Tags required
+}
+```
 
 ### Data Type Aliases
 
@@ -1555,6 +1610,8 @@ BuiltIn    = "Integer" [ "[" Bound "," Bound "]" ]
            | "Timestamp" [ "[" STRING "]" ]
            | "Date"
            | "UUID"
-           | "Vector" "[" INTEGER "]" .
+           | "Vector" "[" INTEGER "]"
+           | "List" "<" DataTypeRef ">" [ "[" ListBound "," ListBound "]" ] .
 Bound      = "_" | INTEGER | FLOAT .
+ListBound  = "_" | INTEGER .
 ```

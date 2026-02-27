@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -403,6 +404,8 @@ func builtinLen(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 		return int64(utf8.RuneCountInString(v)), nil
 	case []any:
 		return int64(len(v)), nil
+	case immutable.Slice:
+		return int64(v.Len()), nil
 	}
 
 	rv := reflect.ValueOf(lhs)
@@ -1041,6 +1044,15 @@ func asSlice(funcName string, val any) ([]any, error) {
 
 	if slice, ok := val.([]any); ok {
 		return slice, nil
+	}
+
+	// Handle immutable.Slice (returned by property Unwrap for List-typed properties).
+	if is, ok := val.(immutable.Slice); ok {
+		result := make([]any, is.Len())
+		for i, v := range is.Iter2() {
+			result[i] = v.Unwrap()
+		}
+		return result, nil
 	}
 
 	rv := reflect.ValueOf(val)

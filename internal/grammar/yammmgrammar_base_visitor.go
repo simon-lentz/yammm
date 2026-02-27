@@ -131,6 +131,10 @@ func (v *BaseYammmGrammarVisitor) VisitUuidT(ctx *UuidTContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseYammmGrammarVisitor) VisitListT(ctx *ListTContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseYammmGrammarVisitor) VisitDatatypeKeyword(ctx *DatatypeKeywordContext) interface{} {
 	return v.VisitChildren(ctx)
 }

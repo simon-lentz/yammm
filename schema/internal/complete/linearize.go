@@ -213,6 +213,12 @@ func (c *completer) completeTypes() bool {
 		pks := make([]*schema.Property, 0)
 		for _, p := range allProps {
 			if p.IsPrimaryKey() {
+				if isListConstraint(p.Constraint()) {
+					c.errorf(p.Span(), diag.E_LIST_PRIMARY_KEY,
+						"property %q: List types cannot be used as primary keys", p.Name())
+					ok = false
+					continue
+				}
 				pks = append(pks, p)
 			}
 		}
