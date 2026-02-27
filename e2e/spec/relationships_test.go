@@ -113,9 +113,9 @@ func TestRelationships_MultiplicityAllForms(t *testing.T) {
 	// function. The implementation treats (one) as optional/one (matching the
 	// "(_)" and "(_:one)" behavior). Only (one:one) and (one:many) are required.
 	tests := []struct {
-		name       string
+		name         string
 		wantOptional bool
-		wantMany   bool
+		wantMany     bool
 	}{
 		// (omitted) -> optional, one
 		{"REL_OMITTED", true, false},

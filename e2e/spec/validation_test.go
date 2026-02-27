@@ -97,8 +97,8 @@ func TestValidation_Validate_Batch(t *testing.T) {
 
 	raws := []instance.RawInstance{
 		raw(map[string]any{"name": "Alice", "age": 30}), // valid
-		raw(map[string]any{"name": "Bob"}),               // valid (age is optional)
-		raw(map[string]any{"age": 200}),                  // invalid: missing required "name"
+		raw(map[string]any{"name": "Bob"}),              // valid (age is optional)
+		raw(map[string]any{"age": 200}),                 // invalid: missing required "name"
 	}
 
 	valid, failures, err := v.Validate(ctx, "Person", raws)

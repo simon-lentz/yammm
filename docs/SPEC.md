@@ -372,7 +372,7 @@ import "./3rdparty" as thirdparty
 
 **Qualified type references:** Imported types must be referenced with their alias qualifier:
 
-```yammm
+```yammm-snippet
 type Car {
     color common.Color required      // qualified reference
     --> WHEELS (one:many) parts.Wheel
@@ -381,7 +381,7 @@ type Car {
 
 **Qualified datatype references:** Custom datatypes from imported schemas must also be qualified with their alias:
 
-```yammm
+```yammm-snippet
 // common.yammm
 schema "Common"
 type Money = Float[0, _]
@@ -483,7 +483,7 @@ Inheritance rules:
 
 Type references may be local or qualified with an import alias:
 
-```yammm
+```yammm-snippet
 type Car {
     --> OWNER Person                    // local type reference
     --> DEALER (one) dealers.Dealer     // qualified reference
@@ -533,7 +533,7 @@ Associations may have their own properties, declared within the relationship bod
 RelProperty = [ DOC_COMMENT ] PropertyName DataTypeRef [ "required" ] .
 ```
 
-```yammm
+```yammm-snippet
 type Person {
     --> WORKS_AT Company {
         startDate Date required
@@ -570,7 +570,7 @@ The underscore `_` represents an unbounded limit. An optional leading `-` allows
 
 Examples:
 
-```yammm
+```yammm-snippet
 age Integer                  // unbounded integer
 age Integer[0, 150]          // 0 to 150 inclusive
 count Integer[1, _]          // minimum 1, no maximum
@@ -592,7 +592,7 @@ max    = "_" | [ "-" ] ( INTEGER | FLOAT ) .
 
 Examples:
 
-```yammm
+```yammm-snippet
 temperature Float            // unbounded float
 percentage Float[0.0, 100.0] // 0 to 100 inclusive
 ratio Float[0, 1.0]          // 0 to 1 inclusive
@@ -609,7 +609,7 @@ BoolT = "Boolean" .
 
 Example:
 
-```yammm
+```yammm-snippet
 active Boolean
 isPublished Boolean required
 ```
@@ -626,7 +626,7 @@ maxLen  = "_" | INTEGER .
 
 Examples:
 
-```yammm
+```yammm-snippet
 name String                  // unbounded string
 name String[1, 100]          // 1 to 100 runes
 code String[3, 3]            // exactly 3 runes
@@ -645,7 +645,7 @@ At least two options must be provided.
 
 Examples:
 
-```yammm
+```yammm-snippet
 status Enum["pending", "approved", "rejected"]
 color Enum["red", "green", "blue"]
 priority Enum["low", "medium", "high", "critical"]
@@ -661,7 +661,7 @@ PatternT = "Pattern" "[" STRING [ "," STRING ] "]" .
 
 Examples:
 
-```yammm
+```yammm-snippet
 email Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
 phone Pattern["^\\d{3}-\\d{3}-\\d{4}$"]
 ```
@@ -681,7 +681,7 @@ The format string follows Go's time formatting conventions. When omitted, RFC333
 
 Examples:
 
-```yammm
+```yammm-snippet
 createdAt Timestamp                                    // RFC3339
 eventTime Timestamp["2006-01-02T15:04:05Z07:00"]       // explicit RFC3339
 logTime Timestamp["2006-01-02 15:04:05"]               // custom format
@@ -697,7 +697,7 @@ DateT = "Date" .
 
 Example:
 
-```yammm
+```yammm-snippet
 birthDate Date
 expiryDate Date required
 ```
@@ -712,7 +712,7 @@ UUIDT = "UUID" .
 
 Example:
 
-```yammm
+```yammm-snippet
 externalId UUID
 correlationId UUID required
 ```
@@ -728,7 +728,7 @@ dimensions = INTEGER .
 
 Examples:
 
-```yammm
+```yammm-snippet
 embedding Vector[768]       // 768-dimensional vector
 coordinates Vector[3]       // 3D coordinates
 ```
@@ -787,7 +787,7 @@ Name        = UC_WORD | LC_WORD .
 
 Examples:
 
-```yammm
+```yammm-snippet
 type Person {
     --> WORKS_AT Company              // optional, one
     --> MANAGES (many) Person         // optional, many
@@ -848,7 +848,7 @@ MultiplicitySpec = "_" [ ":" ( "one" | "many" ) ]
 
 Examples:
 
-```yammm
+```yammm-snippet
 --> OWNER Person              // optional, single owner
 --> OWNER (one) Person        // required, single owner
 --> OWNERS (many) Person      // optional, multiple owners
@@ -859,7 +859,7 @@ Examples:
 
 The optional reverse clause declares the inverse relationship name:
 
-```yammm
+```yammm-snippet
 type Person {
     --> WORKS_AT Company / EMPLOYEES
 }
@@ -1038,7 +1038,7 @@ in   membership test (value in collection)
 
 Example:
 
-```yammm
+```yammm-snippet
 ! "status must be valid" status in ["active", "inactive", "pending"]
 ```
 
@@ -1053,19 +1053,20 @@ These operators support two modes:
 
 **Regular expression matching:** When the right operand is a regex literal, performs pattern matching:
 
-```yammm
+```yammm-snippet
 ! "email must be valid" email =~ /.+@.+\..+/
 ```
 
 **Type checking:** When the right operand is a datatype keyword, checks whether the value matches that type at runtime:
 
-```yammm
+```yammm-snippet
 ! "value must be integer" value =~ Integer
 ! "price must be numeric" price =~ Float
 ! "must not be string" data !~ String
 ```
 
 Supported datatype keywords for type checking:
+
 - `String` - checks for string values
 - `Integer` (alias: `Int`) - checks for integer values
 - `Float` (alias: `Number`) - checks for floating-point values
@@ -1082,7 +1083,7 @@ condition ? { trueExpr : falseExpr }
 
 Example:
 
-```yammm
+```yammm-snippet
 ! "adult status" age >= 18 ? { "adult" : "minor" } == category
 ```
 
@@ -1106,7 +1107,7 @@ Invalid indices or ranges return evaluation errors with start/end/len details.
 
 Properties are accessed using dot notation:
 
-```yammm
+```yammm-snippet
 $self.name         // explicit self reference
 name               // implicit property reference
 $item.price        // lambda parameter property
