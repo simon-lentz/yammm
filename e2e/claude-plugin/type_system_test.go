@@ -30,7 +30,8 @@ func TestTypeSystem_SchemaCompilation(t *testing.T) {
 // TestTypeSystem_NarrowingInvalid verifies that property re-declaration (widening) fails compilation.
 func TestTypeSystem_NarrowingInvalid(t *testing.T) {
 	t.Parallel()
-	loadSchemaExpectError(t, "testdata/type_system/narrowing_invalid.yammm")
+	result := loadSchemaExpectError(t, "testdata/type_system/narrowing_invalid.yammm")
+	assertDiagHasCode(t, result, diag.E_PROPERTY_CONFLICT)
 }
 
 // TestTypeSystem_ModifierOverrideValid verifies that promoting optional-to-required
@@ -200,7 +201,8 @@ func TestTypeSystem_NarrowingValid(t *testing.T) {
 // (removing obligation) is rejected as E_PROPERTY_CONFLICT.
 func TestTypeSystem_ModifierOverrideInvalid(t *testing.T) {
 	t.Parallel()
-	loadSchemaExpectError(t, "testdata/type_system/modifier_override_invalid.yammm")
+	result := loadSchemaExpectError(t, "testdata/type_system/modifier_override_invalid.yammm")
+	assertDiagHasCode(t, result, diag.E_PROPERTY_CONFLICT)
 }
 
 // TestTypeSystem_PKAllowedDate verifies Date is accepted as a primary key type.
@@ -241,7 +243,8 @@ func TestTypeSystem_PKBannedTypes(t *testing.T) {
 	for _, path := range banned {
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
-			loadSchemaExpectError(t, path)
+			result := loadSchemaExpectError(t, path)
+			assertDiagHasCode(t, result, diag.E_INVALID_PRIMARY_KEY_TYPE)
 		})
 	}
 }
@@ -250,7 +253,8 @@ func TestTypeSystem_PKBannedTypes(t *testing.T) {
 // type is still rejected as primary key.
 func TestTypeSystem_PKAliasBanned(t *testing.T) {
 	t.Parallel()
-	loadSchemaExpectError(t, "testdata/type_system/pk_alias_banned.yammm")
+	result := loadSchemaExpectError(t, "testdata/type_system/pk_alias_banned.yammm")
+	assertDiagHasCode(t, result, diag.E_INVALID_PRIMARY_KEY_TYPE)
 }
 
 // TestTypeSystem_ListTypes tests List type variants from type-system.md.
@@ -283,17 +287,20 @@ func TestTypeSystem_ListTypes(t *testing.T) {
 // in a child is rejected (E_PROPERTY_CONFLICT).
 func TestTypeSystem_ListNarrowingInvalid(t *testing.T) {
 	t.Parallel()
-	loadSchemaExpectError(t, "testdata/type_system/list_narrowing_invalid.yammm")
+	result := loadSchemaExpectError(t, "testdata/type_system/list_narrowing_invalid.yammm")
+	assertDiagHasCode(t, result, diag.E_PROPERTY_CONFLICT)
 }
 
 // TestTypeSystem_ListEdgeBanned verifies that List is banned in edge properties.
 func TestTypeSystem_ListEdgeBanned(t *testing.T) {
 	t.Parallel()
-	loadSchemaExpectError(t, "testdata/type_system/list_edge_banned.yammm")
+	result := loadSchemaExpectError(t, "testdata/type_system/list_edge_banned.yammm")
+	assertDiagHasCode(t, result, diag.E_LIST_ON_EDGE)
 }
 
 // TestTypeSystem_ListPKBanned verifies that List cannot be used as a primary key.
 func TestTypeSystem_ListPKBanned(t *testing.T) {
 	t.Parallel()
-	loadSchemaExpectError(t, "testdata/type_system/list_pk_banned.yammm")
+	result := loadSchemaExpectError(t, "testdata/type_system/list_pk_banned.yammm")
+	assertDiagHasCode(t, result, diag.E_INVALID_PRIMARY_KEY_TYPE)
 }
