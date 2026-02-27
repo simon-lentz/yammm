@@ -128,13 +128,18 @@ func (c *completer) complete() *schema.Schema {
 		return nil
 	}
 
+	// Phase 7b: Validate invariant expressions (static property checking)
+	if !c.validateInvariantExpressions() {
+		return nil
+	}
+
 	// Final check for any errors collected during completion phases
 	// (e.g., from merge operations that don't abort but collect diagnostics)
 	if c.collector.HasErrors() {
 		return nil
 	}
 
-	// Phase 7: Seal all types and relations to prevent post-completion mutation
+	// Phase 8: Seal all types and relations to prevent post-completion mutation
 	for _, t := range c.schema.TypesSlice() {
 		t.Seal()
 		// Seal all relations on this type

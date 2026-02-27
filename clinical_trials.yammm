@@ -291,9 +291,6 @@ type SiteActivation extends Auditable {
 
 	! "active_requires_irb_approval"
 		status != "Active" || irb_approval_number != nil
-
-	! "nonexistent property"
-		fake_property != another_fake_property && fake_property != "fake"
 }
 
 /* Links an Investigator to a Site for a particular ClinicalTrial,

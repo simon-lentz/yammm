@@ -1597,3 +1597,114 @@ type TypeA {
 	}
 	assert.False(t, result.HasErrors())
 }
+
+// =============================================================================
+// Invariant Property Validation Integration Tests
+// =============================================================================
+
+// TestLoadString_InvariantUnknownProperty verifies that an invariant referencing
+// a property that does not exist on the type produces E_UNKNOWN_PROPERTY when
+// loaded end-to-end from source text.
+func TestLoadString_InvariantUnknownProperty(t *testing.T) {
+	t.Parallel()
+
+	source := `schema "test"
+
+type Person {
+	name String
+	! "bad_check" fake_property != ""
+}`
+	ctx := context.Background()
+
+	s, result, err := load.LoadString(ctx, source, "test.yammm")
+
+	require.NoError(t, err, "Go error should be nil for content/validation issues")
+	require.True(t, result.HasErrors(), "should have validation errors for unknown property")
+	require.Nil(t, s, "schema must be nil when Result.HasErrors() is true")
+
+	found := false
+	for _, issue := range result.IssuesSlice() {
+		if issue.Code() == diag.E_UNKNOWN_PROPERTY {
+			found = true
+			assert.Contains(t, issue.Message(), "fake_property",
+				"error message should mention the unknown property name")
+		}
+	}
+	assert.True(t, found, "expected E_UNKNOWN_PROPERTY diagnostic")
+}
+
+// TestLoadString_InvariantValidProperty verifies that a schema with valid
+// invariants referencing existing properties compiles successfully end-to-end.
+func TestLoadString_InvariantValidProperty(t *testing.T) {
+	t.Parallel()
+
+	source := `schema "test"
+
+type Person {
+	name String
+	age Integer
+
+	! "name_not_empty" name != ""
+	! "age_positive" age >= 0
+}`
+	ctx := context.Background()
+
+	s, result, err := load.LoadString(ctx, source, "test.yammm")
+
+	require.NoError(t, err)
+	require.NotNil(t, s, "schema should compile successfully")
+	assert.False(t, result.HasErrors(), "unexpected errors: %v", result.Messages())
+
+	personType, ok := s.Type("Person")
+	require.True(t, ok, "Person type should exist")
+
+	invs := personType.InvariantsSlice()
+	require.Len(t, invs, 2, "should have two invariants")
+
+	// Verify both invariant expressions survived the pipeline
+	for _, inv := range invs {
+		require.NotNil(t, inv.Expression(),
+			"invariant %q expression should survive load pipeline", inv.Name())
+	}
+}
+
+// TestLoadString_InvariantLambdaUnknownProperty verifies that a lambda parameter
+// accessing a nonexistent property on a composition target type produces
+// E_UNKNOWN_PROPERTY when loaded end-to-end from source text.
+func TestLoadString_InvariantLambdaUnknownProperty(t *testing.T) {
+	t.Parallel()
+
+	source := `schema "test"
+
+part type LineItem {
+	quantity Integer
+	price Float
+}
+
+type Order {
+	id String primary
+
+	*-> ITEMS (many) LineItem
+
+	! "bad_field" ITEMS -> All |$item| { $item.nonexistent > 0 }
+}`
+	ctx := context.Background()
+
+	s, result, err := load.LoadString(ctx, source, "test.yammm")
+
+	require.NoError(t, err, "Go error should be nil for content/validation issues")
+	require.True(t, result.HasErrors(), "should have validation errors for unknown property on LineItem")
+	require.Nil(t, s, "schema must be nil when Result.HasErrors() is true")
+
+	found := false
+	for _, issue := range result.IssuesSlice() {
+		if issue.Code() == diag.E_UNKNOWN_PROPERTY {
+			found = true
+			assert.Contains(t, issue.Message(), "nonexistent",
+				"error message should mention the unknown property name")
+			assert.Contains(t, issue.Message(), "LineItem",
+				"error message should mention the target type name")
+		}
+	}
+	assert.True(t, found, "expected E_UNKNOWN_PROPERTY for nonexistent on LineItem")
+}
