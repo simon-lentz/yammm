@@ -1,0 +1,14 @@
+schema "GraphRequired"
+
+// Source: SPEC.md, "Graph Construction" — required association for Check tests
+
+type Department {
+    id String primary
+    name String required
+}
+
+type Employee {
+    id String primary
+    name String required
+    --> BELONGS_TO (one:one) Department
+}

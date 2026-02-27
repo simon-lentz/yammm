@@ -1,0 +1,24 @@
+{
+    "Company": [
+        {"id": "acme", "name": "Acme Corp"}
+    ],
+    "Person__with_edge": [
+        {
+            "id": "alice",
+            "name": "Alice",
+            "works_at": {"_target_id": "acme", "role": "Engineer"}
+        }
+    ],
+    "Person__no_edge": [
+        {
+            "id": "bob",
+            "name": "Bob"
+        }
+    ],
+    "Target": [
+        {"id": "t1"}
+    ],
+    "Source__no_edges": [
+        {"id": "s1"}
+    ]
+}

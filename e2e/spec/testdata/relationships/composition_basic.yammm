@@ -1,0 +1,13 @@
+schema "spec_comp_basic"
+
+// Source: SPEC.md, "Compositions" — basic composition with part type target
+
+part type LineItem {
+    description String required
+    quantity Integer required
+}
+
+type Order {
+    id String primary
+    *-> ITEMS (_:many) LineItem
+}

@@ -1,0 +1,6 @@
+schema "DocComment"
+
+/* Documented type for testing doc comment preservation */
+type Documented {
+    name String required
+}

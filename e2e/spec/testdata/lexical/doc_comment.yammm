@@ -1,0 +1,6 @@
+schema "DocComment"
+
+/* This type has documentation */
+type Documented {
+    name String required
+}

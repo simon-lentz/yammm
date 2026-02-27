@@ -1,0 +1,13 @@
+schema "spec_abstract"
+
+// Source: SPEC.md, "Type Modifiers" — abstract types
+// Abstract types cannot be instantiated directly but can be extended.
+
+abstract type Vehicle {
+    name String required
+}
+
+type Car extends Vehicle {
+    id UUID primary
+    doors Integer
+}

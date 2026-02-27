@@ -1,0 +1,20 @@
+{
+    "Record": [
+        {
+            "schema": "test",
+            "type": "test",
+            "required": "test",
+            "primary": "test",
+            "extends": "test",
+            "name": "test"
+        }
+    ],
+    "LiteralTest": [
+        {
+            "name": "Alice",
+            "score": 3.14,
+            "count": 42,
+            "active": true
+        }
+    ]
+}

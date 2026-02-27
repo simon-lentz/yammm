@@ -1,0 +1,18 @@
+schema "GraphBasic"
+
+// Source: SPEC.md, "Graph Construction" — basic graph with multiple types for ordering tests
+
+type Zebra {
+    id String primary
+    name String
+}
+
+type Apple {
+    id String primary
+    name String
+}
+
+type Mango {
+    id String primary
+    name String
+}

@@ -1,0 +1,9 @@
+schema "AliasCycle"
+
+type A = B
+type B = A
+
+type Item {
+    id String primary
+    name A required
+}

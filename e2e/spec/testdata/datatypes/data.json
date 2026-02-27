@@ -1,0 +1,11 @@
+{
+    "RuneTest": [
+        {"id": "1", "name": "caf\u00e9"}
+    ],
+    "RuneTest__too_long": [
+        {"id": "2", "name": "caf\u00e9!"}
+    ],
+    "Item": [
+        {"id": "1", "name": "Valid Label"}
+    ]
+}

@@ -1,0 +1,5 @@
+schema "Basic"
+
+type Item {
+    name String required
+}

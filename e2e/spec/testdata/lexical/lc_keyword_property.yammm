@@ -1,0 +1,10 @@
+schema "LcKeyword"
+
+type Record {
+    schema String
+    type String
+    required String
+    primary String
+    extends String
+    name String required
+}

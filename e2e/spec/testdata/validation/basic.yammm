@@ -1,0 +1,6 @@
+schema "Basic"
+
+type Person {
+    name String primary
+    age Integer[0, 150]
+}

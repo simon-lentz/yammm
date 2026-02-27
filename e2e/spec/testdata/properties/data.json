@@ -1,0 +1,20 @@
+{
+    "Car": [
+        {"vin": "1HGBH41JXMN109186", "make": "Honda", "model": "Civic"}
+    ],
+    "Car__missing_primary": [
+        {"make": "Honda", "model": "Civic"}
+    ],
+    "Person": [
+        {"name": "Alice", "age": 30}
+    ],
+    "Person__missing_required": [
+        {"age": 30}
+    ],
+    "Config": [
+        {"id": "cfg-1"}
+    ],
+    "Meta": [
+        {"id": "meta-1", "schema": "v1", "type": "config", "required": "yes", "primary": "main", "extends": "base"}
+    ]
+}

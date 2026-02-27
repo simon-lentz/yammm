@@ -1,0 +1,7 @@
+schema "IdentifierForms"
+
+type My_Type2 {
+    my_field1 String required
+    value_2 Integer
+    name3 String
+}

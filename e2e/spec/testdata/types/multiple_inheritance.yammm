@@ -1,0 +1,17 @@
+schema "spec_multiple_inheritance"
+
+// Source: SPEC.md, "Inheritance" — multiple inheritance
+// Types may extend multiple parents.
+
+abstract type Named {
+    name String required
+}
+
+abstract type Timestamped {
+    created_at Timestamp required
+}
+
+type Document extends Named, Timestamped {
+    id UUID primary
+    content String
+}

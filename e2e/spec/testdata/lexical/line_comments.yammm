@@ -1,0 +1,7 @@
+schema "LineComments"
+
+// This is a line comment
+type Item {
+    name String required  // inline comment
+    value Integer
+}

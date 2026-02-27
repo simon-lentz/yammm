@@ -1,0 +1,19 @@
+schema "Literals"
+
+type LiteralTest {
+    name String required
+    score Float
+    count Integer
+    active Boolean
+
+    // Integer and float literals in expressions
+    ! "int_literal" count == 42 || count != 42 || count == nil
+    // Boolean literal
+    ! "bool_literal" active == true || active == false || active == nil
+    // String literal in expression
+    ! "string_literal" name != ""
+    // Single-quote string literal
+    ! "single_quote_literal" name != ''
+    // Regex literal
+    ! "regex_literal" name =~ /^[A-Za-z]+$/
+}

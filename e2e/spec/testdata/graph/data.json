@@ -1,0 +1,35 @@
+{
+    "Zebra": [
+        {"id": "z1", "name": "Zara"},
+        {"id": "z2", "name": "Zach"}
+    ],
+    "Apple": [
+        {"id": "a1", "name": "Fuji"},
+        {"id": "a2", "name": "Gala"}
+    ],
+    "Mango": [
+        {"id": "m1", "name": "Alfonso"}
+    ],
+    "Company": [
+        {"id": "acme", "name": "Acme Corp"}
+    ],
+    "Person": [
+        {"id": "alice", "name": "Alice", "works_at": {"_target_id": "acme"}},
+        {"id": "bob", "name": "Bob", "works_at": {"_target_id": "acme"}}
+    ],
+    "Person__no_edge": [
+        {"id": "charlie", "name": "Charlie"}
+    ],
+    "Department": [
+        {"id": "eng", "name": "Engineering"}
+    ],
+    "Employee": [
+        {"id": "emp1", "name": "Alice"}
+    ],
+    "Employee__with_dept": [
+        {"id": "emp2", "name": "Bob", "belongs_to": {"_target_id": "eng"}}
+    ],
+    "LineItem": [
+        {"description": "Widget", "quantity": 5}
+    ]
+}
