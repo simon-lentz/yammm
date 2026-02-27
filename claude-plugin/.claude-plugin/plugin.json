@@ -5,8 +5,10 @@
   "author": {
     "name": "simon-lentz"
   },
+  "homepage": "https://github.com/simon-lentz/yammm",
   "repository": "https://github.com/simon-lentz/yammm",
   "license": "MIT",
+  "keywords": ["yammm", "dsl", "schema", "lsp", "validation"],
   "lspServers": {
     "yammm-lsp": {
       "command": "yammm-lsp",
