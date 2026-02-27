@@ -1,0 +1,2 @@
+schema "pk_pattern_banned"
+type R { id Pattern[".*"] primary }

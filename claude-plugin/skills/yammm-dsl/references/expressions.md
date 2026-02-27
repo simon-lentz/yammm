@@ -30,6 +30,15 @@ The expression language is used within invariant declarations (`! "message" expr
 | `.` | Property access |
 | `?` | Ternary conditional (`cond ? { then : else }`) |
 
+### Logical AND
+
+`&&` evaluates left-to-right with short-circuit semantics. If the left operand is false, the right operand is not evaluated.
+
+```yammm-snippet
+! "both_required" start_date != nil && end_date != nil
+! "range_valid" start_date != nil && end_date != nil && end_date > start_date
+```
+
 ### Pattern and Type Match
 
 `=~` and `!~` support two modes:

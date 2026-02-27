@@ -1,0 +1,14 @@
+schema "type_system_list"
+
+type ShortString = String[_, 10]
+type Tags = List<String[_, 50]>[1, 10]
+
+type ListBasics {
+    id UUID primary
+    tags List<String>
+    bounded_tags List<String[1, 50]>[1, 5] required
+    int_list List<Integer[0, 100]>
+    nested List<List<Integer>>
+    alias_element List<ShortString>
+    alias_list Tags
+}

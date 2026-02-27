@@ -1,0 +1,6 @@
+schema "pk_timestamp"
+
+type TimestampKeyed {
+    ts Timestamp primary
+    label String[1, 100] required
+}

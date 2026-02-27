@@ -10,9 +10,11 @@ func TestExpressions_SchemaCompilation(t *testing.T) {
 
 	schemas := []string{
 		"testdata/expressions/operators.yammm",
+		"testdata/expressions/operators_extended.yammm",
 		"testdata/expressions/pipelines.yammm",
 		"testdata/expressions/nil_handling.yammm",
 		"testdata/expressions/composed.yammm",
+		"testdata/expressions/builtins_extended.yammm",
 	}
 
 	for _, path := range schemas {
@@ -107,4 +109,87 @@ func TestExpressions_NilHandling(t *testing.T) {
 func TestExpressions_Composed(t *testing.T) {
 	t.Parallel()
 	loadSchema(t, "testdata/expressions/composed.yammm")
+}
+
+// TestExpressions_ExtendedOperators tests operators documented in expressions.md
+// that were not previously covered: &&, ^, in, !~, ternary ?{}, indexing.
+func TestExpressions_ExtendedOperators(t *testing.T) {
+	t.Parallel()
+
+	data := "testdata/expressions/data.json"
+	v := loadSchema(t, "testdata/expressions/operators_extended.yammm")
+
+	t.Run("valid_all_operators", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ExtOpRecord")
+		assertValid(t, v, "ExtOpRecord", records[0])
+	})
+
+	t.Run("invalid_logical_and", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ExtOpRecord__invalid_and")
+		// x=-1, y=15: both_positive fails (x > 0 is false, && short-circuits)
+		// product_positive fails: -1 * 15 = -15 (not > 0)
+		assertInvariantFails(t, v, "ExtOpRecord", records[0], "both_positive", "product_positive")
+	})
+
+	t.Run("invalid_xor", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ExtOpRecord__invalid_xor")
+		// x=20, y=20: both > 10, XOR of (true ^ true) = false
+		assertInvariantFails(t, v, "ExtOpRecord", records[0], "exactly_one_big")
+	})
+
+	t.Run("invalid_membership", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ExtOpRecord__invalid_membership")
+		// status="unknown", not in ["active", "pending", "closed"]
+		assertInvariantFails(t, v, "ExtOpRecord", records[0], "valid_status")
+	})
+
+	t.Run("invalid_negated_match", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ExtOpRecord__invalid_negated_match")
+		// name="12345": not_numeric_name fails (matches /^[0-9]+$/, so !~ is false)
+		// name_starts_upper also fails ("1" does not match /^[A-Z]$/)
+		assertInvariantFails(t, v, "ExtOpRecord", records[0], "not_numeric_name", "name_starts_upper")
+	})
+
+	t.Run("invalid_ternary", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ExtOpRecord__invalid_ternary")
+		// score=-5, not nil so ternary evaluates else: -5 >= 0 is false
+		assertInvariantFails(t, v, "ExtOpRecord", records[0], "score_check")
+	})
+
+	t.Run("invalid_indexing", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ExtOpRecord__invalid_indexing")
+		// name="alice", name[0,1]="a", /^[A-Z]$/ fails on lowercase
+		assertInvariantFails(t, v, "ExtOpRecord", records[0], "name_starts_upper")
+	})
+}
+
+// TestExpressions_BuiltinsExtended tests built-in functions documented in
+// expressions.md that were not previously covered in e2e/claude-plugin:
+// Sort, Reverse, Flatten, Compact, Unique, First, Last, Abs, Floor, Ceil,
+// Round, Min, Max, Compare, Substring, Match, TrimPrefix, TrimSuffix, Join,
+// Replace, TypeOf, With, AllOrNone, Count.
+func TestExpressions_BuiltinsExtended(t *testing.T) {
+	t.Parallel()
+
+	data := "testdata/expressions/data.json"
+	v := loadSchema(t, "testdata/expressions/builtins_extended.yammm")
+
+	t.Run("valid_all_builtins", func(t *testing.T) {
+		t.Parallel()
+		// name="Alice", value=3.7
+		// All literal invariants use hardcoded inputs and pass by construction.
+		// Field-based invariants:
+		//   with_binds: "Alice" -> With -> Upper -> Len = 5 > 0 ✓
+		//   typeof_string: TypeOf("Alice") = "string" == "string" ✓
+		//   value_bounded: Floor(3.7)=3.0 <= 3.7 && 3.7 <= Ceil(3.7)=4.0 ✓
+		records := loadTestData(t, data, "BuiltinRecord")
+		assertValid(t, v, "BuiltinRecord", records[0])
+	})
 }

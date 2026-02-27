@@ -1,0 +1,102 @@
+schema "expr_builtins_extended"
+
+// Source: expressions.md, built-in functions not covered by other expression schemas:
+// Sort, Reverse, Flatten, Compact, Unique, First, Last, Abs, Floor, Ceil, Round,
+// Min, Max, Compare, Substring, Match, TrimPrefix, TrimSuffix, Join, Replace,
+// TypeOf, With, AllOrNone, Count.
+
+type BuiltinRecord {
+	id String primary
+	name String[1, 100] required
+	value Float required
+
+	// --- String builtins ---
+
+	// TrimPrefix: remove prefix if present
+	! "trim_prefix_works" "HelloWorld" -> TrimPrefix("Hello") == "World"
+
+	// TrimSuffix: remove suffix if present
+	! "trim_suffix_works" "HelloWorld" -> TrimSuffix("World") == "Hello"
+
+	// Substring: extract by rune indices
+	! "substring_works" "Hello" -> Substring(0, 3) == "Hel"
+
+	// Match: regex capture returns non-nil
+	! "match_works" "abc123" -> Match(/([a-z]+)/) != _
+
+	// Join: split then rejoin with different separator
+	! "join_works" "a,b,c" -> Split(",") -> Join("-") == "a-b-c"
+
+	// Replace: replace all occurrences
+	! "replace_works" "aXbXc" -> Replace("X", "-") == "a-b-c"
+
+	// --- Collection builtins ---
+
+	// Sort: ascending order
+	! "sort_works" [3, 1, 2] -> Sort == [1, 2, 3]
+
+	// Reverse: reverse element order
+	! "reverse_works" [1, 2, 3] -> Reverse == [3, 2, 1]
+
+	// Flatten: unpack one level of nesting
+	! "flatten_works" [[1, 2], [3]] -> Flatten == [1, 2, 3]
+
+	// Compact: remove nil entries
+	! "compact_works" [1, _, 3] -> Compact == [1, 3]
+
+	// Unique: deduplicate elements
+	! "unique_works" [1, 2, 2, 3] -> Unique == [1, 2, 3]
+
+	// First: first element
+	! "first_works" [10, 20, 30] -> First == 10
+
+	// Last: last element
+	! "last_works" [10, 20, 30] -> Last == 30
+
+	// AllOrNone: true if all match predicate
+	! "all_or_none_all" [2, 4, 6] -> AllOrNone |$x| { $x % 2 == 0 }
+
+	// AllOrNone: true if none match predicate
+	! "all_or_none_none" [1, 3, 5] -> AllOrNone |$x| { $x % 2 == 0 }
+
+	// Count: count elements matching predicate
+	! "count_works" [1, 2, 3, 4, 5] -> Count |$x| { $x > 3 } == 2
+
+	// --- Math builtins ---
+
+	// Abs: absolute value
+	! "abs_works" -5.0 -> Abs == 5.0
+
+	// Floor: floor of float
+	! "floor_works" 3.7 -> Floor == 3.0
+
+	// Ceil: ceiling of float
+	! "ceil_works" 3.2 -> Ceil == 4.0
+
+	// Round: banker's rounding (half to even)
+	! "round_works" 3.7 -> Round == 4.0
+
+	// Min: two-value minimum
+	! "min_works" 5 -> Min(3) == 3
+
+	// Max: two-value maximum
+	! "max_works" 5 -> Max(8) == 8
+
+	// Compare: three-way comparison
+	! "compare_positive" 5 -> Compare(3) == 1
+
+	// --- Control flow: With ---
+
+	// With: unconditionally bind and execute body
+	! "with_binds" name -> With |$n| { $n -> Upper -> Len > 0 }
+
+	// --- Type function: TypeOf ---
+
+	// TypeOf: get runtime type name
+	! "typeof_string" name -> TypeOf == "string"
+
+	// --- Field-based invariant ---
+
+	// Floor <= value <= Ceil proves Floor/Ceil bracket the original
+	! "value_bounded" value -> Floor <= value && value <= value -> Ceil
+}
