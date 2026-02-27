@@ -145,6 +145,7 @@ Represents a fixed-dimension numeric vector for embeddings, coordinates, etc.
 - Dimensions must be a positive integer
 - Validation accepts float slices/arrays (`[]float32`/`[]float64`)
 - NaN, Inf, and non-float elements are rejected
+- Cannot be used as a primary key
 - Cannot be used in relationship properties
 
 ```yammm-snippet
@@ -152,11 +153,58 @@ embedding Vector[768]           // 768-dimensional embedding
 coordinates Vector[3]           // 3D coordinates
 ```
 
+### List
+
+Represents an ordered collection of elements with a specified element type and optional length bounds.
+
+**Syntax:** `List<ElementType>` or `List<ElementType>[min, max]`
+
+- The element type can be any built-in type (including `List` for nesting), a `DataType` alias, or `Vector`
+- Length bounds (in square brackets after the angle brackets) are optional and follow the same rules as Integer/String bounds
+- `_` means unbounded: `List<String>[1, _]` (at least one element, no upper bound)
+- Empty lists are valid when no minimum bound is set
+- Cannot be used as a primary key
+- Cannot be used in relationship (edge) properties
+
+```yammm-snippet
+tags List<String>                       // Unbounded string list
+scores List<Integer[0, 100]>            // Bounded integer elements
+top_five List<Float>[5, 5]              // Exactly 5 float elements
+items List<String[1, 50]>[1, 100]       // 1-100 bounded strings
+matrix List<List<Float>>                // Nested list (2D)
+embeddings List<Vector[768]>[_, 10]     // Up to 10 vectors
+```
+
+**Narrowing:** Child types can narrow List constraints by:
+
+- Raising the minimum length or lowering the maximum length
+- Narrowing the element type constraint (e.g., `List<Integer[0, 100]>` narrows `List<Integer>`)
+
+**Alias support:** DataType aliases can wrap List types:
+
+```yammm-snippet
+type Tags = List<String[1, 50]>
+type ScoreBoard = List<Integer[0, 100]>[1, _]
+```
+
+---
+
+## Primary Key Types
+
+Only the following types may be used as primary keys:
+
+| Allowed | Types |
+|---------|-------|
+| Yes | `String`, `UUID`, `Date`, `Timestamp` |
+| No | `Integer`, `Float`, `Boolean`, `Enum`, `Pattern`, `Vector`, `List` |
+
+Alias resolution applies: if a property uses a `DataType` alias, the resolved constraint is checked. For example, `type VIN = String[17, 17]` is allowed as a primary key type because it resolves to `String`.
+
 ---
 
 ## Bound Syntax Rules
 
-When specifying bounds on `Integer`, `Float`, or `String`:
+When specifying bounds on `Integer`, `Float`, `String`, or `List`:
 
 1. **Both bounds required when brackets present.** You cannot write `Integer[5]`; it must be `Integer[5, _]` or `Integer[_, 5]`.
 
@@ -167,6 +215,8 @@ When specifying bounds on `Integer`, `Float`, or `String`:
 4. **Integer bounds for Float.** Integer literals are valid float bounds: `Float[0, 1.0]`.
 
 5. **Negative bounds.** Supported for Integer and Float: `Integer[-100, 100]`, `Float[-1.0, 1.0]`.
+
+6. **List length bounds.** Placed after the angle-bracket element type: `List<String>[1, 10]`. Bounds count elements (not bytes or runes). Omitting brackets means unbounded length.
 
 ---
 

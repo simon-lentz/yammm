@@ -226,6 +226,8 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 - `AllOrNone` returns `true` on empty (vacuous truth)
 - Nil inputs are treated as empty collections
 
+**List properties:** `List<T>` property values are collections and work with all collection functions above. For example: `tags -> Len > 0`, `scores -> All |$s| { $s >= 0 }`, `items -> Filter |$x| { $x -> Len > 3 }`.
+
 ### Math Functions
 
 | Function | Signature | Description |

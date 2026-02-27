@@ -62,6 +62,7 @@ Work through every item. Skip items that do not apply to the schema under review
 - Every concrete type (not abstract, not part) has exactly one field marked `primary`.
 - Abstract types do not declare `primary` fields (the concrete child supplies the key).
 - Part types do not declare `primary` fields (they are identified by their parent composition).
+- Primary key types are restricted to `String`, `UUID`, `Date`, and `Timestamp`. All other types (`Integer`, `Float`, `Boolean`, `Enum`, `Pattern`, `Vector`, `List`) are rejected. DataType aliases are resolved before checking.
 
 ### 3. Field Modifiers
 
@@ -77,6 +78,8 @@ Work through every item. Skip items that do not apply to the schema under review
 - Ranges are logically valid: min is less than or equal to max.
 - `Enum` values are quoted strings: `Enum["a", "b", "c"]`.
 - `Vector` takes a single integer dimension: `Vector[768]`.
+- `List` uses angle brackets for element type and optional square brackets for length bounds: `List<String>`, `List<Integer[0, _]>[1, 10]`.
+- `List` and `Vector` cannot appear in relationship property blocks.
 
 ### 5. Multiplicity
 
@@ -124,6 +127,8 @@ Work through every item. Skip items that do not apply to the schema under review
 - **Deep composition nesting**: More than two levels of `*->` nesting is unusual and may signal a modeling issue. Flag for review.
 - **Duplicated field patterns**: If multiple types repeat the same set of fields (e.g., audit fields), suggest extracting an `abstract type`.
 - **Missing reverse clause**: Relationships that semantically imply a named reverse (e.g., `OWNS` / `owned_by`) benefit from a reverse clause for documentation: `--> OWNS (many) Asset / owned_by (one)`.
+- **Disallowed primary key type**: Primary keys using `Integer`, `Float`, `Boolean`, `Enum`, `Pattern`, `Vector`, or `List` are rejected. Only `String`, `UUID`, `Date`, and `Timestamp` are allowed (aliases that resolve to these are also valid).
+- **Unbounded List without invariant**: A `List<T>` field with no length bounds and no invariant constraining its size may accept arbitrarily large payloads. Suggest adding bounds or a `Len` invariant.
 
 ## Output Format
 
