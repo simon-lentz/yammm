@@ -253,11 +253,8 @@ type R {
 	assertInvariantFails(t, v, "R", raw(map[string]any{"id": "3", "a": false, "b": false}), "or_check")
 }
 
-// Claim 12: ^ XOR.
-// The XOR operator parses in the grammar but the evaluator treats it as an unknown
-// operation, producing an E_EVAL_ERROR. This test documents the current behavior.
-// When XOR support is added to the evaluator, this test should be updated to assert
-// E_INVARIANT_FAIL instead.
+// Claim 12: ^ XOR — logical exclusive or.
+// SPEC §Operators: "^ logical xor" at precedence 14.
 func TestExpressions_LogicalXor(t *testing.T) {
 	t.Parallel()
 	v := loadSchemaString(t, `schema "LogXor"
@@ -268,9 +265,11 @@ type R {
 	! "xor_check" a ^ b
 }`, "log_xor")
 
-	// XOR currently produces an eval error ("unknown operation: ^") rather than
-	// evaluating the expression. Verify the error surfaces as a diagnostic.
-	assertInvalid(t, v, "R", raw(map[string]any{"id": "1", "a": true, "b": false}), diag.E_EVAL_ERROR)
+	// XOR truth table: true iff exactly one operand is true.
+	assertValid(t, v, "R", raw(map[string]any{"id": "1", "a": true, "b": false}))
+	assertValid(t, v, "R", raw(map[string]any{"id": "2", "a": false, "b": true}))
+	assertInvariantFails(t, v, "R", raw(map[string]any{"id": "3", "a": true, "b": true}), "xor_check")
+	assertInvariantFails(t, v, "R", raw(map[string]any{"id": "4", "a": false, "b": false}), "xor_check")
 }
 
 // Claim 13: ! logical NOT.
@@ -463,6 +462,21 @@ type R {
 
 	assertValid(t, v, "R", raw(map[string]any{"id": "1", "name": "expected"}))
 	assertInvariantFails(t, v, "R", raw(map[string]any{"id": "2", "name": "wrong"}), "name_check")
+}
+
+// Claim 24b: Explicit $self property reference.
+// SPEC §Variable Binding Semantics: "$self is bound when evaluating invariants."
+func TestExpressions_ExplicitSelfReference(t *testing.T) {
+	t.Parallel()
+	v := loadSchemaString(t, `schema "SelfRef"
+type R {
+	id String primary
+	name String required
+	! "self_name" $self.name != ""
+}`, "self_ref")
+
+	assertValid(t, v, "R", raw(map[string]any{"id": "1", "name": "Alice"}))
+	assertInvariantFails(t, v, "R", raw(map[string]any{"id": "2", "name": ""}), "self_name")
 }
 
 // Claim 25: Unknown property raises error (strict mode).

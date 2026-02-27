@@ -116,15 +116,8 @@ func TestProperties_RelPropertyCompiles(t *testing.T) {
 // TestProperties_VectorInRelPropertyRejected verifies that Vector data types
 // cannot be used in relationship properties — the schema fails compilation.
 // Source: SPEC.md, "Relationship properties ... cannot use Vector data types."
-//
-// BUG: complete.go validateRelationProperties iterates AllAssociations() (which
-// is empty at Phase 3b because inheritance merging hasn't run yet) instead of
-// Associations() (which has the declared associations from Phase 1). As a result,
-// the vector-in-relationship check is never executed and the schema loads cleanly.
 func TestProperties_VectorInRelPropertyRejected(t *testing.T) {
 	t.Parallel()
-	t.Skip("BUG: validateRelationProperties uses AllAssociations() (empty at Phase 3b) instead of Associations()")
-
 	result := loadSchemaExpectError(t, "testdata/properties/vector_in_rel.yammm")
 	assertDiagHasCode(t, result, diag.E_INVALID_CONSTRAINT)
 }
