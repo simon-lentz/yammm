@@ -984,8 +984,8 @@ func TestValidator_NilReceiver(t *testing.T) {
 		assert.True(t, errors.Is(err, instance.ErrNilValidator), "expected ErrNilValidator, got %v", err)
 		assert.True(t, errors.Is(err, instance.ErrInternalFailure), "expected ErrInternalFailure (parent), got %v", err)
 
-		var internalErr *instance.InternalError
-		require.True(t, errors.As(err, &internalErr), "expected InternalError type, got %T", err)
+		internalErr, ok := errors.AsType[*instance.InternalError](err)
+		require.True(t, ok, "expected InternalError type, got %T", err)
 		assert.Equal(t, instance.KindNilValidator, internalErr.Kind, "expected KindNilValidator")
 	})
 

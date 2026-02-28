@@ -9,7 +9,7 @@ import (
 )
 
 func TestBegin_NilLogger(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	op := Begin(ctx, nil, "test.op")
 
@@ -31,7 +31,7 @@ func TestEnd_NilOp(t *testing.T) {
 func TestBeginEnd_EnabledLogger(t *testing.T) {
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	op := Begin(ctx, logger, "yammm.test.op", slog.String("source", "/test/path"))
 	// Set startTime to 25ms ago for deterministic duration testing (avoids time.Sleep).
@@ -99,7 +99,7 @@ func TestBeginEnd_WithRequestID(t *testing.T) {
 func TestBeginEnd_NoRequestID(t *testing.T) {
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	op := Begin(ctx, logger, "test.op")
 	op.End(nil)
@@ -117,7 +117,7 @@ func TestBeginEnd_NoRequestID(t *testing.T) {
 func TestEnd_WithError(t *testing.T) {
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	op := Begin(ctx, logger, "test.op")
 	op.End(errors.New("something failed"))
@@ -133,7 +133,7 @@ func TestEnd_WithError(t *testing.T) {
 func TestEnd_NoError(t *testing.T) {
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	op := Begin(ctx, logger, "test.op")
 	op.End(nil)
@@ -167,7 +167,7 @@ func TestEnd_ContextCancelled(t *testing.T) {
 func TestEnd_DoubleCalling(t *testing.T) {
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	op := Begin(ctx, logger, "test.op")
 	op.End(nil)
@@ -183,7 +183,7 @@ func TestEnd_DoubleCalling(t *testing.T) {
 func TestBeginEnd_DisabledLevel(t *testing.T) {
 	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	op := Begin(ctx, logger, "test.op")
 

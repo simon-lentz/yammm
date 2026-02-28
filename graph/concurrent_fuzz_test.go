@@ -41,18 +41,16 @@ func FuzzGraph_ConcurrentOperations(f *testing.F) {
 		// Create schema
 		s := buildFuzzSchema(t)
 		g := New(s)
-		ctx := context.Background()
+		ctx := t.Context()
 
 		// Run concurrent operations
 		var wg sync.WaitGroup
 		for w := range numWorkers {
-			wg.Add(1)
-			go func(workerID int) {
-				defer wg.Done()
+			wg.Go(func() {
 				// Each worker gets deterministic randomness based on seed and ID
-				r := rand.New(rand.NewSource(seed + int64(workerID))) //nolint:gosec // fuzz test
-				runFuzzOperations(t, g, s, ctx, r, workerID, opsPerWorker)
-			}(w)
+				r := rand.New(rand.NewSource(seed + int64(w))) //nolint:gosec // fuzz test
+				runFuzzOperations(t, g, s, ctx, r, w, opsPerWorker)
+			})
 		}
 		wg.Wait()
 
@@ -173,7 +171,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 	f.Fuzz(func(t *testing.T, seed int64) {
 		s := buildFuzzSchema(t)
 		g := New(s)
-		ctx := context.Background()
+		ctx := t.Context()
 
 		personType, _ := s.Type("Person")
 		r := rand.New(rand.NewSource(seed)) //nolint:gosec // fuzz test

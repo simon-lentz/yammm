@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance"
@@ -23,7 +22,7 @@ import (
 func TestGraph_SnapshotIsolation(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -102,7 +101,7 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 func TestGraph_ComposedChildAccess(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -189,7 +188,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -248,7 +247,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 func TestGraph_InstanceReferencePreservation(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add an instance
 	person := mustValidInstance(t, s, "Person",
@@ -300,7 +299,7 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add company
 	company := mustValidInstance(t, s, "Company",

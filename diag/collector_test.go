@@ -276,18 +276,16 @@ func TestCollector_ThreadSafety(t *testing.T) {
 
 	// Concurrent writes
 	for i := range numGoroutines {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range issuesPerGoroutine {
 				issue := NewIssue(Error, E_SYNTAX, "test").
 					WithPath("data.json", "$.item").
-					WithDetails(Detail{Key: "id", Value: strconv.Itoa(id)}).
+					WithDetails(Detail{Key: "id", Value: strconv.Itoa(i)}).
 					WithDetails(Detail{Key: "j", Value: strconv.Itoa(j % 10)}).
 					Build()
 				c.Collect(issue)
 			}
-		}(i)
+		})
 	}
 
 	// Concurrent reads during writes
@@ -654,20 +652,18 @@ func TestCollector_DeterministicOrdering_Concurrent(t *testing.T) {
 
 		// Collect issues concurrently with intentionally overlapping attributes
 		for g := range numGoroutines {
-			wg.Add(1)
-			go func(goroutineID int) {
-				defer wg.Done()
+			wg.Go(func() {
 				for i := range issuesPerG {
 					// Create issues that differ only by message (tie-breaker test).
 					// Each message is unique (A00-A19, B00-B19, etc.) to ensure
 					// any reordering instability is detectable.
-					msg := fmt.Sprintf("%c%02d", 'A'+goroutineID, i)
+					msg := fmt.Sprintf("%c%02d", 'A'+g, i)
 					issue := NewIssue(Error, E_SYNTAX, msg).
 						WithSpan(location.Point(source, 1, 1)).
 						Build()
 					c.Collect(issue)
 				}
-			}(g)
+			})
 		}
 
 		wg.Wait()

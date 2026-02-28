@@ -79,7 +79,7 @@ func TestNew_PanicOnNilSchema(t *testing.T) {
 
 func TestGraph_Add_NilReceiver(t *testing.T) {
 	var g *Graph
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchema(t)
 	personType, _ := s.Type("Person")
 
@@ -100,7 +100,7 @@ func TestGraph_Add_NilReceiver(t *testing.T) {
 func TestGraph_Add_NilInstance(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := g.Add(ctx, nil)
 	if !errors.Is(err, ErrNilInstance) {
@@ -127,7 +127,7 @@ func TestGraph_Add_SchemaMismatch(t *testing.T) {
 		Build()
 
 	g := New(schemaA)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create instance from schemaB
 	typeB, _ := schemaB.Type("TypeB")
@@ -149,7 +149,7 @@ func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
 	// Instance from an imported schema should be allowed
 	mainSchema, importedSchema := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create instance from the imported schema (common)
 	entityType, _ := importedSchema.Type("Entity")
@@ -170,7 +170,7 @@ func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
 func TestGraph_Add_ContextCancellation(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // Cancel immediately
 
 	personType, _ := s.Type("Person")
@@ -191,7 +191,7 @@ func TestGraph_Add_ContextCancellation(t *testing.T) {
 func TestGraph_Add_Success(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -232,7 +232,7 @@ func TestGraph_Add_Success(t *testing.T) {
 func TestGraph_Add_DuplicatePK(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -288,7 +288,7 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 func TestGraph_Add_MissingPK(t *testing.T) {
 	s := testSchemaWithPKLessType(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	abstractType, _ := s.Type("Abstract")
 	inst := instance.NewValidInstance(
@@ -323,7 +323,7 @@ func TestGraph_Add_MissingPK(t *testing.T) {
 func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -361,7 +361,7 @@ func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 func TestGraph_InstanceByKey(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -402,7 +402,7 @@ func TestGraph_InstanceByKey(t *testing.T) {
 
 func TestGraph_Check_NilReceiver(t *testing.T) {
 	var g *Graph
-	_, err := g.Check(context.Background())
+	_, err := g.Check(t.Context())
 	if !errors.Is(err, ErrNilGraph) {
 		t.Errorf("Check on nil Graph should return ErrNilGraph, got %v", err)
 	}
@@ -504,7 +504,7 @@ func TestGraph_Add_PartType_Rejected(t *testing.T) {
 	// Part type via Add() → E_GRAPH_INVALID_COMPOSITION
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Try to add a part type directly (should fail)
 	child := mustValidPartInstance(t, s, "Child",
@@ -535,7 +535,7 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 	// PK-less parts have positional identity - multiple can coexist
 	s := testSchemaWithPKLessChild(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Container
 	container := mustValidInstance(t, s, "Container",
@@ -573,7 +573,7 @@ func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
 	// Same PK in same parent = duplicate
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -613,7 +613,7 @@ func TestGraph_NestedComposition(t *testing.T) {
 	// Part containing part (multi-level nesting)
 	s := testSchemaWithNestedComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -654,7 +654,7 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 	// Duplicates should be sorted by (type, pk)
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	companyType, _ := s.Type("Company")
@@ -717,7 +717,7 @@ func TestGraph_Unresolved_Ordering(t *testing.T) {
 	// Unresolved edges should be sorted by (sourceType, sourceKey, relation, targetType, targetKey)
 	s := testSchemaWithChainedAssociations(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add instances with forward refs in non-sorted order
 	typeC := mustValidInstance(t, s, "TypeC", []any{"c1"}, map[string]any{"name": "C1"})
@@ -771,7 +771,7 @@ func TestGraph_LargeGraph_Performance(t *testing.T) {
 	// 1000+ instances, verify ordering is correct
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -811,7 +811,7 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 	// Spaces, quotes, brackets in PK values
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -866,7 +866,7 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 	// Unicode characters in key values
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -909,7 +909,7 @@ func TestGraph_CompositeKey_Large(t *testing.T) {
 	// 5+ component composite keys
 	s := testSchemaWithCompositeKey(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	recordType, _ := s.Type("Record")
 
@@ -958,7 +958,7 @@ func TestGraph_EmptyProperties(t *testing.T) {
 	// Instance with no properties beyond PK
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -994,7 +994,7 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 	// ComposedRelations() returns sorted relation names
 	s := testSchemaWithMultipleCompositions(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Document
 	doc := mustValidInstance(t, s, "Document",
@@ -1041,7 +1041,7 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	// Parent with multiple composition relations
 	s := testSchemaWithMultipleCompositions(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Document
 	doc := mustValidInstance(t, s, "Document",
@@ -1084,7 +1084,7 @@ func TestContract2_PKRequiredForTopLevel(t *testing.T) {
 	// Primary key is required for top-level instances
 	s := testSchemaWithPKLessType(t) // Abstract type has no PK
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	abstractType, _ := s.Type("Abstract")
 	inst := instance.NewValidInstance(
@@ -1122,7 +1122,7 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 	// Imported types: alias-qualified (e.g., "c.Entity")
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add local User
 	userType, _ := mainSchema.Type("User")
@@ -1229,7 +1229,7 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 		Build()
 
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add b.Product with PK "p1"
 	productB, _ := schemaB.Type("Product")
@@ -1279,7 +1279,7 @@ func TestContract14_ComposedKeyFormat(t *testing.T) {
 	// Verify that duplicate PK within same parent is detected
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -1338,7 +1338,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	// (result, nil) for data issues, (empty, error) for internal failures
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -1408,7 +1408,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 func TestResult_Instances(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -1446,7 +1446,7 @@ func TestResult_Instances(t *testing.T) {
 func TestResult_DiagnosticsAndFlags(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -1494,7 +1494,7 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 	// Tests extractCompositions by adding parent with inline children
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create child instances
 	childType, _ := s.Type("Child")
@@ -1550,7 +1550,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 	// Tests nested extractCompositions
 	s := testSchemaWithNestedComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create grandchild
 	grandchildType, _ := s.Type("GrandChild")
@@ -1620,7 +1620,7 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 	// Tests extractCompositions with empty composition slice
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create parent with empty composed slice
 	parentType, _ := s.Type("Parent")
@@ -1657,7 +1657,7 @@ func TestGraph_resolveTypeName_QualifiedTypeNotFound(t *testing.T) {
 	// Tests the "type not found in imported schema" branch
 	mainSchema, _ := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Try to add instance with alias prefix pointing to valid import
 	// but with a type name that doesn't exist in that schema
@@ -1685,7 +1685,7 @@ func TestGraph_resolveTypeName_QualifiedImportAliasNotFound(t *testing.T) {
 	// Instance from completely unknown schema returns ErrSchemaMismatch
 	mainSchema, _ := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Try to add instance with unknown schema (not in import chain)
 	fakeTypeID := schema.NewTypeID(location.MustNewSourceID("test://unknown.yammm"), "SomeType")
@@ -1707,7 +1707,7 @@ func TestGraph_resolveTypeName_UnqualifiedTypeNotFound(t *testing.T) {
 	// Tests the "local type not found" branch
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Try to add instance with non-existent local type
 	fakeTypeID := schema.NewTypeID(location.MustNewSourceID("test://test.yammm"), "NonExistent")
@@ -1735,7 +1735,7 @@ func TestGraph_resolveTypeName_UnqualifiedTypeNotFound(t *testing.T) {
 func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 	s := testSchemaWithNestedComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent first
 	parent := mustValidInstance(t, s, "Parent",
@@ -1811,7 +1811,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 func TestExtractCompositions_OneCardinality_MultipleChildren_Error(t *testing.T) {
 	s := testSchemaWithOneComposition(t) // Parent -> (one) Child
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create two children
 	childType, _ := s.Type("Child")
@@ -1884,7 +1884,7 @@ func TestExtractCompositions_OneCardinality_MultipleChildren_Error(t *testing.T)
 func TestExtractCompositions_BareValidInstance(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create child
 	childType, _ := s.Type("Child")
@@ -1946,7 +1946,7 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 func TestAdd_PerOperationDiagnostics(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// First add - use an invalid type to trigger an error
 	invalidInst := mustValidInstanceWithInvalidType(t, s, "NonExistent", []any{"x"}, nil)
@@ -1993,7 +1993,7 @@ func TestAdd_PerOperationDiagnostics(t *testing.T) {
 func TestCheck_Idempotent_IssueCount(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with reference to missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -2047,7 +2047,7 @@ func TestCheck_Idempotent_IssueCount(t *testing.T) {
 func TestCheck_UnresolvedRequired_TargetPK(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with reference to specific missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -2103,7 +2103,7 @@ func TestCheck_UnresolvedRequired_TargetPK(t *testing.T) {
 func TestCheck_UnresolvedRequired_TargetMissingReason(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with reference to missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -2150,7 +2150,7 @@ func TestCheck_UnresolvedRequired_TargetMissingReason(t *testing.T) {
 func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",

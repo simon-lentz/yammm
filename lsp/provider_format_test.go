@@ -1,7 +1,6 @@
 package lsp
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -1498,7 +1497,7 @@ func TestHasSyntaxErrors_NoErrors(t *testing.T) {
 	t.Parallel()
 
 	// Valid schema should have no errors
-	ctx := context.Background()
+	ctx := t.Context()
 	_, result, err := load.LoadString(ctx, `schema "test"
 
 type Person {
@@ -1518,7 +1517,7 @@ func TestHasSyntaxErrors_WithSyntaxError(t *testing.T) {
 	t.Parallel()
 
 	// Invalid syntax - missing closing brace
-	ctx := context.Background()
+	ctx := t.Context()
 	_, result, err := load.LoadString(ctx, `schema "test"
 
 type Person {
@@ -1538,7 +1537,7 @@ func TestHasSyntaxErrors_WithImportOnly(t *testing.T) {
 
 	// Schema with import - LoadString disallows imports, but this is NOT a syntax error
 	// The parse succeeds; the import restriction is a semantic error (E_IMPORT_NOT_ALLOWED)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, result, err := load.LoadString(ctx, `schema "test"
 
 import "./other" as other
@@ -1566,7 +1565,7 @@ func TestHasSyntaxErrors_VerifyImportErrorCategory(t *testing.T) {
 	t.Parallel()
 
 	// Verify that import errors are categorized as CategoryImport, not CategorySyntax
-	ctx := context.Background()
+	ctx := t.Context()
 	_, result, err := load.LoadString(ctx, `schema "test"
 import "./other" as other
 type Person { name String }
@@ -1725,7 +1724,7 @@ type JapaneseUser {
 	result := formatDocument(input)
 
 	// Verify formatDocument result is still valid YAMMM
-	ctx := context.Background()
+	ctx := t.Context()
 	s, diagResult, err := load.LoadString(ctx, result, "test")
 	if err != nil {
 		t.Fatalf("formatDocument output failed to load: %v", err)

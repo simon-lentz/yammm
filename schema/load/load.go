@@ -92,8 +92,7 @@ func (rl *rootLoader) handleOpenError(err error, requestedPath string) error {
 
 	// Check for the specific "path escapes from parent" error message
 	// that os.Root returns on escape attempts
-	var pathErr *fs.PathError
-	if errors.As(err, &pathErr) {
+	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
 		if pathErr.Err != nil && strings.Contains(pathErr.Err.Error(), "escapes") {
 			return &pathEscapeError{path: requestedPath}
 		}
@@ -888,8 +887,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	// Read the import using rootLoader (sandboxed) or in-memory sources
 	content, importSourceID, err := l.readImportFile(relativePath, imp)
 	if err != nil {
-		var escapeErr *pathEscapeError
-		if errors.As(err, &escapeErr) {
+		if _, ok := errors.AsType[*pathEscapeError](err); ok { //nolint:errcheck // type check only, value unused
 			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_PATH_ESCAPE,
 				fmt.Sprintf("import %q escapes module root", imp.Path)).
 				WithSpan(imp.Span).
@@ -1046,8 +1044,7 @@ func (l *loader) readImportFile(relativePath string, imp *parse.ImportDecl) ([]b
 		}
 
 		// Check if this is a path escape error - return immediately
-		var escapeErr *pathEscapeError
-		if errors.As(err, &escapeErr) {
+		if _, ok := errors.AsType[*pathEscapeError](err); ok { //nolint:errcheck // type check only, value unused
 			return nil, location.SourceID{}, err
 		}
 

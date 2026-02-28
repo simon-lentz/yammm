@@ -2,7 +2,6 @@ package alias_test
 
 import (
 	"slices"
-	"sort"
 	"testing"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -173,7 +172,7 @@ func TestGrammarAliasSynchronization(t *testing.T) {
 			missingInCode = append(missingInCode, kw)
 		}
 	}
-	sort.Strings(missingInCode)
+	slices.Sort(missingInCode)
 
 	// Check for keywords in code but missing from grammar
 	var missingInGrammar []string
@@ -182,7 +181,7 @@ func TestGrammarAliasSynchronization(t *testing.T) {
 			missingInGrammar = append(missingInGrammar, kw)
 		}
 	}
-	sort.Strings(missingInGrammar)
+	slices.Sort(missingInGrammar)
 
 	// Report discrepancies
 	if len(missingInCode) > 0 {
@@ -276,7 +275,7 @@ func mapToSortedSlice(m map[string]bool) []string {
 	for k := range m {
 		result = append(result, k)
 	}
-	sort.Strings(result)
+	slices.Sort(result)
 	return result
 }
 

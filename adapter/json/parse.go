@@ -145,14 +145,14 @@ func (a *Adapter) ParseArray(source location.SourceID, data []byte) (map[string]
 		if err := dec.Decode(&obj); err != nil {
 			// Use syntax error offset for more precise error location
 			errOffset := startOffset
-			var syntaxErr *json.SyntaxError
-			if errors.As(err, &syntaxErr) {
+			syntaxErr, isSyntaxErr := errors.AsType[*json.SyntaxError](err)
+			if isSyntaxErr {
 				errOffset = int(syntaxErr.Offset)
 			}
 			collector.Collect(*a.parseError(source, errOffset, "error reading array element", err.Error()))
 
 			// For syntax errors, the decoder cannot recover - stop parsing
-			if syntaxErr != nil || errors.Is(err, io.ErrUnexpectedEOF) {
+			if isSyntaxErr || errors.Is(err, io.ErrUnexpectedEOF) {
 				return result, collector.Result()
 			}
 
@@ -349,14 +349,14 @@ func (a *Adapter) parseArray(dec *json.Decoder, source location.SourceID, basePa
 		if err := dec.Decode(&obj); err != nil {
 			// Use syntax error offset for more precise error location
 			errOffset := startOffset
-			var syntaxErr *json.SyntaxError
-			if errors.As(err, &syntaxErr) {
+			syntaxErr, isSyntaxErr := errors.AsType[*json.SyntaxError](err)
+			if isSyntaxErr {
 				errOffset = int(syntaxErr.Offset)
 			}
 			issues = append(issues, *a.parseError(source, errOffset, "error reading array element", err.Error()))
 
 			// For syntax errors, the decoder cannot recover - stop parsing
-			if syntaxErr != nil || errors.Is(err, io.ErrUnexpectedEOF) {
+			if isSyntaxErr || errors.Is(err, io.ErrUnexpectedEOF) {
 				return result, issues
 			}
 

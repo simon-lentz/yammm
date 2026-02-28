@@ -1,7 +1,6 @@
 package lsp
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -653,7 +652,7 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 			}
 
 			// Verify the result parses and has the expected schema name.
-			ctx := context.Background()
+			ctx := t.Context()
 			s, _, err := load.LoadString(ctx, result, "test.yammm")
 			if err != nil {
 				t.Fatalf("formatted output failed to parse: %v", err)

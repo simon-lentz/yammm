@@ -3,7 +3,7 @@ package instance
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -77,7 +77,7 @@ func (v *Validator) validateCompositions(
 			}
 			if len(candidates) > 1 {
 				// Collision: multiple input names fold to same composition field
-				sort.Strings(candidates) // Deterministic error message
+				slices.Sort(candidates) // Deterministic error message
 				issue := diag.NewIssue(
 					diag.Error,
 					ErrCaseFoldCollision,

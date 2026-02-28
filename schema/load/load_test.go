@@ -22,7 +22,7 @@ import (
 func TestLoadString_SimpleSchema(t *testing.T) {
 	// Note: YAMMM grammar uses `name Type` syntax, not `name: Type`
 	source := `schema "test" type Person { name String }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 
@@ -43,7 +43,7 @@ func TestLoadString_SimpleSchema(t *testing.T) {
 
 func TestLoadString_EmptySchema(t *testing.T) {
 	source := `schema "empty"`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "empty.yammm")
 
@@ -56,7 +56,7 @@ func TestLoadString_EmptySchema(t *testing.T) {
 func TestLoadString_SyntaxError(t *testing.T) {
 	// Completely invalid syntax that can't be recovered
 	source := `not a valid schema at all!!!`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "syntax.yammm")
 
@@ -75,7 +75,7 @@ func TestLoadString_NilContextPanics(t *testing.T) {
 
 func TestLoadString_DisallowsImports(t *testing.T) {
 	source := `schema "test" import "./other"`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 
@@ -87,7 +87,7 @@ func TestLoadString_DisallowsImports(t *testing.T) {
 func TestWithDisallowImports_LoadSourcesWithEntry(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	tmpDir := t.TempDir()
 
 	source := `schema "test"
@@ -134,7 +134,7 @@ type Person {
 	email Email required
 }`
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 
 	require.NoError(t, err)
@@ -170,7 +170,7 @@ func TestLoadSources_SimpleSchema(t *testing.T) {
 	sources := map[string][]byte{
 		"main.yammm": []byte(`schema "main" type Person { name String }`),
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadSources(ctx, sources, "/project")
 
@@ -182,7 +182,7 @@ func TestLoadSources_SimpleSchema(t *testing.T) {
 
 func TestLoadSources_EmptySources(t *testing.T) {
 	sources := map[string][]byte{}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, _, err := load.LoadSources(ctx, sources, "/project")
 
@@ -207,7 +207,7 @@ func TestLoadSourcesWithEntry_ExplicitEntry(t *testing.T) {
 		"beta.yammm":  []byte(`schema "beta" type BetaType { id String }`),
 		"gamma.yammm": []byte(`schema "gamma" type GammaType { name String }`),
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Explicitly select gamma.yammm as entry (not beta which comes first lexicographically)
 	s, result, err := load.LoadSourcesWithEntry(ctx, sources, "gamma.yammm", "/project")
@@ -227,7 +227,7 @@ func TestLoadSourcesWithEntry_FallbackToLexicographic(t *testing.T) {
 		"beta.yammm":  []byte(`schema "beta" type BetaType { id String }`),
 		"alpha.yammm": []byte(`schema "alpha" type AlphaType { name String }`),
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Empty entry path should fall back to lexicographic order (alpha comes first)
 	s, result, err := load.LoadSourcesWithEntry(ctx, sources, "", "/project")
@@ -242,7 +242,7 @@ func TestLoadSourcesWithEntry_EntryNotInSources(t *testing.T) {
 	sources := map[string][]byte{
 		"main.yammm": []byte(`schema "main"`),
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Request an entry that doesn't exist
 	_, _, err := load.LoadSourcesWithEntry(ctx, sources, "nonexistent.yammm", "/project")
@@ -263,7 +263,7 @@ func TestLoadSourcesWithEntry_NilContextPanics(t *testing.T) {
 
 func TestLoadSourcesWithEntry_EmptySources(t *testing.T) {
 	sources := map[string][]byte{}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, _, err := load.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/project")
 
@@ -272,7 +272,7 @@ func TestLoadSourcesWithEntry_EmptySources(t *testing.T) {
 }
 
 func TestLoad_FileNotFound(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, _, err := load.Load(ctx, "/nonexistent/path/schema.yammm")
 
@@ -293,7 +293,7 @@ func TestLoad_RealFile(t *testing.T) {
 	err := os.WriteFile(schemaPath, []byte(content), 0o600)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, schemaPath)
 
 	require.NoError(t, err)
@@ -322,7 +322,7 @@ func TestLoad_WithImport(t *testing.T) {
 	err = os.WriteFile(mainPath, []byte(mainContent), 0o600)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -356,7 +356,7 @@ func TestLoad_ImportCycle(t *testing.T) {
 	err = os.WriteFile(bPath, []byte(bContent), 0o600)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, aPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err) // No Go error
@@ -380,7 +380,7 @@ func TestLoad_DuplicateImport(t *testing.T) {
 	err = os.WriteFile(mainPath, []byte(mainContent), 0o600)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -390,7 +390,7 @@ func TestLoad_DuplicateImport(t *testing.T) {
 
 func TestWithRegistry(t *testing.T) {
 	source := `schema "test" type Person { name String }`
-	ctx := context.Background()
+	ctx := t.Context()
 	registry := schema.NewRegistry()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm", load.WithRegistry(registry))
@@ -408,7 +408,7 @@ func TestWithRegistry(t *testing.T) {
 func TestWithIssueLimit(t *testing.T) {
 	// Test that issue limit option is respected
 	source := `schema "test" type Person { name String }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test with issue limit (should still work for valid schema)
 	s, result, err := load.LoadString(ctx, source, "test.yammm", load.WithIssueLimit(1))
@@ -433,7 +433,7 @@ func TestLoad_ReservedKeywordAlias(t *testing.T) {
 	err = os.WriteFile(mainPath, []byte(mainContent), 0o600)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -459,7 +459,7 @@ func TestLoad_PathEscape(t *testing.T) {
 	err := os.WriteFile(mainPath, []byte(mainContent), 0o600)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(moduleRoot))
 
 	require.NoError(t, err) // No Go error
@@ -494,7 +494,7 @@ func TestLoad_SymlinkCanonicalization(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Load via symlink
 	s1, result1, err := load.Load(ctx, linkPath)
@@ -519,7 +519,7 @@ type Item {
 	quantity Integer
 	! "Quantity must be non-negative" quantity >= 0
 }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 
@@ -548,7 +548,7 @@ type Target { id String }
 type Owner {
 	--> rel Target
 }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 
@@ -576,7 +576,7 @@ part type Component { id String }
 type Container {
 	*-> parts Component
 }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 
@@ -611,7 +611,7 @@ import "./target" as t
 type Owner { --> rel t.Entity }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -652,7 +652,7 @@ import "./component" as c
 type Container { *-> widgets c.Widget }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -689,7 +689,7 @@ type Person {
 	name String
 	--> friend NonExistentType
 }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 
@@ -706,7 +706,7 @@ type Person {
 // This tests the fix for Executive Summary Item 6: loadingSchemas markers must be
 // cleared on all exit paths to prevent false "import cycle" errors.
 func TestLoadSources_RecoveryAfterParseFailure(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tmpDir := t.TempDir()
 
 	// Step 1: Attempt to load schema with parse error
@@ -763,7 +763,7 @@ type Child extends b.Base {
 }`
 	require.NoError(t, os.WriteFile(derivedPath, []byte(derivedContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, derivedPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -805,7 +805,7 @@ type Child extends b.Base {
 // loadingSchemas markers for both the main schema and its imports when an import
 // fails. This tests cascading cleanup.
 func TestLoadSources_RecoveryAfterImportFailure(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tmpDir := t.TempDir()
 
 	// Step 1: Load with broken import
@@ -870,7 +870,7 @@ type Connector {
 }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, aPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -931,7 +931,7 @@ import "./b" as b
 type Top extends b.Middle { age Integer }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, aPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -998,7 +998,7 @@ type AType {
 }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, aPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -1049,7 +1049,7 @@ func TestLoad_PathEscape_MultiLevel(t *testing.T) {
 	mainContent := `schema "main" import "../../escaped"`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(moduleRoot))
 
 	require.NoError(t, err)
@@ -1093,7 +1093,7 @@ func TestLoad_SymlinkEscape(t *testing.T) {
 	mainContent := `schema "main" import "./link"`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(moduleRoot))
 
 	require.NoError(t, err)
@@ -1126,7 +1126,7 @@ func TestLoad_BoundaryPath_AtRoot(t *testing.T) {
 	mainContent := `schema "main" import "./helper" type User extends helper.Base { name String }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -1170,7 +1170,7 @@ func TestLoad_SymlinkWithinModuleRoot_Blocked(t *testing.T) {
 	mainContent := `schema "main" import "./linked"`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(tmpDir))
 
 	// os.Root blocks ALL symlinks, even internal ones - this is security-correct
@@ -1205,7 +1205,7 @@ func TestLoad_DotDotInMiddleOfPath(t *testing.T) {
 	mainContent := `schema "main" import "../helper" type User extends helper.Base { name String }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(tmpDir))
 
 	require.NoError(t, err)
@@ -1298,7 +1298,7 @@ func TestLoad_ErrSourceStoreNotSupported(t *testing.T) {
 	// When a custom SourceStore that isn't *source.Registry is provided,
 	// the loader should fail fast with ErrSourceStoreNotSupported.
 	source := `schema "test" type Person { name String }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, _, err := load.LoadString(ctx, source, "test.yammm", load.WithSourceRegistry(&mockSourceStore{}))
 
@@ -1329,7 +1329,7 @@ import "./b" as b
 type Top { middle b.Middle }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, aPath, load.WithModuleRoot(moduleRoot))
 
 	require.NoError(t, err)
@@ -1360,7 +1360,7 @@ import "./a" as a
 type TypeB { ref a.TypeA }`
 	require.NoError(t, os.WriteFile(bPath, []byte(bContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, aPath, load.WithModuleRoot(moduleRoot))
 
 	// Cycle should be detected
@@ -1380,7 +1380,7 @@ type TypeB { ref a.TypeA }`
 
 func TestLoad_NonExistentPath(t *testing.T) {
 	// Test loading from a path that doesn't exist
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, _, err := load.Load(ctx, "/nonexistent/path/to/schema.yammm")
 
@@ -1390,7 +1390,7 @@ func TestLoad_NonExistentPath(t *testing.T) {
 
 func TestLoadSources_ImportBetweenSources(t *testing.T) {
 	// Test LoadSources with one in-memory schema importing another
-	ctx := context.Background()
+	ctx := t.Context()
 	moduleRoot := t.TempDir()
 
 	basePath := filepath.Join(moduleRoot, "base.yammm")
@@ -1456,7 +1456,7 @@ func TestLoad_WithLogger(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath,
 		load.WithModuleRoot(moduleRoot),
 		load.WithLogger(logger))
@@ -1493,7 +1493,7 @@ type Combined {
 }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, mainPath, load.WithModuleRoot(moduleRoot))
 
 	require.NoError(t, err)
@@ -1503,7 +1503,7 @@ type Combined {
 
 func TestLoadString_InvalidSyntax(t *testing.T) {
 	// Test LoadString with invalid syntax
-	ctx := context.Background()
+	ctx := t.Context()
 
 	source := `schema "broken"
 type Entity {
@@ -1541,7 +1541,7 @@ func TestLoad_WithSchemaRegistry(t *testing.T) {
 	// Create a registry
 	reg := schema.NewRegistry()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, schemaPath, load.WithRegistry(reg))
 
 	require.NoError(t, err)
@@ -1585,7 +1585,7 @@ type TypeA {
 	refC c.TypeC
 }`), 0o600))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, aPath, load.WithModuleRoot(moduleRoot))
 
 	require.NoError(t, err)
@@ -1614,7 +1614,7 @@ type Person {
 	name String
 	! "bad_check" fake_property != ""
 }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 
@@ -1647,7 +1647,7 @@ type Person {
 	! "name_not_empty" name != ""
 	! "age_positive" age >= 0
 }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 
@@ -1688,7 +1688,7 @@ type Order {
 
 	! "bad_field" ITEMS -> All |$item| { $item.nonexistent > 0 }
 }`
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
 

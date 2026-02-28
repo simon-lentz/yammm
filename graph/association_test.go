@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -20,7 +19,7 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 	// Add source before target, verify edge resolves when target added
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person (source) with edge to Company (target not yet added)
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -75,7 +74,7 @@ func TestGraph_ForwardReference_Multiple(t *testing.T) {
 	// Multiple sources reference the same target
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add multiple Persons all referencing same Company
 	for _, name := range []string{"alice", "bob", "carol"} {
@@ -133,7 +132,7 @@ func TestGraph_ForwardReference_Chain(t *testing.T) {
 	// A → B → C chain: add A first, then C, then B
 	s := testSchemaWithChainedAssociations(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add A (references B which doesn't exist)
 	typeA := mustValidInstanceWithEdge(t, s, "TypeA",
@@ -175,7 +174,7 @@ func TestGraph_ForwardReference_Snapshot(t *testing.T) {
 	// Verify pending edges appear in Unresolved() before resolution
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with forward ref
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -212,7 +211,7 @@ func TestUnresolvedEdge_RequiredAndReasonFields(t *testing.T) {
 	// Verify Required and Reason fields are populated correctly
 	s := testSchemaWithAssociation(t) // Person -> Company (required)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with reference to missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -243,7 +242,7 @@ func TestUnresolvedEdge_OptionalAssociation(t *testing.T) {
 	// Optional associations should have Required=false
 	s := testSchemaWithOptionalAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with reference to missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -274,7 +273,7 @@ func TestUnresolvedEdge_AbsentReason(t *testing.T) {
 	// Absent required association field should have Reason="absent"
 	s := testSchemaWithAssociation(t) // Person -> Company (required)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person WITHOUT employer field
 	person := mustValidInstance(t, s, "Person",
@@ -307,7 +306,7 @@ func TestUnresolvedEdge_EmptyReason(t *testing.T) {
 	// Empty required association array should have Reason="empty"
 	s := testSchemaWithManyAssociation(t) // Person -> Company (required many)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with empty employers array
 	person := mustValidInstanceWithEmptyEdge(t, s, "Person",
@@ -341,7 +340,7 @@ func TestGraph_ForwardReference_AfterResolution(t *testing.T) {
 	// Verify pending is removed after target is added
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with forward ref
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -386,7 +385,7 @@ func TestGraph_Check_RequiredMissing(t *testing.T) {
 	// Required association target missing → E_UNRESOLVED_REQUIRED
 	s := testSchemaWithAssociation(t) // Person -> Company (required)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with edge to non-existent Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -423,7 +422,7 @@ func TestGraph_Check_RequiredEmpty(t *testing.T) {
 	// Required array empty → E_UNRESOLVED_REQUIRED with "empty" reason
 	s := testSchemaWithManyAssociation(t) // Person -> Company (required many)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with empty edge array
 	person := mustValidInstanceWithEmptyEdge(t, s, "Person",
@@ -461,7 +460,7 @@ func TestGraph_Check_OptionalMissing(t *testing.T) {
 	// Optional association unresolved → no error
 	s := testSchemaWithOptionalAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with edge to non-existent Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -487,7 +486,7 @@ func TestGraph_Check_MultipleUnresolved(t *testing.T) {
 	// Multiple unresolved → multiple issues
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add multiple Persons with missing targets
 	for _, name := range []string{"alice", "bob", "carol"} {
@@ -525,7 +524,7 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 	// Multiple Check() calls produce same result
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person with missing target
 	person := mustValidInstanceWithEdge(t, s, "Person",
@@ -567,7 +566,7 @@ func TestGraph_Edge_Properties(t *testing.T) {
 	// Edge with properties captured correctly
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// First add the Company (target)
 	company := mustValidInstance(t, s, "Company",
@@ -626,7 +625,7 @@ func TestGraph_Check_MultipleUnresolved_SameTarget(t *testing.T) {
 	// Each should emit a separate E_UNRESOLVED_REQUIRED
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add 3 Persons all referencing same non-existent Company
 	for _, name := range []string{"alice", "bob", "carol"} {
@@ -677,7 +676,7 @@ func TestGraph_ForwardReference_Multiple_Unresolved_Snapshot(t *testing.T) {
 	// Multiple sources reference same target - verify Unresolved() returns all
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add 3 Persons all referencing same non-existent Company
 	for _, name := range []string{"alice", "bob", "carol"} {
@@ -717,7 +716,7 @@ func TestGraph_Check_RequiredAbsent(t *testing.T) {
 	// Should emit E_UNRESOLVED_REQUIRED with reason="absent"
 	s := testSchemaWithAssociation(t) // Person -> Company (required)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person WITHOUT employer field at all
 	// mustValidInstance creates instance without edges
@@ -757,7 +756,7 @@ func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {
 	// Check diagnostics should include provenance span when source instance has provenance
 	s := testSchemaWithAssociation(t) // Person -> Company (required)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Get the Person type for creating the instance
 	personType, ok := s.Type("Person")
@@ -837,7 +836,7 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 	// Add target before source - edge should resolve immediately
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Company (target) FIRST
 	company := mustValidInstance(t, s, "Company",
@@ -888,7 +887,7 @@ func TestGraph_BackwardReference_Multiple(t *testing.T) {
 	// Add target first, then multiple sources
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Company (target) FIRST
 	company := mustValidInstance(t, s, "Company",
@@ -938,7 +937,7 @@ func TestGraph_CircularReference_Basic(t *testing.T) {
 	// A → B → A cycle - verify graph handles this correctly
 	s := testSchemaWithMutualAssociations(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add TypeA referencing TypeB (forward ref)
 	typeA := mustValidInstanceWithEdge(t, s, "TypeA",
@@ -981,7 +980,7 @@ func TestGraph_CircularReference_Chain(t *testing.T) {
 	// A → B → C → A cycle - longer cycle
 	s := testSchemaWithCircularChain(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add all three in sequence, each creating a forward ref
 	typeA := mustValidInstanceWithEdge(t, s, "TypeA",

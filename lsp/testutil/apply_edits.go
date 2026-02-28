@@ -1,7 +1,8 @@
 package testutil
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"unicode/utf8"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -18,12 +19,13 @@ func ApplyEdits(text string, edits []protocol.TextEdit, encoding string) string 
 	// Copy and sort edits in reverse document order (highest position first).
 	sorted := make([]protocol.TextEdit, len(edits))
 	copy(sorted, edits)
-	sort.Slice(sorted, func(i, j int) bool {
-		a, b := sorted[i].Range, sorted[j].Range
-		if a.Start.Line != b.Start.Line {
-			return a.Start.Line > b.Start.Line
-		}
-		return a.Start.Character > b.Start.Character
+	slices.SortFunc(sorted, func(x, y protocol.TextEdit) int {
+		a, b := x.Range, y.Range
+		// Reverse order (highest position first)
+		return cmp.Or(
+			cmp.Compare(b.Start.Line, a.Start.Line),
+			cmp.Compare(b.Start.Character, a.Start.Character),
+		)
 	})
 
 	result := text

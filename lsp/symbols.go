@@ -2,8 +2,9 @@ package lsp
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/source"
@@ -421,24 +422,29 @@ func formatRelationDetail(r *schema.Relation, arrow string) string {
 
 // sortSymbolsByPosition sorts symbols by their start position.
 func sortSymbolsByPosition(symbols []Symbol) {
-	sort.Slice(symbols, func(i, j int) bool {
-		return positionBefore(symbols[i].Range.Start, symbols[j].Range.Start)
+	slices.SortFunc(symbols, func(a, b Symbol) int {
+		return positionCompare(a.Range.Start, b.Range.Start)
 	})
 }
 
 // sortReferencesByPosition sorts references by their start position.
 func sortReferencesByPosition(refs []ReferenceSymbol) {
-	sort.Slice(refs, func(i, j int) bool {
-		return positionBefore(refs[i].Span.Start, refs[j].Span.Start)
+	slices.SortFunc(refs, func(a, b ReferenceSymbol) int {
+		return positionCompare(a.Span.Start, b.Span.Start)
 	})
+}
+
+// positionCompare compares two positions, returning -1, 0, or +1.
+func positionCompare(a, b location.Position) int {
+	return cmp.Or(
+		cmp.Compare(a.Line, b.Line),
+		cmp.Compare(a.Column, b.Column),
+	)
 }
 
 // positionBefore returns true if a comes before b.
 func positionBefore(a, b location.Position) bool {
-	if a.Line != b.Line {
-		return a.Line < b.Line
-	}
-	return a.Column < b.Column
+	return positionCompare(a, b) < 0
 }
 
 // isSmaller returns true if a is smaller (more specific) than b.

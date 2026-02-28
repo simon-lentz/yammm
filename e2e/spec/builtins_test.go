@@ -1,7 +1,6 @@
 package spec_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -19,7 +18,7 @@ import (
 func TestE2E_NonLambdaBuiltins(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "Record")
 
 	s, result, err := load.Load(ctx, "testdata/builtins/non_lambda.yammm")
@@ -97,7 +96,7 @@ func TestE2E_NonLambdaBuiltins(t *testing.T) {
 func TestE2E_PositionalArgBuiltins(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "Entry")
 
 	s, result, err := load.Load(ctx, "testdata/builtins/positional_args.yammm")
@@ -182,7 +181,7 @@ func TestE2E_PositionalArgBuiltins(t *testing.T) {
 func TestE2E_StringBuiltins(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "StringRecord")
 
 	s, result, err := load.Load(ctx, "testdata/builtins/string_builtins.yammm")
@@ -273,7 +272,7 @@ func TestE2E_StringBuiltins(t *testing.T) {
 func TestE2E_NumericBuiltins(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "NumericRecord")
 
 	s, result, err := load.Load(ctx, "testdata/builtins/numeric_builtins.yammm")
@@ -350,7 +349,7 @@ func TestE2E_NumericBuiltins(t *testing.T) {
 func TestE2E_CollectionBuiltins(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "CollectionRecord")
 
 	s, result, err := load.Load(ctx, "testdata/builtins/collection_builtins.yammm")
@@ -425,7 +424,7 @@ func TestE2E_CollectionBuiltins(t *testing.T) {
 func TestE2E_LambdaBuiltins(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "LambdaRecord")
 
 	s, result, err := load.Load(ctx, "testdata/builtins/lambda.yammm")
@@ -511,7 +510,7 @@ func TestE2E_LambdaBuiltins(t *testing.T) {
 func TestE2E_ControlFlowBuiltins(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "ControlRecord")
 
 	s, result, err := load.Load(ctx, "testdata/builtins/control_flow_builtins.yammm")

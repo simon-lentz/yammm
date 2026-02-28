@@ -1,7 +1,6 @@
 package spec_test
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -21,7 +20,7 @@ import (
 // Fails the test if the schema has errors.
 func loadSchema(t *testing.T, path string) *instance.Validator {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, path)
 	require.NoError(t, err, "load schema %s", path)
 	require.True(t, result.OK(), "schema %s has errors: %v", path, result.Messages())
@@ -31,7 +30,7 @@ func loadSchema(t *testing.T, path string) *instance.Validator {
 // loadSchemaRaw loads a .yammm file and returns both the schema and validator.
 func loadSchemaRaw(t *testing.T, path string) (*schema.Schema, *instance.Validator) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, path)
 	require.NoError(t, err, "load schema %s", path)
 	require.True(t, result.OK(), "schema %s has errors: %v", path, result.Messages())
@@ -42,7 +41,7 @@ func loadSchemaRaw(t *testing.T, path string) (*schema.Schema, *instance.Validat
 // Returns the diagnostic result for inspection.
 func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	_, result, err := load.Load(ctx, path)
 	require.NoError(t, err, "load schema %s: unexpected I/O error", path)
 	require.False(t, result.OK(), "schema %s should have errors but loaded cleanly", path)
@@ -52,7 +51,7 @@ func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 // loadSchemaString loads a schema from inline string content.
 func loadSchemaString(t *testing.T, content, name string) *instance.Validator {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.LoadString(ctx, content, name)
 	require.NoError(t, err, "load schema string %s", name)
 	require.True(t, result.OK(), "schema string %s has errors: %v", name, result.Messages())
@@ -62,7 +61,7 @@ func loadSchemaString(t *testing.T, content, name string) *instance.Validator {
 // loadSchemaStringRaw loads a schema from inline string content, returning both schema and validator.
 func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *instance.Validator) { //nolint:unparam // test helper — second return used selectively
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.LoadString(ctx, content, name)
 	require.NoError(t, err, "load schema string %s", name)
 	require.True(t, result.OK(), "schema string %s has errors: %v", name, result.Messages())
@@ -72,7 +71,7 @@ func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *i
 // loadSchemaStringExpectError loads from string and asserts compilation failure.
 func loadSchemaStringExpectError(t *testing.T, content, name string) diag.Result {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	_, result, err := load.LoadString(ctx, content, name)
 	require.NoError(t, err, "load schema string %s: unexpected I/O error", name)
 	require.False(t, result.OK(), "schema string %s should have errors but loaded cleanly", name)
@@ -82,7 +81,7 @@ func loadSchemaStringExpectError(t *testing.T, content, name string) diag.Result
 // loadSchemaWithOpts loads a .yammm file with specific load options.
 func loadSchemaWithOpts(t *testing.T, path string, opts ...load.Option) (*schema.Schema, diag.Result, error) { //nolint:unparam // test helper — path varies across test files
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	return load.Load(ctx, path, opts...)
 }
 
@@ -107,7 +106,7 @@ func loadTestData(t *testing.T, dataPath, typeKey string) []instance.RawInstance
 // assertValid validates a single instance and asserts success.
 func assertValid(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
 	require.NoError(t, err)
 	assert.Nil(t, failure, "expected valid %s instance, got: %v", typeName, failureMessages(failure))
@@ -117,7 +116,7 @@ func assertValid(t *testing.T, v *instance.Validator, typeName string, raw insta
 // assertInvalid validates a single instance and asserts failure with specific codes.
 func assertInvalid(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance, wantCodes ...diag.Code) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
 	require.NoError(t, err)
 	assert.Nil(t, valid, "expected invalid %s instance", typeName)
@@ -136,7 +135,7 @@ func assertInvalid(t *testing.T, v *instance.Validator, typeName string, raw ins
 // assertInvariantFails validates and asserts specific invariant failures by name.
 func assertInvariantFails(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance, wantNames ...string) { //nolint:unparam // test helper — typeName varies by test file
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
 	require.NoError(t, err)
 	assert.Nil(t, valid, "expected invariant failure for %s", typeName)
@@ -171,7 +170,7 @@ func assertDiagHasCode(t *testing.T, result diag.Result, code diag.Code) {
 // buildGraph builds a graph from a schema and validated instances, returns snapshot.
 func buildGraph(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Result {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 	for _, inst := range instances {
 		result, err := g.Add(ctx, inst)
@@ -184,7 +183,7 @@ func buildGraph(t *testing.T, s *schema.Schema, instances ...*instance.ValidInst
 // validateOne validates a single raw instance and returns the ValidInstance.
 func validateOne(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance) *instance.ValidInstance {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
 	require.NoError(t, err)
 	require.Nil(t, failure, "expected valid %s, got: %v", typeName, failureMessages(failure))

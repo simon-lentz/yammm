@@ -2,7 +2,6 @@
 package hygiene
 
 import (
-	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -101,14 +100,13 @@ func TestFoundationImports(t *testing.T) {
 
 			// -test includes test dependencies
 			// Package path is validated against the cases table; not user input.
-			ctx := context.Background()
+			ctx := t.Context()
 			cmd := exec.CommandContext(ctx, "go", "list", "-deps", "-test", "-f", "{{.ImportPath}}", "./"+tc.pkg) //nolint:gosec // pkg is from test table, not user input
 			cmd.Dir = modRoot
 
 			out, err := cmd.Output()
 			if err != nil {
-				var exitErr *exec.ExitError
-				if errors.As(err, &exitErr) {
+				if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 					t.Fatalf("go list failed: %v\nstderr: %s", err, exitErr.Stderr)
 				}
 				t.Fatalf("go list failed: %v", err)
@@ -140,13 +138,12 @@ func findModuleRoot(t *testing.T) string {
 // getModulePath returns the module path by invoking 'go list -m'.
 func getModulePath(t *testing.T, modRoot string) string {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	cmd := exec.CommandContext(ctx, "go", "list", "-m", "-f", "{{.Path}}")
 	cmd.Dir = modRoot
 	out, err := cmd.Output()
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			t.Fatalf("go list -m failed: %v\nstderr: %s", err, exitErr.Stderr)
 		}
 		t.Fatalf("go list -m failed: %v", err)

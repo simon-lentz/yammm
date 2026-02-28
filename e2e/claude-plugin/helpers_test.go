@@ -1,7 +1,6 @@
 package claude_plugin_test
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -19,7 +18,7 @@ import (
 // Fails the test if the schema has errors.
 func loadSchema(t *testing.T, path string) *instance.Validator {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := load.Load(ctx, path)
 	require.NoError(t, err, "load schema %s", path)
 	require.True(t, result.OK(), "schema %s has errors: %v", path, result.Messages())
@@ -30,7 +29,7 @@ func loadSchema(t *testing.T, path string) *instance.Validator {
 // Returns the diagnostic result for inspection.
 func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	_, result, err := load.Load(ctx, path)
 	require.NoError(t, err, "load schema %s: unexpected I/O error", path)
 	require.False(t, result.OK(), "schema %s should have errors but loaded cleanly", path)
@@ -58,7 +57,7 @@ func loadTestData(t *testing.T, dataPath, typeKey string) []instance.RawInstance
 // assertValid validates a single instance and asserts success.
 func assertValid(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
 	require.NoError(t, err)
 	assert.Nil(t, failure, "expected valid %s instance, got: %v", typeName, failureMessages(failure))
@@ -68,7 +67,7 @@ func assertValid(t *testing.T, v *instance.Validator, typeName string, raw insta
 // assertInvalid validates a single instance and asserts failure with specific codes.
 func assertInvalid(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance, wantCodes ...diag.Code) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
 	require.NoError(t, err)
 	assert.Nil(t, valid, "expected invalid %s instance", typeName)
@@ -87,7 +86,7 @@ func assertInvalid(t *testing.T, v *instance.Validator, typeName string, raw ins
 // assertInvariantFails validates and asserts specific invariant failures by name.
 func assertInvariantFails(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance, wantNames ...string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
 	require.NoError(t, err)
 	assert.Nil(t, valid, "expected invariant failure for %s", typeName)

@@ -1,7 +1,8 @@
 package lsp
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strings"
 
 	"github.com/tliron/glsp"
@@ -151,11 +152,11 @@ func (s *Server) completionAtPosition(snapshot *Snapshot, doc *DocumentSnapshot,
 		items = s.topLevelCompletions()
 	}
 
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].SortText != nil && items[j].SortText != nil {
-			return *items[i].SortText < *items[j].SortText
+	slices.SortFunc(items, func(a, b protocol.CompletionItem) int {
+		if a.SortText != nil && b.SortText != nil {
+			return cmp.Compare(*a.SortText, *b.SortText)
 		}
-		return items[i].Label < items[j].Label
+		return cmp.Compare(a.Label, b.Label)
 	})
 
 	return items, nil

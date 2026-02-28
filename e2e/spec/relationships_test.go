@@ -1,7 +1,6 @@
 package spec_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -222,7 +221,7 @@ func TestRelationships_MultiplicityRequired_Check(t *testing.T) {
 
 	data := "testdata/relationships/data.json"
 	s, v := loadSchemaRaw(t, "testdata/relationships/multiplicity_all_forms.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add target instance so it exists in the graph
 	targets := loadTestData(t, data, "Target")

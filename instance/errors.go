@@ -113,7 +113,7 @@ func (k InternalErrorKind) String() string {
 }
 
 // InternalError wraps internal failures with context for debugging.
-// Use errors.As(err, &internalErr) to extract debugging context.
+// Use errors.AsType[*InternalError](err) to extract debugging context.
 type InternalError struct {
 	Kind  InternalErrorKind
 	Cause error

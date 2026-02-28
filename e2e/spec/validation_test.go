@@ -1,7 +1,6 @@
 package spec_test
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -27,7 +26,7 @@ import (
 func TestValidation_ValidateOne_Success(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"name": "Alice",
@@ -45,7 +44,7 @@ func TestValidation_ValidateOne_Success(t *testing.T) {
 func TestValidation_ValidateOne_Failure(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Missing required "name" property (which is also the primary key)
 	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
@@ -63,7 +62,7 @@ func TestValidation_ValidateOne_Failure(t *testing.T) {
 func TestValidation_ValidateOne_TypeNotFound(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Non-existent type name returns (nil, failure, nil), not (nil, nil, error).
 	// This is because type-not-found is a validation-level failure, not a system error.
@@ -93,7 +92,7 @@ func TestValidation_ValidateOne_TypeNotFound(t *testing.T) {
 func TestValidation_Validate_Batch(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	raws := []instance.RawInstance{
 		raw(map[string]any{"name": "Alice", "age": 30}), // valid
@@ -116,7 +115,7 @@ func TestValidation_Validate_Batch(t *testing.T) {
 func TestValidation_Validate_NilInput(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	valid, failures, err := v.Validate(ctx, "Person", nil)
 	require.NoError(t, err)
@@ -130,7 +129,7 @@ func TestValidation_Validate_NilInput(t *testing.T) {
 func TestValidation_Validate_EmptyInput(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	valid, failures, err := v.Validate(ctx, "Person", []instance.RawInstance{})
 	require.NoError(t, err)
@@ -148,7 +147,7 @@ func TestValidation_Validate_EmptyInput(t *testing.T) {
 // Source: SPEC.md, "Instance Validation" — WithLogger option.
 func TestValidation_WithLogger(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.NoError(t, err)
 	require.True(t, result.OK())
@@ -174,7 +173,7 @@ func TestValidation_WithLogger(t *testing.T) {
 // Source: SPEC.md, "Instance Validation" — strict property name matching.
 func TestValidation_StrictPropertyNames(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.NoError(t, err)
 	require.True(t, result.OK())
@@ -195,7 +194,7 @@ func TestValidation_StrictPropertyNames(t *testing.T) {
 // Source: SPEC.md, "Instance Validation" — default case-insensitive property matching.
 func TestValidation_NonStrictPropertyNames(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.NoError(t, err)
 	require.True(t, result.OK())
@@ -220,7 +219,7 @@ func TestValidation_NonStrictPropertyNames(t *testing.T) {
 // Source: SPEC.md, "Instance Validation" — unknown field handling.
 func TestValidation_AllowUnknownFields(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.NoError(t, err)
 	require.True(t, result.OK())
@@ -243,7 +242,7 @@ func TestValidation_AllowUnknownFields(t *testing.T) {
 // Source: SPEC.md, "Instance Validation" — default rejects unknown fields.
 func TestValidation_RejectUnknownFieldsByDefault(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.NoError(t, err)
 	require.True(t, result.OK())
@@ -277,7 +276,7 @@ func TestValidation_RejectUnknownFieldsByDefault(t *testing.T) {
 // Source: SPEC.md, "Instance Validation" — issue count capping.
 func TestValidation_MaxIssuesPerInstance(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Schema with many required properties to provoke multiple errors
 	schemaStr := `schema "MultiReq"
@@ -319,7 +318,7 @@ type Record {
 func TestValidation_MapInput(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// map[string]any is the native input format
 	props := map[string]any{
@@ -355,7 +354,7 @@ func TestValidation_GoStructViaJSONRoundTrip(t *testing.T) {
 	}
 
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Convert Go struct to map[string]any via JSON round-trip
 	input := PersonInput{Name: "Alice", Age: 30}
@@ -385,7 +384,7 @@ func TestValidation_JSONAdapterTopLevelKeys(t *testing.T) {
 	t.Parallel()
 
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Load data through the JSON adapter
 	dataBytes, err := os.ReadFile("testdata/validation/data.json")
@@ -444,7 +443,7 @@ type Person {
 }
 `
 	v := loadSchemaString(t, schemaContent, "edge_convention")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Default multiplicity is optional/one (not many), so edge data is a single
 	// object (not an array). The _target_ prefix names the FK fields referencing
@@ -481,7 +480,7 @@ type Article {
 }
 `
 	v := loadSchemaString(t, schemaContent, "many_edge")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Many-multiplicity edge uses an array of objects
 	valid, failure, err := v.ValidateOne(ctx, "Article", raw(map[string]any{
@@ -509,7 +508,7 @@ type Article {
 // Source: SPEC.md, "Instance Validation" — recommended defaults.
 func TestValidation_RecommendedOptions(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.NoError(t, err)
 	require.True(t, result.OK())
@@ -544,7 +543,7 @@ func TestValidation_RecommendedOptions(t *testing.T) {
 func TestValidation_ConcurrentUse(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const goroutines = 10
 	errs := make(chan error, goroutines)

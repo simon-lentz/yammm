@@ -1,7 +1,6 @@
 package spec_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance"
@@ -17,7 +16,7 @@ import (
 func TestE2E_NegativeBounds(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Load schema with negative float bounds
 	s, result, err := load.Load(ctx, "testdata/negative_bounds/negative_bounds.yammm")

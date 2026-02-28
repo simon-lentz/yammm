@@ -6,7 +6,7 @@ import (
 )
 
 func TestWithRequestID_RoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ctx = WithRequestID(ctx, "req-123")
 
 	got, ok := RequestIDFrom(ctx)
@@ -19,7 +19,7 @@ func TestWithRequestID_RoundTrip(t *testing.T) {
 }
 
 func TestRequestIDFrom_NotSet(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	got, ok := RequestIDFrom(ctx)
 	if ok {
@@ -32,7 +32,7 @@ func TestRequestIDFrom_NotSet(t *testing.T) {
 
 func TestWithRequestID_EmptyString(t *testing.T) {
 	// Empty string is a valid request ID; distinguishable from "not set"
-	ctx := context.Background()
+	ctx := t.Context()
 	ctx = WithRequestID(ctx, "")
 
 	got, ok := RequestIDFrom(ctx)
@@ -45,7 +45,7 @@ func TestWithRequestID_EmptyString(t *testing.T) {
 }
 
 func TestWithRequestID_Override(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ctx = WithRequestID(ctx, "first")
 	ctx = WithRequestID(ctx, "second")
 
@@ -59,7 +59,7 @@ func TestWithRequestID_Override(t *testing.T) {
 }
 
 func TestWithRequestID_ChildContext(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ctx = WithRequestID(ctx, "parent-req")
 
 	// Child context inherits parent's value
@@ -76,7 +76,7 @@ func TestWithRequestID_ChildContext(t *testing.T) {
 }
 
 func TestWithRequestID_ParentUnaffected(t *testing.T) {
-	parent := context.Background()
+	parent := t.Context()
 	child := WithRequestID(parent, "child-req")
 
 	// Parent should not have the request ID

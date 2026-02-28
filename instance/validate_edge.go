@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -54,7 +54,7 @@ func (v *Validator) validateEdges(
 			}
 			if len(candidates) > 1 {
 				// Collision: multiple input names fold to same relation field
-				sort.Strings(candidates) // Deterministic error message
+				slices.Sort(candidates) // Deterministic error message
 				issue := diag.NewIssue(
 					diag.Error,
 					ErrCaseFoldCollision,
@@ -280,8 +280,7 @@ func (v *Validator) validateEdgeTarget(
 		// Phase 3: Validate FK type against PK constraint
 		if err := v.checkValueWithRecovery(val, pk.Constraint()); err != nil {
 			code := ErrTypeMismatch
-			var checkErr *eval.CheckError
-			if errors.As(err, &checkErr) && checkErr.Kind == eval.KindConstraintFail {
+			if checkErr, ok := errors.AsType[*eval.CheckError](err); ok && checkErr.Kind == eval.KindConstraintFail {
 				code = ErrConstraintFail
 			}
 			issue := diag.NewIssue(
@@ -384,7 +383,7 @@ func (v *Validator) validateEdgeTarget(
 				for _, c := range candidates {
 					names = append(names, c.Name())
 				}
-				sort.Strings(names)
+				slices.Sort(names)
 				issue := diag.NewIssue(
 					diag.Error,
 					ErrCaseFoldCollision,
@@ -401,7 +400,7 @@ func (v *Validator) validateEdgeTarget(
 			if firstField, exists := matchedProps[prop.Name()]; exists {
 				// Collision: multiple input fields match same schema property
 				colliders := []string{firstField, fieldName}
-				sort.Strings(colliders)
+				slices.Sort(colliders)
 				issue := diag.NewIssue(
 					diag.Error,
 					ErrCaseFoldCollision,
@@ -431,8 +430,7 @@ func (v *Validator) validateEdgeTarget(
 		// Validate edge property type
 		if err := v.checkValueWithRecovery(fieldVal, prop.Constraint()); err != nil {
 			code := ErrTypeMismatch
-			var checkErr *eval.CheckError
-			if errors.As(err, &checkErr) && checkErr.Kind == eval.KindConstraintFail {
+			if checkErr, ok := errors.AsType[*eval.CheckError](err); ok && checkErr.Kind == eval.KindConstraintFail {
 				code = ErrConstraintFail
 			}
 			issue := diag.NewIssue(
