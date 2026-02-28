@@ -7,6 +7,7 @@
     { "include": "#schema" },
     { "include": "#import" },
     { "include": "#datatype" },
+    { "include": "#list-alias" },
     { "include": "#type-declaration" },
     { "include": "#strings" }
   ],
@@ -204,6 +205,31 @@
       },
       "end": "(?<=\\])|$",
       "patterns": [
+        { "include": "#property-constraint" },
+        { "include": "#comments" }
+      ]
+    },
+    "list-alias": {
+      "comment": "List type alias: type Name = List<ElementType[constraint]>[list-constraint]. Must appear before type-declaration to prevent the alias line from being consumed as a block type.",
+      "begin": "^\\s*(type)\\s+([A-Z][a-zA-Z0-9_]*)\\s*(=)\\s*(List)\\s*(<)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.type.yammm" },
+        "2": { "name": "entity.name.type.yammm" },
+        "3": { "name": "keyword.operator.assignment.yammm" },
+        "4": { "name": "support.type.yammm" },
+        "5": { "name": "punctuation.definition.typeparams.begin.yammm" }
+      },
+      "end": "$",
+      "patterns": [
+        {
+          "match": ">",
+          "name": "punctuation.definition.typeparams.end.yammm"
+        },
+        {
+          "match": "<",
+          "name": "punctuation.definition.typeparams.begin.yammm"
+        },
+        { "include": "#property-type" },
         { "include": "#property-constraint" },
         { "include": "#comments" }
       ]

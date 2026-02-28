@@ -367,7 +367,7 @@ import "./3rdparty" as thirdparty
 **Reserved keyword restriction:** Aliases cannot be reserved keywords because the lexer tokenizes them as literal tokens rather than identifiers. Reserved keywords include:
 
 - DSL keywords: `schema`, `import`, `as`, `type`, `datatype`, `required`, `primary`, `extends`, `includes`, `abstract`, `part`, `one`, `many`, `in`
-- Built-in type keywords: `Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`
+- Built-in type keywords: `Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`
 - Boolean literals: `true`, `false`
 
 **Qualified type references:** Imported types must be referenced with their alias qualifier:
@@ -525,6 +525,30 @@ type Person {
 
 Properties without modifiers are **optional** and may be omitted from instance data.
 
+#### Primary Key Types
+
+Only the following types may be used as primary keys:
+
+| Allowed | Why |
+|---------|-----|
+| `String` | Natural identifiers (names, codes, external IDs) |
+| `UUID` | Purpose-built for identity |
+| `Date` | Natural key for temporal data (daily reports, events) |
+| `Timestamp` | Natural key for time-series data (event logs) |
+
+All other types are rejected:
+
+| Banned | Why |
+|--------|-----|
+| `Integer`, `Float` | Numeric values are typically mutable; no auto-increment |
+| `Boolean` | Cardinality of 2, useless as identity |
+| `Enum` | Small finite set, poor identity |
+| `Pattern` | Constraint type, not a value type |
+| `Vector` | Collection, not comparable for identity |
+| `List` | Collection, not comparable for identity |
+
+DataType aliases are resolved before checking: `type VIN = String[17, 17]` followed by `vin VIN primary` is valid because `VIN` resolves to `String`.
+
 ### Relationship Properties
 
 Associations may have their own properties, declared within the relationship body:
@@ -542,7 +566,7 @@ type Person {
 }
 ```
 
-Relationship properties follow the same syntax as type properties but cannot use `Vector` data types and default to optional unless `required` is specified.
+Relationship properties follow the same syntax as type properties but cannot use `Vector` or `List` data types and default to optional unless `required` is specified.
 
 ## Data Types
 
@@ -553,7 +577,7 @@ YAMMM provides a set of built-in data types and supports user-defined type alias
 ```text
 DataTypeRef = BuiltIn | QualifiedAlias .
 BuiltIn     = IntegerT | FloatT | BoolT | StringT | EnumT | PatternT |
-              TimestampT | DateT | UUIDT | VectorT .
+              TimestampT | DateT | UUIDT | VectorT | ListT .
 ```
 
 #### Integer
@@ -734,6 +758,61 @@ coordinates Vector[3]       // 3D coordinates
 ```
 
 Validation accepts float slices/arrays (`[]float32`/`[]float64`), including named types and pointers. NaN, Inf, and non-float elements are rejected.
+
+#### List
+
+Represents an ordered collection of typed values:
+
+```text
+ListT       = "List" "<" ElementType ">" [ "[" minLen "," maxLen "]" ] .
+ElementType = DataTypeRef .
+minLen      = "_" | INTEGER .
+maxLen      = "_" | INTEGER .
+```
+
+The element type can be any built-in type (including `List` for nesting), a `DataType` alias, or `Vector`. The underscore `_` represents an unbounded limit.
+
+Examples:
+
+```yammm-snippet
+tags List<String>                          // unbounded list of strings
+tags List<String[_, 6]>                    // each string max 6 runes
+tags List<String>[1, 5]                    // 1 to 5 elements
+tags List<String[_, 6]>[1, 5]             // element + length constrained
+matrix List<List<Integer>>                 // nested list
+embeddings List<Vector[768]>               // list of vectors
+```
+
+Validation accepts JSON arrays where each element passes the element type's constraint. Length bounds (when present) are checked against the array length.
+
+**Restrictions:**
+
+- List types cannot be used as primary keys (see [Primary Key Types](#primary-key-types)).
+- List types cannot be used in relationship (edge) properties.
+
+**Narrowing:**
+
+When a child type re-declares a parent's List property, both the element constraint and the length bounds must narrow (element values form a subset, length range is a subrange):
+
+```yammm-snippet
+abstract type Base {
+    tags List<String>                      // unbounded
+}
+type Child extends Base {
+    tags List<String[1, 50]>[1, 10]       // element + bounds narrowed
+}
+```
+
+**Data Type Aliases:**
+
+List types can be used as DataType alias targets:
+
+```yammm-snippet
+type Tags = List<String[1, 50]>[1, 10]
+type Article {
+    tags Tags required
+}
+```
 
 ### Data Type Aliases
 
@@ -1555,6 +1634,8 @@ BuiltIn    = "Integer" [ "[" Bound "," Bound "]" ]
            | "Timestamp" [ "[" STRING "]" ]
            | "Date"
            | "UUID"
-           | "Vector" "[" INTEGER "]" .
+           | "Vector" "[" INTEGER "]"
+           | "List" "<" DataTypeRef ">" [ "[" ListBound "," ListBound "]" ] .
 Bound      = "_" | INTEGER | FLOAT .
+ListBound  = "_" | INTEGER .
 ```

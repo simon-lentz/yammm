@@ -30,6 +30,15 @@ The expression language is used within invariant declarations (`! "message" expr
 | `.` | Property access |
 | `?` | Ternary conditional (`cond ? { then : else }`) |
 
+### Logical AND
+
+`&&` evaluates left-to-right with short-circuit semantics. If the left operand is false, the right operand is not evaluated.
+
+```yammm-snippet
+! "both_required" start_date != nil && end_date != nil
+! "range_valid" start_date != nil && end_date != nil && end_date > start_date
+```
+
 ### Pattern and Type Match
 
 `=~` and `!~` support two modes:
@@ -225,6 +234,8 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 - `Any` returns `false` on empty
 - `AllOrNone` returns `true` on empty (vacuous truth)
 - Nil inputs are treated as empty collections
+
+**List properties:** `List<T>` property values are collections and work with all collection functions above. For example: `tags -> Len > 0`, `scores -> All |$s| { $s >= 0 }`, `items -> Filter |$x| { $x -> Len > 3 }`.
 
 ### Math Functions
 

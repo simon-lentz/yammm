@@ -499,11 +499,37 @@ func (c *completer) resolveAliasConstraints() bool {
 		}
 	}
 
+	// Resolve List element aliases in DataTypes
+	for _, dt := range c.schema.DataTypesSlice() {
+		if _, isList := dt.Constraint().(schema.ListConstraint); isList {
+			resolved, success := c.resolveListElementAliases(dt.Constraint(), dt.Span())
+			if !success {
+				ok = false
+				continue
+			}
+			dt.SetConstraint(resolved)
+		}
+	}
+
 	// Then, resolve property constraints on all types
 	for _, t := range c.schema.TypesSlice() {
 		for _, p := range t.PropertiesSlice() {
 			if alias, isAlias := p.Constraint().(schema.AliasConstraint); isAlias && !alias.IsResolved() {
 				resolved, success := c.resolveAliasChain(alias.DataTypeName(), p.Span(), make(map[string]bool))
+				if !success {
+					ok = false
+					continue
+				}
+				p.SetConstraint(resolved)
+			}
+		}
+	}
+
+	// Resolve List element aliases in Properties
+	for _, t := range c.schema.TypesSlice() {
+		for _, p := range t.PropertiesSlice() {
+			if _, isList := p.Constraint().(schema.ListConstraint); isList {
+				resolved, success := c.resolveListElementAliases(p.Constraint(), p.Span())
 				if !success {
 					ok = false
 					continue
@@ -581,6 +607,45 @@ func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, v
 	return schema.NewAliasConstraint(dataTypeName, underlying), true
 }
 
+// resolveListElementAliases recursively resolves alias constraints inside
+// ListConstraint elements. Returns the constraint with aliases resolved,
+// or the original if no resolution was needed.
+func (c *completer) resolveListElementAliases(constraint schema.Constraint, span location.Span) (schema.Constraint, bool) {
+	lc, ok := constraint.(schema.ListConstraint)
+	if !ok {
+		return constraint, true
+	}
+
+	elem := lc.Element()
+
+	// Recurse into nested lists first
+	resolved, ok := c.resolveListElementAliases(elem, span)
+	if !ok {
+		return constraint, false
+	}
+	elem = resolved
+
+	// Resolve alias if element is an alias
+	if alias, isAlias := elem.(schema.AliasConstraint); isAlias && !alias.IsResolved() {
+		resolvedAlias, success := c.resolveAliasChain(alias.DataTypeName(), span, make(map[string]bool))
+		if !success {
+			return constraint, false
+		}
+		elem = resolvedAlias
+	}
+
+	// Rebuild with resolved element
+	minLen, hasMin := lc.MinLen()
+	maxLen, hasMax := lc.MaxLen()
+	if !hasMin {
+		minLen = -1
+	}
+	if !hasMax {
+		maxLen = -1
+	}
+	return schema.NewListConstraintBounded(elem, minLen, maxLen), true
+}
+
 // parseQualifiedName splits a qualified name into qualifier and local name.
 // For "foo.Bar", returns ("foo", "Bar"). For "Bar", returns ("", "Bar").
 func parseQualifiedName(name string) (qualifier, localName string) {
@@ -605,6 +670,11 @@ func (c *completer) validateRelationProperties() bool {
 						"relationship property %q cannot use Vector type", p.Name())
 					ok = false
 				}
+				if isListConstraint(p.Constraint()) {
+					c.errorf(p.Span(), diag.E_LIST_ON_EDGE,
+						"relationship property %q cannot use List type", p.Name())
+					ok = false
+				}
 			}
 		}
 	}
@@ -627,6 +697,47 @@ func isVectorConstraint(constraint schema.Constraint) bool {
 			return false
 		}
 		constraint = alias.Resolved()
+	}
+}
+
+// isListConstraint checks if a constraint is or resolves to a List type.
+// Unwraps alias constraints to check the underlying type.
+func isListConstraint(constraint schema.Constraint) bool {
+	if constraint == nil {
+		return false
+	}
+	for {
+		if constraint.Kind() == schema.KindList {
+			return true
+		}
+		alias, ok := constraint.(schema.AliasConstraint)
+		if !ok || alias.Resolved() == nil {
+			return false
+		}
+		constraint = alias.Resolved()
+	}
+}
+
+// isPrimaryKeyAllowed returns true if the constraint's underlying type is
+// permitted as a primary key. Only String, UUID, Date, and Timestamp are
+// allowed. Aliases are unwrapped to check the resolved type.
+func isPrimaryKeyAllowed(constraint schema.Constraint) bool {
+	if constraint == nil {
+		return false
+	}
+	// Unwrap aliases to the resolved type.
+	for {
+		alias, ok := constraint.(schema.AliasConstraint)
+		if !ok || alias.Resolved() == nil {
+			break
+		}
+		constraint = alias.Resolved()
+	}
+	switch constraint.Kind() {
+	case schema.KindString, schema.KindUUID, schema.KindDate, schema.KindTimestamp:
+		return true
+	default:
+		return false
 	}
 }
 

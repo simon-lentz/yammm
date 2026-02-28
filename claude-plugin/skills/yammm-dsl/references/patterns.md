@@ -75,6 +75,8 @@ type Organization {
 
 ## Identifier Patterns
 
+Primary keys must use one of the allowed types: `String`, `UUID`, `Date`, or `Timestamp`. DataType aliases that resolve to an allowed type also work (e.g., `type VIN = String[17, 17]`).
+
 ### Single Primary Key
 
 ```yammm
@@ -106,6 +108,67 @@ type Enrollment {
     course_id String required
 
     ! "composite_populated" student_id -> Len > 0 && course_id -> Len > 0
+}
+```
+
+---
+
+## List Patterns
+
+### Tag / Multi-Value Fields
+
+Use `List<String>` for simple multi-value properties like tags or labels:
+
+```yammm
+type Article {
+    id UUID primary
+    title String[1, 200] required
+    tags List<String[1, 50]>
+    categories List<String[1, 100]>[1, 5]     // 1 to 5 categories
+}
+```
+
+### Bounded Numeric Lists
+
+Use `List<Integer>` or `List<Float>` with element constraints and length bounds:
+
+```yammm
+type Survey {
+    id UUID primary
+    title String[1, 200] required
+    scores List<Integer[1, 10]>[1, _]          // At least one score, each 1-10
+
+    ! "has_scores" scores -> Len > 0
+    ! "average_above_5" scores -> Sum / (scores -> Len) >= 5.0
+}
+```
+
+### List with Alias Element Type
+
+Define a DataType alias for the element type and use it inside the List:
+
+```yammm
+type EmailAddress = Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
+
+type ContactCard {
+    id UUID primary
+    name String[1, 100] required
+    emails List<EmailAddress>[1, 5]            // 1 to 5 validated emails
+}
+```
+
+### List Invariants
+
+List properties work with all collection functions (`Len`, `All`, `Any`, `Filter`, `Map`, etc.):
+
+```yammm
+type Config {
+    id String primary
+    allowed_hosts List<String[1, 253]> required
+
+    ! "has_hosts" allowed_hosts -> Len > 0
+    ! "no_empty_hosts" allowed_hosts -> All |$h| { $h -> Len > 0 }
+    ! "max_hosts" allowed_hosts -> Len <= 50
 }
 ```
 

@@ -49,7 +49,7 @@ multiplicity
 relation_body: rel_property+ ;
 
 built_in:
-  integerT | floatT | boolT | stringT | enumT | patternT | timestampT | dateT | uuidT | vectorT
+  integerT | floatT | boolT | stringT | enumT | patternT | timestampT | dateT | uuidT | vectorT | listT
   ;
 
 integerT: 'Integer' (LBRACK (negMin=MINUS)? min=(USCORE | INTEGER) COMMA (negMax=MINUS)? max=(USCORE | INTEGER) RBRACK)?;
@@ -62,10 +62,11 @@ timestampT: 'Timestamp' (LBRACK format=STRING RBRACK)?;
 vectorT: 'Vector' LBRACK dimensions= INTEGER RBRACK;
 dateT: 'Date' ;
 uuidT: 'UUID' ;
+listT: 'List' LT elementType=data_type_ref GT (LBRACK min=(USCORE | INTEGER) COMMA max=(USCORE | INTEGER) RBRACK)?;
 
 datatypeKeyword
   : 'Integer' | 'Float' | 'Boolean' | 'String' | 'Enum' | 'Pattern' | 'Timestamp' | 'Date'
-  | 'UUID' | 'Vector'
+  | 'UUID' | 'Vector' | 'List'
   ;
 // Invariants attach to types with a user-facing message and an expression; message is presented
 // when the invariant evaluates to false during runtime validation.

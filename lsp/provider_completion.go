@@ -31,6 +31,7 @@ var builtinTypes = []string{
 	"Enum",
 	"Float",
 	"Integer",
+	"List",
 	"Pattern",
 	"String",
 	"Timestamp",

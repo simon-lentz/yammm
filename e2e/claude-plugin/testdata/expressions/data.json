@@ -62,5 +62,89 @@
             "name": "Charlie",
             "nickname": ""
         }
+    ],
+    "ExtOpRecord": [
+        {
+            "id": "ext-001",
+            "x": 15,
+            "y": 3,
+            "name": "Alice",
+            "status": "active",
+            "active": true,
+            "score": 85
+        }
+    ],
+    "ExtOpRecord__invalid_and": [
+        {
+            "id": "ext-002",
+            "x": -1,
+            "y": 15,
+            "name": "Bob",
+            "status": "active",
+            "active": true,
+            "score": 10
+        }
+    ],
+    "ExtOpRecord__invalid_xor": [
+        {
+            "id": "ext-003",
+            "x": 20,
+            "y": 20,
+            "name": "Charlie",
+            "status": "active",
+            "active": true,
+            "score": 50
+        }
+    ],
+    "ExtOpRecord__invalid_membership": [
+        {
+            "id": "ext-004",
+            "x": 15,
+            "y": 3,
+            "name": "Diana",
+            "status": "unknown",
+            "active": true,
+            "score": 50
+        }
+    ],
+    "ExtOpRecord__invalid_negated_match": [
+        {
+            "id": "ext-005",
+            "x": 15,
+            "y": 3,
+            "name": "12345",
+            "status": "active",
+            "active": true,
+            "score": 50
+        }
+    ],
+    "ExtOpRecord__invalid_ternary": [
+        {
+            "id": "ext-006",
+            "x": 15,
+            "y": 3,
+            "name": "Eve",
+            "status": "active",
+            "active": true,
+            "score": -5
+        }
+    ],
+    "ExtOpRecord__invalid_indexing": [
+        {
+            "id": "ext-007",
+            "x": 15,
+            "y": 3,
+            "name": "alice",
+            "status": "active",
+            "active": true,
+            "score": 50
+        }
+    ],
+    "BuiltinRecord": [
+        {
+            "id": "builtin-001",
+            "name": "Alice",
+            "value": 3.7
+        }
     ]
 }

@@ -20,6 +20,7 @@ func TestPatterns_SchemaCompilation(t *testing.T) {
 		"testdata/patterns/collection_invariants.yammm",
 		"testdata/patterns/relationships.yammm",
 		"testdata/patterns/edge_properties.yammm",
+		"testdata/patterns/list_patterns.yammm",
 	}
 
 	for _, path := range schemas {
@@ -317,5 +318,85 @@ func TestPatterns_EdgeProperties(t *testing.T) {
 		t.Parallel()
 		records := loadTestData(t, data, "Employee")
 		assertValid(t, v, "Employee", records[0])
+	})
+}
+
+// TestPatterns_ListTags tests tag/multi-value List pattern from patterns.md.
+func TestPatterns_ListTags(t *testing.T) {
+	t.Parallel()
+
+	data := "testdata/patterns/data.json"
+	v := loadSchema(t, "testdata/patterns/list_patterns.yammm")
+
+	t.Run("valid_article", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ListArticle")
+		assertValid(t, v, "ListArticle", records[0])
+	})
+
+	t.Run("invalid_categories_bounds", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ListArticle__invalid_categories_bounds")
+		assertInvalid(t, v, "ListArticle", records[0], diag.E_CONSTRAINT_FAIL)
+	})
+}
+
+// TestPatterns_ListNumeric tests bounded numeric List with invariants from patterns.md.
+func TestPatterns_ListNumeric(t *testing.T) {
+	t.Parallel()
+
+	data := "testdata/patterns/data.json"
+	v := loadSchema(t, "testdata/patterns/list_patterns.yammm")
+
+	t.Run("valid_survey", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "Survey")
+		assertValid(t, v, "Survey", records[0])
+	})
+
+	t.Run("invalid_empty_scores", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "Survey__invalid_empty_scores")
+		assertInvalid(t, v, "Survey", records[0], diag.E_CONSTRAINT_FAIL)
+	})
+}
+
+// TestPatterns_ListAlias tests List with alias element type from patterns.md.
+func TestPatterns_ListAlias(t *testing.T) {
+	t.Parallel()
+
+	data := "testdata/patterns/data.json"
+	v := loadSchema(t, "testdata/patterns/list_patterns.yammm")
+
+	t.Run("valid_contact", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ContactCard")
+		assertValid(t, v, "ContactCard", records[0])
+	})
+
+	t.Run("invalid_email", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "ContactCard__invalid_email")
+		assertInvalid(t, v, "ContactCard", records[0], diag.E_CONSTRAINT_FAIL)
+	})
+}
+
+// TestPatterns_ListInvariants tests collection invariants on List from patterns.md.
+func TestPatterns_ListInvariants(t *testing.T) {
+	t.Parallel()
+
+	data := "testdata/patterns/data.json"
+	v := loadSchema(t, "testdata/patterns/list_patterns.yammm")
+
+	t.Run("valid_config", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "Config")
+		assertValid(t, v, "Config", records[0])
+	})
+
+	t.Run("invalid_empty_host", func(t *testing.T) {
+		t.Parallel()
+		records := loadTestData(t, data, "Config__invalid_empty_host")
+		assertInvariantFails(t, v, "Config", records[0], "no_empty_hosts")
 	})
 }

@@ -1,39 +1,16 @@
-package builtins_test
+package spec_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
-	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/load"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// loadTestData reads and parses the shared JSON test data file.
-func loadTestData(t *testing.T, typeName string) []instance.RawInstance {
-	t.Helper()
-
-	dataPath := "data.json"
-	dataBytes, err := os.ReadFile(dataPath)
-	require.NoError(t, err, "read test data")
-
-	adapter, err := jsonadapter.NewAdapter(nil)
-	require.NoError(t, err, "create JSON adapter")
-
-	sourceID := location.NewSourceID("test://builtins-data.json")
-	parsed, parseResult := adapter.ParseObject(sourceID, dataBytes)
-	require.True(t, parseResult.OK(), "JSON parse failed: %v", parseResult.Messages())
-
-	records := parsed[typeName]
-	require.NotEmpty(t, records, "expected %s records in test data", typeName)
-	return records
-}
 
 // TestE2E_NonLambdaBuiltins tests non-lambda builtins (acceptBody: false) called
 // via pipe operator from .yammm source text. These were completely broken by Bug 1
@@ -43,9 +20,9 @@ func TestE2E_NonLambdaBuiltins(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	records := loadTestData(t, "Record")
+	records := loadTestData(t, "testdata/builtins/data.json", "Record")
 
-	s, result, err := load.Load(ctx, "non_lambda.yammm")
+	s, result, err := load.Load(ctx, "testdata/builtins/non_lambda.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -121,9 +98,9 @@ func TestE2E_PositionalArgBuiltins(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	records := loadTestData(t, "Entry")
+	records := loadTestData(t, "testdata/builtins/data.json", "Entry")
 
-	s, result, err := load.Load(ctx, "positional_args.yammm")
+	s, result, err := load.Load(ctx, "testdata/builtins/positional_args.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -206,9 +183,9 @@ func TestE2E_StringBuiltins(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	records := loadTestData(t, "StringRecord")
+	records := loadTestData(t, "testdata/builtins/data.json", "StringRecord")
 
-	s, result, err := load.Load(ctx, "string_builtins.yammm")
+	s, result, err := load.Load(ctx, "testdata/builtins/string_builtins.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -297,9 +274,9 @@ func TestE2E_NumericBuiltins(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	records := loadTestData(t, "NumericRecord")
+	records := loadTestData(t, "testdata/builtins/data.json", "NumericRecord")
 
-	s, result, err := load.Load(ctx, "numeric_builtins.yammm")
+	s, result, err := load.Load(ctx, "testdata/builtins/numeric_builtins.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -374,9 +351,9 @@ func TestE2E_CollectionBuiltins(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	records := loadTestData(t, "CollectionRecord")
+	records := loadTestData(t, "testdata/builtins/data.json", "CollectionRecord")
 
-	s, result, err := load.Load(ctx, "collection_builtins.yammm")
+	s, result, err := load.Load(ctx, "testdata/builtins/collection_builtins.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -449,9 +426,9 @@ func TestE2E_LambdaBuiltins(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	records := loadTestData(t, "LambdaRecord")
+	records := loadTestData(t, "testdata/builtins/data.json", "LambdaRecord")
 
-	s, result, err := load.Load(ctx, "lambda.yammm")
+	s, result, err := load.Load(ctx, "testdata/builtins/lambda.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -535,9 +512,9 @@ func TestE2E_ControlFlowBuiltins(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	records := loadTestData(t, "ControlRecord")
+	records := loadTestData(t, "testdata/builtins/data.json", "ControlRecord")
 
-	s, result, err := load.Load(ctx, "control_flow_builtins.yammm")
+	s, result, err := load.Load(ctx, "testdata/builtins/control_flow_builtins.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -614,12 +591,4 @@ func TestE2E_ControlFlowBuiltins(t *testing.T) {
 		assert.Len(t, failedInvariants, 2,
 			"expected exactly 2 invariant failures, got: %v", failedInvariants)
 	})
-}
-
-// failureMessages extracts message strings from a validation failure for test output.
-func failureMessages(f *instance.ValidationFailure) []string {
-	if f == nil {
-		return nil
-	}
-	return f.Result.Messages()
 }

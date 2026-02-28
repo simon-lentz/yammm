@@ -1,0 +1,6 @@
+schema "pk_date"
+
+type DateKeyed {
+    day Date primary
+    label String[1, 100] required
+}

@@ -213,6 +213,13 @@ func (c *completer) completeTypes() bool {
 		pks := make([]*schema.Property, 0)
 		for _, p := range allProps {
 			if p.IsPrimaryKey() {
+				if !isPrimaryKeyAllowed(p.Constraint()) {
+					c.errorf(p.Span(), diag.E_INVALID_PRIMARY_KEY_TYPE,
+						"property %q: %s cannot be used as a primary key (allowed: String, UUID, Date, Timestamp)",
+						p.Name(), p.Constraint().Kind())
+					ok = false
+					continue
+				}
 				pks = append(pks, p)
 			}
 		}

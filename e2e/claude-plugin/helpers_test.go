@@ -108,6 +108,17 @@ func assertInvariantFails(t *testing.T, v *instance.Validator, typeName string, 
 		"expected exactly %d invariant failures, got: %v", len(wantNames), failedInvariants)
 }
 
+// assertDiagHasCode asserts a diagnostic result contains at least one issue with the given code.
+func assertDiagHasCode(t *testing.T, result diag.Result, code diag.Code) {
+	t.Helper()
+	for issue := range result.Issues() {
+		if issue.Code() == code {
+			return
+		}
+	}
+	t.Errorf("expected diagnostic code %s, got: %v", code, result.Messages())
+}
+
 // failureMessages extracts message strings from a validation failure.
 func failureMessages(f *instance.ValidationFailure) []string {
 	if f == nil {

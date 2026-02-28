@@ -788,6 +788,65 @@ func (b *astBuilder) ExitVectorT(ctx *grammar.VectorTContext) {
 	b.currentDT = schema.NewVectorConstraint(dim)
 }
 
+func (b *astBuilder) ExitListT(ctx *grammar.ListTContext) {
+	// The element type's constraint was built by a nested Exit*T call
+	// and stored in b.currentDT (post-order traversal).
+	elementConstraint := b.currentDT
+
+	if elementConstraint == nil {
+		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
+			"list type missing element type").WithSpan(b.spans.FromContext(ctx)).Build())
+		return
+	}
+
+	var minLen, maxLen int64 = -1, -1
+	parseErr := false
+
+	if minToken := ctx.GetMin(); minToken != nil && minToken.GetText() != "_" {
+		v, err := strconv.ParseInt(minToken.GetText(), 10, 64)
+		switch {
+		case err != nil:
+			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+				fmt.Sprintf("invalid list length bound: %v", err)).
+				WithSpan(b.spans.FromToken(minToken)).Build())
+			parseErr = true
+		case v < 0:
+			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+				fmt.Sprintf("list minimum length cannot be negative: %d", v)).
+				WithSpan(b.spans.FromToken(minToken)).Build())
+			parseErr = true
+		default:
+			minLen = v
+		}
+	}
+	if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() != "_" {
+		v, err := strconv.ParseInt(maxToken.GetText(), 10, 64)
+		switch {
+		case err != nil:
+			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+				fmt.Sprintf("invalid list length bound: %v", err)).
+				WithSpan(b.spans.FromToken(maxToken)).Build())
+			parseErr = true
+		case v < 0:
+			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+				fmt.Sprintf("list maximum length cannot be negative: %d", v)).
+				WithSpan(b.spans.FromToken(maxToken)).Build())
+			parseErr = true
+		default:
+			maxLen = v
+		}
+	}
+
+	// Validate min <= max when both are present
+	if !parseErr && minLen >= 0 && maxLen >= 0 && minLen > maxLen {
+		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+			fmt.Sprintf("list length bounds inverted: min %d > max %d", minLen, maxLen)).
+			WithSpan(b.spans.FromContext(ctx)).Build())
+	}
+
+	b.currentDT = schema.NewListConstraintBounded(elementConstraint, minLen, maxLen)
+}
+
 func (b *astBuilder) ExitQualified_alias(ctx *grammar.Qualified_aliasContext) {
 	nameToken := ctx.GetName()
 	if nameToken == nil {

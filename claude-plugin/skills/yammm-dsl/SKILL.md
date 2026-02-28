@@ -43,7 +43,7 @@ part type Tag {
 }
 ```
 
-**Keywords**: `schema`, `import`, `as`, `type`, `abstract`, `part`, `extends`, `required`, `primary`, `one`, `many`.
+**Keywords**: `schema`, `import`, `as`, `type`, `datatype`, `abstract`, `part`, `extends`, `includes`, `required`, `primary`, `one`, `many`, `in`.
 
 **Type modifiers**:
 
@@ -79,8 +79,13 @@ field_name Type            // Optional (can be null)
 | `Enum` | `Enum["a", "b", "c"]` | Enumeration (minimum 2 options) |
 | `Pattern` | `Pattern["regex"]` | Regex-validated string |
 | `Vector` | `Vector[dimensions]` | Fixed-dimension numeric vector |
+| `List` | `List<ElementType>` or `List<ElementType>[min, max]` | Ordered collection with optional length bounds |
 
 See `references/type-system.md` for detailed semantics, bound rules, and examples for each type.
+
+### Primary Key Types
+
+Only `String`, `UUID`, `Date`, and `Timestamp` are allowed as primary key types. All other types (Integer, Float, Boolean, Enum, Pattern, Vector, List) are rejected. Alias resolution applies: a `DataType` alias that resolves to an allowed type is accepted.
 
 ### Bound Syntax
 
@@ -88,6 +93,7 @@ See `references/type-system.md` for detailed semantics, bound rules, and example
 - Both bounds required when brackets present: `String[1, 255]`
 - Exact value: `String[2, 2]` (exactly 2 runes)
 - Negative bounds allowed for Integer/Float: `Integer[-40, 50]`
+- List length bounds use square brackets after the angle-bracket element type: `List<String>[1, 10]`
 
 ### Custom Data Type Aliases
 
@@ -282,4 +288,8 @@ Widening a constraint (e.g., `Integer[0, 200]` when parent declares `Integer[0, 
 
 6. **Referencing imported types without qualifier.** Must write `alias.TypeName`, not just `TypeName`, for imported types and data type aliases.
 
-7. **Using reserved keywords as import aliases.** Keywords like `type`, `schema`, `import`, and built-in type names like `String`, `Integer` cannot be used as aliases.
+7. **Using reserved keywords as import aliases.** Keywords like `type`, `schema`, `import`, and built-in type names like `String`, `Integer`, `List` cannot be used as aliases.
+
+8. **Using a disallowed type as a primary key.** Only `String`, `UUID`, `Date`, and `Timestamp` may be primary keys. Types like `Integer`, `Boolean`, `Enum`, `List`, and `Vector` are rejected.
+
+9. **Using `List` or `Vector` in edge properties.** Relationship property blocks (`--> REL { ... }`) do not support `Vector` or `List` data types.

@@ -45,13 +45,14 @@ If `.claude/yammm.local.md` exists, read its YAML frontmatter at the start of ea
 
 ## Design Guidance
 
-- **Primary keys**: Every concrete (non-abstract, non-part) type must have exactly one field marked `primary`. Choose a stable, unique identifier.
+- **Primary keys**: Every concrete (non-abstract, non-part) type must have exactly one field marked `primary`. Choose a stable, unique identifier. Only `String`, `UUID`, `Date`, and `Timestamp` are allowed as primary key types.
 - **Required fields**: Mark fields `required` when a null value is never valid. Leave fields unmarked (optional) when absence is a legitimate state.
 - **Constraint bounds**: Use bounded types to enforce data integrity. `String[1, 255]` is better than bare `String` when you know the domain. Use `_` for an unbounded side: `Integer[0, _]` for non-negative.
 - **Type aliases**: Define `type Email = Pattern["..."]` or `type CountryCode = String[2, 2]` at the top of the schema to reduce repetition and improve readability.
 - **Abstract types**: Use `abstract type` for shared field sets (e.g., audit fields). Concrete types extend them with `extends`.
 - **Part types and compositions**: Declare `part type` for entities that have no independent existence. Reference them only via composition edges (`*->`). Part types cannot have `primary` fields.
-- **Associations**: Use `-->` for relationships between independently existing types. Use cross-schema imports (`import "path" as alias`) when targeting types in other schemas.
+- **Associations**: Use `-->` for relationships between independently existing types. Use cross-schema imports (`import "path" as alias`) when targeting types in other schemas. Edge properties cannot use `Vector` or `List` types.
+- **Lists**: Use `List<ElementType>` for ordered multi-value fields (tags, scores, etc.). Add length bounds when the domain has known limits: `List<String>[1, 10]`. Lists can nest (`List<List<Float>>`) and use aliases as element types. Lists cannot be primary keys or edge properties.
 - **Invariants**: Add `! "error_id" expression` for business rules that cannot be expressed by type constraints alone. Use capitalized built-in functions: `Len`, `All`, `Any`, `Contains`, etc.
 
 ## DSL Reference

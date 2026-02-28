@@ -44,6 +44,7 @@ var reservedKeywords = map[string]bool{
 	"Date":      true,
 	"UUID":      true,
 	"Vector":    true,
+	"List":      true,
 
 	// Boolean literals
 	"true":  true,

@@ -1,13 +1,10 @@
-package negative_bounds_test
+package spec_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
-	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/load"
 
@@ -23,7 +20,7 @@ func TestE2E_NegativeBounds(t *testing.T) {
 	ctx := context.Background()
 
 	// Load schema with negative float bounds
-	s, result, err := load.Load(ctx, "negative_bounds.yammm")
+	s, result, err := load.Load(ctx, "testdata/negative_bounds/negative_bounds.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -54,17 +51,7 @@ func TestE2E_NegativeBounds(t *testing.T) {
 	assert.Equal(t, 180.0, lonMax, "longitude max should be 180.0")
 
 	// Load test data
-	dataBytes, err := os.ReadFile("data.json")
-	require.NoError(t, err, "read test data")
-
-	adapter, err := jsonadapter.NewAdapter(nil)
-	require.NoError(t, err, "create JSON adapter")
-
-	sourceID := location.NewSourceID("test://data.json")
-	parsed, parseResult := adapter.ParseObject(sourceID, dataBytes)
-	require.True(t, parseResult.OK(), "JSON parse failed: %v", parseResult.Messages())
-
-	records := parsed["GeoPoint"]
+	records := loadTestData(t, "testdata/negative_bounds/data.json", "GeoPoint")
 	require.Len(t, records, 3, "expected 3 GeoPoint records")
 
 	// Validate all records pass
@@ -89,11 +76,4 @@ func TestE2E_NegativeBounds(t *testing.T) {
 			assert.NotNil(t, valid)
 		})
 	}
-}
-
-func failureMessages(f *instance.ValidationFailure) []string {
-	if f == nil {
-		return nil
-	}
-	return f.Result.Messages()
 }

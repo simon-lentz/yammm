@@ -1,0 +1,10 @@
+schema "list_narrowing_invalid"
+
+abstract type Base {
+    id String primary
+    items List<String>[1, 10]
+}
+
+type Child extends Base {
+    items List<Integer>
+}

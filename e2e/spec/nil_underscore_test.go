@@ -1,39 +1,16 @@
-package nil_underscore_test
+package spec_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
-	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/load"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// loadTestData reads and parses the shared JSON test data file.
-func loadTestData(t *testing.T) []instance.RawInstance {
-	t.Helper()
-
-	dataPath := "data.json"
-	dataBytes, err := os.ReadFile(dataPath)
-	require.NoError(t, err, "read test data")
-
-	adapter, err := jsonadapter.NewAdapter(nil)
-	require.NoError(t, err, "create JSON adapter")
-
-	sourceID := location.NewSourceID("test://data.json")
-	parsed, parseResult := adapter.ParseObject(sourceID, dataBytes)
-	require.True(t, parseResult.OK(), "JSON parse failed: %v", parseResult.Messages())
-
-	records := parsed["Record"]
-	require.Len(t, records, 3, "expected 3 records in test data")
-	return records
-}
 
 // TestE2E_NilUnderscore tests that _ and nil behave identically as nil
 // literals in invariant expressions. This is an end-to-end test that:
@@ -45,7 +22,7 @@ func TestE2E_NilUnderscore(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	records := loadTestData(t)
+	records := loadTestData(t, "testdata/nil_underscore/data.json", "Record")
 
 	// Both schema variants define the same invariant using only operators:
 	//   ! "description_when_present" description == <nil_syntax> || description != ""
@@ -58,16 +35,15 @@ func TestE2E_NilUnderscore(t *testing.T) {
 		name string
 		file string
 	}{
-		{name: "underscore (_)", file: "underscore_nil.yammm"},
-		{name: "keyword (nil)", file: "keyword_nil.yammm"},
+		{name: "underscore (_)", file: "testdata/nil_underscore/underscore_nil.yammm"},
+		{name: "keyword (nil)", file: "testdata/nil_underscore/keyword_nil.yammm"},
 	}
 
 	for _, sc := range schemas {
 		t.Run(sc.name, func(t *testing.T) {
 			t.Parallel()
 
-			schemaPath := sc.file
-			s, result, err := load.Load(ctx, schemaPath)
+			s, result, err := load.Load(ctx, sc.file)
 			require.NoError(t, err, "load schema %s", sc.file)
 			require.True(t, result.OK(), "schema %s has errors: %v", sc.file, result.Messages())
 
@@ -117,10 +93,9 @@ func TestE2E_BuiltinLen(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	records := loadTestData(t)
+	records := loadTestData(t, "testdata/nil_underscore/data.json", "Record")
 
-	schemaPath := "builtin_len.yammm"
-	s, result, err := load.Load(ctx, schemaPath)
+	s, result, err := load.Load(ctx, "testdata/nil_underscore/builtin_len.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 

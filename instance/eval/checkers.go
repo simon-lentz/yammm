@@ -101,6 +101,8 @@ func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 		return checkPattern(val, c)
 	case schema.KindVector:
 		return ch.checkVector(val, c)
+	case schema.KindList:
+		return ch.checkList(val, c)
 	case schema.KindAlias:
 		// Resolve alias and check against resolved constraint
 		alias, ok := c.(schema.AliasConstraint)
@@ -155,6 +157,8 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 		return ch.coerceFloat(val)
 	case schema.KindVector:
 		return ch.coerceVector(val)
+	case schema.KindList:
+		return ch.coerceList(val, c)
 	case schema.KindAlias:
 		// Resolve alias and coerce against resolved constraint
 		alias, ok := c.(schema.AliasConstraint)
@@ -537,6 +541,70 @@ func (ch *Checker) checkVector(val any, c schema.Constraint) error {
 		}
 	}
 	return nil
+}
+
+// checkList validates that val is a slice with elements matching the element constraint.
+func (ch *Checker) checkList(val any, c schema.Constraint) error {
+	slice, ok := toSlice(val)
+	if !ok {
+		return typeMismatch("expected array for list, got %T", val)
+	}
+
+	lc, ok := c.(schema.ListConstraint)
+	if !ok {
+		return errors.New("invalid list constraint type")
+	}
+
+	// Check length bounds
+	length := int64(len(slice))
+	if minLen, hasMin := lc.MinLen(); hasMin && length < minLen {
+		return constraintFail("list length %d is less than minimum %d", length, minLen)
+	}
+	if maxLen, hasMax := lc.MaxLen(); hasMax && length > maxLen {
+		return constraintFail("list length %d exceeds maximum %d", length, maxLen)
+	}
+
+	// Check each element
+	elemConstraint := lc.Element()
+	for i, elem := range slice {
+		if err := ch.CheckValue(elem, elemConstraint); err != nil {
+			var ce *CheckError
+			if errors.As(err, &ce) {
+				return &CheckError{
+					Kind: ce.Kind,
+					Msg:  fmt.Sprintf("element [%d]: %s", i, ce.Msg),
+				}
+			}
+			return fmt.Errorf("element [%d]: %w", i, err)
+		}
+	}
+
+	return nil
+}
+
+// coerceList coerces each element to its canonical type.
+func (ch *Checker) coerceList(val any, c schema.Constraint) (any, error) {
+	slice, ok := toSlice(val)
+	if !ok {
+		return nil, fmt.Errorf("expected array for list, got %T", val)
+	}
+
+	lc, ok := c.(schema.ListConstraint)
+	if !ok {
+		return nil, errors.New("invalid list constraint type")
+	}
+
+	elemConstraint := lc.Element()
+	result := make([]any, len(slice))
+	for i, elem := range slice {
+		coerced, err := ch.CoerceValue(elem, elemConstraint)
+		if err != nil {
+			return nil, fmt.Errorf("element [%d]: %w", i, err)
+		}
+		result[i] = coerced
+	}
+
+	return result, nil
 }
 
 // toSlice converts val to []any if it's a slice.

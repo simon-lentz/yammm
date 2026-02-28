@@ -156,5 +156,60 @@
     ],
     "Employee": [
         {"id": "550e8400-e29b-41d4-a716-446655440092", "name": "Carol"}
+    ],
+    "ListArticle": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440070",
+            "title": "Test Article",
+            "tags": ["go", "yammm"],
+            "categories": ["tech", "programming"]
+        }
+    ],
+    "ListArticle__invalid_categories_bounds": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440071",
+            "title": "Too Many Categories",
+            "categories": ["a", "b", "c", "d", "e", "f"]
+        }
+    ],
+    "Survey": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440072",
+            "title": "Test Survey",
+            "scores": [5, 7, 8, 9]
+        }
+    ],
+    "Survey__invalid_empty_scores": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440073",
+            "title": "Empty Scores",
+            "scores": []
+        }
+    ],
+    "ContactCard": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440074",
+            "name": "Alice",
+            "emails": ["alice@example.com", "alice@work.com"]
+        }
+    ],
+    "ContactCard__invalid_email": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440075",
+            "name": "Bob",
+            "emails": ["not-an-email"]
+        }
+    ],
+    "Config": [
+        {
+            "id": "config-001",
+            "allowed_hosts": ["example.com", "api.example.com"]
+        }
+    ],
+    "Config__invalid_empty_host": [
+        {
+            "id": "config-002",
+            "allowed_hosts": ["example.com", ""]
+        }
     ]
 }

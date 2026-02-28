@@ -112,5 +112,41 @@
     ],
     "Strict__invalid_missing_required": [
         {"id": "550e8400-e29b-41d4-a716-446655440051"}
+    ],
+    "DateKeyed": [
+        {
+            "day": "2026-01-15",
+            "label": "Test Day"
+        }
+    ],
+    "TimestampKeyed": [
+        {
+            "ts": "2026-01-15T10:30:00Z",
+            "label": "Test Moment"
+        }
+    ],
+    "ListBasics": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440060",
+            "tags": ["go", "testing"],
+            "bounded_tags": ["alpha", "beta"],
+            "int_list": [10, 50, 100],
+            "nested": [[1, 2], [3, 4]],
+            "alias_element": ["short", "str"],
+            "alias_list": ["tag1", "tag2"]
+        }
+    ],
+    "ListBasics__invalid_bounds": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440061",
+            "bounded_tags": ["a", "b", "c", "d", "e", "f"]
+        }
+    ],
+    "ListBasics__invalid_element": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440062",
+            "bounded_tags": ["valid"],
+            "int_list": [101]
+        }
     ]
 }

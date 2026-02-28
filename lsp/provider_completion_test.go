@@ -789,7 +789,7 @@ func TestBuiltinTypes_Complete(t *testing.T) {
 
 	// Verify all expected built-in types are present
 	expected := []string{
-		"Boolean", "Date", "Enum", "Float", "Integer",
+		"Boolean", "Date", "Enum", "Float", "Integer", "List",
 		"Pattern", "String", "Timestamp", "UUID", "Vector",
 	}
 

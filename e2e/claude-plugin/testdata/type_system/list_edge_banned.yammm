@@ -1,0 +1,10 @@
+schema "list_edge_banned"
+
+type Target {
+    id String primary
+}
+
+type Source {
+    id String primary
+    --> REL (one) Target { tags List<String> }
+}

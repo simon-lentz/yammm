@@ -1140,6 +1140,7 @@ type T {
 	e Pattern ["^[a-z]+$"]
 	f Timestamp ["2006-01-02"]
 	g Vector [128]
+	h List <String> [1, 5]
 }
 `
 	expected := `schema "test"
@@ -1152,6 +1153,7 @@ type T {
 	e Pattern["^[a-z]+$"]
 	f Timestamp["2006-01-02"]
 	g Vector[128]
+	h List<String>[1, 5]
 }
 `
 
@@ -1161,6 +1163,90 @@ type T {
 	}
 	if result != expected {
 		t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, expected)
+	}
+}
+
+func TestFormatTokenStream_ListAngleBracketSpacing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name: "basic list",
+			input: `schema "test"
+
+type T {
+	tags List <String>
+}
+`,
+			expected: `schema "test"
+
+type T {
+	tags List<String>
+}
+`,
+		},
+		{
+			name: "list with element constraint",
+			input: `schema "test"
+
+type T {
+	tags List <String[_, 6]>
+}
+`,
+			expected: `schema "test"
+
+type T {
+	tags List<String[_, 6]>
+}
+`,
+		},
+		{
+			name: "list with bounds",
+			input: `schema "test"
+
+type T {
+	tags List <String> [1, 5]
+}
+`,
+			expected: `schema "test"
+
+type T {
+	tags List<String>[1, 5]
+}
+`,
+		},
+		{
+			name: "nested list",
+			input: `schema "test"
+
+type T {
+	matrix List <List <Integer>>
+}
+`,
+			expected: `schema "test"
+
+type T {
+	matrix List<List<Integer>>
+}
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := formatTokenStream(tt.input)
+			if err != nil {
+				t.Fatalf("formatTokenStream returned error: %v", err)
+			}
+			if result != tt.expected {
+				t.Errorf("formatTokenStream() =\n%q\nwant:\n%q", result, tt.expected)
+			}
+		})
 	}
 }
 

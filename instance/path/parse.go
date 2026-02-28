@@ -598,6 +598,8 @@ func validatePKFields(fields []PKField, typ *schema.Type) error {
 }
 
 // validatePKValueType validates that a PK value matches the expected constraint type.
+// Only types permitted as primary keys (String, UUID, Date, Timestamp) reach here;
+// schema validation rejects all other types before instance paths are parsed.
 func validatePKValueType(value any, constraint schema.Constraint) error {
 	if constraint == nil {
 		return nil // Can't validate without constraint
@@ -607,34 +609,14 @@ func validatePKValueType(value any, constraint schema.Constraint) error {
 	kind := resolveConstraintKind(constraint)
 
 	switch kind {
-	case schema.KindInteger:
-		if _, ok := value.(int64); !ok {
-			return fmt.Errorf("expected integer, got %T", value)
-		}
-
-	case schema.KindFloat:
-		// Accept both int64 and float64 for float constraints
-		// (JSON numbers without decimals parse as int64)
-		switch value.(type) {
-		case int64, float64:
-			// OK
-		default:
-			return fmt.Errorf("expected float, got %T", value)
-		}
-
-	case schema.KindBoolean:
-		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("expected boolean, got %T", value)
-		}
-
-	case schema.KindString, schema.KindUUID, schema.KindTimestamp, schema.KindDate, schema.KindEnum, schema.KindPattern:
-		// All string-like types
+	case schema.KindString, schema.KindUUID, schema.KindTimestamp, schema.KindDate:
+		// All allowed PK types are string-representable.
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("expected string, got %T", value)
 		}
 
 	default:
-		// Unknown or unsupported constraint kind - allow any value
+		return fmt.Errorf("type %s is not allowed as a primary key", kind)
 	}
 
 	return nil

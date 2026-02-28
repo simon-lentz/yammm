@@ -206,6 +206,12 @@ func (s *BaseYammmGrammarListener) EnterUuidT(ctx *UuidTContext) {}
 // ExitUuidT is called when production uuidT is exited.
 func (s *BaseYammmGrammarListener) ExitUuidT(ctx *UuidTContext) {}
 
+// EnterListT is called when production listT is entered.
+func (s *BaseYammmGrammarListener) EnterListT(ctx *ListTContext) {}
+
+// ExitListT is called when production listT is exited.
+func (s *BaseYammmGrammarListener) ExitListT(ctx *ListTContext) {}
+
 // EnterDatatypeKeyword is called when production datatypeKeyword is entered.
 func (s *BaseYammmGrammarListener) EnterDatatypeKeyword(ctx *DatatypeKeywordContext) {}
 

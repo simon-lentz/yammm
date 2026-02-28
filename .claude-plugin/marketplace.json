@@ -8,7 +8,7 @@
       "name": "yammm",
       "source": "./claude-plugin",
       "description": "Yammm DSL schema language support - LSP intelligence, schema authoring, and review",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "simon-lentz"
       },
