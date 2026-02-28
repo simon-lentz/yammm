@@ -88,7 +88,7 @@ func (v *countingVisitor) ExitComposition(inst *graph.Instance, relationName str
 
 func TestWalk_NilResult(t *testing.T) {
 	visitor := &countingVisitor{}
-	err := Walk(context.Background(), nil, visitor)
+	err := Walk(t.Context(), nil, visitor)
 	if err != nil {
 		t.Errorf("Walk(nil) error: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestWalk_NilVisitor_ReturnsError(t *testing.T) {
 	g := graph.New(s)
 	result := g.Snapshot()
 
-	err := Walk(context.Background(), result, nil)
+	err := Walk(t.Context(), result, nil)
 	if !errors.Is(err, ErrNilVisitor) {
 		t.Errorf("Walk(nil visitor) error = %v, want ErrNilVisitor", err)
 	}
@@ -111,7 +111,7 @@ func TestWalk_NilVisitor_ReturnsError(t *testing.T) {
 func TestWalkInstance_NilVisitor_ReturnsError(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -144,7 +144,7 @@ func TestWalk_EmptyResult(t *testing.T) {
 	result := g.Snapshot()
 
 	visitor := &countingVisitor{}
-	err := Walk(context.Background(), result, visitor)
+	err := Walk(t.Context(), result, visitor)
 	if err != nil {
 		t.Errorf("Walk error: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestWalk_EmptyResult(t *testing.T) {
 func TestWalk_SingleInstance(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -195,7 +195,7 @@ func TestWalk_SingleInstance(t *testing.T) {
 func TestWalk_MultipleInstances(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	companyType, _ := s.Type("Company")
@@ -262,7 +262,7 @@ func TestWalk_MultipleInstances(t *testing.T) {
 func TestWalk_PropertyOrder(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -302,7 +302,7 @@ func TestWalk_PropertyOrder(t *testing.T) {
 func TestWalk_ContextCancellation(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -322,7 +322,7 @@ func TestWalk_ContextCancellation(t *testing.T) {
 	}
 
 	// Cancel context before walk
-	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancelCtx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	result := g.Snapshot()
@@ -353,7 +353,7 @@ func (v *errorVisitor) EnterInstance(inst *graph.Instance) error {
 func TestWalk_VisitorError(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -392,7 +392,7 @@ func TestWalk_VisitorError(t *testing.T) {
 
 func TestWalkInstance_NilInstance(t *testing.T) {
 	visitor := &countingVisitor{}
-	err := WalkInstance(context.Background(), nil, visitor)
+	err := WalkInstance(t.Context(), nil, visitor)
 	if err != nil {
 		t.Errorf("WalkInstance(nil) error: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestWalkInstance_NilInstance(t *testing.T) {
 func TestWalkInstance_Single(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -476,7 +476,7 @@ func (v *partialVisitor) EnterInstance(inst *graph.Instance) error {
 func TestBaseVisitor_Embedding(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -591,7 +591,7 @@ func makeMultiEdges(relations map[string][][]any) map[string]*instance.ValidEdge
 func TestWalk_WithEdges(t *testing.T) {
 	s := testAssociationSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	companyType, _ := s.Type("Company")
 	personType, _ := s.Type("Person")
@@ -643,7 +643,7 @@ func TestWalk_WithEdges(t *testing.T) {
 func TestWalk_EdgeSorting(t *testing.T) {
 	s := testMultiRelationSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	companyType, _ := s.Type("Company")
 	deptType, _ := s.Type("Department")
@@ -726,7 +726,7 @@ func (v *edgeOrderVisitor) VisitEdge(edge *graph.Edge) error {
 func TestWalk_WithCompositions(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	parentType, _ := s.Type("Parent")
 	childType, _ := s.Type("Child")
@@ -813,7 +813,7 @@ func (v *exitErrorVisitor) ExitInstance(inst *graph.Instance) error {
 func TestWalk_ExitInstanceError(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -860,7 +860,7 @@ func (v *propErrorVisitor) VisitProperty(inst *graph.Instance, name string, valu
 func TestWalk_VisitPropertyError(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -907,7 +907,7 @@ func (v *edgeErrorVisitor) VisitEdge(edge *graph.Edge) error {
 func TestWalk_VisitEdgeError(t *testing.T) {
 	s := testAssociationSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	companyType, _ := s.Type("Company")
 	personType, _ := s.Type("Person")
@@ -969,7 +969,7 @@ func (v *enterComposeErrorVisitor) EnterComposition(inst *graph.Instance, relati
 func TestWalk_EnterCompositionError(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	parentType, _ := s.Type("Parent")
 	childType, _ := s.Type("Child")
@@ -1030,7 +1030,7 @@ func (v *exitComposeErrorVisitor) ExitComposition(inst *graph.Instance, relation
 func TestWalk_ExitCompositionError(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	parentType, _ := s.Type("Parent")
 	childType, _ := s.Type("Child")
@@ -1076,7 +1076,7 @@ func TestWalk_ExitCompositionError(t *testing.T) {
 func TestWalk_ContextCancellation_DuringCompositions(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	parentType, _ := s.Type("Parent")
 	childType, _ := s.Type("Child")
@@ -1113,7 +1113,7 @@ func TestWalk_ContextCancellation_DuringCompositions(t *testing.T) {
 	}
 
 	// Create a context that's already cancelled
-	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancelCtx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	result := g.Snapshot()
@@ -1129,7 +1129,7 @@ func TestWalk_ContextCancellation_DuringCompositions(t *testing.T) {
 func TestWalkInstance_WithComposition(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	parentType, _ := s.Type("Parent")
 	childType, _ := s.Type("Child")
@@ -1207,7 +1207,7 @@ func TestWalk_EdgeSorting_SameRelationDifferentTargets(t *testing.T) {
 	}
 
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	companyType, _ := s.Type("Company")
 	personType, _ := s.Type("Person")
@@ -1282,7 +1282,7 @@ func (v *edgeTargetOrderVisitor) VisitEdge(edge *graph.Edge) error {
 func TestWalk_WithOptions(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -1314,7 +1314,7 @@ func TestWalk_WithOptions(t *testing.T) {
 func TestWalkInstance_WithOptions(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -1347,7 +1347,7 @@ func TestWalkInstance_WithOptions(t *testing.T) {
 func TestNilContext_Panics(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	inst := instance.NewValidInstance(
@@ -1423,7 +1423,7 @@ func (v *orderTrackingVisitor) EnterInstance(inst *graph.Instance) error {
 func TestWalk_CompositionChildOrdering(t *testing.T) {
 	s := testSchemaWithComposition(t) // Uses existing helper from walk_logging_test.go
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	parentType, _ := s.Type("Parent")
 	childType, _ := s.Type("Child")
@@ -1479,7 +1479,7 @@ func TestWalk_CompositionChildOrdering(t *testing.T) {
 func TestWalk_CompositionChildOrdering_PKLess(t *testing.T) {
 	s := testSchemaWithPKLessComposition(t)
 	g := graph.New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	containerType, _ := s.Type("Container")
 	itemType, _ := s.Type("Item")

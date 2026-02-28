@@ -1,7 +1,6 @@
 package spec_test
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -26,7 +25,7 @@ import (
 // Source: SPEC.md, "load.Load reads a schema from a file path."
 func TestLoading_LoadFromFile(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.Load(ctx, "testdata/loading/valid.yammm")
 
@@ -41,7 +40,7 @@ func TestLoading_LoadFromFile(t *testing.T) {
 // Source: SPEC.md, "load.LoadString loads a schema from a string."
 func TestLoading_LoadStringParameterOrder(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	content := `schema "FromString" type Item { name String required }`
 	s, result, err := load.LoadString(ctx, content, "test-source")
@@ -57,7 +56,7 @@ func TestLoading_LoadStringParameterOrder(t *testing.T) {
 // Source: SPEC.md, "load.LoadSources loads from in-memory sources."
 func TestLoading_LoadSources(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// LoadSources requires absolute paths or a moduleRoot to resolve relative paths.
 	// Use a temporary directory as module root with a relative key.
@@ -83,7 +82,7 @@ func TestLoading_LoadSources(t *testing.T) {
 // Source: SPEC.md, "error != nil indicates catastrophic failure (I/O, corruption)."
 func TestLoading_ErrorPattern_IOFailure(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, _, err := load.Load(ctx, "testdata/loading/does_not_exist.yammm")
 
@@ -95,7 +94,7 @@ func TestLoading_ErrorPattern_IOFailure(t *testing.T) {
 // Source: SPEC.md, "error == nil && !result.OK() indicates semantic failure."
 func TestLoading_ErrorPattern_SemanticFailure(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, result, err := load.Load(ctx, "testdata/loading/syntax_error.yammm")
 
@@ -108,7 +107,7 @@ func TestLoading_ErrorPattern_SemanticFailure(t *testing.T) {
 // Source: SPEC.md, "error == nil && result.OK() indicates success."
 func TestLoading_ErrorPattern_Success(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s, result, err := load.Load(ctx, "testdata/loading/valid.yammm")
 
@@ -127,7 +126,7 @@ func TestLoading_ErrorPattern_Success(t *testing.T) {
 // type resolution."
 func TestLoading_WithRegistry(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reg := schema.NewRegistry()
 
@@ -146,7 +145,7 @@ func TestLoading_WithRegistry(t *testing.T) {
 // imports."
 func TestLoading_WithModuleRoot(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Determine the absolute path to the testdata directory so WithModuleRoot
 	// receives a valid directory.
@@ -167,7 +166,7 @@ func TestLoading_WithModuleRoot(t *testing.T) {
 // issues to collect."
 func TestLoading_WithIssueLimit(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, result, err := load.Load(ctx, "testdata/loading/many_errors.yammm",
 		load.WithIssueLimit(2))
@@ -184,7 +183,7 @@ func TestLoading_WithIssueLimit(t *testing.T) {
 // position tracking."
 func TestLoading_WithSourceRegistry(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	srcReg := source.NewRegistry()
 	s, result, err := load.Load(ctx, "testdata/loading/valid.yammm",
@@ -201,7 +200,7 @@ func TestLoading_WithSourceRegistry(t *testing.T) {
 // diagnostics."
 func TestLoading_WithLogger(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
@@ -250,7 +249,7 @@ func TestLoading_BuilderAPI(t *testing.T) {
 
 	// Validate an instance against the builder-produced schema.
 	v := instance.NewValidator(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{"name": "Alice"}))
 	require.NoError(t, err)

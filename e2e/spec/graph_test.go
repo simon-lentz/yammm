@@ -1,7 +1,6 @@
 package spec_test
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -33,7 +32,7 @@ func TestGraph_NewCreatesGraph(t *testing.T) {
 func TestGraph_AddReturnsResult(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	inst := validateOne(t, v, "Apple", raw(map[string]any{
@@ -52,7 +51,7 @@ func TestGraph_AddReturnsResult(t *testing.T) {
 func TestGraph_CheckRequiredAssociation(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_required.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	// Add Employee without satisfying the required BELONGS_TO association
@@ -78,7 +77,7 @@ func TestGraph_CheckRequiredAssociation(t *testing.T) {
 func TestGraph_CheckRequiredAssociationSatisfied(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_required.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	// Add Department first
@@ -196,7 +195,7 @@ func TestGraph_OrderingInstancesOf(t *testing.T) {
 func TestGraph_OrderingEdges(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_association.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	// Add Company target first
@@ -246,7 +245,7 @@ func TestGraph_OrderingEdges(t *testing.T) {
 func TestGraph_OrderingDuplicates(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	// Add two different types, then add duplicates in reverse order
@@ -297,7 +296,7 @@ func TestGraph_OrderingDuplicates(t *testing.T) {
 func TestGraph_OrderingUnresolved(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_association.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	// Add persons with edges pointing to non-existent companies (forward references
@@ -345,7 +344,7 @@ func TestGraph_OrderingUnresolved(t *testing.T) {
 func TestGraph_Duplicates(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	inst1 := validateOne(t, v, "Apple", raw(map[string]any{
@@ -383,13 +382,13 @@ func TestGraph_Duplicates(t *testing.T) {
 func TestGraph_ConcurrentAdd(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	var wg sync.WaitGroup
 	for i := range 10 {
 		wg.Go(func() {
-			inst := validateOne(t, v, "Apple", raw(map[string]any{ //nolint:contextcheck // test helper uses internal context
+			inst := validateOne(t, v, "Apple", raw(map[string]any{
 				"id":   fmt.Sprintf("item-%d", i),
 				"name": fmt.Sprintf("Item %d", i),
 			}))
@@ -411,7 +410,7 @@ func TestGraph_ConcurrentAdd(t *testing.T) {
 func TestGraph_ConcurrentAddComposed(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_composition.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	// Add parent Order first
@@ -537,7 +536,7 @@ func TestGraph_SnapshotDefensiveCopies(t *testing.T) {
 func TestGraph_AddComposedBasic(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_composition.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	// Add parent Order
@@ -583,7 +582,7 @@ func TestGraph_AddComposedBasic(t *testing.T) {
 func TestGraph_ForwardReferenceResolution(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_association.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	// Add Person first (before its WORKS_AT target Company)
@@ -627,7 +626,7 @@ func TestGraph_ForwardReferenceResolution(t *testing.T) {
 func TestGraph_InlineCompositionExtraction(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_composition.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 	g := graph.New(s)
 
 	// Add Order with inline composed LineItem children
@@ -659,7 +658,7 @@ func TestGraph_InlineCompositionExtraction(t *testing.T) {
 func TestGraph_SnapshotOK(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Clean graph
 	g1 := graph.New(s)

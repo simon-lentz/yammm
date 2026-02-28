@@ -2,7 +2,6 @@ package json
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"testing"
@@ -268,7 +267,7 @@ func TestMarshalObject_EmptyGraph(t *testing.T) {
 }
 
 func TestMarshalObject_SingleType(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaSimple(t)
 	g := graph.New(s)
 
@@ -303,7 +302,7 @@ func TestMarshalObject_SingleType(t *testing.T) {
 }
 
 func TestMarshalObject_MultipleInstances(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaSimple(t)
 	g := graph.New(s)
 
@@ -340,7 +339,7 @@ func TestMarshalObject_MultipleInstances(t *testing.T) {
 }
 
 func TestMarshalObject_MultipleTypes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaMultiType(t)
 	g := graph.New(s)
 
@@ -379,7 +378,7 @@ func TestMarshalObject_MultipleTypes(t *testing.T) {
 }
 
 func TestMarshalObject_WithEdge(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaWithAssociation(t)
 	g := graph.New(s)
 
@@ -431,7 +430,7 @@ func TestMarshalObject_WithEdge(t *testing.T) {
 }
 
 func TestMarshalObject_WithManyEdges(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaWithManyAssociation(t)
 	g := graph.New(s)
 
@@ -481,7 +480,7 @@ func TestMarshalObject_WithManyEdges(t *testing.T) {
 }
 
 func TestMarshalObject_WithComposition(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
 
@@ -532,7 +531,7 @@ func TestMarshalObject_WithComposition(t *testing.T) {
 }
 
 func TestMarshalObject_WithOneComposition(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaWithOneComposition(t)
 	g := graph.New(s)
 
@@ -571,7 +570,7 @@ func TestMarshalObject_WithOneComposition(t *testing.T) {
 }
 
 func TestMarshalObject_WithIndent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaSimple(t)
 	g := graph.New(s)
 
@@ -607,7 +606,7 @@ func TestMarshalObject_WithIndent(t *testing.T) {
 }
 
 func TestMarshalObject_Deterministic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaMultiType(t)
 	g := graph.New(s)
 
@@ -646,7 +645,7 @@ func TestMarshalObject_Deterministic(t *testing.T) {
 }
 
 func TestWriteObject_WritesToBuffer(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaSimple(t)
 	g := graph.New(s)
 
@@ -675,7 +674,7 @@ func TestWriteObject_WritesToBuffer(t *testing.T) {
 }
 
 func TestMarshalObject_WithDiagnostics_NoIssues(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaSimple(t)
 	g := graph.New(s)
 
@@ -707,7 +706,7 @@ func TestMarshalObject_WithDiagnostics_NoIssues(t *testing.T) {
 // with exactly one target still serializes as an array, not a scalar.
 // This tests schema-based cardinality decision vs runtime count.
 func TestMarshalObject_ManyAssociationSingleTarget(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaWithManyAssociation(t)
 	g := graph.New(s)
 
@@ -754,7 +753,7 @@ func TestMarshalObject_ManyAssociationSingleTarget(t *testing.T) {
 // TestMarshalObject_ManyCompositionSingleChild verifies that a many-composition
 // with exactly one child still serializes as an array, not a scalar.
 func TestMarshalObject_ManyCompositionSingleChild(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
 
@@ -821,7 +820,7 @@ func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
 // TestMarshalObject_LowerSnakeFieldNames verifies that CamelCase relation names
 // are properly converted to lower_snake field names using the schema's FieldName().
 func TestMarshalObject_LowerSnakeFieldNames(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaWithCamelCaseRelation(t)
 	g := graph.New(s)
 
@@ -870,7 +869,7 @@ func TestMarshalObject_LowerSnakeFieldNames(t *testing.T) {
 // TestMarshalObject_Deterministic_MultipleSnapshots tests determinism across
 // multiple graph snapshots with different construction orders.
 func TestMarshalObject_Deterministic_MultipleSnapshots(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaMultiType(t)
 
 	adapter, err := NewAdapter(nil)
@@ -914,7 +913,7 @@ func TestMarshalObject_Deterministic_MultipleSnapshots(t *testing.T) {
 // TestMarshalObject_WithDiagnostics_Unresolved tests that unresolved edges
 // are included in the $diagnostics section.
 func TestMarshalObject_WithDiagnostics_Unresolved(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaWithAssociation(t)
 	g := graph.New(s)
 
@@ -958,7 +957,7 @@ func TestMarshalObject_WithDiagnostics_Unresolved(t *testing.T) {
 // TestMarshalObject_WithDiagnostics_Duplicates tests that duplicate records
 // are included in the $diagnostics section.
 func TestMarshalObject_WithDiagnostics_Duplicates(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaSimple(t)
 	g := graph.New(s)
 
@@ -1006,7 +1005,7 @@ func TestMarshalObject_WithDiagnostics_Duplicates(t *testing.T) {
 // TestWriteObject_ShortWrite verifies that WriteObject returns io.ErrShortWrite
 // when the writer accepts fewer bytes than provided.
 func TestWriteObject_ShortWrite(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := testSchemaSimple(t)
 	g := graph.New(s)
 

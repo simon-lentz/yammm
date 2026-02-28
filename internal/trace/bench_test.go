@@ -13,7 +13,7 @@ import (
 // and b.ResetTimer() after any setup to exclude setup cost from measurements.
 
 func BenchmarkEnabled_NilLogger(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	var logger *slog.Logger
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -23,7 +23,7 @@ func BenchmarkEnabled_NilLogger(b *testing.B) {
 }
 
 func BenchmarkDebug_NilLogger(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	var logger *slog.Logger
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -33,7 +33,7 @@ func BenchmarkDebug_NilLogger(b *testing.B) {
 }
 
 func BenchmarkDebugLazy_NilLogger(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	var logger *slog.Logger
 	fn := func() []slog.Attr {
 		return []slog.Attr{slog.String("key", "value")}
@@ -46,7 +46,7 @@ func BenchmarkDebugLazy_NilLogger(b *testing.B) {
 }
 
 func BenchmarkInfo_NilLogger(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	var logger *slog.Logger
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -56,7 +56,7 @@ func BenchmarkInfo_NilLogger(b *testing.B) {
 }
 
 func BenchmarkInfoLazy_NilLogger(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	var logger *slog.Logger
 	fn := func() []slog.Attr {
 		return []slog.Attr{slog.String("key", "value")}
@@ -69,7 +69,7 @@ func BenchmarkInfoLazy_NilLogger(b *testing.B) {
 }
 
 func BenchmarkWarn_NilLogger(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	var logger *slog.Logger
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -79,7 +79,7 @@ func BenchmarkWarn_NilLogger(b *testing.B) {
 }
 
 func BenchmarkError_NilLogger(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	var logger *slog.Logger
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -89,7 +89,7 @@ func BenchmarkError_NilLogger(b *testing.B) {
 }
 
 func BenchmarkOpBeginEnd_NilLogger(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	var logger *slog.Logger
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -113,7 +113,7 @@ func BenchmarkOpBeginEnd_NilLoggerWithRequestID(b *testing.B) {
 // Benchmarks with disabled level (logger non-nil but level too low)
 
 func BenchmarkDebug_DisabledLevel(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 	b.ReportAllocs()
@@ -124,7 +124,7 @@ func BenchmarkDebug_DisabledLevel(b *testing.B) {
 }
 
 func BenchmarkDebugLazy_DisabledLevel(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 	fn := func() []slog.Attr {
@@ -138,7 +138,7 @@ func BenchmarkDebugLazy_DisabledLevel(b *testing.B) {
 }
 
 func BenchmarkOpBeginEnd_DisabledLevel(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 	b.ReportAllocs()
@@ -152,7 +152,7 @@ func BenchmarkOpBeginEnd_DisabledLevel(b *testing.B) {
 // Benchmarks with enabled logging (for comparison)
 
 func BenchmarkDebug_EnabledLevel(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	b.ReportAllocs()
@@ -163,7 +163,7 @@ func BenchmarkDebug_EnabledLevel(b *testing.B) {
 }
 
 func BenchmarkOpBeginEnd_EnabledLevel(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	b.ReportAllocs()

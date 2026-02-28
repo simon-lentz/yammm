@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -39,7 +38,7 @@ func testConcurrentSchema(t *testing.T) *schema.Schema {
 func TestGraph_Concurrent_Add(t *testing.T) {
 	s := testConcurrentSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -47,13 +46,11 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 	const instancesPerGoroutine = 10
 
 	var wg sync.WaitGroup
-	wg.Add(numGoroutines)
 
 	for i := range numGoroutines {
-		go func(goroutineID int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range instancesPerGoroutine {
-				pk := fmt.Sprintf("person-%d-%d", goroutineID, j)
+				pk := fmt.Sprintf("person-%d-%d", i, j)
 				inst := instance.NewValidInstance(
 					"Person",
 					personType.ID(),
@@ -67,7 +64,7 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 					t.Errorf("Add() error: %v", err)
 				}
 			}
-		}(i)
+		})
 	}
 
 	wg.Wait()
@@ -85,7 +82,7 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 	s := testConcurrentSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -94,19 +91,17 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 	const sharedKey = "shared-alice"
 
 	var wg sync.WaitGroup
-	wg.Add(numGoroutines)
 
 	var successCount int
 	var mu sync.Mutex
 
 	for i := range numGoroutines {
-		go func(goroutineID int) {
-			defer wg.Done()
+		wg.Go(func() {
 			inst := instance.NewValidInstance(
 				"Person",
 				personType.ID(),
 				immutable.WrapKey([]any{sharedKey}),
-				immutable.WrapProperties(map[string]any{"name": fmt.Sprintf("Alice %d", goroutineID)}),
+				immutable.WrapProperties(map[string]any{"name": fmt.Sprintf("Alice %d", i)}),
 				nil, nil, nil,
 			)
 
@@ -121,7 +116,7 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 				successCount++
 				mu.Unlock()
 			}
-		}(i)
+		})
 	}
 
 	wg.Wait()
@@ -148,7 +143,7 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 	s := testConcurrentSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	companyType, _ := s.Type("Company")
@@ -157,14 +152,12 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 	const instancesPerGoroutine = 10
 
 	var wg sync.WaitGroup
-	wg.Add(numGoroutines * 2) // Half for Person, half for Company
 
 	// Add Persons
 	for i := range numGoroutines {
-		go func(goroutineID int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range instancesPerGoroutine {
-				pk := fmt.Sprintf("person-%d-%d", goroutineID, j)
+				pk := fmt.Sprintf("person-%d-%d", i, j)
 				inst := instance.NewValidInstance(
 					"Person",
 					personType.ID(),
@@ -177,15 +170,14 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 					t.Errorf("Add Person error: %v", err)
 				}
 			}
-		}(i)
+		})
 	}
 
 	// Add Companies
 	for i := range numGoroutines {
-		go func(goroutineID int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range instancesPerGoroutine {
-				pk := fmt.Sprintf("company-%d-%d", goroutineID, j)
+				pk := fmt.Sprintf("company-%d-%d", i, j)
 				inst := instance.NewValidInstance(
 					"Company",
 					companyType.ID(),
@@ -198,7 +190,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 					t.Errorf("Add Company error: %v", err)
 				}
 			}
-		}(i)
+		})
 	}
 
 	wg.Wait()
@@ -225,7 +217,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 func TestGraph_Concurrent_Snapshot(t *testing.T) {
 	s := testConcurrentSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -234,14 +226,12 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 	const instancesPerWriter = 50
 
 	var wg sync.WaitGroup
-	wg.Add(numWriters + numReaders)
 
 	// Writers add instances
 	for i := range numWriters {
-		go func(writerID int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range instancesPerWriter {
-				pk := fmt.Sprintf("person-%d-%d", writerID, j)
+				pk := fmt.Sprintf("person-%d-%d", i, j)
 				inst := instance.NewValidInstance(
 					"Person",
 					personType.ID(),
@@ -254,13 +244,12 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 					t.Errorf("Add error: %v", err)
 				}
 			}
-		}(i)
+		})
 	}
 
 	// Readers take snapshots concurrently
 	for range numReaders {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 10 {
 				snap := g.Snapshot()
 				// Verify snapshot is self-consistent
@@ -274,7 +263,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 					}
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -292,20 +281,18 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 func TestGraph_Concurrent_Check(t *testing.T) {
 	s := testConcurrentSchema(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
 	const numGoroutines = 20
 
 	var wg sync.WaitGroup
-	wg.Add(numGoroutines * 2)
 
 	// Half check, half add
 	for i := range numGoroutines {
-		go func(id int) {
-			defer wg.Done()
-			pk := fmt.Sprintf("person-%d", id)
+		wg.Go(func() {
+			pk := fmt.Sprintf("person-%d", i)
 			inst := instance.NewValidInstance(
 				"Person",
 				personType.ID(),
@@ -317,15 +304,14 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 			if _, err := g.Add(ctx, inst); err != nil {
 				t.Errorf("Add error: %v", err)
 			}
-		}(i)
+		})
 
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// Check should not error even during concurrent adds
 			if _, err := g.Check(ctx); err != nil {
 				t.Errorf("Check error: %v", err)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -333,7 +319,7 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 
 func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 	s := testConcurrentSchema(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 
@@ -348,13 +334,11 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 		g := New(s)
 
 		var wg sync.WaitGroup
-		wg.Add(numGoroutines)
 
 		for i := range numGoroutines {
-			go func(goroutineID int) {
-				defer wg.Done()
+			wg.Go(func() {
 				for j := range instancesPerGoroutine {
-					pk := fmt.Sprintf("person-%d-%d", goroutineID, j)
+					pk := fmt.Sprintf("person-%d-%d", i, j)
 					inst := instance.NewValidInstance(
 						"Person",
 						personType.ID(),
@@ -367,7 +351,7 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 						t.Errorf("Add error: %v", err)
 					}
 				}
-			}(i)
+			})
 		}
 
 		wg.Wait()
@@ -411,7 +395,7 @@ func BenchmarkGraph_Add_Concurrent(b *testing.B) {
 	}
 
 	personType, _ := s.Type("Person")
-	ctx := context.Background()
+	ctx := b.Context()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -442,7 +426,7 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 	// 3-schema hierarchy with cross-references
 	schemaA, schemaB, schemaC, _ := testTripleSchemaSetup(t)
 	g := New(schemaA)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add instances at each level
 	// Schema C: BaseType
@@ -509,7 +493,7 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 	// Chain of forward references that all resolve
 	s := testSchemaWithChainedAssociations(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add in order: A → B → C (all forward refs)
 	typeA := mustValidInstanceWithEdge(t, s, "TypeA",
@@ -561,7 +545,7 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 	// Test mixing inline compositions with AddComposed
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent without inline children
 	parent := mustValidInstance(t, s, "Parent",
@@ -608,7 +592,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 	// Concurrent Add + Check + Snapshot operations
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
 	companyType, _ := s.Type("Company")
@@ -617,15 +601,13 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 	const opsPerWorker = 20
 
 	var wg sync.WaitGroup
-	wg.Add(numWorkers * 3) // writers + checkers + snapshooters
 
 	// Writers add instances
 	for w := range numWorkers {
-		go func(workerID int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range opsPerWorker {
 				// Add person
-				pk := fmt.Sprintf("person-%d-%d", workerID, i)
+				pk := fmt.Sprintf("person-%d-%d", w, i)
 				person := instance.NewValidInstance(
 					"Person", personType.ID(),
 					immutable.WrapKey([]any{pk}),
@@ -637,7 +619,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 				}
 
 				// Add company
-				ck := fmt.Sprintf("company-%d-%d", workerID, i)
+				ck := fmt.Sprintf("company-%d-%d", w, i)
 				company := instance.NewValidInstance(
 					"Company", companyType.ID(),
 					immutable.WrapKey([]any{ck}),
@@ -648,32 +630,30 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 					t.Errorf("Add company error: %v", err)
 				}
 			}
-		}(w)
+		})
 	}
 
 	// Checkers run Check concurrently
 	for range numWorkers {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range opsPerWorker {
 				if _, err := g.Check(ctx); err != nil {
 					t.Errorf("Check error: %v", err)
 				}
 			}
-		}()
+		})
 	}
 
 	// Snapshotters take snapshots concurrently
 	for range numWorkers {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range opsPerWorker {
 				snap := g.Snapshot()
 				// Just verify it returns something valid
 				_ = snap.Types()
 				_ = snap.Edges()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -699,26 +679,24 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 	// Verifies that all pending edges are tracked and resolved atomically
 	s := testSchemaWithAssociation(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const numWorkers = 50
 
 	var wg sync.WaitGroup
-	wg.Add(numWorkers)
 
 	// All workers add Persons referencing same Company
 	for i := range numWorkers {
-		go func(workerID int) {
-			defer wg.Done()
+		wg.Go(func() {
 			person := mustValidInstanceWithEdge(t, s, "Person",
-				[]any{fmt.Sprintf("person-%d", workerID)},
-				map[string]any{"name": fmt.Sprintf("Person %d", workerID)},
+				[]any{fmt.Sprintf("person-%d", i)},
+				map[string]any{"name": fmt.Sprintf("Person %d", i)},
 				"employer", [][]any{{"shared-company"}})
 
 			if _, err := g.Add(ctx, person); err != nil {
-				t.Errorf("Add person-%d error: %v", workerID, err)
+				t.Errorf("Add person-%d error: %v", i, err)
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 
@@ -765,7 +743,7 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -779,25 +757,22 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 	const opsPerWorker = 50
 
 	var wg sync.WaitGroup
-	wg.Add(numWriters + numReaders)
 
 	// Writers call AddComposed
 	for w := range numWriters {
-		go func(workerID int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range opsPerWorker {
 				child := mustValidPartInstance(t, s, "Child",
-					[]any{fmt.Sprintf("c-%d-%d", workerID, i)},
-					map[string]any{"name": fmt.Sprintf("Child %d-%d", workerID, i)})
+					[]any{fmt.Sprintf("c-%d-%d", w, i)},
+					map[string]any{"name": fmt.Sprintf("Child %d-%d", w, i)})
 				_, _ = g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
 			}
-		}(w)
+		})
 	}
 
 	// Readers take snapshots and read composed children
 	for range numReaders {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range opsPerWorker {
 				snap := g.Snapshot()
 				parents := snap.InstancesOf("Parent")
@@ -808,7 +783,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 					_ = parents[0].ComposedRelations()
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -343,13 +343,11 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 		// Validate property type
 		if err := v.checkValueWithRecovery(rawValue, prop.Constraint()); err != nil {
 			// Check if this is an internal error from panic recovery
-			var internalErr *InternalError
-			if errors.As(err, &internalErr) {
+			if internalErr, ok := errors.AsType[*InternalError](err); ok {
 				return nil, nil, internalErr
 			}
 			code := ErrTypeMismatch
-			var checkErr *eval.CheckError
-			if errors.As(err, &checkErr) && checkErr.Kind == eval.KindConstraintFail {
+			if checkErr, ok := errors.AsType[*eval.CheckError](err); ok && checkErr.Kind == eval.KindConstraintFail {
 				code = ErrConstraintFail
 			}
 			issue := diag.NewIssue(
@@ -370,8 +368,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 		coercedValue, err := v.coerceValueWithRecovery(rawValue, prop.Constraint())
 		if err != nil {
 			// Check if this is an internal error from panic recovery
-			var internalErr *InternalError
-			if errors.As(err, &internalErr) {
+			if internalErr, ok := errors.AsType[*InternalError](err); ok {
 				return nil, nil, internalErr
 			}
 			// This should not happen after successful CheckValue
@@ -522,7 +519,7 @@ func (v *Validator) buildPropertyMapping(typ *schema.Type, props map[string]any,
 		for schemaName, inputs := range foldedInputs {
 			if len(inputs) > 1 {
 				// Collision: multiple input names fold to same schema property
-				sort.Strings(inputs) // Deterministic error message
+				slices.Sort(inputs) // Deterministic error message
 				issue := diag.NewIssue(
 					diag.Error,
 					ErrCaseFoldCollision,

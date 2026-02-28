@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -527,8 +526,8 @@ func (c PatternConstraint) Equal(other Constraint) bool {
 	// Order-insensitive comparison (max 2 patterns)
 	cp := slices.Clone(c.patterns)
 	op := slices.Clone(o.patterns)
-	sort.Strings(cp)
-	sort.Strings(op)
+	slices.Sort(cp)
+	slices.Sort(op)
 	return slices.Equal(cp, op)
 }
 

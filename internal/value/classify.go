@@ -182,7 +182,7 @@ func classifySlice(val any) (Kind, any) {
 	}
 
 	// Only coerce certain slice types to VectorKind:
-	// - []any (interface{}) slices with numeric elements
+	// - []any slices with numeric elements
 	// - []json.Number slices
 	// Typed slices like []int, []string should return UnspecifiedKind.
 	// Per spec: "Vector[N] | []float64, []float32, []any with numeric elements"

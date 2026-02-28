@@ -119,8 +119,8 @@ func TestRegistry_Register_CollisionDifferentContent(t *testing.T) {
 		t.Fatal("Register() with different content should return error")
 	}
 
-	var collisionErr *KeyCollisionError
-	if !errors.As(err, &collisionErr) {
+	collisionErr, ok := errors.AsType[*KeyCollisionError](err)
+	if !ok {
 		t.Errorf("Register() error = %T; want *KeyCollisionError", err)
 	}
 	if collisionErr.SourceID != sourceID {
@@ -943,16 +943,14 @@ func TestRegistry_ConcurrentRegister(t *testing.T) {
 	const numGoroutines = 100
 
 	var wg sync.WaitGroup
-	wg.Add(numGoroutines)
 
 	for range numGoroutines {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			sourceID := location.MustNewSourceID("test://concurrent.yammm")
 			// All goroutines register the same content
 			content := []byte("type Test {}")
 			_ = reg.Register(sourceID, content)
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -981,11 +979,9 @@ func TestRegistry_ConcurrentRead(t *testing.T) {
 
 	const numGoroutines = 100
 	var wg sync.WaitGroup
-	wg.Add(numGoroutines)
 
 	for range numGoroutines {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// All these reads should succeed without data races
 			_, _ = reg.ContentBySource(sourceID)
 			_ = reg.PositionAt(sourceID, 5)
@@ -994,7 +990,7 @@ func TestRegistry_ConcurrentRead(t *testing.T) {
 			_ = reg.Has(sourceID)
 			_ = reg.Len()
 			_ = reg.Keys()
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -1010,21 +1006,17 @@ func TestRegistry_ConcurrentRegisterAndRead(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Writers
-	wg.Add(numSources)
 	for i := range numSources {
-		go func(idx int) {
-			defer wg.Done()
-			sourceID := location.MustNewSourceID(fmt.Sprintf("test://source%d.yammm", idx))
-			content := fmt.Appendf(nil, "content for source %d", idx)
+		wg.Go(func() {
+			sourceID := location.MustNewSourceID(fmt.Sprintf("test://source%d.yammm", i))
+			content := fmt.Appendf(nil, "content for source %d", i)
 			_ = reg.Register(sourceID, content)
-		}(i)
+		})
 	}
 
 	// Readers
-	wg.Add(numReaders)
 	for range numReaders {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// Read operations on potentially non-existent sources
 			for i := range numSources {
 				sourceID := location.MustNewSourceID(fmt.Sprintf("test://source%d.yammm", i))
@@ -1034,7 +1026,7 @@ func TestRegistry_ConcurrentRegisterAndRead(t *testing.T) {
 			}
 			_ = reg.Len()
 			_ = reg.Keys()
-		}()
+		})
 	}
 
 	wg.Wait()

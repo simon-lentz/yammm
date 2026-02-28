@@ -1,7 +1,6 @@
 package spec_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -21,7 +20,7 @@ import (
 func TestE2E_NilUnderscore(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	records := loadTestData(t, "testdata/nil_underscore/data.json", "Record")
 
 	// Both schema variants define the same invariant using only operators:
@@ -92,7 +91,7 @@ func TestE2E_NilUnderscore(t *testing.T) {
 func TestE2E_BuiltinLen(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	records := loadTestData(t, "testdata/nil_underscore/data.json", "Record")
 
 	s, result, err := load.Load(ctx, "testdata/nil_underscore/builtin_len.yammm")

@@ -1,7 +1,6 @@
 package lsp
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -184,7 +183,7 @@ func TestOverlayPrecedenceOverDisk(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	analyzer := NewAnalyzer(logger)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	snapshot, err := analyzer.Analyze(ctx, diskPath, overlays, tmpDir)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
@@ -265,7 +264,7 @@ func TestOverlayWithSymlinkPath_StillOverridesDisk(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	analyzer := NewAnalyzer(logger)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	// Use symlink path as entry too (matches how workspace would call this)
 	snapshot, err := analyzer.Analyze(ctx, symlinkPath, overlays, linkDir)
 	if err != nil {
@@ -327,7 +326,7 @@ func TestLoadSources_PopulatesSourceRegistry(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	analyzer := NewAnalyzer(logger)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
@@ -405,7 +404,7 @@ func TestLoadSources_DiskFallback(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	analyzer := NewAnalyzer(logger)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
@@ -552,7 +551,7 @@ type TypeB {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	analyzer := NewAnalyzer(logger)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Analyze requesting b_main.yammm as entry (even though a_types is lexicographically first)
 	snapshot, err := analyzer.Analyze(ctx, bPath, overlays, tmpDir)

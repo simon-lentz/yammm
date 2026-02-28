@@ -222,15 +222,13 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 
 	// Concurrent readers
 	for i := range 10 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 100 {
-				srcID := location.MustNewSourceID(fmt.Sprintf("test://pre%c.yammm", 'a'+idx))
+				srcID := location.MustNewSourceID(fmt.Sprintf("test://pre%c.yammm", 'a'+i))
 				_, _ = r.LookupBySourceID(srcID)
 				_ = r.Len()
 			}
-		}(i)
+		})
 	}
 
 	// Wait for all goroutines

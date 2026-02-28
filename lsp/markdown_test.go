@@ -1486,7 +1486,7 @@ func BenchmarkAnalyzeMarkdownAndPublish_ManyBlocks(b *testing.B) {
 	uri := "file:///bench/many_blocks.md"
 	w.MarkdownDocumentOpened(uri, 1, content)
 
-	ctx := context.Background()
+	ctx := b.Context()
 	b.ResetTimer()
 	for b.Loop() {
 		w.AnalyzeMarkdownAndPublish(nil, ctx, uri)

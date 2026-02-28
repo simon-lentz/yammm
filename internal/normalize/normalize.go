@@ -1,10 +1,11 @@
 package normalize
 
 import (
+	"cmp"
 	"encoding"
 	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
@@ -313,17 +314,20 @@ func collectStructFieldsUncached(t reflect.Type) []structField {
 	}
 
 	// Sort by name, then by depth, then by tagged status, then by index
-	sort.Slice(fields, func(i, j int) bool {
-		if fields[i].name != fields[j].name {
-			return fields[i].name < fields[j].name
+	slices.SortFunc(fields, func(a, b collectedField) int {
+		if c := cmp.Compare(a.name, b.name); c != 0 {
+			return c
 		}
-		if len(fields[i].index) != len(fields[j].index) {
-			return len(fields[i].index) < len(fields[j].index)
+		if c := cmp.Compare(len(a.index), len(b.index)); c != 0 {
+			return c
 		}
-		if fields[i].tagged != fields[j].tagged {
-			return fields[i].tagged
+		if a.tagged != b.tagged {
+			if a.tagged {
+				return -1
+			}
+			return 1
 		}
-		return indexLess(fields[i].index, fields[j].index)
+		return indexCompare(a.index, b.index)
 	})
 
 	// Apply dominance rules: remove ambiguous duplicates
@@ -345,8 +349,8 @@ func collectStructFieldsUncached(t reflect.Type) []structField {
 	}
 
 	// Re-sort by index order for consistent output
-	sort.Slice(out, func(i, j int) bool {
-		return indexLess(out[i].index, out[j].index)
+	slices.SortFunc(out, func(a, b collectedField) int {
+		return indexCompare(a.index, b.index)
 	})
 
 	// Convert to result type
@@ -381,14 +385,9 @@ func selectDominant(fields []collectedField) (collectedField, bool) {
 	return fields[0], true
 }
 
-// indexLess compares two index paths lexicographically.
-func indexLess(a, b []int) bool {
-	for i := 0; i < len(a) && i < len(b); i++ {
-		if a[i] != b[i] {
-			return a[i] < b[i]
-		}
-	}
-	return len(a) < len(b)
+// indexCompare compares two index paths lexicographically, returning -1, 0, or +1.
+func indexCompare(a, b []int) int {
+	return slices.Compare(a, b)
 }
 
 // fieldValue navigates to a nested field value using an index path.

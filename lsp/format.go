@@ -1,7 +1,9 @@
 package lsp
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -176,11 +178,11 @@ func collectInvariantExpressionRanges(tree antlr.ParseTree) []tokenRange {
 		return nil
 	}
 
-	sort.Slice(collector.ranges, func(i, j int) bool {
-		if collector.ranges[i].start == collector.ranges[j].start {
-			return collector.ranges[i].end < collector.ranges[j].end
-		}
-		return collector.ranges[i].start < collector.ranges[j].start
+	slices.SortFunc(collector.ranges, func(a, b tokenRange) int {
+		return cmp.Or(
+			cmp.Compare(a.start, b.start),
+			cmp.Compare(a.end, b.end),
+		)
 	})
 
 	merged := make([]tokenRange, 0, len(collector.ranges))

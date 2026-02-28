@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -21,7 +20,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 	// Unqualified name only matches local types
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add a local User instance (should succeed)
 	userType, _ := mainSchema.Type("User")
@@ -68,7 +67,7 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 	// "c.Entity" matches imported c.Entity
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Entity using qualified name "c.Entity"
 	entityType, _ := commonSchema.Type("Entity")
@@ -100,7 +99,7 @@ func TestGraph_StrictResolution_UnknownAlias(t *testing.T) {
 	// Instance from completely unknown schema returns ErrSchemaMismatch
 	mainSchema, _ := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create an instance with unknown alias prefix - schema not in import chain
 	unknownType := schema.NewTypeID(location.MustNewSourceID("test://unknown.yammm"), "SomeType")
@@ -122,7 +121,7 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 	// Lookup by alias-qualified type name
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Entity
 	entityType, _ := commonSchema.Type("Entity")
@@ -160,7 +159,7 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 	// Types() returns mixed local/qualified names
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add local User
 	userType, _ := mainSchema.Type("User")
@@ -211,7 +210,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 	// Association from local to imported type
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
 	g := New(mainSchema)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// First add Entity (target)
 	entityType, _ := commonSchema.Type("Entity")
@@ -332,7 +331,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 	}
 
 	g := New(schemaA)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add b.Resource
 	resourceB, _ := schemaB.Type("Resource")

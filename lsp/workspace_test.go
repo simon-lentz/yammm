@@ -563,25 +563,21 @@ func TestWorkspace_ConcurrentDocumentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Concurrent writes
-	wg.Add(numGoroutines)
 	for i := range numGoroutines {
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			uri := "file:///test/file.yammm"
-			ws.DocumentOpened(uri, idx, "content")
-			ws.DocumentChanged(uri, idx+1, "new content")
-		}(i)
+			ws.DocumentOpened(uri, i, "content")
+			ws.DocumentChanged(uri, i+1, "new content")
+		})
 	}
 
 	// Concurrent reads
-	wg.Add(numGoroutines)
 	for range numGoroutines {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			uri := "file:///test/file.yammm"
 			_ = ws.GetDocumentSnapshot(uri)
 			_ = ws.LatestSnapshot(uri)
-		}()
+		})
 	}
 
 	wg.Wait()

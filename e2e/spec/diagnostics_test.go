@@ -1,7 +1,6 @@
 package spec_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -230,7 +229,7 @@ type Item {
 }
 `, "diag_required.yammm")
 
-	ctx := context.Background()
+	ctx := t.Context()
 	// Missing the required "name" field (and "id" primary key)
 	_, failure, err := v.ValidateOne(ctx, "Item", raw(map[string]any{
 		"extra": "value",
@@ -254,7 +253,7 @@ type Score {
 }
 `, "diag_constraint.yammm")
 
-	ctx := context.Background()
+	ctx := t.Context()
 	// value=200 exceeds the Integer[0,100] constraint
 	_, failure, err := v.ValidateOne(ctx, "Score", raw(map[string]any{
 		"id":    "s1",
@@ -281,7 +280,7 @@ type Range {
 }
 `, "diag_invariant.yammm")
 
-	ctx := context.Background()
+	ctx := t.Context()
 	// lo=10, hi=5 violates "lo < hi"
 	_, failure, err := v.ValidateOne(ctx, "Range", raw(map[string]any{
 		"id": "r1",

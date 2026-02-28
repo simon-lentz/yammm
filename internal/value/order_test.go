@@ -4,7 +4,7 @@ import (
 	"math"
 	"math/rand"
 	"regexp"
-	"sort"
+	"slices"
 	"testing"
 	"testing/quick"
 
@@ -587,12 +587,22 @@ func TestLess(t *testing.T) {
 
 	t.Run("usable with sort helpers", func(t *testing.T) {
 		values := []any{"b", "a", "c"}
-		sort.Slice(values, func(i, j int) bool {
-			less, err := value.Less(values[i], values[j])
+		slices.SortFunc(values, func(a, b any) int {
+			lessAB, err := value.Less(a, b)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			return less
+			if lessAB {
+				return -1
+			}
+			lessBA, err := value.Less(b, a)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if lessBA {
+				return 1
+			}
+			return 0
 		})
 		expected := []any{"a", "b", "c"}
 		for i := range values {

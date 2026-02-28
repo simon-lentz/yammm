@@ -1,11 +1,11 @@
 package walk
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -282,36 +282,34 @@ func (w *walker) buildEdgeLookup() map[instanceKey][]*graph.Edge {
 
 	// Sort edges within each source for determinism
 	for key, sourceEdges := range lookup {
-		sort.Slice(sourceEdges, func(i, j int) bool {
-			return edgeLess(sourceEdges[i], sourceEdges[j])
-		})
+		slices.SortFunc(sourceEdges, edgeCompare)
 		lookup[key] = sourceEdges
 	}
 
 	return lookup
 }
 
-// edgeLess compares edges for sorting.
+// edgeCompare compares edges for sorting, returning -1, 0, or +1.
 //
 // The nil target check is defensive programming - nil targets cannot occur
 // in practice because edge creation (graph.go) only creates edges with
 // resolved, non-nil targets. This check provides cheap insurance against
 // potential invariant violations.
-func edgeLess(a, b *graph.Edge) bool {
+func edgeCompare(a, b *graph.Edge) int {
 	// Compare by relation name first
-	if a.Relation() != b.Relation() {
-		return a.Relation() < b.Relation()
+	if c := cmp.Compare(a.Relation(), b.Relation()); c != 0 {
+		return c
 	}
 
 	// Then by target type
 	// Defensive: treat nil targets as equal (should never occur)
 	if a.Target() != nil && b.Target() != nil {
-		if a.Target().TypeName() != b.Target().TypeName() {
-			return a.Target().TypeName() < b.Target().TypeName()
+		if c := cmp.Compare(a.Target().TypeName(), b.Target().TypeName()); c != 0 {
+			return c
 		}
 		// Then by target key
-		return a.Target().PrimaryKey().String() < b.Target().PrimaryKey().String()
+		return cmp.Compare(a.Target().PrimaryKey().String(), b.Target().PrimaryKey().String())
 	}
 
-	return false
+	return 0
 }

@@ -22,7 +22,7 @@ func TestAddComposed_OneCardinality_Success(t *testing.T) {
 	// Add single child to (one) composition
 	s := testSchemaWithOneComposition(t) // Parent -> Child (one)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent first
 	parent := mustValidInstance(t, s, "Parent",
@@ -58,7 +58,7 @@ func TestAddComposed_OneCardinality_Duplicate(t *testing.T) {
 	// Second child → E_DUPLICATE_COMPOSED_PK
 	s := testSchemaWithOneComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -105,7 +105,7 @@ func TestAddComposed_ManyWithPK_Success(t *testing.T) {
 	// Multiple children with different PKs
 	s := testSchemaWithComposition(t) // Parent -> Child (many)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -139,7 +139,7 @@ func TestAddComposed_ManyWithPK_Duplicate(t *testing.T) {
 	// Same PK → E_DUPLICATE_COMPOSED_PK
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -186,7 +186,7 @@ func TestAddComposed_ManyWithoutPK_Appends(t *testing.T) {
 	// PK-less children always append (positional identity)
 	s := testSchemaWithPKLessChild(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add container
 	container := mustValidInstance(t, s, "Container",
@@ -220,7 +220,7 @@ func TestAddComposed_TypeMismatch(t *testing.T) {
 	// Wrong child type → E_GRAPH_INVALID_COMPOSITION
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -259,7 +259,7 @@ func TestAddComposed_ParentNotFound(t *testing.T) {
 	// Missing parent → E_GRAPH_PARENT_NOT_FOUND
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Don't add parent - try to add child directly
 	child := mustValidPartInstance(t, s, "Child",
@@ -290,7 +290,7 @@ func TestAddComposed_ParentTypeNotFound(t *testing.T) {
 	// Unknown parent type → E_GRAPH_TYPE_NOT_FOUND
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
@@ -320,7 +320,7 @@ func TestAddComposed_NotComposition(t *testing.T) {
 	// Relation is association → E_GRAPH_INVALID_COMPOSITION
 	s := testSchemaWithAssociation(t) // Person -> Company (association, not composition)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add Person
 	person := mustValidInstance(t, s, "Person",
@@ -361,7 +361,7 @@ func TestAddComposed_AfterAdd_Mixed(t *testing.T) {
 	// children that were inline in the ValidInstance during Add()
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent (without inline children for now)
 	parent := mustValidInstance(t, s, "Parent",
@@ -403,7 +403,7 @@ func TestAddComposed_NilChild(t *testing.T) {
 	// Nil child → ErrNilChild
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -424,7 +424,7 @@ func TestAddComposed_SchemaMismatch(t *testing.T) {
 	// Child validated against a different schema should fail
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent from graph's schema
 	parent := mustValidInstance(t, s, "Parent",
@@ -463,7 +463,7 @@ func TestAddComposed_SchemaMismatch(t *testing.T) {
 func TestAddComposed_NilReceiver(t *testing.T) {
 	// Nil graph → ErrNilGraph
 	var g *Graph
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a valid schema and child to pass to AddComposed
 	s := testSchemaWithComposition(t)
@@ -480,7 +480,7 @@ func TestAddComposed_ContextCancelled(t *testing.T) {
 	// Cancelled context → context.Canceled
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // Cancel immediately
 
 	child := mustValidPartInstance(t, s, "Child",
@@ -496,7 +496,7 @@ func TestAddComposed_ErrorDetails(t *testing.T) {
 	// Verify diagnostic details (parent_type, pk, relation)
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Don't add parent - trigger E_GRAPH_PARENT_NOT_FOUND
 	child := mustValidPartInstance(t, s, "Child",
@@ -549,7 +549,7 @@ func TestResult_Duplicates_IncludesComposedDuplicates_OneCardinality(t *testing.
 	// Verify that (one) cardinality violations are recorded in Result.Duplicates()
 	s := testSchemaWithOneComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
@@ -603,7 +603,7 @@ func TestResult_Duplicates_IncludesComposedDuplicates_ManyWithPK(t *testing.T) {
 	// Verify that (many) with duplicate PK is recorded in Result.Duplicates()
 	s := testSchemaWithComposition(t)
 	g := New(s)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",

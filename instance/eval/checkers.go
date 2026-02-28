@@ -568,8 +568,7 @@ func (ch *Checker) checkList(val any, c schema.Constraint) error {
 	elemConstraint := lc.Element()
 	for i, elem := range slice {
 		if err := ch.CheckValue(elem, elemConstraint); err != nil {
-			var ce *CheckError
-			if errors.As(err, &ce) {
+			if ce, ok := errors.AsType[*CheckError](err); ok {
 				return &CheckError{
 					Kind: ce.Kind,
 					Msg:  fmt.Sprintf("element [%d]: %s", i, ce.Msg),
