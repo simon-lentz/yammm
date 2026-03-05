@@ -1,6 +1,9 @@
 package location
 
-import "fmt"
+import (
+	"cmp"
+	"fmt"
+)
 
 // Span represents a half-open range [Start, End) in a source file.
 //
@@ -366,39 +369,21 @@ func mergeSpans(a, b Span) Span {
 //	 0 if a == b
 //	+1 if a > b
 func Compare(a, b Span) int {
-	// Compare sources
-	srcA, srcB := a.Source.String(), b.Source.String()
-	if srcA < srcB {
-		return -1
+	if c := cmp.Compare(a.Source.String(), b.Source.String()); c != 0 {
+		return c
 	}
-	if srcA > srcB {
-		return 1
+	if c := comparePositions(a.Start, b.Start); c != 0 {
+		return c
 	}
-
-	// Compare start positions
-	if cmp := comparePositions(a.Start, b.Start); cmp != 0 {
-		return cmp
-	}
-
-	// Compare end positions
 	return comparePositions(a.End, b.End)
 }
 
 // comparePositions compares two positions for ordering.
 func comparePositions(a, b Position) int {
-	if a.Line != b.Line {
-		if a.Line < b.Line {
-			return -1
-		}
-		return 1
+	if c := cmp.Compare(a.Line, b.Line); c != 0 {
+		return c
 	}
-	if a.Column != b.Column {
-		if a.Column < b.Column {
-			return -1
-		}
-		return 1
-	}
-	return 0
+	return cmp.Compare(a.Column, b.Column)
 }
 
 // positionBefore reports whether a is strictly before b using line/column.

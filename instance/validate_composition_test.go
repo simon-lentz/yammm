@@ -1,7 +1,6 @@
 package instance_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,7 +39,7 @@ func TestValidateCompositions_Single(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -75,7 +74,7 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -105,7 +104,7 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -136,7 +135,7 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -167,7 +166,7 @@ func TestValidateCompositions_Required_Missing(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -194,7 +193,7 @@ func TestValidateCompositions_Required_Empty(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -224,7 +223,7 @@ func TestValidateCompositions_DuplicatePK(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -254,7 +253,7 @@ func TestValidateCompositions_ChildValidationFails(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -283,7 +282,7 @@ func TestValidateCompositions_InvalidChildShape(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -310,7 +309,7 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -378,7 +377,7 @@ func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -427,7 +426,7 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -461,7 +460,7 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -513,7 +512,7 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -568,7 +567,7 @@ func TestValidateCompositions_DuplicatePK_PathFormat(t *testing.T) {
 		},
 	}
 
-	_, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	_, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	require.NotNil(t, failure)
@@ -611,7 +610,7 @@ func TestValidateCompositions_CompositePK_PathFormat(t *testing.T) {
 		},
 	}
 
-	_, failure, err := validator.ValidateOne(context.Background(), "School", raw)
+	_, failure, err := validator.ValidateOne(t.Context(), "School", raw)
 
 	require.NoError(t, err)
 	require.NotNil(t, failure)
@@ -664,7 +663,7 @@ func TestOwnership_ValidateForCompositionIsolation(t *testing.T) {
 
 	// Validate using streaming path
 	valid, failures, err := validator.ValidateForComposition(
-		context.Background(), "Person", "addresses", raws,
+		t.Context(), "Person", "addresses", raws,
 	)
 
 	require.NoError(t, err)

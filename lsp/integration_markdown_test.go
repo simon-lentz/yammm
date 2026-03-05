@@ -1,14 +1,12 @@
 package lsp
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/tliron/commonlog"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/simon-lentz/yammm/lsp/testutil"
@@ -33,7 +31,7 @@ func newMarkdownTestHarness(t *testing.T, root string) *testutil.Harness {
 func newMarkdownTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *Server) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	silenceCommonLog.Do(func() { commonlog.Configure(0, nil) })
+	silenceCommonLog()
 	server := NewServer(logger, Config{ModuleRoot: root})
 	h := testutil.NewHarness(t, server.Handler(), root)
 	err := h.Initialize()
@@ -62,7 +60,7 @@ func TestMarkdownIntegration_DiagnosticsInCodeBlock(t *testing.T) {
 	// inspect the published diagnostics.
 	uri := testutil.PathToURI(mdPath)
 	collector := &notificationCollector{}
-	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	diags := collector.diagnosticsFor(uri)
 	assert.NotEmpty(t, diags, "expected diagnostics for syntax error in code block")
@@ -285,7 +283,7 @@ func TestMarkdownIntegration_ImportRejection(t *testing.T) {
 	// Capture diagnostics via the workspace directly.
 	uri := testutil.PathToURI(mdPath)
 	collector := &notificationCollector{}
-	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	diags := collector.diagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")

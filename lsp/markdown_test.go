@@ -1,7 +1,6 @@
 package lsp
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1250,7 +1249,7 @@ func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
 	// Open markdown with syntax error to produce diagnostics.
 	content := "# Test\n\n```yammm\nnot valid schema!!!\n```\n"
 	w.MarkdownDocumentOpened(uri, 1, content)
-	w.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	// Verify non-empty diagnostics were published.
 	diags := collector.diagnosticsFor(uri)
@@ -1281,7 +1280,7 @@ func TestAnalyzeMarkdownAndPublish_ProducesDiagnostics(t *testing.T) {
 	// Content with a syntax error in the code block
 	content := "# Test\n\n```yammm\nnot valid schema!!!\n```\n"
 	w.MarkdownDocumentOpened(uri, 1, content)
-	w.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	// Verify diagnostics were published
 	diags := collector.diagnosticsFor(uri)
@@ -1304,7 +1303,7 @@ func TestAnalyzeMarkdownAndPublish_EmptyBlocks(t *testing.T) {
 	// Markdown with no yammm blocks
 	content := "# Just prose\n\nNo code here.\n"
 	w.MarkdownDocumentOpened(uri, 1, content)
-	w.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -1321,7 +1320,7 @@ func TestAnalyzeMarkdownAndPublish_ImportRejection(t *testing.T) {
 
 	content := "# Import Test\n\n```yammm\nschema \"import_test\"\n\nimport \"./sibling\" as s\n\ntype Foo {\n    id String primary\n}\n```\n"
 	w.MarkdownDocumentOpened(uri, 1, content)
-	w.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	diags := collector.diagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")
@@ -1353,7 +1352,7 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlock(t *testing.T) {
 	// A snippet block with no schema declaration — just a type definition
 	content := "# Snippet Example\n\n```yammm\ntype Foo {\n    id String primary\n    name String required\n}\n```\n"
 	w.MarkdownDocumentOpened(uri, 1, content)
-	w.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -1386,7 +1385,7 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlockWithSchemaSkipsPrefix(t *testing.
 	// A block WITH a schema declaration — should NOT get a prefix
 	content := "# Full Schema\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
 	w.MarkdownDocumentOpened(uri, 1, content)
-	w.AnalyzeMarkdownAndPublish(nil, context.Background(), uri)
+	w.AnalyzeMarkdownAndPublish(nil, t.Context(), uri)
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -1427,7 +1426,7 @@ func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	w.markdownDocs[uri].Version = 1
 	w.mu.Unlock()
 
-	w.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	// This should succeed since version matches
 	snap := w.GetMarkdownDocumentSnapshot(uri)
@@ -1444,7 +1443,7 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 
 	content := "# Valid Schema\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
 	w.MarkdownDocumentOpened(uri, 1, content)
-	w.AnalyzeMarkdownAndPublish(collector.notify, context.Background(), uri)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -1508,7 +1507,7 @@ func testServerWithLogger() *Server {
 func analyzeMarkdownForTest(t *testing.T, s *Server, uri, content string) *MarkdownDocumentSnapshot {
 	t.Helper()
 	s.workspace.MarkdownDocumentOpened(uri, 1, content)
-	s.workspace.AnalyzeMarkdownAndPublish(nil, context.Background(), uri)
+	s.workspace.AnalyzeMarkdownAndPublish(nil, t.Context(), uri)
 	snap := s.workspace.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
 	return snap

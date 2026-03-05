@@ -112,7 +112,7 @@ func TestGraph_Add_Logging(t *testing.T) {
 
 	// Add a Company instance
 	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	_, err := g.Add(context.Background(), company)
+	_, err := g.Add(t.Context(), company)
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
@@ -143,14 +143,14 @@ func TestGraph_Add_DuplicateLogging(t *testing.T) {
 
 	// Add first Company
 	company1 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	_, err := g.Add(context.Background(), company1)
+	_, err := g.Add(t.Context(), company1)
 	if err != nil {
 		t.Fatalf("First Add failed: %v", err)
 	}
 
 	// Add duplicate Company
 	company2 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Inc"})
-	_, err = g.Add(context.Background(), company2)
+	_, err = g.Add(t.Context(), company2)
 	if err != nil {
 		t.Fatalf("Second Add failed: %v", err)
 	}
@@ -179,14 +179,14 @@ func TestGraph_Add_EdgeResolutionLogging(t *testing.T) {
 
 	// Add Company first
 	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	_, err := g.Add(context.Background(), company)
+	_, err := g.Add(t.Context(), company)
 	if err != nil {
 		t.Fatalf("Add Company failed: %v", err)
 	}
 
 	// Add Person with edge to Company
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-	_, err = g.Add(context.Background(), person)
+	_, err = g.Add(t.Context(), person)
 	if err != nil {
 		t.Fatalf("Add Person failed: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestGraph_Add_ForwardReferenceLogging(t *testing.T) {
 
 	// Add Person first with edge to non-existent Company (forward reference)
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-	_, err := g.Add(context.Background(), person)
+	_, err := g.Add(t.Context(), person)
 	if err != nil {
 		t.Fatalf("Add Person failed: %v", err)
 	}
@@ -232,14 +232,14 @@ func TestGraph_Add_PendingEdgesResolvedLogging(t *testing.T) {
 
 	// Add Person first with edge to non-existent Company (creates forward reference)
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-	_, err := g.Add(context.Background(), person)
+	_, err := g.Add(t.Context(), person)
 	if err != nil {
 		t.Fatalf("Add Person failed: %v", err)
 	}
 
 	// Now add Company to resolve the forward reference
 	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	_, err = g.Add(context.Background(), company)
+	_, err = g.Add(t.Context(), company)
 	if err != nil {
 		t.Fatalf("Add Company failed: %v", err)
 	}
@@ -262,13 +262,13 @@ func TestGraph_Check_Logging(t *testing.T) {
 
 	// Add person without employer (required relation)
 	person := mustValidInstance(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"})
-	_, err := g.Add(context.Background(), person)
+	_, err := g.Add(t.Context(), person)
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
 
 	// Check should log the operation
-	_, err = g.Check(context.Background())
+	_, err = g.Check(t.Context())
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
 	}
@@ -291,13 +291,13 @@ func TestGraph_Check_UnresolvedLogging(t *testing.T) {
 
 	// Add person with reference to non-existent company (required relation)
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"missing"}})
-	_, err := g.Add(context.Background(), person)
+	_, err := g.Add(t.Context(), person)
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
 
 	// Check should log unresolved
-	_, err = g.Check(context.Background())
+	_, err = g.Check(t.Context())
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
 	}
@@ -326,14 +326,14 @@ func TestGraph_AddComposed_Logging(t *testing.T) {
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(context.Background(), parent)
+	_, err := g.Add(t.Context(), parent)
 	if err != nil {
 		t.Fatalf("Add parent failed: %v", err)
 	}
 
 	// Add composed child
 	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-	_, err = g.AddComposed(context.Background(), "Parent", FormatKey("p1"), "children", child)
+	_, err = g.AddComposed(t.Context(), "Parent", FormatKey("p1"), "children", child)
 	if err != nil {
 		t.Fatalf("AddComposed failed: %v", err)
 	}
@@ -364,21 +364,21 @@ func TestGraph_AddComposed_DuplicateLogging(t *testing.T) {
 
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(context.Background(), parent)
+	_, err := g.Add(t.Context(), parent)
 	if err != nil {
 		t.Fatalf("Add parent failed: %v", err)
 	}
 
 	// Add first child
 	child1 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-	_, err = g.AddComposed(context.Background(), "Parent", FormatKey("p1"), "children", child1)
+	_, err = g.AddComposed(t.Context(), "Parent", FormatKey("p1"), "children", child1)
 	if err != nil {
 		t.Fatalf("First AddComposed failed: %v", err)
 	}
 
 	// Add duplicate child (same PK)
 	child2 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1 Dup"})
-	_, err = g.AddComposed(context.Background(), "Parent", FormatKey("p1"), "children", child2)
+	_, err = g.AddComposed(t.Context(), "Parent", FormatKey("p1"), "children", child2)
 	if err != nil {
 		t.Fatalf("Second AddComposed failed: %v", err)
 	}
@@ -404,12 +404,12 @@ func TestGraph_NoLogging_WhenNilLogger(t *testing.T) {
 	g := New(s)
 
 	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	_, err := g.Add(context.Background(), company)
+	_, err := g.Add(t.Context(), company)
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	_, err = g.Check(context.Background())
+	_, err = g.Check(t.Context())
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
 	}

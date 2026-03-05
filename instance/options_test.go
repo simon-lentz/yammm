@@ -1,7 +1,6 @@
 package instance_test
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"testing"
@@ -37,7 +36,7 @@ func TestWithLogger(t *testing.T) {
 		Properties: map[string]any{"id": int64(1)},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 	require.NoError(t, err)
 	assert.Nil(t, failure)
 	require.NotNil(t, valid)
@@ -69,7 +68,7 @@ func TestWithMaxIssuesPerInstance(t *testing.T) {
 			},
 		}
 
-		_, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+		_, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 		require.NoError(t, err)
 		require.NotNil(t, failure)
 		// Failure should still be reported
@@ -83,7 +82,7 @@ func TestWithMaxIssuesPerInstance(t *testing.T) {
 			Properties: map[string]any{"id": int64(1), "name": "Alice", "age": int64(30)},
 		}
 
-		valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+		valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 		require.NoError(t, err)
 		assert.Nil(t, failure)
 		require.NotNil(t, valid)
@@ -97,7 +96,7 @@ func TestWithMaxIssuesPerInstance(t *testing.T) {
 			Properties: map[string]any{"id": int64(1), "name": "Alice", "age": int64(30)},
 		}
 
-		valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+		valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 		require.NoError(t, err)
 		assert.Nil(t, failure)
 		require.NotNil(t, valid)
@@ -127,7 +126,7 @@ func TestRecommendedValidatorOptions(t *testing.T) {
 		Properties: map[string]any{"id": int64(1)},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 	require.NoError(t, err)
 	assert.Nil(t, failure)
 	require.NotNil(t, valid)
@@ -159,7 +158,7 @@ func TestOptionsWithProvenance(t *testing.T) {
 			Provenance: prov,
 		}
 
-		_, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+		_, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 		require.NoError(t, err)
 		require.NotNil(t, failure)
 		// The error should include path info from provenance
@@ -174,7 +173,7 @@ func TestOptionsWithProvenance(t *testing.T) {
 			Provenance: nil,
 		}
 
-		_, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+		_, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 		require.NoError(t, err)
 		require.NotNil(t, failure)
 	})
@@ -200,7 +199,7 @@ func TestWithValueRegistry(t *testing.T) {
 		Properties: map[string]any{"id": int64(1)},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 	require.NoError(t, err)
 	assert.Nil(t, failure)
 	require.NotNil(t, valid)

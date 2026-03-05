@@ -177,13 +177,13 @@ func TestWalk_Logging(t *testing.T) {
 	g := graph.New(s)
 
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(context.Background(), parent)
+	_, err := g.Add(t.Context(), parent)
 	if err != nil {
 		t.Fatalf("Add parent failed: %v", err)
 	}
 
 	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-	_, err = g.AddComposed(context.Background(), "Parent", graph.FormatKey("p1"), "children", child)
+	_, err = g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child)
 	if err != nil {
 		t.Fatalf("AddComposed failed: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestWalk_Logging(t *testing.T) {
 
 	// Walk with logging
 	visitor := &noopVisitor{}
-	err = Walk(context.Background(), result, visitor, WithLogger(logger))
+	err = Walk(t.Context(), result, visitor, WithLogger(logger))
 	if err != nil {
 		t.Fatalf("Walk failed: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestWalkInstance_Logging(t *testing.T) {
 	g := graph.New(s)
 
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(context.Background(), parent)
+	_, err := g.Add(t.Context(), parent)
 	if err != nil {
 		t.Fatalf("Add parent failed: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestWalkInstance_Logging(t *testing.T) {
 
 	// Walk single instance with logging
 	visitor := &noopVisitor{}
-	err = WalkInstance(context.Background(), instances[0], visitor, WithLogger(logger))
+	err = WalkInstance(t.Context(), instances[0], visitor, WithLogger(logger))
 	if err != nil {
 		t.Fatalf("WalkInstance failed: %v", err)
 	}
@@ -258,13 +258,13 @@ func TestWalk_CompositionLogging(t *testing.T) {
 	g := graph.New(s)
 
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(context.Background(), parent)
+	_, err := g.Add(t.Context(), parent)
 	if err != nil {
 		t.Fatalf("Add parent failed: %v", err)
 	}
 
 	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-	_, err = g.AddComposed(context.Background(), "Parent", graph.FormatKey("p1"), "children", child)
+	_, err = g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child)
 	if err != nil {
 		t.Fatalf("AddComposed failed: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestWalk_CompositionLogging(t *testing.T) {
 
 	// Walk with logging
 	visitor := &noopVisitor{}
-	err = Walk(context.Background(), result, visitor, WithLogger(logger))
+	err = Walk(t.Context(), result, visitor, WithLogger(logger))
 	if err != nil {
 		t.Fatalf("Walk failed: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestWalk_NoLogging_WhenNilLogger(t *testing.T) {
 	g := graph.New(s)
 
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(context.Background(), parent)
+	_, err := g.Add(t.Context(), parent)
 	if err != nil {
 		t.Fatalf("Add parent failed: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestWalk_NoLogging_WhenNilLogger(t *testing.T) {
 
 	// Walk without logger - should not panic
 	visitor := &noopVisitor{}
-	err = Walk(context.Background(), result, visitor)
+	err = Walk(t.Context(), result, visitor)
 	if err != nil {
 		t.Fatalf("Walk failed: %v", err)
 	}

@@ -81,7 +81,7 @@ func TestBeginEnd_EnabledLogger(t *testing.T) {
 func TestBeginEnd_WithRequestID(t *testing.T) {
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
-	ctx := WithRequestID(context.Background(), "req-456")
+	ctx := WithRequestID(t.Context(), "req-456")
 
 	op := Begin(ctx, logger, "test.op")
 	op.End(nil)
@@ -150,7 +150,7 @@ func TestEnd_NoError(t *testing.T) {
 func TestEnd_ContextCancelled(t *testing.T) {
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	op := Begin(ctx, logger, "test.op")
 	cancel() // Cancel the context
@@ -204,7 +204,7 @@ func TestBeginEnd_DisabledLevel(t *testing.T) {
 func TestEnd_ContextDeadlineExceeded(t *testing.T) {
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-1*time.Second))
 	defer cancel()
 
 	op := Begin(ctx, logger, "test.op")
@@ -221,7 +221,7 @@ func TestEnd_ContextDeadlineExceeded(t *testing.T) {
 func TestEnd_BothErrorAndContextError(t *testing.T) {
 	h := newRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	op := Begin(ctx, logger, "test.op")

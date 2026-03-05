@@ -1,7 +1,6 @@
 package trace
 
 import (
-	"context"
 	"log/slog"
 	"testing"
 )
@@ -100,7 +99,7 @@ func BenchmarkOpBeginEnd_NilLogger(b *testing.B) {
 }
 
 func BenchmarkOpBeginEnd_NilLoggerWithRequestID(b *testing.B) {
-	ctx := WithRequestID(context.Background(), "req-123")
+	ctx := WithRequestID(b.Context(), "req-123")
 	var logger *slog.Logger
 	b.ReportAllocs()
 	b.ResetTimer()

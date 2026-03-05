@@ -1227,7 +1227,7 @@ func TestLoadString_CancellationReturnsError(t *testing.T) {
 	source := `schema "test" type Person { name String }`
 
 	// Create already-cancelled context
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	s, result, err := load.LoadString(ctx, source, "test.yammm")
@@ -1247,7 +1247,7 @@ func TestLoadString_CancellationReturnsError(t *testing.T) {
 func TestLoadString_DeadlineExceededReturnsError(t *testing.T) {
 	source := `schema "test"`
 
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-1*time.Second))
 	defer cancel()
 
 	s, _, err := load.LoadString(ctx, source, "test.yammm")
@@ -1268,7 +1268,7 @@ func TestLoad_CancellationDuringImport(t *testing.T) {
 	require.NoError(t, os.WriteFile(bPath, []byte(`schema "b" type X { id String }`), 0o600))
 
 	// Create context that gets cancelled
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	s, _, err := load.Load(ctx, aPath, load.WithModuleRoot(tmpDir))
@@ -1435,7 +1435,7 @@ func TestLoadSources_ContextCancellation(t *testing.T) {
 	}
 
 	// Create cancelled context
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	s, _, err := load.LoadSources(ctx, sources, moduleRoot)
@@ -1519,7 +1519,7 @@ type Entity {
 
 func TestLoadString_ContextCancellation(t *testing.T) {
 	// Test that LoadString handles context cancellation
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	source := `schema "test" type Test { name String }`

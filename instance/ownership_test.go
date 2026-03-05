@@ -1,7 +1,6 @@
 package instance_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,7 +51,7 @@ func TestOwnership_NestedMapIsolation(t *testing.T) {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 	require.NoError(t, err)
 	require.Nil(t, failure)
 	require.NotNil(t, valid)
@@ -114,7 +113,7 @@ func TestOwnership_NestedSliceIsolation(t *testing.T) {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(context.Background(), "Document", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Document", raw)
 	require.NoError(t, err)
 	require.Nil(t, failure)
 	require.NotNil(t, valid)
@@ -178,7 +177,7 @@ func TestOwnership_CompositionIsolation(t *testing.T) {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(context.Background(), "Order", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Order", raw)
 	require.NoError(t, err)
 	require.Nil(t, failure)
 	require.NotNil(t, valid)
@@ -237,7 +236,7 @@ func TestOwnership_DeeplyNestedCompositionIsolation(t *testing.T) {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(context.Background(), "Container", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Container", raw)
 	require.NoError(t, err)
 	require.Nil(t, failure)
 	require.NotNil(t, valid)
@@ -305,7 +304,7 @@ func TestOwnership_EdgePropertyIsolation(t *testing.T) {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 	require.NoError(t, err)
 	require.Nil(t, failure)
 	require.NotNil(t, valid)

@@ -1,6 +1,7 @@
 package value
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
@@ -320,54 +321,27 @@ func GetUint64(val any) (uint64, bool) {
 	return 0, false
 }
 
-// Int64Compare compares two int64 values and returns 1 if left > right,
-// 0 if equal, and -1 if left < right.
+// Int64Compare compares two int64 values and returns -1, 0, or +1.
 func Int64Compare(left, right int64) int {
-	if left == right {
-		return 0
-	}
-	if left > right {
-		return 1
-	}
-	return -1
+	return cmp.Compare(left, right)
 }
 
-// Uint64Compare compares two uint64 values and returns 1 if left > right,
-// 0 if equal, and -1 if left < right.
+// Uint64Compare compares two uint64 values and returns -1, 0, or +1.
 func Uint64Compare(left, right uint64) int {
-	if left == right {
-		return 0
-	}
-	if left > right {
-		return 1
-	}
-	return -1
+	return cmp.Compare(left, right)
 }
 
-// Float64Compare compares two float64 values and returns 1 if left > right,
-// 0 if equal, and -1 if left < right. Special values are ordered as:
+// Float64Compare compares two float64 values and returns -1, 0, or +1.
+// Special values are ordered as:
 // -Inf < finite < +Inf < NaN (NaN equals NaN) to keep comparisons antisymmetric.
 func Float64Compare(left, right float64) int {
 	leftClass := classifyFloat64(left)
 	rightClass := classifyFloat64(right)
 
 	if leftClass != floatClassFinite || rightClass != floatClassFinite {
-		if leftClass == rightClass {
-			return 0
-		}
-		if leftClass < rightClass {
-			return -1
-		}
-		return 1
+		return cmp.Compare(leftClass, rightClass)
 	}
-
-	if left == right {
-		return 0
-	}
-	if left > right {
-		return 1
-	}
-	return -1
+	return cmp.Compare(left, right)
 }
 
 // CompareInt64Float64 compares an int64 with a float64 exactly, without precision loss.
