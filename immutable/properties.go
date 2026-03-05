@@ -32,37 +32,17 @@ type Properties struct {
 // to props or any mutable value reachable from props. Mutation after WrapProperties
 // is undefined behavior.
 //
-// Use [WrapPropertiesClone] when the map comes from external sources or when
-// ownership cannot be verified.
-func WrapProperties(props map[string]any) Properties {
+// Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
+// caller to freely retain and mutate the original.
+func WrapProperties(props map[string]any, opts ...WrapOption) Properties {
 	if props == nil {
 		return Properties{}
 	}
 
+	cfg := resolveConfig(opts)
 	entries := make(map[string]Value, len(props))
 	for k, v := range props {
-		entries[k] = Value{val: wrapValue(v, false)}
-	}
-	sortedKeys := computeSortedKeys(entries)
-	return Properties{
-		entries:     entries,
-		sortedKeys:  sortedKeys,
-		foldedIndex: computeFoldedIndex(sortedKeys),
-	}
-}
-
-// WrapPropertiesClone wraps a deep clone of the property map.
-//
-// The caller may freely retain and mutate the original map after cloning.
-// This is safe for maps from external sources or shared references.
-func WrapPropertiesClone(props map[string]any) Properties {
-	if props == nil {
-		return Properties{}
-	}
-
-	entries := make(map[string]Value, len(props))
-	for k, v := range props {
-		entries[k] = Value{val: wrapValue(v, true)}
+		entries[k] = Value{val: wrapValue(v, cfg.clone)}
 	}
 	sortedKeys := computeSortedKeys(entries)
 	return Properties{

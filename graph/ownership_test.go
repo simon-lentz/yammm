@@ -10,7 +10,7 @@ import (
 //
 // These tests verify that the Graph maintains proper ownership semantics
 // for ValidInstance data. Since ValidInstance is immutable by design
-// (via immutable.WrapPropertiesClone in the validator), these tests verify:
+// (via immutable.WrapProperties with WithClone in the validator), these tests verify:
 //
 // 1. Each Snapshot returns independent, deep-copied instances (isolation)
 // 2. Within a single snapshot, references are consistent

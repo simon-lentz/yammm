@@ -22,32 +22,17 @@ type Map[K comparable] struct {
 // to m or any mutable value reachable from m. Mutation after WrapMap is
 // undefined behavior.
 //
-// Use [WrapMapClone] when the map comes from external sources or when
-// ownership cannot be verified.
-func WrapMap[K comparable](m map[K]any) Map[K] {
+// Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
+// caller to freely retain and mutate the original.
+func WrapMap[K comparable](m map[K]any, opts ...WrapOption) Map[K] {
 	if m == nil {
 		return Map[K]{}
 	}
 
+	cfg := resolveConfig(opts)
 	entries := make(map[K]Value, len(m))
 	for k, v := range m {
-		entries[k] = Value{val: wrapValue(v, false)}
-	}
-	return Map[K]{entries: entries}
-}
-
-// WrapMapClone wraps a deep clone of the map.
-//
-// The caller may freely retain and mutate the original map after cloning.
-// This is safe for maps from external sources or shared references.
-func WrapMapClone[K comparable](m map[K]any) Map[K] {
-	if m == nil {
-		return Map[K]{}
-	}
-
-	entries := make(map[K]Value, len(m))
-	for k, v := range m {
-		entries[k] = Value{val: wrapValue(v, true)}
+		entries[k] = Value{val: wrapValue(v, cfg.clone)}
 	}
 	return Map[K]{entries: entries}
 }

@@ -5,6 +5,29 @@ import (
 	"reflect"
 )
 
+// WrapOption configures the behavior of Wrap constructors.
+type WrapOption func(*wrapConfig)
+
+type wrapConfig struct {
+	clone bool
+}
+
+// WithClone causes the Wrap constructor to deep-clone maps and slices before
+// wrapping. The caller may freely retain and mutate the original value after
+// construction. Use this when the value comes from external sources, is shared,
+// or when ownership cannot be verified.
+func WithClone() WrapOption {
+	return func(c *wrapConfig) { c.clone = true }
+}
+
+func resolveConfig(opts []WrapOption) wrapConfig {
+	var cfg wrapConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
 // Value wraps an arbitrary Go value and provides immutable access.
 //
 // For primitive types (string, int, float64, bool, nil), the underlying value
@@ -23,18 +46,11 @@ type Value struct {
 // After calling Wrap, the caller MUST NOT retain or use any reference to v
 // or any mutable value reachable from v. Mutation after Wrap is undefined behavior.
 //
-// Use [WrapClone] when the value comes from external sources or when ownership
-// cannot be verified.
-func Wrap(v any) Value {
-	return Value{val: wrapValue(v, false)}
-}
-
-// WrapClone wraps a deep clone of the value.
-//
-// The caller may freely retain and mutate the original value after cloning.
-// This is safe for values from external sources or shared references.
-func WrapClone(v any) Value {
-	return Value{val: wrapValue(v, true)}
+// Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
+// caller to freely retain and mutate the original.
+func Wrap(v any, opts ...WrapOption) Value {
+	cfg := resolveConfig(opts)
+	return Value{val: wrapValue(v, cfg.clone)}
 }
 
 // Unwrap returns the underlying value.

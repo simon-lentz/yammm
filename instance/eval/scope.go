@@ -67,10 +67,10 @@ func PropertyScope(props immutable.Properties) Scope {
 }
 
 // PropertyScopeFromMap returns a Scope backed by a raw property map.
-// The map is wrapped using immutable.WrapPropertiesClone to ensure isolation.
+// The map is wrapped using immutable.WrapProperties with WithClone to ensure isolation.
 func PropertyScopeFromMap(props map[string]any) Scope {
 	return &propertyScope{
-		props: immutable.WrapPropertiesClone(props),
+		props: immutable.WrapProperties(props, immutable.WithClone()),
 		vars:  make(map[string]immutable.Value),
 	}
 }

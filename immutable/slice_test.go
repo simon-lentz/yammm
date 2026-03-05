@@ -135,11 +135,11 @@ func TestSlice_CloneNil(t *testing.T) {
 	}
 }
 
-func TestSlice_WrapSliceClone_Isolation(t *testing.T) {
+func TestSlice_WrapSlice_WithClone_Isolation(t *testing.T) {
 	nested := map[string]any{"key": "original"}
 	input := []any{nested}
 
-	s := WrapSliceClone(input)
+	s := WrapSlice(input, WithClone())
 
 	// Mutate original after cloning
 	nested["key"] = "mutated"

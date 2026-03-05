@@ -36,41 +36,17 @@ type Key struct {
 // This is a programmer error—key components must be JSON-compatible values.
 // This behavior matches [graph.FormatKey].
 //
-// Use [WrapKeyClone] when the components come from external sources or when
-// ownership cannot be verified.
-func WrapKey(components []any) Key {
+// Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
+// caller to freely retain and mutate the original.
+func WrapKey(components []any, opts ...WrapOption) Key {
 	if components == nil {
 		return Key{str: "[]"}
 	}
 
+	cfg := resolveConfig(opts)
 	wrapped := make([]Value, len(components))
 	for i, c := range components {
-		wrapped[i] = Value{val: wrapValue(c, false)}
-	}
-	return Key{components: wrapped, str: computeKeyString(wrapped)}
-}
-
-// WrapKeyClone wraps a deep clone of the key components.
-//
-// The caller may freely retain and mutate the original slice after cloning.
-// This is safe for slices from external sources or shared references.
-//
-// WrapKeyClone panics if any component cannot be JSON-marshaled. This includes:
-//   - Channels and functions
-//   - Cyclic data structures
-//   - NaN or Inf floating-point values
-//   - Maps with unsupported key types (e.g., struct keys; int keys are converted to strings)
-//
-// This is a programmer error—key components must be JSON-compatible values.
-// This behavior matches [graph.FormatKey].
-func WrapKeyClone(components []any) Key {
-	if components == nil {
-		return Key{str: "[]"}
-	}
-
-	wrapped := make([]Value, len(components))
-	for i, c := range components {
-		wrapped[i] = Value{val: wrapValue(c, true)}
+		wrapped[i] = Value{val: wrapValue(c, cfg.clone)}
 	}
 	return Key{components: wrapped, str: computeKeyString(wrapped)}
 }
