@@ -232,7 +232,3 @@ require (
 )
 
 tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint
-
-// Local development: replace with parent module.
-// Remove this replace directive and update the version above when publishing.
-replace github.com/simon-lentz/yammm => ../
