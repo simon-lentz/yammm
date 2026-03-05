@@ -2,6 +2,7 @@ package json
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -204,7 +205,7 @@ func serializeInstance(inst *graph.Instance, edgeIdx edgeIndex, s *schema.Schema
 
 				// Sort edges by target PK for deterministic output
 				slices.SortFunc(edges, func(a, b *graph.Edge) int {
-					return compareStrings(a.Target().PrimaryKey().String(), b.Target().PrimaryKey().String())
+					return cmp.Compare(a.Target().PrimaryKey().String(), b.Target().PrimaryKey().String())
 				})
 
 				// Determine field name and cardinality from schema
@@ -238,7 +239,7 @@ func serializeInstance(inst *graph.Instance, edgeIdx edgeIndex, s *schema.Schema
 
 		// Sort children by PK for deterministic output
 		slices.SortFunc(children, func(a, b *graph.Instance) int {
-			return compareStrings(a.PrimaryKey().String(), b.PrimaryKey().String())
+			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
 		})
 
 		// Determine field name and cardinality from schema
@@ -265,17 +266,6 @@ func serializeInstance(inst *graph.Instance, edgeIdx edgeIndex, s *schema.Schema
 	}
 
 	return obj
-}
-
-// compareStrings compares two strings lexicographically.
-func compareStrings(a, b string) int {
-	if a < b {
-		return -1
-	}
-	if a > b {
-		return 1
-	}
-	return 0
 }
 
 // unwrapValue recursively converts an immutable.Value to a JSON-compatible any.

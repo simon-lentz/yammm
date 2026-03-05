@@ -11,11 +11,11 @@ import (
 //   to v or any mutable value reachable from v
 // - Mutation after Wrap is undefined behavior (not asserted in tests)
 //
-// The WrapClone family performs a deep clone before wrapping:
+// The WithClone option performs a deep clone before wrapping:
 // - Safe with shared references
 // - Caller may freely retain and mutate the original value after cloning
 
-func TestOwnership_WrapClone_IsolatesNestedMaps(t *testing.T) {
+func TestOwnership_WithClone_IsolatesNestedMaps(t *testing.T) {
 	// Create a deeply nested structure
 	level3 := map[string]any{"key": "original"}
 	level2 := map[string]any{"level3": level3}
@@ -23,7 +23,7 @@ func TestOwnership_WrapClone_IsolatesNestedMaps(t *testing.T) {
 	outer := map[string]any{"level1": level1}
 
 	// Clone wrap the structure
-	wrapped := WrapClone(outer)
+	wrapped := Wrap(outer, WithClone())
 
 	// Mutate all levels of the original
 	level3["key"] = "mutated"
@@ -64,13 +64,13 @@ func TestOwnership_WrapClone_IsolatesNestedMaps(t *testing.T) {
 	}
 }
 
-func TestOwnership_WrapClone_IsolatesNestedSlices(t *testing.T) {
+func TestOwnership_WithClone_IsolatesNestedSlices(t *testing.T) {
 	// Create a nested slice structure
 	inner := []any{"a", "b", "c"}
 	outer := []any{inner, "other"}
 
 	// Clone wrap the structure
-	wrapped := WrapSliceClone(outer)
+	wrapped := WrapSlice(outer, WithClone())
 
 	// Mutate original
 	inner[0] = "mutated"
@@ -100,7 +100,7 @@ func TestOwnership_WrapClone_IsolatesNestedSlices(t *testing.T) {
 	}
 }
 
-func TestOwnership_WrapClone_IsolatesMixedStructures(t *testing.T) {
+func TestOwnership_WithClone_IsolatesMixedStructures(t *testing.T) {
 	// Create a mixed structure with maps and slices
 	inner := map[string]any{
 		"list":  []any{1, 2, 3},
@@ -109,7 +109,7 @@ func TestOwnership_WrapClone_IsolatesMixedStructures(t *testing.T) {
 	outer := []any{inner, map[string]any{"other": "data"}}
 
 	// Clone wrap the structure
-	wrapped := WrapSliceClone(outer)
+	wrapped := WrapSlice(outer, WithClone())
 
 	// Mutate original structures
 	inner["value"] = "mutated"
@@ -240,7 +240,7 @@ func TestOwnership_DeeplyNestedStructure(t *testing.T) {
 	root := map[string]any{"level1": level1}
 
 	// Clone wrap
-	wrapped := WrapMapClone(root)
+	wrapped := WrapMap(root, WithClone())
 
 	// Mutate all levels
 	level5["deepValue"] = "mutated"
@@ -284,7 +284,7 @@ func TestOwnership_WrapOwnershipDocumentation(t *testing.T) {
 	// relied upon.
 	//
 	// To safely work with values that may be shared or mutated after wrapping,
-	// use the WrapClone family of functions instead.
+	// use the WithClone option instead.
 
 	original := map[string]any{"key": "value"}
 
@@ -294,13 +294,13 @@ func TestOwnership_WrapOwnershipDocumentation(t *testing.T) {
 	// BAD: Do not do this! Mutating 'original' after Wrap is undefined behavior.
 	// original["key"] = "mutated" // UNDEFINED BEHAVIOR
 
-	// GOOD: Use WrapClone if you need to retain and mutate the original
+	// GOOD: Use WithClone if you need to retain and mutate the original
 	retained := map[string]any{"key": "value"}
-	wrapped := WrapMapClone(retained)
+	wrapped := WrapMap(retained, WithClone())
 	retained["key"] = "mutated" // Safe: wrapped is isolated
 
 	keyVal, _ := wrapped.Get("key")
 	if s, _ := keyVal.String(); s != "value" {
-		t.Error("WrapClone should isolate from mutations")
+		t.Error("WithClone should isolate from mutations")
 	}
 }

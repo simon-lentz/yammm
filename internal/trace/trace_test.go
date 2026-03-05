@@ -54,7 +54,7 @@ func (h *recordHandler) Clear() {
 }
 
 func TestEnabled_NilLogger(t *testing.T) {
-	if Enabled(context.Background(), nil, slog.LevelDebug) {
+	if Enabled(t.Context(), nil, slog.LevelDebug) {
 		t.Error("Enabled should return false for nil logger")
 	}
 }
@@ -90,7 +90,7 @@ func TestEnabled_DisabledLevel(t *testing.T) {
 
 func TestDebug_NilLogger(t *testing.T) {
 	// Should not panic
-	Debug(context.Background(), nil, "test message", slog.String("key", "value"))
+	Debug(t.Context(), nil, "test message", slog.String("key", "value"))
 }
 
 func TestDebug_EnabledLogger(t *testing.T) {
@@ -131,7 +131,7 @@ func TestDebug_DisabledLevel(t *testing.T) {
 	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 
-	Debug(context.Background(), logger, "test message")
+	Debug(t.Context(), logger, "test message")
 
 	records := h.Records()
 	if len(records) != 0 {
@@ -141,7 +141,7 @@ func TestDebug_DisabledLevel(t *testing.T) {
 
 func TestDebugLazy_NilLogger(t *testing.T) {
 	called := false
-	DebugLazy(context.Background(), nil, "test", func() []slog.Attr {
+	DebugLazy(t.Context(), nil, "test", func() []slog.Attr {
 		called = true
 		return nil
 	})
@@ -156,7 +156,7 @@ func TestDebugLazy_DisabledLevel(t *testing.T) {
 	logger := slog.New(h)
 
 	called := false
-	DebugLazy(context.Background(), logger, "test", func() []slog.Attr {
+	DebugLazy(t.Context(), logger, "test", func() []slog.Attr {
 		called = true
 		return nil
 	})
@@ -223,7 +223,7 @@ func TestInfoLazy_DisabledLevel(t *testing.T) {
 	logger := slog.New(h)
 
 	called := false
-	InfoLazy(context.Background(), logger, "test", func() []slog.Attr {
+	InfoLazy(t.Context(), logger, "test", func() []slog.Attr {
 		called = true
 		return nil
 	})
@@ -291,7 +291,7 @@ func TestWarnLazy_DisabledLevel(t *testing.T) {
 	logger := slog.New(h)
 
 	called := false
-	WarnLazy(context.Background(), logger, "test", func() []slog.Attr {
+	WarnLazy(t.Context(), logger, "test", func() []slog.Attr {
 		called = true
 		return nil
 	})

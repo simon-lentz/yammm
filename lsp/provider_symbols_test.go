@@ -5,8 +5,8 @@ import (
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/source"
 )
 
 // emptySnapshot creates a minimal snapshot for testing symbol structure.

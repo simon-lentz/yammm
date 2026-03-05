@@ -7,9 +7,9 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/source"
 )
 
 // SymbolKind represents the kind of a symbol.

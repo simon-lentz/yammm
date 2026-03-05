@@ -20,32 +20,17 @@ type Slice struct {
 // to s or any mutable value reachable from s. Mutation after WrapSlice is
 // undefined behavior.
 //
-// Use [WrapSliceClone] when the slice comes from external sources or when
-// ownership cannot be verified.
-func WrapSlice(s []any) Slice {
+// Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
+// caller to freely retain and mutate the original.
+func WrapSlice(s []any, opts ...WrapOption) Slice {
 	if s == nil {
 		return Slice{}
 	}
 
+	cfg := resolveConfig(opts)
 	elements := make([]Value, len(s))
 	for i, v := range s {
-		elements[i] = Value{val: wrapValue(v, false)}
-	}
-	return Slice{elements: elements}
-}
-
-// WrapSliceClone wraps a deep clone of the slice.
-//
-// The caller may freely retain and mutate the original slice after cloning.
-// This is safe for slices from external sources or shared references.
-func WrapSliceClone(s []any) Slice {
-	if s == nil {
-		return Slice{}
-	}
-
-	elements := make([]Value, len(s))
-	for i, v := range s {
-		elements[i] = Value{val: wrapValue(v, true)}
+		elements[i] = Value{val: wrapValue(v, cfg.clone)}
 	}
 	return Slice{elements: elements}
 }

@@ -215,7 +215,7 @@ func TestKey_WrapKey_PanicsOnUnmarshalableValue(t *testing.T) {
 	}
 }
 
-func TestKey_WrapKeyClone_PanicsOnUnmarshalableValue(t *testing.T) {
+func TestKey_WrapKey_WithClone_PanicsOnUnmarshalableValue(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -232,7 +232,7 @@ func TestKey_WrapKeyClone_PanicsOnUnmarshalableValue(t *testing.T) {
 		}
 	}()
 
-	_ = WrapKeyClone([]any{make(chan int)})
+	_ = WrapKey([]any{make(chan int)}, WithClone())
 }
 
 func TestKey_SingleString(t *testing.T) {
@@ -410,10 +410,10 @@ func TestKey_CloneNil(t *testing.T) {
 	}
 }
 
-func TestKey_WrapKeyClone_Isolation(t *testing.T) {
+func TestKey_WrapKey_WithClone_Isolation(t *testing.T) {
 	input := []any{"original", 100}
 
-	k := WrapKeyClone(input)
+	k := WrapKey(input, WithClone())
 
 	// Mutate original
 	input[0] = "mutated"

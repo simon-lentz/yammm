@@ -1,7 +1,6 @@
 package instance_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -85,7 +84,7 @@ func TestValidateEdges_SingleFK(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -119,7 +118,7 @@ func TestValidateEdges_Many(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Item", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Item", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -148,7 +147,7 @@ func TestValidateEdges_Optional_Nil(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -180,7 +179,7 @@ func TestValidateEdges_Required_Absent(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -209,7 +208,7 @@ func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -234,7 +233,7 @@ func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Item", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Item", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -259,7 +258,7 @@ func TestValidateEdges_MissingFK(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -287,7 +286,7 @@ func TestValidateEdges_UnknownField(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -315,7 +314,7 @@ func TestValidateEdges_UnknownField_Allowed(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -347,7 +346,7 @@ func TestValidateEdges_EdgePropertyValidation(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -390,7 +389,7 @@ func TestValidateEdges_MissingRequiredEdgeProperty(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -422,7 +421,7 @@ func TestValidateEdges_EdgePropertyInvalid(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -449,7 +448,7 @@ func TestValidateEdges_FKTypeMismatch(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -476,7 +475,7 @@ func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Item", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Item", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -501,7 +500,7 @@ func TestValidateEdges_OptionalEdgeWithEmptyArray(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Item", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Item", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -534,7 +533,7 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Item", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Item", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -583,7 +582,7 @@ func TestValidateEdges_CompositeFK(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, failure)
@@ -617,7 +616,7 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -648,7 +647,7 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 			},
 		}
 
-		valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+		valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 		require.NoError(t, err)
 		assert.Nil(t, valid, "Should fail: _target_ID != _target_id (case-sensitive)")
@@ -668,7 +667,7 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 			},
 		}
 
-		valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+		valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 		require.NoError(t, err)
 		assert.Nil(t, valid, "Should fail: _Target_id != _target_id (case-sensitive)")
@@ -686,7 +685,7 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 			},
 		}
 
-		valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+		valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 		require.NoError(t, err)
 		assert.Nil(t, failure)
@@ -714,7 +713,7 @@ func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -761,7 +760,7 @@ func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -791,7 +790,7 @@ func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Item", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Item", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -831,7 +830,7 @@ func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -887,7 +886,7 @@ func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -953,7 +952,7 @@ func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -1004,7 +1003,7 @@ func TestValidateEdges_CompositeFK_OneNullOneValid(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -1041,7 +1040,7 @@ func TestValidateEdges_CompositeFK_OneNullOneMissing(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -1095,7 +1094,7 @@ func TestValidateEdges_CompositeFK_OneNullOneInvalidType(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -1135,7 +1134,7 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(context.Background(), "Person", raw)
+	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.NoError(t, err)
 	assert.Nil(t, valid)
@@ -1358,7 +1357,7 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 				Properties: props,
 			}
 
-			valid, failure, err := validator.ValidateOne(context.Background(), "Source", raw)
+			valid, failure, err := validator.ValidateOne(t.Context(), "Source", raw)
 
 			require.NoError(t, err, tc.description)
 

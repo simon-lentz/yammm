@@ -25,8 +25,8 @@ import (
 
 // silenceCommonLog configures commonlog exactly once. The commonlog library
 // uses unsynchronized global state in Configure(), so concurrent calls from
-// parallel tests cause data races. Using sync.Once ensures thread safety.
-var silenceCommonLog sync.Once
+// parallel tests cause data races. Using sync.OnceFunc ensures thread safety.
+var silenceCommonLog = sync.OnceFunc(func() { commonlog.Configure(0, nil) })
 
 // isMarkdownURI returns true if the URI refers to a markdown file (.md or .markdown).
 // Detection uses filepath.Ext on the filesystem path (not raw URI suffix) to avoid
@@ -89,7 +89,7 @@ func NewServer(logger *slog.Logger, cfg Config) *Server {
 	}
 
 	// Silence commonlog - glsp uses it internally but we use slog for all logging.
-	silenceCommonLog.Do(func() { commonlog.Configure(0, nil) })
+	silenceCommonLog()
 
 	s.handler = protocol.Handler{
 		// Lifecycle

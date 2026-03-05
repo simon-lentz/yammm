@@ -1,6 +1,7 @@
 package diag
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"sync"
@@ -216,70 +217,44 @@ func compareIssues(a, b Issue) int {
 
 	// 2. Both span-backed: compare by span geometry
 	if aHasSpan {
-		if cmp := location.Compare(a.span, b.span); cmp != 0 {
-			return cmp
+		if c := location.Compare(a.span, b.span); c != 0 {
+			return c
 		}
 	} else {
 		// 3. Both path-only: compare by sourceName, then path
-		if a.sourceName != b.sourceName {
-			if a.sourceName < b.sourceName {
-				return -1
-			}
-			return 1
+		if c := cmp.Compare(a.sourceName, b.sourceName); c != 0 {
+			return c
 		}
-		if a.path != b.path {
-			if a.path < b.path {
-				return -1
-			}
-			return 1
+		if c := cmp.Compare(a.path, b.path); c != 0 {
+			return c
 		}
 	}
 
 	// 4. Common tie-breakers: Code, Severity, Message
-	if a.code.value != b.code.value {
-		if a.code.value < b.code.value {
-			return -1
-		}
-		return 1
+	if c := cmp.Compare(a.code.value, b.code.value); c != 0 {
+		return c
 	}
-
-	if a.severity != b.severity {
-		if a.severity < b.severity {
-			return -1
-		}
-		return 1
+	if c := cmp.Compare(a.severity, b.severity); c != 0 {
+		return c
 	}
-
-	if a.message != b.message {
-		if a.message < b.message {
-			return -1
-		}
-		return 1
+	if c := cmp.Compare(a.message, b.message); c != 0 {
+		return c
 	}
 
 	// 5. Extended tie-breakers for true total order
-	if a.hint != b.hint {
-		if a.hint < b.hint {
-			return -1
-		}
-		return 1
+	if c := cmp.Compare(a.hint, b.hint); c != 0 {
+		return c
 	}
 
 	// Include provenance fields even for span-backed issues to ensure total order.
 	// This handles hybrid issues (span + path) that may share identical spans but
 	// differ in instance path. Without this, two hybrid issues with the same span
 	// but different paths would compare equal, violating the total order claim.
-	if a.sourceName != b.sourceName {
-		if a.sourceName < b.sourceName {
-			return -1
-		}
-		return 1
+	if c := cmp.Compare(a.sourceName, b.sourceName); c != 0 {
+		return c
 	}
-	if a.path != b.path {
-		if a.path < b.path {
-			return -1
-		}
-		return 1
+	if c := cmp.Compare(a.path, b.path); c != 0 {
+		return c
 	}
 
 	// Compare details lexicographically
@@ -293,52 +268,28 @@ func compareIssues(a, b Issue) int {
 
 // compareDetails compares two Detail slices lexicographically.
 func compareDetails(a, b []Detail) int {
-	minLen := min(len(a), len(b))
-	for i := range minLen {
-		if a[i].Key != b[i].Key {
-			if a[i].Key < b[i].Key {
-				return -1
-			}
-			return 1
+	for i := range min(len(a), len(b)) {
+		if c := cmp.Compare(a[i].Key, b[i].Key); c != 0 {
+			return c
 		}
-		if a[i].Value != b[i].Value {
-			if a[i].Value < b[i].Value {
-				return -1
-			}
-			return 1
+		if c := cmp.Compare(a[i].Value, b[i].Value); c != 0 {
+			return c
 		}
 	}
-	// Shorter slice sorts first
-	if len(a) != len(b) {
-		if len(a) < len(b) {
-			return -1
-		}
-		return 1
-	}
-	return 0
+	return cmp.Compare(len(a), len(b))
 }
 
 // compareRelated compares two RelatedInfo slices lexicographically.
 func compareRelated(a, b []location.RelatedInfo) int {
-	minLen := min(len(a), len(b))
-	for i := range minLen {
-		if cmp := location.Compare(a[i].Span, b[i].Span); cmp != 0 {
-			return cmp
+	for i := range min(len(a), len(b)) {
+		if c := location.Compare(a[i].Span, b[i].Span); c != 0 {
+			return c
 		}
-		if a[i].Message != b[i].Message {
-			if a[i].Message < b[i].Message {
-				return -1
-			}
-			return 1
+		if c := cmp.Compare(a[i].Message, b[i].Message); c != 0 {
+			return c
 		}
 	}
-	if len(a) != len(b) {
-		if len(a) < len(b) {
-			return -1
-		}
-		return 1
-	}
-	return 0
+	return cmp.Compare(len(a), len(b))
 }
 
 // HasFatal reports whether any Fatal issue has been collected.

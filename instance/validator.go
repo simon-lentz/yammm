@@ -440,13 +440,13 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 	}
 
 	// Create ValidInstance with immutable wrappers
-	// Use WrapClone to ensure defensive copying from raw input
+	// Use WithClone to ensure defensive copying from raw input
 	// Use canonicalName to preserve qualified form (e.g., "alias.Type")
 	validInstance := NewValidInstance(
 		canonicalName,
 		typ.ID(),
-		immutable.WrapKeyClone(pkComponents),
-		immutable.WrapPropertiesClone(validatedProps),
+		immutable.WrapKey(pkComponents, immutable.WithClone()),
+		immutable.WrapProperties(validatedProps, immutable.WithClone()),
 		edges,
 		composed,
 		raw.Provenance,

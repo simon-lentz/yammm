@@ -281,12 +281,12 @@ func TestValue_NestedStructures(t *testing.T) {
 	}
 }
 
-func TestValue_WrapClone_Isolation(t *testing.T) {
-	// Test that WrapClone creates an isolated copy
+func TestValue_Wrap_WithClone_Isolation(t *testing.T) {
+	// Test that Wrap with WithClone creates an isolated copy
 	nested := map[string]any{"key": "original"}
 	outer := map[string]any{"nested": nested}
 
-	wrapped := WrapClone(outer)
+	wrapped := Wrap(outer, WithClone())
 
 	// Mutate original after cloning
 	nested["key"] = "mutated"
@@ -392,8 +392,8 @@ func TestDeepClone_NilInNonStringKeyedMap(t *testing.T) {
 	// Non-string-keyed maps trigger deepCloneMap path which must handle nil values
 	input := map[int]any{1: nil, 2: "value", 3: nil}
 
-	// WrapClone with non-string-keyed map goes through deepCloneMap
-	wrapped := WrapClone(input)
+	// Wrap with WithClone on non-string-keyed map goes through deepCloneMap
+	wrapped := Wrap(input, WithClone())
 
 	// The underlying value should be the cloned map with nil values preserved
 	cloned := wrapped.Unwrap()
@@ -432,7 +432,7 @@ func TestDeepClone_NilInNestedNonStringKeyedMap(t *testing.T) {
 	inner := map[int]any{1: nil, 2: "nested"}
 	input := map[string]any{"inner": inner}
 
-	wrapped := WrapClone(input)
+	wrapped := Wrap(input, WithClone())
 	m, ok := wrapped.Map()
 	if !ok {
 		t.Fatal("expected Map")
@@ -465,7 +465,7 @@ func TestDeepClone_NilInSliceWithinNonStringKeyedMap(t *testing.T) {
 	sliceWithNil := []any{nil, "hello", nil}
 	input := map[int]any{1: sliceWithNil}
 
-	wrapped := WrapClone(input)
+	wrapped := Wrap(input, WithClone())
 	cloned := wrapped.Unwrap()
 
 	m, ok := cloned.(map[int]any)
@@ -571,8 +571,8 @@ func TestWrap_NilInStringKeyedMap(t *testing.T) {
 	// This exercises the wrapValue path (not deepClone) for the most common map type.
 	input := map[string]any{"a": nil, "b": "value", "c": nil}
 
-	// Test both Wrap and WrapClone
-	for _, name := range []string{"Wrap", "WrapClone"} {
+	// Test both Wrap and Wrap with WithClone
+	for _, name := range []string{"Wrap", "WithClone"} {
 		t.Run(name, func(t *testing.T) {
 			var wrapped Value
 			if name == "Wrap" {
@@ -580,7 +580,7 @@ func TestWrap_NilInStringKeyedMap(t *testing.T) {
 				inputCopy := map[string]any{"a": nil, "b": "value", "c": nil}
 				wrapped = Wrap(inputCopy)
 			} else {
-				wrapped = WrapClone(input)
+				wrapped = Wrap(input, WithClone())
 			}
 
 			m, ok := wrapped.Map()
@@ -805,8 +805,8 @@ func TestWrap_NilInSlice(t *testing.T) {
 	// This exercises the wrapValue path (not deepClone) for slices.
 	input := []any{nil, "hello", nil, 42, nil}
 
-	// Test both Wrap and WrapClone
-	for _, name := range []string{"Wrap", "WrapClone"} {
+	// Test both Wrap and Wrap with WithClone
+	for _, name := range []string{"Wrap", "WithClone"} {
 		t.Run(name, func(t *testing.T) {
 			var wrapped Value
 			if name == "Wrap" {
@@ -814,7 +814,7 @@ func TestWrap_NilInSlice(t *testing.T) {
 				inputCopy := []any{nil, "hello", nil, 42, nil}
 				wrapped = Wrap(inputCopy)
 			} else {
-				wrapped = WrapClone(input)
+				wrapped = Wrap(input, WithClone())
 			}
 
 			s, ok := wrapped.Slice()

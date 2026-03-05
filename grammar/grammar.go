@@ -5,4 +5,4 @@
 // "go generate ./..." from the repo root or "make generate-grammars" to regenerate.
 package grammar
 
-//go:generate sh -c "cd ../../.. && make generate-grammars"
+//go:generate sh -c "cd .. && make generate-grammars"

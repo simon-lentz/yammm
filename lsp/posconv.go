@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"unicode/utf8"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/source"
 )
 
 // ByteOffsetFromLSP converts an LSP position to a byte offset.

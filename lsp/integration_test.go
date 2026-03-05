@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tliron/commonlog"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/simon-lentz/yammm/lsp/testutil"
@@ -20,7 +19,7 @@ func newTestHarness(t *testing.T, root string) *testutil.Harness {
 
 	// Use silent logging for tests
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	silenceCommonLog.Do(func() { commonlog.Configure(0, nil) })
+	silenceCommonLog()
 
 	// Create server with test configuration
 	server := NewServer(logger, Config{

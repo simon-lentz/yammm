@@ -90,7 +90,7 @@ func TestMapScope_LookupFold(t *testing.T) {
 }
 
 func TestPropertyScope(t *testing.T) {
-	props := immutable.WrapPropertiesClone(map[string]any{
+	props := immutable.WrapProperties(map[string]any{
 		"name": "Alice",
 		"age":  30,
 	})
@@ -109,7 +109,7 @@ func TestPropertyScope(t *testing.T) {
 }
 
 func TestPropertyScope_VariablePrecedence(t *testing.T) {
-	props := immutable.WrapPropertiesClone(map[string]any{
+	props := immutable.WrapProperties(map[string]any{
 		"x": "from_props",
 	})
 	scope := eval.PropertyScope(props).WithVar("x", "from_var")
@@ -141,7 +141,7 @@ func TestPropertyScopeFromMap(t *testing.T) {
 }
 
 func TestPropertyScope_LookupFold(t *testing.T) {
-	props := immutable.WrapPropertiesClone(map[string]any{
+	props := immutable.WrapProperties(map[string]any{
 		"UserName": "Alice",
 	})
 	scope := eval.PropertyScope(props)
@@ -169,7 +169,7 @@ func TestPropertyScope_LookupFold(t *testing.T) {
 }
 
 func TestPropertyScope_LookupFold_VariablePrecedence(t *testing.T) {
-	props := immutable.WrapPropertiesClone(map[string]any{
+	props := immutable.WrapProperties(map[string]any{
 		"Name": "FromProps",
 	})
 	scope := eval.PropertyScope(props).WithVar("NAME", "FromVar")
@@ -181,7 +181,7 @@ func TestPropertyScope_LookupFold_VariablePrecedence(t *testing.T) {
 }
 
 func TestPropertyScope_WithSelf(t *testing.T) {
-	props := immutable.WrapPropertiesClone(map[string]any{
+	props := immutable.WrapProperties(map[string]any{
 		"name": "Alice",
 	})
 	scope := eval.PropertyScope(props)
@@ -195,7 +195,7 @@ func TestPropertyScope_WithSelf(t *testing.T) {
 }
 
 func TestPropertyScope_LookupFold_NotFound(t *testing.T) {
-	props := immutable.WrapPropertiesClone(map[string]any{
+	props := immutable.WrapProperties(map[string]any{
 		"name": "Alice",
 	})
 	scope := eval.PropertyScope(props)
