@@ -3,9 +3,9 @@ package lsp
 import (
 	"testing"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/source"
 )
 
 func TestExtractSymbols_NilSchema(t *testing.T) {

@@ -12,10 +12,10 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/load"
+	"github.com/simon-lentz/yammm/source"
 )
 
 // Snapshot represents an immutable analysis result for a single entry file.

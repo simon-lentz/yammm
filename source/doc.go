@@ -1,10 +1,9 @@
 // Package source provides a schema source registry for content storage and
 // position conversion.
 //
-// This package is the internal foundation for managing source content and
-// computing byte offset / line-column conversions. It does NOT perform
-// formatting or excerpt rendering - that responsibility belongs exclusively
-// to the diag package.
+// This package manages source content and computes byte offset / line-column
+// conversions. It does NOT perform formatting or excerpt rendering — that
+// responsibility belongs exclusively to the diag package.
 //
 // # Responsibilities
 //

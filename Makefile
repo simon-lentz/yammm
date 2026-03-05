@@ -1,16 +1,16 @@
 ANTLR_VERSION ?= 4.13.1
 ANTLR_JAR      = tools/antlr-$(ANTLR_VERSION)-complete.jar
 ANTLR_URL      = https://www.antlr.org/download/antlr-$(ANTLR_VERSION)-complete.jar
-GRAMMAR_DIR    = internal/grammar
+GRAMMAR_DIR    = grammar
 GRAMMAR_FILE   = YammmGrammar.g4
-GENERATED_DIR  = internal/grammar
+GENERATED_DIR  = grammar
 
 .PHONY: generate-grammars
 generate-grammars: $(ANTLR_JAR)
 	@mkdir -p $(GENERATED_DIR)
-	cd $(GRAMMAR_DIR) && $(JAVA) -jar ../../$(ANTLR_JAR) -Dlanguage=Go -visitor -listener \
+	cd $(GRAMMAR_DIR) && $(JAVA) -jar ../$(ANTLR_JAR) -Dlanguage=Go -visitor -listener \
 		-package grammar \
-		-o ../../$(GENERATED_DIR) \
+		-o ../$(GENERATED_DIR) \
 		$(GRAMMAR_FILE)
 
 $(ANTLR_JAR):

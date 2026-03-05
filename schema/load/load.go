@@ -14,12 +14,12 @@ import (
 	"sync"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/internal/alias"
 	"github.com/simon-lentz/yammm/schema/internal/complete"
 	"github.com/simon-lentz/yammm/schema/internal/parse"
+	"github.com/simon-lentz/yammm/source"
 )
 
 // rootLoader provides sandboxed file access for imports using os.Root.

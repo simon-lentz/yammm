@@ -9,7 +9,7 @@ import (
 
 	"github.com/antlr4-go/antlr/v4"
 
-	"github.com/simon-lentz/yammm/internal/grammar"
+	"github.com/simon-lentz/yammm/grammar"
 )
 
 type tokenRange struct {

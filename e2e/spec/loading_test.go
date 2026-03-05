@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/build"
 	"github.com/simon-lentz/yammm/schema/load"
+	"github.com/simon-lentz/yammm/source"
 )
 
 // =============================================================================
