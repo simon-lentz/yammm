@@ -21,9 +21,11 @@ $(ANTLR_JAR):
 
 lint:
 	go tool golangci-lint run
+	cd lsp && go tool golangci-lint run
 
 lint-fix:
 	go tool golangci-lint run --fix
+	cd lsp && go tool golangci-lint run --fix
 
 PUBLIC_TEST_PACKAGES := .
 
@@ -34,6 +36,7 @@ test-public:
 .PHONY: test-internal
 test-internal:
 	go test ./...
+	cd lsp && go test ./...
 
 # LSP Server binary name
 LSP_BINARY = yammm-lsp

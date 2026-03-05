@@ -41,15 +41,15 @@ repos:
       # Keep go.mod/go.sum tidy (run on push, not every commit)
       - id: go-mod-tidy
         name: go mod tidy
-        entry: bash -c 'cd "$(git rev-parse --show-toplevel)" && go mod tidy'
+        entry: bash -c 'cd "$(git rev-parse --show-toplevel)" && go mod tidy && cd lsp && go mod tidy'
         language: system
         pass_filenames: false
-        files: ^go\.(mod|sum)$
+        files: ^(go\.(mod|sum)|lsp/go\.(mod|sum))$
         stages: [pre-commit, pre-push]
       # Run all tests including integration on push
       - id: go-test
         name: go test
-        entry: go test ./...
+        entry: bash -c 'go test ./... && cd lsp && go test ./...'
         language: system
         pass_filenames: false
         stages: [pre-commit, pre-push]

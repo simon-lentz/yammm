@@ -31,6 +31,9 @@ docs/
 # VScode stuff is indiidual
 .vscode/launch.json
 
+# Go workspace sum (generated)
+go.work.sum
+
 # antlr4 dep
 tools/*.jar
 
