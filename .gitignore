@@ -36,16 +36,3 @@ go.work.sum
 
 # antlr4 dep
 tools/*.jar
-
-# VS Code LSP extension artifacts
-node_modules/
-out/
-*.vsix
-.vscode-test/
-lsp/bin/
-lsp/editors/vscode/bin/
-/yammm-lsp
-
-# LSP log output
-lsp/log/*
-!lsp/log/.gitkeep

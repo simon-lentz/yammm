@@ -20,7 +20,7 @@ repos:
       - id: actionlint
         name: actionlint (GHA)
         files: ^\.github/workflows/.*\.ya?ml$
-  # --- Go formatting & imports (multi-module auto-discovery) ---
+  # --- Go formatting & imports ---
   - repo: https://github.com/tekwizely/pre-commit-golang
     rev: v1.0.0-rc.4
     hooks:
@@ -30,25 +30,18 @@ repos:
         name: goimports
       - id: go-mod-tidy-repo
         name: go mod tidy
-  # --- shell scripts ---
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
-    hooks:
-      - id: shellcheck
-        name: shellcheck scripts
-        files: ^scripts/.*\.sh$
-  # --- multi-module lint & test (scripts handle root + lsp) ---
+  # --- lint & test ---
   - repo: local
     hooks:
       - id: golangci-lint
         name: golangci-lint
-        language: script
+        language: system
         pass_filenames: false
         files: \.go$
-        entry: scripts/lint.sh
+        entry: go tool golangci-lint run
       - id: go-test
         name: go test
-        language: script
+        language: system
         pass_filenames: false
         always_run: true
-        entry: scripts/test.sh
+        entry: go test ./...
