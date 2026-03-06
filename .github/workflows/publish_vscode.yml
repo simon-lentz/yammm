@@ -77,7 +77,7 @@ jobs:
         working-directory: lsp/editors/vscode
         env:
           PRE_RELEASE: ${{ inputs.pre_release && '--pre-release' || '' }}
-        run: npx vsce package --target ${{ matrix.target }} --no-dependencies $PRE_RELEASE
+        run: npx vsce package --target ${{ matrix.target }} --no-dependencies "$PRE_RELEASE"
       - name: Upload VSIX
         uses: actions/upload-artifact@v6
         with:
