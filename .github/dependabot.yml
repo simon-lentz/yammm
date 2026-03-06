@@ -1,30 +1,22 @@
 version: 2
 updates:
-  # Go modules (go.mod + go.sum)
-  - package-ecosystem: "gomod"
-    directory: "/"
+  - package-ecosystem: gomod
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "08:45"
-      timezone: "America/New_York"
-    open-pull-requests-limit: 10
+      interval: monthly
     groups:
       runtime-minor-patch:
-        # Keep runtime dependency bumps low-risk and bundled
-        update-types: ["minor", "patch"]
+        update-types: [minor, patch]
     commit-message:
       prefix: "build(deps)"
-      include: "scope"
-  # Keep GitHub Actions up-to-date
-  - package-ecosystem: "github-actions"
-    directory: "/"
+      include: scope
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "America/New_York"
-    open-pull-requests-limit: 5
+      interval: monthly
     groups:
       actions-minor-patch:
-        update-types: ["minor", "patch"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "build(deps)"
+      include: scope

@@ -1,62 +1,54 @@
 repos:
-  # Generic text hygiene
+  # --- text hygiene ---
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-added-large-files
       - id: check-yaml
       - id: check-json
+  # --- yaml formatting ---
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.21.0
+    hooks:
+      - id: yamlfmt
+  # --- GHA linting ---
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.8
+    rev: v1.7.11
     hooks:
       - id: actionlint
         name: actionlint (GHA)
         files: ^\.github/workflows/.*\.ya?ml$
-  # Go formatting + basic Go workflows
+  # --- Go formatting & imports (multi-module auto-discovery) ---
+  - repo: https://github.com/tekwizely/pre-commit-golang
+    rev: v1.0.0-rc.4
+    hooks:
+      - id: go-fumpt-repo
+        name: gofumpt
+      - id: go-imports-repo
+        name: goimports
+      - id: go-mod-tidy-repo
+        name: go mod tidy
+  # --- shell scripts ---
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        name: shellcheck scripts
+        files: ^scripts/.*\.sh$
+  # --- multi-module lint & test (scripts handle root + lsp) ---
   - repo: local
     hooks:
-      # YAML formatting
-      - id: yamlfmt
-        name: yamlfmt
-        description: This hook uses github.com/google/yamlfmt to format yaml files. Requires Go >1.18 to be installed.
-        entry: yamlfmt
-        language: golang
-        types: [yaml]
-      # Stricter gofmt
-      - id: gofumpt
-        name: gofumpt
-        entry: gofumpt
-        language: system
-        types: [go]
-        args: ["-w"]
-      # Imports: add/remove + format (optional but nice)
-      - id: goimports
-        name: goimports
-        entry: goimports
-        language: system
-        types: [go]
-        args: ["-w"]
-      # Keep go.mod/go.sum tidy (run on push, not every commit)
-      - id: go-mod-tidy
-        name: go mod tidy
-        entry: bash -c 'cd "$(git rev-parse --show-toplevel)" && go mod tidy && cd lsp && go mod tidy'
-        language: system
-        pass_filenames: false
-        files: ^(go\.(mod|sum)|lsp/go\.(mod|sum))$
-        stages: [pre-commit, pre-push]
-      # Run all tests including integration on push
-      - id: go-test
-        name: go test
-        entry: bash -c 'go test ./... && cd lsp && go test ./...'
-        language: system
-        pass_filenames: false
-        stages: [pre-commit, pre-push]
-      # Static analysis
       - id: golangci-lint
         name: golangci-lint
-        entry: make lint
-        language: system
+        language: script
         pass_filenames: false
-        stages: [pre-commit, pre-push]
+        files: \.go$
+        entry: scripts/lint.sh
+      - id: go-test
+        name: go test
+        language: script
+        pass_filenames: false
+        always_run: true
+        entry: scripts/test.sh
