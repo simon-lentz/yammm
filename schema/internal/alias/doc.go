@@ -18,6 +18,6 @@
 // # Grammar Synchronization
 //
 // The reserved keyword list must stay synchronized with the grammar file
-// (internal/grammar/YammmGrammar.g4). The Grammar-Alias Synchronization Test
+// (grammar/YammmGrammar.g4). The Grammar-Alias Synchronization Test
 // in alias_test.go parses the grammar and verifies consistency.
 package alias

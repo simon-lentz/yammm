@@ -1,4 +1,4 @@
-// Package grammar contains ANTLR offset semantics verification tests.
+// Package parse contains ANTLR offset semantics verification tests.
 //
 // These tests verify the critical assumption that ANTLR-Go's Token.GetStart()
 // and Token.GetStop() return rune (character) indices, NOT byte indices.
@@ -12,7 +12,7 @@
 //
 // If these tests fail after an ANTLR-Go version upgrade, span derivation
 // in schema/internal/parse and adapter/json must be re-verified.
-package grammar
+package parse_test
 
 import (
 	"strings"
@@ -20,6 +20,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/antlr4-go/antlr/v4"
+
+	"github.com/simon-lentz/yammm/grammar"
 )
 
 // TestInputStreamRuneBasedIndexing verifies that InputStream.Size() returns
@@ -327,7 +329,7 @@ func TestLexerTokenOffsetsAreRuneBased(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := antlr.NewInputStream(tt.input)
-			lexer := NewYammmGrammarLexer(input)
+			lexer := grammar.NewYammmGrammarLexer(input)
 			stream := antlr.NewCommonTokenStream(lexer, 0)
 			stream.Fill()
 
@@ -422,7 +424,7 @@ func TestSLCommentTokensHiddenChannelAndNewlineOwnership(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := antlr.NewInputStream(tt.input)
-			lexer := NewYammmGrammarLexer(input)
+			lexer := grammar.NewYammmGrammarLexer(input)
 			stream := antlr.NewCommonTokenStream(lexer, 0)
 			stream.Fill()
 
@@ -432,7 +434,7 @@ func TestSLCommentTokensHiddenChannelAndNewlineOwnership(t *testing.T) {
 			commentTokenIdx := -1
 			commentCount := 0
 			for i, tok := range tokens {
-				if tok.GetTokenType() == YammmGrammarLexerSL_COMMENT {
+				if tok.GetTokenType() == grammar.YammmGrammarLexerSL_COMMENT {
 					commentCount++
 					if tok.GetText() == tt.commentText {
 						commentToken = tok
@@ -451,8 +453,8 @@ func TestSLCommentTokensHiddenChannelAndNewlineOwnership(t *testing.T) {
 				t.Fatalf("SL_COMMENT token index not found for %q", tt.commentText)
 			}
 
-			if got := commentToken.GetTokenType(); got != YammmGrammarLexerSL_COMMENT {
-				t.Errorf("SL_COMMENT token type = %d, want %d", got, YammmGrammarLexerSL_COMMENT)
+			if got := commentToken.GetTokenType(); got != grammar.YammmGrammarLexerSL_COMMENT {
+				t.Errorf("SL_COMMENT token type = %d, want %d", got, grammar.YammmGrammarLexerSL_COMMENT)
 			}
 			if got := commentToken.GetChannel(); got != antlr.TokenHiddenChannel {
 				t.Errorf("SL_COMMENT channel = %d, want hidden channel %d", got, antlr.TokenHiddenChannel)
@@ -481,15 +483,15 @@ func TestSLCommentTokensHiddenChannelAndNewlineOwnership(t *testing.T) {
 				}
 
 				next := tokens[commentTokenIdx+1]
-				if next.GetTokenType() != YammmGrammarLexerWS {
-					t.Fatalf("token after SL_COMMENT type = %d, want WS (%d)", next.GetTokenType(), YammmGrammarLexerWS)
+				if next.GetTokenType() != grammar.YammmGrammarLexerWS {
+					t.Fatalf("token after SL_COMMENT type = %d, want WS (%d)", next.GetTokenType(), grammar.YammmGrammarLexerWS)
 				}
 				if !strings.HasPrefix(next.GetText(), "\n") {
 					t.Errorf("WS token after SL_COMMENT should start with newline, got %q", next.GetText())
 				}
 			} else if commentTokenIdx+1 < len(tokens) {
 				next := tokens[commentTokenIdx+1]
-				if next.GetTokenType() == YammmGrammarLexerWS && strings.HasPrefix(next.GetText(), "\n") {
+				if next.GetTokenType() == grammar.YammmGrammarLexerWS && strings.HasPrefix(next.GetText(), "\n") {
 					t.Errorf("did not expect newline WS token after EOF SL_COMMENT, got %q", next.GetText())
 				}
 			}
@@ -535,7 +537,7 @@ func TestCharIndexToByteOffsetConversion(t *testing.T) {
 }
 
 // charIndexToByteOffset converts a character (rune) index to a byte offset.
-// This is the canonical conversion algorithm used by v2/schema/internal/parse.
+// This is the canonical conversion algorithm used by schema/internal/parse.
 //
 // ANTLR's NewInputStream(string) uses character indices (counting runes),
 // but source registries use byte offsets. This function performs the conversion.
@@ -563,12 +565,12 @@ func charIndexToByteOffset(content []byte, charIdx int) int {
 }
 
 // TestGetStopIsInclusive verifies ANTLR's GetStop() returns an inclusive index.
-// This is important because v2/location.Span uses half-open intervals [start, end).
+// This is important because location.Span uses half-open intervals [start, end).
 func TestGetStopIsInclusive(t *testing.T) {
 	// Use a simple schema with a known token
 	input := `schema "X"`
 	is := antlr.NewInputStream(input)
-	lexer := NewYammmGrammarLexer(is)
+	lexer := grammar.NewYammmGrammarLexer(is)
 	stream := antlr.NewCommonTokenStream(lexer, 0)
 	stream.Fill()
 
@@ -608,7 +610,7 @@ func TestGetStopIsInclusive(t *testing.T) {
 		t.Errorf("GetText(%d, %d) = %q, want %q", start, stop, text, `"X"`)
 	}
 
-	// Document the half-open conversion needed for v2/location.Span
+	// Document the half-open conversion needed for location.Span
 	// For half-open [start, end), end = stop + 1
 	halfOpenEnd := stop + 1
 	t.Logf("ANTLR inclusive: [%d, %d], Half-open for Span: [%d, %d)", start, stop, start, halfOpenEnd)

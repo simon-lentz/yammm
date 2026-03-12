@@ -42,7 +42,7 @@ type PositionRegistry interface {
 // uses byte offsets for consistency with Go strings and UTF-8 handling.
 // This interface enables the conversion between these coordinate systems.
 //
-// The primary implementation is internal/source.Registry.
+// The primary implementation is source.Registry.
 type RuneOffsetConverter interface {
 	// RuneToByteOffset converts a rune offset to a byte offset for the given source.
 	//

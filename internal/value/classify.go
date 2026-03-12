@@ -45,7 +45,6 @@ func (k Kind) String() string {
 
 // Registry allows custom type recognition via reflect.Type hooks.
 //
-// The Registry hook is designed for Phase 3 (v2/instance/eval) integration.
 // When instance validation is implemented, the evaluator will populate
 // BaseKindOfReflectType with schema-aware type recognition. Until then,
 // a zero-value Registry provides complete functionality via built-in detection.

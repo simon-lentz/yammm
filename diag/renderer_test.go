@@ -27,40 +27,6 @@ func (m *mockSourceProvider) Content(span location.Span) ([]byte, bool) {
 	return content, ok
 }
 
-// mockLineIndexProvider implements LineIndexProvider for testing.
-type mockLineIndexProvider struct {
-	*mockSourceProvider
-	lineStarts map[location.SourceID][]int // line -> byte offset
-}
-
-func newMockLineIndexProvider() *mockLineIndexProvider {
-	return &mockLineIndexProvider{
-		mockSourceProvider: newMockSourceProvider(),
-		lineStarts:         make(map[location.SourceID][]int),
-	}
-}
-
-func (m *mockLineIndexProvider) AddWithIndex(source location.SourceID, content string) {
-	m.Add(source, content)
-
-	// Build line index
-	offsets := []int{0} // Line 1 starts at byte 0
-	for i := range len(content) {
-		if content[i] == '\n' {
-			offsets = append(offsets, i+1)
-		}
-	}
-	m.lineStarts[source] = offsets
-}
-
-func (m *mockLineIndexProvider) LineStartByte(source location.SourceID, line int) (int, bool) {
-	offsets, ok := m.lineStarts[source]
-	if !ok || line < 1 || line > len(offsets) {
-		return 0, false
-	}
-	return offsets[line-1], true
-}
-
 func TestNewRenderer_Defaults(t *testing.T) {
 	r := NewRenderer()
 
@@ -675,21 +641,6 @@ func TestRenderer_Excerpt_SourceNotAvailable(t *testing.T) {
 	// Should gracefully omit excerpt
 	if output == "" {
 		t.Error("should still produce basic output")
-	}
-}
-
-func TestWithLSPByteFallback(t *testing.T) {
-	// Test that the option is accepted (actual LSP output tested in lsp_test.go)
-	r1 := NewRenderer(WithLSPByteFallback(LSPByteFallbackOmit))
-	r2 := NewRenderer(WithLSPByteFallback(LSPByteFallbackApproximate))
-
-	// Both should produce valid output
-	issue := NewIssue(Error, E_SYNTAX, "test").Build()
-	if r1.FormatIssue(issue) == "" {
-		t.Error("r1 should produce output")
-	}
-	if r2.FormatIssue(issue) == "" {
-		t.Error("r2 should produce output")
 	}
 }
 

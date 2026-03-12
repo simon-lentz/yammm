@@ -13,11 +13,15 @@
 //	  - location: Source positions, spans, and canonical paths
 //	  - diag: Structured diagnostics with stable error codes
 //	  - immutable: Read-only wrappers for safe data sharing
+//	  - source: Source content storage and position conversion
 //
 //	Core library tier:
 //	  - schema: Type system, constraints, and schema compilation
 //	  - instance: Instance validation and constraint checking
 //	  - graph: Instance graph construction and integrity checking
+//
+//	Grammar tier:
+//	  - grammar: ANTLR4-generated lexer, parser, and visitor
 //
 //	Adapter tier:
 //	  - adapter/json: JSON parsing with location tracking
@@ -77,11 +81,12 @@
 //   - [github.com/simon-lentz/yammm/diag]: Structured diagnostics
 //   - [github.com/simon-lentz/yammm/location]: Source location tracking
 //   - [github.com/simon-lentz/yammm/immutable]: Read-only data wrappers
+//   - [github.com/simon-lentz/yammm/source]: Source content storage and position conversion
 //   - [github.com/simon-lentz/yammm/schema]: Schema types and constraints
 //   - [github.com/simon-lentz/yammm/schema/load]: Schema file loading
 //   - [github.com/simon-lentz/yammm/schema/build]: Programmatic schema building
 //   - [github.com/simon-lentz/yammm/instance]: Instance validation
 //   - [github.com/simon-lentz/yammm/graph]: Instance graph management
+//   - [github.com/simon-lentz/yammm/grammar]: ANTLR4-generated lexer/parser
 //   - [github.com/simon-lentz/yammm/adapter/json]: JSON adapter
-//   - [github.com/simon-lentz/yammm/lsp]: Language Server Protocol server
 package yammm

@@ -137,9 +137,9 @@ The module is organized into layers with strict dependency ordering:
 
 ```text
 Primary API (stable)     : schema, instance, graph
-Foundation (stable)      : location, diag, immutable
+Foundation (stable)      : location, diag, immutable, source
 Adapter                  : adapter/json
-Tooling                  : lsp
+Grammar                  : grammar (ANTLR4-generated lexer/parser)
 Internal                 : internal/* (no compatibility guarantees)
 ```
 
@@ -154,6 +154,8 @@ Internal                 : internal/* (no compatibility guarantees)
 | `graph` | Instance graph construction and integrity checking |
 | `diag` | Structured diagnostics with stable error codes |
 | `location` | Source positions, spans, and canonical paths |
+| `source` | Source content storage and position conversion |
+| `grammar` | ANTLR4-generated lexer, parser, and visitor |
 | `adapter/json` | JSON/JSONC parsing with location tracking |
 
 ### Entry Point Pattern
@@ -257,8 +259,8 @@ The `diag` package provides structured diagnostics with stable error codes:
 
 ```go
 if !result.OK() {
-    for _, issue := range result.Issues() {
-        fmt.Printf("[%s] %s: %s\n", issue.Severity, issue.Code, issue.Message)
+    for issue := range result.Issues() {
+        fmt.Printf("[%s] %s: %s\n", issue.Severity(), issue.Code(), issue.Message())
     }
 }
 ```
@@ -267,7 +269,7 @@ Diagnostic codes are stable identifiers for programmatic matching (e.g., `E_TYPE
 
 ## IDE Support
 
-The `lsp` package provides a Language Server Protocol server for YAMMM schema files:
+The [yammm-lsp](https://github.com/simon-lentz/yammm-lsp) repository provides a Language Server Protocol server for YAMMM schema files:
 
 - Real-time diagnostics (parse errors, semantic errors, import issues)
 - Go-to-definition for types, properties, and imports
@@ -276,34 +278,7 @@ The `lsp` package provides a Language Server Protocol server for YAMMM schema fi
 - Document symbols for outline and breadcrumbs
 - Formatting with canonical style
 
-See [`lsp/editors/vscode/README.md`](lsp/editors/vscode/README.md) for VS Code extension setup.
-
-### LSP Quickstart
-
-Get the full VS Code editing experience for `.yammm` files in a few steps:
-
-**Prerequisites**: Go 1.26+, Node.js 18+, npm
-
-```bash
-# Clone the repository
-git clone https://github.com/simon-lentz/yammm.git
-cd yammm
-
-# Build the LSP server and VS Code extension
-make build-vscode
-
-# Package the extension as a .vsix file
-make package-vscode
-```
-
-Then install in VS Code:
-
-1. Open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-2. Run **Extensions: Install from VSIX...**
-3. Select `lsp/editors/vscode/yammm-0.1.0.vsix`
-4. Reload VS Code
-
-Open any `.yammm` file to enjoy syntax highlighting, diagnostics, completions, go-to-definition, and formatting.
+Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) or see the [yammm-lsp repository](https://github.com/simon-lentz/yammm-lsp) for development setup.
 
 ## Documentation
 

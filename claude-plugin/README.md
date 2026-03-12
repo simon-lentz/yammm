@@ -20,9 +20,9 @@ The yammm-lsp binary is bundled with the VS Code extension. Install it from the 
 If you need the LSP binary outside of VS Code, clone the repo and build it:
 
 ```bash
-git clone https://github.com/simon-lentz/yammm.git
-cd yammm
-make build-lsp
+git clone https://github.com/simon-lentz/yammm-lsp.git
+cd yammm-lsp
+make build
 ```
 
 Verify the binary is in your PATH:
@@ -33,7 +33,7 @@ yammm-lsp --version
 
 **Local extension development**:
 
-To develop the VS Code extension or yammm-lsp locally, follow the [LSP Quickstart](https://github.com/simon-lentz/yammm#lsp-quickstart) in the yammm README.
+To develop the VS Code extension or yammm-lsp locally, see the [yammm-lsp repository](https://github.com/simon-lentz/yammm-lsp) README.
 
 ### 2. Install the plugin
 
@@ -114,7 +114,7 @@ cp /path/to/yammm/claude-plugin/settings-template.local.md .claude/yammm.local.m
 The plugin checks for `yammm-lsp` at startup. If you see this warning:
 
 1. Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) (recommended — the LSP binary is bundled)
-2. Or build the standalone binary: `git clone https://github.com/simon-lentz/yammm.git && cd yammm && make build-lsp`
+2. Or build the standalone binary: `git clone https://github.com/simon-lentz/yammm-lsp.git && cd yammm-lsp && make build`
 3. Verify it is in your PATH: `which yammm-lsp`
 
 ### No LSP diagnostics appearing
@@ -134,4 +134,4 @@ The LSP resolves imports relative to the module root. If imports fail:
 
 - [yammm repository](https://github.com/simon-lentz/yammm)
 - [Language specification](https://github.com/simon-lentz/yammm/blob/main/docs/SPEC.md)
-- [VS Code extension](https://github.com/simon-lentz/yammm/tree/main/lsp/editors/vscode)
+- [VS Code extension](https://github.com/simon-lentz/yammm-lsp/tree/main/editors/vscode)
