@@ -75,7 +75,6 @@
 //
 //   - Text output with optional source excerpts and ANSI colors
 //   - JSON output with stable wire format
-//   - LSP-compatible diagnostics with UTF-16 character offsets
 //
 // Example:
 //

@@ -28,7 +28,6 @@ type sourceEntry struct {
 // Registry is thread-safe for concurrent access. It implements:
 //   - [location.PositionRegistry] for byte offset → Position conversion
 //   - [diag.SourceProvider] for source content lookup (via Content)
-//   - [diag.LineIndexProvider] for line start byte lookup
 type Registry struct {
 	mu      sync.RWMutex
 	entries map[location.SourceID]*sourceEntry
@@ -165,9 +164,6 @@ func (r *Registry) PositionAt(source location.SourceID, byteOffset int) location
 }
 
 // LineStartByte returns the byte offset of the start of the given line.
-//
-// This method implements [diag.LineIndexProvider] for LSP UTF-16 offset
-// computation.
 //
 // Lines are 1-based. Returns (0, false) if:
 //   - The source is not registered

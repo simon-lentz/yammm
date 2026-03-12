@@ -54,7 +54,6 @@
 //
 //   - [location.PositionRegistry] — via PositionAt method
 //   - [diag.SourceProvider] — via Content method (accepts [location.Span])
-//   - [diag.LineIndexProvider] — via LineStartByte method
 //
 // # Usage
 //

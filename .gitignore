@@ -35,4 +35,4 @@ docs/
 go.work.sum
 
 # antlr4 dep
-tools/*.jar
+*.jar

@@ -19,32 +19,6 @@ type SourceProvider interface {
 	Content(span location.Span) ([]byte, bool)
 }
 
-// LineIndexProvider is an optional extension for efficient LSP UTF-16
-// offset computation.
-//
-// Registry-backed implementations (*SourceRegistry, *Sources) implement
-// this interface. The Renderer checks if the SourceProvider also implements
-// LineIndexProvider for optimized byte-to-character offset conversion.
-type LineIndexProvider interface {
-	// LineStartByte returns the byte offset of the start of the given line.
-	// Lines are 1-based. Returns (0, false) if the source or line is unknown.
-	LineStartByte(source location.SourceID, line int) (int, bool)
-}
-
-// LSPByteFallback controls behavior when byte offsets are unknown for LSP output.
-type LSPByteFallback uint8
-
-const (
-	// LSPByteFallbackOmit omits diagnostics with unknown byte offsets from LSP output.
-	// This is the default and ensures correctness.
-	LSPByteFallbackOmit LSPByteFallback = iota
-
-	// LSPByteFallbackApproximate uses Column-1 as the UTF-16 offset when byte
-	// offset is unknown. This is correct for ASCII/BMP text but incorrect for
-	// non-BMP characters (emoji, etc.).
-	LSPByteFallbackApproximate
-)
-
 // rendererConfig holds renderer configuration.
 type rendererConfig struct {
 	provider            SourceProvider
@@ -54,7 +28,6 @@ type rendererConfig struct {
 	colorize            bool
 	distinguishFatal    bool
 	truncationIndicator string
-	lspByteFallback     LSPByteFallback
 }
 
 // RendererOption configures Renderer behavior.
@@ -127,13 +100,6 @@ func WithTruncationIndicator(s string) RendererOption {
 	}
 }
 
-// WithLSPByteFallback sets the behavior when byte offsets are unknown for LSP output.
-func WithLSPByteFallback(mode LSPByteFallback) RendererOption {
-	return func(c *rendererConfig) {
-		c.lspByteFallback = mode
-	}
-}
-
 // Renderer provides formatting for diagnostic output.
 //
 // Create with [NewRenderer] and configure with [RendererOption] functions.
@@ -145,7 +111,6 @@ type Renderer struct {
 	colorize            bool
 	distinguishFatal    bool
 	truncationIndicator string
-	lspByteFallback     LSPByteFallback
 }
 
 // NewRenderer creates a renderer with the given options.
@@ -167,7 +132,6 @@ func NewRenderer(opts ...RendererOption) *Renderer {
 		colorize:            cfg.colorize,
 		distinguishFatal:    cfg.distinguishFatal,
 		truncationIndicator: cfg.truncationIndicator,
-		lspByteFallback:     cfg.lspByteFallback,
 	}
 }
 

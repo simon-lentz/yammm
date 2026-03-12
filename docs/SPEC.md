@@ -11,7 +11,7 @@ YAMMM is designed for structured data modeling with a focus on:
 - Invariants expressed as constraint expressions
 - Structured diagnostics with stable error codes
 
-The grammar is compact and regular, allowing for easy analysis by automatic tools. We use [ANTLR](https://en.wikipedia.org/wiki/ANTLR) to generate lexers and parsers from [`YammmGrammar.g4`](../internal/grammar/YammmGrammar.g4).
+The grammar is compact and regular, allowing for easy analysis by automatic tools. We use [ANTLR](https://en.wikipedia.org/wiki/ANTLR) to generate lexers and parsers from [`YammmGrammar.g4`](../grammar/YammmGrammar.g4).
 
 ## Notation
 

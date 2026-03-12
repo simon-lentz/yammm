@@ -137,8 +137,9 @@ The module is organized into layers with strict dependency ordering:
 
 ```text
 Primary API (stable)     : schema, instance, graph
-Foundation (stable)      : location, diag, immutable
+Foundation (stable)      : location, diag, immutable, source
 Adapter                  : adapter/json
+Grammar                  : grammar (ANTLR4-generated lexer/parser)
 Internal                 : internal/* (no compatibility guarantees)
 ```
 
@@ -153,6 +154,8 @@ Internal                 : internal/* (no compatibility guarantees)
 | `graph` | Instance graph construction and integrity checking |
 | `diag` | Structured diagnostics with stable error codes |
 | `location` | Source positions, spans, and canonical paths |
+| `source` | Source content storage and position conversion |
+| `grammar` | ANTLR4-generated lexer, parser, and visitor |
 | `adapter/json` | JSON/JSONC parsing with location tracking |
 
 ### Entry Point Pattern
@@ -256,8 +259,8 @@ The `diag` package provides structured diagnostics with stable error codes:
 
 ```go
 if !result.OK() {
-    for _, issue := range result.Issues() {
-        fmt.Printf("[%s] %s: %s\n", issue.Severity, issue.Code, issue.Message)
+    for issue := range result.Issues() {
+        fmt.Printf("[%s] %s: %s\n", issue.Severity(), issue.Code(), issue.Message())
     }
 }
 ```

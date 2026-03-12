@@ -7,7 +7,7 @@ import (
 )
 
 // SourceRegistry provides the full source content and position lookup interface.
-// This is typically implemented by internal/source.Registry.
+// This is typically implemented by source.Registry.
 type SourceRegistry interface {
 	// ContentBySource returns the source content for the given source ID.
 	ContentBySource(id location.SourceID) ([]byte, bool)
@@ -81,7 +81,6 @@ func (s *Sources) PositionAt(id location.SourceID, byteOffset int) location.Posi
 
 // LineStartByte returns the byte offset of the start of a line.
 // Returns 0, false if the source is not found or line is invalid.
-// Implements diag.LineIndexProvider.
 func (s *Sources) LineStartByte(id location.SourceID, line int) (int, bool) {
 	if s == nil || s.registry == nil {
 		return 0, false
