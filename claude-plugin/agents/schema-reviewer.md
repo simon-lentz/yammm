@@ -26,6 +26,8 @@ description: |
 model: sonnet
 color: cyan
 tools: ["Read", "Grep", "Glob"]
+memory: local
+maxTurns: 15
 ---
 
 # schema-reviewer

@@ -26,6 +26,8 @@ description: |
 model: sonnet
 color: green
 tools: ["Read", "Write", "Grep", "Glob"]
+memory: local
+maxTurns: 30
 ---
 
 # schema-author
