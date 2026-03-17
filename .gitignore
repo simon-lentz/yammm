@@ -29,7 +29,7 @@ docs/
 # vendor/
 
 # VScode stuff is indiidual
-.vscode/launch.json
+.vscode/
 
 # Go workspace sum (generated)
 go.work.sum
