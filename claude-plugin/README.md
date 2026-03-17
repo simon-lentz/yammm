@@ -5,24 +5,22 @@ Yammm DSL schema language support for Claude Code. Provides LSP intelligence, DS
 ## Prerequisites
 
 - **Claude Code** CLI
-- **VS Code** (strongly recommended) — the `yammm-lsp` is optimized for and designed with VS Code in mind
 
 ## Installation
 
 ### 1. Install the yammm-lsp language server
 
-**Recommended: VS Code Marketplace extension**:
+**Recommended: Download a pre-built binary from GitHub releases**:
 
-The yammm-lsp binary is bundled with the VS Code extension. Install it from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm).
+Download the platform-appropriate archive from the [latest release](https://github.com/simon-lentz/yammm-lsp/releases/latest), extract it, and place the binary in your PATH. Archives follow the naming pattern `yammm-lsp-<version>-<platform>.tar.gz`.
 
-**Alternative: Build the standalone binary**:
-
-If you need the LSP binary outside of VS Code, clone the repo and build it:
+Example for macOS (Apple Silicon):
 
 ```bash
-git clone https://github.com/simon-lentz/yammm-lsp.git
-cd yammm-lsp
-make build
+curl -fsSL https://github.com/simon-lentz/yammm-lsp/releases/latest/download/yammm-lsp-v0.1.4-darwin-arm64.tar.gz -o yammm-lsp.tar.gz
+tar xzf yammm-lsp.tar.gz
+sudo mv yammm-lsp /usr/local/bin/
+rm yammm-lsp.tar.gz
 ```
 
 Verify the binary is in your PATH:
@@ -31,9 +29,15 @@ Verify the binary is in your PATH:
 yammm-lsp --version
 ```
 
-**Local extension development**:
+**Alternative: Build from source**:
 
-To develop the VS Code extension or yammm-lsp locally, see the [yammm-lsp repository](https://github.com/simon-lentz/yammm-lsp) README.
+```bash
+git clone https://github.com/simon-lentz/yammm-lsp.git
+cd yammm-lsp
+make build
+```
+
+For VS Code users, the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) bundles the binary and handles installation automatically. See the [yammm-lsp repository](https://github.com/simon-lentz/yammm-lsp) for full development setup.
 
 ### 2. Install the plugin
 
@@ -69,6 +73,7 @@ Analyzes existing `.yammm` files against a 10-item review checklist covering syn
 | Command | Description |
 | ------- | ----------- |
 | `/new-schema` | Scaffold a new `.yammm` file with boilerplate type definitions |
+| `/setup-lsp` | Check yammm-lsp installation status and provide platform-specific download instructions |
 
 ### DSL Knowledge
 
@@ -104,6 +109,9 @@ cp /path/to/yammm/claude-plugin/settings-template.local.md .claude/yammm.local.m
 **Scaffold and iterate:**
 > `/new-schema` to create the boilerplate, then ask the schema-author agent to fill in the details
 
+**Install the LSP binary:**
+> `/setup-lsp` to check installation status and get platform-specific download instructions
+
 **Check for errors:**
 > Check your editor's LSP diagnostics panel after editing, or ask the schema-reviewer agent to audit a file
 
@@ -113,8 +121,8 @@ cp /path/to/yammm/claude-plugin/settings-template.local.md .claude/yammm.local.m
 
 The plugin checks for `yammm-lsp` at startup. If you see this warning:
 
-1. Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) (recommended — the LSP binary is bundled)
-2. Or build the standalone binary: `git clone https://github.com/simon-lentz/yammm-lsp.git && cd yammm-lsp && make build`
+1. Download a pre-built binary from [GitHub releases](https://github.com/simon-lentz/yammm-lsp/releases/latest) (recommended). Run `/setup-lsp` for guided instructions.
+2. Or build from source: `git clone https://github.com/simon-lentz/yammm-lsp.git && cd yammm-lsp && make build`
 3. Verify it is in your PATH: `which yammm-lsp`
 
 ### No LSP diagnostics appearing
@@ -133,5 +141,6 @@ The LSP resolves imports relative to the module root. If imports fail:
 ## More Information
 
 - [yammm repository](https://github.com/simon-lentz/yammm)
+- [yammm-lsp repository](https://github.com/simon-lentz/yammm-lsp)
 - [Language specification](https://github.com/simon-lentz/yammm/blob/main/docs/SPEC.md)
 - [VS Code extension](https://github.com/simon-lentz/yammm-lsp/tree/main/editors/vscode)

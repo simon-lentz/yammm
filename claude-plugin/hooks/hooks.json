@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v yammm-lsp >/dev/null 2>&1 || echo 'Warning: yammm-lsp binary not found in PATH. LSP features (diagnostics, completion, hover) will not work. Install the VS Code extension (https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) which bundles the binary, or build from source: git clone https://github.com/simon-lentz/yammm-lsp.git && cd yammm-lsp && make build'",
+            "command": "command -v yammm-lsp >/dev/null 2>&1 || echo 'Warning: yammm-lsp binary not found in PATH. LSP features (diagnostics, completion, hover) will not work. Download a pre-built binary from https://github.com/simon-lentz/yammm-lsp/releases/latest (recommended), or build from source: git clone https://github.com/simon-lentz/yammm-lsp.git && cd yammm-lsp && make build. Run /setup-lsp for guided installation.'",
             "timeout": 5
           }
         ]
