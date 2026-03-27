@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -32,16 +33,16 @@ type Constraint struct {
 //
 // Returns the same Cypher statements as [Adapter.ConstraintsStructured], but as
 // raw strings rather than structured [Constraint] values.
-func (a *Adapter) ConstraintsForSchema(s *schema.Schema) ([]string, error) {
-	structured, err := a.ConstraintsStructured(s)
-	if err != nil {
-		return nil, err
+func (a *Adapter) ConstraintsForSchema(s *schema.Schema) ([]string, diag.Result) {
+	structured, result := a.ConstraintsStructured(s)
+	if !result.OK() {
+		return nil, result
 	}
 	stmts := make([]string, len(structured))
 	for i, c := range structured {
 		stmts[i] = c.Statement
 	}
-	return stmts, nil
+	return stmts, result
 }
 
 // ConstraintsStructured generates Neo4j 5 constraint statements from a yammm schema
@@ -63,10 +64,15 @@ func (a *Adapter) ConstraintsForSchema(s *schema.Schema) ([]string, error) {
 //
 // Returns the constraint statements in deterministic order:
 // types in schema declaration order, within each type: UNIQUE/NODE KEY -> NOT NULL -> TYPE.
-func (a *Adapter) ConstraintsStructured(s *schema.Schema) ([]Constraint, error) {
-	if err := a.DetectLabelCollisions(s); err != nil {
-		return nil, err
-	}
+//
+// If validation errors are found, returns (nil, result) where result contains
+// all issues. Issues use [E_NEO4J_LABEL_COLLISION], [E_NEO4J_INVALID_IDENTIFIER],
+// or [E_NEO4J_UNSUPPORTED_TYPE] codes.
+func (a *Adapter) ConstraintsStructured(s *schema.Schema) ([]Constraint, diag.Result) {
+	collector := diag.NewCollector(0)
+
+	collisionResult := a.DetectLabelCollisions(s)
+	collector.Merge(collisionResult)
 
 	var constraints []Constraint
 
@@ -82,13 +88,18 @@ func (a *Adapter) ConstraintsStructured(s *schema.Schema) ([]Constraint, error) 
 		}
 
 		if err := ValidateIdentifier(label, fmt.Sprintf("type %q label", name)); err != nil {
-			return nil, fmt.Errorf("invalid label: %w", err)
+			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
+				fmt.Sprintf("invalid label for type %q: %s", name, err)).
+				WithDetail(diag.DetailKeyFormat, "neo4j").
+				WithDetail(diag.DetailKeyTypeName, name).
+				WithDetail(detailKeyLabel, label).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build()
+			collector.Collect(issue)
+			continue
 		}
 
-		typeConstraints, err := a.constraintsForType(t, label)
-		if err != nil {
-			return nil, err
-		}
+		typeConstraints := a.constraintsForType(t, label, collector)
 		constraints = append(constraints, typeConstraints...)
 	}
 
@@ -103,51 +114,39 @@ func (a *Adapter) ConstraintsStructured(s *schema.Schema) ([]Constraint, error) 
 		constraints = filtered
 	}
 
-	return constraints, nil
+	result := collector.Result()
+	if !result.OK() {
+		return nil, result
+	}
+	return constraints, result
 }
 
 // constraintsForType generates all constraints for a single type.
-func (a *Adapter) constraintsForType(t *schema.Type, label string) ([]Constraint, error) {
+func (a *Adapter) constraintsForType(t *schema.Type, label string, collector *diag.Collector) []Constraint {
 	var constraints []Constraint
 
 	// 1. PRIMARY KEY constraints (UNIQUE or NODE KEY).
-	pkConstraints, err := a.primaryKeyConstraints(t, label)
-	if err != nil {
-		return nil, err
-	}
-	constraints = append(constraints, pkConstraints...)
+	constraints = append(constraints, a.primaryKeyConstraints(t, label, collector)...)
 
 	// 2. NOT NULL constraints for required properties.
-	notNullConstraints, err := a.notNullConstraints(t, label)
-	if err != nil {
-		return nil, err
-	}
-	constraints = append(constraints, notNullConstraints...)
+	constraints = append(constraints, a.notNullConstraints(t, label, collector)...)
 
 	// 3. LIST TYPE constraints.
-	listTypeConstraints, err := a.listTypeConstraints(t, label)
-	if err != nil {
-		return nil, err
-	}
-	constraints = append(constraints, listTypeConstraints...)
+	constraints = append(constraints, a.listTypeConstraints(t, label, collector)...)
 
 	// 4. SCALAR TYPE constraints (if enabled).
 	if a.config.scalarTypeConstraints {
-		scalarConstraints, err := a.scalarTypeConstraints(t, label)
-		if err != nil {
-			return nil, err
-		}
-		constraints = append(constraints, scalarConstraints...)
+		constraints = append(constraints, a.scalarTypeConstraints(t, label, collector)...)
 	}
 
-	return constraints, nil
+	return constraints
 }
 
 // primaryKeyConstraints generates UNIQUE or NODE KEY constraints for primary keys.
-func (a *Adapter) primaryKeyConstraints(t *schema.Type, label string) ([]Constraint, error) {
+func (a *Adapter) primaryKeyConstraints(t *schema.Type, label string, collector *diag.Collector) []Constraint {
 	pks := t.PrimaryKeysSlice()
 	if len(pks) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	var pkNames []string
@@ -157,13 +156,21 @@ func (a *Adapter) primaryKeyConstraints(t *schema.Type, label string) ([]Constra
 			continue
 		}
 		if err := ValidateIdentifier(pkName, fmt.Sprintf("type %q primary key", t.Name())); err != nil {
-			return nil, fmt.Errorf("invalid primary key: %w", err)
+			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
+				fmt.Sprintf("invalid primary key %q on type %q: %s", pkName, t.Name(), err)).
+				WithDetail(diag.DetailKeyFormat, "neo4j").
+				WithDetail(diag.DetailKeyTypeName, t.Name()).
+				WithDetail(diag.DetailKeyPropertyName, pkName).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build()
+			collector.Collect(issue)
+			continue
 		}
 		pkNames = append(pkNames, pkName)
 	}
 
 	if len(pkNames) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	kind := ConstraintUnique
@@ -193,11 +200,11 @@ func (a *Adapter) primaryKeyConstraints(t *schema.Type, label string) ([]Constra
 		Label:      label,
 		Properties: pkNames,
 		Statement:  stmt,
-	}}, nil
+	}}
 }
 
 // notNullConstraints generates NOT NULL constraints for required properties.
-func (a *Adapter) notNullConstraints(t *schema.Type, label string) ([]Constraint, error) {
+func (a *Adapter) notNullConstraints(t *schema.Type, label string, collector *diag.Collector) []Constraint {
 	var constraints []Constraint
 	seen := make(map[string]struct{})
 
@@ -224,7 +231,16 @@ func (a *Adapter) notNullConstraints(t *schema.Type, label string) ([]Constraint
 			}
 		}
 		if err := ValidateIdentifier(propName, fmt.Sprintf("type %q property", t.Name())); err != nil {
-			return nil, fmt.Errorf("invalid property: %w", err)
+			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
+				fmt.Sprintf("invalid property %q on type %q: %s", propName, t.Name(), err)).
+				WithDetail(diag.DetailKeyFormat, "neo4j").
+				WithDetail(diag.DetailKeyTypeName, t.Name()).
+				WithDetail(diag.DetailKeyPropertyName, propName).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build()
+			collector.Collect(issue)
+			seen[propName] = struct{}{}
+			continue
 		}
 		seen[propName] = struct{}{}
 
@@ -240,11 +256,11 @@ func (a *Adapter) notNullConstraints(t *schema.Type, label string) ([]Constraint
 			Statement:  stmt,
 		})
 	}
-	return constraints, nil
+	return constraints
 }
 
 // listTypeConstraints generates IS :: LIST<T> constraints for List properties.
-func (a *Adapter) listTypeConstraints(t *schema.Type, label string) ([]Constraint, error) {
+func (a *Adapter) listTypeConstraints(t *schema.Type, label string, collector *diag.Collector) []Constraint {
 	var constraints []Constraint
 	seen := make(map[string]struct{})
 
@@ -268,10 +284,28 @@ func (a *Adapter) listTypeConstraints(t *schema.Type, label string) ([]Constrain
 
 		elemType, err := neo4jListElementType(lc.Element())
 		if err != nil {
-			return nil, fmt.Errorf("type %q property %q: %w", t.Name(), propName, err)
+			issue := diag.NewIssue(diag.Error, E_NEO4J_UNSUPPORTED_TYPE,
+				fmt.Sprintf("unsupported list element type for property %q on type %q: %s", propName, t.Name(), err)).
+				WithDetail(diag.DetailKeyFormat, "neo4j").
+				WithDetail(diag.DetailKeyTypeName, t.Name()).
+				WithDetail(diag.DetailKeyPropertyName, propName).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build()
+			collector.Collect(issue)
+			seen[propName] = struct{}{}
+			continue
 		}
 		if err := ValidateIdentifier(propName, fmt.Sprintf("type %q list property", t.Name())); err != nil {
-			return nil, fmt.Errorf("invalid list property: %w", err)
+			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
+				fmt.Sprintf("invalid list property %q on type %q: %s", propName, t.Name(), err)).
+				WithDetail(diag.DetailKeyFormat, "neo4j").
+				WithDetail(diag.DetailKeyTypeName, t.Name()).
+				WithDetail(diag.DetailKeyPropertyName, propName).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build()
+			collector.Collect(issue)
+			seen[propName] = struct{}{}
+			continue
 		}
 		seen[propName] = struct{}{}
 
@@ -289,11 +323,11 @@ func (a *Adapter) listTypeConstraints(t *schema.Type, label string) ([]Constrain
 			Statement:  stmt,
 		})
 	}
-	return constraints, nil
+	return constraints
 }
 
 // scalarTypeConstraints generates IS :: TYPE constraints for scalar properties.
-func (a *Adapter) scalarTypeConstraints(t *schema.Type, label string) ([]Constraint, error) {
+func (a *Adapter) scalarTypeConstraints(t *schema.Type, label string, collector *diag.Collector) []Constraint {
 	var constraints []Constraint
 	seen := make(map[string]struct{})
 
@@ -324,7 +358,16 @@ func (a *Adapter) scalarTypeConstraints(t *schema.Type, label string) ([]Constra
 		}
 
 		if err := ValidateIdentifier(propName, fmt.Sprintf("type %q property", t.Name())); err != nil {
-			return nil, fmt.Errorf("invalid property: %w", err)
+			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
+				fmt.Sprintf("invalid property %q on type %q: %s", propName, t.Name(), err)).
+				WithDetail(diag.DetailKeyFormat, "neo4j").
+				WithDetail(diag.DetailKeyTypeName, t.Name()).
+				WithDetail(diag.DetailKeyPropertyName, propName).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build()
+			collector.Collect(issue)
+			seen[propName] = struct{}{}
+			continue
 		}
 		seen[propName] = struct{}{}
 
@@ -341,7 +384,7 @@ func (a *Adapter) scalarTypeConstraints(t *schema.Type, label string) ([]Constra
 			Statement:  stmt,
 		})
 	}
-	return constraints, nil
+	return constraints
 }
 
 // buildStatement constructs a complete CREATE CONSTRAINT ... Cypher statement.

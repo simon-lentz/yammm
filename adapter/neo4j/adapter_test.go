@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -29,9 +30,9 @@ func TestAdapter_DefaultConfig(t *testing.T) {
 	}
 	// edition=Enterprise: generate NOT NULL constraints
 	s := loadSchema(t, "basic.yammm")
-	stmts, err := a.ConstraintsForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	stmts, result := a.ConstraintsForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 	hasNotNull := false
 	hasType := false
@@ -72,18 +73,18 @@ func TestAdapter_FullPipeline_BasicSchema(t *testing.T) {
 	a := New()
 
 	// Generate constraints.
-	stmts, err := a.ConstraintsForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	stmts, result := a.ConstraintsForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 	if len(stmts) == 0 {
 		t.Fatal("expected non-empty constraints")
 	}
 
 	// Generate shapes.
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
 	// Verify shapes match constraint labels.
@@ -107,24 +108,24 @@ func TestAdapter_FullPipeline_WithWrite(t *testing.T) {
 	a := New()
 
 	// Generate constraints + shapes.
-	stmts, err := a.ConstraintsForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	stmts, result := a.ConstraintsForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
 	// Build graph with instances.
-	result := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
 		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
 		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test Issue", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
 	})
 
 	// Generate batch node queries.
-	nodeQueries, err := a.BatchNodeQueries(result, shape)
+	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,9 +168,9 @@ func TestAdapter_CommunityEdition_ReducedOutput(t *testing.T) {
 	a := New(WithEdition(Community))
 
 	// Constraints: only UNIQUE.
-	stmts, err := a.ConstraintsForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	stmts, result := a.ConstraintsForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 	for _, stmt := range stmts {
 		if !strings.Contains(stmt, "IS UNIQUE") {
@@ -178,9 +179,9 @@ func TestAdapter_CommunityEdition_ReducedOutput(t *testing.T) {
 	}
 
 	// Shapes: unaffected by edition.
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 	if _, ok := shape.Types["Entity"]; !ok {
 		t.Error("shapes should be unaffected by edition")
@@ -201,9 +202,9 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 	}
 
 	// Constraints use same label.
-	stmts, err := a.ConstraintsForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	stmts, result := a.ConstraintsForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 	for _, stmt := range stmts {
 		if strings.Contains(stmt, "basic_test__Entity") {
@@ -222,19 +223,19 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 	}
 
 	// Shape uses same label.
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 	if ns, ok := shape.Types["Entity"]; !ok || ns.Label != expectedLabel {
 		t.Errorf("shape label = %q; want %q", shape.Types["Entity"].Label, expectedLabel)
 	}
 
 	// Write query uses same label.
-	result := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
-	nodeQueries, err := a.BatchNodeQueries(result, shape)
+	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,9 +261,9 @@ func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 	}
 
 	// Constraints use same label.
-	stmts, err := a.ConstraintsForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	stmts, result := a.ConstraintsForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 	constraintHasLabel := false
 	for _, stmt := range stmts {
@@ -276,19 +277,19 @@ func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 	}
 
 	// Shape uses same label.
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 	if ns, ok := shape.Types["Entity"]; !ok || ns.Label != expectedLabel {
 		t.Errorf("shape label = %q; want %q", shape.Types["Entity"].Label, expectedLabel)
 	}
 
 	// Write query uses same label.
-	result := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
-	nodeQueries, err := a.BatchNodeQueries(result, shape)
+	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,14 +306,14 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 	s, v := loadSchemaAndValidatorInteg(t, "multiple_types.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	structured, err := a.ConstraintsStructured(s)
-	if err != nil {
-		t.Fatal(err)
+	structured, result := a.ConstraintsStructured(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
 	// Build constraint label set.
@@ -321,12 +322,12 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 		constraintLabels[c.Label] = true
 	}
 
-	result := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
 		"Widget": {{"id": "w1", "code": "C1"}},
 		"Gadget": {{"uid": "g1", "sku": "S1"}},
 	})
 
-	nodeQueries, err := a.BatchNodeQueries(result, shape)
+	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,14 +384,14 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
-			if _, err := a.ConstraintsForSchema(s); err != nil {
-				errs <- err
+			if _, result := a.ConstraintsForSchema(s); !result.OK() {
+				errs <- fmt.Errorf("constraints: %v", result.Messages())
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			if _, err := a.ShapeForSchema(s); err != nil {
-				errs <- err
+			if _, result := a.ShapeForSchema(s); !result.OK() {
+				errs <- fmt.Errorf("shape: %v", result.Messages())
 			}
 		}()
 		go func() {

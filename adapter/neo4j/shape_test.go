@@ -10,9 +10,9 @@ func TestShapeForSchema_Basic(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
 	}
 
 	ns, ok := shape.Types["Entity"]
@@ -38,9 +38,9 @@ func TestShapeForSchema_CompositePK(t *testing.T) {
 	s := loadSchema(t, "composite_pk.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
 	}
 
 	ns := shape.Types["Record"]
@@ -59,9 +59,9 @@ func TestShapeForSchema_SkipsAbstract(t *testing.T) {
 	s := loadSchema(t, "abstract_types.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
 	}
 
 	if _, ok := shape.Types["Base"]; ok {
@@ -77,9 +77,9 @@ func TestShapeForSchema_PartTypes(t *testing.T) {
 	s := loadSchema(t, "part_types.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
 	}
 
 	if _, ok := shape.Types["LineItem"]; !ok {
@@ -95,9 +95,9 @@ func TestShapeForSchema_Inheritance(t *testing.T) {
 	s := loadSchema(t, "inheritance.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
 	}
 
 	// Tracked is abstract — should not appear.
@@ -122,9 +122,9 @@ func TestShapeForSchema_MultipleTypes(t *testing.T) {
 	s := loadSchema(t, "multiple_types.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
 	}
 
 	widget, ok := shape.Types["Widget"]
@@ -149,9 +149,9 @@ func TestShapeForSchema_CustomSeparator(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithLabelSeparator("_"))
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
 	}
 
 	ns := shape.Types["Entity"]

@@ -58,5 +58,5 @@
 //
 // # Dependencies
 //
-//	adapter/neo4j  --imports-->  schema, graph, immutable, diag, location
+//	adapter/neo4j  --imports-->  schema, graph, diag
 package neo4j

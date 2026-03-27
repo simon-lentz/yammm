@@ -58,16 +58,16 @@ func TestNodeQueryFor_SinglePK(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(5), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := result.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf("Entity")[0]
 	ns := shape.Types["Entity"]
 	q, err := a.NodeQueryFor(&ns, inst)
 	if err != nil {
@@ -93,16 +93,16 @@ func TestNodeQueryFor_CompositePK(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "composite_pk.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Record": {{"schema_id": "s1", "record_id": "r1", "name": "test"}},
 	})
 
-	inst := result.InstancesOf("Record")[0]
+	inst := graphResult.InstancesOf("Record")[0]
 	ns := shape.Types["Record"]
 	q, err := a.NodeQueryFor(&ns, inst)
 	if err != nil {
@@ -122,16 +122,16 @@ func TestNodeQueryFor_ImmutableKeys(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := result.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf("Entity")[0]
 	ns := shape.Types["Entity"]
 	q, err := a.NodeQueryFor(&ns, inst, WithImmutableKeys("created_at"))
 	if err != nil {
@@ -159,19 +159,19 @@ func TestBatchNodeQueries_SingleType(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {
 			{"id": "e1", "name": "a", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"},
 			{"id": "e2", "name": "b", "count": int64(2), "active": false, "created_at": "2024-01-02T00:00:00Z"},
 		},
 	})
 
-	queries, err := a.BatchNodeQueries(result, shape)
+	queries, err := a.BatchNodeQueries(graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,9 +198,9 @@ func TestBatchNodeQueries_Chunking(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
 	// Create 5 instances.
@@ -212,11 +212,11 @@ func TestBatchNodeQueries_Chunking(t *testing.T) {
 		})
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": instances,
 	})
 
-	queries, err := a.BatchNodeQueries(result, shape, WithNodeChunkSize(2))
+	queries, err := a.BatchNodeQueries(graphResult, shape, WithNodeChunkSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,17 +232,17 @@ func TestEdgeQueryFor_Basic(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
 		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test Issue", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
 	})
 
-	edges := result.Edges()
+	edges := graphResult.Edges()
 	if len(edges) == 0 {
 		t.Fatal("expected at least one edge")
 	}
@@ -268,17 +268,17 @@ func TestEdgeQueryFor_NoProperties(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
 		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test Issue", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
 	})
 
-	edges := result.Edges()
+	edges := graphResult.Edges()
 	if len(edges) == 0 {
 		t.Fatal("expected at least one edge")
 	}
@@ -304,12 +304,12 @@ func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Issuer": {
 			{"issuer_id": "iss1", "name": "Issuer 1"},
 			{"issuer_id": "iss2", "name": "Issuer 2"},
@@ -320,7 +320,7 @@ func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 		},
 	})
 
-	queries, err := a.BatchEdgeQueries(result, shape)
+	queries, err := a.BatchEdgeQueries(graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,9 +347,9 @@ func TestBatchEdgeQueries_Chunking(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
 	// Create enough edges to trigger chunking.
@@ -364,19 +364,19 @@ func TestBatchEdgeQueries_Chunking(t *testing.T) {
 		})
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Issuer": issuers,
 		"Issue":  issues,
 	})
 
-	queries, err := a.BatchEdgeQueries(result, shape, WithEdgeChunkSize(2))
+	queries, err := a.BatchEdgeQueries(graphResult, shape, WithEdgeChunkSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// With chunk size 2 and multiple edges, we should get multiple queries
 	// for signatures that have >2 edges.
-	totalEdges := len(result.Edges())
+	totalEdges := len(graphResult.Edges())
 	if totalEdges == 0 {
 		t.Fatal("expected edges")
 	}
@@ -392,16 +392,16 @@ func TestPropertyCoercion_TypedSlice(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "list_properties.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "active": true, "tags": []any{"a", "b"}, "scores": []any{int64(1), int64(2)}}},
 	})
 
-	queries, err := a.BatchNodeQueries(result, shape)
+	queries, err := a.BatchNodeQueries(graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,12 +438,12 @@ func TestPropertyCoercion_TemporalSlice(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "list_properties.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{
 			"id": "e1", "name": "test", "active": true,
 			"times": []any{"2024-01-01T00:00:00Z", "2024-06-15T12:30:00Z"},
@@ -451,7 +451,7 @@ func TestPropertyCoercion_TemporalSlice(t *testing.T) {
 		}},
 	})
 
-	queries, err := a.BatchNodeQueries(result, shape)
+	queries, err := a.BatchNodeQueries(graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,16 +522,16 @@ func TestPropertyCoercion_Scalars(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(42), "active": true, "created_at": "2024-01-01T00:00:00Z", "score": 3.14}},
 	})
 
-	queries, err := a.BatchNodeQueries(result, shape)
+	queries, err := a.BatchNodeQueries(graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,16 +556,16 @@ func TestNodeQueryFor_MissingKey(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	_, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	_, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := result.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf("Entity")[0]
 
 	// Use a shape with a PK that doesn't exist in the instance.
 	badShape := NodeShape{
@@ -573,7 +573,7 @@ func TestNodeQueryFor_MissingKey(t *testing.T) {
 		PrimaryKeys: []string{"nonexistent_key"},
 	}
 
-	_, err = a.NodeQueryFor(&badShape, inst)
+	_, err := a.NodeQueryFor(&badShape, inst)
 	if err == nil {
 		t.Error("expected error for missing key")
 	}
@@ -584,17 +584,17 @@ func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, err := a.ShapeForSchema(s)
-	if err != nil {
-		t.Fatal(err)
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
 	}
 
-	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Issuer": {{"issuer_id": "iss1", "name": "Test"}},
 		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
 	})
 
-	edges := result.Edges()
+	edges := graphResult.Edges()
 	if len(edges) == 0 {
 		t.Fatal("expected edges")
 	}

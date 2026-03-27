@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -26,7 +27,11 @@ type GraphShape struct {
 // This is the metadata needed to ensure write-time label and key consistency.
 // Consumers use [NodeShape.Label] for MERGE patterns and [NodeShape.PrimaryKeys]
 // for MERGE key properties.
-func (a *Adapter) ShapeForSchema(s *schema.Schema) (*GraphShape, error) {
+//
+// If validation errors are found, returns (nil, result) where result contains
+// [E_NEO4J_INVALID_IDENTIFIER] issues.
+func (a *Adapter) ShapeForSchema(s *schema.Schema) (*GraphShape, diag.Result) {
+	collector := diag.NewCollector(0)
 	shape := &GraphShape{
 		Types: make(map[string]NodeShape),
 	}
@@ -43,7 +48,15 @@ func (a *Adapter) ShapeForSchema(s *schema.Schema) (*GraphShape, error) {
 		}
 
 		if err := ValidateIdentifier(label, fmt.Sprintf("type %q label", name)); err != nil {
-			return nil, fmt.Errorf("invalid label: %w", err)
+			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
+				fmt.Sprintf("invalid label for type %q: %s", name, err)).
+				WithDetail(diag.DetailKeyFormat, "neo4j").
+				WithDetail(diag.DetailKeyTypeName, name).
+				WithDetail(detailKeyLabel, label).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build()
+			collector.Collect(issue)
+			continue
 		}
 
 		// Extract primary keys.
@@ -85,5 +98,10 @@ func (a *Adapter) ShapeForSchema(s *schema.Schema) (*GraphShape, error) {
 			RequiredFields: required,
 		}
 	}
-	return shape, nil
+
+	result := collector.Result()
+	if !result.OK() {
+		return nil, result
+	}
+	return shape, result
 }

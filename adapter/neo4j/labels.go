@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -141,10 +142,12 @@ func (a *Adapter) Label(schemaName, typeName string) string {
 // DetectLabelCollisions checks whether any non-abstract types in the schema
 // would produce the same Neo4j label after sanitization.
 //
-// Returns an error listing all collisions, e.g.:
+// Returns a [diag.Result] containing one [E_NEO4J_LABEL_COLLISION] issue per
+// colliding label, e.g.:
 //
-//	"schema 'my_schema': label 'my_schema__FooBar' produced by types: Foo-Bar, Foo_Bar"
-func (a *Adapter) DetectLabelCollisions(s *schema.Schema) error {
+//	label "my_schema__FooBar" produced by types: Foo-Bar, Foo_Bar
+func (a *Adapter) DetectLabelCollisions(s *schema.Schema) diag.Result {
+	collector := diag.NewCollector(0)
 	labelToTypes := make(map[string][]string)
 
 	schemaName := s.Name()
@@ -162,21 +165,20 @@ func (a *Adapter) DetectLabelCollisions(s *schema.Schema) error {
 		labelToTypes[label] = append(labelToTypes[label], typeName)
 	}
 
-	var collisions []string
 	for label, types := range labelToTypes {
 		if len(types) > 1 {
-			collisions = append(collisions, fmt.Sprintf(
-				"label %q produced by types: %s",
-				label, strings.Join(types, ", "),
-			))
+			msg := fmt.Sprintf("label %q produced by types: %s",
+				label, strings.Join(types, ", "))
+			issue := diag.NewIssue(diag.Error, E_NEO4J_LABEL_COLLISION, msg).
+				WithDetail(diag.DetailKeyFormat, "neo4j").
+				WithDetail(detailKeyLabel, label).
+				WithDetail(diag.DetailKeyTypeName, strings.Join(types, ", ")).
+				Build()
+			collector.Collect(issue)
 		}
 	}
 
-	if len(collisions) > 0 {
-		return fmt.Errorf("%w: schema %q: %s",
-			ErrLabelCollision, schemaName, strings.Join(collisions, "; "))
-	}
-	return nil
+	return collector.Result()
 }
 
 func isASCIILetter(r rune) bool {

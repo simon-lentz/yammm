@@ -26,6 +26,8 @@ var (
 	ErrEmptyIdentifier     = errors.New("neo4j adapter: identifier is empty")
 	ErrReservedKeyword     = errors.New("neo4j adapter: identifier is a Cypher reserved keyword")
 	ErrInvalidIdentifier   = errors.New("neo4j adapter: identifier contains invalid characters")
-	ErrLabelCollision      = errors.New("neo4j adapter: label collision detected")
 	ErrUnsupportedListElem = errors.New("neo4j adapter: unsupported list element type")
 )
+
+// detailKeyLabel is the neo4j-specific detail key for generated label strings.
+const detailKeyLabel = "label"

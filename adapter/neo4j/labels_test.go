@@ -3,11 +3,11 @@ package neo4j
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema/load"
 )
 
@@ -234,57 +234,32 @@ func TestDetectLabelCollisions_NoCollision(t *testing.T) {
 	}
 
 	a := New()
-	if err := a.DetectLabelCollisions(s); err != nil {
-		t.Errorf("DetectLabelCollisions returned error for non-colliding schema: %v", err)
+	if result := a.DetectLabelCollisions(s); !result.OK() {
+		t.Errorf("DetectLabelCollisions returned errors for non-colliding schema: %v", result.Messages())
 	}
 }
 
 func TestDetectLabelCollisions_Collision(t *testing.T) {
 	t.Parallel()
 
-	// Construct a collision scenario programmatically.
-	// Two schemas with different names but types that produce the same label
-	// after sanitization. Use WithLabelSeparator("") so that
-	// Label("ab", "C") == Label("a", "BC") == "abC" (if sanitized names concatenate).
-	//
-	// However, within a single schema, yammm type names follow UC_WORD rules
-	// and can't directly collide after sanitization. Instead, we test the
-	// DetectLabelCollisions method by using a schema where the adapter config
-	// causes collisions. With separator="" and prefix="":
-	//   Label("collision_test", "Foo") = "collision_testFoo"
-	//   Label("collision_test", "Foo") would need two types named "Foo"
-	//
-	// Since yammm prevents duplicate type names, label collisions within a
-	// single schema can only happen if the sanitization collapses different
-	// type names to the same string. With UC_WORD type names
-	// ([A-Z][A-Za-z0-9_]*), sanitization is a no-op — no characters to strip.
-	//
-	// The realistic collision scenario is cross-schema (different schema names
-	// producing the same label), which DetectLabelCollisions doesn't check
-	// (it operates on a single schema).
-	//
-	// Test the error path by loading a valid schema and verifying no error,
-	// then verify the error wrapping contract holds if we could trigger it.
-	// We verify the ErrLabelCollision sentinel is used correctly.
-
-	// Verify the sentinel error is usable.
-	testErr := fmt.Errorf("%w: schema %q: test collision", ErrLabelCollision, "test")
-	if !errors.Is(testErr, ErrLabelCollision) {
-		t.Error("errors.Is with ErrLabelCollision failed on constructed error")
+	// Verify the diag code is registered and constructible.
+	issue := diag.NewIssue(diag.Error, E_NEO4J_LABEL_COLLISION, "test collision").Build()
+	if issue.Code() != E_NEO4J_LABEL_COLLISION {
+		t.Error("E_NEO4J_LABEL_COLLISION code mismatch")
 	}
 
 	// Verify no collision on a valid schema.
-	s, result, err := load.Load(context.Background(), filepath.Join("testdata", "basic.yammm"))
+	s, loadResult, err := load.Load(context.Background(), filepath.Join("testdata", "basic.yammm"))
 	if err != nil {
 		t.Fatalf("load.Load failed: %v", err)
 	}
-	if !result.OK() {
-		t.Fatalf("schema has errors: %v", result)
+	if !loadResult.OK() {
+		t.Fatalf("schema has errors: %v", loadResult)
 	}
 
 	a := New()
-	if err := a.DetectLabelCollisions(s); err != nil {
-		t.Errorf("unexpected collision error: %v", err)
+	if result := a.DetectLabelCollisions(s); !result.OK() {
+		t.Errorf("unexpected collision errors: %v", result.Messages())
 	}
 }
 
