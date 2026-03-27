@@ -1,0 +1,13 @@
+schema "list_test"
+
+type Entity {
+    id     String primary
+    name   String required
+    tags   List<String>
+    scores List<Integer>
+    active Boolean required
+    ratios List<Float>
+    flags  List<Boolean>
+    times  List<Timestamp>
+    dates  List<Date>
+}

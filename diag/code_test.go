@@ -67,7 +67,6 @@ func TestCode_IsZero(t *testing.T) {
 		want bool
 	}{
 		{"zero value", Code{}, true},
-		{"empty string value", code("", CategorySentinel), true},
 		{"valid code", E_TYPE_COLLISION, false},
 		{"sentinel code", E_LIMIT_REACHED, false},
 	}
@@ -325,8 +324,8 @@ func TestContractValidationCodesExist(t *testing.T) {
 }
 
 // TestAllCodes_MatchesDefinedCodes uses AST parsing to verify that every
-// exported E_* variable in code.go appears in allCodes exactly once.
-// This prevents drift between code definitions and the allCodes slice.
+// exported E_* variable in code.go is auto-registered via NewCode() and
+// appears in AllCodes() exactly once.
 func TestAllCodes_MatchesDefinedCodes(t *testing.T) {
 	// Parse code.go to find all exported E_* variable declarations
 	fset := token.NewFileSet()
@@ -361,30 +360,44 @@ func TestAllCodes_MatchesDefinedCodes(t *testing.T) {
 		t.Fatal("no E_* variables found in code.go")
 	}
 
-	// Build map from allCodes
-	allCodesMap := make(map[string]bool)
+	// Build map from registry (via AllCodes)
+	registeredMap := make(map[string]bool)
 	for _, c := range AllCodes() {
 		str := c.String()
-		if allCodesMap[str] {
-			t.Errorf("allCodes contains duplicate: %s", str)
+		if registeredMap[str] {
+			t.Errorf("registry contains duplicate: %s", str)
 		}
-		allCodesMap[str] = true
+		registeredMap[str] = true
 	}
 
-	// Check for codes in definitions but not in allCodes
+	// Check for codes in definitions but not in registry
 	for name := range definedCodes {
-		if !allCodesMap[name] {
-			t.Errorf("E_* variable %s defined in code.go but missing from allCodes", name)
-		}
-	}
-
-	// Check for codes in allCodes but not in definitions
-	for name := range allCodesMap {
-		if !definedCodes[name] {
-			t.Errorf("allCodes contains %s but no matching E_* variable in code.go", name)
+		if !registeredMap[name] {
+			t.Errorf("E_* variable %s defined in code.go but missing from AllCodes()", name)
 		}
 	}
 
 	// Log counts for visibility
-	t.Logf("found %d E_* definitions, %d entries in allCodes", len(definedCodes), len(allCodesMap))
+	t.Logf("found %d E_* definitions in code.go, %d total registered codes", len(definedCodes), len(registeredMap))
+}
+
+// TestNewCodeDuplicatePanics verifies that registering a code with a
+// duplicate identifier panics at registration time.
+func TestNewCodeDuplicatePanics(t *testing.T) {
+	// NewCode with an already-registered identifier should panic.
+	// E_INTERNAL is already registered by the package-level var.
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic from duplicate NewCode, got none")
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("expected string panic, got %T: %v", r, r)
+		}
+		if !strings.Contains(msg, "duplicate code") {
+			t.Errorf("panic message %q does not mention 'duplicate code'", msg)
+		}
+	}()
+	NewCode("E_INTERNAL", CategorySentinel)
 }

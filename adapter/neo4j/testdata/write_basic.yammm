@@ -1,0 +1,17 @@
+schema "write_test"
+
+type Issuer {
+    issuer_id   String primary
+    name        String required
+    state       String
+    --> ISSUES (_:many) Issue
+}
+
+type Issue {
+    issuer_id String primary
+    issue_id  String primary
+    title     String required
+    amount    Float
+    tags      List<String>
+    --> IN_ISSUER (_:one) Issuer
+}

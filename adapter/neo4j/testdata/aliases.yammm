@@ -1,0 +1,14 @@
+schema "alias_test"
+
+type Email = Pattern["^.+@.+$"]
+type Money = Float[0.0, _]
+type ShortCode = String[2, 10]
+type Priority = Enum["low", "medium", "high"]
+
+type Product {
+    id       UUID primary
+    email    Email required
+    price    Money required
+    code     ShortCode
+    priority Priority
+}
