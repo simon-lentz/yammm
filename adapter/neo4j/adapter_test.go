@@ -246,6 +246,60 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 	}
 }
 
+func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidatorInteg(t, "basic.yammm")
+	a := New(WithLabelPrefix("app_"))
+
+	expectedLabel := "app_basic_test__Entity"
+
+	// Label method.
+	directLabel := a.Label(s.Name(), "Entity")
+	if directLabel != expectedLabel {
+		t.Errorf("Label() = %q; want %q", directLabel, expectedLabel)
+	}
+
+	// Constraints use same label.
+	stmts, err := a.ConstraintsForSchema(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	constraintHasLabel := false
+	for _, stmt := range stmts {
+		if strings.Contains(stmt, expectedLabel) {
+			constraintHasLabel = true
+			break
+		}
+	}
+	if !constraintHasLabel {
+		t.Errorf("no constraint contains prefixed label %q", expectedLabel)
+	}
+
+	// Shape uses same label.
+	shape, err := a.ShapeForSchema(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ns, ok := shape.Types["Entity"]; !ok || ns.Label != expectedLabel {
+		t.Errorf("shape label = %q; want %q", shape.Types["Entity"].Label, expectedLabel)
+	}
+
+	// Write query uses same label.
+	result := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
+	})
+	nodeQueries, err := a.BatchNodeQueries(result, shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodeQueries) == 0 {
+		t.Fatal("expected node queries")
+	}
+	if !strings.Contains(nodeQueries[0].Statement, expectedLabel) {
+		t.Errorf("MERGE statement uses wrong label: %s", nodeQueries[0].Statement)
+	}
+}
+
 func TestAdapter_LabelConsistency(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidatorInteg(t, "multiple_types.yammm")

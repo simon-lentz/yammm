@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
@@ -429,6 +430,90 @@ func TestPropertyCoercion_TypedSlice(t *testing.T) {
 		default:
 			t.Errorf("scores should be []int64, got %T", scores)
 		}
+	}
+}
+
+func TestPropertyCoercion_TemporalSlice(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "list_properties.yammm")
+	a := New()
+
+	shape, err := a.ShapeForSchema(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{
+			"id": "e1", "name": "test", "active": true,
+			"times": []any{"2024-01-01T00:00:00Z", "2024-06-15T12:30:00Z"},
+			"dates": []any{"2024-01-01", "2024-06-15"},
+		}},
+	})
+
+	queries, err := a.BatchNodeQueries(result, shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) == 0 {
+		t.Fatal("expected queries")
+	}
+
+	rows := queries[0].Params["rows"].([]map[string]any)
+	props := rows[0]["props"].(map[string]any)
+
+	// The immutable layer stores temporal values as strings.
+	// Coercion converts []any to []string (not []any, which the
+	// Neo4j driver rejects).
+	if times, ok := props["times"]; ok {
+		switch v := times.(type) {
+		case []string:
+			if len(v) != 2 {
+				t.Errorf("times length = %d; want 2", len(v))
+			}
+		default:
+			t.Errorf("times should be []string, got %T", times)
+		}
+	}
+
+	if dates, ok := props["dates"]; ok {
+		switch v := dates.(type) {
+		case []string:
+			if len(v) != 2 {
+				t.Errorf("dates length = %d; want 2", len(v))
+			}
+		default:
+			t.Errorf("dates should be []string, got %T", dates)
+		}
+	}
+}
+
+func TestCoerceSlice_TimeTimeElements(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "list_properties.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+	prop, ok := st.Property("times")
+	if !ok {
+		t.Fatal("times property not found")
+	}
+
+	t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
+	raw := []any{t1, t2}
+
+	result := coerceSlice(raw, prop.Constraint())
+	out, ok := result.([]time.Time)
+	if !ok {
+		t.Fatalf("expected []time.Time, got %T", result)
+	}
+	if len(out) != 2 {
+		t.Fatalf("length = %d; want 2", len(out))
+	}
+	if !out[0].Equal(t1) || !out[1].Equal(t2) {
+		t.Errorf("values mismatch: got %v", out)
 	}
 }
 

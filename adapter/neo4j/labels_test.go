@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema/load"
@@ -140,7 +141,7 @@ func TestValidateIdentifier_ErrorsIs(t *testing.T) {
 			t.Fatal("expected error")
 		}
 		msg := err.Error()
-		if !containsSubstring(msg, "property 'run_id'") {
+		if !strings.Contains(msg, "property 'run_id'") {
 			t.Errorf("error message %q does not contain context", msg)
 		}
 	})
@@ -311,17 +312,4 @@ func TestCypherReservedKeywords(t *testing.T) {
 	if fresh["INJECTED"] {
 		t.Error("CypherReservedKeywords() should return a copy; modification affected subsequent call")
 	}
-}
-
-func containsSubstring(s, sub string) bool {
-	return len(s) >= len(sub) && searchSubstring(s, sub)
-}
-
-func searchSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

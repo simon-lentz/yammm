@@ -6,6 +6,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
@@ -410,6 +411,37 @@ func coerceSlice(raw []any, c schema.Constraint) any {
 			out[i] = b
 		}
 		return out
+	case schema.KindTimestamp, schema.KindDate:
+		// Elements may be time.Time (pre-parsed input) or string
+		// (the common case: the immutable layer validates temporal
+		// format but stores the value as a string).
+		if len(raw) == 0 {
+			return raw
+		}
+		switch raw[0].(type) {
+		case time.Time:
+			out := make([]time.Time, len(raw))
+			for i, v := range raw {
+				t, ok := v.(time.Time)
+				if !ok {
+					return raw
+				}
+				out[i] = t
+			}
+			return out
+		case string:
+			out := make([]string, len(raw))
+			for i, v := range raw {
+				s, ok := v.(string)
+				if !ok {
+					return raw
+				}
+				out[i] = s
+			}
+			return out
+		default:
+			return raw
+		}
 	default:
 		return raw
 	}
