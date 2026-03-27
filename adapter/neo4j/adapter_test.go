@@ -1,18 +1,10 @@
 package neo4j
 
 import (
-	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/load"
-
-	"github.com/simon-lentz/yammm/graph"
 )
 
 func TestAdapter_DefaultConfig(t *testing.T) {
@@ -104,7 +96,7 @@ func TestAdapter_FullPipeline_BasicSchema(t *testing.T) {
 
 func TestAdapter_FullPipeline_WithWrite(t *testing.T) {
 	t.Parallel()
-	s, v := loadSchemaAndValidatorInteg(t, "write_basic.yammm")
+	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
 	// Generate constraints + shapes.
@@ -119,7 +111,7 @@ func TestAdapter_FullPipeline_WithWrite(t *testing.T) {
 	}
 
 	// Build graph with instances.
-	graphResult := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
 		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test Issue", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
 	})
@@ -190,7 +182,7 @@ func TestAdapter_CommunityEdition_ReducedOutput(t *testing.T) {
 
 func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 	t.Parallel()
-	s, v := loadSchemaAndValidatorInteg(t, "basic.yammm")
+	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New(WithLabelSeparator("_"))
 
 	expectedLabel := "basic_test_Entity"
@@ -232,7 +224,7 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 	}
 
 	// Write query uses same label.
-	graphResult := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
@@ -249,7 +241,7 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 
 func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 	t.Parallel()
-	s, v := loadSchemaAndValidatorInteg(t, "basic.yammm")
+	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New(WithLabelPrefix("app_"))
 
 	expectedLabel := "app_basic_test__Entity"
@@ -286,7 +278,7 @@ func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 	}
 
 	// Write query uses same label.
-	graphResult := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
@@ -303,7 +295,7 @@ func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 
 func TestAdapter_LabelConsistency(t *testing.T) {
 	t.Parallel()
-	s, v := loadSchemaAndValidatorInteg(t, "multiple_types.yammm")
+	s, v := loadSchemaAndValidator(t, "multiple_types.yammm")
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
@@ -322,7 +314,7 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 		constraintLabels[c.Label] = true
 	}
 
-	graphResult := buildGraphResultInteg(t, s, v, map[string][]map[string]any{
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Widget": {{"id": "w1", "code": "C1"}},
 		"Gadget": {{"uid": "g1", "sku": "S1"}},
 	})
@@ -406,43 +398,4 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 	for err := range errs {
 		t.Errorf("concurrent error: %v", err)
 	}
-}
-
-// --- integration test helpers ---
-
-func loadSchemaAndValidatorInteg(t *testing.T, name string) (*schema.Schema, *instance.Validator) {
-	t.Helper()
-	s, result, err := load.Load(context.Background(), filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatalf("load.Load(%s) failed: %v", name, err)
-	}
-	if !result.OK() {
-		t.Fatalf("schema %s has errors: %v", name, result)
-	}
-	return s, instance.NewValidator(s)
-}
-
-func buildGraphResultInteg(t *testing.T, s *schema.Schema, v *instance.Validator, instances map[string][]map[string]any) *graph.Result {
-	t.Helper()
-	ctx := context.Background()
-	g := graph.New(s)
-	for typeName, records := range instances {
-		for _, props := range records {
-			valid, failure, err := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
-			if err != nil {
-				t.Fatalf("validate %s: %v", typeName, err)
-			}
-			if failure != nil {
-				t.Fatalf("validate %s failed: %v", typeName, failure.Result.Messages())
-			}
-			result, err := g.Add(ctx, valid)
-			if err != nil {
-				t.Fatalf("graph.Add %s: %v", typeName, err)
-			}
-			if !result.OK() {
-				t.Fatalf("graph.Add %s issues: %v", typeName, result.Messages())
-			}
-		}
-	}
-	return g.Snapshot()
 }

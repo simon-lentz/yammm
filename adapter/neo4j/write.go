@@ -88,9 +88,14 @@ func WithEdgeChunkSize(size int) WriteOption {
 // The query uses the NodeShape's label and primary keys for MERGE matching,
 // and SET for all properties. If immutable keys are configured, uses
 // ON CREATE SET / ON MATCH SET to preserve immutable values.
+//
+// schemaType provides constraint metadata for schema-aware slice coercion
+// (e.g., converting []any to []string for List<String> properties). This
+// matches the coercion behavior of [Adapter.BatchNodeQueries].
 func (a *Adapter) NodeQueryFor(
 	shape *NodeShape,
 	inst *graph.Instance,
+	schemaType *schema.Type,
 	opts ...WriteOption,
 ) (*NodeQuery, error) {
 	cfg := defaultWriteConfig()
@@ -103,9 +108,7 @@ func (a *Adapter) NodeQueryFor(
 		return nil, fmt.Errorf("type %q: %w", inst.TypeName(), err)
 	}
 
-	// Single-node queries don't have schema context for slice coercion.
-	// Use Clone() directly; BatchNodeQueries provides full coercion.
-	props := inst.Properties().Clone()
+	props := propsToParamMap(inst, schemaType)
 
 	params := make(map[string]any)
 	for k, v := range keyProps {

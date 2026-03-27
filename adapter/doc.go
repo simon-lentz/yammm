@@ -23,7 +23,7 @@
 // Adapters depend on library packages; library packages never depend on adapters:
 //
 //	adapter/json   ──imports──▶  instance, diag, location, graph, immutable, schema
-//	adapter/neo4j  ──imports──▶  schema, graph, immutable, diag, location
+//	adapter/neo4j  ──imports──▶  schema, graph, diag
 //
 // # Layering Discipline
 //

@@ -1,28 +1,12 @@
 package neo4j
 
 import (
-	"context"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/load"
 )
-
-func loadSchema(t *testing.T, name string) *schema.Schema {
-	t.Helper()
-	s, result, err := load.Load(context.Background(), filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatalf("load.Load(%s) failed: %v", name, err)
-	}
-	if !result.OK() {
-		t.Fatalf("schema %s has errors: %v", name, result)
-	}
-	return s
-}
 
 func TestConstraints_BasicSinglePK(t *testing.T) {
 	t.Parallel()

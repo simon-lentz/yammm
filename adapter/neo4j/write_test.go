@@ -1,57 +1,11 @@
 package neo4j
 
 import (
-	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/load"
 )
-
-// loadSchemaAndValidator loads a test schema and returns the schema + validator.
-func loadSchemaAndValidator(t *testing.T, name string) (*schema.Schema, *instance.Validator) {
-	t.Helper()
-	s, result, err := load.Load(context.Background(), filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatalf("load.Load(%s) failed: %v", name, err)
-	}
-	if !result.OK() {
-		t.Fatalf("schema %s has errors: %v", name, result)
-	}
-	return s, instance.NewValidator(s)
-}
-
-// buildGraphResult validates instances and builds a graph.Result snapshot.
-func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, instances map[string][]map[string]any) *graph.Result {
-	t.Helper()
-	ctx := context.Background()
-	g := graph.New(s)
-	for typeName, records := range instances {
-		for _, props := range records {
-			valid, failure, err := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
-			if err != nil {
-				t.Fatalf("validate %s: %v", typeName, err)
-			}
-			if failure != nil {
-				t.Fatalf("validate %s failed: %v", typeName, failure.Result.Messages())
-			}
-			result, err := g.Add(ctx, valid)
-			if err != nil {
-				t.Fatalf("graph.Add %s: %v", typeName, err)
-			}
-			if !result.OK() {
-				t.Fatalf("graph.Add %s issues: %v", typeName, result.Messages())
-			}
-		}
-	}
-	return g.Snapshot()
-}
 
 func TestNodeQueryFor_SinglePK(t *testing.T) {
 	t.Parallel()
@@ -69,7 +23,8 @@ func TestNodeQueryFor_SinglePK(t *testing.T) {
 
 	inst := graphResult.InstancesOf("Entity")[0]
 	ns := shape.Types["Entity"]
-	q, err := a.NodeQueryFor(&ns, inst)
+	st, _ := s.Type("Entity")
+	q, err := a.NodeQueryFor(&ns, inst, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +59,8 @@ func TestNodeQueryFor_CompositePK(t *testing.T) {
 
 	inst := graphResult.InstancesOf("Record")[0]
 	ns := shape.Types["Record"]
-	q, err := a.NodeQueryFor(&ns, inst)
+	st, _ := s.Type("Record")
+	q, err := a.NodeQueryFor(&ns, inst, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +89,8 @@ func TestNodeQueryFor_ImmutableKeys(t *testing.T) {
 
 	inst := graphResult.InstancesOf("Entity")[0]
 	ns := shape.Types["Entity"]
-	q, err := a.NodeQueryFor(&ns, inst, WithImmutableKeys("created_at"))
+	st, _ := s.Type("Entity")
+	q, err := a.NodeQueryFor(&ns, inst, st, WithImmutableKeys("created_at"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,9 +530,101 @@ func TestNodeQueryFor_MissingKey(t *testing.T) {
 		PrimaryKeys: []string{"nonexistent_key"},
 	}
 
-	_, err := a.NodeQueryFor(&badShape, inst)
+	_, err := a.NodeQueryFor(&badShape, inst, nil)
 	if err == nil {
 		t.Error("expected error for missing key")
+	}
+}
+
+func TestNodeQueryFor_EmptyPrimaryKeys(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "basic.yammm")
+	a := New()
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
+	})
+
+	inst := graphResult.InstancesOf("Entity")[0]
+	emptyPKShape := NodeShape{
+		Label:       "test__Entity",
+		PrimaryKeys: nil,
+	}
+
+	_, err := a.NodeQueryFor(&emptyPKShape, inst, nil)
+	if err == nil {
+		t.Error("expected error for empty primary keys")
+	}
+	if !strings.Contains(err.Error(), "no primary keys defined") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestBatchNodeQueries_MissingShape(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "basic.yammm")
+	a := New()
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
+	})
+
+	// Pass an empty shape map — no shape for "Entity".
+	emptyShapes := &GraphShape{Types: map[string]NodeShape{}}
+	_, err := a.BatchNodeQueries(graphResult, emptyShapes)
+	if err == nil {
+		t.Error("expected error for missing shape")
+	}
+	if !strings.Contains(err.Error(), "no shape for type") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestEdgeQueryFor_MissingSourceShape(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
+	a := New()
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Issuer": {{"issuer_id": "iss1", "name": "Test"}},
+		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+	})
+
+	edges := graphResult.Edges()
+	if len(edges) == 0 {
+		t.Fatal("expected edges")
+	}
+
+	// Shape map with only one type — whichever type is the source will be missing.
+	partialShapes := &GraphShape{Types: map[string]NodeShape{
+		"__none__": {Label: "x", PrimaryKeys: []string{"x"}},
+	}}
+	_, err := a.EdgeQueryFor(edges[0], partialShapes)
+	if err == nil {
+		t.Error("expected error for missing source/target shape")
+	}
+	if !strings.Contains(err.Error(), "no shape for") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestBatchEdgeQueries_MissingShape(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
+	a := New()
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Issuer": {{"issuer_id": "iss1", "name": "Test"}},
+		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+	})
+
+	emptyShapes := &GraphShape{Types: map[string]NodeShape{}}
+	_, err := a.BatchEdgeQueries(graphResult, emptyShapes)
+	if err == nil {
+		t.Error("expected error for missing shape")
+	}
+	if !strings.Contains(err.Error(), "no shape for") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
