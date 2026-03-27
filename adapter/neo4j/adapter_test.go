@@ -365,15 +365,26 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 
 func TestAdapter_ThreadSafety(t *testing.T) {
 	t.Parallel()
-	s := loadSchema(t, "basic.yammm")
+	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	var wg sync.WaitGroup
-	errs := make(chan error, 30)
+	// Pre-build immutable inputs for write operations.
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
+	}
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
+		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test Issue", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+	})
 
-	// Run ConstraintsForSchema, ShapeForSchema, and Label concurrently.
+	var wg sync.WaitGroup
+	errs := make(chan error, 50)
+
+	// Run ConstraintsForSchema, ShapeForSchema, Label, BatchNodeQueries,
+	// and BatchEdgeQueries concurrently.
 	for range 10 {
-		wg.Add(3)
+		wg.Add(5)
 		go func() {
 			defer wg.Done()
 			if _, result := a.ConstraintsForSchema(s); !result.OK() {
@@ -389,6 +400,18 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_ = a.Label("test", "Type")
+		}()
+		go func() {
+			defer wg.Done()
+			if _, err := a.BatchNodeQueries(graphResult, shape); err != nil {
+				errs <- fmt.Errorf("batch nodes: %w", err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if _, err := a.BatchEdgeQueries(graphResult, shape); err != nil {
+				errs <- fmt.Errorf("batch edges: %w", err)
+			}
 		}()
 	}
 

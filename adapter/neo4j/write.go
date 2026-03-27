@@ -317,8 +317,12 @@ func (a *Adapter) BatchEdgeQueries(
 			for k, v := range tgtKeys {
 				row["to_"+k] = v
 			}
-			if hasProps && edge.HasProperties() {
-				row["rel_props"] = edge.Properties().Clone()
+			if hasProps {
+				if edge.HasProperties() {
+					row["rel_props"] = edge.Properties().Clone()
+				} else {
+					row["rel_props"] = map[string]any{}
+				}
 			}
 			rows = append(rows, row)
 		}
@@ -459,6 +463,7 @@ func extractKeyProps(inst *graph.Instance, keyNames []string) (map[string]any, e
 
 	result := make(map[string]any, len(keyNames))
 	var missing []string
+	var nilKeys []string
 
 	for _, name := range keyNames {
 		val, ok := inst.Properties().Get(name)
@@ -468,13 +473,20 @@ func extractKeyProps(inst *graph.Instance, keyNames []string) (map[string]any, e
 		}
 		unwrapped := val.Unwrap()
 		if unwrapped == nil {
-			return nil, fmt.Errorf("primary key %q has nil value", name)
+			nilKeys = append(nilKeys, name)
+			continue
 		}
 		result[name] = unwrapped
 	}
 
+	if len(missing) > 0 && len(nilKeys) > 0 {
+		return nil, fmt.Errorf("missing required primary key(s): %v; nil primary key(s): %v", missing, nilKeys)
+	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required primary key(s): %v", missing)
+	}
+	if len(nilKeys) > 0 {
+		return nil, fmt.Errorf("nil primary key(s): %v", nilKeys)
 	}
 	return result, nil
 }

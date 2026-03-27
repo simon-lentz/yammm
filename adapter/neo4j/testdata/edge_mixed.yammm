@@ -1,0 +1,14 @@
+schema "edge_mixed_test"
+
+type Company {
+    company_id String primary
+    name String required
+}
+
+type Employee {
+    employee_id String primary
+    name String required
+    --> WORKS_AT (_:one) Company {
+        note String
+    }
+}

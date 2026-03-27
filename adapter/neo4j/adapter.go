@@ -63,6 +63,10 @@ func WithLabelSeparator(sep string) Option {
 
 // WithLabelPrefix adds a global prefix to all generated labels.
 // Default: "" (no prefix). Example: WithLabelPrefix("app_") produces "app_msrb_emma__Issuer".
+//
+// The prefix is only applied when a schema name is provided to [Adapter.Label].
+// When schemaName is empty (legacy/unscoped usage), the label is the sanitized
+// type name alone, without any prefix.
 func WithLabelPrefix(prefix string) Option {
 	return func(c *adapterConfig) {
 		c.labelPrefix = prefix

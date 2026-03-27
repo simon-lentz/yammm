@@ -628,6 +628,68 @@ func TestBatchEdgeQueries_MissingShape(t *testing.T) {
 	}
 }
 
+func TestBatchEdgeQueries_MixedProperties(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "edge_mixed.yammm")
+	a := New()
+
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
+	}
+
+	// Employee e1 provides the optional edge property "note";
+	// Employee e2 does not. Both produce WORKS_AT edges with the
+	// same (Employee, WORKS_AT, Company) signature but different
+	// HasProperties() results. Before the fix, the edge without
+	// properties would omit rel_props from its row, causing
+	// SET r += row.rel_props to evaluate to null (Neo4j TypeError).
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Company": {
+			{"company_id": "c1", "name": "Acme"},
+		},
+		"Employee": {
+			{"employee_id": "e1", "name": "Alice", "works_at": map[string]any{"_target_company_id": "c1", "note": "senior"}},
+			{"employee_id": "e2", "name": "Bob", "works_at": map[string]any{"_target_company_id": "c1"}},
+		},
+	})
+
+	queries, err := a.BatchEdgeQueries(graphResult, shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find the WORKS_AT batch query.
+	var worksAtQuery *BatchEdgeQuery
+	for _, q := range queries {
+		if q.RelationType == "WORKS_AT" {
+			worksAtQuery = q
+			break
+		}
+	}
+	if worksAtQuery == nil {
+		t.Fatal("expected a WORKS_AT batch edge query")
+	}
+
+	// If the statement references rel_props, every row must contain the key.
+	if strings.Contains(worksAtQuery.Statement, "rel_props") {
+		rows, ok := worksAtQuery.Params["rows"].([]map[string]any)
+		if !ok {
+			t.Fatal("rows should be []map[string]any")
+		}
+		for i, row := range rows {
+			relProps, exists := row["rel_props"]
+			if !exists {
+				t.Errorf("row %d missing rel_props key — would cause SET r += null TypeError in Neo4j", i)
+				continue
+			}
+			if relProps == nil {
+				t.Errorf("row %d has nil rel_props — would cause SET r += null TypeError in Neo4j", i)
+			}
+		}
+	}
+}
+
 func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
