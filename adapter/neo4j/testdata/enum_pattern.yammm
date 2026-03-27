@@ -1,0 +1,7 @@
+schema "enum_pattern_test"
+
+type Record {
+    id     String primary
+    status Enum["pending", "approved", "rejected"] required
+    email  Pattern["^.+@.+$"]
+}

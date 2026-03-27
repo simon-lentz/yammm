@@ -1,0 +1,14 @@
+schema "basic_test"
+
+type Entity {
+    id          String primary
+    name        String required
+    description String
+    count       Integer required
+    score       Float
+    active      Boolean required
+    created_at  Timestamp required
+    birth_date  Date
+    ref         UUID
+    embedding   Vector[3]
+}

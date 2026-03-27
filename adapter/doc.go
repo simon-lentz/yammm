@@ -22,9 +22,8 @@
 //
 // Adapters depend on library packages; library packages never depend on adapters:
 //
-//	adapter/json  ──imports──▶  instance
-//	adapter/json  ──imports──▶  diag
-//	adapter/json  ──imports──▶  location (for PositionRegistry interface)
+//	adapter/json   ──imports──▶  instance, diag, location, graph, immutable, schema
+//	adapter/neo4j  ──imports──▶  schema, graph, immutable, diag, location
 //
 // # Layering Discipline
 //
@@ -34,4 +33,5 @@
 // # Subpackages
 //
 //   - [json]: JSON adapter with optional location tracking and JSONC support
+//   - [neo4j]: Neo4j 5 constraint generation, label mapping, and write query generation
 package adapter

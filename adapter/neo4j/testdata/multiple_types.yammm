@@ -1,0 +1,13 @@
+schema "multi_test"
+
+type Widget {
+    id          String primary
+    code        String required
+    description String
+}
+
+type Gadget {
+    uid           String primary
+    sku           String primary
+    optional_note String
+}

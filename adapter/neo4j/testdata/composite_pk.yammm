@@ -1,0 +1,8 @@
+schema "composite_test"
+
+type Record {
+    schema_id String primary
+    record_id String primary
+    name      String required
+    value     Float
+}

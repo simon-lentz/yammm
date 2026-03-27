@@ -1,0 +1,11 @@
+schema "abstract_test"
+
+abstract type Base {
+    id String primary
+}
+
+type Widget extends Base {
+    id   String primary
+    code String primary
+    name String required
+}
