@@ -1,6 +1,7 @@
 package diag
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -531,5 +532,113 @@ func TestResult_IssuesAtLeastAsSevereAs_InvalidThreshold(t *testing.T) {
 	if iteratorCount != sliceCount {
 		t.Errorf("iterator count (%d) != slice count (%d); should be consistent",
 			iteratorCount, sliceCount)
+	}
+}
+
+func TestResult_Err_NilWhenOK(t *testing.T) {
+	r := OK()
+	if err := r.Err(); err != nil {
+		t.Errorf("OK().Err() = %v; want nil", err)
+	}
+}
+
+func TestResult_Err_NilWhenWarningsOnly(t *testing.T) {
+	issues := []Issue{
+		NewIssue(Warning, E_INVALID_NAME, "name looks odd").Build(),
+	}
+	r := newResult(issues, 0, false, 0)
+
+	if !r.OK() {
+		t.Fatal("result with only warnings should be OK")
+	}
+	if err := r.Err(); err != nil {
+		t.Errorf("Err() = %v; want nil for warnings-only result", err)
+	}
+}
+
+func TestResult_Err_NonNilOnError(t *testing.T) {
+	issues := []Issue{
+		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
+	}
+	r := newResult(issues, 0, false, 0)
+
+	err := r.Err()
+	if err == nil {
+		t.Fatal("Err() = nil; want non-nil for result with errors")
+	}
+
+	// Error() string should contain the issue message
+	if !strings.Contains(err.Error(), "unexpected token") {
+		t.Errorf("Error() = %q; want it to contain %q", err.Error(), "unexpected token")
+	}
+}
+
+func TestResult_Err_NonNilOnFatal(t *testing.T) {
+	issues := []Issue{
+		NewIssue(Fatal, E_LIMIT_REACHED, "limit reached").Build(),
+	}
+	r := newResult(issues, 0, false, 0)
+
+	err := r.Err()
+	if err == nil {
+		t.Fatal("Err() = nil; want non-nil for result with fatal")
+	}
+}
+
+func TestResult_Err_ErrorsAs(t *testing.T) {
+	issues := []Issue{
+		NewIssue(Error, E_TYPE_COLLISION, `type "Person" already defined`).Build(),
+		NewIssue(Warning, E_INVALID_NAME, "name looks odd").Build(),
+	}
+	r := newResult(issues, 0, false, 0)
+
+	err := r.Err()
+	if err == nil {
+		t.Fatal("Err() = nil; want non-nil")
+	}
+
+	var re *ResultError
+	if !errors.As(err, &re) {
+		t.Fatal("errors.As(*ResultError) = false; want true")
+	}
+
+	// Verify the Result is accessible and intact
+	if re.Result.Len() != 2 {
+		t.Errorf("ResultError.Result.Len() = %d; want 2", re.Result.Len())
+	}
+	if re.Result.OK() {
+		t.Error("ResultError.Result.OK() = true; want false")
+	}
+}
+
+func TestResult_Err_WrappableWithFmtErrorf(t *testing.T) {
+	issues := []Issue{
+		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
+	}
+	r := newResult(issues, 0, false, 0)
+
+	wrapped := errors.Join(errors.New("schema validation failed"), r.Err())
+
+	var re *ResultError
+	if !errors.As(wrapped, &re) {
+		t.Fatal("errors.As through wrapped error = false; want true")
+	}
+}
+
+func TestResult_Err_MatchesString(t *testing.T) {
+	issues := []Issue{
+		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
+		NewIssue(Error, E_TYPE_COLLISION, "duplicate type").Build(),
+	}
+	r := newResult(issues, 0, false, 0)
+
+	err := r.Err()
+	if err == nil {
+		t.Fatal("Err() = nil; want non-nil")
+	}
+
+	// Error() output should match Result.String()
+	if err.Error() != r.String() {
+		t.Errorf("Error() = %q; want %q (same as String())", err.Error(), r.String())
 	}
 }
