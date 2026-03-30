@@ -371,6 +371,52 @@ func (r Result) MessagesAtOrAbove(threshold Severity) []string {
 	return result
 }
 
+// ResultError is an error wrapping a failed [Result].
+//
+// ResultError is returned by [Result.Err] when the result contains Fatal or
+// Error issues. Use [errors.As] to extract the underlying Result for structured
+// access to diagnostic issues:
+//
+//	var re *diag.ResultError
+//	if errors.As(err, &re) {
+//	    for issue := range re.Result.Issues() { ... }
+//	}
+//
+// This follows the pattern of [context.Context.Err] and [sql.Rows.Err]:
+// nil means success, non-nil means failure with structured details available.
+type ResultError struct {
+	// Result contains the diagnostic issues that caused the failure.
+	Result Result
+}
+
+// Error returns a summary of the diagnostic issues.
+//
+// The format matches [Result.String]: a count line followed by per-issue
+// code and message lines.
+func (e *ResultError) Error() string {
+	return e.Result.String()
+}
+
+// Err returns nil if the result is OK, or a *[ResultError] if it contains
+// Fatal or Error issues.
+//
+// This provides idiomatic error conversion for use in error-returning functions:
+//
+//	schema, result, err := load.Load(ctx, path)
+//	if err != nil { return err }
+//	if err := result.Err(); err != nil {
+//	    return fmt.Errorf("schema validation: %w", err)
+//	}
+//
+// The returned error supports [errors.As] with *[ResultError] for access to
+// the full [Result].
+func (r Result) Err() error {
+	if r.OK() {
+		return nil
+	}
+	return &ResultError{Result: r}
+}
+
 // String returns a minimal multi-line representation suitable for quick debugging.
 //
 // String returns "OK" when OK() is true (no Fatal/Error issues), regardless of
