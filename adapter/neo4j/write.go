@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -348,7 +349,14 @@ func (a *Adapter) BatchEdgeQueries(
 // --- internal helpers ---
 
 // propsToParamMap converts instance properties to a Neo4j-driver-compatible map.
-// Coerces []any slices to concrete typed slices using schema constraint metadata.
+// Coerces []any slices to concrete typed slices, and scalar Date/Timestamp strings
+// to time.Time values, using schema constraint metadata. Without this coercion,
+// Neo4j TYPE constraints (IS :: DATE, IS :: ZONED DATETIME) reject string values.
+//
+// Note: Date values are coerced to time.Time here. Callers that need the Neo4j
+// driver to send DATE (not ZONED DATETIME) must post-process the map to convert
+// time.Time values for Date-typed properties to dbtype.Date. See the
+// TemporalCoercionHints method for identifying which properties need this.
 func propsToParamMap(inst *graph.Instance, schemaType *schema.Type) map[string]any {
 	raw := inst.Properties().Clone()
 	if schemaType == nil {
@@ -364,9 +372,49 @@ func propsToParamMap(inst *graph.Instance, schemaType *schema.Type) map[string]a
 			if found {
 				raw[key] = coerceSlice(slice, prop.Constraint())
 			}
+			continue
+		}
+		// Coerce scalar Date/Timestamp strings to time.Time so the Neo4j
+		// driver sends native temporal types that satisfy TYPE constraints.
+		if s, ok := val.(string); ok {
+			prop, found := schemaType.Property(key)
+			if !found {
+				continue
+			}
+			raw[key] = coerceTemporalScalar(s, prop.Constraint())
 		}
 	}
 	return raw
+}
+
+// coerceTemporalScalar converts a string value to a Neo4j-driver-compatible
+// temporal type based on the schema constraint:
+//   - KindDate → dbtype.Date (Neo4j DATE)
+//   - KindTimestamp → time.Time (Neo4j ZONED DATETIME)
+//
+// Returns the original string if parsing fails or the constraint is not temporal.
+func coerceTemporalScalar(s string, c schema.Constraint) any {
+	c = effectiveConstraint(c)
+	switch c.Kind() {
+	case schema.KindDate:
+		t, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			return s
+		}
+		return dbtype.Date(t)
+	case schema.KindTimestamp:
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			// Try RFC3339Nano for sub-second precision
+			t, err = time.Parse(time.RFC3339Nano, s)
+			if err != nil {
+				return s
+			}
+		}
+		return t
+	default:
+		return s
+	}
 }
 
 // coerceSlice converts []any to a concrete typed slice using schema constraint metadata.

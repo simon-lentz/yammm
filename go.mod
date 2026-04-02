@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/antlr4-go/antlr/v4 v4.13.1
 	github.com/google/uuid v1.6.0
+	github.com/neo4j/neo4j-go-driver/v6 v6.0.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/jsonc v0.3.2
 	golang.org/x/text v0.34.0
