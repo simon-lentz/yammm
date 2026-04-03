@@ -18,7 +18,7 @@ func TestNewInstance(t *testing.T) {
 	assert.Nil(t, raw.Provenance)
 }
 
-func TestInstanceBuilder_Prop(t *testing.T) {
+func TestBuilder_Prop(t *testing.T) {
 	t.Run("single property", func(t *testing.T) {
 		raw := NewInstance().
 			Prop("name", "Alice").
@@ -59,7 +59,7 @@ func TestInstanceBuilder_Prop(t *testing.T) {
 	})
 }
 
-func TestInstanceBuilder_Edge(t *testing.T) {
+func TestBuilder_Edge(t *testing.T) {
 	t.Run("simple edge with target", func(t *testing.T) {
 		raw := NewInstance().
 			Prop("vin", "ABC123").
@@ -100,7 +100,7 @@ func TestInstanceBuilder_Edge(t *testing.T) {
 	})
 }
 
-func TestInstanceBuilder_Edges(t *testing.T) {
+func TestBuilder_Edges(t *testing.T) {
 	t.Run("many association", func(t *testing.T) {
 		raw := NewInstance().
 			Prop("id", "alice").
@@ -136,7 +136,7 @@ func TestInstanceBuilder_Edges(t *testing.T) {
 	})
 }
 
-func TestInstanceBuilder_Composed(t *testing.T) {
+func TestBuilder_Composed(t *testing.T) {
 	raw := NewInstance().
 		Prop("vin", "CAR-001").
 		Composed("engine",
@@ -149,7 +149,7 @@ func TestInstanceBuilder_Composed(t *testing.T) {
 	assert.Equal(t, "ENG-001", engine["serial"])
 }
 
-func TestInstanceBuilder_ComposedMany(t *testing.T) {
+func TestBuilder_ComposedMany(t *testing.T) {
 	raw := NewInstance().
 		Prop("vin", "CAR-001").
 		ComposedMany("wheels",
@@ -173,7 +173,7 @@ func TestInstanceBuilder_ComposedMany(t *testing.T) {
 	assert.Equal(t, []string{"FL", "FR", "RL", "RR"}, positions)
 }
 
-func TestInstanceBuilder_WithProvenance(t *testing.T) {
+func TestBuilder_WithProvenance(t *testing.T) {
 	t.Run("valid path", func(t *testing.T) {
 		raw := NewInstance().
 			WithProvenance("test://valid", "$.Person[0]").
@@ -195,7 +195,7 @@ func TestInstanceBuilder_WithProvenance(t *testing.T) {
 	})
 }
 
-func TestInstanceBuilder_WithFullProvenance(t *testing.T) {
+func TestBuilder_WithFullProvenance(t *testing.T) {
 	prov := NewProvenance(
 		"test.json",
 		path.Root().Key("users").Index(0),
@@ -211,7 +211,7 @@ func TestInstanceBuilder_WithFullProvenance(t *testing.T) {
 	assert.Equal(t, "$.users[0]", raw.Provenance.Path().String())
 }
 
-func TestInstanceBuilder_Reusability(t *testing.T) {
+func TestBuilder_Reusability(t *testing.T) {
 	builder := NewInstance().
 		Prop("id", "p1").
 		Prop("name", "Alice")
@@ -295,7 +295,7 @@ func TestEdgeBuilder_Build_Independence(t *testing.T) {
 }
 
 // Integration test: complex nested structure
-func TestInstanceBuilder_ComplexStructure(t *testing.T) {
+func TestBuilder_ComplexStructure(t *testing.T) {
 	raw := NewInstance().
 		Prop("id", "car-001").
 		Prop("vin", "1HGCM82633A123456").

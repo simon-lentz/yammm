@@ -112,9 +112,9 @@ func TestTypeStrata_NamedTypesInvalid(t *testing.T) {
 	}
 }
 
-// TestValueOrder_NamedTypesError verifies that ValueOrder correctly errors on
+// TestOrder_NamedTypesError verifies that Order correctly errors on
 // named types (since TypeStrata now returns InvalidStrata for them).
-func TestValueOrder_NamedTypesError(t *testing.T) {
+func TestOrder_NamedTypesError(t *testing.T) {
 	tests := []struct {
 		name  string
 		left  any
@@ -128,18 +128,18 @@ func TestValueOrder_NamedTypesError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := value.ValueOrder(tt.left, tt.right)
+			_, err := value.Order(tt.left, tt.right)
 			if err == nil {
-				t.Errorf("ValueOrder(%T, %T) should have returned an error for named type", tt.left, tt.right)
+				t.Errorf("Order(%T, %T) should have returned an error for named type", tt.left, tt.right)
 			}
 		})
 	}
 }
 
-// TestValueOrder_LargeUnsigned verifies that uint64/uintptr values > math.MaxInt64
+// TestOrder_LargeUnsigned verifies that uint64/uintptr values > math.MaxInt64
 // can be compared correctly. This was a bug where GetInt64 rejected overflow,
-// causing ValueOrder to fail. See DEV_V2_INTERNAL_VALUE_REVIEW.md issue #2.
-func TestValueOrder_LargeUnsigned(t *testing.T) {
+// causing Order to fail. See DEV_V2_INTERNAL_VALUE_REVIEW.md issue #2.
+func TestOrder_LargeUnsigned(t *testing.T) {
 	const (
 		maxInt64      = int64(1<<63 - 1)  // 9223372036854775807
 		maxInt64Plus1 = uint64(1 << 63)   // 9223372036854775808
@@ -182,12 +182,12 @@ func TestValueOrder_LargeUnsigned(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := value.ValueOrder(tt.left, tt.right)
+			got, err := value.Order(tt.left, tt.right)
 			if err != nil {
-				t.Fatalf("ValueOrder(%v, %v) unexpected error: %v", tt.left, tt.right, err)
+				t.Fatalf("Order(%v, %v) unexpected error: %v", tt.left, tt.right, err)
 			}
 			if got != tt.want {
-				t.Errorf("ValueOrder(%v, %v) = %d, want %d", tt.left, tt.right, got, tt.want)
+				t.Errorf("Order(%v, %v) = %d, want %d", tt.left, tt.right, got, tt.want)
 			}
 		})
 	}
@@ -364,10 +364,10 @@ func TestIsFinite(t *testing.T) {
 	}
 }
 
-func TestValueOrder(t *testing.T) {
-	assertValueOrder := func(t *testing.T, expected int, left, right any) {
+func TestOrder(t *testing.T) {
+	assertOrder := func(t *testing.T, expected int, left, right any) {
 		t.Helper()
-		got, err := value.ValueOrder(left, right)
+		got, err := value.Order(left, right)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -375,94 +375,94 @@ func TestValueOrder(t *testing.T) {
 	}
 
 	// Nil
-	assertValueOrder(t, 0, nil, nil)
-	assertValueOrder(t, 1, false, nil)
-	assertValueOrder(t, -1, nil, true)
+	assertOrder(t, 0, nil, nil)
+	assertOrder(t, 1, false, nil)
+	assertOrder(t, -1, nil, true)
 
 	// Bool
-	assertValueOrder(t, 0, false, false)
-	assertValueOrder(t, 0, true, true)
-	assertValueOrder(t, -1, false, true)
-	assertValueOrder(t, 1, true, false)
+	assertOrder(t, 0, false, false)
+	assertOrder(t, 0, true, true)
+	assertOrder(t, -1, false, true)
+	assertOrder(t, 1, true, false)
 
 	// Signed integers
-	assertValueOrder(t, 0, 1, 1)
-	assertValueOrder(t, -1, 1, 2)
-	assertValueOrder(t, 1, 2, 1)
-	assertValueOrder(t, -1, int64(-5), int64(5))
+	assertOrder(t, 0, 1, 1)
+	assertOrder(t, -1, 1, 2)
+	assertOrder(t, 1, 2, 1)
+	assertOrder(t, -1, int64(-5), int64(5))
 
 	// Unsigned integers
-	assertValueOrder(t, 0, uint(42), uint(42))
-	assertValueOrder(t, -1, uint(1), uint(2))
-	assertValueOrder(t, 1, uint(10), uint(5))
-	assertValueOrder(t, 0, uint64(1000), uint64(1000))
+	assertOrder(t, 0, uint(42), uint(42))
+	assertOrder(t, -1, uint(1), uint(2))
+	assertOrder(t, 1, uint(10), uint(5))
+	assertOrder(t, 0, uint64(1000), uint64(1000))
 
 	// Mixed signed/unsigned comparison
-	assertValueOrder(t, 0, int(42), uint(42))
-	assertValueOrder(t, -1, int(1), uint(2))
-	assertValueOrder(t, 1, uint(10), int(5))
+	assertOrder(t, 0, int(42), uint(42))
+	assertOrder(t, -1, int(1), uint(2))
+	assertOrder(t, 1, uint(10), int(5))
 
 	// Float comparisons
-	assertValueOrder(t, -1, 1, 3.14)
-	assertValueOrder(t, 1, 3.14, 1)
-	assertValueOrder(t, -1, 1.12, 3.14)
+	assertOrder(t, -1, 1, 3.14)
+	assertOrder(t, 1, 3.14, 1)
+	assertOrder(t, -1, 1.12, 3.14)
 
 	// Cross-strata
-	assertValueOrder(t, -1, false, 1)
-	assertValueOrder(t, -1, true, 1.2)
-	assertValueOrder(t, 1, 1, false)
-	assertValueOrder(t, 1, 1, true)
+	assertOrder(t, -1, false, 1)
+	assertOrder(t, -1, true, 1.2)
+	assertOrder(t, 1, 1, false)
+	assertOrder(t, 1, 1, true)
 
 	// String
-	assertValueOrder(t, -1, "a", "b")
-	assertValueOrder(t, 1, "a", 1)
-	assertValueOrder(t, -1, 1, "a")
+	assertOrder(t, -1, "a", "b")
+	assertOrder(t, 1, "a", 1)
+	assertOrder(t, -1, 1, "a")
 
 	// Slice
-	assertValueOrder(t, 1, []string{"a"}, []int{1})
-	assertValueOrder(t, 1, []int{1}, 1)
-	assertValueOrder(t, -1, 1, []int{1})
-	assertValueOrder(t, 1, []any{"a", "b", "c"}, []any{"a", "b"})
-	assertValueOrder(t, 1, []any{"a", "b", 1}, []any{"a", "b"})
-	assertValueOrder(t, -1, []any{"a", "b", 1}, []any{"a", "b", "c"})
+	assertOrder(t, 1, []string{"a"}, []int{1})
+	assertOrder(t, 1, []int{1}, 1)
+	assertOrder(t, -1, 1, []int{1})
+	assertOrder(t, 1, []any{"a", "b", "c"}, []any{"a", "b"})
+	assertOrder(t, 1, []any{"a", "b", 1}, []any{"a", "b"})
+	assertOrder(t, -1, []any{"a", "b", 1}, []any{"a", "b", "c"})
 
 	// Special float values
 	nan := math.NaN()
 	posInf := math.Inf(1)
 	negInf := math.Inf(-1)
 
-	assertValueOrder(t, 0, []any{nan}, []any{nan})
-	assertValueOrder(t, 1, []any{nan}, []any{float64(0)})
-	assertValueOrder(t, -1, []any{float64(0)}, []any{nan})
+	assertOrder(t, 0, []any{nan}, []any{nan})
+	assertOrder(t, 1, []any{nan}, []any{float64(0)})
+	assertOrder(t, -1, []any{float64(0)}, []any{nan})
 
-	assertValueOrder(t, 0, nan, nan)
-	assertValueOrder(t, 1, nan, posInf)
-	assertValueOrder(t, 1, nan, negInf)
-	assertValueOrder(t, 1, nan, float64(42))
-	assertValueOrder(t, -1, float64(0), nan)
-	assertValueOrder(t, -1, negInf, float64(0))
-	assertValueOrder(t, 1, posInf, float64(0))
-	assertValueOrder(t, -1, negInf, posInf)
-	assertValueOrder(t, 0, posInf, posInf)
-	assertValueOrder(t, 0, negInf, negInf)
+	assertOrder(t, 0, nan, nan)
+	assertOrder(t, 1, nan, posInf)
+	assertOrder(t, 1, nan, negInf)
+	assertOrder(t, 1, nan, float64(42))
+	assertOrder(t, -1, float64(0), nan)
+	assertOrder(t, -1, negInf, float64(0))
+	assertOrder(t, 1, posInf, float64(0))
+	assertOrder(t, -1, negInf, posInf)
+	assertOrder(t, 0, posInf, posInf)
+	assertOrder(t, 0, negInf, negInf)
 
 	t.Run("invalid types return error", func(t *testing.T) {
-		_, err := value.ValueOrder(struct{}{}, struct{}{})
+		_, err := value.Order(struct{}{}, struct{}{})
 		if err == nil {
 			t.Error("expected error for struct comparison")
 		}
-		_, err = value.ValueOrder(struct{}{}, 1)
+		_, err = value.Order(struct{}{}, 1)
 		if err == nil {
 			t.Error("expected error for struct vs int comparison")
 		}
-		_, err = value.ValueOrder([]any{struct{}{}}, []any{struct{}{}})
+		_, err = value.Order([]any{struct{}{}}, []any{struct{}{}})
 		if err == nil {
 			t.Error("expected error for slice containing struct")
 		}
 	})
 }
 
-func TestValueOrder_Invariants(t *testing.T) {
+func TestOrder_Invariants(t *testing.T) {
 	// Symmetry on equality
 	nan := math.NaN()
 	equalVals := []any{
@@ -480,11 +480,11 @@ func TestValueOrder_Invariants(t *testing.T) {
 		[]*regexp.Regexp{regexp.MustCompile("x")},
 	}
 	for _, v := range equalVals {
-		lr, err := value.ValueOrder(v, v)
+		lr, err := value.Order(v, v)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		rl, err := value.ValueOrder(v, v)
+		rl, err := value.Order(v, v)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -509,11 +509,11 @@ func TestValueOrder_Invariants(t *testing.T) {
 		{math.Inf(1), nan},
 	}
 	for _, p := range pairs {
-		lr, err := value.ValueOrder(p.a, p.b)
+		lr, err := value.Order(p.a, p.b)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		rl, err := value.ValueOrder(p.b, p.a)
+		rl, err := value.Order(p.b, p.a)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -523,7 +523,7 @@ func TestValueOrder_Invariants(t *testing.T) {
 	// Transitivity on simple chains
 	chain := func(vals ...any) {
 		for i := range vals[:len(vals)-1] {
-			res, err := value.ValueOrder(vals[i], vals[i+1])
+			res, err := value.Order(vals[i], vals[i+1])
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -549,7 +549,7 @@ func sign(n int) int {
 }
 
 func TestLess(t *testing.T) {
-	t.Run("matches ValueOrder", func(t *testing.T) {
+	t.Run("matches Order", func(t *testing.T) {
 		inputs := []struct {
 			a    any
 			b    any
@@ -570,7 +570,7 @@ func TestLess(t *testing.T) {
 			}
 			assertEqual(t, tc.want, got)
 
-			ord, err := value.ValueOrder(tc.a, tc.b)
+			ord, err := value.Order(tc.a, tc.b)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -794,16 +794,16 @@ func TestMax(t *testing.T) {
 	assertEqual(t, int64(100), value.Max(int64(-100), int64(100)))
 }
 
-func FuzzValueOrder_Ints(f *testing.F) {
+func FuzzOrder_Ints(f *testing.F) {
 	f.Add(int64(0), int64(1))
 	f.Add(int64(-5), int64(-5))
 	f.Add(int64(math.MaxInt64), int64(math.MinInt64))
 	f.Fuzz(func(t *testing.T, a int64, b int64) {
-		cmp, err := value.ValueOrder(a, b)
+		cmp, err := value.Order(a, b)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		rcmp, err := value.ValueOrder(b, a)
+		rcmp, err := value.Order(b, a)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -811,16 +811,16 @@ func FuzzValueOrder_Ints(f *testing.F) {
 	})
 }
 
-func FuzzValueOrder_Strings(f *testing.F) {
+func FuzzOrder_Strings(f *testing.F) {
 	f.Add("a", "b")
 	f.Add("same", "same")
 	f.Add("", "")
 	f.Fuzz(func(t *testing.T, a string, b string) {
-		cmp, err := value.ValueOrder(a, b)
+		cmp, err := value.Order(a, b)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		rcmp, err := value.ValueOrder(b, a)
+		rcmp, err := value.Order(b, a)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -828,7 +828,7 @@ func FuzzValueOrder_Strings(f *testing.F) {
 	})
 }
 
-func TestValueOrder_RandomSupportedPairs(t *testing.T) {
+func TestOrder_RandomSupportedPairs(t *testing.T) {
 	r := rand.New(rand.NewSource(123)) //nolint:gosec // deterministic pseudo-randomness is fine in tests
 	vals := []any{
 		nil, false, true,
@@ -843,11 +843,11 @@ func TestValueOrder_RandomSupportedPairs(t *testing.T) {
 	for range 32 {
 		a := vals[r.Intn(len(vals))]
 		b := vals[r.Intn(len(vals))]
-		cmp, err := value.ValueOrder(a, b)
+		cmp, err := value.Order(a, b)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		rcmp, err := value.ValueOrder(b, a)
+		rcmp, err := value.Order(b, a)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -855,10 +855,10 @@ func TestValueOrder_RandomSupportedPairs(t *testing.T) {
 	}
 }
 
-// TestValueOrder_FloatIntTransitivity verifies that ValueOrder maintains transitivity
+// TestOrder_FloatIntTransitivity verifies that Order maintains transitivity
 // when comparing floats with large integers (> 2^53). This is a regression test for
 // the precision loss bug where float64(large_int) loses precision.
-func TestValueOrder_FloatIntTransitivity(t *testing.T) {
+func TestOrder_FloatIntTransitivity(t *testing.T) {
 	// The exact values from the review document that demonstrated the transitivity violation.
 	// Prior to the fix: a==b (wrong), b==c, a>c → not transitive
 	// After the fix: a>b, b==c, a>c → transitive
@@ -867,30 +867,30 @@ func TestValueOrder_FloatIntTransitivity(t *testing.T) {
 		b := float64(9007199254740992) // 2^53
 		c := uint64(9007199254740992)  // 2^53
 
-		ab, err := value.ValueOrder(a, b)
+		ab, err := value.Order(a, b)
 		if err != nil {
-			t.Fatalf("ValueOrder(a, b) error: %v", err)
+			t.Fatalf("Order(a, b) error: %v", err)
 		}
-		bc, err := value.ValueOrder(b, c)
+		bc, err := value.Order(b, c)
 		if err != nil {
-			t.Fatalf("ValueOrder(b, c) error: %v", err)
+			t.Fatalf("Order(b, c) error: %v", err)
 		}
-		ac, err := value.ValueOrder(a, c)
+		ac, err := value.Order(a, c)
 		if err != nil {
-			t.Fatalf("ValueOrder(a, c) error: %v", err)
+			t.Fatalf("Order(a, c) error: %v", err)
 		}
 
 		// a should be greater than b (not equal!)
 		if ab != 1 {
-			t.Errorf("ValueOrder(uint64(2^53+1), float64(2^53)) = %d, want 1 (greater)", ab)
+			t.Errorf("Order(uint64(2^53+1), float64(2^53)) = %d, want 1 (greater)", ab)
 		}
 		// b should equal c
 		if bc != 0 {
-			t.Errorf("ValueOrder(float64(2^53), uint64(2^53)) = %d, want 0 (equal)", bc)
+			t.Errorf("Order(float64(2^53), uint64(2^53)) = %d, want 0 (equal)", bc)
 		}
 		// a should be greater than c (transitivity: a>b, b==c → a>c)
 		if ac != 1 {
-			t.Errorf("ValueOrder(uint64(2^53+1), uint64(2^53)) = %d, want 1 (greater)", ac)
+			t.Errorf("Order(uint64(2^53+1), uint64(2^53)) = %d, want 1 (greater)", ac)
 		}
 	})
 
@@ -899,27 +899,27 @@ func TestValueOrder_FloatIntTransitivity(t *testing.T) {
 		b := float64(9007199254740992) // 2^53
 		c := int64(9007199254740992)   // 2^53
 
-		ab, err := value.ValueOrder(a, b)
+		ab, err := value.Order(a, b)
 		if err != nil {
-			t.Fatalf("ValueOrder(a, b) error: %v", err)
+			t.Fatalf("Order(a, b) error: %v", err)
 		}
-		bc, err := value.ValueOrder(b, c)
+		bc, err := value.Order(b, c)
 		if err != nil {
-			t.Fatalf("ValueOrder(b, c) error: %v", err)
+			t.Fatalf("Order(b, c) error: %v", err)
 		}
-		ac, err := value.ValueOrder(a, c)
+		ac, err := value.Order(a, c)
 		if err != nil {
-			t.Fatalf("ValueOrder(a, c) error: %v", err)
+			t.Fatalf("Order(a, c) error: %v", err)
 		}
 
 		if ab != 1 {
-			t.Errorf("ValueOrder(int64(2^53+1), float64(2^53)) = %d, want 1", ab)
+			t.Errorf("Order(int64(2^53+1), float64(2^53)) = %d, want 1", ab)
 		}
 		if bc != 0 {
-			t.Errorf("ValueOrder(float64(2^53), int64(2^53)) = %d, want 0", bc)
+			t.Errorf("Order(float64(2^53), int64(2^53)) = %d, want 0", bc)
 		}
 		if ac != 1 {
-			t.Errorf("ValueOrder(int64(2^53+1), int64(2^53)) = %d, want 1", ac)
+			t.Errorf("Order(int64(2^53+1), int64(2^53)) = %d, want 1", ac)
 		}
 	})
 
@@ -930,30 +930,30 @@ func TestValueOrder_FloatIntTransitivity(t *testing.T) {
 		b := float64(-9007199254740992) // -2^53 (exact)
 		c := int64(-9007199254740993)   // -(2^53 + 1)
 
-		ab, err := value.ValueOrder(a, b)
+		ab, err := value.Order(a, b)
 		if err != nil {
-			t.Fatalf("ValueOrder(a, b) error: %v", err)
+			t.Fatalf("Order(a, b) error: %v", err)
 		}
-		bc, err := value.ValueOrder(b, c)
+		bc, err := value.Order(b, c)
 		if err != nil {
-			t.Fatalf("ValueOrder(b, c) error: %v", err)
+			t.Fatalf("Order(b, c) error: %v", err)
 		}
-		ac, err := value.ValueOrder(a, c)
+		ac, err := value.Order(a, c)
 		if err != nil {
-			t.Fatalf("ValueOrder(a, c) error: %v", err)
+			t.Fatalf("Order(a, c) error: %v", err)
 		}
 
 		// a == b (both are -2^53)
 		if ab != 0 {
-			t.Errorf("ValueOrder(-2^53, float64(-2^53)) = %d, want 0", ab)
+			t.Errorf("Order(-2^53, float64(-2^53)) = %d, want 0", ab)
 		}
 		// b > c (b is -2^53, c is -(2^53+1), so b > c)
 		if bc != 1 {
-			t.Errorf("ValueOrder(float64(-2^53), -(2^53+1)) = %d, want 1", bc)
+			t.Errorf("Order(float64(-2^53), -(2^53+1)) = %d, want 1", bc)
 		}
 		// a > c (transitivity: a==b, b>c → a>c)
 		if ac != 1 {
-			t.Errorf("ValueOrder(-2^53, -(2^53+1)) = %d, want 1", ac)
+			t.Errorf("Order(-2^53, -(2^53+1)) = %d, want 1", ac)
 		}
 	})
 }
@@ -1052,13 +1052,13 @@ func TestCompareUint64Float64(t *testing.T) {
 	}
 }
 
-// TestValueOrder_StringComparableEdgeCases tests edge cases in toStringComparable
-// through the ValueOrder function (toStringComparable is unexported).
-func TestValueOrder_StringComparableEdgeCases(t *testing.T) {
+// TestOrder_StringComparableEdgeCases tests edge cases in toStringComparable
+// through the Order function (toStringComparable is unexported).
+func TestOrder_StringComparableEdgeCases(t *testing.T) {
 	// Test nil regexp - should return error
 	t.Run("nil regexp vs string returns error", func(t *testing.T) {
 		var nilRegexp *regexp.Regexp = nil
-		_, err := value.ValueOrder(nilRegexp, "test")
+		_, err := value.Order(nilRegexp, "test")
 		if err == nil {
 			t.Error("expected error for nil regexp comparison")
 		}
@@ -1066,7 +1066,7 @@ func TestValueOrder_StringComparableEdgeCases(t *testing.T) {
 
 	t.Run("string vs nil regexp returns error", func(t *testing.T) {
 		var nilRegexp *regexp.Regexp = nil
-		_, err := value.ValueOrder("test", nilRegexp)
+		_, err := value.Order("test", nilRegexp)
 		if err == nil {
 			t.Error("expected error for nil regexp comparison")
 		}
@@ -1075,7 +1075,7 @@ func TestValueOrder_StringComparableEdgeCases(t *testing.T) {
 	t.Run("nil regexp vs nil regexp returns error", func(t *testing.T) {
 		var nilRegexp1 *regexp.Regexp = nil
 		var nilRegexp2 *regexp.Regexp = nil
-		_, err := value.ValueOrder(nilRegexp1, nilRegexp2)
+		_, err := value.Order(nilRegexp1, nilRegexp2)
 		if err == nil {
 			t.Error("expected error for nil regexp comparison")
 		}
@@ -1085,7 +1085,7 @@ func TestValueOrder_StringComparableEdgeCases(t *testing.T) {
 	t.Run("regexp vs regexp equal", func(t *testing.T) {
 		r1 := regexp.MustCompile("abc")
 		r2 := regexp.MustCompile("abc")
-		cmp, err := value.ValueOrder(r1, r2)
+		cmp, err := value.Order(r1, r2)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1097,7 +1097,7 @@ func TestValueOrder_StringComparableEdgeCases(t *testing.T) {
 	t.Run("regexp vs regexp less", func(t *testing.T) {
 		r1 := regexp.MustCompile("abc")
 		r2 := regexp.MustCompile("def")
-		cmp, err := value.ValueOrder(r1, r2)
+		cmp, err := value.Order(r1, r2)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1108,7 +1108,7 @@ func TestValueOrder_StringComparableEdgeCases(t *testing.T) {
 
 	t.Run("regexp vs string", func(t *testing.T) {
 		r := regexp.MustCompile("abc")
-		cmp, err := value.ValueOrder(r, "abc")
+		cmp, err := value.Order(r, "abc")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1119,7 +1119,7 @@ func TestValueOrder_StringComparableEdgeCases(t *testing.T) {
 
 	t.Run("string vs regexp", func(t *testing.T) {
 		r := regexp.MustCompile("def")
-		cmp, err := value.ValueOrder("abc", r)
+		cmp, err := value.Order("abc", r)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1235,8 +1235,8 @@ func TestCompareUint64Float64_AdditionalEdgeCases(t *testing.T) {
 	}
 }
 
-// TestValueOrder_MixedFloatInt tests ValueOrder with mixed float/int comparisons.
-func TestValueOrder_MixedFloatInt(t *testing.T) {
+// TestOrder_MixedFloatInt tests Order with mixed float/int comparisons.
+func TestOrder_MixedFloatInt(t *testing.T) {
 	tests := []struct {
 		name  string
 		left  any
@@ -1280,27 +1280,27 @@ func TestValueOrder_MixedFloatInt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := value.ValueOrder(tt.left, tt.right)
+			got, err := value.Order(tt.left, tt.right)
 			if err != nil {
-				t.Fatalf("ValueOrder(%v, %v) error: %v", tt.left, tt.right, err)
+				t.Fatalf("Order(%v, %v) error: %v", tt.left, tt.right, err)
 			}
 			if got != tt.want {
-				t.Errorf("ValueOrder(%v, %v) = %d, want %d", tt.left, tt.right, got, tt.want)
+				t.Errorf("Order(%v, %v) = %d, want %d", tt.left, tt.right, got, tt.want)
 			}
 		})
 	}
 }
 
 // Property-based tests using testing/quick for numeric coercion
-// These verify that ValueOrder maintains the required properties across
+// These verify that Order maintains the required properties across
 // randomly generated inputs.
 
-// TestValueOrder_Antisymmetry_Int64_Quick verifies that for all int64 pairs,
-// ValueOrder(a, b) == -ValueOrder(b, a).
-func TestValueOrder_Antisymmetry_Int64_Quick(t *testing.T) {
+// TestOrder_Antisymmetry_Int64_Quick verifies that for all int64 pairs,
+// Order(a, b) == -Order(b, a).
+func TestOrder_Antisymmetry_Int64_Quick(t *testing.T) {
 	f := func(a, b int64) bool {
-		cmpAB, errAB := value.ValueOrder(a, b)
-		cmpBA, errBA := value.ValueOrder(b, a)
+		cmpAB, errAB := value.Order(a, b)
+		cmpBA, errBA := value.Order(b, a)
 		if errAB != nil || errBA != nil {
 			return false
 		}
@@ -1311,12 +1311,12 @@ func TestValueOrder_Antisymmetry_Int64_Quick(t *testing.T) {
 	}
 }
 
-// TestValueOrder_Antisymmetry_Uint64_Quick verifies that for all uint64 pairs,
-// ValueOrder(a, b) == -ValueOrder(b, a).
-func TestValueOrder_Antisymmetry_Uint64_Quick(t *testing.T) {
+// TestOrder_Antisymmetry_Uint64_Quick verifies that for all uint64 pairs,
+// Order(a, b) == -Order(b, a).
+func TestOrder_Antisymmetry_Uint64_Quick(t *testing.T) {
 	f := func(a, b uint64) bool {
-		cmpAB, errAB := value.ValueOrder(a, b)
-		cmpBA, errBA := value.ValueOrder(b, a)
+		cmpAB, errAB := value.Order(a, b)
+		cmpBA, errBA := value.Order(b, a)
 		if errAB != nil || errBA != nil {
 			return false
 		}
@@ -1327,12 +1327,12 @@ func TestValueOrder_Antisymmetry_Uint64_Quick(t *testing.T) {
 	}
 }
 
-// TestValueOrder_Antisymmetry_Float64_Quick verifies that for all float64 pairs,
-// ValueOrder(a, b) == -ValueOrder(b, a), including NaN handling.
-func TestValueOrder_Antisymmetry_Float64_Quick(t *testing.T) {
+// TestOrder_Antisymmetry_Float64_Quick verifies that for all float64 pairs,
+// Order(a, b) == -Order(b, a), including NaN handling.
+func TestOrder_Antisymmetry_Float64_Quick(t *testing.T) {
 	f := func(a, b float64) bool {
-		cmpAB, errAB := value.ValueOrder(a, b)
-		cmpBA, errBA := value.ValueOrder(b, a)
+		cmpAB, errAB := value.Order(a, b)
+		cmpBA, errBA := value.Order(b, a)
 		if errAB != nil || errBA != nil {
 			return false
 		}
@@ -1343,12 +1343,12 @@ func TestValueOrder_Antisymmetry_Float64_Quick(t *testing.T) {
 	}
 }
 
-// TestValueOrder_Antisymmetry_MixedInt64Float64_Quick verifies antisymmetry
+// TestOrder_Antisymmetry_MixedInt64Float64_Quick verifies antisymmetry
 // when comparing int64 and float64 values.
-func TestValueOrder_Antisymmetry_MixedInt64Float64_Quick(t *testing.T) {
+func TestOrder_Antisymmetry_MixedInt64Float64_Quick(t *testing.T) {
 	f := func(i int64, f float64) bool {
-		cmpIF, errIF := value.ValueOrder(i, f)
-		cmpFI, errFI := value.ValueOrder(f, i)
+		cmpIF, errIF := value.Order(i, f)
+		cmpFI, errFI := value.Order(f, i)
 		if errIF != nil || errFI != nil {
 			return false
 		}
@@ -1359,12 +1359,12 @@ func TestValueOrder_Antisymmetry_MixedInt64Float64_Quick(t *testing.T) {
 	}
 }
 
-// TestValueOrder_Antisymmetry_MixedUint64Float64_Quick verifies antisymmetry
+// TestOrder_Antisymmetry_MixedUint64Float64_Quick verifies antisymmetry
 // when comparing uint64 and float64 values.
-func TestValueOrder_Antisymmetry_MixedUint64Float64_Quick(t *testing.T) {
+func TestOrder_Antisymmetry_MixedUint64Float64_Quick(t *testing.T) {
 	f := func(u uint64, f float64) bool {
-		cmpUF, errUF := value.ValueOrder(u, f)
-		cmpFU, errFU := value.ValueOrder(f, u)
+		cmpUF, errUF := value.Order(u, f)
+		cmpFU, errFU := value.Order(f, u)
 		if errUF != nil || errFU != nil {
 			return false
 		}
@@ -1375,12 +1375,12 @@ func TestValueOrder_Antisymmetry_MixedUint64Float64_Quick(t *testing.T) {
 	}
 }
 
-// TestValueOrder_Antisymmetry_MixedInt64Uint64_Quick verifies antisymmetry
+// TestOrder_Antisymmetry_MixedInt64Uint64_Quick verifies antisymmetry
 // when comparing int64 and uint64 values.
-func TestValueOrder_Antisymmetry_MixedInt64Uint64_Quick(t *testing.T) {
+func TestOrder_Antisymmetry_MixedInt64Uint64_Quick(t *testing.T) {
 	f := func(i int64, u uint64) bool {
-		cmpIU, errIU := value.ValueOrder(i, u)
-		cmpUI, errUI := value.ValueOrder(u, i)
+		cmpIU, errIU := value.Order(i, u)
+		cmpUI, errUI := value.Order(u, i)
 		if errIU != nil || errUI != nil {
 			return false
 		}
@@ -1391,12 +1391,12 @@ func TestValueOrder_Antisymmetry_MixedInt64Uint64_Quick(t *testing.T) {
 	}
 }
 
-// TestValueOrder_Transitivity_Int64_Quick verifies transitivity: if a < b and b < c, then a < c.
-func TestValueOrder_Transitivity_Int64_Quick(t *testing.T) {
+// TestOrder_Transitivity_Int64_Quick verifies transitivity: if a < b and b < c, then a < c.
+func TestOrder_Transitivity_Int64_Quick(t *testing.T) {
 	f := func(a, b, c int64) bool {
-		cmpAB, errAB := value.ValueOrder(a, b)
-		cmpBC, errBC := value.ValueOrder(b, c)
-		cmpAC, errAC := value.ValueOrder(a, c)
+		cmpAB, errAB := value.Order(a, b)
+		cmpBC, errBC := value.Order(b, c)
+		cmpAC, errAC := value.Order(a, c)
 		if errAB != nil || errBC != nil || errAC != nil {
 			return false
 		}
@@ -1423,13 +1423,13 @@ func TestValueOrder_Transitivity_Int64_Quick(t *testing.T) {
 	}
 }
 
-// TestValueOrder_Transitivity_Float64_Quick verifies transitivity for float64,
+// TestOrder_Transitivity_Float64_Quick verifies transitivity for float64,
 // including special handling for NaN.
-func TestValueOrder_Transitivity_Float64_Quick(t *testing.T) {
+func TestOrder_Transitivity_Float64_Quick(t *testing.T) {
 	f := func(a, b, c float64) bool {
-		cmpAB, errAB := value.ValueOrder(a, b)
-		cmpBC, errBC := value.ValueOrder(b, c)
-		cmpAC, errAC := value.ValueOrder(a, c)
+		cmpAB, errAB := value.Order(a, b)
+		cmpBC, errBC := value.Order(b, c)
+		cmpAC, errAC := value.Order(a, c)
 		if errAB != nil || errBC != nil || errAC != nil {
 			return false
 		}
@@ -1456,15 +1456,15 @@ func TestValueOrder_Transitivity_Float64_Quick(t *testing.T) {
 	}
 }
 
-// TestValueOrder_Transitivity_MixedNumeric_Quick verifies transitivity across
+// TestOrder_Transitivity_MixedNumeric_Quick verifies transitivity across
 // mixed numeric types (int64, uint64, float64).
-func TestValueOrder_Transitivity_MixedNumeric_Quick(t *testing.T) {
+func TestOrder_Transitivity_MixedNumeric_Quick(t *testing.T) {
 	f := func(i int64, u uint64, flt float64) bool {
 		// Test transitivity with i, u, flt in different roles
 		// If i < u and u < flt, then i < flt
-		cmpIU, errIU := value.ValueOrder(i, u)
-		cmpUF, errUF := value.ValueOrder(u, flt)
-		cmpIF, errIF := value.ValueOrder(i, flt)
+		cmpIU, errIU := value.Order(i, u)
+		cmpUF, errUF := value.Order(u, flt)
+		cmpIF, errIF := value.Order(i, flt)
 		if errIU != nil || errUF != nil || errIF != nil {
 			return false
 		}
@@ -1496,11 +1496,11 @@ func TestValueOrder_Transitivity_MixedNumeric_Quick(t *testing.T) {
 	}
 }
 
-// TestValueOrder_Reflexivity_Quick verifies that ValueOrder(x, x) == 0 for all values.
-func TestValueOrder_Reflexivity_Quick(t *testing.T) {
+// TestOrder_Reflexivity_Quick verifies that Order(x, x) == 0 for all values.
+func TestOrder_Reflexivity_Quick(t *testing.T) {
 	t.Run("int64", func(t *testing.T) {
 		f := func(x int64) bool {
-			cmp, err := value.ValueOrder(x, x)
+			cmp, err := value.Order(x, x)
 			return err == nil && cmp == 0
 		}
 		if err := quick.Check(f, nil); err != nil {
@@ -1510,7 +1510,7 @@ func TestValueOrder_Reflexivity_Quick(t *testing.T) {
 
 	t.Run("uint64", func(t *testing.T) {
 		f := func(x uint64) bool {
-			cmp, err := value.ValueOrder(x, x)
+			cmp, err := value.Order(x, x)
 			return err == nil && cmp == 0
 		}
 		if err := quick.Check(f, nil); err != nil {
@@ -1520,7 +1520,7 @@ func TestValueOrder_Reflexivity_Quick(t *testing.T) {
 
 	t.Run("float64", func(t *testing.T) {
 		f := func(x float64) bool {
-			cmp, err := value.ValueOrder(x, x)
+			cmp, err := value.Order(x, x)
 			// NaN == NaN in our ordering
 			return err == nil && cmp == 0
 		}
@@ -1531,7 +1531,7 @@ func TestValueOrder_Reflexivity_Quick(t *testing.T) {
 
 	t.Run("string", func(t *testing.T) {
 		f := func(x string) bool {
-			cmp, err := value.ValueOrder(x, x)
+			cmp, err := value.Order(x, x)
 			return err == nil && cmp == 0
 		}
 		if err := quick.Check(f, nil); err != nil {
@@ -1543,11 +1543,11 @@ func TestValueOrder_Reflexivity_Quick(t *testing.T) {
 // TestCompareInt64Float64_Quick tests CompareInt64Float64 properties.
 func TestCompareInt64Float64_Quick(t *testing.T) {
 	// Antisymmetry: CompareInt64Float64(i, f) == -CompareFloat64Int64(f, i)
-	// Note: We don't have CompareFloat64Int64, but we can verify through ValueOrder
+	// Note: We don't have CompareFloat64Int64, but we can verify through Order
 	f := func(i int64, flt float64) bool {
 		cmp1 := value.CompareInt64Float64(i, flt)
-		// Compare through ValueOrder which should be consistent
-		vo, err := value.ValueOrder(i, flt)
+		// Compare through Order which should be consistent
+		vo, err := value.Order(i, flt)
 		if err != nil {
 			return false
 		}
@@ -1562,8 +1562,8 @@ func TestCompareInt64Float64_Quick(t *testing.T) {
 func TestCompareUint64Float64_Quick(t *testing.T) {
 	f := func(u uint64, flt float64) bool {
 		cmp1 := value.CompareUint64Float64(u, flt)
-		// Compare through ValueOrder which should be consistent
-		vo, err := value.ValueOrder(u, flt)
+		// Compare through Order which should be consistent
+		vo, err := value.Order(u, flt)
 		if err != nil {
 			return false
 		}

@@ -16,10 +16,10 @@
 //	s, result, err := load.Load(ctx, "schema.yammm")
 //
 //	// Load from string
-//	s, result, err := load.LoadString(ctx, source, "schema.yammm")
+//	s, result, err := load.String(ctx, source, "schema.yammm")
 //
 //	// Load from multiple sources
-//	s, result, err := load.LoadSources(ctx, sources, moduleRoot)
+//	s, result, err := load.Sources(ctx, sources, moduleRoot)
 //
 // The triple-return pattern ensures diagnostics are always available via
 // diag.Result, while err signals catastrophic failures (I/O, cancellation).

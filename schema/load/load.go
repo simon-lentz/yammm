@@ -189,7 +189,7 @@ func Load(ctx context.Context, path string, opts ...Option) (*schema.Schema, dia
 	return s, result, err
 }
 
-// LoadString loads a schema from a string source.
+// String loads a schema from a string source.
 //
 // The sourceName is used as the display path in diagnostics. For
 // consistent error messages, use a meaningful path-like name.
@@ -199,9 +199,9 @@ func Load(ctx context.Context, path string, opts ...Option) (*schema.Schema, dia
 //
 // ctx must not be nil. Passing nil will panic.
 // On error, Schema is nil but diag.Result may contain useful diagnostics.
-func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Option) (*schema.Schema, diag.Result, error) {
+func String(ctx context.Context, sourceCode, sourceName string, opts ...Option) (*schema.Schema, diag.Result, error) {
 	if ctx == nil {
-		panic("load.LoadString: context must not be nil")
+		panic("load.String: context must not be nil")
 	}
 
 	cfg := defaultConfig()
@@ -220,20 +220,20 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Opti
 	return s, result, err
 }
 
-// LoadSources loads a schema from in-memory sources.
+// Sources loads a schema from in-memory sources.
 //
 // The sources map keys are paths relative to moduleRoot, and values are
 // the file contents. The first entry (by sorted key order) is treated as the
-// entry point schema. Use LoadSourcesWithEntry if you need to specify the
+// entry point schema. Use SourcesWithEntry if you need to specify the
 // entry point explicitly.
 //
 // This function is useful for testing and embedded schemas.
 //
 // ctx must not be nil. Passing nil will panic.
 // On error, Schema is nil but diag.Result may contain useful diagnostics.
-func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot string, opts ...Option) (*schema.Schema, diag.Result, error) {
+func Sources(ctx context.Context, sources map[string][]byte, moduleRoot string, opts ...Option) (*schema.Schema, diag.Result, error) {
 	if ctx == nil {
-		panic("load.LoadSources: context must not be nil")
+		panic("load.Sources: context must not be nil")
 	}
 
 	if len(sources) == 0 {
@@ -335,10 +335,10 @@ func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot stri
 	return s, result, err
 }
 
-// LoadSourcesWithEntry loads a schema from in-memory sources with an explicit entry point.
+// SourcesWithEntry loads a schema from in-memory sources with an explicit entry point.
 //
 // The sources map keys are paths relative to moduleRoot, and values are
-// the file contents. Unlike LoadSources, this function uses the provided
+// the file contents. Unlike Sources, this function uses the provided
 // entryPath as the entry point instead of selecting by sorted key order.
 //
 // This is useful when the caller knows which file should be the entry point,
@@ -347,13 +347,13 @@ func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot stri
 //
 // The entryPath must exist in the sources map (as either an absolute path
 // or relative to moduleRoot). If entryPath is empty, falls back to sorted
-// key order selection like LoadSources.
+// key order selection like Sources.
 //
 // ctx must not be nil. Passing nil will panic.
 // On error, Schema is nil but diag.Result may contain useful diagnostics.
-func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...Option) (*schema.Schema, diag.Result, error) {
+func SourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...Option) (*schema.Schema, diag.Result, error) {
 	if ctx == nil {
-		panic("load.LoadSourcesWithEntry: context must not be nil")
+		panic("load.SourcesWithEntry: context must not be nil")
 	}
 
 	if len(sources) == 0 {
@@ -415,7 +415,7 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		// Use the provided entry path
 		selectedEntry = entryPath
 	} else {
-		// Fall back to lexicographic selection (same as LoadSources)
+		// Fall back to lexicographic selection (same as Sources)
 		for path := range sources {
 			if selectedEntry == "" || path < selectedEntry {
 				selectedEntry = path
@@ -996,7 +996,7 @@ func (l *loader) readImportFile(relativePath string, imp *parse.ImportDecl) ([]b
 		candidates = []string{relativePath + ".yammm", relativePath}
 	}
 
-	// First check if we have it in in-memory sources (for LoadSources)
+	// First check if we have it in in-memory sources (for Sources)
 	for _, candidate := range candidates {
 		var absPath string
 		if l.moduleRoot != "" {

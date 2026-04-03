@@ -71,7 +71,7 @@ type pendingEdge struct {
 //
 // Panics if schema is nil (programmer error). A nil schema is never valid
 // as there is no way to validate instances without a schema.
-func New(s *schema.Schema, opts ...GraphOption) *Graph {
+func New(s *schema.Schema, opts ...Option) *Graph {
 	if s == nil {
 		panic("graph.New: nil schema")
 	}

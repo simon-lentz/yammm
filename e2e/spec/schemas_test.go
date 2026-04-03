@@ -158,7 +158,7 @@ func TestSchemas_SchemaDocumentation(t *testing.T) {
 	assert.Contains(t, s.Documentation(), "Schema-level documentation")
 }
 
-// TestSchemas_ImportNotAllowedInString verifies that LoadString always
+// TestSchemas_ImportNotAllowedInString verifies that String always
 // disallows imports, producing E_IMPORT_NOT_ALLOWED.
 func TestSchemas_ImportNotAllowedInString(t *testing.T) {
 	t.Parallel()

@@ -187,6 +187,8 @@ func (a *Adapter) BatchNodeQueries(
 }
 
 // EdgeQueryFor generates a single relationship MERGE query for a graph edge.
+//
+//nolint:revive // opts reserved for future edge-level write options
 func (a *Adapter) EdgeQueryFor(
 	edge *graph.Edge,
 	shapes *GraphShape,

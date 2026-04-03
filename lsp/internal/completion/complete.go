@@ -1,3 +1,4 @@
+// Package completion provides context-aware code completion for yammm schemas.
 package completion
 
 import (

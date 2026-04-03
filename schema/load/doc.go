@@ -17,9 +17,9 @@
 //
 // # String Loading
 //
-// For testing or embedded schemas, use LoadString:
+// For testing or embedded schemas, use String:
 //
-//	schema, result, err := load.LoadString(ctx, source, "test.yammm")
+//	schema, result, err := load.String(ctx, source, "test.yammm")
 //
 // # In-Memory Sources
 //
@@ -29,7 +29,7 @@
 //	    "main.yammm":   mainContent,
 //	    "common.yammm": commonContent,
 //	}
-//	schema, result, err := load.LoadSources(ctx, sources, "/project")
+//	schema, result, err := load.Sources(ctx, sources, "/project")
 //
 // # Options
 //

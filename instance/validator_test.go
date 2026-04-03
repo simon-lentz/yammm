@@ -976,7 +976,7 @@ func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testin
 // --- P1 Internal Error Sentinel Tests ---
 
 func TestValidator_NilReceiver(t *testing.T) {
-	var v *instance.Validator = nil
+	var v *instance.Validator
 
 	t.Run("Validate", func(t *testing.T) {
 		_, _, err := v.Validate(t.Context(), "Test", nil)

@@ -110,7 +110,7 @@ func TestWalk_NilVisitor_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestWalkInstance_NilVisitor_ReturnsError(t *testing.T) {
+func TestInstance_NilVisitor_ReturnsError(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
 	ctx := t.Context()
@@ -134,9 +134,9 @@ func TestWalkInstance_NilVisitor_ReturnsError(t *testing.T) {
 		t.Fatal("No instances found")
 	}
 
-	err := WalkInstance(ctx, instances[0], nil)
+	err := Instance(ctx, instances[0], nil)
 	if !errors.Is(err, ErrNilVisitor) {
-		t.Errorf("WalkInstance(nil visitor) error = %v, want ErrNilVisitor", err)
+		t.Errorf("Instance(nil visitor) error = %v, want ErrNilVisitor", err)
 	}
 }
 
@@ -392,18 +392,18 @@ func TestWalk_VisitorError(t *testing.T) {
 	}
 }
 
-func TestWalkInstance_NilInstance(t *testing.T) {
+func TestInstance_NilInstance(t *testing.T) {
 	visitor := &countingVisitor{}
-	err := WalkInstance(t.Context(), nil, visitor)
+	err := Instance(t.Context(), nil, visitor)
 	if err != nil {
-		t.Errorf("WalkInstance(nil) error: %v", err)
+		t.Errorf("Instance(nil) error: %v", err)
 	}
 	if visitor.enterInstance != 0 {
 		t.Error("Should not visit nil instance")
 	}
 }
 
-func TestWalkInstance_Single(t *testing.T) {
+func TestInstance_Single(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
 	ctx := t.Context()
@@ -428,8 +428,8 @@ func TestWalkInstance_Single(t *testing.T) {
 	}
 
 	visitor := &countingVisitor{}
-	if err := WalkInstance(ctx, instances[0], visitor); err != nil {
-		t.Errorf("WalkInstance error: %v", err)
+	if err := Instance(ctx, instances[0], visitor); err != nil {
+		t.Errorf("Instance error: %v", err)
 	}
 
 	if visitor.enterInstance != 1 {
@@ -1127,8 +1127,8 @@ func TestWalk_ContextCancellation_DuringCompositions(t *testing.T) {
 	}
 }
 
-// TestWalkInstance_WithComposition tests WalkInstance with compositions.
-func TestWalkInstance_WithComposition(t *testing.T) {
+// TestInstance_WithComposition tests Instance with compositions.
+func TestInstance_WithComposition(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
 	ctx := t.Context()
@@ -1169,8 +1169,8 @@ func TestWalkInstance_WithComposition(t *testing.T) {
 	}
 
 	visitor := &countingVisitor{}
-	if err := WalkInstance(ctx, parents[0], visitor); err != nil {
-		t.Errorf("WalkInstance error: %v", err)
+	if err := Instance(ctx, parents[0], visitor); err != nil {
+		t.Errorf("Instance error: %v", err)
 	}
 
 	// Should visit parent + 2 children = 3 instances
@@ -1312,8 +1312,8 @@ func TestWalk_WithOptions(t *testing.T) {
 	}
 }
 
-// TestWalkInstance_WithOptions tests WalkInstance with options.
-func TestWalkInstance_WithOptions(t *testing.T) {
+// TestInstance_WithOptions tests Instance with options.
+func TestInstance_WithOptions(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
 	ctx := t.Context()
@@ -1335,8 +1335,8 @@ func TestWalkInstance_WithOptions(t *testing.T) {
 	instances := result.InstancesOf("Person")
 
 	visitor := &countingVisitor{}
-	if err := WalkInstance(ctx, instances[0], visitor, WithLogger(nil)); err != nil {
-		t.Errorf("WalkInstance error: %v", err)
+	if err := Instance(ctx, instances[0], visitor, WithLogger(nil)); err != nil {
+		t.Errorf("Instance error: %v", err)
 	}
 
 	if visitor.enterInstance != 1 {
@@ -1344,7 +1344,7 @@ func TestWalkInstance_WithOptions(t *testing.T) {
 	}
 }
 
-// TestNilContext_Panics verifies Walk and WalkInstance panic with helpful
+// TestNilContext_Panics verifies Walk and Instance panic with helpful
 // messages when passed a nil context.
 func TestNilContext_Panics(t *testing.T) {
 	s := testSchema(t)
@@ -1381,9 +1381,9 @@ func TestNilContext_Panics(t *testing.T) {
 			wantMsg: "walk.Walk: nil context",
 		},
 		{
-			name:    "WalkInstance",
-			fn:      func() { _ = WalkInstance(nil, instances[0], nil) }, //nolint:staticcheck // testing nil context panic
-			wantMsg: "walk.WalkInstance: nil context",
+			name:    "Instance",
+			fn:      func() { _ = Instance(nil, instances[0], nil) }, //nolint:staticcheck // testing nil context panic
+			wantMsg: "walk.Instance: nil context",
 		},
 	}
 
@@ -1754,7 +1754,7 @@ func TestWalk_Logging(t *testing.T) {
 	}
 }
 
-func TestWalkInstance_Logging(t *testing.T) {
+func TestInstance_Logging(t *testing.T) {
 	s := testSchemaWithComposition(t)
 
 	// Build a graph with instances
@@ -1778,9 +1778,9 @@ func TestWalkInstance_Logging(t *testing.T) {
 
 	// Walk single instance with logging
 	visitor := &noopVisitor{}
-	err = WalkInstance(t.Context(), instances[0], visitor, WithLogger(logger))
+	err = Instance(t.Context(), instances[0], visitor, WithLogger(logger))
 	if err != nil {
-		t.Fatalf("WalkInstance failed: %v", err)
+		t.Fatalf("Instance failed: %v", err)
 	}
 
 	records := h.Records()

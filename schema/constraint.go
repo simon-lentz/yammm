@@ -183,8 +183,8 @@ func NewIntegerConstraint() IntegerConstraint {
 
 // NewIntegerConstraintBounded creates an IntegerConstraint with the given bounds.
 // Use hasMin=false or hasMax=false to indicate no bound.
-func NewIntegerConstraintBounded(min int64, hasMin bool, max int64, hasMax bool) IntegerConstraint {
-	return IntegerConstraint{min: min, max: max, hasMin: hasMin, hasMax: hasMax}
+func NewIntegerConstraintBounded(lo int64, hasMin bool, hi int64, hasMax bool) IntegerConstraint {
+	return IntegerConstraint{min: lo, max: hi, hasMin: hasMin, hasMax: hasMax}
 }
 
 func (IntegerConstraint) Kind() ConstraintKind { return KindInteger }
@@ -246,8 +246,8 @@ func NewFloatConstraint() FloatConstraint {
 
 // NewFloatConstraintBounded creates a FloatConstraint with the given bounds.
 // Use hasMin=false or hasMax=false to indicate no bound.
-func NewFloatConstraintBounded(min float64, hasMin bool, max float64, hasMax bool) FloatConstraint {
-	return FloatConstraint{min: min, max: max, hasMin: hasMin, hasMax: hasMax}
+func NewFloatConstraintBounded(lo float64, hasMin bool, hi float64, hasMax bool) FloatConstraint {
+	return FloatConstraint{min: lo, max: hi, hasMin: hasMin, hasMax: hasMax}
 }
 
 func (FloatConstraint) Kind() ConstraintKind { return KindFloat }

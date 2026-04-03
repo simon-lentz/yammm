@@ -19,12 +19,12 @@ import (
 	"github.com/simon-lentz/yammm/schema/load"
 )
 
-func TestLoadString_SimpleSchema(t *testing.T) {
+func TestString_SimpleSchema(t *testing.T) {
 	// Note: YAMMM grammar uses `name Type` syntax, not `name: Type`
 	source := `schema "test" type Person { name String }`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	require.NoError(t, err)
 	require.NotNil(t, s)
@@ -41,11 +41,11 @@ func TestLoadString_SimpleSchema(t *testing.T) {
 	assert.Equal(t, "Person", typ.Name())
 }
 
-func TestLoadString_EmptySchema(t *testing.T) {
+func TestString_EmptySchema(t *testing.T) {
 	source := `schema "empty"`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "empty.yammm")
+	s, result, err := load.String(ctx, source, "empty.yammm")
 
 	require.NoError(t, err)
 	require.NotNil(t, s)
@@ -53,38 +53,38 @@ func TestLoadString_EmptySchema(t *testing.T) {
 	assert.False(t, result.HasErrors())
 }
 
-func TestLoadString_SyntaxError(t *testing.T) {
+func TestString_SyntaxError(t *testing.T) {
 	// Completely invalid syntax that can't be recovered
 	source := `not a valid schema at all!!!`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "syntax.yammm")
+	s, result, err := load.String(ctx, source, "syntax.yammm")
 
 	require.NoError(t, err) // No Go error, but diagnostics
 	assert.Nil(t, s)        // No valid schema could be produced
 	assert.True(t, result.HasErrors())
 }
 
-func TestLoadString_NilContextPanics(t *testing.T) {
+func TestString_NilContextPanics(t *testing.T) {
 	source := `schema "test"`
 
 	assert.Panics(t, func() {
-		_, _, _ = load.LoadString(nil, source, "test.yammm") //nolint:staticcheck // intentional nil
+		_, _, _ = load.String(nil, source, "test.yammm") //nolint:staticcheck // intentional nil
 	})
 }
 
-func TestLoadString_DisallowsImports(t *testing.T) {
+func TestString_DisallowsImports(t *testing.T) {
 	source := `schema "test" import "./other"`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	require.NoError(t, err)
 	assert.Nil(t, s)
 	assert.True(t, result.HasErrors())
 }
 
-func TestWithDisallowImports_LoadSourcesWithEntry(t *testing.T) {
+func TestWithDisallowImports_SourcesWithEntry(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
@@ -102,7 +102,7 @@ type Bar {
 		filepath.Join(tmpDir, "test.yammm"): []byte(source),
 	}
 
-	s, result, err := load.LoadSourcesWithEntry(
+	s, result, err := load.SourcesWithEntry(
 		ctx, sources, filepath.Join(tmpDir, "test.yammm"), tmpDir,
 		load.WithDisallowImports(),
 	)
@@ -122,7 +122,7 @@ type Bar {
 	assert.True(t, foundCode, "expected E_IMPORT_NOT_ALLOWED diagnostic")
 }
 
-func TestLoadString_DataTypeResolution_PreservesCase(t *testing.T) {
+func TestString_DataTypeResolution_PreservesCase(t *testing.T) {
 	// M3 fix: Verify datatype references preserve declared case end-to-end
 	source := `schema "test"
 
@@ -135,7 +135,7 @@ type Person {
 }`
 
 	ctx := t.Context()
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	require.NoError(t, err)
 	require.False(t, result.HasErrors(), "result: %v", result.Messages())
@@ -166,13 +166,13 @@ type Person {
 	assert.Equal(t, nameType, dt)
 }
 
-func TestLoadSources_SimpleSchema(t *testing.T) {
+func TestSources_SimpleSchema(t *testing.T) {
 	sources := map[string][]byte{
 		"main.yammm": []byte(`schema "main" type Person { name String }`),
 	}
 	ctx := t.Context()
 
-	s, result, err := load.LoadSources(ctx, sources, "/project")
+	s, result, err := load.Sources(ctx, sources, "/project")
 
 	require.NoError(t, err)
 	require.NotNil(t, s)
@@ -180,27 +180,27 @@ func TestLoadSources_SimpleSchema(t *testing.T) {
 	assert.False(t, result.HasErrors())
 }
 
-func TestLoadSources_EmptySources(t *testing.T) {
+func TestSources_EmptySources(t *testing.T) {
 	sources := map[string][]byte{}
 	ctx := t.Context()
 
-	_, _, err := load.LoadSources(ctx, sources, "/project")
+	_, _, err := load.Sources(ctx, sources, "/project")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no sources provided")
 }
 
-func TestLoadSources_NilContextPanics(t *testing.T) {
+func TestSources_NilContextPanics(t *testing.T) {
 	sources := map[string][]byte{
 		"main.yammm": []byte(`schema "main"`),
 	}
 
 	assert.Panics(t, func() {
-		_, _, _ = load.LoadSources(nil, sources, "/project") //nolint:staticcheck // intentional nil
+		_, _, _ = load.Sources(nil, sources, "/project") //nolint:staticcheck // intentional nil
 	})
 }
 
-func TestLoadSourcesWithEntry_ExplicitEntry(t *testing.T) {
+func TestSourcesWithEntry_ExplicitEntry(t *testing.T) {
 	// Create two schemas where "beta.yammm" would be selected lexicographically
 	// but we explicitly select "gamma.yammm" as entry
 	sources := map[string][]byte{
@@ -210,7 +210,7 @@ func TestLoadSourcesWithEntry_ExplicitEntry(t *testing.T) {
 	ctx := t.Context()
 
 	// Explicitly select gamma.yammm as entry (not beta which comes first lexicographically)
-	s, result, err := load.LoadSourcesWithEntry(ctx, sources, "gamma.yammm", "/project")
+	s, result, err := load.SourcesWithEntry(ctx, sources, "gamma.yammm", "/project")
 
 	require.NoError(t, err)
 	require.NotNil(t, s)
@@ -222,7 +222,7 @@ func TestLoadSourcesWithEntry_ExplicitEntry(t *testing.T) {
 	assert.True(t, ok, "GammaType should exist in loaded schema")
 }
 
-func TestLoadSourcesWithEntry_FallbackToLexicographic(t *testing.T) {
+func TestSourcesWithEntry_FallbackToLexicographic(t *testing.T) {
 	sources := map[string][]byte{
 		"beta.yammm":  []byte(`schema "beta" type BetaType { id String }`),
 		"alpha.yammm": []byte(`schema "alpha" type AlphaType { name String }`),
@@ -230,7 +230,7 @@ func TestLoadSourcesWithEntry_FallbackToLexicographic(t *testing.T) {
 	ctx := t.Context()
 
 	// Empty entry path should fall back to lexicographic order (alpha comes first)
-	s, result, err := load.LoadSourcesWithEntry(ctx, sources, "", "/project")
+	s, result, err := load.SourcesWithEntry(ctx, sources, "", "/project")
 
 	require.NoError(t, err)
 	require.NotNil(t, s)
@@ -238,34 +238,34 @@ func TestLoadSourcesWithEntry_FallbackToLexicographic(t *testing.T) {
 	assert.False(t, result.HasErrors())
 }
 
-func TestLoadSourcesWithEntry_EntryNotInSources(t *testing.T) {
+func TestSourcesWithEntry_EntryNotInSources(t *testing.T) {
 	sources := map[string][]byte{
 		"main.yammm": []byte(`schema "main"`),
 	}
 	ctx := t.Context()
 
 	// Request an entry that doesn't exist
-	_, _, err := load.LoadSourcesWithEntry(ctx, sources, "nonexistent.yammm", "/project")
+	_, _, err := load.SourcesWithEntry(ctx, sources, "nonexistent.yammm", "/project")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found in sources")
 }
 
-func TestLoadSourcesWithEntry_NilContextPanics(t *testing.T) {
+func TestSourcesWithEntry_NilContextPanics(t *testing.T) {
 	sources := map[string][]byte{
 		"main.yammm": []byte(`schema "main"`),
 	}
 
 	assert.Panics(t, func() {
-		_, _, _ = load.LoadSourcesWithEntry(nil, sources, "main.yammm", "/project") //nolint:staticcheck // intentional nil
+		_, _, _ = load.SourcesWithEntry(nil, sources, "main.yammm", "/project") //nolint:staticcheck // intentional nil
 	})
 }
 
-func TestLoadSourcesWithEntry_EmptySources(t *testing.T) {
+func TestSourcesWithEntry_EmptySources(t *testing.T) {
 	sources := map[string][]byte{}
 	ctx := t.Context()
 
-	_, _, err := load.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/project")
+	_, _, err := load.SourcesWithEntry(ctx, sources, "main.yammm", "/project")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no sources provided")
@@ -393,7 +393,7 @@ func TestWithRegistry(t *testing.T) {
 	ctx := t.Context()
 	registry := schema.NewRegistry()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm", load.WithRegistry(registry))
+	s, result, err := load.String(ctx, source, "test.yammm", load.WithRegistry(registry))
 
 	require.NoError(t, err)
 	require.NotNil(t, s)
@@ -411,7 +411,7 @@ func TestWithIssueLimit(t *testing.T) {
 	ctx := t.Context()
 
 	// Test with issue limit (should still work for valid schema)
-	s, result, err := load.LoadString(ctx, source, "test.yammm", load.WithIssueLimit(1))
+	s, result, err := load.String(ctx, source, "test.yammm", load.WithIssueLimit(1))
 
 	require.NoError(t, err)
 	assert.NotNil(t, s)
@@ -512,7 +512,7 @@ func TestLoad_SymlinkCanonicalization(t *testing.T) {
 	assert.Equal(t, s1.SourceID(), s2.SourceID(), "Symlink and direct path should resolve to same SourceID")
 }
 
-func TestLoadString_InvariantExpression(t *testing.T) {
+func TestString_InvariantExpression(t *testing.T) {
 	source := `schema "test"
 
 type Item {
@@ -521,7 +521,7 @@ type Item {
 }`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	require.NoError(t, err)
 	require.NotNil(t, s)
@@ -540,7 +540,7 @@ type Item {
 	assert.Equal(t, ">=", e.Op(), "expression should be a >= comparison")
 }
 
-func TestLoadString_RelationTargetIDResolved(t *testing.T) {
+func TestString_RelationTargetIDResolved(t *testing.T) {
 	source := `schema "test"
 
 type Target { id String }
@@ -550,7 +550,7 @@ type Owner {
 }`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	require.NoError(t, err)
 	require.NotNil(t, s)
@@ -568,7 +568,7 @@ type Owner {
 	assert.Equal(t, s.SourceID(), rel.TargetID().SchemaPath())
 }
 
-func TestLoadString_CompositionTargetIDResolved(t *testing.T) {
+func TestString_CompositionTargetIDResolved(t *testing.T) {
 	source := `schema "test"
 
 part type Component { id String }
@@ -578,7 +578,7 @@ type Container {
 }`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	require.NoError(t, err)
 	require.NotNil(t, s)
@@ -678,11 +678,11 @@ type Container { *-> widgets c.Widget }`
 	assert.NotEqual(t, s.SourceID(), rel.TargetID().SchemaPath(), "targetID should point to imported schema")
 }
 
-// TestLoadString_Contract19_SchemaNilWhenErrorsExist verifies:
+// TestString_Contract19_SchemaNilWhenErrorsExist verifies:
 // Schema must be nil whenever Result.HasErrors() is true.
 // This test uses a validation error (undefined type reference) rather than a parse error
 // to ensure the invariant holds through the completion phase.
-func TestLoadString_Contract19_SchemaNilWhenErrorsExist(t *testing.T) {
+func TestString_Contract19_SchemaNilWhenErrorsExist(t *testing.T) {
 	// Schema with an undefined type reference in a relation
 	source := `schema "test"
 type Person {
@@ -691,7 +691,7 @@ type Person {
 }`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	// error should be nil for content issues
 	require.NoError(t, err, "Go error should be nil for content/validation issues")
@@ -701,11 +701,11 @@ type Person {
 	require.Nil(t, s, "schema must be nil when Result.HasErrors() is true")
 }
 
-// TestLoadSources_RecoveryAfterParseFailure verifies that the loader properly cleans up
+// TestSources_RecoveryAfterParseFailure verifies that the loader properly cleans up
 // internal state after a parse failure, allowing subsequent loads to succeed.
 // This tests the fix for Executive Summary Item 6: loadingSchemas markers must be
 // cleared on all exit paths to prevent false "import cycle" errors.
-func TestLoadSources_RecoveryAfterParseFailure(t *testing.T) {
+func TestSources_RecoveryAfterParseFailure(t *testing.T) {
 	ctx := t.Context()
 	tmpDir := t.TempDir()
 
@@ -717,7 +717,7 @@ type Person {
 }`),
 	}
 
-	s1, result1, err1 := load.LoadSources(ctx, brokenSources, tmpDir)
+	s1, result1, err1 := load.Sources(ctx, brokenSources, tmpDir)
 	require.NoError(t, err1, "I/O errors should not occur")
 	require.True(t, result1.HasErrors(), "should have parse errors")
 	require.Nil(t, s1, "schema should be nil on errors")
@@ -732,7 +732,7 @@ type Person {
 }`),
 	}
 
-	s2, result2, err2 := load.LoadSources(ctx, fixedSources, tmpDir)
+	s2, result2, err2 := load.Sources(ctx, fixedSources, tmpDir)
 	require.NoError(t, err2, "I/O errors should not occur")
 	require.False(t, result2.HasErrors(), "fixed schema should have no errors: %v", result2.Messages())
 	require.NotNil(t, s2, "fixed schema should load successfully")
@@ -801,10 +801,10 @@ type Child extends b.Base {
 	assert.Equal(t, "Base", superTypes[0].Name())
 }
 
-// TestLoadSources_RecoveryAfterImportFailure verifies that the loader cleans up
+// TestSources_RecoveryAfterImportFailure verifies that the loader cleans up
 // loadingSchemas markers for both the main schema and its imports when an import
 // fails. This tests cascading cleanup.
-func TestLoadSources_RecoveryAfterImportFailure(t *testing.T) {
+func TestSources_RecoveryAfterImportFailure(t *testing.T) {
 	ctx := t.Context()
 	tmpDir := t.TempDir()
 
@@ -818,7 +818,7 @@ type Person {
 		"helper.yammm": []byte(`INVALID`),
 	}
 
-	s1, result1, err1 := load.LoadSources(ctx, brokenSources, tmpDir)
+	s1, result1, err1 := load.Sources(ctx, brokenSources, tmpDir)
 	require.NoError(t, err1)
 	require.True(t, result1.HasErrors())
 	require.Nil(t, s1)
@@ -837,7 +837,7 @@ type Base {
 }`),
 	}
 
-	s2, result2, err2 := load.LoadSources(ctx, fixedSources, tmpDir)
+	s2, result2, err2 := load.Sources(ctx, fixedSources, tmpDir)
 	require.NoError(t, err2)
 	require.False(t, result2.HasErrors(), "should not report false import cycle: %v", result2.Messages())
 	require.NotNil(t, s2)
@@ -1223,14 +1223,14 @@ func TestLoad_DotDotInMiddleOfPath(t *testing.T) {
 // Context Cancellation Tests (/19)
 // =============================================================================
 
-func TestLoadString_CancellationReturnsError(t *testing.T) {
+func TestString_CancellationReturnsError(t *testing.T) {
 	source := `schema "test" type Person { name String }`
 
 	// Create already-cancelled context
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	// Cancellation returns error, not diagnostic
 	require.Error(t, err)
@@ -1244,13 +1244,13 @@ func TestLoadString_CancellationReturnsError(t *testing.T) {
 	}
 }
 
-func TestLoadString_DeadlineExceededReturnsError(t *testing.T) {
+func TestString_DeadlineExceededReturnsError(t *testing.T) {
 	source := `schema "test"`
 
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-1*time.Second))
 	defer cancel()
 
-	s, _, err := load.LoadString(ctx, source, "test.yammm")
+	s, _, err := load.String(ctx, source, "test.yammm")
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -1300,7 +1300,7 @@ func TestLoad_ErrSourceStoreNotSupported(t *testing.T) {
 	source := `schema "test" type Person { name String }`
 	ctx := t.Context()
 
-	s, _, err := load.LoadString(ctx, source, "test.yammm", load.WithSourceRegistry(&mockSourceStore{}))
+	s, _, err := load.String(ctx, source, "test.yammm", load.WithSourceRegistry(&mockSourceStore{}))
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, load.ErrSourceStoreNotSupported)
@@ -1388,8 +1388,8 @@ func TestLoad_NonExistentPath(t *testing.T) {
 	assert.Nil(t, s)
 }
 
-func TestLoadSources_ImportBetweenSources(t *testing.T) {
-	// Test LoadSources with one in-memory schema importing another
+func TestSources_ImportBetweenSources(t *testing.T) {
+	// Test Sources with one in-memory schema importing another
 	ctx := t.Context()
 	moduleRoot := t.TempDir()
 
@@ -1412,7 +1412,7 @@ type Derived extends b.BaseEntity {
 		derivedPath: derivedContent,
 	}
 
-	s, result, err := load.LoadSources(ctx, sources, moduleRoot)
+	s, result, err := load.Sources(ctx, sources, moduleRoot)
 	require.NoError(t, err)
 	if result.HasErrors() {
 		for _, issue := range result.IssuesSlice() {
@@ -1423,8 +1423,8 @@ type Derived extends b.BaseEntity {
 	require.NotNil(t, s)
 }
 
-func TestLoadSources_ContextCancellation(t *testing.T) {
-	// Test that LoadSources handles context cancellation
+func TestSources_ContextCancellation(t *testing.T) {
+	// Test that Sources handles context cancellation
 	moduleRoot := t.TempDir()
 
 	mainPath := filepath.Join(moduleRoot, "main.yammm")
@@ -1438,7 +1438,7 @@ func TestLoadSources_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	s, _, err := load.LoadSources(ctx, sources, moduleRoot)
+	s, _, err := load.Sources(ctx, sources, moduleRoot)
 
 	require.Error(t, err)
 	assert.Nil(t, s)
@@ -1501,8 +1501,8 @@ type Combined {
 	assert.False(t, result.HasErrors())
 }
 
-func TestLoadString_InvalidSyntax(t *testing.T) {
-	// Test LoadString with invalid syntax
+func TestString_InvalidSyntax(t *testing.T) {
+	// Test String with invalid syntax
 	ctx := t.Context()
 
 	source := `schema "broken"
@@ -1510,20 +1510,20 @@ type Entity {
 	name String
 	// missing closing brace`
 
-	s, result, err := load.LoadString(ctx, source, "test://broken.yammm")
+	s, result, err := load.String(ctx, source, "test://broken.yammm")
 
 	require.NoError(t, err) // Parse errors are collected, not returned as error
 	assert.Nil(t, s)
 	assert.True(t, result.HasErrors())
 }
 
-func TestLoadString_ContextCancellation(t *testing.T) {
-	// Test that LoadString handles context cancellation
+func TestString_ContextCancellation(t *testing.T) {
+	// Test that String handles context cancellation
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	source := `schema "test" type Test { name String }`
-	s, _, err := load.LoadString(ctx, source, "test.yammm")
+	s, _, err := load.String(ctx, source, "test.yammm")
 
 	require.Error(t, err)
 	assert.Nil(t, s)
@@ -1602,10 +1602,10 @@ type TypeA {
 // Invariant Property Validation Integration Tests
 // =============================================================================
 
-// TestLoadString_InvariantUnknownProperty verifies that an invariant referencing
+// TestString_InvariantUnknownProperty verifies that an invariant referencing
 // a property that does not exist on the type produces E_UNKNOWN_PROPERTY when
 // loaded end-to-end from source text.
-func TestLoadString_InvariantUnknownProperty(t *testing.T) {
+func TestString_InvariantUnknownProperty(t *testing.T) {
 	t.Parallel()
 
 	source := `schema "test"
@@ -1616,7 +1616,7 @@ type Person {
 }`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	require.NoError(t, err, "Go error should be nil for content/validation issues")
 	require.True(t, result.HasErrors(), "should have validation errors for unknown property")
@@ -1633,9 +1633,9 @@ type Person {
 	assert.True(t, found, "expected E_UNKNOWN_PROPERTY diagnostic")
 }
 
-// TestLoadString_InvariantValidProperty verifies that a schema with valid
+// TestString_InvariantValidProperty verifies that a schema with valid
 // invariants referencing existing properties compiles successfully end-to-end.
-func TestLoadString_InvariantValidProperty(t *testing.T) {
+func TestString_InvariantValidProperty(t *testing.T) {
 	t.Parallel()
 
 	source := `schema "test"
@@ -1649,7 +1649,7 @@ type Person {
 }`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	require.NoError(t, err)
 	require.NotNil(t, s, "schema should compile successfully")
@@ -1668,10 +1668,10 @@ type Person {
 	}
 }
 
-// TestLoadString_InvariantLambdaUnknownProperty verifies that a lambda parameter
+// TestString_InvariantLambdaUnknownProperty verifies that a lambda parameter
 // accessing a nonexistent property on a composition target type produces
 // E_UNKNOWN_PROPERTY when loaded end-to-end from source text.
-func TestLoadString_InvariantLambdaUnknownProperty(t *testing.T) {
+func TestString_InvariantLambdaUnknownProperty(t *testing.T) {
 	t.Parallel()
 
 	source := `schema "test"
@@ -1690,7 +1690,7 @@ type Order {
 }`
 	ctx := t.Context()
 
-	s, result, err := load.LoadString(ctx, source, "test.yammm")
+	s, result, err := load.String(ctx, source, "test.yammm")
 
 	require.NoError(t, err, "Go error should be nil for content/validation issues")
 	require.True(t, result.HasErrors(), "should have validation errors for unknown property on LineItem")

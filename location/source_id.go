@@ -117,15 +117,15 @@ func SourceIDFromCanonicalPath(cp CanonicalPath) SourceID {
 // and forward-slash conversion—but NO symlink resolution. Returns error if
 // path is not absolute.
 //
-// Use for in-memory loading scenarios (LoadSources) where filesystem access
+// Use for in-memory loading scenarios (Sources) where filesystem access
 // is unavailable or undesirable.
 //
 // For paths without symlinks, this produces SourceIDs equal to those from
 // SourceIDFromPath. When symlinks are involved, the results may differ—use
-// CanonicalizePathForSourceID() before constructing LoadSources keys to ensure
+// CanonicalizePathForSourceID() before constructing Sources keys to ensure
 // TypeID equality.
 //
-// # LoadSources Key Requirements
+// # Sources Key Requirements
 //
 // The following transformations are applied automatically:
 //   - path.Clean(): Normalizes . and .. segments (/a/../b → /b)
@@ -184,7 +184,7 @@ func (s SourceID) CanonicalPath() (CanonicalPath, bool) {
 }
 
 // CanonicalizePathForSourceID resolves symlinks and returns a path suitable
-// for use as a LoadSources key when TypeID equality with Load() is required.
+// for use as a Sources key when TypeID equality with Load() is required.
 //
 // Performs strict canonicalization: absolute, cleaned, NFC-normalized,
 // forward-slashes, and symlink-resolved. Unlike NewCanonicalPath (which

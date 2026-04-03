@@ -52,7 +52,7 @@ func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 func loadSchemaString(t *testing.T, content, name string) *instance.Validator {
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := load.LoadString(ctx, content, name)
+	s, result, err := load.String(ctx, content, name)
 	require.NoError(t, err, "load schema string %s", name)
 	require.True(t, result.OK(), "schema string %s has errors: %v", name, result.Messages())
 	return instance.NewValidator(s)
@@ -62,7 +62,7 @@ func loadSchemaString(t *testing.T, content, name string) *instance.Validator {
 func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *instance.Validator) { //nolint:unparam // test helper — second return used selectively
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := load.LoadString(ctx, content, name)
+	s, result, err := load.String(ctx, content, name)
 	require.NoError(t, err, "load schema string %s", name)
 	require.True(t, result.OK(), "schema string %s has errors: %v", name, result.Messages())
 	return s, instance.NewValidator(s)
@@ -72,7 +72,7 @@ func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *i
 func loadSchemaStringExpectError(t *testing.T, content, name string) diag.Result {
 	t.Helper()
 	ctx := t.Context()
-	_, result, err := load.LoadString(ctx, content, name)
+	_, result, err := load.String(ctx, content, name)
 	require.NoError(t, err, "load schema string %s: unexpected I/O error", name)
 	require.False(t, result.OK(), "schema string %s should have errors but loaded cleanly", name)
 	return result

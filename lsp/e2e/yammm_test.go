@@ -603,7 +603,7 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 
 			// Verify the result parses and has the expected schema name.
 			ctx := t.Context()
-			s, _, err := load.LoadString(ctx, result, "test.yammm")
+			s, _, err := load.String(ctx, result, "test.yammm")
 			require.NoError(t, err, "formatted output failed to parse")
 			assert.Equal(t, "日本語", s.Name(), "schema name mismatch")
 		})

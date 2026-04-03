@@ -12,12 +12,12 @@ Yammm DSL schema language support for Claude Code. Provides LSP intelligence, DS
 
 **Recommended: Download a pre-built binary from GitHub releases**:
 
-Download the platform-appropriate archive from the [latest release](https://github.com/simon-lentz/yammm-lsp/releases/latest), extract it, and place the binary in your PATH. Archives follow the naming pattern `yammm-lsp-<version>-<platform>.tar.gz`.
+Download the platform-appropriate archive from the [latest release](https://github.com/simon-lentz/yammm/releases/latest), extract it, and place the binary in your PATH. Archives follow the naming pattern `yammm-lsp-<version>-<platform>.tar.gz`.
 
 Example for macOS (Apple Silicon):
 
 ```bash
-curl -fsSL https://github.com/simon-lentz/yammm-lsp/releases/latest/download/yammm-lsp-v0.1.4-darwin-arm64.tar.gz -o yammm-lsp.tar.gz
+curl -fsSL https://github.com/simon-lentz/yammm/releases/latest/download/yammm-lsp-v0.1.4-darwin-arm64.tar.gz -o yammm-lsp.tar.gz
 tar xzf yammm-lsp.tar.gz
 sudo mv yammm-lsp /usr/local/bin/
 rm yammm-lsp.tar.gz
@@ -32,12 +32,12 @@ yammm-lsp --version
 **Alternative: Build from source**:
 
 ```bash
-git clone https://github.com/simon-lentz/yammm-lsp.git
-cd yammm-lsp
+git clone https://github.com/simon-lentz/yammm.git
+cd yammm
 make build
 ```
 
-For VS Code users, the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) bundles the binary and handles installation automatically. See the [yammm-lsp repository](https://github.com/simon-lentz/yammm-lsp) for full development setup.
+For VS Code users, the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) bundles the binary and handles installation automatically.
 
 ### 2. Install the plugin
 
@@ -121,8 +121,8 @@ cp /path/to/yammm/claude-plugin/settings-template.local.md .claude/yammm.local.m
 
 The plugin checks for `yammm-lsp` at startup. If you see this warning:
 
-1. Download a pre-built binary from [GitHub releases](https://github.com/simon-lentz/yammm-lsp/releases/latest) (recommended). Run `/setup-lsp` for guided instructions.
-2. Or build from source: `git clone https://github.com/simon-lentz/yammm-lsp.git && cd yammm-lsp && make build`
+1. Download a pre-built binary from [GitHub releases](https://github.com/simon-lentz/yammm/releases/latest) (recommended). Run `/setup-lsp` for guided instructions.
+2. Or build from source: `git clone https://github.com/simon-lentz/yammm.git && cd yammm && make build`
 3. Verify it is in your PATH: `which yammm-lsp`
 
 ### No LSP diagnostics appearing
@@ -141,6 +141,6 @@ The LSP resolves imports relative to the module root. If imports fail:
 ## More Information
 
 - [yammm repository](https://github.com/simon-lentz/yammm)
-- [yammm-lsp repository](https://github.com/simon-lentz/yammm-lsp)
+- [LSP source](https://github.com/simon-lentz/yammm/tree/main/lsp)
 - [Language specification](https://github.com/simon-lentz/yammm/blob/main/docs/SPEC.md)
-- [VS Code extension](https://github.com/simon-lentz/yammm-lsp/tree/main/editors/vscode)
+- [VS Code extension](https://github.com/simon-lentz/yammm/tree/main/lsp/editors/vscode)

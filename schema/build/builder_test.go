@@ -1114,7 +1114,7 @@ func TestBuilder_ImportResolver_NotFound(t *testing.T) {
 	registry := schema.NewRegistry()
 
 	// Create resolver that never finds anything
-	resolver := func(path string) (location.SourceID, bool) {
+	resolver := func(_ string) (location.SourceID, bool) {
 		return location.SourceID{}, false
 	}
 

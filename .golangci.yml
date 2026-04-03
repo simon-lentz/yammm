@@ -41,7 +41,7 @@ linters:
     - unused
     - gocritic
     - nolintlint # enforce good //nolint usage
-    # - revive # configurable style linter (better golint)
+    - revive # configurable style linter
     # - gochecknoinits # ban init() functions
     # - gochecknoglobals # ban globals
     # - exhaustive # enum-style switch exhaustiveness
@@ -49,7 +49,6 @@ linters:
     - lll # long lines
     - funlen # function length
     - gocognit # cognitive complexity
-    - revive # temporaryly disabled
   exclusions:
     generated: strict
     presets:
@@ -71,6 +70,44 @@ linters:
           - wrapcheck
           - gochecknoinits
           - gochecknoglobals
+      # LSP protocol types mirror the LSP spec; exported comments add no value.
+      - path: "lsp/internal/protocol/.*"
+        linters:
+          - revive
+      # LSP workspace scheduler: background context stored for lifecycle, not request-scoped.
+      - path: "lsp/internal/workspace/.*"
+        linters:
+          - revive
+      # Diagnostic codes use E_* naming convention by design (stable identifiers).
+      - path: "diag/code\\.go"
+        linters:
+          - revive
+      - path: "diag/detail\\.go"
+        linters:
+          - revive
+      - path: "adapter/neo4j/errors\\.go"
+        linters:
+          - revive
+      # ANTLR-generated method names use underscores (ExitSchema_name, etc.).
+      - path: "schema/internal/parse/.*"
+        linters:
+          - revive
+      # Package names matching domain concepts (not stdlib collisions).
+      - path: "lsp/internal/format/.*"
+        linters:
+          - revive
+      - path: "internal/trace/.*"
+        linters:
+          - revive
+      - path: "adapter/json/.*"
+        linters:
+          - revive
+      - path: "schema/build/.*"
+        linters:
+          - revive
+      - path: "instance/path/.*"
+        linters:
+          - revive
   settings:
     nolintlint:
       require-specific: true # //nolint:<linter>

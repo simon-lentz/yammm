@@ -203,16 +203,16 @@ func TestStringConstraint_MaxLen_Unbounded(t *testing.T) {
 
 func TestIntegerConstraint_Min(t *testing.T) {
 	c := schema.NewIntegerConstraintBounded(10, true, 100, true)
-	min, hasMin := c.Min()
+	minVal, hasMin := c.Min()
 	assert.True(t, hasMin)
-	assert.Equal(t, int64(10), min)
+	assert.Equal(t, int64(10), minVal)
 }
 
 func TestIntegerConstraint_Max(t *testing.T) {
 	c := schema.NewIntegerConstraintBounded(10, true, 100, true)
-	max, hasMax := c.Max()
+	maxVal, hasMax := c.Max()
 	assert.True(t, hasMax)
-	assert.Equal(t, int64(100), max)
+	assert.Equal(t, int64(100), maxVal)
 }
 
 func TestIntegerConstraint_Min_Unbounded(t *testing.T) {
@@ -249,16 +249,16 @@ func TestIntegerConstraint_Equal_DifferentMax(t *testing.T) {
 
 func TestFloatConstraint_Min(t *testing.T) {
 	c := schema.NewFloatConstraintBounded(1.5, true, 10.5, true)
-	min, hasMin := c.Min()
+	minVal, hasMin := c.Min()
 	assert.True(t, hasMin)
-	assert.Equal(t, 1.5, min)
+	assert.Equal(t, 1.5, minVal)
 }
 
 func TestFloatConstraint_Max(t *testing.T) {
 	c := schema.NewFloatConstraintBounded(1.5, true, 10.5, true)
-	max, hasMax := c.Max()
+	maxVal, hasMax := c.Max()
 	assert.True(t, hasMax)
-	assert.Equal(t, 10.5, max)
+	assert.Equal(t, 10.5, maxVal)
 }
 
 func TestFloatConstraint_Min_Unbounded(t *testing.T) {

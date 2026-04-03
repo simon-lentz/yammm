@@ -749,7 +749,7 @@ func TestChecker_NewChecker_WithRegistry(t *testing.T) {
 	// Verify NewChecker accepts a Registry and the Checker is usable
 	var hookCalled bool
 	reg := value.Registry{
-		BaseKindOfReflectType: func(rt reflect.Type) value.Kind {
+		BaseKindOfReflectType: func(_ reflect.Type) value.Kind {
 			hookCalled = true
 			return value.UnspecifiedKind // Hook doesn't recognize the type
 		},

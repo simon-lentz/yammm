@@ -27,3 +27,68 @@ jobs:
         run: pip install pre-commit
       - name: Run all checks
         run: pre-commit run --all-files
+  build-extension:
+    name: Build Extension ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            bin_dir: darwin-arm64
+          - target: darwin-x64
+            goos: darwin
+            goarch: amd64
+            bin_dir: darwin-amd64
+          - target: linux-x64
+            goos: linux
+            goarch: amd64
+            bin_dir: linux-amd64
+          - target: linux-arm64
+            goos: linux
+            goarch: arm64
+            bin_dir: linux-arm64
+          - target: win32-x64
+            goos: windows
+            goarch: amd64
+            bin_dir: windows-amd64
+            ext: .exe
+          - target: win32-arm64
+            goos: windows
+            goarch: arm64
+            bin_dir: windows-arm64
+            ext: .exe
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build LSP binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          BIN_DIR: ${{ matrix.bin_dir }}
+          BIN_EXT: ${{ matrix.ext }}
+          BUILD_VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p "lsp/editors/vscode/bin/${BIN_DIR}"
+          go build -trimpath -ldflags="-s -w -X main.version=${BUILD_VERSION}" \
+            -o "lsp/editors/vscode/bin/${BIN_DIR}/yammm-lsp${BIN_EXT}" \
+            ./cmd/yammm-lsp
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: lsp/editors/vscode
+        run: npm ci
+      - name: Package VSIX
+        working-directory: lsp/editors/vscode
+        run: npx vsce package --target ${{ matrix.target }} --no-dependencies
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v7
+        with:
+          name: vsix-${{ matrix.target }}
+          path: lsp/editors/vscode/*.vsix
+          retention-days: 7

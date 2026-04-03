@@ -9,10 +9,10 @@ import (
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 )
 
-// DefinitionAtPosition returns the definition location for the symbol at the given position.
+// AtPosition returns the definition location for the symbol at the given position.
 // The line and char parameters are LSP-encoding coordinates.
 // Returns nil when no definition is found or when snapshot is nil (pre-first-analysis).
-func DefinitionAtPosition(
+func AtPosition(
 	snapshot *analysis.Snapshot,
 	doc *docstate.Snapshot,
 	line, char int,
