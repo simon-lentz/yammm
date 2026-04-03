@@ -83,7 +83,7 @@ func (v *Validator) validateCompositions(
 					ErrCaseFoldCollision,
 					fmt.Sprintf("multiple input fields %v fold to composition field %q", candidates, fieldName),
 				).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-					WithDetail(diag.DetailKeyJsonField, fieldName)
+					WithDetail(diag.DetailKeyJSONField, fieldName)
 				withProvenance(issue, prov, provenancePathBuilder(prov).String())
 				collector.Collect(issue.Build())
 				hasValue = false // Don't proceed with ambiguous match
@@ -126,7 +126,7 @@ func (v *Validator) validateComposition(
 				fmt.Sprintf("missing required composition %q", rel.Name()),
 			).WithDetail(diag.DetailKeyReason, "absent").
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
-				WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			withProvenance(issue, prov, basePath.String())
 			collector.Collect(issue.Build())
 		}
@@ -142,7 +142,7 @@ func (v *Validator) validateComposition(
 			fmt.Sprintf("composition %q: null is not a valid composition value", rel.Name()),
 		).WithExpectedGot("array", "null")
 		withProvenance(issue, prov, basePath.String()).
-			WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 		collector.Collect(issue.Build())
 		return immutable.Value{}
 	}
@@ -156,7 +156,7 @@ func (v *Validator) validateComposition(
 			fmt.Sprintf("composition %q: expected array, got %s", rel.Name(), kindOf(rawValue)),
 		)
 		withProvenance(issue, prov, basePath.String()).
-			WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 		collector.Collect(issue.Build())
 		return immutable.Value{}
 	}
@@ -170,7 +170,7 @@ func (v *Validator) validateComposition(
 				fmt.Sprintf("composition %q: required composition cannot be empty", rel.Name()),
 			).WithDetail(diag.DetailKeyReason, "empty").
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
-				WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			withProvenance(issue, prov, basePath.String())
 			collector.Collect(issue.Build())
 			return immutable.Value{}
@@ -191,7 +191,7 @@ func (v *Validator) validateComposition(
 				"composition child must be an object, got "+kindOf(elem),
 			)
 			withProvenance(issue, prov, basePath.Index(i).String()).
-				WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			collector.Collect(issue.Build())
 			continue
 		}
@@ -250,7 +250,7 @@ func (v *Validator) validateComposition(
 						ErrDuplicateComposedPK,
 						fmt.Sprintf("duplicate primary key in composed children at indices %d and %d", firstIdx, i),
 					).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-						WithDetail(diag.DetailKeyJsonField, rel.FieldName()).
+						WithDetail(diag.DetailKeyJSONField, rel.FieldName()).
 						WithDetail(diag.DetailKeyPrimaryKey, pkStr)
 					withProvenance(issue, prov, pkPathFromInstance(basePath, child, childType, i).String())
 					collector.Collect(issue.Build())

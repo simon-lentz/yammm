@@ -410,8 +410,8 @@ func TestGraph_Check_NilReceiver(t *testing.T) {
 	}
 }
 
-func TestResult_NilReceiver(t *testing.T) {
-	var r *Result
+func TestSnapshot_NilReceiver(t *testing.T) {
+	var r *Snapshot
 
 	// All methods should handle nil gracefully
 	if r.Types() != nil {

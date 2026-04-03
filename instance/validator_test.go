@@ -434,7 +434,7 @@ func TestValidator_ValidateOne_IntegerBounds(t *testing.T) {
 	// Create type with bounded integer
 	personType := makeType("Person", false, false,
 		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), false, false),
+		makeProp("age", schema.IntegerBetween(0, 150), false, false),
 	)
 	s := makeTestSchema(personType)
 
@@ -479,7 +479,7 @@ func TestValidator_ValidateOne_StringBounds(t *testing.T) {
 	// Create type with bounded string
 	personType := makeType("Person", false, false,
 		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("code", schema.NewStringConstraintBounded(3, 10), false, false),
+		makeProp("code", schema.StringLenBetween(3, 10), false, false),
 	)
 	s := makeTestSchema(personType)
 

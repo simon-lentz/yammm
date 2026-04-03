@@ -270,10 +270,10 @@ func TestCheckValue_String(t *testing.T) {
 		{"valid_string", "hello", schema.NewStringConstraint(), false},
 		{"empty_string", "", schema.NewStringConstraint(), false},
 		{"wrong_type", 42, schema.NewStringConstraint(), true},
-		{"min_length_ok", "abc", schema.NewStringConstraintBounded(3, 10), false},
-		{"min_length_fail", "ab", schema.NewStringConstraintBounded(3, 10), true},
-		{"max_length_ok", "abcdefghij", schema.NewStringConstraintBounded(1, 10), false},
-		{"max_length_fail", "abcdefghijk", schema.NewStringConstraintBounded(1, 10), true},
+		{"min_length_ok", "abc", schema.StringLenBetween(3, 10), false},
+		{"min_length_fail", "ab", schema.StringLenBetween(3, 10), true},
+		{"max_length_ok", "abcdefghij", schema.StringLenBetween(1, 10), false},
+		{"max_length_fail", "abcdefghijk", schema.StringLenBetween(1, 10), true},
 	}
 
 	for _, tt := range tests {
@@ -300,12 +300,12 @@ func TestCheckValue_Integer(t *testing.T) {
 		{"valid_uint", uint(42), schema.NewIntegerConstraint(), false},
 		{"wrong_type_string", "42", schema.NewIntegerConstraint(), true},
 		{"wrong_type_float", 3.14, schema.NewIntegerConstraint(), true},
-		{"min_ok", int64(10), schema.NewIntegerConstraintBounded(10, true, 100, true), false},
-		{"min_fail", int64(9), schema.NewIntegerConstraintBounded(10, true, 100, true), true},
-		{"max_ok", int64(100), schema.NewIntegerConstraintBounded(10, true, 100, true), false},
-		{"max_fail", int64(101), schema.NewIntegerConstraintBounded(10, true, 100, true), true},
-		{"no_min", int64(-1000), schema.NewIntegerConstraintBounded(0, false, 100, true), false},
-		{"no_max", int64(1000), schema.NewIntegerConstraintBounded(0, true, 0, false), false},
+		{"min_ok", int64(10), schema.IntegerBetween(10, 100), false},
+		{"min_fail", int64(9), schema.IntegerBetween(10, 100), true},
+		{"max_ok", int64(100), schema.IntegerBetween(10, 100), false},
+		{"max_fail", int64(101), schema.IntegerBetween(10, 100), true},
+		{"no_min", int64(-1000), schema.IntegerMax(100), false},
+		{"no_max", int64(1000), schema.IntegerMin(0), false},
 	}
 
 	for _, tt := range tests {
@@ -331,10 +331,10 @@ func TestCheckValue_Float(t *testing.T) {
 		{"valid_int_as_float", int64(42), schema.NewFloatConstraint(), false},
 		{"wrong_type_string", "3.14", schema.NewFloatConstraint(), true},
 		{"wrong_type_bool", true, schema.NewFloatConstraint(), true},
-		{"min_ok", 0.0, schema.NewFloatConstraintBounded(0.0, true, 1.0, true), false},
-		{"min_fail", -0.1, schema.NewFloatConstraintBounded(0.0, true, 1.0, true), true},
-		{"max_ok", 1.0, schema.NewFloatConstraintBounded(0.0, true, 1.0, true), false},
-		{"max_fail", 1.1, schema.NewFloatConstraintBounded(0.0, true, 1.0, true), true},
+		{"min_ok", 0.0, schema.FloatBetween(0.0, 1.0), false},
+		{"min_fail", -0.1, schema.FloatBetween(0.0, 1.0), true},
+		{"max_ok", 1.0, schema.FloatBetween(0.0, 1.0), false},
+		{"max_fail", 1.1, schema.FloatBetween(0.0, 1.0), true},
 	}
 
 	for _, tt := range tests {
@@ -552,7 +552,7 @@ func TestCheckValue_Vector(t *testing.T) {
 
 func TestCheckValue_Alias(t *testing.T) {
 	// Alias that resolves to integer
-	constraint := schema.NewAliasConstraint("PositiveInt", schema.NewIntegerConstraintBounded(1, true, 0, false))
+	constraint := schema.NewAliasConstraint("PositiveInt", schema.IntegerMin(1))
 
 	tests := []struct {
 		name    string
@@ -586,7 +586,7 @@ func TestCheckValue_UnresolvedAlias(t *testing.T) {
 }
 
 func TestCheckerFor(t *testing.T) {
-	constraint := schema.NewIntegerConstraintBounded(0, true, 100, true)
+	constraint := schema.IntegerBetween(0, 100)
 	checker := eval.CheckerFor(constraint)
 
 	ok, msg := checker(int64(50))
@@ -617,8 +617,8 @@ func TestCheckValue_Float_NaNInf(t *testing.T) {
 		{"accept_small", 1e-308, schema.NewFloatConstraint(), false, ""},
 
 		// NaN/Inf with bounds - should fail on NaN/Inf check before bounds
-		{"nan_with_bounds", math.NaN(), schema.NewFloatConstraintBounded(0, true, 100, true), true, "not finite"},
-		{"inf_with_bounds", math.Inf(1), schema.NewFloatConstraintBounded(0, true, 100, true), true, "not finite"},
+		{"nan_with_bounds", math.NaN(), schema.FloatBetween(0, 100), true, "not finite"},
+		{"inf_with_bounds", math.Inf(1), schema.FloatBetween(0, 100), true, "not finite"},
 	}
 
 	for _, tt := range tests {
@@ -1035,10 +1035,10 @@ func TestCheckValue_Integer_Float64WholeNumber(t *testing.T) {
 		{"float64_fraction_half", float64(0.5), schema.NewIntegerConstraint(), true},
 
 		// Float64 whole numbers should respect bounds
-		{"float64_min_ok", float64(10.0), schema.NewIntegerConstraintBounded(10, true, 100, true), false},
-		{"float64_min_fail", float64(9.0), schema.NewIntegerConstraintBounded(10, true, 100, true), true},
-		{"float64_max_ok", float64(100.0), schema.NewIntegerConstraintBounded(10, true, 100, true), false},
-		{"float64_max_fail", float64(101.0), schema.NewIntegerConstraintBounded(10, true, 100, true), true},
+		{"float64_min_ok", float64(10.0), schema.IntegerBetween(10, 100), false},
+		{"float64_min_fail", float64(9.0), schema.IntegerBetween(10, 100), true},
+		{"float64_max_ok", float64(100.0), schema.IntegerBetween(10, 100), false},
+		{"float64_max_fail", float64(101.0), schema.IntegerBetween(10, 100), true},
 
 		// Non-finite should be rejected
 		{"float64_nan", math.NaN(), schema.NewIntegerConstraint(), true},
@@ -1434,7 +1434,7 @@ func TestCheckValue_List(t *testing.T) {
 func TestCheckValue_List_ElementConstraintViolation(t *testing.T) {
 	t.Parallel()
 	// String with max length 3
-	constraint := schema.NewListConstraint(schema.NewStringConstraintBounded(-1, 3))
+	constraint := schema.NewListConstraint(schema.StringMaxLen(3))
 
 	t.Run("element within constraint", func(t *testing.T) {
 		t.Parallel()

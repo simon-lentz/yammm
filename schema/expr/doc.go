@@ -1,24 +1,8 @@
-// Package expr provides expression compilation for YAMMM schema invariants.
+// Package expr provides expression types for YAMMM schema invariants.
 //
 // This package contains the compile-time representation of expressions. It
-// transforms ANTLR parse trees into typed Expression trees that can be stored
-// in the schema and evaluated at runtime by the instance layer.
-//
-// # Compilation vs Evaluation
-//
-// The expr package is responsible for compilation only:
-//   - Parsing expression syntax from invariant declarations
-//   - Building typed AST nodes (SExpr, Literal, Op, DatatypeLiteral)
-//   - Collecting syntax errors during parsing
-//
-// Note: Function name validation is deferred to the eval layer (instance/eval).
-// Unknown functions compile successfully into the AST; validation happens at
-// evaluation time. This design allows schemas to be compiled without knowing
-// all builtins, supporting runtime extension and custom builtin registration.
-//
-// Evaluation is handled separately by the instance layer, which provides
-// the runtime context (property values, variables, etc.) needed to execute
-// expressions.
+// defines typed Expression nodes that can be stored in the schema and evaluated
+// at runtime by the instance layer.
 //
 // # Expression Types
 //
@@ -29,19 +13,12 @@
 //   - [Op]: Operation name (e.g., "+", "&&", "Any")
 //   - [DatatypeLiteral]: Data type name for type checking expressions
 //
-// # Usage
+// # Compilation vs Evaluation
 //
-// Expressions are compiled from ANTLR parse trees:
-//
-//	ctx := parser.Expr() // ANTLR ExprContext
-//	collector := diag.NewCollector(0)
-//	expr := expr.Compile(ctx, collector, sourceID, registry, converter)
-//	if collector.HasErrors() {
-//	    // Handle compilation errors
-//	}
-//
-// The resulting Expression can be stored in an InvariantDecl and evaluated
-// later when validating instances.
+// Compilation (transforming ANTLR parse trees into Expression trees) is handled
+// by the internal exprcomp package. Evaluation is handled separately by the
+// instance layer, which provides the runtime context (property values,
+// variables, etc.) needed to execute expressions.
 //
 // # Known Limitations
 //
@@ -49,7 +26,4 @@
 //     Spans are captured in diagnostics during compilation but not attached
 //     to the resulting AST nodes. Future IDE features may require extending
 //     nodes to optionally carry spans.
-//
-//   - [CompileString] uses a synthetic schema wrapper internally and creates
-//     its own source registry. It is intended for testing, not production use.
 package expr

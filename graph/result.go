@@ -7,23 +7,23 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Result is an immutable snapshot of the graph at a point in time.
+// Snapshot is an immutable snapshot of the graph at a point in time.
 //
-// Result provides read-only access to all instances, edges, duplicates,
+// Snapshot provides read-only access to all instances, edges, duplicates,
 // and diagnostics. It is safe for concurrent read access from multiple
 // goroutines.
 //
 // All slice-returning methods produce deterministically sorted output,
 // independent of Add() call order or concurrency:
-//   - [Result.Types]: lexicographic by type name
-//   - [Result.InstancesOf]: lexicographic by primary key string
-//   - [Result.Edges]: lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
-//   - [Result.Duplicates]: lexicographic by (typeName, primaryKey)
-//   - [Result.Unresolved]: lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
+//   - [Snapshot.Types]: lexicographic by type name
+//   - [Snapshot.InstancesOf]: lexicographic by primary key string
+//   - [Snapshot.Edges]: lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
+//   - [Snapshot.Duplicates]: lexicographic by (typeName, primaryKey)
+//   - [Snapshot.Unresolved]: lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
 //
-// The [Result.Instances] map has non-deterministic iteration order per Go semantics.
+// The [Snapshot.Instances] map has non-deterministic iteration order per Go semantics.
 // For deterministic iteration, use Types() + InstancesOf().
-type Result struct {
+type Snapshot struct {
 	// schema is the schema used for validation.
 	schema *schema.Schema
 
@@ -54,7 +54,7 @@ type Result struct {
 // This provides access to type definitions and relation metadata,
 // which is needed for schema-aware serialization (e.g., determining
 // whether a relation is one-to-one or one-to-many).
-func (r *Result) Schema() *schema.Schema {
+func (r *Snapshot) Schema() *schema.Schema {
 	if r == nil {
 		return nil
 	}
@@ -67,9 +67,9 @@ func (r *Result) Schema() *schema.Schema {
 //   - Local types: unqualified (e.g., "Person")
 //   - Imported types: alias-qualified (e.g., "c.Entity")
 //
-// Use with [Result.InstancesOf] for deterministic iteration.
+// Use with [Snapshot.InstancesOf] for deterministic iteration.
 // Returns a defensive copy.
-func (r *Result) Types() []string {
+func (r *Snapshot) Types() []string {
 	if r == nil || len(r.types) == 0 {
 		return nil
 	}
@@ -88,7 +88,7 @@ func (r *Result) Types() []string {
 //   - Imported types: alias-qualified (e.g., "c.Entity")
 //
 // Returns a defensive copy.
-func (r *Result) InstancesOf(typeName string) []*Instance {
+func (r *Snapshot) InstancesOf(typeName string) []*Instance {
 	if r == nil || r.instances == nil {
 		return nil
 	}
@@ -104,12 +104,12 @@ func (r *Result) InstancesOf(typeName string) []*Instance {
 // Instances returns all validated instances keyed by type name.
 //
 // WARNING: Map iteration order is non-deterministic per Go semantics.
-// For deterministic iteration (CLI output, tests), use [Result.Types]
-// with [Result.InstancesOf] instead.
+// For deterministic iteration (CLI output, tests), use [Snapshot.Types]
+// with [Snapshot.InstancesOf] instead.
 //
 // The map keys use instance tag form.
 // Returns a shallow copy of the map; instance slices are shared.
-func (r *Result) Instances() map[string][]*Instance {
+func (r *Snapshot) Instances() map[string][]*Instance {
 	if r == nil || r.instances == nil {
 		return nil
 	}
@@ -125,7 +125,7 @@ func (r *Result) Instances() map[string][]*Instance {
 // Returns (nil, false) if no matching instance exists.
 //
 // The typeName must be in instance tag form.
-func (r *Result) InstanceByKey(typeName, key string) (*Instance, bool) {
+func (r *Snapshot) InstanceByKey(typeName, key string) (*Instance, bool) {
 	if r == nil || r.instanceIndex == nil {
 		return nil, false
 	}
@@ -143,7 +143,7 @@ func (r *Result) InstanceByKey(typeName, key string) (*Instance, bool) {
 // (sourceTypeName, sourceKey, relationName, targetTypeName, targetKey)
 //
 // Returns a defensive copy.
-func (r *Result) Edges() []*Edge {
+func (r *Snapshot) Edges() []*Edge {
 	if r == nil || len(r.edges) == 0 {
 		return nil
 	}
@@ -159,7 +159,7 @@ func (r *Result) Edges() []*Edge {
 // here, making Check idempotent: multiple calls have no effect on snapshot diagnostics.
 //
 // Use [diag.Result.OK] to check if the graph construction succeeded.
-func (r *Result) Diagnostics() diag.Result {
+func (r *Snapshot) Diagnostics() diag.Result {
 	if r == nil {
 		return diag.OK()
 	}
@@ -171,7 +171,7 @@ func (r *Result) Diagnostics() diag.Result {
 // Duplicates are sorted by (typeName, primaryKey).
 // Returns nil if no duplicates were detected.
 // Returns a defensive copy.
-func (r *Result) Duplicates() []*Duplicate {
+func (r *Snapshot) Duplicates() []*Duplicate {
 	if r == nil || len(r.duplicates) == 0 {
 		return nil
 	}
@@ -188,7 +188,7 @@ func (r *Result) Duplicates() []*Duplicate {
 //
 // Returns nil if all edges are resolved.
 // Returns a defensive copy.
-func (r *Result) Unresolved() []*UnresolvedEdge {
+func (r *Snapshot) Unresolved() []*UnresolvedEdge {
 	if r == nil || len(r.unresolved) == 0 {
 		return nil
 	}
@@ -201,7 +201,7 @@ func (r *Result) Unresolved() []*UnresolvedEdge {
 //
 // This is a convenience method equivalent to r.Diagnostics().OK().
 // A graph may have warnings and still be OK.
-func (r *Result) OK() bool {
+func (r *Snapshot) OK() bool {
 	if r == nil {
 		return true
 	}
@@ -211,16 +211,16 @@ func (r *Result) OK() bool {
 // HasErrors reports whether the graph has any errors.
 //
 // This is a convenience method equivalent to r.Diagnostics().HasErrors().
-func (r *Result) HasErrors() bool {
+func (r *Snapshot) HasErrors() bool {
 	if r == nil {
 		return false
 	}
 	return r.diagnostics.HasErrors()
 }
 
-// newResult creates a Result from sorted graph data.
+// newSnapshot creates a Snapshot from sorted graph data.
 // All slices must already be sorted according to the ordering guarantees.
-func newResult(
+func newSnapshot(
 	s *schema.Schema,
 	types []string,
 	instances map[string][]*Instance,
@@ -229,8 +229,8 @@ func newResult(
 	duplicates []*Duplicate,
 	unresolved []*UnresolvedEdge,
 	diagnostics diag.Result,
-) *Result {
-	return &Result{
+) *Snapshot {
+	return &Snapshot{
 		schema:        s,
 		types:         types,
 		instances:     instances,

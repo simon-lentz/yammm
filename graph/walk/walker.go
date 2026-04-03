@@ -39,7 +39,7 @@ func WithLogger(logger *slog.Logger) Option {
 //   - Compositions are visited in relation name order
 //
 // Returns on first error from visitor or if context is cancelled.
-func Walk(ctx context.Context, result *graph.Result, visitor Visitor, opts ...Option) error {
+func Walk(ctx context.Context, result *graph.Snapshot, visitor Visitor, opts ...Option) error {
 	// Nil context check - must come first for consistent contract
 	// (nil context always panics, even if result is also nil)
 	if ctx == nil {
@@ -122,7 +122,7 @@ func Instance(ctx context.Context, inst *graph.Instance, visitor Visitor, opts .
 }
 
 type walker struct {
-	result  *graph.Result
+	result  *graph.Snapshot
 	visitor Visitor
 	config  walkConfig
 }

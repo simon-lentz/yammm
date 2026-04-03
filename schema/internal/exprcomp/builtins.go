@@ -1,4 +1,4 @@
-package expr
+package exprcomp
 
 import (
 	"errors"
@@ -84,8 +84,8 @@ func defaultBuiltinNames() map[string]struct{} {
 // The zero value is usable and contains all default builtins. This makes the
 // following patterns equivalent:
 //
-//	var r expr.BuiltinRegistry  // zero value, contains defaults
-//	r := expr.NewBuiltinRegistry()  // explicit construction
+//	var r exprcomp.BuiltinRegistry  // zero value, contains defaults
+//	r := exprcomp.NewBuiltinRegistry()  // explicit construction
 //
 // Thread Safety: BuiltinRegistry is not safe for concurrent mutation. Build
 // the registry during initialization, then share the result. Clone() can be

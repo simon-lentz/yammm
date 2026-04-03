@@ -16,11 +16,11 @@ func TestConstraint_String(t *testing.T) {
 		expected   string
 	}{
 		{"String", schema.NewStringConstraint(), "String"},
-		{"String bounded", schema.NewStringConstraintBounded(1, 100), "String[1, 100]"},
-		{"String min only", schema.NewStringConstraintBounded(1, -1), "String[1, _]"},
-		{"String max only", schema.NewStringConstraintBounded(-1, 100), "String[_, 100]"},
+		{"String bounded", schema.StringLenBetween(1, 100), "String[1, 100]"},
+		{"String min only", schema.StringMinLen(1), "String[1, _]"},
+		{"String max only", schema.StringMaxLen(100), "String[_, 100]"},
 		{"Integer", schema.NewIntegerConstraint(), "Integer"},
-		{"Integer bounded", schema.NewIntegerConstraintBounded(0, true, 100, true), "Integer[0, 100]"},
+		{"Integer bounded", schema.IntegerBetween(0, 100), "Integer[0, 100]"},
 		{"Float", schema.NewFloatConstraint(), "Float"},
 		{"Boolean", schema.NewBooleanConstraint(), "Boolean"},
 		{"Timestamp", schema.NewTimestampConstraint(), "Timestamp"},
@@ -52,14 +52,14 @@ func TestConstraint_Kind(t *testing.T) {
 
 func TestConstraint_Equal(t *testing.T) {
 	t.Run("same constraints are equal", func(t *testing.T) {
-		c1 := schema.NewStringConstraintBounded(1, 100)
-		c2 := schema.NewStringConstraintBounded(1, 100)
+		c1 := schema.StringLenBetween(1, 100)
+		c2 := schema.StringLenBetween(1, 100)
 		assert.True(t, c1.Equal(c2))
 	})
 
 	t.Run("different bounds are not equal", func(t *testing.T) {
-		c1 := schema.NewStringConstraintBounded(1, 100)
-		c2 := schema.NewStringConstraintBounded(1, 200)
+		c1 := schema.StringLenBetween(1, 100)
+		c2 := schema.StringLenBetween(1, 200)
 		assert.False(t, c1.Equal(c2))
 	})
 
@@ -113,7 +113,7 @@ func TestPatternConstraint_MaxTwoPatterns(t *testing.T) {
 }
 
 func TestAliasConstraint_ResolvesForEquality(t *testing.T) {
-	underlying := schema.NewStringConstraintBounded(1, 100)
+	underlying := schema.StringLenBetween(1, 100)
 	alias := schema.NewAliasConstraint("Name", underlying)
 
 	// Alias should equal its resolved constraint
@@ -174,14 +174,14 @@ func TestAliasConstraint_Kind(t *testing.T) {
 // --- StringConstraint Accessor Tests ---
 
 func TestStringConstraint_MinLen(t *testing.T) {
-	c := schema.NewStringConstraintBounded(5, 100)
+	c := schema.StringLenBetween(5, 100)
 	minLen, hasMin := c.MinLen()
 	assert.True(t, hasMin)
 	assert.Equal(t, int64(5), minLen)
 }
 
 func TestStringConstraint_MaxLen(t *testing.T) {
-	c := schema.NewStringConstraintBounded(5, 100)
+	c := schema.StringLenBetween(5, 100)
 	maxLen, hasMax := c.MaxLen()
 	assert.True(t, hasMax)
 	assert.Equal(t, int64(100), maxLen)
@@ -202,14 +202,14 @@ func TestStringConstraint_MaxLen_Unbounded(t *testing.T) {
 // --- IntegerConstraint Accessor Tests ---
 
 func TestIntegerConstraint_Min(t *testing.T) {
-	c := schema.NewIntegerConstraintBounded(10, true, 100, true)
+	c := schema.IntegerBetween(10, 100)
 	minVal, hasMin := c.Min()
 	assert.True(t, hasMin)
 	assert.Equal(t, int64(10), minVal)
 }
 
 func TestIntegerConstraint_Max(t *testing.T) {
-	c := schema.NewIntegerConstraintBounded(10, true, 100, true)
+	c := schema.IntegerBetween(10, 100)
 	maxVal, hasMax := c.Max()
 	assert.True(t, hasMax)
 	assert.Equal(t, int64(100), maxVal)
@@ -228,34 +228,34 @@ func TestIntegerConstraint_Max_Unbounded(t *testing.T) {
 }
 
 func TestIntegerConstraint_Equal_Same(t *testing.T) {
-	c1 := schema.NewIntegerConstraintBounded(10, true, 100, true)
-	c2 := schema.NewIntegerConstraintBounded(10, true, 100, true)
+	c1 := schema.IntegerBetween(10, 100)
+	c2 := schema.IntegerBetween(10, 100)
 	assert.True(t, c1.Equal(c2))
 }
 
 func TestIntegerConstraint_Equal_DifferentMin(t *testing.T) {
-	c1 := schema.NewIntegerConstraintBounded(10, true, 100, true)
-	c2 := schema.NewIntegerConstraintBounded(20, true, 100, true)
+	c1 := schema.IntegerBetween(10, 100)
+	c2 := schema.IntegerBetween(20, 100)
 	assert.False(t, c1.Equal(c2))
 }
 
 func TestIntegerConstraint_Equal_DifferentMax(t *testing.T) {
-	c1 := schema.NewIntegerConstraintBounded(10, true, 100, true)
-	c2 := schema.NewIntegerConstraintBounded(10, true, 200, true)
+	c1 := schema.IntegerBetween(10, 100)
+	c2 := schema.IntegerBetween(10, 200)
 	assert.False(t, c1.Equal(c2))
 }
 
 // --- FloatConstraint Accessor Tests ---
 
 func TestFloatConstraint_Min(t *testing.T) {
-	c := schema.NewFloatConstraintBounded(1.5, true, 10.5, true)
+	c := schema.FloatBetween(1.5, 10.5)
 	minVal, hasMin := c.Min()
 	assert.True(t, hasMin)
 	assert.Equal(t, 1.5, minVal)
 }
 
 func TestFloatConstraint_Max(t *testing.T) {
-	c := schema.NewFloatConstraintBounded(1.5, true, 10.5, true)
+	c := schema.FloatBetween(1.5, 10.5)
 	maxVal, hasMax := c.Max()
 	assert.True(t, hasMax)
 	assert.Equal(t, 10.5, maxVal)
@@ -274,14 +274,14 @@ func TestFloatConstraint_Max_Unbounded(t *testing.T) {
 }
 
 func TestFloatConstraint_Equal_Same(t *testing.T) {
-	c1 := schema.NewFloatConstraintBounded(1.5, true, 10.5, true)
-	c2 := schema.NewFloatConstraintBounded(1.5, true, 10.5, true)
+	c1 := schema.FloatBetween(1.5, 10.5)
+	c2 := schema.FloatBetween(1.5, 10.5)
 	assert.True(t, c1.Equal(c2))
 }
 
 func TestFloatConstraint_Equal_DifferentMin(t *testing.T) {
-	c1 := schema.NewFloatConstraintBounded(1.5, true, 10.5, true)
-	c2 := schema.NewFloatConstraintBounded(2.0, true, 10.5, true)
+	c1 := schema.FloatBetween(1.5, 10.5)
+	c2 := schema.FloatBetween(2.0, 10.5)
 	assert.False(t, c1.Equal(c2))
 }
 
@@ -485,35 +485,21 @@ func TestAliasConstraint_String_Unresolved(t *testing.T) {
 
 func TestFloatConstraint_StringStability(t *testing.T) {
 	tests := []struct {
-		name     string
-		min      float64
-		hasMin   bool
-		max      float64
-		hasMax   bool
-		expected string
+		name       string
+		constraint schema.Constraint
+		expected   string
 	}{
-		{"no bounds", 0, false, 0, false, "Float"},
-		{"min only", 0, true, 0, false, "Float[0, _]"},
-		{"max only", 0, false, 100.5, true, "Float[_, 100.5]"},
-		{"both bounds", -10.25, true, 10.25, true, "Float[-10.25, 10.25]"},
-		{"large values", 1e10, true, 1e15, true, "Float[10000000000, 1000000000000000]"},
-		{"small decimals", 0.123456789, true, 0.987654321, true, "Float[0.123456789, 0.987654321]"},
+		{"no bounds", schema.NewFloatConstraint(), "Float"},
+		{"min only", schema.FloatMin(0), "Float[0, _]"},
+		{"max only", schema.FloatMax(100.5), "Float[_, 100.5]"},
+		{"both bounds", schema.FloatBetween(-10.25, 10.25), "Float[-10.25, 10.25]"},
+		{"large values", schema.FloatBetween(1e10, 1e15), "Float[10000000000, 1000000000000000]"},
+		{"small decimals", schema.FloatBetween(0.123456789, 0.987654321), "Float[0.123456789, 0.987654321]"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var c schema.Constraint
-			switch {
-			case tt.hasMin && tt.hasMax:
-				c = schema.NewFloatConstraintBounded(tt.min, true, tt.max, true)
-			case tt.hasMin:
-				c = schema.NewFloatConstraintBounded(tt.min, true, 0, false)
-			case tt.hasMax:
-				c = schema.NewFloatConstraintBounded(0, false, tt.max, true)
-			default:
-				c = schema.NewFloatConstraint()
-			}
-			assert.Equal(t, tt.expected, c.String())
+			assert.Equal(t, tt.expected, tt.constraint.String())
 		})
 	}
 }
@@ -527,11 +513,11 @@ func TestConstraint_IsResolved_NonAliasConstraints(t *testing.T) {
 		constraint schema.Constraint
 	}{
 		{"String", schema.NewStringConstraint()},
-		{"String bounded", schema.NewStringConstraintBounded(1, 100)},
+		{"String bounded", schema.StringLenBetween(1, 100)},
 		{"Integer", schema.NewIntegerConstraint()},
-		{"Integer bounded", schema.NewIntegerConstraintBounded(0, true, 100, true)},
+		{"Integer bounded", schema.IntegerBetween(0, 100)},
 		{"Float", schema.NewFloatConstraint()},
-		{"Float bounded", schema.NewFloatConstraintBounded(1.0, true, 10.0, true)},
+		{"Float bounded", schema.FloatBetween(1.0, 10.0)},
 		{"Boolean", schema.NewBooleanConstraint()},
 		{"Timestamp", schema.NewTimestampConstraint()},
 		{"Timestamp formatted", schema.NewTimestampConstraintFormatted("2006-01-02")},
@@ -732,61 +718,61 @@ func TestStringConstraint_NarrowsTo(t *testing.T) {
 		},
 		{
 			name:   "identical bounded",
-			parent: schema.NewStringConstraintBounded(1, 100),
-			child:  schema.NewStringConstraintBounded(1, 100),
+			parent: schema.StringLenBetween(1, 100),
+			child:  schema.StringLenBetween(1, 100),
 			want:   true,
 		},
 		{
 			name:   "raise min",
-			parent: schema.NewStringConstraintBounded(1, 100),
-			child:  schema.NewStringConstraintBounded(5, 100),
+			parent: schema.StringLenBetween(1, 100),
+			child:  schema.StringLenBetween(5, 100),
 			want:   true,
 		},
 		{
 			name:   "lower max",
-			parent: schema.NewStringConstraintBounded(1, 100),
-			child:  schema.NewStringConstraintBounded(1, 50),
+			parent: schema.StringLenBetween(1, 100),
+			child:  schema.StringLenBetween(1, 50),
 			want:   true,
 		},
 		{
 			name:   "raise min and lower max",
-			parent: schema.NewStringConstraintBounded(1, 100),
-			child:  schema.NewStringConstraintBounded(5, 50),
+			parent: schema.StringLenBetween(1, 100),
+			child:  schema.StringLenBetween(5, 50),
 			want:   true,
 		},
 		{
 			name:   "lower min rejected",
-			parent: schema.NewStringConstraintBounded(5, 100),
-			child:  schema.NewStringConstraintBounded(1, 100),
+			parent: schema.StringLenBetween(5, 100),
+			child:  schema.StringLenBetween(1, 100),
 			want:   false,
 		},
 		{
 			name:   "raise max rejected",
-			parent: schema.NewStringConstraintBounded(1, 100),
-			child:  schema.NewStringConstraintBounded(1, 200),
+			parent: schema.StringLenBetween(1, 100),
+			child:  schema.StringLenBetween(1, 200),
 			want:   false,
 		},
 		{
 			name:   "add upper bound to unbounded parent",
-			parent: schema.NewStringConstraintBounded(1, -1),
-			child:  schema.NewStringConstraintBounded(1, 100),
+			parent: schema.StringMinLen(1),
+			child:  schema.StringLenBetween(1, 100),
 			want:   true,
 		},
 		{
 			name:   "remove upper bound rejected",
-			parent: schema.NewStringConstraintBounded(1, 100),
-			child:  schema.NewStringConstraintBounded(1, -1),
+			parent: schema.StringLenBetween(1, 100),
+			child:  schema.StringMinLen(1),
 			want:   false,
 		},
 		{
 			name:   "unbounded parent to bounded child",
 			parent: schema.NewStringConstraint(),
-			child:  schema.NewStringConstraintBounded(5, 50),
+			child:  schema.StringLenBetween(5, 50),
 			want:   true,
 		},
 		{
 			name:   "bounded parent to unbounded child rejected",
-			parent: schema.NewStringConstraintBounded(1, 100),
+			parent: schema.StringLenBetween(1, 100),
 			child:  schema.NewStringConstraint(),
 			want:   false,
 		},
@@ -823,50 +809,50 @@ func TestIntegerConstraint_NarrowsTo(t *testing.T) {
 		},
 		{
 			name:   "identical bounded",
-			parent: schema.NewIntegerConstraintBounded(0, true, 100, true),
-			child:  schema.NewIntegerConstraintBounded(0, true, 100, true),
+			parent: schema.IntegerBetween(0, 100),
+			child:  schema.IntegerBetween(0, 100),
 			want:   true,
 		},
 		{
 			name:   "raise min",
-			parent: schema.NewIntegerConstraintBounded(0, true, 100, true),
-			child:  schema.NewIntegerConstraintBounded(10, true, 100, true),
+			parent: schema.IntegerBetween(0, 100),
+			child:  schema.IntegerBetween(10, 100),
 			want:   true,
 		},
 		{
 			name:   "lower max",
-			parent: schema.NewIntegerConstraintBounded(0, true, 100, true),
-			child:  schema.NewIntegerConstraintBounded(0, true, 50, true),
+			parent: schema.IntegerBetween(0, 100),
+			child:  schema.IntegerBetween(0, 50),
 			want:   true,
 		},
 		{
 			name:   "lower min rejected",
-			parent: schema.NewIntegerConstraintBounded(10, true, 100, true),
-			child:  schema.NewIntegerConstraintBounded(0, true, 100, true),
+			parent: schema.IntegerBetween(10, 100),
+			child:  schema.IntegerBetween(0, 100),
 			want:   false,
 		},
 		{
 			name:   "raise max rejected",
-			parent: schema.NewIntegerConstraintBounded(0, true, 100, true),
-			child:  schema.NewIntegerConstraintBounded(0, true, 200, true),
+			parent: schema.IntegerBetween(0, 100),
+			child:  schema.IntegerBetween(0, 200),
 			want:   false,
 		},
 		{
 			name:   "unbounded to bounded",
 			parent: schema.NewIntegerConstraint(),
-			child:  schema.NewIntegerConstraintBounded(0, true, 100, true),
+			child:  schema.IntegerBetween(0, 100),
 			want:   true,
 		},
 		{
 			name:   "add upper bound",
-			parent: schema.NewIntegerConstraintBounded(0, true, 0, false),
-			child:  schema.NewIntegerConstraintBounded(0, true, 100, true),
+			parent: schema.IntegerMin(0),
+			child:  schema.IntegerBetween(0, 100),
 			want:   true,
 		},
 		{
 			name:   "remove lower bound rejected",
-			parent: schema.NewIntegerConstraintBounded(0, true, 100, true),
-			child:  schema.NewIntegerConstraintBounded(0, false, 100, true),
+			parent: schema.IntegerBetween(0, 100),
+			child:  schema.IntegerMax(100),
 			want:   false,
 		},
 		{
@@ -902,32 +888,32 @@ func TestFloatConstraint_NarrowsTo(t *testing.T) {
 		},
 		{
 			name:   "raise min",
-			parent: schema.NewFloatConstraintBounded(0.0, true, 100.0, true),
-			child:  schema.NewFloatConstraintBounded(10.0, true, 100.0, true),
+			parent: schema.FloatBetween(0.0, 100.0),
+			child:  schema.FloatBetween(10.0, 100.0),
 			want:   true,
 		},
 		{
 			name:   "lower max",
-			parent: schema.NewFloatConstraintBounded(0.0, true, 100.0, true),
-			child:  schema.NewFloatConstraintBounded(0.0, true, 50.0, true),
+			parent: schema.FloatBetween(0.0, 100.0),
+			child:  schema.FloatBetween(0.0, 50.0),
 			want:   true,
 		},
 		{
 			name:   "lower min rejected",
-			parent: schema.NewFloatConstraintBounded(10.0, true, 100.0, true),
-			child:  schema.NewFloatConstraintBounded(0.0, true, 100.0, true),
+			parent: schema.FloatBetween(10.0, 100.0),
+			child:  schema.FloatBetween(0.0, 100.0),
 			want:   false,
 		},
 		{
 			name:   "raise max rejected",
-			parent: schema.NewFloatConstraintBounded(0.0, true, 100.0, true),
-			child:  schema.NewFloatConstraintBounded(0.0, true, 200.0, true),
+			parent: schema.FloatBetween(0.0, 100.0),
+			child:  schema.FloatBetween(0.0, 200.0),
 			want:   false,
 		},
 		{
 			name:   "unbounded to bounded",
 			parent: schema.NewFloatConstraint(),
-			child:  schema.NewFloatConstraintBounded(0.0, true, 100.0, true),
+			child:  schema.FloatBetween(0.0, 100.0),
 			want:   true,
 		},
 		{
@@ -1110,8 +1096,8 @@ func TestAliasConstraint_NarrowsTo(t *testing.T) {
 	t.Run("alias wrapping Integer narrows to narrower Integer", func(t *testing.T) {
 		t.Parallel()
 		parent := schema.NewAliasConstraint("Age",
-			schema.NewIntegerConstraintBounded(0, true, 150, true))
-		child := schema.NewIntegerConstraintBounded(18, true, 150, true)
+			schema.IntegerBetween(0, 150))
+		child := schema.IntegerBetween(18, 150)
 
 		assert.True(t, parent.NarrowsTo(child))
 	})
@@ -1119,17 +1105,17 @@ func TestAliasConstraint_NarrowsTo(t *testing.T) {
 	t.Run("alias wrapping Integer does not narrow to wider Integer", func(t *testing.T) {
 		t.Parallel()
 		parent := schema.NewAliasConstraint("AdultAge",
-			schema.NewIntegerConstraintBounded(18, true, 150, true))
-		child := schema.NewIntegerConstraintBounded(0, true, 150, true)
+			schema.IntegerBetween(18, 150))
+		child := schema.IntegerBetween(0, 150)
 
 		assert.False(t, parent.NarrowsTo(child))
 	})
 
 	t.Run("child is alias wrapping narrower Integer", func(t *testing.T) {
 		t.Parallel()
-		parent := schema.NewIntegerConstraintBounded(0, true, 150, true)
+		parent := schema.IntegerBetween(0, 150)
 		child := schema.NewAliasConstraint("AdultAge",
-			schema.NewIntegerConstraintBounded(18, true, 150, true))
+			schema.IntegerBetween(18, 150))
 
 		assert.True(t, parent.NarrowsTo(child))
 	})
@@ -1137,9 +1123,9 @@ func TestAliasConstraint_NarrowsTo(t *testing.T) {
 	t.Run("both aliases wrapping compatible constraints", func(t *testing.T) {
 		t.Parallel()
 		parent := schema.NewAliasConstraint("Age",
-			schema.NewIntegerConstraintBounded(0, true, 150, true))
+			schema.IntegerBetween(0, 150))
 		child := schema.NewAliasConstraint("AdultAge",
-			schema.NewIntegerConstraintBounded(18, true, 150, true))
+			schema.IntegerBetween(18, 150))
 
 		assert.True(t, parent.NarrowsTo(child))
 	})
@@ -1155,21 +1141,21 @@ func TestAliasConstraint_NarrowsTo(t *testing.T) {
 	t.Run("deep alias chain narrows correctly", func(t *testing.T) {
 		t.Parallel()
 		// A -> B -> Integer[0,150]
-		terminal := schema.NewIntegerConstraintBounded(0, true, 150, true)
+		terminal := schema.IntegerBetween(0, 150)
 		aliasB := schema.NewAliasConstraint("B", terminal)
 		aliasA := schema.NewAliasConstraint("A", aliasB)
 
-		child := schema.NewIntegerConstraintBounded(18, true, 120, true)
+		child := schema.IntegerBetween(18, 120)
 		assert.True(t, aliasA.NarrowsTo(child))
 	})
 
 	t.Run("deep alias chain rejects widening", func(t *testing.T) {
 		t.Parallel()
-		terminal := schema.NewIntegerConstraintBounded(18, true, 65, true)
+		terminal := schema.IntegerBetween(18, 65)
 		aliasB := schema.NewAliasConstraint("B", terminal)
 		aliasA := schema.NewAliasConstraint("A", aliasB)
 
-		child := schema.NewIntegerConstraintBounded(0, true, 150, true)
+		child := schema.IntegerBetween(0, 150)
 		assert.False(t, aliasA.NarrowsTo(child))
 	})
 
@@ -1203,7 +1189,7 @@ func TestListConstraint_String(t *testing.T) {
 		},
 		{
 			name: "element constrained",
-			c:    schema.NewListConstraint(schema.NewStringConstraintBounded(-1, 6)),
+			c:    schema.NewListConstraint(schema.StringMaxLen(6)),
 			want: "List<String[_, 6]>",
 		},
 		{
@@ -1213,7 +1199,7 @@ func TestListConstraint_String(t *testing.T) {
 		},
 		{
 			name: "both constrained",
-			c:    schema.NewListConstraintBounded(schema.NewStringConstraintBounded(-1, 6), 1, 5),
+			c:    schema.NewListConstraintBounded(schema.StringMaxLen(6), 1, 5),
 			want: "List<String[_, 6]>[1, 5]",
 		},
 		{
@@ -1333,12 +1319,12 @@ func TestListConstraint_NarrowsTo(t *testing.T) {
 		{
 			name:   "element narrows",
 			parent: schema.NewListConstraint(schema.NewStringConstraint()),
-			child:  schema.NewListConstraint(schema.NewStringConstraintBounded(1, 50)),
+			child:  schema.NewListConstraint(schema.StringLenBetween(1, 50)),
 			want:   true,
 		},
 		{
 			name:   "element widens fails",
-			parent: schema.NewListConstraint(schema.NewStringConstraintBounded(1, 50)),
+			parent: schema.NewListConstraint(schema.StringLenBetween(1, 50)),
 			child:  schema.NewListConstraint(schema.NewStringConstraint()),
 			want:   false,
 		},

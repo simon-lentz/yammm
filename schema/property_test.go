@@ -319,14 +319,14 @@ func TestProperty_CanNarrowFrom(t *testing.T) {
 	}{
 		{
 			name:   "identical properties same constraint same modifier",
-			child:  narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), false, false),
-			parent: narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), false, false),
+			child:  narrowProp("age", schema.IntegerBetween(0, 150), false, false),
+			parent: narrowProp("age", schema.IntegerBetween(0, 150), false, false),
 			want:   true,
 		},
 		{
 			name:   "narrow bounds parent Integer[0,150] child Integer[18,150]",
-			child:  narrowProp("age", schema.NewIntegerConstraintBounded(18, true, 150, true), false, false),
-			parent: narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), false, false),
+			child:  narrowProp("age", schema.IntegerBetween(18, 150), false, false),
+			parent: narrowProp("age", schema.IntegerBetween(0, 150), false, false),
 			want:   true,
 		},
 		{
@@ -343,14 +343,14 @@ func TestProperty_CanNarrowFrom(t *testing.T) {
 		},
 		{
 			name:   "narrow bounds AND promote required both at once",
-			child:  narrowProp("age", schema.NewIntegerConstraintBounded(18, true, 150, true), false, false),
-			parent: narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), true, false),
+			child:  narrowProp("age", schema.IntegerBetween(18, 150), false, false),
+			parent: narrowProp("age", schema.IntegerBetween(0, 150), true, false),
 			want:   true,
 		},
 		{
 			name:   "widen bounds rejected",
-			child:  narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 200, true), false, false),
-			parent: narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), false, false),
+			child:  narrowProp("age", schema.IntegerBetween(0, 200), false, false),
+			parent: narrowProp("age", schema.IntegerBetween(0, 150), false, false),
 			want:   false,
 		},
 		{
@@ -409,20 +409,20 @@ func TestProperty_CanNarrowFrom(t *testing.T) {
 		},
 		{
 			name:   "narrow string bounds",
-			child:  narrowProp("code", schema.NewStringConstraintBounded(2, 5), false, false),
-			parent: narrowProp("code", schema.NewStringConstraintBounded(1, 10), false, false),
+			child:  narrowProp("code", schema.StringLenBetween(2, 5), false, false),
+			parent: narrowProp("code", schema.StringLenBetween(1, 10), false, false),
 			want:   true,
 		},
 		{
 			name:   "widen string min rejected",
-			child:  narrowProp("code", schema.NewStringConstraintBounded(0, 10), false, false),
-			parent: narrowProp("code", schema.NewStringConstraintBounded(1, 10), false, false),
+			child:  narrowProp("code", schema.StringLenBetween(0, 10), false, false),
+			parent: narrowProp("code", schema.StringLenBetween(1, 10), false, false),
 			want:   false,
 		},
 		{
 			name:   "narrow float bounds",
-			child:  narrowProp("score", schema.NewFloatConstraintBounded(0.1, true, 0.9, true), false, false),
-			parent: narrowProp("score", schema.NewFloatConstraintBounded(0.0, true, 1.0, true), false, false),
+			child:  narrowProp("score", schema.FloatBetween(0.1, 0.9), false, false),
+			parent: narrowProp("score", schema.FloatBetween(0.0, 1.0), false, false),
 			want:   true,
 		},
 		{

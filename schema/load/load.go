@@ -164,10 +164,7 @@ func Load(ctx context.Context, path string, opts ...Option) (*schema.Schema, dia
 	}
 
 	// Create loader and load the schema
-	ldr, err := newLoader(cfg, moduleRoot)
-	if err != nil {
-		return nil, diag.Result{}, err
-	}
+	ldr := newLoader(cfg, moduleRoot)
 	defer ldr.Close() // Release rootLoader resources when done
 
 	s, result, err := ldr.loadFile(ctx, absPath, content)
@@ -212,10 +209,7 @@ func String(ctx context.Context, sourceCode, sourceName string, opts ...Option) 
 	sourceID := location.NewSourceID("string://" + sourceName)
 
 	// Create loader and load from string
-	ldr, err := newLoader(cfg, "")
-	if err != nil {
-		return nil, diag.Result{}, err
-	}
+	ldr := newLoader(cfg, "")
 	s, result, err := ldr.loadSource(ctx, sourceID, []byte(sourceCode))
 	return s, result, err
 }
@@ -254,10 +248,7 @@ func Sources(ctx context.Context, sources map[string][]byte, moduleRoot string, 
 	}
 
 	// Create loader
-	ldr, err := newLoader(cfg, moduleRoot)
-	if err != nil {
-		return nil, diag.Result{}, err
-	}
+	ldr := newLoader(cfg, moduleRoot)
 	defer ldr.Close() // Release rootLoader resources when done
 
 	// Pre-register all sources
@@ -272,7 +263,7 @@ func Sources(ctx context.Context, sources map[string][]byte, moduleRoot string, 
 		// Canonicalize the path to match the canonicalized moduleRoot.
 		// This ensures filepath.Rel works correctly during import resolution,
 		// especially on systems with symlinks (e.g., macOS /var -> /private/var).
-		absPath, err = makeCanonicalPath(absPath)
+		absPath, err := makeCanonicalPath(absPath)
 		if err != nil {
 			return nil, diag.Result{}, fmt.Errorf("canonicalize path %q: %w", path, err)
 		}
@@ -305,7 +296,7 @@ func Sources(ctx context.Context, sources map[string][]byte, moduleRoot string, 
 	}
 
 	// Canonicalize entry path to match sourceContent keys
-	entryAbsPath, err = makeCanonicalPath(entryAbsPath)
+	entryAbsPath, err := makeCanonicalPath(entryAbsPath)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("canonicalize entry path %q: %w", entryPath, err)
 	}
@@ -374,10 +365,7 @@ func SourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath 
 	}
 
 	// Create loader
-	ldr, err := newLoader(cfg, moduleRoot)
-	if err != nil {
-		return nil, diag.Result{}, err
-	}
+	ldr := newLoader(cfg, moduleRoot)
 	defer ldr.Close() // Release rootLoader resources when done
 
 	// Pre-register all sources
@@ -392,7 +380,7 @@ func SourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath 
 		// Canonicalize the path to match the canonicalized moduleRoot.
 		// This ensures filepath.Rel works correctly during import resolution,
 		// especially on systems with symlinks (e.g., macOS /var -> /private/var).
-		absPath, err = makeCanonicalPath(absPath)
+		absPath, err := makeCanonicalPath(absPath)
 		if err != nil {
 			return nil, diag.Result{}, fmt.Errorf("canonicalize path %q: %w", path, err)
 		}
@@ -431,7 +419,7 @@ func SourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath 
 	}
 
 	// Canonicalize entry path to match sourceContent keys
-	entryAbsPath, err = makeCanonicalPath(entryAbsPath)
+	entryAbsPath, err := makeCanonicalPath(entryAbsPath)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("canonicalize entry path %q: %w", selectedEntry, err)
 	}
@@ -503,25 +491,13 @@ func (a *registryAdapter) LookupBySourceID(id location.SourceID) (*schema.Schema
 }
 
 // newLoader creates a new loader with the given configuration.
-// Returns ErrSourceStoreNotSupported if a custom SourceStore implementation is provided
-// that is not *source.Registry.
-func newLoader(cfg *config, moduleRoot string) (*loader, error) {
+func newLoader(cfg *config, moduleRoot string) *loader {
 	registry := cfg.registry
 	if registry == nil {
 		registry = schema.NewRegistry()
 	}
 
-	// Validate and use provided source registry if it's a *source.Registry.
-	// Custom SourceStore implementations are not supported - fail fast with
-	// ErrSourceStoreNotSupported rather than silently falling back.
-	var sourceReg *source.Registry
-	if cfg.sourceRegistry != nil {
-		sr, ok := cfg.sourceRegistry.(*source.Registry)
-		if !ok {
-			return nil, ErrSourceStoreNotSupported
-		}
-		sourceReg = sr
-	}
+	sourceReg := cfg.sourceRegistry
 	if sourceReg == nil {
 		sourceReg = source.NewRegistry()
 	}
@@ -544,7 +520,7 @@ func newLoader(cfg *config, moduleRoot string) (*loader, error) {
 		loadedSchemas:   make(map[location.SourceID]*schema.Schema),
 		loadingSchemas:  make(map[location.SourceID]bool),
 		resolvedImports: make(map[string]resolvedImport),
-	}, nil
+	}
 }
 
 // ensureRootLoader creates the rootLoader if not already created.

@@ -97,7 +97,7 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 // forward references that target this instance.
 //
 // Return semantics:
-//   - (result, nil): Operation completed. Check result.OK() for success.
+//   - (result, nil): Operation completed. Check [diag.Result.OK] for success.
 //   - (empty, error): Internal failure (nil receiver, nil instance, schema mismatch)
 //     or context cancellation.
 //
@@ -374,7 +374,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Res
 //   - Stream children only to top-level parents
 //
 // Return semantics:
-//   - (result, nil): Operation completed. Check result.OK() for success.
+//   - (result, nil): Operation completed. Check [diag.Result.OK] for success.
 //   - (empty, error): Internal failure or context cancellation.
 //
 // Error codes that may appear in result:
@@ -520,7 +520,7 @@ func (g *Graph) AddComposed(
 				fmt.Sprintf("composition %q already has a child", relationName)).
 				WithDetail(diag.DetailKeyTypeName, parentType).
 				WithDetail(diag.DetailKeyRelationName, relationName).
-				WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName, nil); err == nil {
 				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
 			}
@@ -553,7 +553,7 @@ func (g *Graph) AddComposed(
 					"duplicate composed child primary key "+childPKString).
 					WithDetail(diag.DetailKeyTypeName, parentType).
 					WithDetail(diag.DetailKeyRelationName, relationName).
-					WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+					WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 				if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName, childKeyValues); err == nil {
 					builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
 				}
@@ -592,7 +592,7 @@ func (g *Graph) AddComposed(
 // Optional associations may remain unresolved without error.
 //
 // Return semantics:
-//   - (result, nil): Check completed. Check result.OK() for success.
+//   - (result, nil): Check completed. Check [diag.Result.OK] for success.
 //   - (empty, error): Internal failure or context cancellation.
 //
 // Error codes that may appear in result:
@@ -656,7 +656,7 @@ func (g *Graph) Check(ctx context.Context) (diag.Result, error) {
 				WithDetail(diag.DetailKeyTypeName, pend.source.TypeName()).
 				WithDetail(diag.DetailKeyPrimaryKey, pend.source.PrimaryKey().String()).
 				WithDetail(diag.DetailKeyRelationName, pend.relation).
-				WithDetail(diag.DetailKeyJsonField, pend.jsonField).
+				WithDetail(diag.DetailKeyJSONField, pend.jsonField).
 				WithDetail(diag.DetailKeyReason, reasonToken)
 
 			// Add target_type and target_pk only for target_missing case
@@ -696,12 +696,12 @@ func (g *Graph) Check(ctx context.Context) (diag.Result, error) {
 
 // Snapshot creates a point-in-time snapshot of the graph.
 //
-// The returned [Result] is immutable and independent of subsequent
-// graph modifications. All slice accessors on Result return sorted data.
+// The returned [Snapshot] is immutable and independent of subsequent
+// graph modifications. All slice accessors on Snapshot return sorted data.
 //
 // Snapshot acquires a read lock; concurrent Add/AddComposed calls will
 // block until Snapshot completes.
-func (g *Graph) Snapshot() *Result {
+func (g *Graph) Snapshot() *Snapshot {
 	if g == nil {
 		return nil
 	}
@@ -710,7 +710,7 @@ func (g *Graph) Snapshot() *Result {
 	defer g.mu.RUnlock()
 
 	// Clone map tracks original->cloned instance mappings for the entire snapshot.
-	// This ensures all references within the Result point to cloned instances,
+	// This ensures all references within the Snapshot point to cloned instances,
 	// making the snapshot truly independent of future graph mutations.
 	cloneMap := make(map[*Instance]*Instance)
 
@@ -845,7 +845,7 @@ func (g *Graph) Snapshot() *Result {
 		return cmp.Compare(a.TargetKey, b.TargetKey)
 	})
 
-	return newResult(g.schema, types, instances, instanceIndex, edges, duplicates, unresolved, g.collector.Result())
+	return newSnapshot(g.schema, types, instances, instanceIndex, edges, duplicates, unresolved, g.collector.Result())
 }
 
 // isKnownSchema checks if the given schema path is the graph's schema or one of its imports.
@@ -996,7 +996,7 @@ func (g *Graph) extractCompositions(valid *instance.ValidInstance, graphInst *In
 					WithDetail(diag.DetailKeyRelationName, relationName)
 				// Add json_field detail if relation is known
 				if hasRel {
-					builder = builder.WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+					builder = builder.WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 				}
 				if composedPK, err := FormatComposedKey(parentKeyValues, relationName, nil); err == nil {
 					builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)

@@ -231,7 +231,7 @@ func (b *Builder) Build() (*schema.Schema, diag.Result) {
 		if err := location.ValidateSyntheticSourceID(sourceID.String()); err != nil {
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_SYNTHETIC_ID,
 				fmt.Sprintf("invalid synthetic source ID: %s", err)).
-				WithDetail(diag.DetailKeyId, sourceID.String()).Build())
+				WithDetail(diag.DetailKeyID, sourceID.String()).Build())
 			return nil, collector.Result()
 		}
 	}

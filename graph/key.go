@@ -22,6 +22,9 @@ import (
 //	FormatKey("us", 12345)    -> `["us",12345]`
 //	FormatKey(42)             -> `[42]`
 //
+// Valid component types are those produced by JSON unmarshaling: string,
+// int64, float64, and bool.
+//
 // FormatKey panics if any value cannot be JSON-marshaled (e.g., channels,
 // functions, cyclic structs). This is a programmer error—primary key values
 // come from validated instances and are guaranteed JSON-marshalable.

@@ -482,7 +482,7 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 			hasRelation = true
 			assert.Equal(t, "addresses", d.Value)
 		}
-		if d.Key == diag.DetailKeyJsonField {
+		if d.Key == diag.DetailKeyJSONField {
 			hasJSONField = true
 			assert.Equal(t, "addresses", d.Value)
 		}
@@ -534,7 +534,7 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 			hasRelation = true
 			assert.Equal(t, "addresses", d.Value)
 		}
-		if d.Key == diag.DetailKeyJsonField {
+		if d.Key == diag.DetailKeyJSONField {
 			hasJSONField = true
 			assert.Equal(t, "addresses", d.Value)
 		}

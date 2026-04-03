@@ -1766,7 +1766,7 @@ func TestNarrowing_ValidConstraintNarrowing(t *testing.T) {
 				Properties: []*parse.PropertyDecl{
 					{
 						Name:       "age",
-						Constraint: schema.NewIntegerConstraintBounded(0, true, 150, true),
+						Constraint: schema.IntegerBetween(0, 150),
 						Optional:   true,
 					},
 				},
@@ -1779,7 +1779,7 @@ func TestNarrowing_ValidConstraintNarrowing(t *testing.T) {
 				Properties: []*parse.PropertyDecl{
 					{
 						Name:       "age",
-						Constraint: schema.NewIntegerConstraintBounded(18, true, 150, true),
+						Constraint: schema.IntegerBetween(18, 150),
 						Optional:   true,
 					},
 				},
@@ -1826,7 +1826,7 @@ func TestNarrowing_ValidModifierOverride(t *testing.T) {
 				Properties: []*parse.PropertyDecl{
 					{
 						Name:       "name",
-						Constraint: schema.NewStringConstraintBounded(1, 100),
+						Constraint: schema.StringLenBetween(1, 100),
 						Optional:   true,
 					},
 				},
@@ -1839,7 +1839,7 @@ func TestNarrowing_ValidModifierOverride(t *testing.T) {
 				Properties: []*parse.PropertyDecl{
 					{
 						Name:       "name",
-						Constraint: schema.NewStringConstraintBounded(1, 100),
+						Constraint: schema.StringLenBetween(1, 100),
 						Optional:   false, // required overrides optional
 					},
 				},
@@ -1876,7 +1876,7 @@ func TestNarrowing_WideningRejected(t *testing.T) {
 				Properties: []*parse.PropertyDecl{
 					{
 						Name:       "age",
-						Constraint: schema.NewIntegerConstraintBounded(0, true, 150, true),
+						Constraint: schema.IntegerBetween(0, 150),
 						Optional:   true,
 					},
 				},
@@ -1889,7 +1889,7 @@ func TestNarrowing_WideningRejected(t *testing.T) {
 				Properties: []*parse.PropertyDecl{
 					{
 						Name:       "age",
-						Constraint: schema.NewIntegerConstraintBounded(0, true, 200, true),
+						Constraint: schema.IntegerBetween(0, 200),
 						Optional:   true,
 					},
 				},

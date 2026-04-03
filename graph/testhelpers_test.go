@@ -616,7 +616,7 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 // Assertion Helpers
 
 // assertInstanceCount verifies the number of instances of a type in the result.
-func assertInstanceCount(t *testing.T, result *Result, typeName string, expected int) bool {
+func assertInstanceCount(t *testing.T, result *Snapshot, typeName string, expected int) bool {
 	t.Helper()
 
 	instances := result.InstancesOf(typeName)
@@ -628,7 +628,7 @@ func assertInstanceCount(t *testing.T, result *Result, typeName string, expected
 }
 
 // assertEdgeCount verifies the number of edges in the result.
-func assertEdgeCount(t *testing.T, result *Result, expected int) {
+func assertEdgeCount(t *testing.T, result *Snapshot, expected int) {
 	t.Helper()
 
 	edges := result.Edges()
@@ -638,7 +638,7 @@ func assertEdgeCount(t *testing.T, result *Result, expected int) {
 }
 
 // assertUnresolvedCount verifies the number of unresolved edges in the result.
-func assertUnresolvedCount(t *testing.T, result *Result, expected int) {
+func assertUnresolvedCount(t *testing.T, result *Snapshot, expected int) {
 	t.Helper()
 
 	unresolved := result.Unresolved()

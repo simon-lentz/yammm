@@ -132,7 +132,7 @@ func (a *Adapter) NodeQueryFor(
 // Returns one [BatchNodeQuery] per type per chunk. Types with more instances
 // than the chunk size produce multiple queries.
 func (a *Adapter) BatchNodeQueries(
-	result *graph.Result,
+	result *graph.Snapshot,
 	shapes *GraphShape,
 	opts ...WriteOption,
 ) ([]*BatchNodeQuery, error) {
@@ -244,7 +244,7 @@ func (a *Adapter) EdgeQueryFor(
 //
 // Returns one [BatchEdgeQuery] per signature per chunk.
 func (a *Adapter) BatchEdgeQueries(
-	result *graph.Result,
+	result *graph.Snapshot,
 	shapes *GraphShape,
 	opts ...WriteOption,
 ) ([]*BatchEdgeQuery, error) {

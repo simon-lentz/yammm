@@ -60,7 +60,7 @@ func (v *Validator) validateEdges(
 					ErrCaseFoldCollision,
 					fmt.Sprintf("multiple input fields %v fold to relation field %q", candidates, fieldName),
 				).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-					WithDetail(diag.DetailKeyJsonField, fieldName)
+					WithDetail(diag.DetailKeyJSONField, fieldName)
 				withProvenance(issue, prov, provenancePathBuilder(prov).String())
 				collector.Collect(issue.Build())
 				hasValue = false // Don't proceed with ambiguous match
@@ -108,7 +108,7 @@ func (v *Validator) validateEdgeData(
 			"edge "+rel.Name()+": null is not a valid edge value",
 		).WithExpectedGot(expectedShapeForRelation(rel), "null")
 		withProvenance(issue, prov, basePath.String()).
-			WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 		collector.Collect(issue.Build())
 		return nil
 	}
@@ -124,7 +124,7 @@ func (v *Validator) validateEdgeData(
 				"edge "+rel.Name()+": expected array, got "+kindOf(rawValue),
 			)
 			withProvenance(issue, prov, basePath.String()).
-				WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			collector.Collect(issue.Build())
 			return nil
 		}
@@ -162,7 +162,7 @@ func (v *Validator) validateEdgeData(
 			"edge "+rel.Name()+": expected object, got "+kindOf(rawValue),
 		)
 		withProvenance(issue, prov, basePath.String()).
-			WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 		collector.Collect(issue.Build())
 		return nil
 	}
@@ -199,7 +199,7 @@ func (v *Validator) validateEdgeTarget(
 			"expected object for edge target, got "+kindOf(elem),
 		)
 		withProvenance(issue, prov, targetPath.String()).
-			WithDetail(diag.DetailKeyJsonField, rel.FieldName())
+			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 		targetCollector.Collect(issue.Build())
 		// Merge issues into parent collector
 		for issue := range targetCollector.Result().Issues() {

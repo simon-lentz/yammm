@@ -168,7 +168,7 @@ func assertDiagHasCode(t *testing.T, result diag.Result, code diag.Code) {
 }
 
 // buildGraph builds a graph from a schema and validated instances, returns snapshot.
-func buildGraph(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Result {
+func buildGraph(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	t.Helper()
 	ctx := t.Context()
 	g := graph.New(s)

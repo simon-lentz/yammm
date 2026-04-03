@@ -19,7 +19,7 @@ const (
 )
 
 // Constraint is a structured representation of a single Neo4j constraint.
-// Use [Adapter.ConstraintsStructured] to get these instead of raw Cypher strings.
+// Construct via [Adapter.ConstraintsStructured]; do not create directly.
 type Constraint struct {
 	Name       string         // Deterministic constraint name (empty if WithNamedConstraints(false))
 	Kind       ConstraintKind // Constraint category

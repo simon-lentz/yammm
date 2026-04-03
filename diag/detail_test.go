@@ -17,7 +17,7 @@ func TestDetailKeyConstants(t *testing.T) {
 		{"DetailKeyPrimaryKey", DetailKeyPrimaryKey},
 		{"DetailKeyReason", DetailKeyReason},
 		{"DetailKeyField", DetailKeyField},
-		{"DetailKeyJsonField", DetailKeyJsonField},
+		{"DetailKeyJSONField", DetailKeyJSONField},
 		{"DetailKeyDetail", DetailKeyDetail},
 		{"DetailKeyFormat", DetailKeyFormat},
 		{"DetailKeyTargetType", DetailKeyTargetType},
@@ -27,7 +27,7 @@ func TestDetailKeyConstants(t *testing.T) {
 		{"DetailKeyCycle", DetailKeyCycle},
 		{"DetailKeyName", DetailKeyName},
 		{"DetailKeyContext", DetailKeyContext},
-		{"DetailKeyId", DetailKeyId},
+		{"DetailKeyID", DetailKeyID},
 		{"DetailKeyFunction", DetailKeyFunction},
 	}
 
@@ -58,7 +58,7 @@ func TestDetailKeyConstants_Uniqueness(t *testing.T) {
 		DetailKeyPrimaryKey,
 		DetailKeyReason,
 		DetailKeyField,
-		DetailKeyJsonField,
+		DetailKeyJSONField,
 		DetailKeyDetail,
 		DetailKeyFormat,
 		DetailKeyTargetType,
@@ -68,7 +68,7 @@ func TestDetailKeyConstants_Uniqueness(t *testing.T) {
 		DetailKeyCycle,
 		DetailKeyName,
 		DetailKeyContext,
-		DetailKeyId,
+		DetailKeyID,
 		DetailKeyFunction,
 	}
 
@@ -205,8 +205,8 @@ func TestPathRelation(t *testing.T) {
 		t.Errorf("first detail value = %q; want %q", details[0].Value, "OwnedCars")
 	}
 
-	if details[1].Key != DetailKeyJsonField {
-		t.Errorf("second detail key = %q; want %q", details[1].Key, DetailKeyJsonField)
+	if details[1].Key != DetailKeyJSONField {
+		t.Errorf("second detail key = %q; want %q", details[1].Key, DetailKeyJSONField)
 	}
 	if details[1].Value != "owned_cars" {
 		t.Errorf("second detail value = %q; want %q", details[1].Value, "owned_cars")

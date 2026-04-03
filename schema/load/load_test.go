@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/load"
 )
@@ -1275,35 +1274,6 @@ func TestLoad_CancellationDuringImport(t *testing.T) {
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
-	assert.Nil(t, s)
-}
-
-// mockSourceStore implements SourceStore but is not *source.Registry.
-// Used to test ErrSourceStoreNotSupported behavior.
-type mockSourceStore struct{}
-
-func (m *mockSourceStore) Register(_ location.SourceID, _ []byte) error {
-	return nil
-}
-
-func (m *mockSourceStore) PositionAt(_ location.SourceID, _ int) location.Position {
-	return location.Position{}
-}
-
-func (m *mockSourceStore) RuneToByteOffset(_ location.SourceID, _ int) (int, bool) {
-	return 0, false
-}
-
-func TestLoad_ErrSourceStoreNotSupported(t *testing.T) {
-	// When a custom SourceStore that isn't *source.Registry is provided,
-	// the loader should fail fast with ErrSourceStoreNotSupported.
-	source := `schema "test" type Person { name String }`
-	ctx := t.Context()
-
-	s, _, err := load.String(ctx, source, "test.yammm", load.WithSourceRegistry(&mockSourceStore{}))
-
-	require.Error(t, err)
-	require.ErrorIs(t, err, load.ErrSourceStoreNotSupported)
 	assert.Nil(t, s)
 }
 

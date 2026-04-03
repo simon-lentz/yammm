@@ -82,9 +82,6 @@ linters:
       - path: "diag/code\\.go"
         linters:
           - revive
-      - path: "diag/detail\\.go"
-        linters:
-          - revive
       - path: "adapter/neo4j/errors\\.go"
         linters:
           - revive

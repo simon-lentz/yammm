@@ -16,7 +16,7 @@
 // and [Graph.AddComposed] concurrently. The graph handles forward references
 // and duplicate detection atomically using internal synchronization.
 //
-// [Result] is an immutable snapshot; it is safe for concurrent read access
+// [Snapshot] is an immutable snapshot; it is safe for concurrent read access
 // from multiple goroutines.
 //
 // # Basic Usage
@@ -56,10 +56,10 @@
 //
 // This applies to:
 //
-//   - [Result.Types]
-//   - [Result.InstancesOf]
-//   - [Result.InstanceByKey]
-//   - [Result.Instances] map keys
+//   - [Snapshot.Types]
+//   - [Snapshot.InstancesOf]
+//   - [Snapshot.InstanceByKey]
+//   - [Snapshot.Instances] map keys
 //   - [Instance.TypeName]
 //
 // # Key Formatting
@@ -70,7 +70,7 @@
 //	graph.FormatKey("ABC123")       // ["ABC123"]
 //	graph.FormatKey("us", 12345)    // ["us",12345]
 //
-// Use [FormatKey] to construct lookup keys for [Result.InstanceByKey].
+// Use [FormatKey] to construct lookup keys for [Snapshot.InstanceByKey].
 //
 // For composed children, [FormatComposedKey] and [ParseComposedKey] provide
 // identity encoding that handles all special characters safely.
@@ -80,20 +80,20 @@
 // Graph operations follow the (Output, diag.Result, error) pattern:
 //
 //   - error != nil: Internal failure (nil receiver, nil instance, cancellation)
-//   - error == nil && result.Err() != nil: Semantic failure (duplicate PK, type not found)
-//   - error == nil && result.Err() == nil: Success (may have warnings)
+//   - error == nil && [diag.Result.Err] != nil: Semantic failure (duplicate PK, type not found)
+//   - error == nil && [diag.Result.Err] == nil: Success (may have warnings)
 //
 // Internal errors use the ErrInternal sentinel and related error types.
 // Semantic issues use diag.Code values like E_DUPLICATE_PK, E_UNRESOLVED_REQUIRED.
 //
 // # Diagnostics Lifecycle
 //
-// [Result.Diagnostics] returns the cumulative issues from [Graph.Add] and
+// [Snapshot.Diagnostics] returns the cumulative issues from [Graph.Add] and
 // [Graph.AddComposed] calls. These are construction-time diagnostics that
 // accumulate as instances are added to the graph.
 //
 // [Graph.Check] operates differently: it returns a fresh [diag.Result] per
-// call without affecting [Result.Diagnostics]. This makes Check idempotent—
+// call without affecting [Snapshot.Diagnostics]. This makes Check idempotent—
 // calling it multiple times returns identical results without accumulating
 // issues into the snapshot.
 //
@@ -103,14 +103,14 @@
 //
 // # Ordering Guarantees
 //
-// All slice-returning [Result] methods produce deterministically sorted output,
+// All slice-returning [Snapshot] methods produce deterministically sorted output,
 // independent of [Graph.Add] call order or concurrency:
 //
-//   - [Result.Types]: lexicographic by type name
-//   - [Result.InstancesOf]: lexicographic by primary key string
-//   - [Result.Edges]: lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
-//   - [Result.Duplicates]: lexicographic by (typeName, primaryKey)
-//   - [Result.Unresolved]: lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
+//   - [Snapshot.Types]: lexicographic by type name
+//   - [Snapshot.InstancesOf]: lexicographic by primary key string
+//   - [Snapshot.Edges]: lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
+//   - [Snapshot.Duplicates]: lexicographic by (typeName, primaryKey)
+//   - [Snapshot.Unresolved]: lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
 //
 // Sorting is performed at [Graph.Snapshot] time, amortized across accessor calls.
 //
