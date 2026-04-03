@@ -27,8 +27,8 @@
 // All YAMMM public entry points follow a consistent pattern:
 //
 //   - err != nil: catastrophic failure (I/O, internal corruption, runtime failures)
-//   - err == nil and !result.OK(): semantic failure represented as structured issues
-//   - err == nil and result.OK(): success (may still include warnings/info/hints)
+//   - err == nil and result.Err() != nil: semantic failure represented as structured issues
+//   - err == nil and result.Err() == nil: success (may still include warnings/info/hints)
 //
 // # Severity Semantics
 //
@@ -39,7 +39,7 @@
 //   - [Warning], [Info], [Hint]: Non-blocking diagnostics
 //
 // The [Severity.IsFailure] method returns true for Fatal and Error severities,
-// matching the !result.OK() check.
+// matching the result.Err() != nil check.
 //
 // # Issue Construction
 //
@@ -62,7 +62,7 @@
 //	collector.Collect(issue)
 //	result := collector.Result()
 //
-//	if !result.OK() {
+//	if err := result.Err(); err != nil {
 //	    // handle semantic failures
 //	}
 //

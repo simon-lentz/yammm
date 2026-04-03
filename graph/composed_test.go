@@ -40,8 +40,8 @@ func TestAddComposed_OneCardinality_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddComposed error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("AddComposed should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("AddComposed should succeed: %v", err)
 	}
 
 	// Verify child is attached
@@ -124,8 +124,8 @@ func TestAddComposed_ManyWithPK_Success(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AddComposed %s error: %v", id, err)
 		}
-		if !result.OK() {
-			t.Errorf("AddComposed %s should succeed: %s", id, result.String())
+		if err := result.Err(); err != nil {
+			t.Errorf("AddComposed %s should succeed: %v", id, err)
 		}
 	}
 
@@ -205,8 +205,8 @@ func TestAddComposed_ManyWithoutPK_Appends(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AddComposed item %d error: %v", i, err)
 		}
-		if !result.OK() {
-			t.Errorf("AddComposed item %d should succeed: %s", i, result.String())
+		if err := result.Err(); err != nil {
+			t.Errorf("AddComposed item %d should succeed: %v", i, err)
 		}
 	}
 

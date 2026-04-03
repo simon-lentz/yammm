@@ -564,8 +564,8 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AddComposed child %d error: %v", i, err)
 		}
-		if !result.OK() {
-			t.Errorf("AddComposed child %d should succeed: %s", i, result.String())
+		if err := result.Err(); err != nil {
+			t.Errorf("AddComposed child %d should succeed: %v", i, err)
 		}
 	}
 

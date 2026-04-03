@@ -31,8 +31,8 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 		t.Fatalf("Add person error: %v", err)
 	}
 	// Should succeed (forward ref is allowed)
-	if !result.OK() {
-		t.Errorf("Add person should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add person should succeed: %v", err)
 	}
 
 	// Snapshot should show unresolved edge
@@ -48,8 +48,8 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add company error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add company should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add company should succeed: %v", err)
 	}
 
 	// Snapshot should now show resolved edge
@@ -477,8 +477,8 @@ func TestGraph_Check_OptionalMissing(t *testing.T) {
 		t.Fatalf("Check error: %v", err)
 	}
 
-	if !result.OK() {
-		t.Errorf("Check should pass with unresolved optional association: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Check should pass with unresolved optional association: %v", err)
 	}
 }
 
@@ -846,8 +846,8 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add company error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add company should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add company should succeed: %v", err)
 	}
 
 	// Snapshot should have no edges and no unresolved
@@ -864,8 +864,8 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add person error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add person should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add person should succeed: %v", err)
 	}
 
 	// Edge should be immediately resolved (no pending)
@@ -971,8 +971,8 @@ func TestGraph_CircularReference_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Check should succeed for resolved circular references: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Check should succeed for resolved circular references: %v", err)
 	}
 }
 
@@ -1023,8 +1023,8 @@ func TestGraph_CircularReference_Chain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Check should succeed for resolved circular chain: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Check should succeed for resolved circular chain: %v", err)
 	}
 
 	// Verify edges form the expected cycle

@@ -36,8 +36,8 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add user error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add user should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add user should succeed: %v", err)
 	}
 
 	// Try to add Entity using unqualified name - should fail since Entity is in common, not local
@@ -83,8 +83,8 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add entity error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add entity should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add entity should succeed: %v", err)
 	}
 
 	// Verify entity is in graph with qualified type name
@@ -251,8 +251,8 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add user error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add user should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add user should succeed: %v", err)
 	}
 
 	// Verify edge exists from User to c.Entity

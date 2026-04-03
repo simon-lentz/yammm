@@ -208,8 +208,8 @@ func TestGraph_Add_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add() error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add() should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add() should succeed: %v", err)
 	}
 
 	// Verify instance is in graph
@@ -556,8 +556,8 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AddComposed item %d error: %v", i, err)
 		}
-		if !result.OK() {
-			t.Errorf("AddComposed item %d should succeed (positional identity): %s", i, result.String())
+		if err := result.Err(); err != nil {
+			t.Errorf("AddComposed item %d should succeed (positional identity): %v", i, err)
 		}
 	}
 
@@ -593,8 +593,8 @@ func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddComposed child1 error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("First child should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("First child should succeed: %v", err)
 	}
 
 	// Add second child with same PK - should fail
@@ -844,8 +844,8 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 			t.Errorf("Add key %q error: %v", key, err)
 			continue
 		}
-		if !result.OK() {
-			t.Errorf("Add key %q should succeed: %s", key, result.String())
+		if err := result.Err(); err != nil {
+			t.Errorf("Add key %q should succeed: %v", key, err)
 		}
 	}
 
@@ -896,8 +896,8 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 			t.Errorf("Add unicode key %q error: %v", key, err)
 			continue
 		}
-		if !result.OK() {
-			t.Errorf("Add unicode key %q should succeed: %s", key, result.String())
+		if err := result.Err(); err != nil {
+			t.Errorf("Add unicode key %q should succeed: %v", key, err)
 		}
 	}
 
@@ -929,8 +929,8 @@ func TestGraph_CompositeKey_Large(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Add error: %v", err)
 			}
-			if !result.OK() {
-				t.Errorf("Add should succeed: %s", result.String())
+			if err := result.Err(); err != nil {
+				t.Errorf("Add should succeed: %v", err)
 			}
 		}
 	}
@@ -975,8 +975,8 @@ func TestGraph_EmptyProperties(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add should succeed: %v", err)
 	}
 
 	snap := g.Snapshot()
@@ -1262,8 +1262,8 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 		t.Fatalf("Add c.Product error: %v", err)
 	}
 
-	if !result.OK() {
-		t.Errorf(" violation: Same PK with different TypeID should not be duplicate: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf(" violation: Same PK with different TypeID should not be duplicate: %v", err)
 	}
 
 	// Verify both exist
@@ -1534,8 +1534,8 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add parent error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add parent should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add parent should succeed: %v", err)
 	}
 
 	// Verify inline children were extracted
@@ -1596,8 +1596,8 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add parent error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add parent should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add parent should succeed: %v", err)
 	}
 
 	// Verify nested structure
@@ -1643,8 +1643,8 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add parent error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add parent should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add parent should succeed: %v", err)
 	}
 
 	// Verify no children
@@ -1776,8 +1776,8 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddComposed error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("AddComposed should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("AddComposed should succeed: %v", err)
 	}
 
 	// Verify nested structure
@@ -1916,8 +1916,8 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add error: %v", err)
 	}
-	if !result.OK() {
-		t.Errorf("Add should succeed: %s", result.String())
+	if err := result.Err(); err != nil {
+		t.Errorf("Add should succeed: %v", err)
 	}
 
 	// Verify child was extracted from bare instance
