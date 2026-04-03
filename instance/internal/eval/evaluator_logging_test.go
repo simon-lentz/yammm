@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/simon-lentz/yammm/instance/eval"
+	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
 

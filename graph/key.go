@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/immutable"
 )
 
 // FormatKey produces a canonical JSON array string for primary key lookup.
