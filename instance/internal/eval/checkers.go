@@ -351,11 +351,11 @@ func (ch *Checker) checkInteger(val any, c schema.Constraint) error {
 		return nil // No bounds to check
 	}
 
-	if min, hasMin := ic.Min(); hasMin && i < min {
-		return constraintFail("integer %d is less than minimum %d", i, min)
+	if lo, hasMin := ic.Min(); hasMin && i < lo {
+		return constraintFail("integer %d is less than minimum %d", i, lo)
 	}
-	if max, hasMax := ic.Max(); hasMax && i > max {
-		return constraintFail("integer %d exceeds maximum %d", i, max)
+	if hi, hasMax := ic.Max(); hasMax && i > hi {
+		return constraintFail("integer %d exceeds maximum %d", i, hi)
 	}
 	return nil
 }
@@ -388,11 +388,11 @@ func (ch *Checker) checkFloat(val any, c schema.Constraint) error {
 		return nil // No bounds to check
 	}
 
-	if min, hasMin := fc.Min(); hasMin && f < min {
-		return constraintFail("float %v is less than minimum %v", f, min)
+	if lo, hasMin := fc.Min(); hasMin && f < lo {
+		return constraintFail("float %v is less than minimum %v", f, lo)
 	}
-	if max, hasMax := fc.Max(); hasMax && f > max {
-		return constraintFail("float %v exceeds maximum %v", f, max)
+	if hi, hasMax := fc.Max(); hasMax && f > hi {
+		return constraintFail("float %v exceeds maximum %v", f, hi)
 	}
 	return nil
 }

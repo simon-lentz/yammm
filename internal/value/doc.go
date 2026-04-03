@@ -14,7 +14,7 @@
 // comparisons in tests and constraint validation:
 //
 //   - [TypeStrata] classifies values into ordered strata: Nil < Bool < Numeric < String < Slice
-//   - [ValueOrder] compares two values, returning -1/0/1 for ordering
+//   - [Order] compares two values, returning -1/0/1 for ordering
 //   - [Less] is a convenience wrapper for sort operations
 //
 // Supported types for comparison:
@@ -26,7 +26,7 @@
 //   - slices of supported types (lexicographic comparison)
 //
 // IMPORTANT: Only predeclared scalar types are supported. Named scalar types
-// (e.g., type MyInt int) return InvalidStrata and will cause ValueOrder to error.
+// (e.g., type MyInt int) return InvalidStrata and will cause Order to error.
 // This is intentional for consistency across all value extraction functions.
 // All slices are supported structurally (via reflect), but their elements must be
 // supported types.
@@ -66,7 +66,7 @@
 //
 // # Large Unsigned Integer Comparison
 //
-// [ValueOrder] supports comparing uint64 values that exceed math.MaxInt64.
+// [Order] supports comparing uint64 values that exceed math.MaxInt64.
 // On 64-bit platforms, uintptr values exceeding MaxInt64 are also supported
 // (on 32-bit platforms, uintptr cannot hold such values).
 // The comparison algorithm handles:
@@ -77,14 +77,14 @@
 //
 // # Mixed Float/Integer Comparison
 //
-// For mixed float/integer comparisons, [ValueOrder] uses [CompareInt64Float64] and
+// For mixed float/integer comparisons, [Order] uses [CompareInt64Float64] and
 // [CompareUint64Float64] to preserve transitivity for values > 2^53. These functions
 // convert the float to integer (not vice versa) when the float is a whole number,
 // avoiding the precision loss that occurs when large integers are converted to float64.
 //
 // This ensures the ordering relation remains transitive across all supported values:
-//   - ValueOrder(uint64(2^53+1), float64(2^53)) returns 1 (greater), not 0
-//   - ValueOrder(int64(2^53+1), float64(2^53)) returns 1 (greater), not 0
+//   - Order(uint64(2^53+1), float64(2^53)) returns 1 (greater), not 0
+//   - Order(int64(2^53+1), float64(2^53)) returns 1 (greater), not 0
 //
 // # Vector Coercion
 //

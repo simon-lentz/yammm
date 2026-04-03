@@ -74,7 +74,7 @@ func IsFinite(f float64) bool {
 	return !math.IsNaN(f) && !math.IsInf(f, 0)
 }
 
-// ValueOrder returns the canonical order of the two values, using TypeOrder to first
+// Order returns the canonical order of the two values, using TypeOrder to first
 // determine the order of the type of the values. If values have the same type order they
 // are compared taking data type into account. Unsupported types yield an error instead of
 // panicking. For supported types, comparisons are antisymmetric and transitive (i.e., a total
@@ -82,7 +82,7 @@ func IsFinite(f float64) bool {
 // NaN considered equal to NaN) to keep ordering deterministic. Maps, structs, and other
 // complex shapes are intentionally out of scope; normalize them before ordering if you need
 // stable comparisons.
-func ValueOrder(left, right any) (int, error) {
+func Order(left, right any) (int, error) {
 	// If type order is different, no need to compare values.
 	if to, err := TypeOrder(left, right); err != nil {
 		return 0, err
@@ -173,7 +173,7 @@ func ValueOrder(left, right any) (int, error) {
 		for i := range minLen {
 			leftVal := leftVo.Index(i).Interface()
 			rightVal := rightVo.Index(i).Interface()
-			which, err := ValueOrder(leftVal, rightVal)
+			which, err := Order(leftVal, rightVal)
 			if err != nil {
 				return 0, err
 			}
@@ -194,11 +194,11 @@ func ValueOrder(left, right any) (int, error) {
 	return 0, fmt.Errorf("value: unknown strata for comparison between %T and %T", left, right)
 }
 
-// Less returns true when left is strictly less than right according to ValueOrder. This is a
+// Less returns true when left is strictly less than right according to Order. This is a
 // convenience for wiring canonical ordering into sort helpers; callers must handle the returned
 // error for unsupported inputs.
 func Less(left, right any) (bool, error) {
-	cmp, err := ValueOrder(left, right)
+	cmp, err := Order(left, right)
 	if err != nil {
 		return false, err
 	}

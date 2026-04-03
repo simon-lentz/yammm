@@ -210,7 +210,7 @@ func TestOverlayWithSymlinkPath_StillOverridesDisk(t *testing.T) {
 	assert.False(t, ok, "DiskType should NOT exist (overlay should override disk even via symlink)")
 }
 
-func TestLoadSources_PopulatesSourceRegistry(t *testing.T) {
+func TestSources_PopulatesSourceRegistry(t *testing.T) {
 	// Validates the loader populates the source registry for all files in
 	// the import closure.
 	// Given: entry file that imports another file
@@ -267,7 +267,7 @@ func TestLoadSources_PopulatesSourceRegistry(t *testing.T) {
 	assert.Equal(t, 0, offset, "LineStartByte(1) should be 0 (first line starts at byte 0)")
 }
 
-func TestLoadSources_DiskFallback(t *testing.T) {
+func TestSources_DiskFallback(t *testing.T) {
 	// Validates that imports not in the overlay are resolved from disk
 	// and participate in diagnostics.
 	// Given: sources map with only the entry file
@@ -388,7 +388,7 @@ func TestAnalyzer_MultiOpenDocs_CorrectEntrySelection(t *testing.T) {
 	// lexicographic order.
 	//
 	// This validates the fix for the analyzer entry selection issue where
-	// LoadSourcesWithEntry is used to specify the exact entry file.
+	// SourcesWithEntry is used to specify the exact entry file.
 	t.Parallel()
 
 	tmpDir := t.TempDir()

@@ -58,10 +58,10 @@ func WithAllowUnknownFields(allow bool) ValidatorOption {
 // WithMaxIssuesPerInstance sets the maximum number of issues to collect
 // per instance before stopping validation of that instance.
 // Default is 100.
-func WithMaxIssuesPerInstance(max int) ValidatorOption {
+func WithMaxIssuesPerInstance(n int) ValidatorOption {
 	return func(c *validatorConfig) {
-		if max > 0 {
-			c.maxIssuesPerInstance = max
+		if n > 0 {
+			c.maxIssuesPerInstance = n
 		}
 	}
 }

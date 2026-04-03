@@ -222,7 +222,7 @@ func looksLikeAbsoluteElement(e string) bool {
 // path.Clean would collapse // to /, causing collisions with regular Unix paths.
 // Use a local mount point instead.
 //
-// This is used by SourceIDFromAbsolutePath for LoadSources scenarios.
+// This is used by SourceIDFromAbsolutePath for Sources scenarios.
 func canonicalizeAbsolutePath(absPath string) (string, error) {
 	// Convert all backslashes to forward slashes for consistent handling.
 	// We do this manually because filepath.ToSlash only converts the native

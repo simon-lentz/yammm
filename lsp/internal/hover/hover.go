@@ -12,12 +12,12 @@ import (
 	"github.com/simon-lentz/yammm/lsp/internal/symbols"
 )
 
-// HoverAtPosition returns hover info for the given position within a document.
+// AtPosition returns hover info for the given position within a document.
 // The line and char parameters are LSP-encoding coordinates.
 // Returns nil, nil when no hover info is found.
 //
 //nolint:nilnil // LSP protocol: nil result means "no hover info"
-func HoverAtPosition(
+func AtPosition(
 	snapshot *analysis.Snapshot,
 	doc *docstate.Snapshot,
 	line, char int,

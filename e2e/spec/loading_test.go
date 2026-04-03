@@ -35,39 +35,39 @@ func TestLoading_LoadFromFile(t *testing.T) {
 	assert.Equal(t, "Valid", s.Name())
 }
 
-// TestLoading_LoadStringParameterOrder verifies that load.LoadString accepts
+// TestLoading_StringParameterOrder verifies that load.String accepts
 // (ctx, sourceCode, sourceName) — content first, then display name.
-// Source: SPEC.md, "load.LoadString loads a schema from a string."
-func TestLoading_LoadStringParameterOrder(t *testing.T) {
+// Source: SPEC.md, "load.String loads a schema from a string."
+func TestLoading_StringParameterOrder(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
 	content := `schema "FromString" type Item { name String required }`
-	s, result, err := load.LoadString(ctx, content, "test-source")
+	s, result, err := load.String(ctx, content, "test-source")
 
-	require.NoError(t, err, "LoadString should not return an error for valid content")
+	require.NoError(t, err, "String should not return an error for valid content")
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
 	require.NotNil(t, s, "schema should not be nil")
 	assert.Equal(t, "FromString", s.Name())
 }
 
-// TestLoading_LoadSources verifies that load.LoadSources loads a schema from
+// TestLoading_Sources verifies that load.Sources loads a schema from
 // an in-memory source map keyed by file path.
-// Source: SPEC.md, "load.LoadSources loads from in-memory sources."
-func TestLoading_LoadSources(t *testing.T) {
+// Source: SPEC.md, "load.Sources loads from in-memory sources."
+func TestLoading_Sources(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	// LoadSources requires absolute paths or a moduleRoot to resolve relative paths.
+	// Sources requires absolute paths or a moduleRoot to resolve relative paths.
 	// Use a temporary directory as module root with a relative key.
 	tmpDir := t.TempDir()
 	sources := map[string][]byte{
 		"entry.yammm": []byte(`schema "InMemory" type Widget { label String required }`),
 	}
 
-	s, result, err := load.LoadSources(ctx, sources, tmpDir)
+	s, result, err := load.Sources(ctx, sources, tmpDir)
 
-	require.NoError(t, err, "LoadSources should not return an error")
+	require.NoError(t, err, "Sources should not return an error")
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
 	require.NotNil(t, s, "schema should not be nil")
 	assert.Equal(t, "InMemory", s.Name())

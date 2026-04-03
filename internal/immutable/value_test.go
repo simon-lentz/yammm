@@ -1218,13 +1218,13 @@ func TestConcurrent_Map_Read(t *testing.T) {
 				_, _ = m.Get("a")
 				_, _ = m.Get("nonexistent")
 
-				// Iterator operations
-				for range m.Keys() {
-					// Just iterate
+				// Iterator operations — verify concurrent iteration doesn't panic
+				for k := range m.Keys() {
+					_ = k
 				}
 
-				for range m.Range() {
-					// Just iterate
+				for k, v := range m.Range() {
+					_, _ = k, v
 				}
 			}
 		})
@@ -1250,9 +1250,9 @@ func TestConcurrent_Slice_Read(t *testing.T) {
 				_ = s.Get(0)
 				_ = s.Get(1)
 
-				// Iterator operations
-				for range s.Iter() {
-					// Just iterate
+				// Iterator operations — verify concurrent iteration doesn't panic
+				for v := range s.Iter() {
+					_ = v
 				}
 			}
 		})

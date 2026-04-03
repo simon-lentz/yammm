@@ -23,7 +23,7 @@ Help the user install the `yammm-lsp` binary for Claude Code plugin LSP features
 
    For Unix (macOS/Linux):
    ```
-   curl -fsSL https://github.com/simon-lentz/yammm-lsp/releases/latest/download/yammm-lsp-<version>-<platform>.tar.gz -o yammm-lsp.tar.gz
+   curl -fsSL https://github.com/simon-lentz/yammm/releases/latest/download/yammm-lsp-<version>-<platform>.tar.gz -o yammm-lsp.tar.gz
    tar xzf yammm-lsp.tar.gz
    sudo mv yammm-lsp /usr/local/bin/
    rm yammm-lsp.tar.gz
@@ -31,10 +31,10 @@ Help the user install the `yammm-lsp` binary for Claude Code plugin LSP features
 
    For Windows:
    ```
-   Download from https://github.com/simon-lentz/yammm-lsp/releases/latest
+   Download from https://github.com/simon-lentz/yammm/releases/latest
    Extract yammm-lsp.exe and add its directory to PATH.
    ```
 
-   Note: To determine the exact `<version>` tag for the download URL, check the latest release page at https://github.com/simon-lentz/yammm-lsp/releases/latest. The archive naming pattern is `yammm-lsp-<version>-<platform>.tar.gz` (e.g., `yammm-lsp-v0.1.4-darwin-arm64.tar.gz`).
+   Note: To determine the exact `<version>` tag for the download URL, check the latest release page at https://github.com/simon-lentz/yammm/releases/latest. The archive naming pattern is `yammm-lsp-<version>-<platform>.tar.gz` (e.g., `yammm-lsp-v0.1.4-darwin-arm64.tar.gz`).
 
 4. **Do NOT run the download or installation commands yourself.** Print them for the user to review and run. Installation requires user confirmation since it modifies system PATH locations.

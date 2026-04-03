@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFormatTokenStream_NoChanges(t *testing.T) {
+func TestTokenStream_NoChanges(t *testing.T) {
 	t.Parallel()
 
 	input := `schema "test"
@@ -20,78 +20,78 @@ type Person {
 	name String required
 }
 `
-	tsResult, err := FormatTokenStream(input)
+	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
 	assert.Equal(t, input, tsResult, "formatTokenStream: expected no changes")
 }
 
-func TestFormatTokenStream_TrailingWhitespace(t *testing.T) {
+func TestTokenStream_TrailingWhitespace(t *testing.T) {
 	t.Parallel()
 
 	input := "schema \"test\"   \n\ntype Person {   \n\tname String required   \n}\n"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String required\n}\n"
 
-	tsResult, err := FormatTokenStream(input)
+	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, tsResult, "FormatTokenStream()")
+	assert.Equal(t, expected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_NormalizeCRLF(t *testing.T) {
+func TestTokenStream_NormalizeCRLF(t *testing.T) {
 	t.Parallel()
 
 	input := "schema \"test\"\r\n\r\ntype Person {\r\n\tname String\r\n}\r\n"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
-	tsResult, err := FormatTokenStream(input)
+	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, tsResult, "FormatTokenStream()")
+	assert.Equal(t, expected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_NormalizeCR(t *testing.T) {
+func TestTokenStream_NormalizeCR(t *testing.T) {
 	t.Parallel()
 
 	input := "schema \"test\"\r\rtype Person {\r\tname String\r}\r"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
-	tsResult, err := FormatTokenStream(input)
+	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, tsResult, "FormatTokenStream()")
+	assert.Equal(t, expected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_PreservesBlankLines(t *testing.T) {
+func TestTokenStream_PreservesBlankLines(t *testing.T) {
 	t.Parallel()
 
 	input, tsExpected := loadTestPair(t, "preserves_blank_lines")
 
-	// FormatTokenStream collapses blank lines (max 1 blank between declarations)
-	tsResult, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, tsExpected, tsResult, "FormatTokenStream()")
+	// TokenStream collapses blank lines (max 1 blank between declarations)
+	tsResult, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, tsExpected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_RemoveTrailingBlankLines(t *testing.T) {
+func TestTokenStream_RemoveTrailingBlankLines(t *testing.T) {
 	t.Parallel()
 
 	input := "schema \"test\"\n\ntype Person {\n\tname String\n}\n\n\n\n"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
-	tsResult, err := FormatTokenStream(input)
+	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, tsResult, "FormatTokenStream()")
+	assert.Equal(t, expected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_EnsureTrailingNewline(t *testing.T) {
+func TestTokenStream_EnsureTrailingNewline(t *testing.T) {
 	t.Parallel()
 
 	input := "schema \"test\"\n\ntype Person {\n\tname String\n}"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
-	tsResult, err := FormatTokenStream(input)
+	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, tsResult, "FormatTokenStream()")
+	assert.Equal(t, expected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_PreservesComments(t *testing.T) {
+func TestTokenStream_PreservesComments(t *testing.T) {
 	t.Parallel()
 
 	input := `schema "test"
@@ -101,23 +101,23 @@ type Person {
 	name String // inline comment
 }
 `
-	tsResult, err := FormatTokenStream(input)
+	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
 	assert.Equal(t, input, tsResult, "formatTokenStream: comments should be preserved")
 }
 
-func TestFormatTokenStream_PreservesIndentation(t *testing.T) {
+func TestTokenStream_PreservesIndentation(t *testing.T) {
 	t.Parallel()
 
 	input, tsExpected := loadTestPair(t, "preserves_indentation")
 
-	// FormatTokenStream aligns name column within same-kind groups
-	tsResult, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, tsExpected, tsResult, "FormatTokenStream()")
+	// TokenStream aligns name column within same-kind groups
+	tsResult, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, tsExpected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_IdempotentInline(t *testing.T) {
+func TestTokenStream_IdempotentInline(t *testing.T) {
 	t.Parallel()
 
 	input := `schema "test"
@@ -133,161 +133,161 @@ type Person {
 `
 
 	// formatTokenStream idempotency
-	tsFirst, err := FormatTokenStream(input)
+	tsFirst, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream first pass returned error")
-	tsSecond, err := FormatTokenStream(tsFirst)
+	tsSecond, err := TokenStream(tsFirst)
 	require.NoError(t, err, "formatTokenStream second pass returned error")
 	assert.Equal(t, tsFirst, tsSecond, "formatTokenStream should be idempotent")
 }
 
-func TestFormatTokenStream_ComplexDocument(t *testing.T) {
+func TestTokenStream_ComplexDocument(t *testing.T) {
 	t.Parallel()
 
 	input, tsExpected := loadTestPair(t, "complex_document")
 
-	// FormatTokenStream collapses double blanks to single
-	tsResult, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, tsExpected, tsResult, "FormatTokenStream()")
+	// TokenStream collapses double blanks to single
+	tsResult, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, tsExpected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_DeclarationSpacing(t *testing.T) {
+func TestTokenStream_DeclarationSpacing(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "declaration_spacing")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
 
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_ExpressionPreservation(t *testing.T) {
+func TestTokenStream_ExpressionPreservation(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "expression_preservation")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
 
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 
 	assert.Contains(t, result, `! "must_be_enabled" !disabled && active`, "logical NOT spacing should be preserved")
 	assert.Contains(t, result, `{ "adult" : "minor" }`, "ternary brace/colon spacing should be preserved")
 }
 
-func TestFormatTokenStream_CommentHandling(t *testing.T) {
+func TestTokenStream_CommentHandling(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "comment_handling")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
 
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_CollapsesBlankLines(t *testing.T) {
+func TestTokenStream_CollapsesBlankLines(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "collapses_blank_lines")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_BlankLinesAtStartOfFile(t *testing.T) {
+func TestTokenStream_BlankLinesAtStartOfFile(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "blank_lines_at_start")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_NoBlankAfterOpenBrace(t *testing.T) {
+func TestTokenStream_NoBlankAfterOpenBrace(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "no_blank_after_open_brace")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_NoBlankBeforeCloseBrace(t *testing.T) {
+func TestTokenStream_NoBlankBeforeCloseBrace(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "no_blank_before_close_brace")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_EnsureBlankAfterSchema(t *testing.T) {
+func TestTokenStream_EnsureBlankAfterSchema(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "ensure_blank_after_schema")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_EnsureBlankAfterImportBlock(t *testing.T) {
+func TestTokenStream_EnsureBlankAfterImportBlock(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "ensure_blank_after_import_block")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_ImportGroupingPreserved(t *testing.T) {
+func TestTokenStream_ImportGroupingPreserved(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "import_grouping_preserved")
 
-	result, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	result, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_CommentNotCollapsedAsBlank(t *testing.T) {
+func TestTokenStream_CommentNotCollapsedAsBlank(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "comment_not_collapsed_as_blank")
 
-	result, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	result, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_DocCommentMultilineNotCollapsed(t *testing.T) {
+func TestTokenStream_DocCommentMultilineNotCollapsed(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "doc_comment_multiline_not_collapsed")
 
-	result, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	result, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_EdgePropertyBlockBlanks(t *testing.T) {
+func TestTokenStream_EdgePropertyBlockBlanks(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "edge_property_block_blanks")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_GoldenFile(t *testing.T) {
+func TestTokenStream_GoldenFile(t *testing.T) {
 	t.Parallel()
 
 	unformatted, err := os.ReadFile("../../testdata/lsp/formatting/unformatted.yammm")
@@ -295,23 +295,23 @@ func TestFormatTokenStream_GoldenFile(t *testing.T) {
 	golden, err := os.ReadFile("../../testdata/lsp/formatting/formatted.yammm.golden")
 	require.NoError(t, err, "failed to read golden fixture")
 
-	result, err := FormatTokenStream(string(unformatted))
+	result, err := TokenStream(string(unformatted))
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, string(golden), result, "FormatTokenStream(unformatted) != golden")
+	assert.Equal(t, string(golden), result, "TokenStream(unformatted) != golden")
 }
 
-func TestFormatTokenStream_GoldenIdempotent(t *testing.T) {
+func TestTokenStream_GoldenIdempotent(t *testing.T) {
 	t.Parallel()
 
 	golden, err := os.ReadFile("../../testdata/lsp/formatting/formatted.yammm.golden")
 	require.NoError(t, err, "failed to read golden fixture")
 
-	result, err := FormatTokenStream(string(golden))
+	result, err := TokenStream(string(golden))
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, string(golden), result, "FormatTokenStream(golden) != golden")
+	assert.Equal(t, string(golden), result, "TokenStream(golden) != golden")
 }
 
-func TestFormatTokenStream_GoldenFixtures(t *testing.T) {
+func TestTokenStream_GoldenFixtures(t *testing.T) {
 	t.Parallel()
 
 	fixtures := []string{
@@ -334,14 +334,14 @@ func TestFormatTokenStream_GoldenFixtures(t *testing.T) {
 			golden, err := os.ReadFile(goldenPath)
 			require.NoError(t, err, "failed to read golden %s", name)
 
-			result, err := FormatTokenStream(string(input))
+			result, err := TokenStream(string(input))
 			require.NoError(t, err, "formatTokenStream returned error")
-			assert.Equal(t, string(golden), result, "FormatTokenStream(%s) != golden", name)
+			assert.Equal(t, string(golden), result, "TokenStream(%s) != golden", name)
 		})
 	}
 }
 
-func TestFormatTokenStream_GoldenIdempotentAll(t *testing.T) {
+func TestTokenStream_GoldenIdempotentAll(t *testing.T) {
 	t.Parallel()
 
 	goldenFiles := []string{
@@ -361,42 +361,42 @@ func TestFormatTokenStream_GoldenIdempotentAll(t *testing.T) {
 			golden, err := os.ReadFile(goldenPath)
 			require.NoError(t, err, "failed to read golden %s", name)
 
-			result, err := FormatTokenStream(string(golden))
+			result, err := TokenStream(string(golden))
 			require.NoError(t, err, "formatTokenStream returned error")
-			assert.Equal(t, string(golden), result, "FormatTokenStream(%s) not idempotent", name)
+			assert.Equal(t, string(golden), result, "TokenStream(%s) not idempotent", name)
 		})
 	}
 }
 
-func TestFormatTokenStream_BlankLineCollapsingIdempotent(t *testing.T) {
+func TestTokenStream_BlankLineCollapsingIdempotent(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "blank_line_collapsing_idempotent")
 
-	first, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream first pass returned error")
-	assert.Equal(t, expected, first, "FormatTokenStream()")
+	first, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream first pass returned error")
+	assert.Equal(t, expected, first, "TokenStream()")
 
-	second, err := FormatTokenStream(first)
-	require.NoError(t, err, "FormatTokenStream second pass returned error")
+	second, err := TokenStream(first)
+	require.NoError(t, err, "TokenStream second pass returned error")
 	assert.Equal(t, first, second, "blank line collapsing should be idempotent")
 }
 
-func TestFormatTokenStream_Idempotent(t *testing.T) {
+func TestTokenStream_Idempotent(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "fts_idempotent")
 
-	first, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream first pass returned error")
-	assert.Equal(t, expected, first, "FormatTokenStream()")
+	first, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream first pass returned error")
+	assert.Equal(t, expected, first, "TokenStream()")
 
-	second, err := FormatTokenStream(first)
-	require.NoError(t, err, "FormatTokenStream second pass returned error")
-	assert.Equal(t, first, second, "FormatTokenStream should be idempotent")
+	second, err := TokenStream(first)
+	require.NoError(t, err, "TokenStream second pass returned error")
+	assert.Equal(t, first, second, "TokenStream should be idempotent")
 }
 
-func TestFormatTokenStream_InvalidInputReturnsError(t *testing.T) {
+func TestTokenStream_InvalidInputReturnsError(t *testing.T) {
 	t.Parallel()
 
 	input := `schema "test"
@@ -405,61 +405,61 @@ type Person {
 	name String
 `
 
-	_, err := FormatTokenStream(input)
+	_, err := TokenStream(input)
 	require.Error(t, err, "expected formatTokenStream to return error for malformed input")
 }
 
-func TestFormatTokenStream_ColonInMultiplicity(t *testing.T) {
+func TestTokenStream_ColonInMultiplicity(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "colon_in_multiplicity")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_QualifiedReferences(t *testing.T) {
+func TestTokenStream_QualifiedReferences(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "qualified_references")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_ImportSpacing(t *testing.T) {
+func TestTokenStream_ImportSpacing(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "import_spacing")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_ExtendsMultipleTypes(t *testing.T) {
+func TestTokenStream_ExtendsMultipleTypes(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "extends_multiple_types")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_AllConstraintBracketTypes(t *testing.T) {
+func TestTokenStream_AllConstraintBracketTypes(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "all_constraint_bracket_types")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_ListAngleBracketSpacing(t *testing.T) {
+func TestTokenStream_ListAngleBracketSpacing(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -532,33 +532,33 @@ type T {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result, err := FormatTokenStream(tt.input)
+			result, err := TokenStream(tt.input)
 			require.NoError(t, err, "formatTokenStream returned error")
-			assert.Equal(t, tt.expected, result, "FormatTokenStream()")
+			assert.Equal(t, tt.expected, result, "TokenStream()")
 		})
 	}
 }
 
-func TestFormatTokenStream_DOCCommentNewlineAfter(t *testing.T) {
+func TestTokenStream_DOCCommentNewlineAfter(t *testing.T) {
 	t.Parallel()
 
 	// Verify DOC_COMMENT always gets a newline before the next declaration token.
 	input, expected := loadTestPair(t, "doc_comment_newline_after")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_TrailingCommaInConstraints(t *testing.T) {
+func TestTokenStream_TrailingCommaInConstraints(t *testing.T) {
 	t.Parallel()
 
 	// Trailing comma inside Enum is grammar-legal and should be tight before RBRACK.
 	input, expected := loadTestPair(t, "trailing_comma_in_constraints")
 
-	result, err := FormatTokenStream(input)
+	result, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
 func TestNormalizeIndentation_NoLeading(t *testing.T) {
@@ -610,59 +610,59 @@ func TestNormalizeIndentation_Empty(t *testing.T) {
 	assert.Equal(t, "", result, "empty input should return empty")
 }
 
-func TestFormatTokenStream_ConvertSpacesToTabs(t *testing.T) {
+func TestTokenStream_ConvertSpacesToTabs(t *testing.T) {
 	t.Parallel()
 
 	input, tsExpected := loadTestPair(t, "convert_spaces_to_tabs")
 
-	// FormatTokenStream: tab indentation + name column alignment
-	tsResult, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, tsExpected, tsResult, "FormatTokenStream()")
+	// TokenStream: tab indentation + name column alignment
+	tsResult, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, tsExpected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_MixedIndentNormalized(t *testing.T) {
+func TestTokenStream_MixedIndentNormalized(t *testing.T) {
 	t.Parallel()
 
 	input, tsExpected := loadTestPair(t, "mixed_indent_normalized")
 
-	// FormatTokenStream uses canonical brace-depth indentation
-	tsResult, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, tsExpected, tsResult, "FormatTokenStream()")
+	// TokenStream uses canonical brace-depth indentation
+	tsResult, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, tsExpected, tsResult, "TokenStream()")
 }
 
-func TestFormatTokenStream_MultibyteCJK(t *testing.T) {
+func TestTokenStream_MultibyteCJK(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "multibyte_cjk")
 
-	tsResult, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, expected, tsResult, "FormatTokenStream() with CJK content")
+	tsResult, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, expected, tsResult, "TokenStream() with CJK content")
 }
 
-func TestFormatTokenStream_Emoji(t *testing.T) {
+func TestTokenStream_Emoji(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "emoji")
 
-	tsResult, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, expected, tsResult, "FormatTokenStream() with emoji")
+	tsResult, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, expected, tsResult, "TokenStream() with emoji")
 }
 
-func TestFormatTokenStream_MultibyteMixedContent(t *testing.T) {
+func TestTokenStream_MultibyteMixedContent(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "multibyte_mixed_content")
 
-	tsResult, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, expected, tsResult, "FormatTokenStream() with mixed content")
+	tsResult, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, expected, tsResult, "TokenStream() with mixed content")
 }
 
-func TestFormatTokenStream_MultibyteParseable(t *testing.T) {
+func TestTokenStream_MultibyteParseable(t *testing.T) {
 	// Test that formatted multibyte content in strings is still parseable
 	// YAMMM identifiers are ASCII-only, but string literals can contain Unicode
 	t.Parallel()
@@ -677,9 +677,9 @@ type JapaneseUser {
 	ctx := t.Context()
 
 	// Verify formatTokenStream result is parseable
-	tsResult, err := FormatTokenStream(input)
+	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	s, diagResult, err := load.LoadString(ctx, tsResult, "test")
+	s, diagResult, err := load.String(ctx, tsResult, "test")
 	require.NoError(t, err, "formatTokenStream output failed to load")
 	if !diagResult.OK() {
 		for issue := range diagResult.Issues() {
@@ -1260,37 +1260,37 @@ func TestWrapLongLines_ExactlyAtThreshold(t *testing.T) {
 
 // --- Full pipeline tests ---
 
-func TestFormatTokenStream_WrapLongEnum(t *testing.T) {
+func TestTokenStream_WrapLongEnum(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "wrap_long_enum")
 
-	result, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	result, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_CollapseShortMultilineEnum(t *testing.T) {
+func TestTokenStream_CollapseShortMultilineEnum(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "collapse_short_multiline_enum")
 
-	result, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	result, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, expected, result, "TokenStream()")
 }
 
-func TestFormatTokenStream_WrapAndAlignInteraction(t *testing.T) {
+func TestTokenStream_WrapAndAlignInteraction(t *testing.T) {
 	t.Parallel()
 
 	input, expected := loadTestPair(t, "wrap_and_align_interaction")
 
-	result, err := FormatTokenStream(input)
-	require.NoError(t, err, "FormatTokenStream returned error")
-	assert.Equal(t, expected, result, "FormatTokenStream()")
+	result, err := TokenStream(input)
+	require.NoError(t, err, "TokenStream returned error")
+	assert.Equal(t, expected, result, "TokenStream()")
 
 	// Verify idempotency of full pipeline
-	second, err := FormatTokenStream(result)
-	require.NoError(t, err, "FormatTokenStream second pass returned error")
+	second, err := TokenStream(result)
+	require.NoError(t, err, "TokenStream second pass returned error")
 	assert.Equal(t, result, second, "full pipeline should be idempotent")
 }

@@ -1,3 +1,4 @@
+// Package markdown extracts yammm code blocks from markdown documents.
 package markdown
 
 import (

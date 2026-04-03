@@ -20,7 +20,7 @@ func handleHover(ws Resolver, logger *slog.Logger) jrpc2.Handler {
 			return nil, nil
 		}
 
-		result, err := hover.HoverAtPosition(unit.Snapshot, unit.Doc, unit.LocalLine, unit.LocalChar,
+		result, err := hover.AtPosition(unit.Snapshot, unit.Doc, unit.LocalLine, unit.LocalChar,
 			ws.PositionEncoding(), logger)
 		if err != nil || result == nil {
 			return result, err //nolint:wrapcheck // thin dispatch to internal package

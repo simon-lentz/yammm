@@ -43,9 +43,9 @@ const (
 // across calls — strings.Replacer is safe for concurrent use.
 var lineEndingReplacer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
-// FormatTokenStream applies parse-tree-assisted token-stream formatting.
+// TokenStream applies parse-tree-assisted token-stream formatting.
 // Returns an error if lexing/parsing fails so callers can fall back.
-func FormatTokenStream(text string) (string, error) {
+func TokenStream(text string) (string, error) {
 	normalized := lineEndingReplacer.Replace(text)
 
 	input := antlr.NewInputStream(normalized)

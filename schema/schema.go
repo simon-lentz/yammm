@@ -26,7 +26,7 @@ type Schema struct {
 }
 
 // NewSchema creates a new Schema. This is primarily for internal use;
-// schemas are typically created via Load, LoadString, or Builder.
+// schemas are typically created via Load, String, or Builder.
 func NewSchema(
 	name string,
 	sourceID location.SourceID,

@@ -23,7 +23,7 @@ type Evaluator struct {
 }
 
 // NewEvaluator creates a new expression evaluator.
-func NewEvaluator(opts ...EvalOption) *Evaluator {
+func NewEvaluator(opts ...Option) *Evaluator {
 	return &Evaluator{
 		cfg: applyOptions(opts),
 	}
@@ -711,7 +711,7 @@ func (e *Evaluator) equal(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("== requires 2 operands")
 	}
-	cmp, err := value.ValueOrder(args[0], args[1])
+	cmp, err := value.Order(args[0], args[1])
 	if err != nil {
 		return nil, fmt.Errorf("== comparison error: %w", err)
 	}
@@ -722,7 +722,7 @@ func (e *Evaluator) notEqual(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("!= requires 2 operands")
 	}
-	cmp, err := value.ValueOrder(args[0], args[1])
+	cmp, err := value.Order(args[0], args[1])
 	if err != nil {
 		return nil, fmt.Errorf("!= comparison error: %w", err)
 	}
@@ -733,7 +733,7 @@ func (e *Evaluator) lessThan(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("< requires 2 operands")
 	}
-	cmp, err := value.ValueOrder(args[0], args[1])
+	cmp, err := value.Order(args[0], args[1])
 	if err != nil {
 		return nil, fmt.Errorf("< comparison error: %w", err)
 	}
@@ -744,7 +744,7 @@ func (e *Evaluator) lessOrEqual(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("<= requires 2 operands")
 	}
-	cmp, err := value.ValueOrder(args[0], args[1])
+	cmp, err := value.Order(args[0], args[1])
 	if err != nil {
 		return nil, fmt.Errorf("<= comparison error: %w", err)
 	}
@@ -755,7 +755,7 @@ func (e *Evaluator) greaterThan(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("> requires 2 operands")
 	}
-	cmp, err := value.ValueOrder(args[0], args[1])
+	cmp, err := value.Order(args[0], args[1])
 	if err != nil {
 		return nil, fmt.Errorf("> comparison error: %w", err)
 	}
@@ -766,7 +766,7 @@ func (e *Evaluator) greaterOrEqual(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New(">= requires 2 operands")
 	}
-	cmp, err := value.ValueOrder(args[0], args[1])
+	cmp, err := value.Order(args[0], args[1])
 	if err != nil {
 		return nil, fmt.Errorf(">= comparison error: %w", err)
 	}
@@ -824,7 +824,7 @@ func (e *Evaluator) inOp(args []any) (any, error) {
 	}
 
 	for _, elem := range slice {
-		cmp, err := value.ValueOrder(left, elem)
+		cmp, err := value.Order(left, elem)
 		if err != nil {
 			continue // incomparable types are not equal
 		}

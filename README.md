@@ -269,7 +269,7 @@ Diagnostic codes are stable identifiers for programmatic matching (e.g., `E_TYPE
 
 ## IDE Support
 
-The [yammm-lsp](https://github.com/simon-lentz/yammm-lsp) repository provides a Language Server Protocol server for YAMMM schema files:
+The [`lsp/`](lsp/) package provides a Language Server Protocol server for YAMMM schema files, with the binary entry point at [`cmd/yammm-lsp/`](cmd/yammm-lsp/):
 
 - Real-time diagnostics (parse errors, semantic errors, import issues)
 - Go-to-definition for types, properties, and imports
@@ -278,7 +278,7 @@ The [yammm-lsp](https://github.com/simon-lentz/yammm-lsp) repository provides a 
 - Document symbols for outline and breadcrumbs
 - Formatting with canonical style
 
-Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) or see the [yammm-lsp repository](https://github.com/simon-lentz/yammm-lsp) for development setup.
+Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=simon-lentz.yammm) or build the LSP binary from source with `make build`.
 
 ## Documentation
 

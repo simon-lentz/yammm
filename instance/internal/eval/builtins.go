@@ -374,7 +374,7 @@ func builtinUnique(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expr
 		return []any{}, nil
 	}
 
-	// Use value.ValueOrder for all comparisons to ensure semantic equality.
+	// Use value.Order for all comparisons to ensure semantic equality.
 	// This handles edge cases like NaN correctly (NaN == NaN per DSL total ordering,
 	// not IEEE 754 where NaN != NaN). Using map keys for comparable types would
 	// break this semantic because Go's map equality follows IEEE 754.
@@ -382,7 +382,7 @@ func builtinUnique(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expr
 	for _, elem := range slice {
 		found := false
 		for _, r := range result {
-			cmp, err := value.ValueOrder(elem, r)
+			cmp, err := value.Order(elem, r)
 			if err == nil && cmp == 0 {
 				found = true
 				break
@@ -505,12 +505,12 @@ func builtinSort(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expres
 	// Capture first comparison error during sort
 	var sortErr error
 
-	// Sort using value.ValueOrder
+	// Sort using value.Order
 	slices.SortFunc(result, func(a, b any) int {
 		if sortErr != nil {
 			return 0 // Already have an error, just return 0 to complete sort
 		}
-		cmp, err := value.ValueOrder(a, b)
+		cmp, err := value.Order(a, b)
 		if err != nil {
 			sortErr = fmt.Errorf("sort: %w", err)
 			return 0
@@ -581,7 +581,7 @@ func builtinContains(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr
 
 	target := args[0]
 	for _, elem := range slice {
-		cmp, err := value.ValueOrder(elem, target)
+		cmp, err := value.Order(elem, target)
 		if err == nil && cmp == 0 {
 			return true, nil
 		}
@@ -670,7 +670,7 @@ func builtinRound(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 func builtinMin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	// Two-arg form: Min(a, b)
 	if len(args) == 1 {
-		cmp, err := value.ValueOrder(lhs, args[0])
+		cmp, err := value.Order(lhs, args[0])
 		if err != nil {
 			return nil, fmt.Errorf("min: %w", err)
 		}
@@ -691,7 +691,7 @@ func builtinMin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expr
 
 	result := slice[0]
 	for i := 1; i < len(slice); i++ {
-		cmp, err := value.ValueOrder(slice[i], result)
+		cmp, err := value.Order(slice[i], result)
 		if err != nil {
 			return nil, fmt.Errorf("min: %w", err)
 		}
@@ -705,7 +705,7 @@ func builtinMin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expr
 func builtinMax(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	// Two-arg form: Max(a, b)
 	if len(args) == 1 {
-		cmp, err := value.ValueOrder(lhs, args[0])
+		cmp, err := value.Order(lhs, args[0])
 		if err != nil {
 			return nil, fmt.Errorf("max: %w", err)
 		}
@@ -726,7 +726,7 @@ func builtinMax(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expr
 
 	result := slice[0]
 	for i := 1; i < len(slice); i++ {
-		cmp, err := value.ValueOrder(slice[i], result)
+		cmp, err := value.Order(slice[i], result)
 		if err != nil {
 			return nil, fmt.Errorf("max: %w", err)
 		}
@@ -741,7 +741,7 @@ func builtinCompare(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.
 	if len(args) != 1 {
 		return nil, errors.New("compare requires exactly one argument")
 	}
-	cmp, err := value.ValueOrder(lhs, args[0])
+	cmp, err := value.Order(lhs, args[0])
 	if err != nil {
 		return nil, fmt.Errorf("compare: %w", err)
 	}
@@ -891,11 +891,11 @@ func builtinReplace(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.
 	if !ok {
 		return nil, fmt.Errorf("Replace() expects string for old value, got %T", args[0])
 	}
-	new, ok := args[1].(string)
+	replacement, ok := args[1].(string)
 	if !ok {
 		return nil, fmt.Errorf("Replace() expects string for new value, got %T", args[1])
 	}
-	return strings.ReplaceAll(s, old, new), nil
+	return strings.ReplaceAll(s, old, replacement), nil
 }
 
 func builtinSubstring(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {

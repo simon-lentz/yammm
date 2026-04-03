@@ -472,7 +472,7 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 
 	// Verify required details including reason="absent"
 	details := issues[0].Details()
-	var hasReason, hasRelation, hasJsonField bool
+	var hasReason, hasRelation, hasJSONField bool
 	for _, d := range details {
 		if d.Key == diag.DetailKeyReason {
 			hasReason = true
@@ -483,13 +483,13 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 			assert.Equal(t, "addresses", d.Value)
 		}
 		if d.Key == diag.DetailKeyJsonField {
-			hasJsonField = true
+			hasJSONField = true
 			assert.Equal(t, "addresses", d.Value)
 		}
 	}
 	assert.True(t, hasReason, "should have 'reason' detail")
 	assert.True(t, hasRelation, "should have 'relation' detail")
-	assert.True(t, hasJsonField, "should have 'json_field' detail")
+	assert.True(t, hasJSONField, "should have 'json_field' detail")
 }
 
 func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
@@ -524,7 +524,7 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 
 	// Verify required details including reason="empty"
 	details := issues[0].Details()
-	var hasReason, hasRelation, hasJsonField bool
+	var hasReason, hasRelation, hasJSONField bool
 	for _, d := range details {
 		if d.Key == diag.DetailKeyReason {
 			hasReason = true
@@ -535,13 +535,13 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 			assert.Equal(t, "addresses", d.Value)
 		}
 		if d.Key == diag.DetailKeyJsonField {
-			hasJsonField = true
+			hasJSONField = true
 			assert.Equal(t, "addresses", d.Value)
 		}
 	}
 	assert.True(t, hasReason, "should have 'reason' detail")
 	assert.True(t, hasRelation, "should have 'relation' detail")
-	assert.True(t, hasJsonField, "should have 'json_field' detail")
+	assert.True(t, hasJSONField, "should have 'json_field' detail")
 }
 
 func TestValidateCompositions_DuplicatePK_PathFormat(t *testing.T) {

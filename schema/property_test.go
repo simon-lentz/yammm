@@ -279,15 +279,15 @@ func TestProperty_Equal_OneNilConstraint(t *testing.T) {
 
 func TestProperty_Equal_NilProperty(t *testing.T) {
 	p1 := schema.NewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	var p2 *schema.Property = nil
+	var p2 *schema.Property
 
 	assert.False(t, p1.Equal(p2))
 	assert.False(t, p2.Equal(p1))
 }
 
 func TestProperty_Equal_BothNil(t *testing.T) {
-	var p1 *schema.Property = nil
-	var p2 *schema.Property = nil
+	var p1 *schema.Property
+	var p2 *schema.Property
 
 	assert.True(t, p1.Equal(p2))
 }

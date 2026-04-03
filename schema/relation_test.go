@@ -623,15 +623,15 @@ func TestRelation_Equal_Nil(t *testing.T) {
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
-	var nilRel *schema.Relation = nil
+	var nilRel *schema.Relation
 
 	assert.False(t, r.Equal(nilRel))
 	assert.False(t, nilRel.Equal(r))
 }
 
 func TestRelation_Equal_BothNil(t *testing.T) {
-	var r1 *schema.Relation = nil
-	var r2 *schema.Relation = nil
+	var r1 *schema.Relation
+	var r2 *schema.Relation
 
 	assert.True(t, r1.Equal(r2))
 }

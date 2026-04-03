@@ -40,7 +40,7 @@ func TestNewSources_ValidRegistry(t *testing.T) {
 // --- Nil Receiver Tests ---
 
 func TestSources_ContentBySource_NilReceiver(t *testing.T) {
-	var s *schema.Sources = nil
+	var s *schema.Sources
 
 	content, ok := s.ContentBySource(location.SourceID{})
 
@@ -49,7 +49,7 @@ func TestSources_ContentBySource_NilReceiver(t *testing.T) {
 }
 
 func TestSources_Content_NilReceiver(t *testing.T) {
-	var s *schema.Sources = nil
+	var s *schema.Sources
 
 	content, ok := s.Content(location.Span{})
 
@@ -58,7 +58,7 @@ func TestSources_Content_NilReceiver(t *testing.T) {
 }
 
 func TestSources_PositionAt_NilReceiver(t *testing.T) {
-	var s *schema.Sources = nil
+	var s *schema.Sources
 
 	pos := s.PositionAt(location.SourceID{}, 0)
 
@@ -66,7 +66,7 @@ func TestSources_PositionAt_NilReceiver(t *testing.T) {
 }
 
 func TestSources_LineStartByte_NilReceiver(t *testing.T) {
-	var s *schema.Sources = nil
+	var s *schema.Sources
 
 	offset, ok := s.LineStartByte(location.SourceID{}, 1)
 
@@ -75,7 +75,7 @@ func TestSources_LineStartByte_NilReceiver(t *testing.T) {
 }
 
 func TestSources_RuneToByteOffset_NilReceiver(t *testing.T) {
-	var s *schema.Sources = nil
+	var s *schema.Sources
 
 	offset, ok := s.RuneToByteOffset(location.SourceID{}, 0)
 
@@ -84,7 +84,7 @@ func TestSources_RuneToByteOffset_NilReceiver(t *testing.T) {
 }
 
 func TestSources_SourceIDs_NilReceiver(t *testing.T) {
-	var s *schema.Sources = nil
+	var s *schema.Sources
 
 	ids := s.SourceIDs()
 
@@ -92,7 +92,7 @@ func TestSources_SourceIDs_NilReceiver(t *testing.T) {
 }
 
 func TestSources_Has_NilReceiver(t *testing.T) {
-	var s *schema.Sources = nil
+	var s *schema.Sources
 
 	result := s.Has(location.SourceID{})
 
@@ -100,7 +100,7 @@ func TestSources_Has_NilReceiver(t *testing.T) {
 }
 
 func TestSources_Len_NilReceiver(t *testing.T) {
-	var s *schema.Sources = nil
+	var s *schema.Sources
 
 	result := s.Len()
 
@@ -215,7 +215,7 @@ func TestSources_Len_Valid(t *testing.T) {
 // --- SourceIDsIter Tests ---
 
 func TestSources_SourceIDsIter_NilReceiver(t *testing.T) {
-	var s *schema.Sources = nil
+	var s *schema.Sources
 
 	var collected []location.SourceID
 	for id := range s.SourceIDsIter() {

@@ -330,7 +330,7 @@ func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams
 }
 
 // initialized handles the initialized notification.
-func (s *Server) initialized(_ context.Context, params *protocol.InitializedParams) error {
+func (s *Server) initialized(_ context.Context, _ *protocol.InitializedParams) error {
 	s.logger.Info("server initialized")
 	return nil
 }

@@ -4,8 +4,8 @@ import (
 	"log/slog"
 )
 
-// GraphOption configures graph construction behavior.
-type GraphOption func(*graphConfig)
+// Option configures graph construction behavior.
+type Option func(*graphConfig)
 
 // graphConfig holds internal configuration for a Graph.
 type graphConfig struct {
@@ -22,7 +22,7 @@ type graphConfig struct {
 //   - Check operations
 //
 // Pass nil to disable logging (the default).
-func WithLogger(logger *slog.Logger) GraphOption {
+func WithLogger(logger *slog.Logger) Option {
 	return func(cfg *graphConfig) {
 		cfg.logger = logger
 	}

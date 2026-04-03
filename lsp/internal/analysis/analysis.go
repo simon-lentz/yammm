@@ -1,3 +1,4 @@
+// Package analysis wraps schema loading and validation for LSP analysis snapshots.
 package analysis
 
 import (
@@ -190,7 +191,7 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //     The snapshot may still contain warnings (check Result.Warnings()).
 //
 // The opts parameter accepts optional [load.Option] values that are forwarded
-// to [load.LoadSourcesWithEntry]. For example, callers may pass
+// to [load.SourcesWithEntry]. For example, callers may pass
 // [load.WithDisallowImports] to reject import declarations.
 //
 // Source-registry invariance: The Analyzer creates its own [source.Registry],
@@ -234,7 +235,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 		}
 	}
 
-	// Build sources map for LoadSourcesWithEntry using maps.Copy
+	// Build sources map for SourcesWithEntry using maps.Copy
 	sources := make(map[string][]byte, len(overlays))
 	maps.Copy(sources, overlays)
 
@@ -245,7 +246,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	allOpts := make([]load.Option, len(opts), len(opts)+1)
 	copy(allOpts, opts)
 	allOpts = append(allOpts, load.WithSourceRegistry(sourceRegistry))
-	schemaResult, diagResult, loadErr := load.LoadSourcesWithEntry(
+	schemaResult, diagResult, loadErr := load.SourcesWithEntry(
 		ctx,
 		sources,
 		entryPath,

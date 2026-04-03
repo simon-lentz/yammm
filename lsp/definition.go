@@ -22,7 +22,7 @@ func handleDefinition(ws Resolver, logger *slog.Logger) jrpc2.Handler {
 			return nil, nil
 		}
 
-		loc := definition.DefinitionAtPosition(unit.Snapshot, unit.Doc, unit.LocalLine, unit.LocalChar,
+		loc := definition.AtPosition(unit.Snapshot, unit.Doc, unit.LocalLine, unit.LocalChar,
 			ws.PositionEncoding(), ws.RemapPathToURI, logger)
 		if loc == nil {
 			return nil, nil

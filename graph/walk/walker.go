@@ -12,18 +12,18 @@ import (
 	"github.com/simon-lentz/yammm/internal/trace"
 )
 
-// ErrNilVisitor is returned when Walk or WalkInstance is called with a nil visitor.
+// ErrNilVisitor is returned when Walk or Instance is called with a nil visitor.
 var ErrNilVisitor = errors.New("walk: nil visitor")
 
-// WalkOption configures the walker behavior.
-type WalkOption func(*walkConfig)
+// Option configures the walker behavior.
+type Option func(*walkConfig)
 
 type walkConfig struct {
 	logger *slog.Logger
 }
 
 // WithLogger enables debug logging during traversal.
-func WithLogger(logger *slog.Logger) WalkOption {
+func WithLogger(logger *slog.Logger) Option {
 	return func(cfg *walkConfig) {
 		cfg.logger = logger
 	}
@@ -39,7 +39,7 @@ func WithLogger(logger *slog.Logger) WalkOption {
 //   - Compositions are visited in relation name order
 //
 // Returns on first error from visitor or if context is cancelled.
-func Walk(ctx context.Context, result *graph.Result, visitor Visitor, opts ...WalkOption) error {
+func Walk(ctx context.Context, result *graph.Result, visitor Visitor, opts ...Option) error {
 	// Nil context check - must come first for consistent contract
 	// (nil context always panics, even if result is also nil)
 	if ctx == nil {
@@ -75,21 +75,21 @@ func Walk(ctx context.Context, result *graph.Result, visitor Visitor, opts ...Wa
 	return err
 }
 
-// WalkInstance traverses a single instance subtree.
+// Instance traverses a single instance subtree.
 //
 // This is useful for traversing just one instance and its composed children
 // without visiting the entire graph.
 //
-// Note: WalkInstance does not call VisitEdge. Edges require the full graph
+// Note: Instance does not call VisitEdge. Edges require the full graph
 // context (built by Walk) to resolve. If edge visits are needed, use Walk
 // with a result that contains the instance.
 //
 // Returns on first error from visitor or if context is cancelled.
-func WalkInstance(ctx context.Context, inst *graph.Instance, visitor Visitor, opts ...WalkOption) error {
+func Instance(ctx context.Context, inst *graph.Instance, visitor Visitor, opts ...Option) error {
 	// Nil context check - must come first for consistent contract
 	// (nil context always panics, even if inst is also nil)
 	if ctx == nil {
-		panic("walk.WalkInstance: nil context")
+		panic("walk.Instance: nil context")
 	}
 
 	if inst == nil {

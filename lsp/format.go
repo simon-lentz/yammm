@@ -32,7 +32,7 @@ func handleFormatting(ws Resolver, logger *slog.Logger) jrpc2.Handler {
 			return nil, nil
 		}
 
-		formatted, formatErr := format.FormatTokenStream(doc.Text)
+		formatted, formatErr := format.TokenStream(doc.Text)
 		if formatErr != nil {
 			logger.Debug("formatting skipped due to parse error", "uri", uri, "error", formatErr)
 			return []protocol.TextEdit{}, nil

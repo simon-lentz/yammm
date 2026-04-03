@@ -54,7 +54,7 @@ func WithRegistry(r *schema.Registry) Option {
 
 // WithModuleRoot sets the root directory for module-style imports.
 // This option is only meaningful for Load() which operates on filesystem paths.
-// For LoadString() and LoadSources(), the module root is inferred or provided directly.
+// For String() and Sources(), the module root is inferred or provided directly.
 func WithModuleRoot(root string) Option {
 	return func(c *config) {
 		c.moduleRoot = root
@@ -90,7 +90,7 @@ type SourceStore interface {
 // If not provided, a new source registry is created for the load operation.
 //
 // IMPORTANT: Currently only *source.Registry is supported. Passing a custom
-// SourceStore implementation will cause Load/LoadSources/LoadString to return
+// SourceStore implementation will cause Load/Sources/String to return
 // ErrSourceStoreNotSupported. This limitation exists because the internal
 // implementation requires source.Registry-specific functionality.
 //
@@ -103,7 +103,7 @@ func WithSourceRegistry(store SourceStore) Option {
 
 // WithDisallowImports prevents import declarations from being processed.
 // When enabled, any import statements in the source produce an
-// E_IMPORT_NOT_ALLOWED diagnostic. Used by LoadString (unconditionally)
+// E_IMPORT_NOT_ALLOWED diagnostic. Used by String (unconditionally)
 // and by the LSP markdown analysis path (isolated blocks).
 func WithDisallowImports() Option {
 	return func(c *config) {
