@@ -8,17 +8,18 @@
 // library packages (schema, graph, immutable, diag, location); library
 // packages never depend on adapters.
 //
-// # No Neo4j Driver Dependency
+// # Neo4j Driver Dependency (Type-Only)
 //
-// The adapter produces Cypher strings, structured [Constraint] objects,
-// and parameterized query maps. It does not import the Neo4j Go driver
-// or execute anything against a database. Consumers supply their own
-// driver and choose how to apply the generated output (directly, via
-// neo4j-migrations, via rdata's Apply(), etc.).
+// The adapter imports [github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype]
+// for temporal type definitions (dbtype.Date). It does not import
+// connection, session, or transaction packages — no code in this package
+// opens a connection or executes queries against a database. Consumers
+// supply their own driver and choose how to apply the generated output
+// (directly, via neo4j-migrations, via rdata's Apply(), etc.).
 //
 // This mirrors the JSON adapter principle: adapter/json does not import
-// HTTP libraries -- it produces bytes. adapter/neo4j does not import the
-// Neo4j driver -- it produces Cypher.
+// HTTP libraries — it produces bytes. adapter/neo4j does not import the
+// Neo4j session API — it produces Cypher and driver-compatible parameters.
 //
 // # Thread Safety
 //
@@ -26,12 +27,11 @@
 // Configuration is immutable after [New] returns. All methods use only
 // local allocations and read-only access to the frozen config.
 //
-// # Zero External Dependencies
+// # External Dependencies
 //
-// The package depends only on the Go standard library and yammm library
-// packages. No Neo4j driver, no test frameworks beyond [testing]. This
-// keeps the adapter lightweight and avoids forcing driver version choices
-// on consumers.
+// The package depends on the Go standard library, yammm library packages,
+// and [github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype] (type definitions
+// only, zero transitive dependencies). No test frameworks beyond [testing].
 //
 // # Edition Gating
 //
@@ -58,5 +58,5 @@
 //
 // # Dependencies
 //
-//	adapter/neo4j  --imports-->  schema, graph, diag
+//	adapter/neo4j  --imports-->  schema, graph, diag, neo4j-go-driver/v6 (dbtype only)
 package neo4j

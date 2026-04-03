@@ -12,7 +12,6 @@
 //	Foundation tier (no internal dependencies):
 //	  - location: Source positions, spans, and canonical paths
 //	  - diag: Structured diagnostics with stable error codes
-//	  - immutable: Read-only wrappers for safe data sharing
 //	  - source: Source content storage and position conversion
 //
 //	Core library tier:
@@ -80,7 +79,6 @@
 //
 //   - [github.com/simon-lentz/yammm/diag]: Structured diagnostics
 //   - [github.com/simon-lentz/yammm/location]: Source location tracking
-//   - [github.com/simon-lentz/yammm/immutable]: Read-only data wrappers
 //   - [github.com/simon-lentz/yammm/source]: Source content storage and position conversion
 //   - [github.com/simon-lentz/yammm/schema]: Schema types and constraints
 //   - [github.com/simon-lentz/yammm/schema/load]: Schema file loading

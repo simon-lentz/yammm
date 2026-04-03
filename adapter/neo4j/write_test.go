@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestNodeQueryFor_SinglePK(t *testing.T) {
@@ -419,28 +422,27 @@ func TestPropertyCoercion_TemporalSlice(t *testing.T) {
 	rows := queries[0].Params["rows"].([]map[string]any)
 	props := rows[0]["props"].(map[string]any)
 
-	// The immutable layer stores temporal values as strings.
-	// Coercion converts []any to []string (not []any, which the
-	// Neo4j driver rejects).
+	// Temporal list elements are coerced to driver-compatible types:
+	// List<Timestamp> strings -> []time.Time, List<Date> strings -> []dbtype.Date.
 	if times, ok := props["times"]; ok {
 		switch v := times.(type) {
-		case []string:
+		case []time.Time:
 			if len(v) != 2 {
 				t.Errorf("times length = %d; want 2", len(v))
 			}
 		default:
-			t.Errorf("times should be []string, got %T", times)
+			t.Errorf("times should be []time.Time, got %T", times)
 		}
 	}
 
 	if dates, ok := props["dates"]; ok {
 		switch v := dates.(type) {
-		case []string:
+		case []dbtype.Date:
 			if len(v) != 2 {
 				t.Errorf("dates length = %d; want 2", len(v))
 			}
 		default:
-			t.Errorf("dates should be []string, got %T", dates)
+			t.Errorf("dates should be []dbtype.Date, got %T", dates)
 		}
 	}
 }
@@ -472,6 +474,95 @@ func TestCoerceSlice_TimeTimeElements(t *testing.T) {
 	if !out[0].Equal(t1) || !out[1].Equal(t2) {
 		t.Errorf("values mismatch: got %v", out)
 	}
+}
+
+func TestCoerceSlice_DateStringElements(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "list_properties.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+	prop, ok := st.Property("dates")
+	if !ok {
+		t.Fatal("dates property not found")
+	}
+
+	raw := []any{"2024-01-01", "2024-06-15"}
+	result := coerceSlice(raw, prop.Constraint())
+	out, ok := result.([]dbtype.Date)
+	if !ok {
+		t.Fatalf("expected []dbtype.Date, got %T", result)
+	}
+	if len(out) != 2 {
+		t.Fatalf("length = %d; want 2", len(out))
+	}
+	expected0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	expected1 := time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)
+	if !time.Time(out[0]).Equal(expected0) {
+		t.Errorf("out[0] = %v; want %v", out[0], expected0)
+	}
+	if !time.Time(out[1]).Equal(expected1) {
+		t.Errorf("out[1] = %v; want %v", out[1], expected1)
+	}
+}
+
+func TestCoerceSlice_TimestampStringElements(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "list_properties.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+	prop, ok := st.Property("times")
+	if !ok {
+		t.Fatal("times property not found")
+	}
+
+	raw := []any{"2024-01-01T00:00:00Z", "2024-06-15T12:30:00Z"}
+	result := coerceSlice(raw, prop.Constraint())
+	out, ok := result.([]time.Time)
+	if !ok {
+		t.Fatalf("expected []time.Time, got %T", result)
+	}
+	if len(out) != 2 {
+		t.Fatalf("length = %d; want 2", len(out))
+	}
+}
+
+func TestCoerceSlice_TemporalParseFailure(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "list_properties.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+
+	t.Run("DateParseFailure", func(t *testing.T) {
+		t.Parallel()
+		prop, ok := st.Property("dates")
+		if !ok {
+			t.Fatal("dates property not found")
+		}
+		raw := []any{"not-a-date", "also-not"}
+		result := coerceSlice(raw, prop.Constraint())
+		if _, ok := result.([]string); !ok {
+			t.Errorf("expected []string fallback, got %T", result)
+		}
+	})
+
+	t.Run("TimestampParseFailure", func(t *testing.T) {
+		t.Parallel()
+		prop, ok := st.Property("times")
+		if !ok {
+			t.Fatal("times property not found")
+		}
+		raw := []any{"not-a-timestamp", "also-not"}
+		result := coerceSlice(raw, prop.Constraint())
+		if _, ok := result.([]string); !ok {
+			t.Errorf("expected []string fallback, got %T", result)
+		}
+	})
 }
 
 func TestPropertyCoercion_Scalars(t *testing.T) {
@@ -506,6 +597,132 @@ func TestPropertyCoercion_Scalars(t *testing.T) {
 	if _, ok := props["active"].(bool); !ok {
 		t.Errorf("active should be bool, got %T", props["active"])
 	}
+}
+
+func TestPropertyCoercion_TemporalScalar(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "basic.yammm")
+	a := New()
+
+	shape, result := a.ShapeForSchema(s)
+	if !result.OK() {
+		t.Fatal(result.Messages())
+	}
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{
+			"id": "e1", "name": "test", "count": int64(1), "active": true,
+			"created_at": "2024-01-01T00:00:00Z",
+			"birth_date": "2024-06-15",
+		}},
+	})
+
+	queries, err := a.BatchNodeQueries(graphResult, shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows := queries[0].Params["rows"].([]map[string]any)
+	props := rows[0]["props"].(map[string]any)
+
+	// Date property should coerce to dbtype.Date, not string.
+	if bd, ok := props["birth_date"]; ok {
+		if _, isDate := bd.(dbtype.Date); !isDate {
+			t.Errorf("birth_date should be dbtype.Date, got %T", bd)
+		}
+	} else {
+		t.Error("birth_date missing from props")
+	}
+
+	// Timestamp property should coerce to time.Time, not string.
+	if ca, ok := props["created_at"]; ok {
+		if _, isTime := ca.(time.Time); !isTime {
+			t.Errorf("created_at should be time.Time, got %T", ca)
+		}
+	} else {
+		t.Error("created_at missing from props")
+	}
+}
+
+func TestCoerceTemporalScalar_Unit(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "basic.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+
+	t.Run("Date", func(t *testing.T) {
+		t.Parallel()
+		prop, ok := st.Property("birth_date")
+		if !ok {
+			t.Fatal("birth_date property not found")
+		}
+		result := coerceTemporalScalar("2024-06-15", prop.Constraint())
+		if _, isDate := result.(dbtype.Date); !isDate {
+			t.Errorf("expected dbtype.Date, got %T", result)
+		}
+	})
+
+	t.Run("Timestamp_RFC3339", func(t *testing.T) {
+		t.Parallel()
+		prop, ok := st.Property("created_at")
+		if !ok {
+			t.Fatal("created_at property not found")
+		}
+		result := coerceTemporalScalar("2024-01-01T00:00:00Z", prop.Constraint())
+		if _, isTime := result.(time.Time); !isTime {
+			t.Errorf("expected time.Time, got %T", result)
+		}
+	})
+
+	t.Run("Timestamp_RFC3339Nano", func(t *testing.T) {
+		t.Parallel()
+		prop, ok := st.Property("created_at")
+		if !ok {
+			t.Fatal("created_at property not found")
+		}
+		result := coerceTemporalScalar("2024-01-01T00:00:00.123456789Z", prop.Constraint())
+		tt, isTime := result.(time.Time)
+		if !isTime {
+			t.Fatalf("expected time.Time, got %T", result)
+		}
+		if tt.Nanosecond() != 123456789 {
+			t.Errorf("nanosecond = %d; want 123456789", tt.Nanosecond())
+		}
+	})
+
+	t.Run("UnparseableDate", func(t *testing.T) {
+		t.Parallel()
+		prop, ok := st.Property("birth_date")
+		if !ok {
+			t.Fatal("birth_date property not found")
+		}
+		result := coerceTemporalScalar("not-a-date", prop.Constraint())
+		if s, ok := result.(string); !ok || s != "not-a-date" {
+			t.Errorf("expected original string, got %T %v", result, result)
+		}
+	})
+
+	t.Run("UnparseableTimestamp", func(t *testing.T) {
+		t.Parallel()
+		prop, ok := st.Property("created_at")
+		if !ok {
+			t.Fatal("created_at property not found")
+		}
+		result := coerceTemporalScalar("not-a-timestamp", prop.Constraint())
+		if s, ok := result.(string); !ok || s != "not-a-timestamp" {
+			t.Errorf("expected original string, got %T %v", result, result)
+		}
+	})
+
+	t.Run("NonTemporalConstraint", func(t *testing.T) {
+		t.Parallel()
+		result := coerceTemporalScalar("hello", schema.NewStringConstraint())
+		if s, ok := result.(string); !ok || s != "hello" {
+			t.Errorf("expected original string, got %T %v", result, result)
+		}
+	})
 }
 
 func TestNodeQueryFor_MissingKey(t *testing.T) {

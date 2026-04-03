@@ -350,13 +350,9 @@ func (a *Adapter) BatchEdgeQueries(
 
 // propsToParamMap converts instance properties to a Neo4j-driver-compatible map.
 // Coerces []any slices to concrete typed slices, and scalar Date/Timestamp strings
-// to time.Time values, using schema constraint metadata. Without this coercion,
+// to native temporal types, using schema constraint metadata. Without this coercion,
 // Neo4j TYPE constraints (IS :: DATE, IS :: ZONED DATETIME) reject string values.
-//
-// Note: Date values are coerced to time.Time here. Callers that need the Neo4j
-// driver to send DATE (not ZONED DATETIME) must post-process the map to convert
-// time.Time values for Date-typed properties to dbtype.Date. See the
-// TemporalCoercionHints method for identifying which properties need this.
+// Date strings are coerced to dbtype.Date; Timestamp strings to time.Time.
 func propsToParamMap(inst *graph.Instance, schemaType *schema.Type) map[string]any {
 	raw := inst.Properties().Clone()
 	if schemaType == nil {
@@ -466,10 +462,39 @@ func coerceSlice(raw []any, c schema.Constraint) any {
 			out[i] = b
 		}
 		return out
-	case schema.KindTimestamp, schema.KindDate:
-		// Elements may be time.Time (pre-parsed input) or string
-		// (the common case: the immutable layer validates temporal
-		// format but stores the value as a string).
+	case schema.KindDate:
+		if len(raw) == 0 {
+			return raw
+		}
+		switch raw[0].(type) {
+		case time.Time:
+			out := make([]dbtype.Date, len(raw))
+			for i, v := range raw {
+				t, ok := v.(time.Time)
+				if !ok {
+					return raw
+				}
+				out[i] = dbtype.Date(t)
+			}
+			return out
+		case string:
+			out := make([]dbtype.Date, len(raw))
+			for i, v := range raw {
+				s, ok := v.(string)
+				if !ok {
+					return raw
+				}
+				t, err := time.Parse("2006-01-02", s)
+				if err != nil {
+					return coerceToStringSlice(raw)
+				}
+				out[i] = dbtype.Date(t)
+			}
+			return out
+		default:
+			return raw
+		}
+	case schema.KindTimestamp:
 		if len(raw) == 0 {
 			return raw
 		}
@@ -485,13 +510,20 @@ func coerceSlice(raw []any, c schema.Constraint) any {
 			}
 			return out
 		case string:
-			out := make([]string, len(raw))
+			out := make([]time.Time, len(raw))
 			for i, v := range raw {
 				s, ok := v.(string)
 				if !ok {
 					return raw
 				}
-				out[i] = s
+				t, err := time.Parse(time.RFC3339, s)
+				if err != nil {
+					t, err = time.Parse(time.RFC3339Nano, s)
+					if err != nil {
+						return coerceToStringSlice(raw)
+					}
+				}
+				out[i] = t
 			}
 			return out
 		default:
@@ -500,6 +532,21 @@ func coerceSlice(raw []any, c schema.Constraint) any {
 	default:
 		return raw
 	}
+}
+
+// coerceToStringSlice converts []any to []string, returning the original
+// slice if any element is not a string. Used as a fallback when temporal
+// parsing fails for list elements.
+func coerceToStringSlice(raw []any) any {
+	out := make([]string, len(raw))
+	for i, v := range raw {
+		s, ok := v.(string)
+		if !ok {
+			return raw
+		}
+		out[i] = s
+	}
+	return out
 }
 
 // extractKeyProps extracts named primary key properties from an instance.

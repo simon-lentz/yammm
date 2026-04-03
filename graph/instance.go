@@ -3,8 +3,8 @@ package graph
 import (
 	"slices"
 
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 

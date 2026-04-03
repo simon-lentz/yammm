@@ -16,7 +16,7 @@ import (
 // hygiene.
 //
 // Foundation tier packages and their constraints:
-//   - immutable: stdlib only (no other module packages)
+//   - internal/immutable: stdlib only (no other module packages)
 //   - location: stdlib + golang.org/x/text/unicode/norm (no other module packages)
 //   - diag: stdlib + location (no upper-tier packages)
 //
@@ -57,7 +57,7 @@ func TestFoundationImports(t *testing.T) {
 			},
 		},
 		{
-			pkg: "immutable",
+			pkg: "internal/immutable",
 			forbiddenSuffix: []string{
 				"/schema",
 				"/instance",
@@ -80,7 +80,7 @@ func TestFoundationImports(t *testing.T) {
 				"/adapter",
 				"/diag",
 				"/location",
-				"/immutable",
+				"/internal/immutable",
 			},
 		},
 	}

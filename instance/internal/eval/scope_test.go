@@ -3,8 +3,8 @@ package eval_test
 import (
 	"testing"
 
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance/eval"
+	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/immutable"
 	"github.com/stretchr/testify/assert"
 )
 

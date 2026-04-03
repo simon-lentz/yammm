@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/simon-lentz/yammm/instance/eval"
+	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/stretchr/testify/assert"
