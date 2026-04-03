@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	github.com/antlr4-go/antlr/v4 v4.13.1
+	github.com/creachadair/jrpc2 v1.3.5
 	github.com/google/uuid v1.6.0
 	github.com/neo4j/neo4j-go-driver/v6 v6.0.0
 	github.com/stretchr/testify v1.11.1
@@ -59,6 +60,7 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/ckaznocha/intrange v0.3.1 // indirect
+	github.com/creachadair/mds v0.26.1 // indirect
 	github.com/curioswitch/go-reassign v0.3.0 // indirect
 	github.com/daixiang0/gci v0.13.7 // indirect
 	github.com/dave/dst v0.27.3 // indirect

@@ -1,0 +1,10 @@
+schema "混合Content"
+
+// コメント with 日本語
+type MixedType {
+	ascii String required
+	// 日本語フィールド
+	jpField Integer
+	// emoji🎉field
+	emojiField Float
+}

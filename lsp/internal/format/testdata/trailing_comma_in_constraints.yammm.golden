@@ -1,0 +1,5 @@
+schema "test"
+
+type T {
+	status Enum["a", "b", "c",]
+}

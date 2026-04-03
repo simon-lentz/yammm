@@ -1,0 +1,30 @@
+schema "expressions"
+
+type RuleSet {
+	name       String required
+	name_norm  String required
+	start_date Date required
+	end_date   Date
+	confidence Float[0.0, 1.0]
+	count      Integer[1, _]
+	active     Boolean required
+
+	*-> ITEMS (many) LineItem
+
+	! "name_not_empty" name != ""
+	! "norm_not_empty" name_norm -> Len > 0
+	! "dates_valid" end_date == nil || end_date > start_date
+	! "confidence_valid" confidence >= 0.0 && confidence <= 1.0
+	! "all_positive_qty" ITEMS -> All |$item| { $item.quantity > 0 }
+	! "has_items" ITEMS -> Len > 0
+	! "pipeline_check" name -> Upper -> Trim != ""
+	! "replace_check" name -> Replace("old", "new") != ""
+	! "not_disabled" !active || confidence > 0.5
+	! "grouping" (count > 0) && (confidence < 1.0)
+	! "ternary_check" active ? { confidence : 0.0 } > 0.0
+}
+
+part type LineItem {
+	quantity Integer[1, _] required
+	price    Float[0.0, _] required
+}

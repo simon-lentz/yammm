@@ -1,0 +1,20 @@
+# IDE and test directories
+.vscode/**
+.vscode-test/**
+
+# Source files (we bundle instead)
+src/**
+tsconfig.json
+**/*.ts
+
+# Source maps and declaration files
+**/*.map
+**/*.d.ts
+
+# Dependencies (bundled via esbuild)
+node_modules/**
+
+# Development files
+.gitignore
+.eslintrc.json
+esbuild.mjs

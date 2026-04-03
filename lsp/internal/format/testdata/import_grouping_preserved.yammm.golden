@@ -1,0 +1,9 @@
+schema "test"
+
+import "./a" as a
+
+import "./b" as b
+
+type T {
+	name String
+}

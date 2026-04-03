@@ -1,0 +1,8 @@
+schema "test"
+
+import "./path" as alias
+import "./other" as other
+
+type T {
+	name String
+}

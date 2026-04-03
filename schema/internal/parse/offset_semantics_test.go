@@ -21,7 +21,7 @@ import (
 
 	"github.com/antlr4-go/antlr/v4"
 
-	"github.com/simon-lentz/yammm/grammar"
+	"github.com/simon-lentz/yammm/internal/grammar"
 )
 
 // TestInputStreamRuneBasedIndexing verifies that InputStream.Size() returns

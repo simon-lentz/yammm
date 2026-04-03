@@ -1,0 +1,7 @@
+schema "test"
+
+/* Entity doc */
+type T {
+	/* Field doc */
+	name String
+}

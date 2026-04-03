@@ -1,0 +1,9 @@
+schema "test"
+
+type RuleSet {
+	! "all_positive" ITEMS -> All |$item| { $item.qty > 0 }
+	! "adult_status" age >= 18 ? { "adult" : "minor" } == category
+	! "must_be_enabled" !disabled && active
+	! "grouping" (a > 0) && (b < 100)
+	! "replace" items -> Replace("old", "new")
+}

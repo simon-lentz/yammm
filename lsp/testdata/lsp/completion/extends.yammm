@@ -1,0 +1,44 @@
+// Test fixture for extends clause completion context.
+// Tests: completion suggestions after "extends" keyword.
+//
+// Expected completions after "extends":
+// - Local type names (Entity, BaseModel, Auditable)
+// - Imported types as "alias.Type" (e.g., base.BaseEntity)
+//
+// Test positions (marked with cursor comments):
+// - Line 22: After "extends " with partial input
+// - Line 27: After "extends " for imported type
+schema "extends_completion"
+
+import "./base" as base
+
+// Base types for extends completion
+abstract type Entity {
+	id String primary
+}
+
+abstract type Auditable extends Entity {
+	// CURSOR: Position after "extends E" (partial)
+	// Expected: Entity (local type matching prefix)
+	createdAt String
+	updatedAt String
+}
+
+type Product extends base.BaseEntity {
+	// CURSOR: Position after "extends base." (qualified)
+	// Expected: base.BaseEntity, base.Auditable
+	sku String
+	name String
+}
+
+// Types available for extends completion
+type BaseModel {
+	version Integer
+}
+
+type Customer extends Entity {
+	// CURSOR: Position after "extends "
+	// Expected: Entity, Auditable, BaseModel, base.BaseEntity, base.Auditable
+	name String
+	email String
+}

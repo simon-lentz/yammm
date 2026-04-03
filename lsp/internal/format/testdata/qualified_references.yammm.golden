@@ -1,0 +1,8 @@
+schema "test"
+
+import "./other" as other
+
+type T {
+	--> REL (one) other.Target
+	name other.CustomType
+}

@@ -4,9 +4,9 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/grammar"
+	"github.com/simon-lentz/yammm/internal/grammar"
+	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/source"
 )
 
 // Compile compiles an ANTLR expression context into an Expression AST.

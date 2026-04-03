@@ -36,3 +36,11 @@ go.work.sum
 
 # antlr4 dep
 *.jar
+
+# VS Code extension build artifacts
+lsp/editors/vscode/out/
+lsp/editors/vscode/node_modules/
+lsp/editors/vscode/*.vsix
+
+# LSP binary build artifacts
+bin/

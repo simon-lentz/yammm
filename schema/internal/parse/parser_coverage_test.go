@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/internal/parse"
-	"github.com/simon-lentz/yammm/source"
 )
 
 // parseSchema is a helper to parse a schema and return the model and diagnostics.

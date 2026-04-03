@@ -1,0 +1,6 @@
+schema "test"
+
+import "./other" as other
+type Person {
+	name String
+}

@@ -1,0 +1,20 @@
+// Test fixture for completion testing.
+// Tests: type references, property types, extends clause.
+schema "completion"
+
+import "./base" as base
+
+type Person {
+	name String
+	email String
+}
+
+type Employee extends Person {
+	department String
+	manager String
+}
+
+type Order {
+	// Test completion after typing "Pe" for Person
+	*-> CUSTOMER (one)
+}

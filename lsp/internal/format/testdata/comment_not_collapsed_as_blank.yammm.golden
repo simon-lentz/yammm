@@ -1,0 +1,10 @@
+schema "test"
+
+type Person {
+	name String
+}
+
+// This is a comment between types
+type Company {
+	title String
+}

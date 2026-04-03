@@ -1,0 +1,13 @@
+schema "test"
+
+abstract type Base {
+	id String primary
+}
+
+abstract type Auditable {
+	ts Timestamp required
+}
+
+type Concrete extends Base, Auditable {
+	name String required
+}
