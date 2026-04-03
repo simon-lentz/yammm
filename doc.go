@@ -18,9 +18,6 @@
 //	  - instance: Instance validation and constraint checking
 //	  - graph: Instance graph construction and integrity checking
 //
-//	Grammar tier:
-//	  - grammar: ANTLR4-generated lexer, parser, and visitor
-//
 //	Adapter tier:
 //	  - adapter/json: JSON parsing with location tracking
 //
@@ -83,6 +80,5 @@
 //   - [github.com/simon-lentz/yammm/schema/build]: Programmatic schema building
 //   - [github.com/simon-lentz/yammm/instance]: Instance validation
 //   - [github.com/simon-lentz/yammm/graph]: Instance graph management
-//   - [github.com/simon-lentz/yammm/grammar]: ANTLR4-generated lexer/parser
 //   - [github.com/simon-lentz/yammm/adapter/json]: JSON adapter
 package yammm

@@ -14,24 +14,32 @@ import (
 )
 
 // NodeQuery represents a parameterized Cypher query for a single node upsert.
+//
+// Construct via [Adapter.NodeQueryFor]; do not create directly.
 type NodeQuery struct {
 	Statement string         // Cypher MERGE ... SET statement
 	Params    map[string]any // Query parameters
 }
 
 // BatchNodeQuery represents an UNWIND-based batch node upsert.
+//
+// Construct via [Adapter.BatchNodeQueries]; do not create directly.
 type BatchNodeQuery struct {
 	Statement string         // Cypher UNWIND $rows AS row MERGE ... SET statement
 	Params    map[string]any // Contains "rows" key with []map[string]any value
 }
 
 // EdgeQuery represents a parameterized Cypher query for a relationship merge.
+//
+// Construct via [Adapter.EdgeQueryFor]; do not create directly.
 type EdgeQuery struct {
 	Statement string         // Cypher MATCH ... MERGE ... SET statement
 	Params    map[string]any // Query parameters
 }
 
 // BatchEdgeQuery represents an UNWIND-based batch relationship merge.
+//
+// Construct via [Adapter.BatchEdgeQueries]; do not create directly.
 type BatchEdgeQuery struct {
 	Statement    string         // Cypher UNWIND $rows AS row MATCH ... MERGE ... SET statement
 	Params       map[string]any // Contains "rows" key with []map[string]any value
