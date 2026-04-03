@@ -1,0 +1,12 @@
+schema "test"
+
+type T {
+	a String[1, 255]
+	b Integer[0, _]
+	c Float[0.0, 100.0]
+	d Enum["x", "y", "z"]
+	e Pattern["^[a-z]+$"]
+	f Timestamp["2006-01-02"]
+	g Vector[128]
+	h List<String>[1, 5]
+}

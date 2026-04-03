@@ -1,0 +1,45 @@
+// Test fixture for type body completion context.
+// Tests: completion suggestions inside type declarations.
+//
+// Expected completions inside type body:
+// - Property name + type snippets
+// - "-->" association snippet
+// - "*->" composition snippet
+// - "!" invariant snippet
+// - Built-in types: String, Integer, Float, Boolean, UUID, Date, Timestamp, Vector
+// - Property modifiers: primary, required
+//
+// Test positions (marked with cursor comments):
+// - Line 20: Empty line inside type body
+// - Line 26: After property, before relation
+// - Line 32: Property type position (after colon)
+schema "type_body"
+
+type Product {
+	sku String primary
+	// CURSOR: Inside type body, start of line
+	// Expected: property snippet, -->, *->, !
+	name String required
+}
+
+type Order {
+	orderId String primary
+	// CURSOR: Between property and relation
+	// Expected: property snippet, -->, *->, !
+	--> CUSTOMER (one) Customer
+}
+
+type Customer {
+	// CURSOR: Property type position (partial: "id Str")
+	// Expected: String, Integer, Float, Boolean, UUID, Date, Timestamp, Vector
+	id String primary
+	email String required
+}
+
+type LineItem {
+	quantity Integer required
+	unitPrice Integer
+	// CURSOR: Invariant position
+	// Expected: ! snippet
+	! "quantity must be positive" quantity > 0
+}

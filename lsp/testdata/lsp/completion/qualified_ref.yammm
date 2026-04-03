@@ -1,0 +1,43 @@
+// Test fixture for qualified reference completion context.
+// Tests: completion after typing "alias." for imported types.
+//
+// Expected completions after "alias.":
+// - Types exported by the imported schema
+// - Trigger character "." should activate completion
+//
+// Test positions (marked with cursor comments):
+// - Line 20: After "base." in relation target
+// - Line 25: After "base." in extends clause
+// - Line 30: After partial "base.Base" (filtered)
+schema "qualified_ref"
+
+import "./base" as base
+
+type Order {
+	orderId String primary
+	// CURSOR: After "base." in composition target
+	// Expected: base.BaseEntity, base.Auditable
+	*-> AUDIT (one) base.Auditable
+}
+
+type Product extends base.BaseEntity {
+	// CURSOR: After "base." in extends clause
+	// Expected: base.BaseEntity, base.Auditable
+	sku String
+	name String
+}
+
+type Invoice {
+	// CURSOR: After "base.Base" (partial, filtered)
+	// Expected: base.BaseEntity (filtered by prefix "Base")
+	--> ENTITY (one) base.BaseEntity
+	amount Integer
+}
+
+// Test with multiple imports
+type Shipment {
+	trackingId String primary
+	// Relation targets can use qualified refs
+	--> PRODUCT (one) Product
+	--> AUDIT (one) base.Auditable
+}

@@ -1,0 +1,20 @@
+schema "vehicles"
+
+
+import "./parts" as parts
+
+
+// Abstract vehicle type
+abstract type Vehicle {
+	vin String[17, 17] primary
+
+
+	--> MANUFACTURER (one) Manufacturer
+}
+
+
+// Concrete car type
+type Car extends Vehicle {
+	model String required
+	*-> WHEELS (many) parts.Wheel
+}

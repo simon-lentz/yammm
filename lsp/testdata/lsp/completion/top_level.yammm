@@ -1,0 +1,28 @@
+// Test fixture for top-level completion context.
+// Tests: completion suggestions at schema top-level positions.
+//
+// Expected completions at top-level:
+// - "import" keyword
+// - "type" keyword
+// - "abstract type" keywords
+// - "part type" keywords
+//
+// Test positions (marked with cursor comments):
+// - Line 16: After schema declaration, before any content
+// - Line 20: Between type declarations
+schema "top_level"
+
+// CURSOR: Top-level position for keyword completion
+// Expected: import, type, abstract type, part type
+
+type Person {
+	name String
+}
+
+// CURSOR: Between declarations
+// Expected: import, type, abstract type, part type
+
+type Address {
+	street String
+	city String
+}

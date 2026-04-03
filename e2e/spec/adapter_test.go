@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
+	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/source"
 )
 
 // =============================================================================

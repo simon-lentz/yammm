@@ -1,0 +1,7 @@
+schema "test"
+
+type T {
+	--> REL  (_:many) Target
+	--> REL2 (_:one) Target
+	*-> REL3 (one:many) Target
+}

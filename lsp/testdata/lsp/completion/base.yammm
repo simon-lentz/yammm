@@ -1,0 +1,13 @@
+// Test fixture for completion testing (base module).
+// Provides types for import completion testing.
+schema "base"
+
+type BaseEntity {
+	id String primary
+	createdAt String
+}
+
+type Auditable extends BaseEntity {
+	updatedAt String
+	updatedBy String
+}

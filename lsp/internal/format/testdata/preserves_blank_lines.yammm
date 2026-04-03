@@ -1,0 +1,13 @@
+schema "test"
+
+
+
+type Person {
+	name String
+}
+
+
+
+type Company {
+	title String
+}

@@ -1,0 +1,38 @@
+
+
+
+schema "test"
+
+
+
+import "./a" as a
+import "./b" as b
+
+
+
+// Comment
+abstract type Base {
+
+
+
+	id String primary
+
+
+
+	name String required
+
+
+
+}
+
+
+
+type Concrete extends Base {
+	--> REL (one) Target {
+
+
+		weight Float
+
+
+	}
+}

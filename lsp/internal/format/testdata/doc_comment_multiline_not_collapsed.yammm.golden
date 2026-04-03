@@ -1,0 +1,8 @@
+schema "test"
+
+/* This is a
+multiline doc
+comment */
+type Person {
+	name String
+}

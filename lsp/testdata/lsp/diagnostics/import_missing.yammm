@@ -1,0 +1,9 @@
+// Test fixture for missing import file diagnostics.
+// Expected: E_IMPORT_NOT_FOUND error on line 4.
+schema "import_missing"
+
+import "./nonexistent" as missing
+
+type Foo {
+	bar missing.Bar
+}

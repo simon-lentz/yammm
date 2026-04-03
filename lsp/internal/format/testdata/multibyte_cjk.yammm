@@ -1,0 +1,7 @@
+schema "日本語テスト"
+
+type User {
+	name String required
+	// 年齢 means age in Japanese
+	age Integer
+}

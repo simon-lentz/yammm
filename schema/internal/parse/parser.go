@@ -9,7 +9,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/grammar"
+	"github.com/simon-lentz/yammm/internal/grammar"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"

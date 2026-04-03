@@ -1,0 +1,7 @@
+schema "test"
+
+type Person {
+	name String
+	age  Integer
+	--> EMPLOYER (one) Company
+}

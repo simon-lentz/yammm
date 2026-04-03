@@ -1,0 +1,65 @@
+># Grammar Injection Test
+#^ text.html.markdown markup.heading.markdown heading.1.markdown punctuation.definition.heading.markdown
+# ^ text.html.markdown markup.heading.markdown heading.1.markdown
+#  ^^^^^^^^^^^^^^^^^^^^^^ text.html.markdown markup.heading.markdown heading.1.markdown entity.name.section.markdown
+>
+>Prose before the code block.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ text.html.markdown meta.paragraph.markdown
+>
+>```yammm
+#^^^ text.html.markdown punctuation.definition.markdown
+#   ^^^^^ text.html.markdown fenced_code.block.language.markdown
+>schema "injection_test"
+#^^^^^^ text.html.markdown meta.embedded.block.yammm keyword.control.schema.yammm
+#      ^ text.html.markdown meta.embedded.block.yammm
+#       ^^^^^^^^^^^^^^^^ text.html.markdown meta.embedded.block.yammm string.quoted.yammm
+>
+>type Widget {
+#^^^^ text.html.markdown meta.embedded.block.yammm keyword.declaration.type.yammm
+#    ^ text.html.markdown meta.embedded.block.yammm
+#     ^^^^^^ text.html.markdown meta.embedded.block.yammm entity.name.type.yammm
+#           ^ text.html.markdown meta.embedded.block.yammm
+#            ^ text.html.markdown meta.embedded.block.yammm punctuation.definition.block.begin.yammm
+>    id String primary
+#^^^^ text.html.markdown meta.embedded.block.yammm
+#    ^^ text.html.markdown meta.embedded.block.yammm variable.other.property.yammm
+#      ^ text.html.markdown meta.embedded.block.yammm
+#       ^^^^^^ text.html.markdown meta.embedded.block.yammm support.type.yammm
+#             ^ text.html.markdown meta.embedded.block.yammm
+#              ^^^^^^^ text.html.markdown meta.embedded.block.yammm storage.modifier.yammm
+>    label String required
+#^^^^ text.html.markdown meta.embedded.block.yammm
+#    ^^^^^ text.html.markdown meta.embedded.block.yammm variable.other.property.yammm
+#         ^ text.html.markdown meta.embedded.block.yammm
+#          ^^^^^^ text.html.markdown meta.embedded.block.yammm support.type.yammm
+#                ^ text.html.markdown meta.embedded.block.yammm
+#                 ^^^^^^^^ text.html.markdown meta.embedded.block.yammm storage.modifier.yammm
+>}
+#^ text.html.markdown meta.embedded.block.yammm punctuation.definition.block.end.yammm
+>```
+#^^^ text.html.markdown punctuation.definition.markdown
+>
+>Prose after the code block.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^ text.html.markdown meta.paragraph.markdown
+>
+>~~~yammm
+#^^^ text.html.markdown punctuation.definition.markdown
+#   ^^^^^ text.html.markdown fenced_code.block.language.markdown
+>type Gadget {
+#^^^^ text.html.markdown meta.embedded.block.yammm keyword.declaration.type.yammm
+#    ^ text.html.markdown meta.embedded.block.yammm
+#     ^^^^^^ text.html.markdown meta.embedded.block.yammm entity.name.type.yammm
+#           ^ text.html.markdown meta.embedded.block.yammm
+#            ^ text.html.markdown meta.embedded.block.yammm punctuation.definition.block.begin.yammm
+>    name String primary
+#^^^^ text.html.markdown meta.embedded.block.yammm
+#    ^^^^ text.html.markdown meta.embedded.block.yammm variable.other.property.yammm
+#        ^ text.html.markdown meta.embedded.block.yammm
+#         ^^^^^^ text.html.markdown meta.embedded.block.yammm support.type.yammm
+#               ^ text.html.markdown meta.embedded.block.yammm
+#                ^^^^^^^ text.html.markdown meta.embedded.block.yammm storage.modifier.yammm
+>}
+#^ text.html.markdown meta.embedded.block.yammm punctuation.definition.block.end.yammm
+>~~~
+#^^^ text.html.markdown punctuation.definition.markdown
+>

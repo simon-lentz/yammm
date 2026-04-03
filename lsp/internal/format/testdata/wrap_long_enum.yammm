@@ -1,0 +1,5 @@
+schema "test"
+
+type T {
+	status Enum["pending_review", "approved", "rejected", "needs_revision", "escalated", "archived", "deleted"] required
+}

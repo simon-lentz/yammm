@@ -1,0 +1,6 @@
+schema "test"
+
+type   Person{
+    name String  required
+    ! "must_be_enabled" !disabled && active
+}

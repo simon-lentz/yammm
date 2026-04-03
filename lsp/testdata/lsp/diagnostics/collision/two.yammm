@@ -1,0 +1,16 @@
+// Test fixture for type collision diagnostics (file 2 of 2).
+// Expected: E_TYPE_COLLISION error when both one.yammm and two.yammm
+// are in the same import closure and both define "Product".
+schema "collision_two"
+
+// This type collides with Product in one.yammm
+type Product {
+	id String primary
+	title String
+	description String
+}
+
+type Inventory {
+	warehouse String
+	*-> PRODUCTS (many) Product
+}

@@ -1,0 +1,7 @@
+schema "test"
+
+type T {
+	name String required
+	status Enum["pending_review", "approved", "rejected", "needs_revision", "escalated", "archived", "deleted"] required
+	age Integer
+}

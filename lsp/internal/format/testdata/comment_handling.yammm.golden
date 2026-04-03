@@ -1,0 +1,9 @@
+schema "test"
+
+/* Doc
+block
+*/
+type Person {
+	// standalone
+	name String // inline
+}

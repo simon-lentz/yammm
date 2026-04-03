@@ -1,0 +1,10 @@
+schema "test"
+
+type T {
+	--> REL (one) Target {
+
+		weight Float required
+		score Integer
+
+	}
+}

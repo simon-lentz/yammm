@@ -1,0 +1,5 @@
+schema "sibling"
+
+type Sibling {
+	name String required
+}
