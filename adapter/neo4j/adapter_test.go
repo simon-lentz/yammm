@@ -23,8 +23,8 @@ func TestAdapter_DefaultConfig(t *testing.T) {
 	// edition=Enterprise: generate NOT NULL constraints
 	s := loadSchema(t, "basic.yammm")
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 	hasNotNull := false
 	hasType := false
@@ -66,8 +66,8 @@ func TestAdapter_FullPipeline_BasicSchema(t *testing.T) {
 
 	// Generate constraints.
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if len(stmts) == 0 {
 		t.Fatal("expected non-empty constraints")
@@ -75,8 +75,8 @@ func TestAdapter_FullPipeline_BasicSchema(t *testing.T) {
 
 	// Generate shapes.
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	// Verify shapes match constraint labels.
@@ -101,13 +101,13 @@ func TestAdapter_FullPipeline_WithWrite(t *testing.T) {
 
 	// Generate constraints + shapes.
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	// Build graph with instances.
@@ -161,8 +161,8 @@ func TestAdapter_CommunityEdition_ReducedOutput(t *testing.T) {
 
 	// Constraints: only UNIQUE.
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 	for _, stmt := range stmts {
 		if !strings.Contains(stmt, "IS UNIQUE") {
@@ -172,8 +172,8 @@ func TestAdapter_CommunityEdition_ReducedOutput(t *testing.T) {
 
 	// Shapes: unaffected by edition.
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if _, ok := shape.Types["Entity"]; !ok {
 		t.Error("shapes should be unaffected by edition")
@@ -195,8 +195,8 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 
 	// Constraints use same label.
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 	for _, stmt := range stmts {
 		if strings.Contains(stmt, "basic_test__Entity") {
@@ -216,8 +216,8 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 
 	// Shape uses same label.
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if ns, ok := shape.Types["Entity"]; !ok || ns.Label != expectedLabel {
 		t.Errorf("shape label = %q; want %q", shape.Types["Entity"].Label, expectedLabel)
@@ -254,8 +254,8 @@ func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 
 	// Constraints use same label.
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 	constraintHasLabel := false
 	for _, stmt := range stmts {
@@ -270,8 +270,8 @@ func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 
 	// Shape uses same label.
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if ns, ok := shape.Types["Entity"]; !ok || ns.Label != expectedLabel {
 		t.Errorf("shape label = %q; want %q", shape.Types["Entity"].Label, expectedLabel)
@@ -299,13 +299,13 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	structured, result := a.ConstraintsStructured(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	// Build constraint label set.
@@ -370,8 +370,8 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 
 	// Pre-build immutable inputs for write operations.
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
@@ -387,14 +387,16 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 		wg.Add(5)
 		go func() {
 			defer wg.Done()
-			if _, result := a.ConstraintsForSchema(s); !result.OK() {
-				errs <- fmt.Errorf("constraints: %v", result.Messages())
+			_, result := a.ConstraintsForSchema(s)
+			if err := result.Err(); err != nil {
+				errs <- fmt.Errorf("constraints: %w", err)
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			if _, result := a.ShapeForSchema(s); !result.OK() {
-				errs <- fmt.Errorf("shape: %v", result.Messages())
+			_, result := a.ShapeForSchema(s)
+			if err := result.Err(); err != nil {
+				errs <- fmt.Errorf("shape: %w", err)
 			}
 		}()
 		go func() {

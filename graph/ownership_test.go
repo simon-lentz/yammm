@@ -124,8 +124,8 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AddComposed error: %v", err)
 		}
-		if !result.OK() {
-			t.Errorf("AddComposed should succeed: %s", result.String())
+		if err := result.Err(); err != nil {
+			t.Errorf("AddComposed should succeed: %v", err)
 		}
 	}
 

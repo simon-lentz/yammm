@@ -2,6 +2,7 @@ package immutable
 
 import (
 	"math"
+	"sync"
 	"testing"
 )
 
@@ -855,5 +856,620 @@ func TestWrap_NilInSlice(t *testing.T) {
 				t.Errorf("expected nil at index 4, got %v", v.Unwrap())
 			}
 		})
+	}
+}
+
+// This file contains cross-cutting tests for ownership semantics.
+//
+// The Wrap family implements whole-graph ownership transfer:
+// - After calling Wrap(v), the caller MUST NOT retain or use any reference
+//   to v or any mutable value reachable from v
+// - Mutation after Wrap is undefined behavior (not asserted in tests)
+//
+// The WithClone option performs a deep clone before wrapping:
+// - Safe with shared references
+// - Caller may freely retain and mutate the original value after cloning
+
+func TestOwnership_WithClone_IsolatesNestedMaps(t *testing.T) {
+	// Create a deeply nested structure
+	level3 := map[string]any{"key": "original"}
+	level2 := map[string]any{"level3": level3}
+	level1 := map[string]any{"level2": level2}
+	outer := map[string]any{"level1": level1}
+
+	// Clone wrap the structure
+	wrapped := Wrap(outer, WithClone())
+
+	// Mutate all levels of the original
+	level3["key"] = "mutated"
+	level3["new"] = "added"
+	level2["newKey"] = "newValue"
+	level1["another"] = "test"
+	outer["topNew"] = "topValue"
+
+	// Verify wrapped structure is completely isolated
+	m, ok := wrapped.Map()
+	if !ok {
+		t.Fatal("expected Map")
+	}
+
+	// Check outer level
+	if _, ok := m.Get("topNew"); ok {
+		t.Error("outer mutation leaked to wrapped")
+	}
+
+	// Navigate to level3
+	l1Val, _ := m.Get("level1")
+	l1Map, _ := l1Val.Map()
+	l2Val, _ := l1Map.Get("level2")
+	l2Map, _ := l2Val.Map()
+	l3Val, _ := l2Map.Get("level3")
+	l3Map, _ := l3Val.Map()
+
+	// Check level3
+	keyVal, ok := l3Map.Get("key")
+	if !ok {
+		t.Fatal("expected key in level3")
+	}
+	if s, _ := keyVal.String(); s != "original" {
+		t.Errorf("expected 'original', got %q", s)
+	}
+	if _, ok := l3Map.Get("new"); ok {
+		t.Error("level3 mutation leaked to wrapped")
+	}
+}
+
+func TestOwnership_WithClone_IsolatesNestedSlices(t *testing.T) {
+	// Create a nested slice structure
+	inner := []any{"a", "b", "c"}
+	outer := []any{inner, "other"}
+
+	// Clone wrap the structure
+	wrapped := WrapSlice(outer, WithClone())
+
+	// Mutate original
+	inner[0] = "mutated"
+	outer[1] = "changed"
+
+	// Verify wrapped structure is isolated
+	if wrapped.Len() != 2 {
+		t.Errorf("expected length 2, got %d", wrapped.Len())
+	}
+
+	// Check first element (the inner slice)
+	firstVal := wrapped.Get(0)
+	innerSlice, ok := firstVal.Slice()
+	if !ok {
+		t.Fatal("expected first element to be Slice")
+	}
+
+	firstElem := innerSlice.Get(0)
+	if s, _ := firstElem.String(); s != "a" {
+		t.Errorf("expected 'a', got %q", s)
+	}
+
+	// Check second element
+	secondVal := wrapped.Get(1)
+	if s, _ := secondVal.String(); s != "other" {
+		t.Errorf("expected 'other', got %q", s)
+	}
+}
+
+func TestOwnership_WithClone_IsolatesMixedStructures(t *testing.T) {
+	// Create a mixed structure with maps and slices
+	inner := map[string]any{
+		"list":  []any{1, 2, 3},
+		"value": "test",
+	}
+	outer := []any{inner, map[string]any{"other": "data"}}
+
+	// Clone wrap the structure
+	wrapped := WrapSlice(outer, WithClone())
+
+	// Mutate original structures
+	inner["value"] = "mutated"
+	innerList := inner["list"].([]any)
+	innerList[0] = 999
+
+	// Verify wrapped structure is isolated
+	firstVal := wrapped.Get(0)
+	firstMap, ok := firstVal.Map()
+	if !ok {
+		t.Fatal("expected first element to be Map")
+	}
+
+	// Check value
+	valVal, _ := firstMap.Get("value")
+	if s, _ := valVal.String(); s != "test" {
+		t.Errorf("expected 'test', got %q", s)
+	}
+
+	// Check list
+	listVal, _ := firstMap.Get("list")
+	listSlice, _ := listVal.Slice()
+	firstNum := listSlice.Get(0)
+	if n, _ := firstNum.Int(); n != 1 {
+		t.Errorf("expected 1, got %d", n)
+	}
+}
+
+func TestOwnership_MapClone_Independence(t *testing.T) {
+	// Test that Clone() returns an independent mutable copy
+	original := map[string]any{
+		"nested": map[string]any{"key": "value"},
+	}
+
+	wrapped := WrapMap(original)
+	cloned := wrapped.Clone()
+
+	// Mutate the clone
+	nested := cloned["nested"].(map[string]any)
+	nested["key"] = "modified"
+	cloned["newKey"] = "newValue"
+
+	// Verify original wrapped structure is unchanged
+	nestedVal, _ := wrapped.Get("nested")
+	nestedMap, _ := nestedVal.Map()
+	keyVal, _ := nestedMap.Get("key")
+	if s, _ := keyVal.String(); s != "value" {
+		t.Error("clone modification affected wrapped structure")
+	}
+	if _, ok := wrapped.Get("newKey"); ok {
+		t.Error("clone addition affected wrapped structure")
+	}
+}
+
+func TestOwnership_SliceClone_Independence(t *testing.T) {
+	// Test that Clone() returns an independent mutable copy
+	original := []any{
+		map[string]any{"key": "value"},
+		"string",
+	}
+
+	wrapped := WrapSlice(original)
+	cloned := wrapped.Clone()
+
+	// Mutate the clone
+	nested := cloned[0].(map[string]any)
+	nested["key"] = "modified"
+	cloned[1] = "changed"
+
+	// Verify original wrapped structure is unchanged
+	firstVal := wrapped.Get(0)
+	firstMap, _ := firstVal.Map()
+	keyVal, _ := firstMap.Get("key")
+	if s, _ := keyVal.String(); s != "value" {
+		t.Error("clone modification affected wrapped structure")
+	}
+
+	secondVal := wrapped.Get(1)
+	if s, _ := secondVal.String(); s != "string" {
+		t.Error("clone modification affected wrapped structure")
+	}
+}
+
+func TestOwnership_PropertiesClone_Independence(t *testing.T) {
+	original := map[string]any{
+		"prop": map[string]any{"nested": "data"},
+	}
+
+	wrapped := WrapProperties(original)
+	cloned := wrapped.Clone()
+
+	// Mutate the clone
+	nested := cloned["prop"].(map[string]any)
+	nested["nested"] = "modified"
+
+	// Verify original wrapped structure is unchanged
+	propVal, _ := wrapped.Get("prop")
+	propMap, _ := propVal.Map()
+	nestedVal, _ := propMap.Get("nested")
+	if s, _ := nestedVal.String(); s != "data" {
+		t.Error("clone modification affected wrapped properties")
+	}
+}
+
+func TestOwnership_KeyClone_Independence(t *testing.T) {
+	original := []any{"component", 123}
+
+	wrapped := WrapKey(original)
+	cloned := wrapped.Clone()
+
+	// Mutate the clone
+	cloned[0] = "modified"
+
+	// Verify original wrapped structure is unchanged
+	firstVal := wrapped.Get(0)
+	if s, _ := firstVal.String(); s != "component" {
+		t.Error("clone modification affected wrapped key")
+	}
+}
+
+func TestOwnership_DeeplyNestedStructure(t *testing.T) {
+	// Create a 5-level deep structure
+	level5 := map[string]any{"deepValue": "leaf"}
+	level4 := map[string]any{"level5": level5}
+	level3 := []any{level4}
+	level2 := map[string]any{"level3": level3}
+	level1 := []any{level2}
+	root := map[string]any{"level1": level1}
+
+	// Clone wrap
+	wrapped := WrapMap(root, WithClone())
+
+	// Mutate all levels
+	level5["deepValue"] = "mutated"
+	level4["new4"] = "added"
+	level3[0] = "replaced"
+	level2["new2"] = "added"
+	level1[0] = "replaced"
+	root["new0"] = "added"
+
+	// Navigate and verify isolation
+	l1Val, _ := wrapped.Get("level1")
+	l1Slice, _ := l1Val.Slice()
+	l2Val := l1Slice.Get(0)
+	l2Map, _ := l2Val.Map()
+	l3Val, _ := l2Map.Get("level3")
+	l3Slice, _ := l3Val.Slice()
+	l4Val := l3Slice.Get(0)
+	l4Map, _ := l4Val.Map()
+	l5Val, _ := l4Map.Get("level5")
+	l5Map, _ := l5Val.Map()
+	deepVal, _ := l5Map.Get("deepValue")
+
+	if s, _ := deepVal.String(); s != "leaf" {
+		t.Errorf("expected 'leaf', got %q", s)
+	}
+}
+
+// Document: Mutation after Wrap is undefined behavior.
+// This test demonstrates the ownership transfer contract but does NOT assert
+// on the behavior after mutation, since it is undefined.
+func TestOwnership_WrapOwnershipDocumentation(t *testing.T) {
+	// This test serves as documentation for the ownership contract.
+	//
+	// After calling Wrap(v), the caller transfers ownership of v and all
+	// transitively reachable mutable values to the immutable wrapper.
+	// The caller MUST NOT retain or use any reference to v after this point.
+	//
+	// If the caller violates this contract by mutating v after Wrap, the
+	// behavior is undefined. The wrapped structure may or may not reflect
+	// the mutations - this is implementation-dependent and should not be
+	// relied upon.
+	//
+	// To safely work with values that may be shared or mutated after wrapping,
+	// use the WithClone option instead.
+
+	original := map[string]any{"key": "value"}
+
+	// After this call, 'original' ownership is transferred
+	_ = WrapMap(original)
+
+	// BAD: Do not do this! Mutating 'original' after Wrap is undefined behavior.
+	// original["key"] = "mutated" // UNDEFINED BEHAVIOR
+
+	// GOOD: Use WithClone if you need to retain and mutate the original
+	retained := map[string]any{"key": "value"}
+	wrapped := WrapMap(retained, WithClone())
+	retained["key"] = "mutated" // Safe: wrapped is isolated
+
+	keyVal, _ := wrapped.Get("key")
+	if s, _ := keyVal.String(); s != "value" {
+		t.Error("WithClone should isolate from mutations")
+	}
+}
+
+// This file contains concurrent read safety tests.
+//
+// All immutable types are safe for concurrent read access.
+// The underlying data structures are never modified after construction.
+
+func TestConcurrent_Value_Read(t *testing.T) {
+	input := map[string]any{
+		"name":  "Alice",
+		"age":   30,
+		"items": []any{1, 2, 3},
+	}
+
+	v := Wrap(input)
+
+	var wg sync.WaitGroup
+	const goroutines = 100
+	const iterations = 1000
+
+	for range goroutines {
+		wg.Go(func() {
+			for range iterations {
+				// Read operations
+				_ = v.Unwrap()
+				_ = v.IsNil()
+				_, _ = v.Bool()
+				_, _ = v.Int()
+				_, _ = v.Float()
+				_, _ = v.String()
+				_, _ = v.Map()
+				_, _ = v.Slice()
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrent_Map_Read(t *testing.T) {
+	input := map[string]any{
+		"a": 1,
+		"b": 2,
+		"c": map[string]any{"nested": "value"},
+	}
+
+	m := WrapMap(input)
+
+	var wg sync.WaitGroup
+	const goroutines = 100
+	const iterations = 1000
+
+	for range goroutines {
+		wg.Go(func() {
+			for range iterations {
+				// Read operations
+				_ = m.Len()
+				_, _ = m.Get("a")
+				_, _ = m.Get("nonexistent")
+
+				// Iterator operations
+				for range m.Keys() {
+					// Just iterate
+				}
+
+				for range m.Range() {
+					// Just iterate
+				}
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrent_Slice_Read(t *testing.T) {
+	input := []any{1, 2, 3, map[string]any{"key": "value"}, []any{"a", "b"}}
+
+	s := WrapSlice(input)
+
+	var wg sync.WaitGroup
+	const goroutines = 100
+	const iterations = 1000
+
+	for range goroutines {
+		wg.Go(func() {
+			for range iterations {
+				// Read operations
+				_ = s.Len()
+				_ = s.Get(0)
+				_ = s.Get(1)
+
+				// Iterator operations
+				for range s.Iter() {
+					// Just iterate
+				}
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrent_Properties_Read(t *testing.T) {
+	input := map[string]any{
+		"Name":    "Alice",
+		"AGE":     30,
+		"email":   "alice@example.com",
+		"Address": map[string]any{"city": "NYC"},
+	}
+
+	p := WrapProperties(input)
+
+	var wg sync.WaitGroup
+	const goroutines = 100
+	const iterations = 1000
+
+	for range goroutines {
+		wg.Go(func() {
+			for range iterations {
+				// Read operations
+				_ = p.Len()
+				_, _ = p.Get("Name")
+				_, _ = p.GetFold("name")
+				_, _ = p.GetFold("NAME")
+				_, _ = p.GetFold("nonexistent")
+
+				// Iterator operations
+				for range p.Keys() {
+					// Just iterate
+				}
+
+				for range p.SortedKeys() {
+					// Just iterate
+				}
+
+				for range p.Range() {
+					// Just iterate
+				}
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrent_Key_Read(t *testing.T) {
+	input := []any{"us", 12345, "suffix"}
+
+	k := WrapKey(input)
+
+	var wg sync.WaitGroup
+	const goroutines = 100
+	const iterations = 1000
+
+	for range goroutines {
+		wg.Go(func() {
+			for range iterations {
+				// Read operations
+				_ = k.Len()
+				_ = k.Get(0)
+				_ = k.Get(1)
+				_ = k.String()
+				_, _ = k.SingleString()
+				_, _ = k.SingleInt()
+
+				// Iterator operations
+				for range k.Iter() {
+					// Just iterate
+				}
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrent_Clone_Safety(t *testing.T) {
+	// Test that Clone() can be called concurrently
+	input := map[string]any{
+		"nested": map[string]any{"key": "value"},
+		"items":  []any{1, 2, 3},
+	}
+
+	m := WrapMap(input)
+
+	var wg sync.WaitGroup
+	const goroutines = 100
+
+	for range goroutines {
+		wg.Go(func() {
+			cloned := m.Clone()
+			// Mutate the clone (safe, it's independent)
+			nested := cloned["nested"].(map[string]any)
+			nested["new"] = "added"
+		})
+	}
+
+	wg.Wait()
+
+	// Verify original is unchanged
+	nested, _ := m.Get("nested")
+	nestedMap, _ := nested.Map()
+	if _, ok := nestedMap.Get("new"); ok {
+		t.Error("clone mutations affected original")
+	}
+}
+
+func TestConcurrent_NestedAccess(t *testing.T) {
+	// Test concurrent access to deeply nested structures
+	input := map[string]any{
+		"level1": map[string]any{
+			"level2": map[string]any{
+				"level3": []any{"a", "b", "c"},
+			},
+		},
+	}
+
+	m := WrapMap(input)
+
+	var wg sync.WaitGroup
+	const goroutines = 100
+	const iterations = 100
+
+	for range goroutines {
+		wg.Go(func() {
+			for range iterations {
+				// Navigate to deeply nested value
+				l1Val, _ := m.Get("level1")
+				l1Map, _ := l1Val.Map()
+				l2Val, _ := l1Map.Get("level2")
+				l2Map, _ := l2Val.Map()
+				l3Val, _ := l2Map.Get("level3")
+				l3Slice, _ := l3Val.Slice()
+
+				// Access elements
+				for i := range l3Slice.Len() {
+					_ = l3Slice.Get(i)
+				}
+
+				// Iterate
+				for range l3Slice.Iter() {
+					// Just iterate
+				}
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrent_MixedTypes(t *testing.T) {
+	// Test concurrent access with mixed immutable types
+	mapData := WrapMap(map[string]any{"key": "value"})
+	sliceData := WrapSlice([]any{1, 2, 3})
+	propsData := WrapProperties(map[string]any{"prop": "data"})
+	keyData := WrapKey([]any{"us", 123})
+	valueData := Wrap(map[string]any{"nested": []any{"a", "b"}})
+
+	var wg sync.WaitGroup
+	const goroutines = 50
+	const iterations = 100
+
+	for range goroutines {
+		wg.Go(func() {
+			for range iterations {
+				// Access all types
+				_, _ = mapData.Get("key")
+				_ = sliceData.Get(0)
+				_, _ = propsData.GetFold("prop")
+				_ = keyData.String()
+				_, _ = valueData.Map()
+
+				// Clone all types
+				_ = mapData.Clone()
+				_ = sliceData.Clone()
+				_ = propsData.Clone()
+				_ = keyData.Clone()
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrent_IteratorConsistency(t *testing.T) {
+	// Test that iterators return consistent results under concurrent access
+	input := map[string]any{"a": 1, "b": 2, "c": 3}
+	m := WrapMap(input)
+
+	results := make(chan int, 100)
+
+	var wg sync.WaitGroup
+	const goroutines = 100
+
+	for range goroutines {
+		wg.Go(func() {
+			count := 0
+			for range m.Keys() {
+				count++
+			}
+			results <- count
+		})
+	}
+
+	wg.Wait()
+	close(results)
+
+	// All goroutines should have seen 3 keys
+	for count := range results {
+		if count != 3 {
+			t.Errorf("expected 3 keys, got %d", count)
+		}
 	}
 }

@@ -11,8 +11,8 @@ func TestShapeForSchema_Basic(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
 	ns, ok := shape.Types["Entity"]
@@ -39,8 +39,8 @@ func TestShapeForSchema_CompositePK(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
 	ns := shape.Types["Record"]
@@ -60,8 +60,8 @@ func TestShapeForSchema_SkipsAbstract(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
 	if _, ok := shape.Types["Base"]; ok {
@@ -78,8 +78,8 @@ func TestShapeForSchema_PartTypes(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
 	if _, ok := shape.Types["LineItem"]; !ok {
@@ -96,8 +96,8 @@ func TestShapeForSchema_Inheritance(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
 	// Tracked is abstract — should not appear.
@@ -123,8 +123,8 @@ func TestShapeForSchema_MultipleTypes(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
 	widget, ok := shape.Types["Widget"]
@@ -150,8 +150,8 @@ func TestShapeForSchema_CustomSeparator(t *testing.T) {
 	a := New(WithLabelSeparator("_"))
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ShapeForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
 	ns := shape.Types["Entity"]

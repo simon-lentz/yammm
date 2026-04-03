@@ -16,8 +16,8 @@ func TestNodeQueryFor_SinglePK(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -52,8 +52,8 @@ func TestNodeQueryFor_CompositePK(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -82,8 +82,8 @@ func TestNodeQueryFor_ImmutableKeys(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -120,8 +120,8 @@ func TestBatchNodeQueries_SingleType(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -159,8 +159,8 @@ func TestBatchNodeQueries_Chunking(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	// Create 5 instances.
@@ -193,8 +193,8 @@ func TestEdgeQueryFor_Basic(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -229,8 +229,8 @@ func TestEdgeQueryFor_NoProperties(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -265,8 +265,8 @@ func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -308,8 +308,8 @@ func TestBatchEdgeQueries_Chunking(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	// Create enough edges to trigger chunking.
@@ -353,8 +353,8 @@ func TestPropertyCoercion_TypedSlice(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -399,8 +399,8 @@ func TestPropertyCoercion_TemporalSlice(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -571,8 +571,8 @@ func TestPropertyCoercion_Scalars(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -605,8 +605,8 @@ func TestPropertyCoercion_TemporalScalar(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -731,8 +731,8 @@ func TestNodeQueryFor_MissingKey(t *testing.T) {
 	a := New()
 
 	_, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -851,8 +851,8 @@ func TestBatchEdgeQueries_MixedProperties(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	// Employee e1 provides the optional edge property "note";
@@ -913,8 +913,8 @@ func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
 	a := New()
 
 	shape, result := a.ShapeForSchema(s)
-	if !result.OK() {
-		t.Fatal(result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{

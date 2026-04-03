@@ -229,13 +229,14 @@ func TestDetectLabelCollisions_NoCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load.Load failed: %v", err)
 	}
-	if !result.OK() {
-		t.Fatalf("schema has errors: %v", result)
+	if err := result.Err(); err != nil {
+		t.Fatalf("schema has errors: %v", err)
 	}
 
 	a := New()
-	if result := a.DetectLabelCollisions(s); !result.OK() {
-		t.Errorf("DetectLabelCollisions returned errors for non-colliding schema: %v", result.Messages())
+	result = a.DetectLabelCollisions(s)
+	if err := result.Err(); err != nil {
+		t.Errorf("DetectLabelCollisions returned errors for non-colliding schema: %v", err)
 	}
 }
 
@@ -253,13 +254,14 @@ func TestDetectLabelCollisions_Collision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load.Load failed: %v", err)
 	}
-	if !loadResult.OK() {
-		t.Fatalf("schema has errors: %v", loadResult)
+	if err := loadResult.Err(); err != nil {
+		t.Fatalf("schema has errors: %v", err)
 	}
 
 	a := New()
-	if result := a.DetectLabelCollisions(s); !result.OK() {
-		t.Errorf("unexpected collision errors: %v", result.Messages())
+	result := a.DetectLabelCollisions(s)
+	if err := result.Err(); err != nil {
+		t.Errorf("unexpected collision errors: %v", err)
 	}
 }
 

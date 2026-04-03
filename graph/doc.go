@@ -28,13 +28,13 @@
 //	if err != nil {
 //	    // Internal error (nil instance, context cancellation)
 //	}
-//	if !result.OK() {
+//	if err := result.Err(); err != nil {
 //	    // Validation error (duplicate PK, type not found)
 //	}
 //
 //	// Check completeness
 //	result, err = g.Check(ctx)
-//	if !result.OK() {
+//	if err := result.Err(); err != nil {
 //	    // Required associations are missing
 //	}
 //
@@ -80,8 +80,8 @@
 // Graph operations follow the (Output, diag.Result, error) pattern:
 //
 //   - error != nil: Internal failure (nil receiver, nil instance, cancellation)
-//   - error == nil && !result.OK(): Semantic failure (duplicate PK, type not found)
-//   - error == nil && result.OK(): Success (may have warnings)
+//   - error == nil && result.Err() != nil: Semantic failure (duplicate PK, type not found)
+//   - error == nil && result.Err() == nil: Success (may have warnings)
 //
 // Internal errors use the ErrInternal sentinel and related error types.
 // Semantic issues use diag.Code values like E_DUPLICATE_PK, E_UNRESOLVED_REQUIRED.

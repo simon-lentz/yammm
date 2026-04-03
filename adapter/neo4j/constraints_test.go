@@ -14,8 +14,8 @@ func TestConstraints_BasicSinglePK(t *testing.T) {
 	a := New()
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// UNIQUE for id.
@@ -50,8 +50,8 @@ func TestConstraints_CompositePK(t *testing.T) {
 	a := New()
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// Composite UNIQUE.
@@ -69,8 +69,8 @@ func TestConstraints_SkipsAbstract(t *testing.T) {
 	a := New()
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// No constraints should reference abstract type Base.
@@ -95,8 +95,8 @@ func TestConstraints_PartTypes(t *testing.T) {
 	a := New()
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// LineItem (part type) receives constraints — not skipped.
@@ -124,8 +124,8 @@ func TestConstraints_ListProperties(t *testing.T) {
 	a := New()
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	assertContains(t, stmts, "REQUIRE n.tags IS :: LIST<STRING NOT NULL>")
@@ -142,8 +142,8 @@ func TestConstraints_Aliases(t *testing.T) {
 	a := New()
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// Email (Pattern) -> STRING, Money (Float) -> FLOAT,
@@ -160,8 +160,8 @@ func TestConstraints_NamedConstraints(t *testing.T) {
 	a := New() // Default: named=true.
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// Every statement should contain a name before IF NOT EXISTS.
@@ -185,8 +185,8 @@ func TestConstraints_UnnamedConstraints(t *testing.T) {
 	a := New(WithNamedConstraints(false))
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// Every statement should have no name — "CREATE CONSTRAINT IF NOT EXISTS".
@@ -203,8 +203,8 @@ func TestConstraints_NodeKey(t *testing.T) {
 	a := New(WithNodeKeyConstraints(true))
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// Should use NODE KEY instead of UNIQUE.
@@ -224,8 +224,8 @@ func TestConstraints_NodeKeyComposite(t *testing.T) {
 	a := New(WithNodeKeyConstraints(true))
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	assertContains(t, stmts, "REQUIRE (n.schema_id, n.record_id) IS NODE KEY")
@@ -245,8 +245,8 @@ func TestConstraints_CommunityEdition(t *testing.T) {
 	a := New(WithEdition(Community))
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// Only UNIQUE constraints should be present.
@@ -266,8 +266,8 @@ func TestConstraints_RequiredOnlyTypes(t *testing.T) {
 	a := New(WithRequiredOnlyTypeConstraints(true))
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// Required properties should have TYPE constraints.
@@ -291,8 +291,8 @@ func TestConstraints_ScalarTypesDisabled(t *testing.T) {
 	a := New(WithScalarTypeConstraints(false))
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// LIST TYPE constraints should still be generated.
@@ -310,12 +310,12 @@ func TestConstraints_DeterministicOrder(t *testing.T) {
 	a := New()
 
 	stmts1, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("first call failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("first call failed: %v", err)
 	}
 	stmts2, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("second call failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("second call failed: %v", err)
 	}
 
 	if !slices.Equal(stmts1, stmts2) {
@@ -347,8 +347,8 @@ func TestConstraints_Inheritance(t *testing.T) {
 	a := New()
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// No constraints for abstract type Tracked.
@@ -387,8 +387,8 @@ func TestConstraints_EnumPattern(t *testing.T) {
 	a := New()
 
 	stmts, result := a.ConstraintsForSchema(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsForSchema failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
 	// Enum and Pattern both map to STRING.
@@ -402,8 +402,8 @@ func TestConstraintsStructured(t *testing.T) {
 	a := New()
 
 	constraints, result := a.ConstraintsStructured(s)
-	if !result.OK() {
-		t.Fatalf("ConstraintsStructured failed: %v", result.Messages())
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsStructured failed: %v", err)
 	}
 
 	if len(constraints) == 0 {

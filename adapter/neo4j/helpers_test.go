@@ -18,8 +18,8 @@ func loadSchema(t *testing.T, name string) *schema.Schema {
 	if err != nil {
 		t.Fatalf("load.Load(%s) failed: %v", name, err)
 	}
-	if !result.OK() {
-		t.Fatalf("schema %s has errors: %v", name, result)
+	if err := result.Err(); err != nil {
+		t.Fatalf("schema %s has errors: %v", name, err)
 	}
 	return s
 }
@@ -49,8 +49,8 @@ func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, ins
 			if err != nil {
 				t.Fatalf("graph.Add %s: %v", typeName, err)
 			}
-			if !result.OK() {
-				t.Fatalf("graph.Add %s issues: %v", typeName, result.Messages())
+			if err := result.Err(); err != nil {
+				t.Fatalf("graph.Add %s issues: %v", typeName, err)
 			}
 		}
 	}

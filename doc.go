@@ -60,7 +60,7 @@
 //	    if err != nil {
 //	        // Internal error or context cancelled
 //	    }
-//	    if !result.OK() {
+//	    if err := result.Err(); err != nil {
 //	        // Diagnostic issues (duplicate PK, etc.)
 //	    }
 //	}
@@ -68,7 +68,7 @@
 //	if err != nil {
 //	    // Internal error or context cancelled
 //	}
-//	if !result.OK() {
+//	if err := result.Err(); err != nil {
 //	    // Unresolved required associations
 //	}
 //
