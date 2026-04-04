@@ -662,13 +662,13 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// Wire resolved schema references (SourceID already set during completion)
 	for _, imp := range s.ImportsSlice() {
 		if resolved, ok := l.resolvedImports[imp.Alias()]; ok {
-			imp.SetSchema(resolved.schema)
+			schema.InternalSetImportSchema(imp, resolved.schema)
 		}
 	}
 
 	// Seal all imports to prevent further mutation
 	for _, imp := range s.ImportsSlice() {
-		imp.Seal()
+		schema.InternalSealImport(imp)
 	}
 
 	// Schema must be nil if any errors exist.
@@ -678,10 +678,10 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	}
 
 	// Attach sources for diagnostics rendering
-	s.SetSources(schema.NewSources(l.sourceRegistry))
+	schema.InternalSetSchemaSources(s, schema.NewSources(l.sourceRegistry))
 
 	// Seal the schema to prevent further mutation
-	s.Seal()
+	schema.InternalSealSchema(s)
 
 	l.logger.Debug("schema loaded",
 		"source", sourceID.String(),

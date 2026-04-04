@@ -133,9 +133,9 @@ func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 	typeSpan := location.Range(sourceID, 3, 1, 5, 2)
 	typeNameSpan := location.Range(sourceID, 3, 6, 3, 12)
 
-	s := schema.NewSchema("test", sourceID, schemaSpan, "")
-	typ := schema.NewType("Person", sourceID, typeSpan, "", false, false)
-	s.SetTypes([]*schema.Type{typ})
+	s := schema.InternalNewSchema("test", sourceID, schemaSpan, "")
+	typ := schema.InternalNewType("Person", sourceID, typeSpan, "", false, false)
+	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
 
 	idx := &symbols.SymbolIndex{
 		Symbols: []symbols.Symbol{

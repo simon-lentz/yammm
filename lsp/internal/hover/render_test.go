@@ -33,7 +33,7 @@ func TestHoverForImport(t *testing.T) {
 	importedID := location.MustNewSourceID("test://parts.yammm")
 	span := location.Range(sourceID, 1, 1, 1, 30)
 
-	imp := schema.NewImport("./parts", "parts", importedID, span)
+	imp := schema.InternalNewImport("./parts", "parts", importedID, span)
 
 	sym := &symbols.Symbol{
 		Name: "parts",
@@ -54,7 +54,7 @@ func TestHoverForType(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://types.yammm")
 	span := location.Range(sourceID, 1, 1, 10, 1)
 
-	typ := schema.NewType("Person", sourceID, span, "A person entity.", false, false)
+	typ := schema.InternalNewType("Person", sourceID, span, "A person entity.", false, false)
 
 	sym := &symbols.Symbol{
 		Name:     "Person",
@@ -76,7 +76,7 @@ func TestHoverForType_Abstract(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://types.yammm")
 	span := location.Range(sourceID, 1, 1, 10, 1)
 
-	typ := schema.NewType("Entity", sourceID, span, "", true, false)
+	typ := schema.InternalNewType("Entity", sourceID, span, "", true, false)
 
 	sym := &symbols.Symbol{
 		Name:     "Entity",
@@ -95,7 +95,7 @@ func TestHoverForType_Part(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://types.yammm")
 	span := location.Range(sourceID, 1, 1, 10, 1)
 
-	typ := schema.NewType("Wheel", sourceID, span, "", false, true)
+	typ := schema.InternalNewType("Wheel", sourceID, span, "", false, true)
 
 	sym := &symbols.Symbol{
 		Name:     "Wheel",
@@ -113,7 +113,7 @@ func TestHoverForProperty(t *testing.T) {
 
 	span := location.Range(location.MustNewSourceID("test://p.yammm"), 1, 1, 1, 20)
 
-	prop := schema.NewProperty("name", span, "The person's name.", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	prop := schema.InternalNewProperty("name", span, "The person's name.", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	sym := &symbols.Symbol{
 		Name:       "name",
@@ -134,7 +134,7 @@ func TestHoverForProperty_Required(t *testing.T) {
 
 	span := location.Range(location.MustNewSourceID("test://p.yammm"), 1, 1, 1, 20)
 
-	prop := schema.NewProperty("email", span, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	prop := schema.InternalNewProperty("email", span, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	sym := &symbols.Symbol{
 		Name:       "email",
@@ -152,7 +152,7 @@ func TestHoverForRelation_Association(t *testing.T) {
 
 	targetRef := schema.NewTypeRef("", "Address", location.Span{})
 
-	rel := schema.NewRelation(
+	rel := schema.InternalNewRelation(
 		schema.RelationAssociation,
 		"ADDRESSES",
 		"addresses",
@@ -189,7 +189,7 @@ func TestHoverForRelation_Composition(t *testing.T) {
 
 	targetRef := schema.NewTypeRef("", "Wheel", location.Span{})
 
-	rel := schema.NewRelation(
+	rel := schema.InternalNewRelation(
 		schema.RelationComposition,
 		"WHEELS",
 		"wheels",
@@ -222,7 +222,7 @@ func TestHoverForRelation_Composition(t *testing.T) {
 func TestHoverForInvariant(t *testing.T) {
 	t.Parallel()
 
-	inv := schema.NewInvariant("age must be positive", nil, location.Span{}, "Ensures age is valid.")
+	inv := schema.InternalNewInvariant("age must be positive", nil, location.Span{}, "Ensures age is valid.")
 
 	sym := &symbols.Symbol{
 		Name:       "age must be positive",
@@ -242,7 +242,7 @@ func TestHoverForDataType(t *testing.T) {
 	t.Parallel()
 
 	constraint := schema.NewStringConstraint()
-	dt := schema.NewDataType("ShortName", constraint, location.Span{}, "A short name string.")
+	dt := schema.InternalNewDataType("ShortName", constraint, location.Span{}, "A short name string.")
 
 	sym := &symbols.Symbol{
 		Name: "ShortName",
@@ -282,7 +282,7 @@ func TestRelativeSourcePath(t *testing.T) {
 				Name:     "TestType",
 				Kind:     symbols.SymbolType,
 				SourceID: tt.sourceID,
-				Data:     schema.NewType("TestType", tt.sourceID, location.Span{}, "", false, false),
+				Data:     schema.InternalNewType("TestType", tt.sourceID, location.Span{}, "", false, false),
 			}
 			result := RenderSymbol(sym, tt.root)
 			assert.Contains(t, result, tt.want)

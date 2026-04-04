@@ -50,9 +50,9 @@ type Type struct {
 	sealed bool // true after completion; prevents further mutation
 }
 
-// NewType creates a new Type. This is primarily for internal use;
+// newType creates a new Type. This is primarily for internal use;
 // types are typically created during schema parsing and completion.
-func NewType(
+func newType(
 	name string,
 	sourceID location.SourceID,
 	span location.Span,
@@ -104,9 +104,9 @@ func (t *Type) NameSpan() location.Span {
 	return t.nameSpan
 }
 
-// SetNameSpan sets the precise span of the type name.
+// setNameSpan sets the precise span of the type name.
 // This must be called before the type is sealed.
-func (t *Type) SetNameSpan(span location.Span) {
+func (t *Type) setNameSpan(span location.Span) {
 	if t.sealed {
 		panic("cannot modify sealed type")
 	}
@@ -387,14 +387,10 @@ func (t *Type) CanonicalPropertyMap() map[string]string {
 }
 
 // --- Internal setters used during completion ---
-// These setters are not part of the public API and will panic if called
-// after the type is sealed. They may be removed or made unexported in
-// future versions.
 
-// Seal marks the type as immutable.
+// seal marks the type as immutable.
 // Called by the completer after type completion finishes.
-// This is not part of the public API and may be removed in future versions.
-func (t *Type) Seal() {
+func (t *Type) seal() {
 	// Precompute cached maps for thread-safe access after sealing
 	t.canonicalMap = make(map[string]string, len(t.allProperties))
 	for _, p := range t.allProperties {
@@ -404,21 +400,21 @@ func (t *Type) Seal() {
 	t.sealed = true
 }
 
-// IsSealed reports whether the type has been sealed.
-func (t *Type) IsSealed() bool {
+// isSealed reports whether the type has been sealed.
+func (t *Type) isSealed() bool {
 	return t.sealed
 }
 
-// SetSchemaName sets the owning schema's name (called during completion).
-func (t *Type) SetSchemaName(name string) {
+// setSchemaName sets the owning schema's name (called during completion).
+func (t *Type) setSchemaName(name string) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.schemaName = name
 }
 
-// SetProperties sets the declared properties (called during completion).
-func (t *Type) SetProperties(properties []*Property) {
+// setProperties sets the declared properties (called during completion).
+func (t *Type) setProperties(properties []*Property) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -428,8 +424,8 @@ func (t *Type) SetProperties(properties []*Property) {
 	}
 }
 
-// SetAssociations sets the declared associations (called during completion).
-func (t *Type) SetAssociations(associations []*Relation) {
+// setAssociations sets the declared associations (called during completion).
+func (t *Type) setAssociations(associations []*Relation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -439,8 +435,8 @@ func (t *Type) SetAssociations(associations []*Relation) {
 	}
 }
 
-// SetCompositions sets the declared compositions (called during completion).
-func (t *Type) SetCompositions(compositions []*Relation) {
+// setCompositions sets the declared compositions (called during completion).
+func (t *Type) setCompositions(compositions []*Relation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -450,32 +446,32 @@ func (t *Type) SetCompositions(compositions []*Relation) {
 	}
 }
 
-// SetInvariants sets the invariants (called during completion).
-func (t *Type) SetInvariants(invariants []*Invariant) {
+// setInvariants sets the invariants (called during completion).
+func (t *Type) setInvariants(invariants []*Invariant) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.invariants = invariants
 }
 
-// SetAllInvariants sets all invariants including inherited (called during completion).
-func (t *Type) SetAllInvariants(all []*Invariant) {
+// setAllInvariants sets all invariants including inherited (called during completion).
+func (t *Type) setAllInvariants(all []*Invariant) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.allInvariants = all
 }
 
-// SetInherits sets the declared extends clause (called during completion).
-func (t *Type) SetInherits(inherits []TypeRef) {
+// setInherits sets the declared extends clause (called during completion).
+func (t *Type) setInherits(inherits []TypeRef) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.inherits = inherits
 }
 
-// SetAllProperties sets all properties including inherited (called during completion).
-func (t *Type) SetAllProperties(all []*Property) {
+// setAllProperties sets all properties including inherited (called during completion).
+func (t *Type) setAllProperties(all []*Property) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -486,16 +482,16 @@ func (t *Type) SetAllProperties(all []*Property) {
 	}
 }
 
-// SetPrimaryKeys sets the primary key properties (called during completion).
-func (t *Type) SetPrimaryKeys(pks []*Property) {
+// setPrimaryKeys sets the primary key properties (called during completion).
+func (t *Type) setPrimaryKeys(pks []*Property) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.primaryKeys = pks
 }
 
-// SetAllAssociations sets all associations including inherited (called during completion).
-func (t *Type) SetAllAssociations(all []*Relation) {
+// setAllAssociations sets all associations including inherited (called during completion).
+func (t *Type) setAllAssociations(all []*Relation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -505,8 +501,8 @@ func (t *Type) SetAllAssociations(all []*Relation) {
 	}
 }
 
-// SetAllCompositions sets all compositions including inherited (called during completion).
-func (t *Type) SetAllCompositions(all []*Relation) {
+// setAllCompositions sets all compositions including inherited (called during completion).
+func (t *Type) setAllCompositions(all []*Relation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -516,16 +512,16 @@ func (t *Type) SetAllCompositions(all []*Relation) {
 	}
 }
 
-// SetSuperTypes sets the linearized ancestors (called during completion).
-func (t *Type) SetSuperTypes(supers []ResolvedTypeRef) {
+// setSuperTypes sets the linearized ancestors (called during completion).
+func (t *Type) setSuperTypes(supers []ResolvedTypeRef) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.superTypes = supers
 }
 
-// SetSubTypes sets the known subtypes (called during completion).
-func (t *Type) SetSubTypes(subs []ResolvedTypeRef) {
+// setSubTypes sets the known subtypes (called during completion).
+func (t *Type) setSubTypes(subs []ResolvedTypeRef) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}

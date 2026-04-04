@@ -78,7 +78,7 @@ type completer struct {
 
 func (c *completer) complete() *schema.Schema {
 	// Create the schema shell
-	c.schema = schema.NewSchema(
+	c.schema = schema.InternalNewSchema(
 		c.model.Name,
 		c.sourceID,
 		c.model.Span,
@@ -141,19 +141,19 @@ func (c *completer) complete() *schema.Schema {
 
 	// Phase 8: Seal all types and relations to prevent post-completion mutation
 	for _, t := range c.schema.TypesSlice() {
-		t.Seal()
+		schema.InternalSealType(t)
 		// Seal all relations on this type
 		for rel := range t.AllAssociations() {
-			rel.Seal()
+			schema.InternalSealRelation(rel)
 		}
 		for rel := range t.AllCompositions() {
-			rel.Seal()
+			schema.InternalSealRelation(rel)
 		}
 	}
 
 	// Seal all data types for consistency with type/relation sealing
 	for _, dt := range c.schema.DataTypesSlice() {
-		dt.Seal()
+		schema.InternalSealDataType(dt)
 	}
 
 	return c.schema
@@ -175,7 +175,7 @@ func (c *completer) indexTypes() bool {
 			return false
 		}
 
-		t := schema.NewType(
+		t := schema.InternalNewType(
 			td.Name,
 			c.sourceID,
 			td.Span,
@@ -186,7 +186,7 @@ func (c *completer) indexTypes() bool {
 
 		// Set precise name span for go-to-definition accuracy
 		if !td.NameSpan.IsZero() {
-			t.SetNameSpan(td.NameSpan)
+			schema.InternalSetTypeNameSpan(t, td.NameSpan)
 		}
 
 		// Convert declared inherits
@@ -196,26 +196,26 @@ func (c *completer) indexTypes() bool {
 				inherits = append(inherits, ref.ToSchemaTypeRef())
 			}
 		}
-		t.SetInherits(inherits)
+		schema.InternalSetTypeInherits(t, inherits)
 
 		// Convert and set declared properties
 		props := c.convertProperties(td.Properties, td.Name)
-		t.SetProperties(props)
+		schema.InternalSetTypeProperties(t, props)
 
 		// Convert and set declared relations (split into associations/compositions)
 		assocs, comps := c.convertRelations(td.Relations, td.Name)
-		t.SetAssociations(assocs)
-		t.SetCompositions(comps)
+		schema.InternalSetTypeAssociations(t, assocs)
+		schema.InternalSetTypeCompositions(t, comps)
 
 		// Convert and set invariants
 		invariants := c.convertInvariants(td.Invariants)
-		t.SetInvariants(invariants)
+		schema.InternalSetTypeInvariants(t, invariants)
 
 		c.typeIndex[td.Name] = t
 		types = append(types, t)
 	}
 
-	c.schema.SetTypes(types)
+	schema.InternalSetSchemaTypes(c.schema, types)
 	return true
 }
 
@@ -235,7 +235,7 @@ func (c *completer) indexDataTypes() bool {
 			return false
 		}
 
-		dt := schema.NewDataType(
+		dt := schema.InternalNewDataType(
 			dd.Name,
 			dd.Constraint,
 			dd.Span,
@@ -246,7 +246,7 @@ func (c *completer) indexDataTypes() bool {
 		dataTypes = append(dataTypes, dt)
 	}
 
-	c.schema.SetDataTypes(dataTypes)
+	schema.InternalSetSchemaDataTypes(c.schema, dataTypes)
 	return true
 }
 
@@ -327,11 +327,11 @@ func (c *completer) indexImports() bool {
 			seenSourceIDs[resolvedSourceID] = id
 		}
 		// If resolvedImports is nil, leave resolvedSourceID as zero for deferred resolution
-		imp := schema.NewImport(id.Path, id.Alias, resolvedSourceID, id.Span)
+		imp := schema.InternalNewImport(id.Path, id.Alias, resolvedSourceID, id.Span)
 		imports = append(imports, imp)
 	}
 
-	c.schema.SetImports(imports)
+	schema.InternalSetSchemaImports(c.schema, imports)
 	return true
 }
 
@@ -360,7 +360,7 @@ func (c *completer) convertProperties(decls []*parse.PropertyDecl, ownerType str
 		seen[pd.Name] = pd
 
 		scope := schema.TypeScope(schema.NewTypeRef("", ownerType, pd.Span))
-		p := schema.NewProperty(
+		p := schema.InternalNewProperty(
 			pd.Name,
 			pd.Span,
 			pd.Documentation,
@@ -416,7 +416,7 @@ func (c *completer) convertRelations(decls []*parse.RelationDecl, ownerType stri
 					continue
 				}
 				scope := schema.RelationScope(rd.Name)
-				p := schema.NewProperty(
+				p := schema.InternalNewProperty(
 					pd.Name,
 					pd.Span,
 					pd.Documentation,
@@ -439,7 +439,7 @@ func (c *completer) convertRelations(decls []*parse.RelationDecl, ownerType stri
 			kind = schema.RelationComposition
 		}
 
-		r := schema.NewRelation(
+		r := schema.InternalNewRelation(
 			kind,
 			rd.Name,
 			fieldName,
@@ -475,7 +475,7 @@ func (c *completer) convertInvariants(decls []*parse.InvariantDecl) []*schema.In
 			continue
 		}
 
-		inv := schema.NewInvariant(id.Name, id.Expr, id.Span, id.Documentation)
+		inv := schema.InternalNewInvariant(id.Name, id.Expr, id.Span, id.Documentation)
 		invs = append(invs, inv)
 	}
 
@@ -495,7 +495,7 @@ func (c *completer) resolveAliasConstraints() bool {
 				ok = false
 				continue
 			}
-			dt.SetConstraint(resolved)
+			schema.InternalSetDataTypeConstraint(dt, resolved)
 		}
 	}
 
@@ -507,7 +507,7 @@ func (c *completer) resolveAliasConstraints() bool {
 				ok = false
 				continue
 			}
-			dt.SetConstraint(resolved)
+			schema.InternalSetDataTypeConstraint(dt, resolved)
 		}
 	}
 
@@ -520,7 +520,7 @@ func (c *completer) resolveAliasConstraints() bool {
 					ok = false
 					continue
 				}
-				p.SetConstraint(resolved)
+				schema.InternalSetPropertyConstraint(p, resolved)
 			}
 		}
 	}
@@ -534,7 +534,7 @@ func (c *completer) resolveAliasConstraints() bool {
 					ok = false
 					continue
 				}
-				p.SetConstraint(resolved)
+				schema.InternalSetPropertyConstraint(p, resolved)
 			}
 		}
 	}

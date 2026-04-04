@@ -276,7 +276,7 @@ func (b *Builder) Build() (*schema.Schema, diag.Result) {
 	b.wireImports(s)
 
 	// Seal the schema to prevent further mutation
-	s.Seal()
+	schema.InternalSealSchema(s)
 
 	return s, collector.Result()
 }
@@ -547,10 +547,10 @@ func (b *Builder) wireImports(s *schema.Schema) {
 		if !imp.ResolvedSourceID().IsZero() {
 			resolved, status := b.registry.LookupBySourceID(imp.ResolvedSourceID())
 			if status.Found() {
-				imp.SetSchema(resolved)
+				schema.InternalSetImportSchema(imp, resolved)
 			}
 		}
-		imp.Seal()
+		schema.InternalSealImport(imp)
 	}
 }
 

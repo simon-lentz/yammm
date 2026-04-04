@@ -25,9 +25,9 @@ type Schema struct {
 	sealed        bool // true after loading is complete; prevents further mutation
 }
 
-// NewSchema creates a new Schema. This is primarily for internal use;
+// newSchema creates a new Schema. This is primarily for internal use;
 // schemas are typically created via Load, String, or Builder.
-func NewSchema(
+func newSchema(
 	name string,
 	sourceID location.SourceID,
 	span location.Span,
@@ -210,24 +210,20 @@ func (s *Schema) HasSourceProvider() bool {
 }
 
 // --- Internal setters used during completion ---
-// These setters are not part of the public API and will panic if called
-// after the schema is sealed. They may be removed or made unexported in
-// future versions.
 
-// Seal marks the schema as immutable.
+// seal marks the schema as immutable.
 // Called by the loader after all post-completion wiring is done.
-// This is not part of the public API and may be removed in future versions.
-func (s *Schema) Seal() {
+func (s *Schema) seal() {
 	s.sealed = true
 }
 
-// IsSealed reports whether the schema has been sealed.
-func (s *Schema) IsSealed() bool {
+// isSealed reports whether the schema has been sealed.
+func (s *Schema) isSealed() bool {
 	return s.sealed
 }
 
-// SetTypes sets the types (called during completion).
-func (s *Schema) SetTypes(types []*Type) {
+// setTypes sets the types (called during completion).
+func (s *Schema) setTypes(types []*Type) {
 	if s.sealed {
 		panic("schema: cannot mutate sealed schema")
 	}
@@ -238,8 +234,8 @@ func (s *Schema) SetTypes(types []*Type) {
 	}
 }
 
-// SetDataTypes sets the data types (called during completion).
-func (s *Schema) SetDataTypes(dataTypes []*DataType) {
+// setDataTypes sets the data types (called during completion).
+func (s *Schema) setDataTypes(dataTypes []*DataType) {
 	if s.sealed {
 		panic("schema: cannot mutate sealed schema")
 	}
@@ -250,8 +246,8 @@ func (s *Schema) SetDataTypes(dataTypes []*DataType) {
 	}
 }
 
-// SetImports sets the imports (called during completion).
-func (s *Schema) SetImports(imports []*Import) {
+// setImports sets the imports (called during completion).
+func (s *Schema) setImports(imports []*Import) {
 	if s.sealed {
 		panic("schema: cannot mutate sealed schema")
 	}
@@ -262,8 +258,8 @@ func (s *Schema) SetImports(imports []*Import) {
 	}
 }
 
-// SetSources sets the source registry (called during loading).
-func (s *Schema) SetSources(sources *Sources) {
+// setSources sets the source registry (called during loading).
+func (s *Schema) setSources(sources *Sources) {
 	if s.sealed {
 		panic("schema: cannot mutate sealed schema")
 	}

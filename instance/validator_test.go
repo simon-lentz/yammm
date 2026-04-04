@@ -19,17 +19,17 @@ import (
 
 // makeTestSchema creates a schema with the given types.
 func makeTestSchema(types ...*schema.Type) *schema.Schema {
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes(types)
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, types)
+	schema.InternalSealSchema(s)
 	return s
 }
 
 // makeType creates a type with the given properties.
 func makeType(name string, isAbstract, isPart bool, props ...*schema.Property) *schema.Type {
-	t := schema.NewType(name, location.SourceID{}, location.Span{}, "", isAbstract, isPart)
-	t.SetProperties(props)
-	t.SetAllProperties(props)
+	t := schema.InternalNewType(name, location.SourceID{}, location.Span{}, "", isAbstract, isPart)
+	schema.InternalSetTypeProperties(t, props)
+	schema.InternalSetTypeAllProperties(t, props)
 
 	// Separate PKs
 	var pks []*schema.Property
@@ -38,14 +38,14 @@ func makeType(name string, isAbstract, isPart bool, props ...*schema.Property) *
 			pks = append(pks, p)
 		}
 	}
-	t.SetPrimaryKeys(pks)
-	t.Seal()
+	schema.InternalSetTypePrimaryKeys(t, pks)
+	schema.InternalSealType(t)
 	return t
 }
 
 // makeProp creates a property.
 func makeProp(name string, constraint schema.Constraint, optional, isPK bool) *schema.Property {
-	return schema.NewProperty(
+	return schema.InternalNewProperty(
 		name,
 		location.Span{},
 		"",
@@ -524,15 +524,15 @@ func TestValidator_ValidateOne_StringBounds(t *testing.T) {
 
 // makeTypeWithRelation creates a type with a composition relation to a part type.
 func makeTypeWithRelation(typeName string, partType *schema.Type, relationName string) *schema.Type {
-	t := schema.NewType(typeName, location.SourceID{}, location.Span{}, "", false, false)
+	t := schema.InternalNewType(typeName, location.SourceID{}, location.Span{}, "", false, false)
 
 	idProp := makeProp("id", schema.NewIntegerConstraint(), false, true)
-	t.SetProperties([]*schema.Property{idProp})
-	t.SetAllProperties([]*schema.Property{idProp})
-	t.SetPrimaryKeys([]*schema.Property{idProp})
+	schema.InternalSetTypeProperties(t, []*schema.Property{idProp})
+	schema.InternalSetTypeAllProperties(t, []*schema.Property{idProp})
+	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{idProp})
 
 	// Create composition relation to part type
-	rel := schema.NewRelation(
+	rel := schema.InternalNewRelation(
 		schema.RelationComposition,
 		relationName,
 		relationName, // fieldName
@@ -548,11 +548,11 @@ func makeTypeWithRelation(typeName string, partType *schema.Type, relationName s
 		typeName, // owner
 		nil,      // no edge properties for composition
 	)
-	rel.Seal()
+	schema.InternalSealRelation(rel)
 
-	t.SetCompositions([]*schema.Relation{rel})
-	t.SetAllCompositions([]*schema.Relation{rel})
-	t.Seal()
+	schema.InternalSetTypeCompositions(t, []*schema.Relation{rel})
+	schema.InternalSetTypeAllCompositions(t, []*schema.Relation{rel})
+	schema.InternalSealType(t)
 	return t
 }
 
@@ -566,9 +566,9 @@ func TestValidator_ValidateForComposition_Success(t *testing.T) {
 	// Create parent type with composition
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -629,9 +629,9 @@ func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -685,9 +685,9 @@ func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *te
 
 // makeTypeWithInvariant creates a type with an invariant expression.
 func makeTypeWithInvariant(invName string, invExpr expr.Expression, props ...*schema.Property) *schema.Type {
-	t := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	t.SetProperties(props)
-	t.SetAllProperties(props)
+	t := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSetTypeProperties(t, props)
+	schema.InternalSetTypeAllProperties(t, props)
 
 	var pks []*schema.Property
 	for _, p := range props {
@@ -695,13 +695,13 @@ func makeTypeWithInvariant(invName string, invExpr expr.Expression, props ...*sc
 			pks = append(pks, p)
 		}
 	}
-	t.SetPrimaryKeys(pks)
+	schema.InternalSetTypePrimaryKeys(t, pks)
 
-	inv := schema.NewInvariant(invName, invExpr, location.Span{}, "")
-	t.SetInvariants([]*schema.Invariant{inv})
-	t.SetAllInvariants([]*schema.Invariant{inv})
+	inv := schema.InternalNewInvariant(invName, invExpr, location.Span{}, "")
+	schema.InternalSetTypeInvariants(t, []*schema.Invariant{inv})
+	schema.InternalSetTypeAllInvariants(t, []*schema.Invariant{inv})
 
-	t.Seal()
+	schema.InternalSealType(t)
 	return t
 }
 
@@ -940,9 +940,9 @@ func TestValidator_ValidateForComposition_NilInput_ReturnsNil(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -960,9 +960,9 @@ func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testin
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -1034,9 +1034,9 @@ func TestOwnership_NestedMapIsolation(t *testing.T) {
 	// Create parent type with composition
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -1098,9 +1098,9 @@ func TestOwnership_NestedSliceIsolation(t *testing.T) {
 	// Create parent type with composition
 	documentType := makeTypeWithRelation("Document", noteType, "notes")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{documentType, noteType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{documentType, noteType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -1163,9 +1163,9 @@ func TestOwnership_CompositionIsolation(t *testing.T) {
 	// Create parent type with composition
 	orderType := makeTypeWithRelation("Order", itemType, "items")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{orderType, itemType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{orderType, itemType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -1219,9 +1219,9 @@ func TestOwnership_DeeplyNestedCompositionIsolation(t *testing.T) {
 	// Create parent type
 	containerType := makeTypeWithRelation("Container", detailType, "details")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{containerType, detailType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{containerType, detailType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -1287,9 +1287,9 @@ func TestOwnership_EdgePropertyIsolation(t *testing.T) {
 	}
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, edgeProps)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 

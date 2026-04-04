@@ -108,7 +108,7 @@ func TestTypeCompletions_EmptySchema(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://types.yammm")
 	span := location.Range(sourceID, 1, 1, 10, 1)
 
-	sch := schema.NewSchema("test", sourceID, span, "")
+	sch := schema.InternalNewSchema("test", sourceID, span, "")
 
 	snapshot := &analysis.Snapshot{
 		Schema:          sch,

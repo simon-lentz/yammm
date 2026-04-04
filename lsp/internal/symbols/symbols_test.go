@@ -28,7 +28,7 @@ func TestExtractSymbols_EmptySchema(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://empty.yammm")
 	span := location.Range(sourceID, 1, 1, 1, 20)
 
-	s := schema.NewSchema("empty", sourceID, span, "")
+	s := schema.InternalNewSchema("empty", sourceID, span, "")
 
 	syms := symbols.ExtractSymbols(s, nil)
 	assert.Len(t, syms, 1, "should contain only the schema itself")
@@ -44,10 +44,10 @@ func TestExtractSymbols_WithType(t *testing.T) {
 	schemaSpan := location.Range(sourceID, 1, 1, 10, 1)
 	typeSpan := location.Range(sourceID, 3, 1, 7, 1)
 
-	s := schema.NewSchema("People", sourceID, schemaSpan, "")
+	s := schema.InternalNewSchema("People", sourceID, schemaSpan, "")
 
-	typ := schema.NewType("Person", sourceID, typeSpan, "", false, false)
-	s.SetTypes([]*schema.Type{typ})
+	typ := schema.InternalNewType("Person", sourceID, typeSpan, "", false, false)
+	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
 
 	syms := symbols.ExtractSymbols(s, nil)
 
@@ -82,7 +82,7 @@ func TestBuildSymbolIndex(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://index.yammm")
 	schemaSpan := location.Range(sourceID, 1, 1, 10, 1)
 
-	s := schema.NewSchema("Index", sourceID, schemaSpan, "")
+	s := schema.InternalNewSchema("Index", sourceID, schemaSpan, "")
 
 	idx := symbols.BuildSymbolIndex(s, nil)
 	require.NotNil(t, idx, "symbols.BuildSymbolIndex() returned nil")
@@ -107,9 +107,9 @@ func TestSymbolAtPosition_FindsSymbol(t *testing.T) {
 	schemaSpan := location.Range(sourceID, 1, 1, 20, 1)
 	typeSpan := location.Range(sourceID, 5, 1, 15, 1)
 
-	s := schema.NewSchema("Find", sourceID, schemaSpan, "")
-	typ := schema.NewType("Target", sourceID, typeSpan, "", false, false)
-	s.SetTypes([]*schema.Type{typ})
+	s := schema.InternalNewSchema("Find", sourceID, schemaSpan, "")
+	typ := schema.InternalNewType("Target", sourceID, typeSpan, "", false, false)
+	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
 
 	idx := symbols.BuildSymbolIndex(s, nil)
 
@@ -325,11 +325,11 @@ func TestExtractTypeSymbols_AbstractAndPart(t *testing.T) {
 	abstractSpan := location.Range(sourceID, 3, 1, 5, 1)
 	partSpan := location.Range(sourceID, 7, 1, 9, 1)
 
-	s := schema.NewSchema("Types", sourceID, schemaSpan, "")
+	s := schema.InternalNewSchema("Types", sourceID, schemaSpan, "")
 
-	abstract := schema.NewType("Entity", sourceID, abstractSpan, "", true, false)
-	part := schema.NewType("Wheel", sourceID, partSpan, "", false, true)
-	s.SetTypes([]*schema.Type{abstract, part})
+	abstract := schema.InternalNewType("Entity", sourceID, abstractSpan, "", true, false)
+	part := schema.InternalNewType("Wheel", sourceID, partSpan, "", false, true)
+	schema.InternalSetSchemaTypes(s, []*schema.Type{abstract, part})
 
 	syms := symbols.ExtractSymbols(s, nil)
 
@@ -405,11 +405,11 @@ func TestExtractSymbols_WithDataType(t *testing.T) {
 	schemaSpan := location.Range(sourceID, 1, 1, 10, 1)
 	dtSpan := location.Range(sourceID, 3, 1, 3, 30)
 
-	s := schema.NewSchema("DataTypes", sourceID, schemaSpan, "")
+	s := schema.InternalNewSchema("DataTypes", sourceID, schemaSpan, "")
 
 	// Create a datatype alias
-	dt := schema.NewDataType("ShortString", schema.NewStringConstraint(), dtSpan, "")
-	s.SetDataTypes([]*schema.DataType{dt})
+	dt := schema.InternalNewDataType("ShortString", schema.NewStringConstraint(), dtSpan, "")
+	schema.InternalSetSchemaDataTypes(s, []*schema.DataType{dt})
 
 	syms := symbols.ExtractSymbols(s, nil)
 
@@ -446,14 +446,14 @@ func TestExtractReferences_DataTypeRef(t *testing.T) {
 	propSpan := location.Range(sourceID, 5, 5, 5, 30)
 	dtRefSpan := location.Range(sourceID, 5, 15, 5, 25)
 
-	s := schema.NewSchema("RefTest", sourceID, schemaSpan, "")
+	s := schema.InternalNewSchema("RefTest", sourceID, schemaSpan, "")
 
 	// Create a type with a property that has a datatype reference
-	typ := schema.NewType("Person", sourceID, typeSpan, "", false, false)
+	typ := schema.InternalNewType("Person", sourceID, typeSpan, "", false, false)
 
 	// Create a property with a DataTypeRef
 	dtRef := schema.LocalDataTypeRef("ShortString", dtRefSpan)
-	prop := schema.NewProperty(
+	prop := schema.InternalNewProperty(
 		"name",
 		propSpan,
 		"",
@@ -463,8 +463,8 @@ func TestExtractReferences_DataTypeRef(t *testing.T) {
 		false,
 		schema.DeclaringScope{},
 	)
-	typ.SetProperties([]*schema.Property{prop})
-	s.SetTypes([]*schema.Type{typ})
+	schema.InternalSetTypeProperties(typ, []*schema.Property{prop})
+	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
 
 	refs := symbols.ExtractReferences(s)
 
@@ -490,14 +490,14 @@ func TestExtractReferences_QualifiedDataTypeRef(t *testing.T) {
 	propSpan := location.Range(sourceID, 7, 5, 7, 40)
 	dtRefSpan := location.Range(sourceID, 7, 15, 7, 35)
 
-	s := schema.NewSchema("QualifiedTest", sourceID, schemaSpan, "")
+	s := schema.InternalNewSchema("QualifiedTest", sourceID, schemaSpan, "")
 
 	// Create a type with a property that has a qualified datatype reference
-	typ := schema.NewType("User", sourceID, typeSpan, "", false, false)
+	typ := schema.InternalNewType("User", sourceID, typeSpan, "", false, false)
 
 	// Create a property with a qualified DataTypeRef (e.g., types.Email)
 	dtRef := schema.NewDataTypeRef("types", "Email", dtRefSpan)
-	prop := schema.NewProperty(
+	prop := schema.InternalNewProperty(
 		"email",
 		propSpan,
 		"",
@@ -507,8 +507,8 @@ func TestExtractReferences_QualifiedDataTypeRef(t *testing.T) {
 		false,
 		schema.DeclaringScope{},
 	)
-	typ.SetProperties([]*schema.Property{prop})
-	s.SetTypes([]*schema.Type{typ})
+	schema.InternalSetTypeProperties(typ, []*schema.Property{prop})
+	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
 
 	refs := symbols.ExtractReferences(s)
 
@@ -595,7 +595,7 @@ func TestFormatPropertyDetail_NilConstraint(t *testing.T) {
 	t.Parallel()
 
 	// Create a property with nil constraint (optional so not required)
-	prop := schema.NewProperty(
+	prop := schema.InternalNewProperty(
 		"testProp",
 		location.Span{},
 		"",
@@ -618,7 +618,7 @@ func TestFormatPropertyDetail_NilConstraintWithModifiers(t *testing.T) {
 	t.Parallel()
 
 	// Create a property with nil constraint but with primary key and required flags
-	prop := schema.NewProperty(
+	prop := schema.InternalNewProperty(
 		"id",
 		location.Span{},
 		"",
@@ -640,7 +640,7 @@ func TestFormatPropertyDetail_WithConstraint(t *testing.T) {
 	t.Parallel()
 
 	constraint := schema.NewStringConstraint()
-	prop := schema.NewProperty(
+	prop := schema.InternalNewProperty(
 		"name",
 		location.Span{},
 		"",
