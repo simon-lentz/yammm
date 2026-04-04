@@ -1,7 +1,7 @@
 package graph
 
 import (
-	"github.com/simon-lentz/yammm/internal/immutable"
+	"github.com/simon-lentz/yammm/immutable"
 )
 
 // Edge represents a resolved association edge between two instances.

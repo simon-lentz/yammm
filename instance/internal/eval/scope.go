@@ -4,7 +4,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/simon-lentz/yammm/internal/immutable"
+	"github.com/simon-lentz/yammm/immutable"
 )
 
 // Scope provides variable bindings for expression evaluation.

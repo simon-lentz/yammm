@@ -2,7 +2,7 @@ package walk
 
 import (
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/internal/immutable"
+	"github.com/simon-lentz/yammm/immutable"
 )
 
 // Visitor receives callbacks during graph traversal.
