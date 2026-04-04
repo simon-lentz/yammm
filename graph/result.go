@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"iter"
 	"maps"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -22,7 +23,8 @@ import (
 //   - [Snapshot.Unresolved]: lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
 //
 // The [Snapshot.Instances] map has non-deterministic iteration order per Go semantics.
-// For deterministic iteration, use Types() + InstancesOf().
+// For deterministic iteration, use [Snapshot.AllInstances] (iterator) or
+// Types() + InstancesOf() (slice-based).
 type Snapshot struct {
 	// schema is the schema used for validation.
 	schema *schema.Schema
@@ -117,6 +119,30 @@ func (r *Snapshot) Instances() map[string][]*Instance {
 	result := make(map[string][]*Instance, len(r.instances))
 	maps.Copy(result, r.instances)
 	return result
+}
+
+// AllInstances returns an iterator over every instance in the graph in
+// deterministic order: types sorted lexicographically, instances within
+// each type sorted by primary key.
+//
+// This is the simplest way to iterate all instances without composition
+// structure. For composition-aware traversal, use [walk.Walk].
+//
+// Unlike [Snapshot.Instances] (which returns a map with non-deterministic
+// iteration order), AllInstances guarantees stable ordering across calls.
+func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
+	return func(yield func(*Instance) bool) {
+		if r == nil {
+			return
+		}
+		for _, typeName := range r.types {
+			for _, inst := range r.instances[typeName] {
+				if !yield(inst) {
+					return
+				}
+			}
+		}
+	}
 }
 
 // InstanceByKey looks up a single instance by type name and primary key.

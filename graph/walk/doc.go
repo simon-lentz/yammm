@@ -1,8 +1,7 @@
 // Package walk provides structured traversal of the graph using the visitor pattern.
 //
-// This is an internal package for the graph layer. The walker provides a clean
-// abstraction for traversing validated instance graphs with callbacks at each
-// structural element.
+// The walker provides a clean abstraction for traversing validated instance
+// graphs with callbacks at each structural element.
 //
 // # Visitor Pattern
 //
