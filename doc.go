@@ -5,21 +5,21 @@
 // It provides post-validation services including graph traversal and
 // integrity checking.
 //
-// # Architecture Overview
+// # Package Structure
 //
-// The module is organized into layers with strict dependency ordering:
+// The module's packages and what they provide:
 //
-//	Foundation tier (no internal dependencies):
-//	  - location: Source positions, spans, and canonical paths
-//	  - diag: Structured diagnostics with stable error codes
+//   - [location]: Source positions, spans, and canonical paths
+//   - [diag]: Structured diagnostics with stable error codes
+//   - [schema]: Type system, constraints, schema loading, and programmatic building
+//   - [schema/expr]: Expression AST types for invariants
+//   - [instance]: Instance validation and constraint checking
+//   - [graph]: Instance graph construction and integrity checking
+//   - [graph/walk]: Visitor-pattern graph traversal
+//   - [adapter/json]: JSON parsing and serialization
+//   - [adapter/neo4j]: Neo4j constraint generation and Cypher query building
 //
-//	Core library tier:
-//	  - schema: Type system, constraints, and schema compilation
-//	  - instance: Instance validation and constraint checking
-//	  - graph: Instance graph construction and integrity checking
-//
-//	Adapter tier:
-//	  - adapter/json: JSON parsing with location tracking
+// Adapters depend on library packages; library packages never depend on adapters.
 //
 // # Entry Points
 //
@@ -68,17 +68,4 @@
 //	if err := result.Err(); err != nil {
 //	    // Unresolved required associations
 //	}
-//
-// # Subpackages
-//
-// See the individual package documentation for detailed usage:
-//
-//   - [github.com/simon-lentz/yammm/diag]: Structured diagnostics
-//   - [github.com/simon-lentz/yammm/location]: Source location tracking
-//   - [github.com/simon-lentz/yammm/schema]: Schema types and constraints
-//   - [github.com/simon-lentz/yammm/schema/load]: Schema file loading
-//   - [github.com/simon-lentz/yammm/schema/build]: Programmatic schema building
-//   - [github.com/simon-lentz/yammm/instance]: Instance validation
-//   - [github.com/simon-lentz/yammm/graph]: Instance graph management
-//   - [github.com/simon-lentz/yammm/adapter/json]: JSON adapter
 package yammm

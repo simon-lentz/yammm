@@ -43,5 +43,4 @@
 // # Subpackages
 //
 //   - [instance/path] provides JSONPath-like syntax for error locations
-//   - [instance/eval] provides expression evaluation for invariants
 package instance

@@ -3,10 +3,9 @@
 //
 // # Architectural Position
 //
-// The neo4j adapter lives at the outermost tier of the yammm module,
-// alongside [github.com/simon-lentz/yammm/adapter/json]. It depends on
-// library packages (schema, graph, immutable, diag, location); library
-// packages never depend on adapters.
+// The neo4j adapter lives alongside [github.com/simon-lentz/yammm/adapter/json]
+// in the adapter layer. It depends on library packages (schema, graph, immutable,
+// diag, location); library packages never depend on adapters.
 //
 // # Neo4j Driver Dependency (Type-Only)
 //

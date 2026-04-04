@@ -11,9 +11,9 @@ package location
 //
 // Design rationale:
 //
-//  1. Foundation tier placement: PositionRegistry is defined in location
-//     (foundation tier) because the interface operates on location.Position and
-//     location.SourceID — natural cohesion with the location package.
+//  1. Placement in location: PositionRegistry is defined here because the
+//     interface operates on location.Position and location.SourceID — natural
+//     cohesion with the location package.
 //
 //  2. Decouples adapters from schema: Adapters can use any PositionRegistry
 //     implementation, not just schema.SourceRegistry. This enables testing with

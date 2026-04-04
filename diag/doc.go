@@ -1,8 +1,8 @@
 // Package diag provides structured diagnostics for the YAMMM validation pipeline.
 //
-// This package sits at the foundation tier alongside [location], providing the
-// single diagnostic infrastructure used across schema loading, parsing,
-// compilation, and instance validation.
+// This package provides the single diagnostic infrastructure used across schema
+// loading, parsing, compilation, and instance validation. It depends only on
+// [location] and the standard library.
 //
 // # Design Principles
 //
@@ -86,6 +86,6 @@
 //
 // # Package Dependencies
 //
-// Per the Foundation Rule, diag imports only stdlib and [location]. It must not
-// import higher-level packages like schema, instance, graph, or adapter.
+// diag imports only stdlib and [location]. It must not import schema, instance,
+// graph, or adapter.
 package diag

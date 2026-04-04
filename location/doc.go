@@ -1,8 +1,8 @@
 // Package location provides source location tracking for diagnostics.
 //
 // This package defines the core types used by the YAMMM diagnostic system
-// to track source locations. It sits at the foundation tier and can be imported
-// by all other packages without introducing circular dependencies.
+// to track source locations. It depends only on the standard library and can be
+// imported by all other packages without introducing circular dependencies.
 //
 // # CanonicalPath
 //

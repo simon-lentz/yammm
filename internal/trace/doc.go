@@ -20,9 +20,9 @@
 //   - Stdlib only: Uses [log/slog] (Go 1.21+), preserving dependency hygiene.
 //   - Logger injection: Loggers are passed via options at API boundaries, not stored
 //     in globals or read from environment variables.
-//   - Foundation tier exclusion: This package is NOT at the foundation tier. It may
-//     be imported by core library tier packages (schema, instance, graph) and adapters,
-//     but NOT by foundation tier packages (diag, location, immutable).
+//   - Import discipline: This package may be imported by schema, instance, graph,
+//     and adapter packages, but NOT by diag, location, or immutable (which must
+//     remain free of internal dependencies).
 //
 // # Separation of Concerns
 //

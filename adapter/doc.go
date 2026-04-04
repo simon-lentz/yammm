@@ -4,7 +4,7 @@
 //
 // # Architectural Boundary
 //
-// Adapters live at the outermost tier of the module. This design provides:
+// Adapters are the outermost layer of the module. This design provides:
 //
 //   - Dependency hygiene via import granularity: Go modules are granular at the
 //     import level. Consumers who import only schema and instance do not
