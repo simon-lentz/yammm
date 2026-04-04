@@ -2,6 +2,7 @@ package json
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"testing"
@@ -235,7 +236,7 @@ func TestMarshalObject_NilResult(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	_, err = adapter.MarshalObject(nil)
+	_, err = adapter.MarshalObject(context.Background(), nil)
 	require.Error(t, err)
 	assert.Equal(t, ErrNilResult, err)
 }
@@ -245,7 +246,7 @@ func TestWriteObject_NilResult(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	_, err = adapter.WriteObject(&buf, nil)
+	_, err = adapter.WriteObject(context.Background(), &buf, nil)
 	require.Error(t, err)
 	assert.Equal(t, ErrNilResult, err)
 }
@@ -258,7 +259,7 @@ func TestMarshalObject_EmptyGraph(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -284,7 +285,7 @@ func TestMarshalObject_SingleType(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -328,7 +329,7 @@ func TestMarshalObject_MultipleInstances(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -362,7 +363,7 @@ func TestMarshalObject_MultipleTypes(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -407,7 +408,7 @@ func TestMarshalObject_WithEdge(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -465,7 +466,7 @@ func TestMarshalObject_WithManyEdges(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -512,7 +513,7 @@ func TestMarshalObject_WithComposition(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -554,7 +555,7 @@ func TestMarshalObject_WithOneComposition(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -588,18 +589,18 @@ func TestMarshalObject_WithIndent(t *testing.T) {
 	require.NoError(t, err)
 
 	// Compact
-	compact, err := adapter.MarshalObject(result)
+	compact, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 	assert.NotContains(t, string(compact), "\n")
 
 	// Pretty with tabs
-	pretty, err := adapter.MarshalObject(result, WithIndent("\t"))
+	pretty, err := adapter.MarshalObject(context.Background(), result, WithIndent("\t"))
 	require.NoError(t, err)
 	assert.Contains(t, string(pretty), "\n")
 	assert.Contains(t, string(pretty), "\t")
 
 	// Pretty with spaces
-	prettySpaces, err := adapter.MarshalObject(result, WithIndent("  "))
+	prettySpaces, err := adapter.MarshalObject(context.Background(), result, WithIndent("  "))
 	require.NoError(t, err)
 	assert.Contains(t, string(prettySpaces), "\n")
 	assert.Contains(t, string(prettySpaces), "  ")
@@ -634,7 +635,7 @@ func TestMarshalObject_Deterministic(t *testing.T) {
 	// Run multiple times and verify identical output
 	var outputs [][]byte
 	for range 5 {
-		data, err := adapter.MarshalObject(result)
+		data, err := adapter.MarshalObject(context.Background(), result)
 		require.NoError(t, err)
 		outputs = append(outputs, data)
 	}
@@ -663,7 +664,7 @@ func TestWriteObject_WritesToBuffer(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	n, err := adapter.WriteObject(&buf, result)
+	n, err := adapter.WriteObject(context.Background(), &buf, result)
 	require.NoError(t, err)
 	assert.Equal(t, int64(buf.Len()), n)
 	assert.Greater(t, n, int64(0))
@@ -691,7 +692,7 @@ func TestMarshalObject_WithDiagnostics_NoIssues(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result, WithDiagnostics(true))
+	data, err := adapter.MarshalObject(context.Background(), result, WithDiagnostics(true))
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -735,7 +736,7 @@ func TestMarshalObject_ManyAssociationSingleTarget(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -777,7 +778,7 @@ func TestMarshalObject_ManyCompositionSingleChild(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -849,7 +850,7 @@ func TestMarshalObject_LowerSnakeFieldNames(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result)
+	data, err := adapter.MarshalObject(context.Background(), result)
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -898,7 +899,7 @@ func TestMarshalObject_Deterministic_MultipleSnapshots(t *testing.T) {
 		}
 
 		result := g.Snapshot()
-		data, err := adapter.MarshalObject(result)
+		data, err := adapter.MarshalObject(context.Background(), result)
 		require.NoError(t, err)
 		outputs = append(outputs, data)
 	}
@@ -934,7 +935,7 @@ func TestMarshalObject_WithDiagnostics_Unresolved(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result, WithDiagnostics(true))
+	data, err := adapter.MarshalObject(context.Background(), result, WithDiagnostics(true))
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -984,7 +985,7 @@ func TestMarshalObject_WithDiagnostics_Duplicates(t *testing.T) {
 	adapter, err := NewAdapter(nil)
 	require.NoError(t, err)
 
-	data, err := adapter.MarshalObject(result, WithDiagnostics(true))
+	data, err := adapter.MarshalObject(context.Background(), result, WithDiagnostics(true))
 	require.NoError(t, err)
 
 	var output map[string]any
@@ -1024,7 +1025,7 @@ func TestWriteObject_ShortWrite(t *testing.T) {
 
 	// Use a limited writer that only accepts first 5 bytes
 	lw := &limitedWriter{limit: 5}
-	n, err := adapter.WriteObject(lw, result)
+	n, err := adapter.WriteObject(context.Background(), lw, result)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, io.ErrShortWrite)
 	assert.Equal(t, int64(5), n)

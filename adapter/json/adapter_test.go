@@ -1,6 +1,7 @@
 package json
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -87,7 +88,7 @@ func TestParseObject(t *testing.T) {
 			]
 		}`)
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 		require.True(t, diags.OK(), "expected no errors: %v", diags)
 		require.Len(t, result, 1)
 		require.Len(t, result["Person"], 2)
@@ -104,7 +105,7 @@ func TestParseObject(t *testing.T) {
 			"Company": [{"title": "Acme Inc"}]
 		}`)
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 		require.True(t, diags.OK())
 		require.Len(t, result, 2)
 		require.Len(t, result["Person"], 1)
@@ -115,7 +116,7 @@ func TestParseObject(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{}`)
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 		require.True(t, diags.OK())
 		assert.Len(t, result, 0)
 	})
@@ -124,7 +125,7 @@ func TestParseObject(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{invalid}`)
 
-		_, diags := adapter.ParseObject(source, data)
+		_, diags := adapter.ParseObject(context.Background(), source, data)
 		require.False(t, diags.OK())
 	})
 
@@ -132,7 +133,7 @@ func TestParseObject(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[1, 2, 3]`)
 
-		_, diags := adapter.ParseObject(source, data)
+		_, diags := adapter.ParseObject(context.Background(), source, data)
 		require.False(t, diags.OK())
 	})
 
@@ -140,7 +141,7 @@ func TestParseObject(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"person": [{"name": "Alice"}]}`) // lowercase type name
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 		require.False(t, diags.OK())
 		assert.Len(t, result, 0) // Invalid type should be skipped
 	})
@@ -149,7 +150,7 @@ func TestParseObject(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"common.Person": [{"name": "Alice"}]}`)
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 		require.True(t, diags.OK())
 		require.Len(t, result["common.Person"], 1)
 	})
@@ -163,7 +164,7 @@ func TestParseObject(t *testing.T) {
 			]
 		}`)
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 		require.True(t, diags.OK())
 		require.Len(t, result["Person"], 1)
 	})
@@ -175,7 +176,7 @@ func TestParseObject(t *testing.T) {
 			"Person": [{"name": "Alice"}]
 		}`)
 
-		_, diags := adapter.ParseObject(source, data)
+		_, diags := adapter.ParseObject(context.Background(), source, data)
 		require.False(t, diags.OK())
 	})
 }
@@ -191,7 +192,7 @@ func TestParseArray(t *testing.T) {
 			{"$type": "Person", "name": "Bob"}
 		]`)
 
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 		require.True(t, diags.OK())
 		require.Len(t, result["Person"], 2)
 		require.Len(t, result["Company"], 1)
@@ -205,7 +206,7 @@ func TestParseArray(t *testing.T) {
 		adapter, _ := NewAdapter(nil, WithTypeField("_type"))
 		data := []byte(`[{"_type": "Person", "name": "Alice"}]`)
 
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 		require.True(t, diags.OK())
 		require.Len(t, result["Person"], 1)
 
@@ -218,7 +219,7 @@ func TestParseArray(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[{"name": "Alice"}]`)
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 		require.False(t, diags.OK())
 	})
 
@@ -226,7 +227,7 @@ func TestParseArray(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[{"$type": 123, "name": "Alice"}]`)
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 		require.False(t, diags.OK())
 	})
 
@@ -234,7 +235,7 @@ func TestParseArray(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[{"$type": "person", "name": "Alice"}]`) // lowercase
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 		require.False(t, diags.OK())
 	})
 
@@ -242,7 +243,7 @@ func TestParseArray(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[]`)
 
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 		require.True(t, diags.OK())
 		assert.Len(t, result, 0)
 	})
@@ -251,7 +252,7 @@ func TestParseArray(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"Person": []}`)
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 		require.False(t, diags.OK())
 	})
 }
@@ -266,7 +267,7 @@ func TestParseTypedArray(t *testing.T) {
 			{"name": "Bob", "age": 25}
 		]`)
 
-		result, diags := adapter.ParseTypedArray(source, "Person", data)
+		result, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
 		require.True(t, diags.OK())
 		require.Len(t, result, 2)
 
@@ -278,7 +279,7 @@ func TestParseTypedArray(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[{"name": "Alice"}]`)
 
-		_, diags := adapter.ParseTypedArray(source, "person", data) // lowercase
+		_, diags := adapter.ParseTypedArray(context.Background(), source, "person", data) // lowercase
 		require.False(t, diags.OK())
 	})
 
@@ -286,7 +287,7 @@ func TestParseTypedArray(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[]`)
 
-		result, diags := adapter.ParseTypedArray(source, "Person", data)
+		result, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
 		require.True(t, diags.OK())
 		assert.Len(t, result, 0)
 	})
@@ -299,7 +300,7 @@ func TestParseOne(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"name": "Alice", "age": 30}`)
 
-		result, diags := adapter.ParseOne(source, "Person", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Person", data)
 		require.True(t, diags.OK())
 
 		assert.Equal(t, "Alice", result.Properties["name"])
@@ -313,7 +314,7 @@ func TestParseOne(t *testing.T) {
 			"address": {"city": "NYC", "zip": "10001"}
 		}`)
 
-		result, diags := adapter.ParseOne(source, "Person", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Person", data)
 		require.True(t, diags.OK())
 
 		address, ok := result.Properties["address"].(map[string]any)
@@ -325,7 +326,7 @@ func TestParseOne(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"name": "Alice"}`)
 
-		_, diags := adapter.ParseOne(source, "person", data) // lowercase
+		_, diags := adapter.ParseOne(context.Background(), source, "person", data) // lowercase
 		require.False(t, diags.OK())
 	})
 
@@ -333,7 +334,7 @@ func TestParseOne(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{invalid}`)
 
-		_, diags := adapter.ParseOne(source, "Person", data)
+		_, diags := adapter.ParseOne(context.Background(), source, "Person", data)
 		require.False(t, diags.OK())
 	})
 }
@@ -344,7 +345,7 @@ func TestNumericConversion(t *testing.T) {
 
 	t.Run("integers preserved as int64", func(t *testing.T) {
 		data := []byte(`{"value": 42}`)
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 
 		val := result.Properties["value"]
@@ -354,7 +355,7 @@ func TestNumericConversion(t *testing.T) {
 
 	t.Run("floats preserved as float64", func(t *testing.T) {
 		data := []byte(`{"value": 3.14}`)
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 
 		val := result.Properties["value"]
@@ -364,7 +365,7 @@ func TestNumericConversion(t *testing.T) {
 
 	t.Run("large integers", func(t *testing.T) {
 		data := []byte(`{"value": 9223372036854775807}`) // MaxInt64
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 
 		val := result.Properties["value"]
@@ -376,7 +377,7 @@ func TestNumericConversion(t *testing.T) {
 			"obj": {"count": 5},
 			"arr": [1, 2.5, 3]
 		}`)
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 
 		obj := result.Properties["obj"].(map[string]any)
@@ -402,7 +403,7 @@ func TestLocationTracking(t *testing.T) {
 		require.NoError(t, err)
 
 		data := []byte(`{"name": "Alice", "age": 30}`)
-		result, diags := adapter.ParseOne(source, "Person", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Person", data)
 		require.True(t, diags.OK())
 
 		assert.NotNil(t, result.Provenance, "Provenance should be set when tracking")
@@ -412,7 +413,7 @@ func TestLocationTracking(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"name": "Alice"}`)
 
-		result, diags := adapter.ParseOne(source, "Person", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Person", data)
 		require.True(t, diags.OK())
 
 		assert.Nil(t, result.Provenance, "Provenance should be nil when not tracking")
@@ -426,7 +427,7 @@ func TestEdgeCases(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"name": "日本語", "emoji": "🎉"}`)
 
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 		assert.Equal(t, "日本語", result.Properties["name"])
 		assert.Equal(t, "🎉", result.Properties["emoji"])
@@ -436,7 +437,7 @@ func TestEdgeCases(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"name": null}`)
 
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 		assert.Nil(t, result.Properties["name"])
 	})
@@ -445,7 +446,7 @@ func TestEdgeCases(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"active": true, "deleted": false}`)
 
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 		assert.Equal(t, true, result.Properties["active"])
 		assert.Equal(t, false, result.Properties["deleted"])
@@ -455,7 +456,7 @@ func TestEdgeCases(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"name": ""}`)
 
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 		assert.Equal(t, "", result.Properties["name"])
 	})
@@ -464,7 +465,7 @@ func TestEdgeCases(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"data": {}}`)
 
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 
 		obj, ok := result.Properties["data"].(map[string]any)
@@ -476,7 +477,7 @@ func TestEdgeCases(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"items": []}`)
 
-		result, diags := adapter.ParseOne(source, "Test", data)
+		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
 
 		arr, ok := result.Properties["items"].([]any)
@@ -496,7 +497,7 @@ func TestContinuesAfterErrors(t *testing.T) {
 			{"$type": "Person", "name": "Charlie"}
 		]`)
 
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 		// Should have an error for the first element
 		require.False(t, diags.OK())
 		// But should still have parsed the valid elements
@@ -510,7 +511,7 @@ func TestContinuesAfterErrors(t *testing.T) {
 			"Person": [{"name": "Bob"}]
 		}`)
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 		require.False(t, diags.OK())
 		// Should have parsed the valid type
 		require.Len(t, result["Person"], 1)
@@ -533,7 +534,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 
 		// Invalid JSON to trigger parse error
 		data := []byte(`{invalid json}`)
-		_, diags := adapter.ParseOne(source, "Test", data)
+		_, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 
 		require.False(t, diags.OK())
 		issues := diags.IssuesSlice()
@@ -550,7 +551,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 
 		// Array element missing type tag
 		data := []byte(`[{"name": "Test"}]`)
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		issues := diags.IssuesSlice()
@@ -567,7 +568,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 
 		// Array element with invalid (lowercase) type tag
 		data := []byte(`[{"$type": "person", "name": "Test"}]`)
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		issues := diags.IssuesSlice()
@@ -583,7 +584,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 
 		// Type name that is a reserved keyword
 		data := []byte(`[{"$type": "String", "name": "Test"}]`)
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		issues := diags.IssuesSlice()
@@ -602,7 +603,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 		// Malformed JSON
 		data := []byte(`[{"name": }]`)
 
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		// Should return partial results up to error
@@ -614,7 +615,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 		// Truncated JSON
 		data := []byte(`[{"$type": "Person"`)
 
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		require.NotNil(t, result)
@@ -625,7 +626,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 		// Object instead of array
 		data := []byte(`{"$type": "Person"}`)
 
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		// Should have error but empty result
@@ -636,7 +637,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[]`)
 
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.True(t, diags.OK())
 		require.Empty(t, result)
@@ -647,7 +648,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 		// Type tag is a number, not string
 		data := []byte(`[{"$type": 123, "name": "Test"}]`)
 
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		// Should still have empty map since element failed
@@ -662,7 +663,7 @@ func TestParseObject_ErrorPaths(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{invalid}`)
 
-		_, diags := adapter.ParseObject(source, data)
+		_, diags := adapter.ParseObject(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 	})
@@ -672,7 +673,7 @@ func TestParseObject_ErrorPaths(t *testing.T) {
 		// Array instead of object
 		data := []byte(`[{"$type": "Person"}]`)
 
-		_, diags := adapter.ParseObject(source, data)
+		_, diags := adapter.ParseObject(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 	})
@@ -681,7 +682,7 @@ func TestParseObject_ErrorPaths(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"Person": [{"name":`)
 
-		_, diags := adapter.ParseObject(source, data)
+		_, diags := adapter.ParseObject(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 	})
@@ -696,7 +697,7 @@ func TestParseObject_ErrorPaths(t *testing.T) {
 			]
 		}`)
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		// Should have partial results
@@ -711,7 +712,7 @@ func TestParseTypedArray_ErrorPaths(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[{"name": }]`)
 
-		_, diags := adapter.ParseTypedArray(source, "Person", data)
+		_, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
 
 		require.False(t, diags.OK())
 		// Result may be nil for syntax errors
@@ -721,7 +722,7 @@ func TestParseTypedArray_ErrorPaths(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`{"name": "Alice"}`)
 
-		result, diags := adapter.ParseTypedArray(source, "Person", data)
+		result, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
 
 		require.False(t, diags.OK())
 		require.Empty(t, result)
@@ -731,7 +732,7 @@ func TestParseTypedArray_ErrorPaths(t *testing.T) {
 		adapter, _ := NewAdapter(nil)
 		data := []byte(`[{"name": "Alice"`)
 
-		_, diags := adapter.ParseTypedArray(source, "Person", data)
+		_, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
 
 		require.False(t, diags.OK())
 		// Result may be nil for syntax errors
@@ -748,7 +749,7 @@ func TestParseArray_ErrorDetails_WithoutTracking(t *testing.T) {
 		// Type tag is present but not a string - exercises invalidTypeTagError without tracking
 		data := []byte(`[{"$type": 123, "name": "Test"}]`)
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		issues := diags.IssuesSlice()
@@ -778,7 +779,7 @@ func TestParseArray_ErrorDetails_WithoutTracking(t *testing.T) {
 		// Empty string type tag
 		data := []byte(`[{"$type": "", "name": "Test"}]`)
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 	})
@@ -787,7 +788,7 @@ func TestParseArray_ErrorDetails_WithoutTracking(t *testing.T) {
 		// Null type tag
 		data := []byte(`[{"$type": null, "name": "Test"}]`)
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 	})
@@ -796,7 +797,7 @@ func TestParseArray_ErrorDetails_WithoutTracking(t *testing.T) {
 		// Object as type tag
 		data := []byte(`[{"$type": {"x": 1}, "name": "Test"}]`)
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 	})
@@ -805,7 +806,7 @@ func TestParseArray_ErrorDetails_WithoutTracking(t *testing.T) {
 		// Array as type tag
 		data := []byte(`[{"$type": ["Person"], "name": "Test"}]`)
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 	})
@@ -814,7 +815,7 @@ func TestParseArray_ErrorDetails_WithoutTracking(t *testing.T) {
 		// Boolean as type tag
 		data := []byte(`[{"$type": true, "name": "Test"}]`)
 
-		_, diags := adapter.ParseArray(source, data)
+		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 	})
@@ -829,7 +830,7 @@ func TestParseObject_NestedArrayErrors(t *testing.T) {
 		// Array contains non-object (string) - should report error
 		data := []byte(`{"Person": ["not an object"]}`)
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		require.NotNil(t, result)
@@ -839,7 +840,7 @@ func TestParseObject_NestedArrayErrors(t *testing.T) {
 		// Array contains number instead of object
 		data := []byte(`{"Person": [123]}`)
 
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 
 		require.False(t, diags.OK())
 		require.NotNil(t, result)
@@ -906,7 +907,7 @@ func TestParseObject_NonArrayValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, diags := adapter.ParseObject(source, []byte(tt.input))
+			result, diags := adapter.ParseObject(context.Background(), source, []byte(tt.input))
 
 			if tt.expectError {
 				require.False(t, diags.OK(), "expected error for non-array value")
@@ -928,7 +929,7 @@ func TestNullRejection(t *testing.T) {
 
 	t.Run("ParseOne rejects null root", func(t *testing.T) {
 		data := []byte(`null`)
-		_, diags := adapter.ParseOne(source, "Person", data)
+		_, diags := adapter.ParseOne(context.Background(), source, "Person", data)
 
 		require.False(t, diags.OK(), "null root should be rejected")
 		issues := diags.IssuesSlice()
@@ -938,7 +939,7 @@ func TestNullRejection(t *testing.T) {
 
 	t.Run("ParseTypedArray rejects null elements", func(t *testing.T) {
 		data := []byte(`[null, {"name": "Alice"}, null]`)
-		result, diags := adapter.ParseTypedArray(source, "Person", data)
+		result, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
 
 		require.False(t, diags.OK(), "null array elements should be rejected")
 		// Should have parsed the valid element
@@ -948,7 +949,7 @@ func TestNullRejection(t *testing.T) {
 
 	t.Run("ParseArray rejects null elements", func(t *testing.T) {
 		data := []byte(`[null, {"$type": "Person", "name": "Alice"}]`)
-		result, diags := adapter.ParseArray(source, data)
+		result, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK(), "null array elements should be rejected")
 		// Should have parsed the valid element
@@ -957,7 +958,7 @@ func TestNullRejection(t *testing.T) {
 
 	t.Run("ParseObject array with null elements", func(t *testing.T) {
 		data := []byte(`{"Person": [null, {"name": "Alice"}, null]}`)
-		result, diags := adapter.ParseObject(source, data)
+		result, diags := adapter.ParseObject(context.Background(), source, data)
 
 		require.False(t, diags.OK(), "null elements in type array should be rejected")
 		// Should have parsed the valid element
@@ -983,7 +984,7 @@ func TestTrailingContent(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				_, diags := adapter.ParseObject(source, []byte(tt.input))
+				_, diags := adapter.ParseObject(context.Background(), source, []byte(tt.input))
 				require.False(t, diags.OK(), "trailing content should be rejected")
 				issues := diags.IssuesSlice()
 				require.NotEmpty(t, issues)
@@ -1004,7 +1005,7 @@ func TestTrailingContent(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				_, diags := adapter.ParseArray(source, []byte(tt.input))
+				_, diags := adapter.ParseArray(context.Background(), source, []byte(tt.input))
 				require.False(t, diags.OK(), "trailing content should be rejected")
 			})
 		}
@@ -1021,7 +1022,7 @@ func TestTrailingContent(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				_, diags := adapter.ParseTypedArray(source, "Person", []byte(tt.input))
+				_, diags := adapter.ParseTypedArray(context.Background(), source, "Person", []byte(tt.input))
 				require.False(t, diags.OK(), "trailing content should be rejected")
 			})
 		}
@@ -1039,7 +1040,7 @@ func TestTrailingContent(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				_, diags := adapter.ParseOne(source, "Person", []byte(tt.input))
+				_, diags := adapter.ParseOne(context.Background(), source, "Person", []byte(tt.input))
 				require.False(t, diags.OK(), "trailing content should be rejected")
 			})
 		}

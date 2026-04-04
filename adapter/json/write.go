@@ -3,6 +3,7 @@ package json
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,7 +56,7 @@ func WithDiagnostics(include bool) WriteOption {
 // unresolved edges and duplicates in a "$diagnostics" section.
 //
 // Returns ErrNilResult if result is nil.
-func (a *Adapter) MarshalObject(result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
+func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
 	if result == nil {
 		return nil, ErrNilResult
 	}
@@ -86,8 +87,8 @@ func (a *Adapter) MarshalObject(result *graph.Snapshot, opts ...WriteOption) ([]
 //
 // Returns the number of bytes written and ErrNilResult if result is nil.
 // Returns io.ErrShortWrite if the writer accepts fewer bytes than provided.
-func (a *Adapter) WriteObject(w io.Writer, result *graph.Snapshot, opts ...WriteOption) (int64, error) {
-	data, err := a.MarshalObject(result, opts...)
+func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Snapshot, opts ...WriteOption) (int64, error) {
+	data, err := a.MarshalObject(ctx, result, opts...)
 	if err != nil {
 		return 0, err
 	}

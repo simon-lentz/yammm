@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"context"
 	"slices"
 	"testing"
 )
@@ -10,7 +11,7 @@ func TestShapeForSchema_Basic(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
@@ -38,7 +39,7 @@ func TestShapeForSchema_CompositePK(t *testing.T) {
 	s := loadSchema(t, "composite_pk.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestShapeForSchema_SkipsAbstract(t *testing.T) {
 	s := loadSchema(t, "abstract_types.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestShapeForSchema_PartTypes(t *testing.T) {
 	s := loadSchema(t, "part_types.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestShapeForSchema_Inheritance(t *testing.T) {
 	s := loadSchema(t, "inheritance.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestShapeForSchema_MultipleTypes(t *testing.T) {
 	s := loadSchema(t, "multiple_types.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestShapeForSchema_CustomSeparator(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithLabelSeparator("_"))
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}

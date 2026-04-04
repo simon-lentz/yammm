@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ func TestNodeQueryFor_SinglePK(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +28,7 @@ func TestNodeQueryFor_SinglePK(t *testing.T) {
 	inst := graphResult.InstancesOf("Entity")[0]
 	ns := shape.Types["Entity"]
 	st, _ := s.Type("Entity")
-	q, err := a.NodeQueryFor(&ns, inst, st)
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestNodeQueryFor_CompositePK(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "composite_pk.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestNodeQueryFor_CompositePK(t *testing.T) {
 	inst := graphResult.InstancesOf("Record")[0]
 	ns := shape.Types["Record"]
 	st, _ := s.Type("Record")
-	q, err := a.NodeQueryFor(&ns, inst, st)
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestNodeQueryFor_ImmutableKeys(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,7 @@ func TestNodeQueryFor_ImmutableKeys(t *testing.T) {
 	inst := graphResult.InstancesOf("Entity")[0]
 	ns := shape.Types["Entity"]
 	st, _ := s.Type("Entity")
-	q, err := a.NodeQueryFor(&ns, inst, st, WithImmutableKeys("created_at"))
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st, WithImmutableKeys("created_at"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +120,7 @@ func TestBatchNodeQueries_SingleType(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestBatchNodeQueries_SingleType(t *testing.T) {
 		},
 	})
 
-	queries, err := a.BatchNodeQueries(graphResult, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func TestBatchNodeQueries_Chunking(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +177,7 @@ func TestBatchNodeQueries_Chunking(t *testing.T) {
 		"Entity": instances,
 	})
 
-	queries, err := a.BatchNodeQueries(graphResult, shape, WithNodeChunkSize(2))
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithNodeChunkSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +193,7 @@ func TestEdgeQueryFor_Basic(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +208,7 @@ func TestEdgeQueryFor_Basic(t *testing.T) {
 		t.Fatal("expected at least one edge")
 	}
 
-	q, err := a.EdgeQueryFor(edges[0], shape)
+	q, err := a.EdgeQueryFor(context.Background(), edges[0], shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +229,7 @@ func TestEdgeQueryFor_NoProperties(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +250,7 @@ func TestEdgeQueryFor_NoProperties(t *testing.T) {
 		t.Skip("edge has properties; cannot test no-props path")
 	}
 
-	q, err := a.EdgeQueryFor(edge, shape)
+	q, err := a.EdgeQueryFor(context.Background(), edge, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +265,7 @@ func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +281,7 @@ func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 		},
 	})
 
-	queries, err := a.BatchEdgeQueries(graphResult, shape)
+	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +308,7 @@ func TestBatchEdgeQueries_Chunking(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +330,7 @@ func TestBatchEdgeQueries_Chunking(t *testing.T) {
 		"Issue":  issues,
 	})
 
-	queries, err := a.BatchEdgeQueries(graphResult, shape, WithEdgeChunkSize(2))
+	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, shape, WithEdgeChunkSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +353,7 @@ func TestPropertyCoercion_TypedSlice(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "list_properties.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +362,7 @@ func TestPropertyCoercion_TypedSlice(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "active": true, "tags": []any{"a", "b"}, "scores": []any{int64(1), int64(2)}}},
 	})
 
-	queries, err := a.BatchNodeQueries(graphResult, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +399,7 @@ func TestPropertyCoercion_TemporalSlice(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "list_properties.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +412,7 @@ func TestPropertyCoercion_TemporalSlice(t *testing.T) {
 		}},
 	})
 
-	queries, err := a.BatchNodeQueries(graphResult, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +571,7 @@ func TestPropertyCoercion_Scalars(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +580,7 @@ func TestPropertyCoercion_Scalars(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "count": int64(42), "active": true, "created_at": "2024-01-01T00:00:00Z", "score": 3.14}},
 	})
 
-	queries, err := a.BatchNodeQueries(graphResult, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,7 +605,7 @@ func TestPropertyCoercion_TemporalScalar(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +618,7 @@ func TestPropertyCoercion_TemporalScalar(t *testing.T) {
 		}},
 	})
 
-	queries, err := a.BatchNodeQueries(graphResult, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +731,7 @@ func TestNodeQueryFor_MissingKey(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New()
 
-	_, result := a.ShapeForSchema(s)
+	_, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +748,7 @@ func TestNodeQueryFor_MissingKey(t *testing.T) {
 		PrimaryKeys: []string{"nonexistent_key"},
 	}
 
-	_, err := a.NodeQueryFor(&badShape, inst, nil)
+	_, err := a.NodeQueryFor(context.Background(), &badShape, inst, nil)
 	if err == nil {
 		t.Error("expected error for missing key")
 	}
@@ -768,7 +769,7 @@ func TestNodeQueryFor_EmptyPrimaryKeys(t *testing.T) {
 		PrimaryKeys: nil,
 	}
 
-	_, err := a.NodeQueryFor(&emptyPKShape, inst, nil)
+	_, err := a.NodeQueryFor(context.Background(), &emptyPKShape, inst, nil)
 	if err == nil {
 		t.Error("expected error for empty primary keys")
 	}
@@ -788,7 +789,7 @@ func TestBatchNodeQueries_MissingShape(t *testing.T) {
 
 	// Pass an empty shape map — no shape for "Entity".
 	emptyShapes := &GraphShape{Types: map[string]NodeShape{}}
-	_, err := a.BatchNodeQueries(graphResult, emptyShapes)
+	_, err := a.BatchNodeQueries(context.Background(), graphResult, emptyShapes)
 	if err == nil {
 		t.Error("expected error for missing shape")
 	}
@@ -816,7 +817,7 @@ func TestEdgeQueryFor_MissingSourceShape(t *testing.T) {
 	partialShapes := &GraphShape{Types: map[string]NodeShape{
 		"__none__": {Label: "x", PrimaryKeys: []string{"x"}},
 	}}
-	_, err := a.EdgeQueryFor(edges[0], partialShapes)
+	_, err := a.EdgeQueryFor(context.Background(), edges[0], partialShapes)
 	if err == nil {
 		t.Error("expected error for missing source/target shape")
 	}
@@ -836,7 +837,7 @@ func TestBatchEdgeQueries_MissingShape(t *testing.T) {
 	})
 
 	emptyShapes := &GraphShape{Types: map[string]NodeShape{}}
-	_, err := a.BatchEdgeQueries(graphResult, emptyShapes)
+	_, err := a.BatchEdgeQueries(context.Background(), graphResult, emptyShapes)
 	if err == nil {
 		t.Error("expected error for missing shape")
 	}
@@ -850,7 +851,7 @@ func TestBatchEdgeQueries_MixedProperties(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "edge_mixed.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -871,7 +872,7 @@ func TestBatchEdgeQueries_MixedProperties(t *testing.T) {
 		},
 	})
 
-	queries, err := a.BatchEdgeQueries(graphResult, shape)
+	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -912,7 +913,7 @@ func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -933,7 +934,7 @@ func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
 	// edge with an invalid relation name, which can't be produced by
 	// the graph builder. Verify that valid edges pass instead.
 	for _, edge := range edges {
-		_, err := a.EdgeQueryFor(edge, shape)
+		_, err := a.EdgeQueryFor(context.Background(), edge, shape)
 		if err != nil {
 			t.Errorf("EdgeQueryFor failed for valid edge %s: %v", edge.Relation(), err)
 		}

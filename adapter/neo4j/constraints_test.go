@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -13,7 +14,7 @@ func TestConstraints_BasicSinglePK(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New()
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -49,7 +50,7 @@ func TestConstraints_CompositePK(t *testing.T) {
 	s := loadSchema(t, "composite_pk.yammm")
 	a := New()
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestConstraints_SkipsAbstract(t *testing.T) {
 	s := loadSchema(t, "abstract_types.yammm")
 	a := New()
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestConstraints_PartTypes(t *testing.T) {
 	s := loadSchema(t, "part_types.yammm")
 	a := New()
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestConstraints_ListProperties(t *testing.T) {
 	s := loadSchema(t, "list_properties.yammm")
 	a := New()
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -141,7 +142,7 @@ func TestConstraints_Aliases(t *testing.T) {
 	s := loadSchema(t, "aliases.yammm")
 	a := New()
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -159,7 +160,7 @@ func TestConstraints_NamedConstraints(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New() // Default: named=true.
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestConstraints_UnnamedConstraints(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithNamedConstraints(false))
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -202,7 +203,7 @@ func TestConstraints_NodeKey(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithNodeKeyConstraints(true))
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -223,7 +224,7 @@ func TestConstraints_NodeKeyComposite(t *testing.T) {
 	s := loadSchema(t, "composite_pk.yammm")
 	a := New(WithNodeKeyConstraints(true))
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -244,7 +245,7 @@ func TestConstraints_CommunityEdition(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithEdition(Community))
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -265,7 +266,7 @@ func TestConstraints_RequiredOnlyTypes(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithRequiredOnlyTypeConstraints(true))
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -290,7 +291,7 @@ func TestConstraints_ScalarTypesDisabled(t *testing.T) {
 	s := loadSchema(t, "list_properties.yammm")
 	a := New(WithScalarTypeConstraints(false))
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -309,11 +310,11 @@ func TestConstraints_DeterministicOrder(t *testing.T) {
 	s := loadSchema(t, "multiple_types.yammm")
 	a := New()
 
-	stmts1, result := a.ConstraintsForSchema(s)
+	stmts1, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("first call failed: %v", err)
 	}
-	stmts2, result := a.ConstraintsForSchema(s)
+	stmts2, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("second call failed: %v", err)
 	}
@@ -346,7 +347,7 @@ func TestConstraints_Inheritance(t *testing.T) {
 	s := loadSchema(t, "inheritance.yammm")
 	a := New()
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -386,7 +387,7 @@ func TestConstraints_EnumPattern(t *testing.T) {
 	s := loadSchema(t, "enum_pattern.yammm")
 	a := New()
 
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
@@ -401,7 +402,7 @@ func TestConstraintsStructured(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New()
 
-	constraints, result := a.ConstraintsStructured(s)
+	constraints, result := a.ConstraintsStructured(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsStructured failed: %v", err)
 	}

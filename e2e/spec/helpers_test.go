@@ -95,7 +95,7 @@ func loadTestData(t *testing.T, dataPath, typeKey string) []instance.RawInstance
 	require.NoError(t, err, "create JSON adapter")
 
 	sourceID := location.NewSourceID("test://" + dataPath)
-	parsed, parseResult := adapter.ParseObject(sourceID, dataBytes)
+	parsed, parseResult := adapter.ParseObject(t.Context(), sourceID, dataBytes)
 	require.True(t, parseResult.OK(), "JSON parse %s failed: %v", dataPath, parseResult.Messages())
 
 	records := parsed[typeKey]

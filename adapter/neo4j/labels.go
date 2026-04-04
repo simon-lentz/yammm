@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -124,7 +125,7 @@ func CypherReservedKeywords() map[string]bool {
 //	Label("msrb_emma", "Issuer")       -> "msrb_emma__Issuer"
 //	Label("census_tiger", "County")    -> "census_tiger__County"
 //	Label("", "Person")                -> "Person"
-func (a *Adapter) Label(schemaName, typeName string) string {
+func (a *Adapter) Label(_ context.Context, schemaName, typeName string) string {
 	trimmedType := strings.TrimSpace(typeName)
 	if trimmedType == "" {
 		return ""
@@ -146,7 +147,7 @@ func (a *Adapter) Label(schemaName, typeName string) string {
 // colliding label, e.g.:
 //
 //	label "my_schema__FooBar" produced by types: Foo-Bar, Foo_Bar
-func (a *Adapter) DetectLabelCollisions(s *schema.Schema) diag.Result {
+func (a *Adapter) DetectLabelCollisions(ctx context.Context, s *schema.Schema) diag.Result {
 	collector := diag.NewCollector(0)
 	labelToTypes := make(map[string][]string)
 
@@ -157,7 +158,7 @@ func (a *Adapter) DetectLabelCollisions(s *schema.Schema) diag.Result {
 			continue
 		}
 
-		label := a.Label(schemaName, typeName)
+		label := a.Label(ctx, schemaName, typeName)
 		if label == "" {
 			continue
 		}
