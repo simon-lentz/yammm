@@ -231,7 +231,7 @@ func (b *Builder) Build() (*schema.Schema, diag.Result) {
 		if err := location.ValidateSyntheticSourceID(sourceID.String()); err != nil {
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_SYNTHETIC_ID,
 				fmt.Sprintf("invalid synthetic source ID: %s", err)).
-				WithDetail(diag.DetailKeyId, sourceID.String()).Build())
+				WithDetail(diag.DetailKeyID, sourceID.String()).Build())
 			return nil, collector.Result()
 		}
 	}
@@ -276,7 +276,7 @@ func (b *Builder) Build() (*schema.Schema, diag.Result) {
 	b.wireImports(s)
 
 	// Seal the schema to prevent further mutation
-	s.Seal()
+	schema.InternalSealSchema(s)
 
 	return s, collector.Result()
 }
@@ -307,8 +307,8 @@ type registryAdapter struct {
 
 // LookupBySourceID implements the complete.Registry interface.
 func (a *registryAdapter) LookupBySourceID(id location.SourceID) (*schema.Schema, bool) {
-	s, status := a.r.LookupBySourceID(id)
-	return s, status.Found()
+	s, ok := a.r.LookupBySourceID(id)
+	return s, ok
 }
 
 // validateInput performs shallow validation of builder input before completion.
@@ -436,8 +436,8 @@ func (b *Builder) resolveImportPath(importPath string) (location.SourceID, bool)
 		}
 
 		// Look up by SourceID
-		_, status := b.registry.LookupBySourceID(resolvedID)
-		if !status.Found() {
+		_, ok = b.registry.LookupBySourceID(resolvedID)
+		if !ok {
 			return location.SourceID{}, false
 		}
 		return resolvedID, true
@@ -450,8 +450,8 @@ func (b *Builder) resolveImportPath(importPath string) (location.SourceID, bool)
 			return location.SourceID{}, false
 		}
 		// Look up by SourceID to verify it exists
-		_, status := b.registry.LookupBySourceID(resolvedID)
-		if !status.Found() {
+		_, ok = b.registry.LookupBySourceID(resolvedID)
+		if !ok {
 			return location.SourceID{}, false
 		}
 		return resolvedID, true
@@ -465,8 +465,8 @@ func (b *Builder) resolveImportPath(importPath string) (location.SourceID, bool)
 	}
 
 	// Case 3: Fallback - treat path as schema name (non-relative paths only)
-	s, status := b.registry.LookupByName(importPath)
-	if !status.Found() {
+	s, ok := b.registry.LookupByName(importPath)
+	if !ok {
 		return location.SourceID{}, false
 	}
 	return s.SourceID(), true
@@ -545,12 +545,12 @@ func (b *Builder) wireImports(s *schema.Schema) {
 	for _, imp := range s.ImportsSlice() {
 		// Look up by SourceID (which was set during completion)
 		if !imp.ResolvedSourceID().IsZero() {
-			resolved, status := b.registry.LookupBySourceID(imp.ResolvedSourceID())
-			if status.Found() {
-				imp.SetSchema(resolved)
+			resolved, ok := b.registry.LookupBySourceID(imp.ResolvedSourceID())
+			if ok {
+				schema.InternalSetImportSchema(imp, resolved)
 			}
 		}
-		imp.Seal()
+		schema.InternalSealImport(imp)
 	}
 }
 

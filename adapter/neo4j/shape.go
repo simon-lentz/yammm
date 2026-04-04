@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,8 @@ import (
 )
 
 // NodeShape describes the Neo4j representation of a single yammm type.
+//
+// Construct via [Adapter.ShapeForSchema]; do not create directly.
 type NodeShape struct {
 	Type           string   // Original yammm type name
 	Label          string   // Sanitized Neo4j label (namespace + separator + type)
@@ -17,6 +20,8 @@ type NodeShape struct {
 }
 
 // GraphShape maps yammm type names to their Neo4j node representations.
+//
+// Construct via [Adapter.ShapeForSchema]; do not create directly.
 type GraphShape struct {
 	Types map[string]NodeShape
 }
@@ -30,7 +35,7 @@ type GraphShape struct {
 //
 // If validation errors are found, returns (nil, result) where result contains
 // [E_NEO4J_INVALID_IDENTIFIER] issues.
-func (a *Adapter) ShapeForSchema(s *schema.Schema) (*GraphShape, diag.Result) {
+func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphShape, diag.Result) {
 	collector := diag.NewCollector(0)
 	shape := &GraphShape{
 		Types: make(map[string]NodeShape),
@@ -42,7 +47,7 @@ func (a *Adapter) ShapeForSchema(s *schema.Schema) (*GraphShape, diag.Result) {
 			continue
 		}
 
-		label := a.Label(s.Name(), name)
+		label := a.Label(ctx, s.Name(), name)
 		if label == "" {
 			continue
 		}

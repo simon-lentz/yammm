@@ -1,8 +1,8 @@
 // Package immutable provides immutable wrapper types for Go values.
 //
-// This package sits at the foundation tier alongside [location] and [diag],
-// providing compile-time immutability guarantees for values that appear in
-// public API signatures throughout the YAMMM library.
+// This package provides compile-time immutability guarantees for values that
+// appear in public API signatures throughout the YAMMM library. It depends only
+// on the standard library.
 //
 // # Design Principles
 //
@@ -138,7 +138,6 @@
 //
 // # Package Dependencies
 //
-// Per the Foundation Rule, immutable imports only stdlib packages (reflect, iter,
-// cmp, encoding/json). It must not import higher-level packages like schema,
-// instance, graph, or adapter.
+// immutable imports only stdlib packages (reflect, iter, cmp, encoding/json).
+// It must not import schema, instance, graph, or adapter.
 package immutable

@@ -394,7 +394,7 @@ func TestValidation_JSONAdapterTopLevelKeys(t *testing.T) {
 	require.NoError(t, err)
 
 	sourceID := location.NewSourceID("test://validation/data.json")
-	parsed, parseResult := adapter.ParseObject(sourceID, dataBytes)
+	parsed, parseResult := adapter.ParseObject(t.Context(), sourceID, dataBytes)
 	require.True(t, parseResult.OK(), "JSON parse failed: %v", parseResult.Messages())
 
 	// Verify the parsed map has type-keyed entries
@@ -559,7 +559,7 @@ func TestValidation_ConcurrentUse(t *testing.T) {
 				return
 			}
 			if failure != nil {
-				errs <- failure
+				errs <- failure.Result.Err()
 				return
 			}
 			errs <- nil

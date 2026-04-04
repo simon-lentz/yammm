@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,18 +12,20 @@ func TestAdapter_DefaultConfig(t *testing.T) {
 	t.Parallel()
 	a := New()
 
+	ctx := context.Background()
+
 	// Verify defaults by checking observable behavior.
 	// separator="__"
-	if got := a.Label("s", "T"); got != "s__T" {
+	if got := a.Label(ctx, "s", "T"); got != "s__T" {
 		t.Errorf("default separator: Label('s','T') = %q; want 's__T'", got)
 	}
 	// prefix=""
-	if got := a.Label("s", "T"); !strings.HasPrefix(got, "s") {
+	if got := a.Label(ctx, "s", "T"); !strings.HasPrefix(got, "s") {
 		t.Errorf("default prefix: Label should not have prefix, got %q", got)
 	}
 	// edition=Enterprise: generate NOT NULL constraints
 	s := loadSchema(t, "basic.yammm")
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -63,9 +66,10 @@ func TestAdapter_FullPipeline_BasicSchema(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")
 	a := New()
+	ctx := context.Background()
 
 	// Generate constraints.
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +78,7 @@ func TestAdapter_FullPipeline_BasicSchema(t *testing.T) {
 	}
 
 	// Generate shapes.
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +102,15 @@ func TestAdapter_FullPipeline_WithWrite(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
+	ctx := context.Background()
 
 	// Generate constraints + shapes.
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +122,7 @@ func TestAdapter_FullPipeline_WithWrite(t *testing.T) {
 	})
 
 	// Generate batch node queries.
-	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
+	nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,9 +163,10 @@ func TestAdapter_CommunityEdition_ReducedOutput(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithEdition(Community))
+	ctx := context.Background()
 
 	// Constraints: only UNIQUE.
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +177,7 @@ func TestAdapter_CommunityEdition_ReducedOutput(t *testing.T) {
 	}
 
 	// Shapes: unaffected by edition.
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -184,17 +190,18 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New(WithLabelSeparator("_"))
+	ctx := context.Background()
 
 	expectedLabel := "basic_test_Entity"
 
 	// Label method.
-	directLabel := a.Label(s.Name(), "Entity")
+	directLabel := a.Label(ctx, s.Name(), "Entity")
 	if directLabel != expectedLabel {
 		t.Errorf("Label() = %q; want %q", directLabel, expectedLabel)
 	}
 
 	// Constraints use same label.
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +222,7 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 	}
 
 	// Shape uses same label.
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +234,7 @@ func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
-	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
+	nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,17 +250,18 @@ func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
 	a := New(WithLabelPrefix("app_"))
+	ctx := context.Background()
 
 	expectedLabel := "app_basic_test__Entity"
 
 	// Label method.
-	directLabel := a.Label(s.Name(), "Entity")
+	directLabel := a.Label(ctx, s.Name(), "Entity")
 	if directLabel != expectedLabel {
 		t.Errorf("Label() = %q; want %q", directLabel, expectedLabel)
 	}
 
 	// Constraints use same label.
-	stmts, result := a.ConstraintsForSchema(s)
+	stmts, result := a.ConstraintsForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +277,7 @@ func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 	}
 
 	// Shape uses same label.
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +289,7 @@ func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
-	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
+	nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,13 +305,14 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "multiple_types.yammm")
 	a := New()
+	ctx := context.Background()
 
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
 
-	structured, result := a.ConstraintsStructured(s)
+	structured, result := a.ConstraintsStructured(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +328,7 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 		"Gadget": {{"uid": "g1", "sku": "S1"}},
 	})
 
-	nodeQueries, err := a.BatchNodeQueries(graphResult, shape)
+	nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +341,7 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 		typeName := t2.Name()
 
 		// 1. Label() output.
-		directLabel := a.Label(s.Name(), typeName)
+		directLabel := a.Label(ctx, s.Name(), typeName)
 
 		// 2. Shape label.
 		ns, ok := shape.Types[typeName]
@@ -367,9 +376,10 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
+	ctx := context.Background()
 
 	// Pre-build immutable inputs for write operations.
-	shape, result := a.ShapeForSchema(s)
+	shape, result := a.ShapeForSchema(ctx, s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -387,31 +397,31 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 		wg.Add(5)
 		go func() {
 			defer wg.Done()
-			_, result := a.ConstraintsForSchema(s)
+			_, result := a.ConstraintsForSchema(ctx, s)
 			if err := result.Err(); err != nil {
 				errs <- fmt.Errorf("constraints: %w", err)
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			_, result := a.ShapeForSchema(s)
+			_, result := a.ShapeForSchema(ctx, s)
 			if err := result.Err(); err != nil {
 				errs <- fmt.Errorf("shape: %w", err)
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			_ = a.Label("test", "Type")
+			_ = a.Label(ctx, "test", "Type")
 		}()
 		go func() {
 			defer wg.Done()
-			if _, err := a.BatchNodeQueries(graphResult, shape); err != nil {
+			if _, err := a.BatchNodeQueries(ctx, graphResult, shape); err != nil {
 				errs <- fmt.Errorf("batch nodes: %w", err)
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			if _, err := a.BatchEdgeQueries(graphResult, shape); err != nil {
+			if _, err := a.BatchEdgeQueries(ctx, graphResult, shape); err != nil {
 				errs <- fmt.Errorf("batch edges: %w", err)
 			}
 		}()

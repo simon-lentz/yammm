@@ -248,7 +248,7 @@ func (c *completer) validateRelationTarget(_ *schema.Type, r *schema.Relation, k
 	}
 
 	// Resolve the semantic identity
-	r.SetTargetID(target.ID())
+	schema.InternalSetRelationTargetID(r, target.ID())
 
 	return true
 }
@@ -288,7 +288,7 @@ func (c *completer) validateCompositionTarget(t *schema.Type, r *schema.Relation
 	}
 
 	// Resolve the semantic identity
-	r.SetTargetID(target.ID())
+	schema.InternalSetRelationTargetID(r, target.ID())
 
 	return true
 }

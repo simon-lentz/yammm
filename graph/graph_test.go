@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/immutable"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/build"
@@ -410,8 +410,8 @@ func TestGraph_Check_NilReceiver(t *testing.T) {
 	}
 }
 
-func TestResult_NilReceiver(t *testing.T) {
-	var r *Result
+func TestSnapshot_NilReceiver(t *testing.T) {
+	var r *Snapshot
 
 	// All methods should handle nil gracefully
 	if r.Types() != nil {

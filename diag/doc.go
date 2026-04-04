@@ -1,8 +1,8 @@
 // Package diag provides structured diagnostics for the YAMMM validation pipeline.
 //
-// This package sits at the foundation tier alongside [location], providing the
-// single diagnostic infrastructure used across schema loading, parsing,
-// compilation, and instance validation.
+// This package provides the single diagnostic infrastructure used across schema
+// loading, parsing, compilation, and instance validation. It depends only on
+// [location] and the standard library.
 //
 // # Design Principles
 //
@@ -27,8 +27,8 @@
 // All YAMMM public entry points follow a consistent pattern:
 //
 //   - err != nil: catastrophic failure (I/O, internal corruption, runtime failures)
-//   - err == nil and result.Err() != nil: semantic failure represented as structured issues
-//   - err == nil and result.Err() == nil: success (may still include warnings/info/hints)
+//   - err == nil and [Result.Err] != nil: semantic failure represented as structured issues
+//   - err == nil and [Result.Err] == nil: success (may still include warnings/info/hints)
 //
 // # Severity Semantics
 //
@@ -39,7 +39,7 @@
 //   - [Warning], [Info], [Hint]: Non-blocking diagnostics
 //
 // The [Severity.IsFailure] method returns true for Fatal and Error severities,
-// matching the result.Err() != nil check.
+// matching the [Result.Err] != nil check.
 //
 // # Issue Construction
 //
@@ -86,6 +86,6 @@
 //
 // # Package Dependencies
 //
-// Per the Foundation Rule, diag imports only stdlib and [location]. It must not
-// import higher-level packages like schema, instance, graph, or adapter.
+// diag imports only stdlib and [location]. It must not import schema, instance,
+// graph, or adapter.
 package diag

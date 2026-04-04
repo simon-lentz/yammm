@@ -109,19 +109,19 @@ func NewStringConstraint() StringConstraint {
 	return StringConstraint{}
 }
 
-// NewStringConstraintBounded creates a StringConstraint with the given bounds.
-// Pass -1 for minLen or maxLen to indicate no bound.
-func NewStringConstraintBounded(minLen, maxLen int64) StringConstraint {
-	c := StringConstraint{}
-	if minLen >= 0 {
-		c.minLen = minLen
-		c.hasMin = true
-	}
-	if maxLen >= 0 {
-		c.maxLen = maxLen
-		c.hasMax = true
-	}
-	return c
+// StringMinLen creates a StringConstraint with a minimum length bound.
+func StringMinLen(lo int64) StringConstraint {
+	return StringConstraint{minLen: lo, hasMin: true}
+}
+
+// StringMaxLen creates a StringConstraint with a maximum length bound.
+func StringMaxLen(hi int64) StringConstraint {
+	return StringConstraint{maxLen: hi, hasMax: true}
+}
+
+// StringLenBetween creates a StringConstraint with both min and max length bounds.
+func StringLenBetween(lo, hi int64) StringConstraint {
+	return StringConstraint{minLen: lo, maxLen: hi, hasMin: true, hasMax: true}
 }
 
 func (StringConstraint) Kind() ConstraintKind { return KindString }
@@ -181,10 +181,19 @@ func NewIntegerConstraint() IntegerConstraint {
 	return IntegerConstraint{}
 }
 
-// NewIntegerConstraintBounded creates an IntegerConstraint with the given bounds.
-// Use hasMin=false or hasMax=false to indicate no bound.
-func NewIntegerConstraintBounded(lo int64, hasMin bool, hi int64, hasMax bool) IntegerConstraint {
-	return IntegerConstraint{min: lo, max: hi, hasMin: hasMin, hasMax: hasMax}
+// IntegerMin creates an IntegerConstraint with a minimum bound.
+func IntegerMin(lo int64) IntegerConstraint {
+	return IntegerConstraint{min: lo, hasMin: true}
+}
+
+// IntegerMax creates an IntegerConstraint with a maximum bound.
+func IntegerMax(hi int64) IntegerConstraint {
+	return IntegerConstraint{max: hi, hasMax: true}
+}
+
+// IntegerBetween creates an IntegerConstraint with both min and max bounds.
+func IntegerBetween(lo, hi int64) IntegerConstraint {
+	return IntegerConstraint{min: lo, max: hi, hasMin: true, hasMax: true}
 }
 
 func (IntegerConstraint) Kind() ConstraintKind { return KindInteger }
@@ -244,10 +253,19 @@ func NewFloatConstraint() FloatConstraint {
 	return FloatConstraint{}
 }
 
-// NewFloatConstraintBounded creates a FloatConstraint with the given bounds.
-// Use hasMin=false or hasMax=false to indicate no bound.
-func NewFloatConstraintBounded(lo float64, hasMin bool, hi float64, hasMax bool) FloatConstraint {
-	return FloatConstraint{min: lo, max: hi, hasMin: hasMin, hasMax: hasMax}
+// FloatMin creates a FloatConstraint with a minimum bound.
+func FloatMin(lo float64) FloatConstraint {
+	return FloatConstraint{min: lo, hasMin: true}
+}
+
+// FloatMax creates a FloatConstraint with a maximum bound.
+func FloatMax(hi float64) FloatConstraint {
+	return FloatConstraint{max: hi, hasMax: true}
+}
+
+// FloatBetween creates a FloatConstraint with both min and max bounds.
+func FloatBetween(lo, hi float64) FloatConstraint {
+	return FloatConstraint{min: lo, max: hi, hasMin: true, hasMax: true}
 }
 
 func (FloatConstraint) Kind() ConstraintKind { return KindFloat }
@@ -578,19 +596,19 @@ func NewListConstraint(element Constraint) ListConstraint {
 	return ListConstraint{element: element}
 }
 
-// NewListConstraintBounded creates a ListConstraint with the given length bounds.
-// Pass -1 for minLen or maxLen to indicate no bound.
-func NewListConstraintBounded(element Constraint, minLen, maxLen int64) ListConstraint {
-	c := ListConstraint{element: element}
-	if minLen >= 0 {
-		c.minLen = minLen
-		c.hasMin = true
-	}
-	if maxLen >= 0 {
-		c.maxLen = maxLen
-		c.hasMax = true
-	}
-	return c
+// ListMinLen creates a ListConstraint with a minimum length bound.
+func ListMinLen(element Constraint, lo int64) ListConstraint {
+	return ListConstraint{element: element, minLen: lo, hasMin: true}
+}
+
+// ListMaxLen creates a ListConstraint with a maximum length bound.
+func ListMaxLen(element Constraint, hi int64) ListConstraint {
+	return ListConstraint{element: element, maxLen: hi, hasMax: true}
+}
+
+// ListLenBetween creates a ListConstraint with both min and max length bounds.
+func ListLenBetween(element Constraint, lo, hi int64) ListConstraint {
+	return ListConstraint{element: element, minLen: lo, maxLen: hi, hasMin: true, hasMax: true}
 }
 
 func (ListConstraint) Kind() ConstraintKind { return KindList }

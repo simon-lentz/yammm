@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/simon-lentz/yammm/internal/immutable"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/trace"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema/expr"

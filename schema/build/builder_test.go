@@ -309,9 +309,9 @@ func TestBuilder_ConstraintTypes(t *testing.T) {
 	s, result := build.NewBuilder().
 		WithName("test").
 		AddType("AllConstraints").
-		WithProperty("str", schema.NewStringConstraintBounded(1, 100)).
-		WithProperty("num", schema.NewIntegerConstraintBounded(0, true, 1000, true)).
-		WithProperty("flt", schema.NewFloatConstraintBounded(0.0, true, 1.0, true)).
+		WithProperty("str", schema.StringLenBetween(1, 100)).
+		WithProperty("num", schema.IntegerBetween(0, 1000)).
+		WithProperty("flt", schema.FloatBetween(0.0, 1.0)).
 		WithProperty("flag", schema.NewBooleanConstraint()).
 		WithProperty("id", schema.NewUUIDConstraint()).
 		WithProperty("created", schema.NewTimestampConstraint()).

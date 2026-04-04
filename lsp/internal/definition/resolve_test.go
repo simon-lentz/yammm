@@ -27,7 +27,7 @@ func TestResolveSymbol_LocalType(t *testing.T) {
 	span := location.Range(sourceID, 5, 1, 10, 1)
 	selectionSpan := location.Range(sourceID, 5, 6, 5, 12)
 
-	typ := schema.NewType("Person", sourceID, span, "A person type", false, false)
+	typ := schema.InternalNewType("Person", sourceID, span, "A person type", false, false)
 
 	sym := &symbols.Symbol{
 		Name:      "Person",
@@ -61,7 +61,7 @@ func TestResolveSymbol_ImportWithoutSchema(t *testing.T) {
 	importSpan := location.Range(mainSourceID, 1, 1, 1, 30)
 
 	// Create an import WITHOUT a resolved schema (unresolved import)
-	imp := schema.NewImport("./missing", "missing", importedSourceID, importSpan)
+	imp := schema.InternalNewImport("./missing", "missing", importedSourceID, importSpan)
 	// Don't call imp.SetSchema() - simulates unresolved import
 
 	sym := &symbols.Symbol{

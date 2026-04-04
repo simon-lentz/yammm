@@ -31,8 +31,8 @@ func loadSchemaAndValidator(t *testing.T, name string) (*schema.Schema, *instanc
 	return s, instance.NewValidator(s)
 }
 
-// buildGraphResult validates instances and builds a graph.Result snapshot.
-func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, instances map[string][]map[string]any) *graph.Result {
+// buildGraphResult validates instances and builds a graph.Snapshot.
+func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, instances map[string][]map[string]any) *graph.Snapshot {
 	t.Helper()
 	ctx := context.Background()
 	g := graph.New(s)

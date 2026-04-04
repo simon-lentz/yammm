@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -19,7 +20,7 @@ const (
 )
 
 // Constraint is a structured representation of a single Neo4j constraint.
-// Use [Adapter.ConstraintsStructured] to get these instead of raw Cypher strings.
+// Construct via [Adapter.ConstraintsStructured]; do not create directly.
 type Constraint struct {
 	Name       string         // Deterministic constraint name (empty if WithNamedConstraints(false))
 	Kind       ConstraintKind // Constraint category
@@ -33,8 +34,8 @@ type Constraint struct {
 //
 // Returns the same Cypher statements as [Adapter.ConstraintsStructured], but as
 // raw strings rather than structured [Constraint] values.
-func (a *Adapter) ConstraintsForSchema(s *schema.Schema) ([]string, diag.Result) {
-	structured, result := a.ConstraintsStructured(s)
+func (a *Adapter) ConstraintsForSchema(ctx context.Context, s *schema.Schema) ([]string, diag.Result) {
+	structured, result := a.ConstraintsStructured(ctx, s)
 	if !result.OK() {
 		return nil, result
 	}
@@ -68,10 +69,10 @@ func (a *Adapter) ConstraintsForSchema(s *schema.Schema) ([]string, diag.Result)
 // If validation errors are found, returns (nil, result) where result contains
 // all issues. Issues use [E_NEO4J_LABEL_COLLISION], [E_NEO4J_INVALID_IDENTIFIER],
 // or [E_NEO4J_UNSUPPORTED_TYPE] codes.
-func (a *Adapter) ConstraintsStructured(s *schema.Schema) ([]Constraint, diag.Result) {
+func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) ([]Constraint, diag.Result) {
 	collector := diag.NewCollector(0)
 
-	collisionResult := a.DetectLabelCollisions(s)
+	collisionResult := a.DetectLabelCollisions(ctx, s)
 	collector.Merge(collisionResult)
 
 	var constraints []Constraint
@@ -82,7 +83,7 @@ func (a *Adapter) ConstraintsStructured(s *schema.Schema) ([]Constraint, diag.Re
 			continue
 		}
 
-		label := a.Label(s.Name(), name)
+		label := a.Label(ctx, s.Name(), name)
 		if label == "" {
 			continue
 		}
@@ -99,7 +100,7 @@ func (a *Adapter) ConstraintsStructured(s *schema.Schema) ([]Constraint, diag.Re
 			continue
 		}
 
-		typeConstraints := a.constraintsForType(t, label, collector)
+		typeConstraints := a.constraintsForType(ctx, t, label, collector)
 		constraints = append(constraints, typeConstraints...)
 	}
 
@@ -122,7 +123,7 @@ func (a *Adapter) ConstraintsStructured(s *schema.Schema) ([]Constraint, diag.Re
 }
 
 // constraintsForType generates all constraints for a single type.
-func (a *Adapter) constraintsForType(t *schema.Type, label string, collector *diag.Collector) []Constraint {
+func (a *Adapter) constraintsForType(_ context.Context, t *schema.Type, label string, collector *diag.Collector) []Constraint {
 	var constraints []Constraint
 
 	// 1. PRIMARY KEY constraints (UNIQUE or NODE KEY).

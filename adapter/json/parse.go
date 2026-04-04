@@ -2,6 +2,7 @@ package json
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +29,7 @@ import (
 //	  "Person": [{"name": "Alice"}, {"name": "Bob"}],
 //	  "Company": [{"title": "Acme Inc"}]
 //	}
-func (a *Adapter) ParseObject(source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
+func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 	result := make(map[string][]instance.RawInstance)
 
@@ -112,7 +113,7 @@ func (a *Adapter) ParseObject(source location.SourceID, data []byte) (map[string
 //	  {"$type": "Person", "name": "Alice"},
 //	  {"$type": "Company", "title": "Acme Inc"}
 //	]
-func (a *Adapter) ParseArray(source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
+func (a *Adapter) ParseArray(ctx context.Context, source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 	result := make(map[string][]instance.RawInstance)
 
@@ -138,6 +139,11 @@ func (a *Adapter) ParseArray(source location.SourceID, data []byte) (map[string]
 
 	idx := 0
 	for dec.More() {
+		if err := ctx.Err(); err != nil {
+			collector.Collect(*a.parseError(source, int(dec.InputOffset()), "context canceled", err.Error()))
+			return result, collector.Result()
+		}
+
 		startOffset := int(dec.InputOffset())
 
 		// Read the object
@@ -230,7 +236,7 @@ func (a *Adapter) ParseArray(source location.SourceID, data []byte) (map[string]
 // Example input (with typeName="Person"):
 //
 //	[{"name": "Alice"}, {"name": "Bob"}]
-func (a *Adapter) ParseTypedArray(source location.SourceID, typeName string, data []byte) ([]instance.RawInstance, diag.Result) {
+func (a *Adapter) ParseTypedArray(ctx context.Context, source location.SourceID, typeName string, data []byte) ([]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 
 	// Validate type name
@@ -268,7 +274,7 @@ func (a *Adapter) ParseTypedArray(source location.SourceID, typeName string, dat
 // Example input (with typeName="Person"):
 //
 //	{"name": "Alice", "age": 30}
-func (a *Adapter) ParseOne(source location.SourceID, typeName string, data []byte) (instance.RawInstance, diag.Result) {
+func (a *Adapter) ParseOne(ctx context.Context, source location.SourceID, typeName string, data []byte) (instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 
 	// Validate type name

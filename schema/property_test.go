@@ -165,7 +165,7 @@ func TestNewProperty(t *testing.T) {
 	doc := "The user's name"
 	scope := schema.TypeScope(schema.NewTypeRef("", "User", location.Span{}))
 
-	p := schema.NewProperty("name", span, doc, constraint, schema.DataTypeRef{}, false, false, scope)
+	p := schema.InternalNewProperty("name", span, doc, constraint, schema.DataTypeRef{}, false, false, scope)
 
 	assert.NotNil(t, p)
 	assert.Equal(t, "name", p.Name())
@@ -187,7 +187,7 @@ func TestProperty_Accessors(t *testing.T) {
 	}
 	scope := schema.RelationScope("OWNS")
 
-	p := schema.NewProperty("quantity", span, "Item count", constraint, schema.DataTypeRef{}, true, true, scope)
+	p := schema.InternalNewProperty("quantity", span, "Item count", constraint, schema.DataTypeRef{}, true, true, scope)
 
 	assert.Equal(t, "quantity", p.Name())
 	assert.Equal(t, span, p.Span())
@@ -200,24 +200,24 @@ func TestProperty_Accessors(t *testing.T) {
 }
 
 func TestProperty_IsOptional(t *testing.T) {
-	optionalProp := schema.NewProperty("opt", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
-	requiredProp := schema.NewProperty("req", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	optionalProp := schema.InternalNewProperty("opt", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
+	requiredProp := schema.InternalNewProperty("req", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.True(t, optionalProp.IsOptional())
 	assert.False(t, requiredProp.IsOptional())
 }
 
 func TestProperty_IsRequired(t *testing.T) {
-	optionalProp := schema.NewProperty("opt", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
-	requiredProp := schema.NewProperty("req", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	optionalProp := schema.InternalNewProperty("opt", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
+	requiredProp := schema.InternalNewProperty("req", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, optionalProp.IsRequired())
 	assert.True(t, requiredProp.IsRequired())
 }
 
 func TestProperty_IsPrimaryKey(t *testing.T) {
-	pkProp := schema.NewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	normalProp := schema.NewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	pkProp := schema.InternalNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	normalProp := schema.InternalNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.True(t, pkProp.IsPrimaryKey())
 	assert.False(t, normalProp.IsPrimaryKey())
@@ -225,8 +225,8 @@ func TestProperty_IsPrimaryKey(t *testing.T) {
 
 func TestProperty_Equal_Identical(t *testing.T) {
 	constraint := schema.NewStringConstraint()
-	p1 := schema.NewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.True(t, p1.Equal(p2))
 	assert.True(t, p2.Equal(p1))
@@ -234,51 +234,51 @@ func TestProperty_Equal_Identical(t *testing.T) {
 
 func TestProperty_Equal_DifferentName(t *testing.T) {
 	constraint := schema.NewStringConstraint()
-	p1 := schema.NewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("title", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("title", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_DifferentOptional(t *testing.T) {
 	constraint := schema.NewStringConstraint()
-	p1 := schema.NewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_DifferentPrimaryKey(t *testing.T) {
 	constraint := schema.NewStringConstraint()
-	p1 := schema.NewProperty("id", location.Span{}, "", constraint, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	p2 := schema.NewProperty("id", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.InternalNewProperty("id", location.Span{}, "", constraint, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("id", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_DifferentConstraint(t *testing.T) {
-	p1 := schema.NewProperty("value", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("value", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.InternalNewProperty("value", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("value", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_NilConstraints(t *testing.T) {
-	p1 := schema.NewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.InternalNewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.True(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_OneNilConstraint(t *testing.T) {
-	p1 := schema.NewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("value", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.InternalNewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("value", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_NilProperty(t *testing.T) {
-	p1 := schema.NewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.InternalNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 	var p2 *schema.Property
 
 	assert.False(t, p1.Equal(p2))
@@ -297,15 +297,15 @@ func TestProperty_Equal_IgnoresSpanAndDoc(t *testing.T) {
 	span1 := location.Span{Start: location.Position{Line: 1}}
 	span2 := location.Span{Start: location.Position{Line: 99}}
 
-	p1 := schema.NewProperty("name", span1, "Doc 1", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("name", span2, "Doc 2", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.InternalNewProperty("name", span1, "Doc 1", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("name", span2, "Doc 2", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	// Equal should ignore span and doc (declaration-site specific)
 	assert.True(t, p1.Equal(p2))
 }
 
 func narrowProp(name string, constraint schema.Constraint, optional, pk bool) *schema.Property {
-	return schema.NewProperty(name, location.Span{}, "", constraint, schema.DataTypeRef{}, optional, pk, schema.DeclaringScope{})
+	return schema.InternalNewProperty(name, location.Span{}, "", constraint, schema.DataTypeRef{}, optional, pk, schema.DeclaringScope{})
 }
 
 func TestProperty_CanNarrowFrom(t *testing.T) {
@@ -319,14 +319,14 @@ func TestProperty_CanNarrowFrom(t *testing.T) {
 	}{
 		{
 			name:   "identical properties same constraint same modifier",
-			child:  narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), false, false),
-			parent: narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), false, false),
+			child:  narrowProp("age", schema.IntegerBetween(0, 150), false, false),
+			parent: narrowProp("age", schema.IntegerBetween(0, 150), false, false),
 			want:   true,
 		},
 		{
 			name:   "narrow bounds parent Integer[0,150] child Integer[18,150]",
-			child:  narrowProp("age", schema.NewIntegerConstraintBounded(18, true, 150, true), false, false),
-			parent: narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), false, false),
+			child:  narrowProp("age", schema.IntegerBetween(18, 150), false, false),
+			parent: narrowProp("age", schema.IntegerBetween(0, 150), false, false),
 			want:   true,
 		},
 		{
@@ -343,14 +343,14 @@ func TestProperty_CanNarrowFrom(t *testing.T) {
 		},
 		{
 			name:   "narrow bounds AND promote required both at once",
-			child:  narrowProp("age", schema.NewIntegerConstraintBounded(18, true, 150, true), false, false),
-			parent: narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), true, false),
+			child:  narrowProp("age", schema.IntegerBetween(18, 150), false, false),
+			parent: narrowProp("age", schema.IntegerBetween(0, 150), true, false),
 			want:   true,
 		},
 		{
 			name:   "widen bounds rejected",
-			child:  narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 200, true), false, false),
-			parent: narrowProp("age", schema.NewIntegerConstraintBounded(0, true, 150, true), false, false),
+			child:  narrowProp("age", schema.IntegerBetween(0, 200), false, false),
+			parent: narrowProp("age", schema.IntegerBetween(0, 150), false, false),
 			want:   false,
 		},
 		{
@@ -409,20 +409,20 @@ func TestProperty_CanNarrowFrom(t *testing.T) {
 		},
 		{
 			name:   "narrow string bounds",
-			child:  narrowProp("code", schema.NewStringConstraintBounded(2, 5), false, false),
-			parent: narrowProp("code", schema.NewStringConstraintBounded(1, 10), false, false),
+			child:  narrowProp("code", schema.StringLenBetween(2, 5), false, false),
+			parent: narrowProp("code", schema.StringLenBetween(1, 10), false, false),
 			want:   true,
 		},
 		{
 			name:   "widen string min rejected",
-			child:  narrowProp("code", schema.NewStringConstraintBounded(0, 10), false, false),
-			parent: narrowProp("code", schema.NewStringConstraintBounded(1, 10), false, false),
+			child:  narrowProp("code", schema.StringLenBetween(0, 10), false, false),
+			parent: narrowProp("code", schema.StringLenBetween(1, 10), false, false),
 			want:   false,
 		},
 		{
 			name:   "narrow float bounds",
-			child:  narrowProp("score", schema.NewFloatConstraintBounded(0.1, true, 0.9, true), false, false),
-			parent: narrowProp("score", schema.NewFloatConstraintBounded(0.0, true, 1.0, true), false, false),
+			child:  narrowProp("score", schema.FloatBetween(0.1, 0.9), false, false),
+			parent: narrowProp("score", schema.FloatBetween(0.0, 1.0), false, false),
 			want:   true,
 		},
 		{

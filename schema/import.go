@@ -15,9 +15,9 @@ type Import struct {
 	sealed           bool              // true after loading is complete; prevents further mutation
 }
 
-// NewImport creates a new Import. This is primarily for internal use;
+// newImport creates a new Import. This is primarily for internal use;
 // imports are typically created during schema parsing.
-func NewImport(path, alias string, resolvedSourceID location.SourceID, span location.Span) *Import {
+func newImport(path, alias string, resolvedSourceID location.SourceID, span location.Span) *Import {
 	return &Import{
 		path:             path,
 		alias:            alias,
@@ -63,29 +63,29 @@ func (i *Import) Span() location.Span {
 
 // --- Internal methods used during loading ---
 
-// Seal prevents further mutation of the import.
+// seal prevents further mutation of the import.
 // Called during loading after resolution is complete.
-func (i *Import) Seal() {
+func (i *Import) seal() {
 	i.sealed = true
 }
 
-// IsSealed reports whether the import has been sealed.
-func (i *Import) IsSealed() bool {
+// isSealed reports whether the import has been sealed.
+func (i *Import) isSealed() bool {
 	return i.sealed
 }
 
-// SetResolvedSourceID sets the resolved source identity (called during loading).
-// Panics if called after Seal().
-func (i *Import) SetResolvedSourceID(id location.SourceID) {
+// setResolvedSourceID sets the resolved source identity (called during loading).
+// Panics if called after seal().
+func (i *Import) setResolvedSourceID(id location.SourceID) {
 	if i.sealed {
 		panic("import: cannot mutate sealed import")
 	}
 	i.resolvedSourceID = id
 }
 
-// SetSchema sets the resolved schema (called during loading).
-// Panics if called after Seal().
-func (i *Import) SetSchema(s *Schema) {
+// setSchema sets the resolved schema (called during loading).
+// Panics if called after seal().
+func (i *Import) setSchema(s *Schema) {
 	if i.sealed {
 		panic("import: cannot mutate sealed import")
 	}

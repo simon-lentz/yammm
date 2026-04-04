@@ -14,6 +14,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
 	"github.com/simon-lentz/yammm/schema/internal/alias"
+	"github.com/simon-lentz/yammm/schema/internal/exprcomp"
 )
 
 // Parser parses YAMMM schema source into an AST Model.
@@ -460,7 +461,7 @@ func (b *astBuilder) ExitInvariant(ctx *grammar.InvariantContext) {
 	// Compile the invariant expression
 	var compiledExpr expr.Expression
 	if exprCtx := ctx.Expr(); exprCtx != nil {
-		compiledExpr = expr.Compile(
+		compiledExpr = exprcomp.Compile(
 			exprCtx,
 			b.collector,
 			b.sourceID,
@@ -546,7 +547,16 @@ func (b *astBuilder) ExitIntegerT(ctx *grammar.IntegerTContext) {
 			WithSpan(b.spans.FromContext(ctx)).Build())
 	}
 
-	b.currentDT = schema.NewIntegerConstraintBounded(min, hasMin, max, hasMax)
+	switch {
+	case hasMin && hasMax:
+		b.currentDT = schema.IntegerBetween(min, max)
+	case hasMin:
+		b.currentDT = schema.IntegerMin(min)
+	case hasMax:
+		b.currentDT = schema.IntegerMax(max)
+	default:
+		b.currentDT = schema.NewIntegerConstraint()
+	}
 }
 
 func (b *astBuilder) ExitFloatT(ctx *grammar.FloatTContext) {
@@ -600,7 +610,16 @@ func (b *astBuilder) ExitFloatT(ctx *grammar.FloatTContext) {
 			WithSpan(b.spans.FromContext(ctx)).Build())
 	}
 
-	b.currentDT = schema.NewFloatConstraintBounded(min, hasMin, max, hasMax)
+	switch {
+	case hasMin && hasMax:
+		b.currentDT = schema.FloatBetween(min, max)
+	case hasMin:
+		b.currentDT = schema.FloatMin(min)
+	case hasMax:
+		b.currentDT = schema.FloatMax(max)
+	default:
+		b.currentDT = schema.NewFloatConstraint()
+	}
 }
 
 func (b *astBuilder) ExitBoolT(_ *grammar.BoolTContext) {
@@ -653,7 +672,16 @@ func (b *astBuilder) ExitStringT(ctx *grammar.StringTContext) {
 			WithSpan(b.spans.FromContext(ctx)).Build())
 	}
 
-	b.currentDT = schema.NewStringConstraintBounded(minLen, maxLen)
+	switch {
+	case minLen >= 0 && maxLen >= 0:
+		b.currentDT = schema.StringLenBetween(minLen, maxLen)
+	case minLen >= 0:
+		b.currentDT = schema.StringMinLen(minLen)
+	case maxLen >= 0:
+		b.currentDT = schema.StringMaxLen(maxLen)
+	default:
+		b.currentDT = schema.NewStringConstraint()
+	}
 }
 
 func (b *astBuilder) ExitEnumT(ctx *grammar.EnumTContext) {
@@ -844,7 +872,16 @@ func (b *astBuilder) ExitListT(ctx *grammar.ListTContext) {
 			WithSpan(b.spans.FromContext(ctx)).Build())
 	}
 
-	b.currentDT = schema.NewListConstraintBounded(elementConstraint, minLen, maxLen)
+	switch {
+	case minLen >= 0 && maxLen >= 0:
+		b.currentDT = schema.ListLenBetween(elementConstraint, minLen, maxLen)
+	case minLen >= 0:
+		b.currentDT = schema.ListMinLen(elementConstraint, minLen)
+	case maxLen >= 0:
+		b.currentDT = schema.ListMaxLen(elementConstraint, maxLen)
+	default:
+		b.currentDT = schema.NewListConstraint(elementConstraint)
+	}
 }
 
 func (b *astBuilder) ExitQualified_alias(ctx *grammar.Qualified_aliasContext) {

@@ -60,7 +60,7 @@ func TestAdapter_StrictJSON_RejectsComments(t *testing.T) {
 		"Person": [{ "name": "Alice" }]
 	}`)
 	sourceID := location.NewSourceID("test://strict-json-comments")
-	_, result := a.ParseObject(sourceID, jsonc)
+	_, result := a.ParseObject(t.Context(), sourceID, jsonc)
 	assert.False(t, result.OK(), "strict JSON should reject line comments")
 }
 
@@ -76,7 +76,7 @@ func TestAdapter_StrictJSON_RejectsTrailingCommas(t *testing.T) {
 		"Person": [{ "name": "Alice", }]
 	}`)
 	sourceID := location.NewSourceID("test://strict-json-trailing")
-	_, result := a.ParseObject(sourceID, data)
+	_, result := a.ParseObject(t.Context(), sourceID, data)
 	assert.False(t, result.OK(), "strict JSON should reject trailing commas")
 }
 
@@ -96,7 +96,7 @@ func TestAdapter_TrackLocations(t *testing.T) {
 	a, err := jsonadapter.NewAdapter(reg, jsonadapter.WithTrackLocations(true))
 	require.NoError(t, err)
 
-	raw, result := a.ParseOne(sourceID, "Person", data)
+	raw, result := a.ParseOne(t.Context(), sourceID, "Person", data)
 	require.True(t, result.OK(), "parse should succeed: %v", result.Messages())
 	require.NotNil(t, raw.Provenance, "Provenance should be set when location tracking is enabled")
 }
@@ -120,7 +120,7 @@ func TestAdapter_CustomTypeField(t *testing.T) {
 
 	data := []byte(`[{"_type": "Person", "name": "Alice"}]`)
 	sourceID := location.NewSourceID("test://custom-type-field")
-	parsed, result := a.ParseArray(sourceID, data)
+	parsed, result := a.ParseArray(t.Context(), sourceID, data)
 	require.True(t, result.OK(), "ParseArray with custom type field should succeed: %v", result.Messages())
 	require.Len(t, parsed["Person"], 1)
 	assert.Equal(t, "Alice", parsed["Person"][0].Properties["name"])
@@ -149,7 +149,7 @@ func TestAdapter_JSONC_LineComments(t *testing.T) {
 		]
 	}`)
 	sourceID := location.NewSourceID("test://jsonc-line-comments")
-	parsed, result := a.ParseObject(sourceID, jsonc)
+	parsed, result := a.ParseObject(t.Context(), sourceID, jsonc)
 	require.True(t, result.OK(), "JSONC with line comments should parse: %v", result.Messages())
 	require.Len(t, parsed["Person"], 1)
 	assert.Equal(t, "Alice", parsed["Person"][0].Properties["name"])
@@ -171,7 +171,7 @@ func TestAdapter_JSONC_BlockComments(t *testing.T) {
 		]
 	}`)
 	sourceID := location.NewSourceID("test://jsonc-block-comments")
-	parsed, result := a.ParseObject(sourceID, jsonc)
+	parsed, result := a.ParseObject(t.Context(), sourceID, jsonc)
 	require.True(t, result.OK(), "JSONC with block comments should parse: %v", result.Messages())
 	require.Len(t, parsed["Person"], 1)
 	assert.Equal(t, "Alice", parsed["Person"][0].Properties["name"])
@@ -191,7 +191,7 @@ func TestAdapter_JSONC_TrailingCommas(t *testing.T) {
 		],
 	}`)
 	sourceID := location.NewSourceID("test://jsonc-trailing-commas")
-	parsed, result := a.ParseObject(sourceID, jsonc)
+	parsed, result := a.ParseObject(t.Context(), sourceID, jsonc)
 	require.True(t, result.OK(), "JSONC with trailing commas should parse: %v", result.Messages())
 	require.Len(t, parsed["Person"], 1)
 	assert.Equal(t, "Alice", parsed["Person"][0].Properties["name"])
@@ -220,7 +220,7 @@ func TestAdapter_ParseObject_OutputShape(t *testing.T) {
 		]
 	}`)
 	sourceID := location.NewSourceID("test://output-shape")
-	parsed, result := a.ParseObject(sourceID, data)
+	parsed, result := a.ParseObject(t.Context(), sourceID, data)
 	require.True(t, result.OK(), "ParseObject should succeed: %v", result.Messages())
 
 	// Keyed by type name
@@ -245,7 +245,7 @@ func TestAdapter_ParseObject_RecordProperties(t *testing.T) {
 		]
 	}`)
 	sourceID := location.NewSourceID("test://record-properties")
-	parsed, result := a.ParseObject(sourceID, data)
+	parsed, result := a.ParseObject(t.Context(), sourceID, data)
 	require.True(t, result.OK(), "ParseObject should succeed: %v", result.Messages())
 	require.Len(t, parsed["Person"], 1)
 

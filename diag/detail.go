@@ -45,9 +45,9 @@ const (
 	// DetailKeyField is the data-level field name (for unknown/unexpected fields).
 	DetailKeyField = "field"
 
-	// DetailKeyJsonField is the normalized JSON field name for relation in path
+	// DetailKeyJSONField is the normalized JSON field name for relation in path
 	// (lower_snake form).
-	DetailKeyJsonField = "json_field"
+	DetailKeyJSONField = "json_field"
 
 	// DetailKeyDetail is the specific error description (grammar violation,
 	// constraint reason, parse error).
@@ -78,8 +78,8 @@ const (
 	// DetailKeyContext is contextual information (e.g., "Builder", "Registry").
 	DetailKeyContext = "context"
 
-	// DetailKeyId is the identifier value (e.g., synthetic SourceID).
-	DetailKeyId = "id"
+	// DetailKeyID is the identifier value (e.g., synthetic SourceID).
+	DetailKeyID = "id"
 
 	// DetailKeyFunction is the builtin function name
 	// (for expression evaluation errors).
@@ -172,6 +172,6 @@ func TypeField(typeName, fieldName string) []Detail {
 func PathRelation(relationName, jsonFieldName string) []Detail {
 	return []Detail{
 		{Key: DetailKeyRelationName, Value: relationName},
-		{Key: DetailKeyJsonField, Value: jsonFieldName},
+		{Key: DetailKeyJSONField, Value: jsonFieldName},
 	}
 }

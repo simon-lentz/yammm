@@ -106,7 +106,7 @@ type Property struct {
 	scope        DeclaringScope
 }
 
-// NewProperty creates a new Property.
+// newProperty creates a new Property.
 //
 // This is a low-level API primarily for:
 //   - Internal use during schema parsing and completion
@@ -117,7 +117,7 @@ type Property struct {
 // The dataTypeRef parameter captures the syntactic reference (with span) when the
 // constraint is an alias to a named DataType. Pass zero-value DataTypeRef for
 // built-in constraints. This enables LSP navigation to DataType definitions.
-func NewProperty(
+func newProperty(
 	name string,
 	span location.Span,
 	doc string,
@@ -166,9 +166,9 @@ func (p *Property) DataTypeRef() DataTypeRef {
 	return p.dataTypeRef
 }
 
-// SetConstraint sets the constraint (called during alias resolution).
+// setConstraint sets the constraint (called during alias resolution).
 // Internal use only; called during schema completion.
-func (p *Property) SetConstraint(c Constraint) {
+func (p *Property) setConstraint(c Constraint) {
 	p.constraint = c
 }
 

@@ -21,6 +21,10 @@ type SeverityCounts struct {
 // Results are obtained via [Collector.Result] or the [OK] function for empty
 // success results.
 //
+// Result satisfies [fmt.Stringer]; its [Result.String] method returns "OK" when
+// there are no errors, or a multi-line summary of error messages suitable for
+// test failures and log output.
+//
 // There is no public constructor accepting arbitrary issues; this ensures
 // all issues in a Result are valid.
 type Result struct {

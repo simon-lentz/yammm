@@ -1,4 +1,4 @@
-package expr
+package exprcomp
 
 import (
 	"fmt"
@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/grammar"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema/expr"
 	"github.com/simon-lentz/yammm/schema/internal/span"
 )
 
@@ -47,7 +48,7 @@ func (v *Visitor) HasErrors() bool {
 }
 
 // Visit dispatches to the appropriate visit method based on node type.
-func (v *Visitor) Visit(tree antlr.ParseTree) Expression {
+func (v *Visitor) Visit(tree antlr.ParseTree) expr.Expression {
 	if tree == nil {
 		return nil
 	}
@@ -88,7 +89,7 @@ func (v *Visitor) Visit(tree antlr.ParseTree) Expression {
 		return v.VisitDatatypeName(ctx)
 	case *grammar.DatatypeKeywordContext:
 		v.errorf(ctx, "invalid datatype keyword")
-		return NewLiteral(nil)
+		return expr.NewLiteral(nil)
 	case *grammar.ArgumentsContext:
 		return v.VisitArguments(ctx)
 	case *grammar.ParametersContext:
@@ -98,7 +99,7 @@ func (v *Visitor) Visit(tree antlr.ParseTree) Expression {
 	case *grammar.UminusContext:
 		return v.VisitUminus(ctx)
 	case *grammar.LiteralNilContext:
-		return NewLiteral(nil)
+		return expr.NewLiteral(nil)
 	case *grammar.NameContext:
 		return v.VisitName(ctx)
 	case *grammar.RelationNameContext:
@@ -109,27 +110,27 @@ func (v *Visitor) Visit(tree antlr.ParseTree) Expression {
 		return v.VisitExpr(ctx)
 	default:
 		v.errorf(nil, "unknown expression context: %T", tree)
-		return NewLiteral(nil)
+		return expr.NewLiteral(nil)
 	}
 }
 
 // VisitExpr handles unexpected expr contexts.
-func (v *Visitor) VisitExpr(ctx *grammar.ExprContext) Expression {
+func (v *Visitor) VisitExpr(ctx *grammar.ExprContext) expr.Expression {
 	v.errorf(ctx, "invalid expression: %q", ctx.GetText())
-	return NewLiteral(nil)
+	return expr.NewLiteral(nil)
 }
 
 // VisitValue handles value expressions.
-func (v *Visitor) VisitValue(ctx *grammar.ValueContext) Expression {
+func (v *Visitor) VisitValue(ctx *grammar.ValueContext) expr.Expression {
 	return v.Visit(ctx.GetLeft())
 }
 
 // VisitLiteral handles literal values.
-func (v *Visitor) VisitLiteral(ctx *grammar.LiteralContext) Expression {
+func (v *Visitor) VisitLiteral(ctx *grammar.LiteralContext) expr.Expression {
 	token := ctx.GetV()
 	if token == nil {
 		v.errorf(ctx, "missing literal token")
-		return NewLiteral(nil)
+		return expr.NewLiteral(nil)
 	}
 
 	switch token.GetTokenType() {
@@ -137,33 +138,33 @@ func (v *Visitor) VisitLiteral(ctx *grammar.LiteralContext) Expression {
 		s, err := strconv.Unquote(token.GetText())
 		if err != nil {
 			v.errorf(ctx, "invalid string literal: %v", err)
-			return NewLiteral(nil)
+			return expr.NewLiteral(nil)
 		}
-		return NewLiteral(s)
+		return expr.NewLiteral(s)
 
 	case grammar.YammmGrammarLexerINTEGER:
 		i, err := strconv.ParseInt(token.GetText(), 10, 64)
 		if err != nil {
 			v.errorf(ctx, "invalid integer literal: %v", err)
-			return NewLiteral(nil)
+			return expr.NewLiteral(nil)
 		}
-		return NewLiteral(i)
+		return expr.NewLiteral(i)
 
 	case grammar.YammmGrammarLexerFLOAT:
 		f, err := strconv.ParseFloat(token.GetText(), 64)
 		if err != nil {
 			v.errorf(ctx, "invalid float literal: %v", err)
-			return NewLiteral(nil)
+			return expr.NewLiteral(nil)
 		}
-		return NewLiteral(f)
+		return expr.NewLiteral(f)
 
 	case grammar.YammmGrammarLexerBOOLEAN:
 		b, err := strconv.ParseBool(token.GetText())
 		if err != nil {
 			v.errorf(ctx, "invalid boolean literal: %v", err)
-			return NewLiteral(nil)
+			return expr.NewLiteral(nil)
 		}
-		return NewLiteral(b)
+		return expr.NewLiteral(b)
 
 	case grammar.YammmGrammarLexerREGEXP:
 		s := token.GetText()
@@ -171,29 +172,29 @@ func (v *Visitor) VisitLiteral(ctx *grammar.LiteralContext) Expression {
 		r, err := regexp.Compile(re)
 		if err != nil {
 			v.errorf(ctx, "invalid regexp literal: %v", err)
-			return NewLiteral(nil)
+			return expr.NewLiteral(nil)
 		}
-		return NewLiteral(r)
+		return expr.NewLiteral(r)
 
 	default:
 		v.errorf(ctx, "unexpected literal token type: %d", token.GetTokenType())
-		return NewLiteral(nil)
+		return expr.NewLiteral(nil)
 	}
 }
 
 // VisitUminus handles unary minus.
-func (v *Visitor) VisitUminus(ctx *grammar.UminusContext) Expression {
-	return SExpr{Op("-x"), v.Visit(ctx.GetRight())}
+func (v *Visitor) VisitUminus(ctx *grammar.UminusContext) expr.Expression {
+	return expr.SExpr{expr.Op("-x"), v.Visit(ctx.GetRight())}
 }
 
 // VisitVariable handles variable references ($name).
-func (v *Visitor) VisitVariable(ctx *grammar.VariableContext) Expression {
+func (v *Visitor) VisitVariable(ctx *grammar.VariableContext) expr.Expression {
 	s := ctx.GetLeft().GetText()
-	return SExpr{Op("$"), NewLiteral(s[1:])} // Strip the $
+	return expr.SExpr{expr.Op("$"), expr.NewLiteral(s[1:])} // Strip the $
 }
 
 // VisitPeriod handles member access (lhs.name).
-func (v *Visitor) VisitPeriod(ctx *grammar.PeriodContext) Expression {
+func (v *Visitor) VisitPeriod(ctx *grammar.PeriodContext) expr.Expression {
 	nameExpr := v.Visit(ctx.GetName())
 	// Convert property access to literal name for member access
 	if nameExpr.Op() == "p" {
@@ -202,107 +203,107 @@ func (v *Visitor) VisitPeriod(ctx *grammar.PeriodContext) Expression {
 			nameExpr = children[0]
 		}
 	}
-	return SExpr{Op("."), v.Visit(ctx.GetLeft()), nameExpr}
+	return expr.SExpr{expr.Op("."), v.Visit(ctx.GetLeft()), nameExpr}
 }
 
 // VisitName handles property name references.
-func (v *Visitor) VisitName(ctx *grammar.NameContext) Expression {
-	return SExpr{Op("p"), NewLiteral(ctx.GetLeft().GetText())}
+func (v *Visitor) VisitName(ctx *grammar.NameContext) expr.Expression {
+	return expr.SExpr{expr.Op("p"), expr.NewLiteral(ctx.GetLeft().GetText())}
 }
 
 // VisitRelationName handles relation name references.
-func (v *Visitor) VisitRelationName(ctx *grammar.RelationNameContext) Expression {
-	return SExpr{Op("p"), NewLiteral(ctx.GetLeft().GetText())}
+func (v *Visitor) VisitRelationName(ctx *grammar.RelationNameContext) expr.Expression {
+	return expr.SExpr{expr.Op("p"), expr.NewLiteral(ctx.GetLeft().GetText())}
 }
 
 // VisitMuldiv handles multiplication, division, and modulo.
-func (v *Visitor) VisitMuldiv(ctx *grammar.MuldivContext) Expression {
+func (v *Visitor) VisitMuldiv(ctx *grammar.MuldivContext) expr.Expression {
 	return v.binaryExpr(ctx.GetOp(), ctx.GetLeft(), ctx.GetRight())
 }
 
 // VisitPlusminus handles addition and subtraction.
-func (v *Visitor) VisitPlusminus(ctx *grammar.PlusminusContext) Expression {
+func (v *Visitor) VisitPlusminus(ctx *grammar.PlusminusContext) expr.Expression {
 	return v.binaryExpr(ctx.GetOp(), ctx.GetLeft(), ctx.GetRight())
 }
 
 // VisitCompare handles comparison operators (<, <=, >, >=).
-func (v *Visitor) VisitCompare(ctx *grammar.CompareContext) Expression {
+func (v *Visitor) VisitCompare(ctx *grammar.CompareContext) expr.Expression {
 	return v.binaryExpr(ctx.GetOp(), ctx.GetLeft(), ctx.GetRight())
 }
 
 // VisitEquality handles equality operators (==, !=).
-func (v *Visitor) VisitEquality(ctx *grammar.EqualityContext) Expression {
+func (v *Visitor) VisitEquality(ctx *grammar.EqualityContext) expr.Expression {
 	return v.binaryExpr(ctx.GetOp(), ctx.GetLeft(), ctx.GetRight())
 }
 
 // VisitMatch handles pattern matching operators (=~, !~).
-func (v *Visitor) VisitMatch(ctx *grammar.MatchContext) Expression {
+func (v *Visitor) VisitMatch(ctx *grammar.MatchContext) expr.Expression {
 	return v.binaryExpr(ctx.GetOp(), ctx.GetLeft(), ctx.GetRight())
 }
 
 // VisitIn handles the 'in' operator.
-func (v *Visitor) VisitIn(ctx *grammar.InContext) Expression {
+func (v *Visitor) VisitIn(ctx *grammar.InContext) expr.Expression {
 	return v.binaryExpr(ctx.GetOp(), ctx.GetLeft(), ctx.GetRight())
 }
 
 // VisitOr handles logical OR (||).
-func (v *Visitor) VisitOr(ctx *grammar.OrContext) Expression {
+func (v *Visitor) VisitOr(ctx *grammar.OrContext) expr.Expression {
 	return v.binaryExpr(ctx.GetOp(), ctx.GetLeft(), ctx.GetRight())
 }
 
 // VisitAnd handles logical AND (&&).
-func (v *Visitor) VisitAnd(ctx *grammar.AndContext) Expression {
+func (v *Visitor) VisitAnd(ctx *grammar.AndContext) expr.Expression {
 	return v.binaryExpr(ctx.GetOp(), ctx.GetLeft(), ctx.GetRight())
 }
 
 // VisitIf handles ternary conditional (?).
-func (v *Visitor) VisitIf(ctx *grammar.IfContext) Expression {
-	op := Op(ctx.GetOp().GetText())
+func (v *Visitor) VisitIf(ctx *grammar.IfContext) expr.Expression {
+	op := expr.Op(ctx.GetOp().GetText())
 	cond := v.Visit(ctx.GetLeft())
 	trueBranch := v.Visit(ctx.GetTrueBranch())
 	if ctx.GetFalseBranch() != nil {
-		return SExpr{op, cond, trueBranch, v.Visit(ctx.GetFalseBranch())}
+		return expr.SExpr{op, cond, trueBranch, v.Visit(ctx.GetFalseBranch())}
 	}
-	return SExpr{op, cond, trueBranch}
+	return expr.SExpr{op, cond, trueBranch}
 }
 
 // VisitNot handles logical NOT (!).
-func (v *Visitor) VisitNot(ctx *grammar.NotContext) Expression {
-	return SExpr{Op(ctx.GetOp().GetText()), v.Visit(ctx.GetRight())}
+func (v *Visitor) VisitNot(ctx *grammar.NotContext) expr.Expression {
+	return expr.SExpr{expr.Op(ctx.GetOp().GetText()), v.Visit(ctx.GetRight())}
 }
 
 // VisitGroup handles parenthesized expressions.
-func (v *Visitor) VisitGroup(ctx *grammar.GroupContext) Expression {
+func (v *Visitor) VisitGroup(ctx *grammar.GroupContext) expr.Expression {
 	return v.Visit(ctx.GetLeft())
 }
 
 // VisitAt handles slice/index access (@).
-func (v *Visitor) VisitAt(ctx *grammar.AtContext) Expression {
+func (v *Visitor) VisitAt(ctx *grammar.AtContext) expr.Expression {
 	right := ctx.GetRight()
-	args := make([]Expression, len(right))
+	args := make([]expr.Expression, len(right))
 	for i := range right {
 		args[i] = v.Visit(right[i])
 	}
-	return append(SExpr{Op("@"), v.Visit(ctx.GetLeft())}, args...)
+	return append(expr.SExpr{expr.Op("@"), v.Visit(ctx.GetLeft())}, args...)
 }
 
 // VisitList handles list literals ([]).
-func (v *Visitor) VisitList(ctx *grammar.ListContext) Expression {
+func (v *Visitor) VisitList(ctx *grammar.ListContext) expr.Expression {
 	values := ctx.GetValues()
-	elements := make([]Expression, len(values))
+	elements := make([]expr.Expression, len(values))
 	for i := range values {
 		elements[i] = v.Visit(values[i])
 	}
-	return append(SExpr{Op("[]")}, elements...)
+	return append(expr.SExpr{expr.Op("[]")}, elements...)
 }
 
 // VisitDatatypeName handles data type names.
-func (v *Visitor) VisitDatatypeName(ctx *grammar.DatatypeNameContext) Expression {
-	return DatatypeLiteral(ctx.GetLeft().GetText())
+func (v *Visitor) VisitDatatypeName(ctx *grammar.DatatypeNameContext) expr.Expression {
+	return expr.DatatypeLiteral(ctx.GetLeft().GetText())
 }
 
 // VisitFcall handles function calls.
-func (v *Visitor) VisitFcall(ctx *grammar.FcallContext) Expression {
+func (v *Visitor) VisitFcall(ctx *grammar.FcallContext) expr.Expression {
 	lhs := v.Visit(ctx.GetLeft())
 	fname := ctx.GetName().GetText()
 	args := v.Visit(ctx.GetArgs())
@@ -320,41 +321,41 @@ func (v *Visitor) VisitFcall(ctx *grammar.FcallContext) Expression {
 	// indistinguishable (both become NewLiteral(nil)). This is intentional;
 	// evaluators should treat them equivalently.
 	if args == nil {
-		args = NewLiteral([]Expression{})
+		args = expr.NewLiteral([]expr.Expression{})
 	}
 	if params == nil {
-		params = NewLiteral([]string{})
+		params = expr.NewLiteral([]string{})
 	}
 	if body == nil {
-		body = NewLiteral(nil)
+		body = expr.NewLiteral(nil)
 	}
-	return SExpr{Op(fname), lhs, args, params, body}
+	return expr.SExpr{expr.Op(fname), lhs, args, params, body}
 }
 
 // VisitArguments handles function argument lists.
 // Returns a Literal containing []Expression for type-safe AST processing.
-func (v *Visitor) VisitArguments(ctx *grammar.ArgumentsContext) Expression {
+func (v *Visitor) VisitArguments(ctx *grammar.ArgumentsContext) expr.Expression {
 	args := ctx.GetArgs()
-	a := make([]Expression, len(args))
+	a := make([]expr.Expression, len(args))
 	for i := range args {
 		a[i] = v.Visit(args[i])
 	}
-	return NewLiteral(a)
+	return expr.NewLiteral(a)
 }
 
 // VisitParameters handles lambda parameter lists.
-func (v *Visitor) VisitParameters(ctx *grammar.ParametersContext) Expression {
+func (v *Visitor) VisitParameters(ctx *grammar.ParametersContext) expr.Expression {
 	params := ctx.GetParams()
 	p := make([]string, len(params))
 	for i := range params {
 		p[i] = params[i].GetText()[1:] // Strip the $
 	}
-	return NewLiteral(p)
+	return expr.NewLiteral(p)
 }
 
 // binaryExpr creates a binary expression node.
-func (v *Visitor) binaryExpr(op antlr.Token, left, right antlr.ParseTree) Expression {
-	return SExpr{Op(op.GetText()), v.Visit(left), v.Visit(right)}
+func (v *Visitor) binaryExpr(op antlr.Token, left, right antlr.ParseTree) expr.Expression {
+	return expr.SExpr{expr.Op(op.GetText()), v.Visit(left), v.Visit(right)}
 }
 
 // errorf reports an error at the given context.

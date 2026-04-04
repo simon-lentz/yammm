@@ -95,7 +95,7 @@ func loadTestData(t *testing.T, dataPath, typeKey string) []instance.RawInstance
 	require.NoError(t, err, "create JSON adapter")
 
 	sourceID := location.NewSourceID("test://" + dataPath)
-	parsed, parseResult := adapter.ParseObject(sourceID, dataBytes)
+	parsed, parseResult := adapter.ParseObject(t.Context(), sourceID, dataBytes)
 	require.True(t, parseResult.OK(), "JSON parse %s failed: %v", dataPath, parseResult.Messages())
 
 	records := parsed[typeKey]
@@ -168,7 +168,7 @@ func assertDiagHasCode(t *testing.T, result diag.Result, code diag.Code) {
 }
 
 // buildGraph builds a graph from a schema and validated instances, returns snapshot.
-func buildGraph(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Result {
+func buildGraph(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	t.Helper()
 	ctx := t.Context()
 	g := graph.New(s)

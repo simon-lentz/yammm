@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -14,24 +15,32 @@ import (
 )
 
 // NodeQuery represents a parameterized Cypher query for a single node upsert.
+//
+// Construct via [Adapter.NodeQueryFor]; do not create directly.
 type NodeQuery struct {
 	Statement string         // Cypher MERGE ... SET statement
 	Params    map[string]any // Query parameters
 }
 
 // BatchNodeQuery represents an UNWIND-based batch node upsert.
+//
+// Construct via [Adapter.BatchNodeQueries]; do not create directly.
 type BatchNodeQuery struct {
 	Statement string         // Cypher UNWIND $rows AS row MERGE ... SET statement
 	Params    map[string]any // Contains "rows" key with []map[string]any value
 }
 
 // EdgeQuery represents a parameterized Cypher query for a relationship merge.
+//
+// Construct via [Adapter.EdgeQueryFor]; do not create directly.
 type EdgeQuery struct {
 	Statement string         // Cypher MATCH ... MERGE ... SET statement
 	Params    map[string]any // Query parameters
 }
 
 // BatchEdgeQuery represents an UNWIND-based batch relationship merge.
+//
+// Construct via [Adapter.BatchEdgeQueries]; do not create directly.
 type BatchEdgeQuery struct {
 	Statement    string         // Cypher UNWIND $rows AS row MATCH ... MERGE ... SET statement
 	Params       map[string]any // Contains "rows" key with []map[string]any value
@@ -94,6 +103,7 @@ func WithEdgeChunkSize(size int) WriteOption {
 // (e.g., converting []any to []string for List<String> properties). This
 // matches the coercion behavior of [Adapter.BatchNodeQueries].
 func (a *Adapter) NodeQueryFor(
+	_ context.Context,
 	shape *NodeShape,
 	inst *graph.Instance,
 	schemaType *schema.Type,
@@ -132,7 +142,8 @@ func (a *Adapter) NodeQueryFor(
 // Returns one [BatchNodeQuery] per type per chunk. Types with more instances
 // than the chunk size produce multiple queries.
 func (a *Adapter) BatchNodeQueries(
-	result *graph.Result,
+	ctx context.Context,
+	result *graph.Snapshot,
 	shapes *GraphShape,
 	opts ...WriteOption,
 ) ([]*BatchNodeQuery, error) {
@@ -145,6 +156,9 @@ func (a *Adapter) BatchNodeQueries(
 	var queries []*BatchNodeQuery
 
 	for _, typeName := range result.Types() {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("batch node queries: %w", err)
+		}
 		nodeShape, ok := shapes.Types[typeName]
 		if !ok {
 			return nil, fmt.Errorf("no shape for type %q", typeName)
@@ -190,6 +204,7 @@ func (a *Adapter) BatchNodeQueries(
 //
 //nolint:revive // opts reserved for future edge-level write options
 func (a *Adapter) EdgeQueryFor(
+	_ context.Context,
 	edge *graph.Edge,
 	shapes *GraphShape,
 	opts ...WriteOption,
@@ -244,7 +259,8 @@ func (a *Adapter) EdgeQueryFor(
 //
 // Returns one [BatchEdgeQuery] per signature per chunk.
 func (a *Adapter) BatchEdgeQueries(
-	result *graph.Result,
+	ctx context.Context,
+	result *graph.Snapshot,
 	shapes *GraphShape,
 	opts ...WriteOption,
 ) ([]*BatchEdgeQuery, error) {
@@ -282,6 +298,9 @@ func (a *Adapter) BatchEdgeQueries(
 	var queries []*BatchEdgeQuery
 
 	for _, sig := range sigs {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("batch edge queries: %w", err)
+		}
 		sigEdges := groups[sig]
 
 		srcShape, ok := shapes.Types[sig.sourceType]

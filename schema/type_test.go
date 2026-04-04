@@ -12,9 +12,9 @@ import (
 )
 
 func TestType_Seal_PreventsSetProperties(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.SetProperties([]*schema.Property{})
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSetTypeProperties(typ, []*schema.Property{})
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -22,12 +22,12 @@ func TestType_Seal_PreventsSetProperties(t *testing.T) {
 		}
 	}()
 
-	typ.SetProperties([]*schema.Property{})
+	schema.InternalSetTypeProperties(typ, []*schema.Property{})
 }
 
 func TestType_Seal_PreventsSetAssociations(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -35,12 +35,12 @@ func TestType_Seal_PreventsSetAssociations(t *testing.T) {
 		}
 	}()
 
-	typ.SetAssociations([]*schema.Relation{})
+	schema.InternalSetTypeAssociations(typ, []*schema.Relation{})
 }
 
 func TestType_Seal_PreventsSetCompositions(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -48,12 +48,12 @@ func TestType_Seal_PreventsSetCompositions(t *testing.T) {
 		}
 	}()
 
-	typ.SetCompositions([]*schema.Relation{})
+	schema.InternalSetTypeCompositions(typ, []*schema.Relation{})
 }
 
 func TestType_Seal_PreventsSetInvariants(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -61,12 +61,12 @@ func TestType_Seal_PreventsSetInvariants(t *testing.T) {
 		}
 	}()
 
-	typ.SetInvariants([]*schema.Invariant{})
+	schema.InternalSetTypeInvariants(typ, []*schema.Invariant{})
 }
 
 func TestType_Seal_PreventsSetInherits(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -74,12 +74,12 @@ func TestType_Seal_PreventsSetInherits(t *testing.T) {
 		}
 	}()
 
-	typ.SetInherits([]schema.TypeRef{})
+	schema.InternalSetTypeInherits(typ, []schema.TypeRef{})
 }
 
 func TestType_Seal_PreventsSetAllProperties(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -87,12 +87,12 @@ func TestType_Seal_PreventsSetAllProperties(t *testing.T) {
 		}
 	}()
 
-	typ.SetAllProperties([]*schema.Property{})
+	schema.InternalSetTypeAllProperties(typ, []*schema.Property{})
 }
 
 func TestType_Seal_PreventsSetPrimaryKeys(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -100,12 +100,12 @@ func TestType_Seal_PreventsSetPrimaryKeys(t *testing.T) {
 		}
 	}()
 
-	typ.SetPrimaryKeys([]*schema.Property{})
+	schema.InternalSetTypePrimaryKeys(typ, []*schema.Property{})
 }
 
 func TestType_Seal_PreventsSetAllAssociations(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -113,12 +113,12 @@ func TestType_Seal_PreventsSetAllAssociations(t *testing.T) {
 		}
 	}()
 
-	typ.SetAllAssociations([]*schema.Relation{})
+	schema.InternalSetTypeAllAssociations(typ, []*schema.Relation{})
 }
 
 func TestType_Seal_PreventsSetAllCompositions(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -126,12 +126,12 @@ func TestType_Seal_PreventsSetAllCompositions(t *testing.T) {
 		}
 	}()
 
-	typ.SetAllCompositions([]*schema.Relation{})
+	schema.InternalSetTypeAllCompositions(typ, []*schema.Relation{})
 }
 
 func TestType_Seal_PreventsSetSuperTypes(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -139,12 +139,12 @@ func TestType_Seal_PreventsSetSuperTypes(t *testing.T) {
 		}
 	}()
 
-	typ.SetSuperTypes([]schema.ResolvedTypeRef{})
+	schema.InternalSetTypeSuperTypes(typ, []schema.ResolvedTypeRef{})
 }
 
 func TestType_Seal_PreventsSetSubTypes(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -152,24 +152,24 @@ func TestType_Seal_PreventsSetSubTypes(t *testing.T) {
 		}
 	}()
 
-	typ.SetSubTypes([]schema.ResolvedTypeRef{})
+	schema.InternalSetTypeSubTypes(typ, []schema.ResolvedTypeRef{})
 }
 
 func TestType_SettersWorkBeforeSeal(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
 
 	// These should not panic before sealing
-	typ.SetProperties([]*schema.Property{})
-	typ.SetAssociations([]*schema.Relation{})
-	typ.SetCompositions([]*schema.Relation{})
-	typ.SetInvariants([]*schema.Invariant{})
-	typ.SetInherits([]schema.TypeRef{})
-	typ.SetAllProperties([]*schema.Property{})
-	typ.SetPrimaryKeys([]*schema.Property{})
-	typ.SetAllAssociations([]*schema.Relation{})
-	typ.SetAllCompositions([]*schema.Relation{})
-	typ.SetSuperTypes([]schema.ResolvedTypeRef{})
-	typ.SetSubTypes([]schema.ResolvedTypeRef{})
+	schema.InternalSetTypeProperties(typ, []*schema.Property{})
+	schema.InternalSetTypeAssociations(typ, []*schema.Relation{})
+	schema.InternalSetTypeCompositions(typ, []*schema.Relation{})
+	schema.InternalSetTypeInvariants(typ, []*schema.Invariant{})
+	schema.InternalSetTypeInherits(typ, []schema.TypeRef{})
+	schema.InternalSetTypeAllProperties(typ, []*schema.Property{})
+	schema.InternalSetTypePrimaryKeys(typ, []*schema.Property{})
+	schema.InternalSetTypeAllAssociations(typ, []*schema.Relation{})
+	schema.InternalSetTypeAllCompositions(typ, []*schema.Relation{})
+	schema.InternalSetTypeSuperTypes(typ, []schema.ResolvedTypeRef{})
+	schema.InternalSetTypeSubTypes(typ, []schema.ResolvedTypeRef{})
 
 	// Verify no panic occurred by reaching this point
 }
@@ -184,7 +184,7 @@ func TestNewType(t *testing.T) {
 		End:    location.Position{Line: 20, Column: 1, Byte: 200},
 	}
 
-	typ := schema.NewType("Person", sourceID, span, "A person type", true, false)
+	typ := schema.InternalNewType("Person", sourceID, span, "A person type", true, false)
 
 	assert.NotNil(t, typ)
 	assert.Equal(t, "Person", typ.Name())
@@ -197,25 +197,25 @@ func TestNewType(t *testing.T) {
 
 func TestType_SourceID(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://source")
-	typ := schema.NewType("Test", sourceID, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Test", sourceID, location.Span{}, "", false, false)
 
 	assert.Equal(t, sourceID, typ.SourceID())
 }
 
 func TestType_SchemaName(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
 	assert.Equal(t, "", typ.SchemaName()) // Initially empty
 
-	typ.SetSchemaName("myschema")
+	schema.InternalSetTypeSchemaName(typ, "myschema")
 	assert.Equal(t, "myschema", typ.SchemaName())
 }
 
 func TestType_SetSchemaName_PanicsWhenSealed(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	typ.Seal()
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	schema.InternalSealType(typ)
 
 	assert.Panics(t, func() {
-		typ.SetSchemaName("test")
+		schema.InternalSetTypeSchemaName(typ, "test")
 	})
 }
 
@@ -225,7 +225,7 @@ func TestType_Span(t *testing.T) {
 		Start:  location.Position{Line: 10, Column: 1, Byte: 100},
 		End:    location.Position{Line: 15, Column: 1, Byte: 150},
 	}
-	typ := schema.NewType("Test", location.SourceID{}, span, "", false, false)
+	typ := schema.InternalNewType("Test", location.SourceID{}, span, "", false, false)
 
 	result := typ.Span()
 	assert.Equal(t, 10, result.Start.Line)
@@ -233,22 +233,22 @@ func TestType_Span(t *testing.T) {
 }
 
 func TestType_Documentation(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "Type documentation", false, false)
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "Type documentation", false, false)
 
 	assert.Equal(t, "Type documentation", typ.Documentation())
 }
 
 func TestType_IsAbstract(t *testing.T) {
-	abstractType := schema.NewType("Abstract", location.SourceID{}, location.Span{}, "", true, false)
-	concreteType := schema.NewType("Concrete", location.SourceID{}, location.Span{}, "", false, false)
+	abstractType := schema.InternalNewType("Abstract", location.SourceID{}, location.Span{}, "", true, false)
+	concreteType := schema.InternalNewType("Concrete", location.SourceID{}, location.Span{}, "", false, false)
 
 	assert.True(t, abstractType.IsAbstract())
 	assert.False(t, concreteType.IsAbstract())
 }
 
 func TestType_IsPart(t *testing.T) {
-	partType := schema.NewType("Part", location.SourceID{}, location.Span{}, "", false, true)
-	normalType := schema.NewType("Normal", location.SourceID{}, location.Span{}, "", false, false)
+	partType := schema.InternalNewType("Part", location.SourceID{}, location.Span{}, "", false, true)
+	normalType := schema.InternalNewType("Normal", location.SourceID{}, location.Span{}, "", false, false)
 
 	assert.True(t, partType.IsPart())
 	assert.False(t, normalType.IsPart())
@@ -256,7 +256,7 @@ func TestType_IsPart(t *testing.T) {
 
 func TestType_ID(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://schema")
-	typ := schema.NewType("Person", sourceID, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Person", sourceID, location.Span{}, "", false, false)
 
 	id := typ.ID()
 	assert.Equal(t, sourceID, id.SchemaPath())
@@ -264,9 +264,9 @@ func TestType_ID(t *testing.T) {
 }
 
 func TestType_Property_Found(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	prop := schema.NewProperty("name", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	typ.SetProperties([]*schema.Property{prop})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	prop := schema.InternalNewProperty("name", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	schema.InternalSetTypeProperties(typ, []*schema.Property{prop})
 
 	result, ok := typ.Property("name")
 
@@ -275,7 +275,7 @@ func TestType_Property_Found(t *testing.T) {
 }
 
 func TestType_Property_NotFound(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
 
 	result, ok := typ.Property("nonexistent")
 
@@ -284,10 +284,10 @@ func TestType_Property_NotFound(t *testing.T) {
 }
 
 func TestType_Properties_Iterator(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p1 := schema.NewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("age", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	typ.SetProperties([]*schema.Property{p1, p2})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	p1 := schema.InternalNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("age", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	schema.InternalSetTypeProperties(typ, []*schema.Property{p1, p2})
 
 	count := 0
 	for prop := range typ.Properties() {
@@ -298,9 +298,9 @@ func TestType_Properties_Iterator(t *testing.T) {
 }
 
 func TestType_PropertiesSlice(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p := schema.NewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	typ.SetProperties([]*schema.Property{p})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	p := schema.InternalNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	schema.InternalSetTypeProperties(typ, []*schema.Property{p})
 
 	result := typ.PropertiesSlice()
 
@@ -309,10 +309,10 @@ func TestType_PropertiesSlice(t *testing.T) {
 }
 
 func TestType_AllProperties_Iterator(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p1 := schema.NewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("inherited", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	typ.SetAllProperties([]*schema.Property{p1, p2})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	p1 := schema.InternalNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("inherited", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	schema.InternalSetTypeAllProperties(typ, []*schema.Property{p1, p2})
 
 	count := 0
 	for prop := range typ.AllProperties() {
@@ -323,9 +323,9 @@ func TestType_AllProperties_Iterator(t *testing.T) {
 }
 
 func TestType_AllPropertiesSlice(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p := schema.NewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	typ.SetAllProperties([]*schema.Property{p})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	p := schema.InternalNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	schema.InternalSetTypeAllProperties(typ, []*schema.Property{p})
 
 	result := typ.AllPropertiesSlice()
 
@@ -334,9 +334,9 @@ func TestType_AllPropertiesSlice(t *testing.T) {
 }
 
 func TestType_PrimaryKeys_Iterator(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	pk := schema.NewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	typ.SetPrimaryKeys([]*schema.Property{pk})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	pk := schema.InternalNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	schema.InternalSetTypePrimaryKeys(typ, []*schema.Property{pk})
 
 	count := 0
 	for prop := range typ.PrimaryKeys() {
@@ -348,9 +348,9 @@ func TestType_PrimaryKeys_Iterator(t *testing.T) {
 }
 
 func TestType_PrimaryKeysSlice(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	pk := schema.NewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	typ.SetPrimaryKeys([]*schema.Property{pk})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	pk := schema.InternalNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	schema.InternalSetTypePrimaryKeys(typ, []*schema.Property{pk})
 
 	result := typ.PrimaryKeysSlice()
 
@@ -358,19 +358,19 @@ func TestType_PrimaryKeysSlice(t *testing.T) {
 }
 
 func TestType_HasPrimaryKey(t *testing.T) {
-	typWithPK := schema.NewType("WithPK", location.SourceID{}, location.Span{}, "", false, false)
-	pk := schema.NewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	typWithPK.SetPrimaryKeys([]*schema.Property{pk})
+	typWithPK := schema.InternalNewType("WithPK", location.SourceID{}, location.Span{}, "", false, false)
+	pk := schema.InternalNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	schema.InternalSetTypePrimaryKeys(typWithPK, []*schema.Property{pk})
 
-	typWithoutPK := schema.NewType("NoPK", location.SourceID{}, location.Span{}, "", false, false)
+	typWithoutPK := schema.InternalNewType("NoPK", location.SourceID{}, location.Span{}, "", false, false)
 
 	assert.True(t, typWithPK.HasPrimaryKey())
 	assert.False(t, typWithoutPK.HasPrimaryKey())
 }
 
 func TestType_Relation_Found(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	rel := schema.NewRelation(
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	rel := schema.InternalNewRelation(
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
@@ -383,7 +383,7 @@ func TestType_Relation_Found(t *testing.T) {
 		"Person",
 		nil,
 	)
-	typ.SetAssociations([]*schema.Relation{rel})
+	schema.InternalSetTypeAssociations(typ, []*schema.Relation{rel})
 
 	result, ok := typ.Relation("WORKS_AT")
 
@@ -392,7 +392,7 @@ func TestType_Relation_Found(t *testing.T) {
 }
 
 func TestType_Relation_NotFound(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
 
 	result, ok := typ.Relation("NONEXISTENT")
 
@@ -401,8 +401,8 @@ func TestType_Relation_NotFound(t *testing.T) {
 }
 
 func TestType_Associations_Iterator(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	rel := schema.NewRelation(
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	rel := schema.InternalNewRelation(
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
@@ -415,7 +415,7 @@ func TestType_Associations_Iterator(t *testing.T) {
 		"Person",
 		nil,
 	)
-	typ.SetAssociations([]*schema.Relation{rel})
+	schema.InternalSetTypeAssociations(typ, []*schema.Relation{rel})
 
 	count := 0
 	for r := range typ.Associations() {
@@ -427,8 +427,8 @@ func TestType_Associations_Iterator(t *testing.T) {
 }
 
 func TestType_AssociationsSlice(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	rel := schema.NewRelation(
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	rel := schema.InternalNewRelation(
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
@@ -441,7 +441,7 @@ func TestType_AssociationsSlice(t *testing.T) {
 		"Person",
 		nil,
 	)
-	typ.SetAssociations([]*schema.Relation{rel})
+	schema.InternalSetTypeAssociations(typ, []*schema.Relation{rel})
 
 	result := typ.AssociationsSlice()
 
@@ -449,8 +449,8 @@ func TestType_AssociationsSlice(t *testing.T) {
 }
 
 func TestType_AllAssociations_Iterator(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	rel := schema.NewRelation(
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	rel := schema.InternalNewRelation(
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
@@ -463,7 +463,7 @@ func TestType_AllAssociations_Iterator(t *testing.T) {
 		"Person",
 		nil,
 	)
-	typ.SetAllAssociations([]*schema.Relation{rel})
+	schema.InternalSetTypeAllAssociations(typ, []*schema.Relation{rel})
 
 	count := 0
 	for r := range typ.AllAssociations() {
@@ -474,8 +474,8 @@ func TestType_AllAssociations_Iterator(t *testing.T) {
 }
 
 func TestType_AllAssociationsSlice(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	rel := schema.NewRelation(
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	rel := schema.InternalNewRelation(
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
@@ -488,7 +488,7 @@ func TestType_AllAssociationsSlice(t *testing.T) {
 		"Person",
 		nil,
 	)
-	typ.SetAllAssociations([]*schema.Relation{rel})
+	schema.InternalSetTypeAllAssociations(typ, []*schema.Relation{rel})
 
 	result := typ.AllAssociationsSlice()
 
@@ -496,8 +496,8 @@ func TestType_AllAssociationsSlice(t *testing.T) {
 }
 
 func TestType_Compositions_Iterator(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	comp := schema.NewRelation(
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	comp := schema.InternalNewRelation(
 		schema.RelationComposition,
 		"HAS_ADDRESS",
 		"addresses",
@@ -510,7 +510,7 @@ func TestType_Compositions_Iterator(t *testing.T) {
 		"Person",
 		nil,
 	)
-	typ.SetCompositions([]*schema.Relation{comp})
+	schema.InternalSetTypeCompositions(typ, []*schema.Relation{comp})
 
 	count := 0
 	for r := range typ.Compositions() {
@@ -522,8 +522,8 @@ func TestType_Compositions_Iterator(t *testing.T) {
 }
 
 func TestType_CompositionsSlice(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	comp := schema.NewRelation(
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	comp := schema.InternalNewRelation(
 		schema.RelationComposition,
 		"HAS_ADDRESS",
 		"addresses",
@@ -536,7 +536,7 @@ func TestType_CompositionsSlice(t *testing.T) {
 		"Person",
 		nil,
 	)
-	typ.SetCompositions([]*schema.Relation{comp})
+	schema.InternalSetTypeCompositions(typ, []*schema.Relation{comp})
 
 	result := typ.CompositionsSlice()
 
@@ -544,8 +544,8 @@ func TestType_CompositionsSlice(t *testing.T) {
 }
 
 func TestType_AllCompositions_Iterator(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	comp := schema.NewRelation(
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	comp := schema.InternalNewRelation(
 		schema.RelationComposition,
 		"HAS_ADDRESS",
 		"addresses",
@@ -558,7 +558,7 @@ func TestType_AllCompositions_Iterator(t *testing.T) {
 		"Person",
 		nil,
 	)
-	typ.SetAllCompositions([]*schema.Relation{comp})
+	schema.InternalSetTypeAllCompositions(typ, []*schema.Relation{comp})
 
 	count := 0
 	for r := range typ.AllCompositions() {
@@ -569,8 +569,8 @@ func TestType_AllCompositions_Iterator(t *testing.T) {
 }
 
 func TestType_AllCompositionsSlice(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	comp := schema.NewRelation(
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	comp := schema.InternalNewRelation(
 		schema.RelationComposition,
 		"HAS_ADDRESS",
 		"addresses",
@@ -583,7 +583,7 @@ func TestType_AllCompositionsSlice(t *testing.T) {
 		"Person",
 		nil,
 	)
-	typ.SetAllCompositions([]*schema.Relation{comp})
+	schema.InternalSetTypeAllCompositions(typ, []*schema.Relation{comp})
 
 	result := typ.AllCompositionsSlice()
 
@@ -591,9 +591,9 @@ func TestType_AllCompositionsSlice(t *testing.T) {
 }
 
 func TestType_Invariants_Iterator(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	inv := schema.NewInvariant("age > 0", nil, location.Span{}, "Age must be positive")
-	typ.SetInvariants([]*schema.Invariant{inv})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	inv := schema.InternalNewInvariant("age > 0", nil, location.Span{}, "Age must be positive")
+	schema.InternalSetTypeInvariants(typ, []*schema.Invariant{inv})
 
 	count := 0
 	for i := range typ.Invariants() {
@@ -604,9 +604,9 @@ func TestType_Invariants_Iterator(t *testing.T) {
 }
 
 func TestType_InvariantsSlice(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	inv := schema.NewInvariant("age > 0", nil, location.Span{}, "")
-	typ.SetInvariants([]*schema.Invariant{inv})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	inv := schema.InternalNewInvariant("age > 0", nil, location.Span{}, "")
+	schema.InternalSetTypeInvariants(typ, []*schema.Invariant{inv})
 
 	result := typ.InvariantsSlice()
 
@@ -614,9 +614,9 @@ func TestType_InvariantsSlice(t *testing.T) {
 }
 
 func TestType_Inherits_Iterator(t *testing.T) {
-	typ := schema.NewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
 	parentRef := schema.NewTypeRef("", "Person", location.Span{})
-	typ.SetInherits([]schema.TypeRef{parentRef})
+	schema.InternalSetTypeInherits(typ, []schema.TypeRef{parentRef})
 
 	count := 0
 	for ref := range typ.Inherits() {
@@ -627,9 +627,9 @@ func TestType_Inherits_Iterator(t *testing.T) {
 }
 
 func TestType_InheritsSlice(t *testing.T) {
-	typ := schema.NewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
 	parentRef := schema.NewTypeRef("", "Person", location.Span{})
-	typ.SetInherits([]schema.TypeRef{parentRef})
+	schema.InternalSetTypeInherits(typ, []schema.TypeRef{parentRef})
 
 	result := typ.InheritsSlice()
 
@@ -638,13 +638,13 @@ func TestType_InheritsSlice(t *testing.T) {
 }
 
 func TestType_SuperTypes_Iterator(t *testing.T) {
-	typ := schema.NewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
 	sourceID := location.MustNewSourceID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Person", location.Span{}),
 		schema.NewTypeID(sourceID, "Person"),
 	)
-	typ.SetSuperTypes([]schema.ResolvedTypeRef{resolved})
+	schema.InternalSetTypeSuperTypes(typ, []schema.ResolvedTypeRef{resolved})
 
 	count := 0
 	for ref := range typ.SuperTypes() {
@@ -655,13 +655,13 @@ func TestType_SuperTypes_Iterator(t *testing.T) {
 }
 
 func TestType_SuperTypesSlice(t *testing.T) {
-	typ := schema.NewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
 	sourceID := location.MustNewSourceID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Person", location.Span{}),
 		schema.NewTypeID(sourceID, "Person"),
 	)
-	typ.SetSuperTypes([]schema.ResolvedTypeRef{resolved})
+	schema.InternalSetTypeSuperTypes(typ, []schema.ResolvedTypeRef{resolved})
 
 	result := typ.SuperTypesSlice()
 
@@ -669,13 +669,13 @@ func TestType_SuperTypesSlice(t *testing.T) {
 }
 
 func TestType_SubTypes_Iterator(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
 	sourceID := location.MustNewSourceID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Employee", location.Span{}),
 		schema.NewTypeID(sourceID, "Employee"),
 	)
-	typ.SetSubTypes([]schema.ResolvedTypeRef{resolved})
+	schema.InternalSetTypeSubTypes(typ, []schema.ResolvedTypeRef{resolved})
 
 	count := 0
 	for ref := range typ.SubTypes() {
@@ -686,13 +686,13 @@ func TestType_SubTypes_Iterator(t *testing.T) {
 }
 
 func TestType_SubTypesSlice(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
 	sourceID := location.MustNewSourceID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Employee", location.Span{}),
 		schema.NewTypeID(sourceID, "Employee"),
 	)
-	typ.SetSubTypes([]schema.ResolvedTypeRef{resolved})
+	schema.InternalSetTypeSubTypes(typ, []schema.ResolvedTypeRef{resolved})
 
 	result := typ.SubTypesSlice()
 
@@ -701,13 +701,13 @@ func TestType_SubTypesSlice(t *testing.T) {
 
 func TestType_IsSuperTypeOf(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://schema")
-	personType := schema.NewType("Person", sourceID, location.Span{}, "", false, false)
+	personType := schema.InternalNewType("Person", sourceID, location.Span{}, "", false, false)
 	employeeID := schema.NewTypeID(sourceID, "Employee")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Employee", location.Span{}),
 		employeeID,
 	)
-	personType.SetSubTypes([]schema.ResolvedTypeRef{resolved})
+	schema.InternalSetTypeSubTypes(personType, []schema.ResolvedTypeRef{resolved})
 
 	assert.True(t, personType.IsSuperTypeOf(employeeID))
 	assert.False(t, personType.IsSuperTypeOf(schema.NewTypeID(sourceID, "Unknown")))
@@ -715,23 +715,23 @@ func TestType_IsSuperTypeOf(t *testing.T) {
 
 func TestType_IsSubTypeOf(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://schema")
-	employeeType := schema.NewType("Employee", sourceID, location.Span{}, "", false, false)
+	employeeType := schema.InternalNewType("Employee", sourceID, location.Span{}, "", false, false)
 	personID := schema.NewTypeID(sourceID, "Person")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Person", location.Span{}),
 		personID,
 	)
-	employeeType.SetSuperTypes([]schema.ResolvedTypeRef{resolved})
+	schema.InternalSetTypeSuperTypes(employeeType, []schema.ResolvedTypeRef{resolved})
 
 	assert.True(t, employeeType.IsSubTypeOf(personID))
 	assert.False(t, employeeType.IsSubTypeOf(schema.NewTypeID(sourceID, "Unknown")))
 }
 
 func TestType_CanonicalPropertyMap(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p1 := schema.NewProperty("FirstName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.NewProperty("LastName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	typ.SetAllProperties([]*schema.Property{p1, p2})
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	p1 := schema.InternalNewProperty("FirstName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.InternalNewProperty("LastName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	schema.InternalSetTypeAllProperties(typ, []*schema.Property{p1, p2})
 
 	result := typ.CanonicalPropertyMap()
 
@@ -740,10 +740,10 @@ func TestType_CanonicalPropertyMap(t *testing.T) {
 }
 
 func TestType_CanonicalPropertyMap_AfterSeal(t *testing.T) {
-	typ := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p := schema.NewProperty("Name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	typ.SetAllProperties([]*schema.Property{p})
-	typ.Seal()
+	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	p := schema.InternalNewProperty("Name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	schema.InternalSetTypeAllProperties(typ, []*schema.Property{p})
+	schema.InternalSealType(typ)
 
 	result := typ.CanonicalPropertyMap()
 
@@ -751,14 +751,14 @@ func TestType_CanonicalPropertyMap_AfterSeal(t *testing.T) {
 }
 
 func TestType_IsSealed(t *testing.T) {
-	typ := schema.NewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+	typ := schema.InternalNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
 
 	// New type should not be sealed
-	assert.False(t, typ.IsSealed(), "new type should not be sealed")
+	assert.False(t, schema.InternalIsSealedType(typ), "new type should not be sealed")
 
 	// After sealing, IsSealed should return true
-	typ.Seal()
-	assert.True(t, typ.IsSealed(), "sealed type should report IsSealed() == true")
+	schema.InternalSealType(typ)
+	assert.True(t, schema.InternalIsSealedType(typ), "sealed type should report IsSealed() == true")
 }
 
 // TestType_CanonicalPropertyMap_Immutability verifies that CanonicalPropertyMap

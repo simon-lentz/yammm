@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/instance/path"
-	"github.com/simon-lentz/yammm/internal/immutable"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -57,7 +57,7 @@ func NewValidator(s *schema.Schema, opts ...ValidatorOption) *Validator {
 //   - Process successful instances immediately
 //   - Report failures with detailed diagnostics
 //   - Handle system errors separately from validation errors
-func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance) ([]*ValidInstance, []ValidationFailure, error) {
+func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance, opts ...ValidationOption) ([]*ValidInstance, []ValidationFailure, error) {
 	if v == nil {
 		return nil, nil, &InternalError{Kind: KindNilValidator, Cause: ErrNilValidator}
 	}
@@ -84,7 +84,7 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 			return valid, failures, err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
 		}
 
-		instance, failure, err := v.ValidateOne(ctx, typeName, raws[i])
+		instance, failure, err := v.ValidateOne(ctx, typeName, raws[i], opts...)
 		if err != nil {
 			return valid, failures, err
 		}
@@ -105,7 +105,8 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 //   - (valid, nil, nil) on success
 //   - (nil, failure, nil) on validation failure
 //   - (nil, nil, err) on system error
-func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance) (*ValidInstance, *ValidationFailure, error) {
+func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance, opts ...ValidationOption) (*ValidInstance, *ValidationFailure, error) {
+	applyValidationOptions(opts) // no per-call options defined yet
 	if v == nil {
 		return nil, nil, &InternalError{Kind: KindNilValidator, Cause: ErrNilValidator}
 	}
@@ -130,7 +131,8 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 //
 // This is used when validating part types within a composition context.
 // Unlike direct validation, part types are allowed here.
-func (v *Validator) ValidateForComposition(ctx context.Context, parentType, relationName string, raws []RawInstance) ([]*ValidInstance, []ValidationFailure, error) {
+func (v *Validator) ValidateForComposition(ctx context.Context, parentType, relationName string, raws []RawInstance, opts ...ValidationOption) ([]*ValidInstance, []ValidationFailure, error) {
+	applyValidationOptions(opts) // no per-call options defined yet
 	if v == nil {
 		return nil, nil, &InternalError{Kind: KindNilValidator, Cause: ErrNilValidator}
 	}

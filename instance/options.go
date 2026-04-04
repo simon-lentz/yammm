@@ -105,3 +105,27 @@ func applyOptions(opts []ValidatorOption) *validatorConfig {
 	}
 	return cfg
 }
+
+// ValidationOption configures a single Validate, ValidateOne, or
+// ValidateForComposition call. Per-call options override construction-time
+// [ValidatorOption] settings for the duration of that call only.
+//
+// No per-call options are defined yet. This type exists so the method
+// signatures are forward-compatible for CLI per-invocation overrides
+// (e.g., --strict, --fail-fast) without a second breaking change.
+type ValidationOption func(*validationCallConfig)
+
+// validationCallConfig holds per-call configuration applied ephemerally
+// within a single Validate call. Fields will be added when CLI per-call
+// overrides are needed.
+type validationCallConfig struct{}
+
+// applyValidationOptions applies per-call options. Currently a no-op since
+// no per-call options are defined; the function signature will gain a return
+// value when options are added.
+func applyValidationOptions(opts []ValidationOption) {
+	cfg := &validationCallConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+}

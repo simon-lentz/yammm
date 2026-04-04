@@ -1,4 +1,4 @@
-package expr
+package exprcomp
 
 import (
 	"github.com/antlr4-go/antlr/v4"
@@ -7,6 +7,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/grammar"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // Compile compiles an ANTLR expression context into an Expression AST.
@@ -22,7 +23,7 @@ func Compile(
 	sourceID location.SourceID,
 	registry location.PositionRegistry,
 	converter location.RuneOffsetConverter,
-) Expression {
+) expr.Expression {
 	if ctx == nil {
 		return nil
 	}
@@ -44,7 +45,7 @@ func CompileString(
 	exprSource string,
 	collector *diag.Collector,
 	sourceID location.SourceID,
-) Expression {
+) expr.Expression {
 	// Create a minimal schema wrapper to use the parser
 	schemaSource := `schema "expr" type T { ! "test" ` + exprSource + ` }`
 

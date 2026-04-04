@@ -1,20 +1,11 @@
 package load
 
 import (
-	"errors"
 	"log/slog"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/schema"
 )
-
-// ErrSourceStoreNotSupported is returned when WithSourceRegistry is called
-// with a SourceStore implementation that is not *source.Registry.
-//
-// The current implementation requires *source.Registry for full functionality.
-// Custom SourceStore implementations may be supported in future versions.
-// Use source.NewRegistry() for compatibility.
-var ErrSourceStoreNotSupported = errors.New("custom SourceStore implementation not supported; use *source.Registry")
 
 // Option configures the behavior of Load functions.
 type Option func(*config)
@@ -24,7 +15,7 @@ type config struct {
 	registry        *schema.Registry
 	moduleRoot      string
 	issueLimit      int
-	sourceRegistry  SourceStore
+	sourceRegistry  *source.Registry
 	logger          *slog.Logger
 	disallowImports bool
 }
@@ -70,34 +61,11 @@ func WithIssueLimit(limit int) Option {
 	}
 }
 
-// SourceStore provides source content and position information.
-// This interface abstracts the source registry for testability and LSP integration.
-// The interface is designed to be compatible with *source.Registry.
-type SourceStore interface {
-	// Register adds source content for a file. Implementations should handle
-	// re-registration gracefully (e.g., return error or no-op if already registered).
-	Register(sourceID location.SourceID, content []byte) error
-	// PositionAt converts a byte offset to a position.
-	// Returns a zero Position if the source or offset is invalid.
-	// Use Position.IsZero() to check for "not found".
-	PositionAt(sourceID location.SourceID, byteOffset int) location.Position
-	// RuneToByteOffset converts a rune offset to a byte offset.
-	// Returns (offset, false) if the source or rune offset is invalid.
-	RuneToByteOffset(sourceID location.SourceID, runeOffset int) (int, bool)
-}
-
-// WithSourceRegistry provides a custom source registry for position tracking.
+// WithSourceRegistry provides a source registry for position tracking.
 // If not provided, a new source registry is created for the load operation.
-//
-// IMPORTANT: Currently only *source.Registry is supported. Passing a custom
-// SourceStore implementation will cause Load/Sources/String to return
-// ErrSourceStoreNotSupported. This limitation exists because the internal
-// implementation requires source.Registry-specific functionality.
-//
-// For compatibility, use source.NewRegistry() to create the store.
-func WithSourceRegistry(store SourceStore) Option {
+func WithSourceRegistry(reg *source.Registry) Option {
 	return func(c *config) {
-		c.sourceRegistry = store
+		c.sourceRegistry = reg
 	}
 }
 

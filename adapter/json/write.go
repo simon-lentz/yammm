@@ -3,6 +3,7 @@ package json
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/internal/immutable"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -41,7 +42,7 @@ func WithDiagnostics(include bool) WriteOption {
 	}
 }
 
-// MarshalObject serializes a graph.Result to JSON bytes in object-keyed format.
+// MarshalObject serializes a graph snapshot to JSON bytes in object-keyed format.
 //
 // The output format groups instances by type name:
 //
@@ -55,7 +56,7 @@ func WithDiagnostics(include bool) WriteOption {
 // unresolved edges and duplicates in a "$diagnostics" section.
 //
 // Returns ErrNilResult if result is nil.
-func (a *Adapter) MarshalObject(result *graph.Result, opts ...WriteOption) ([]byte, error) {
+func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
 	if result == nil {
 		return nil, ErrNilResult
 	}
@@ -80,14 +81,14 @@ func (a *Adapter) MarshalObject(result *graph.Result, opts ...WriteOption) ([]by
 	return data, nil
 }
 
-// WriteObject writes a graph.Result to an io.Writer in JSON object-keyed format.
+// WriteObject writes a graph snapshot to an io.Writer in JSON object-keyed format.
 //
 // See MarshalObject for output format details.
 //
 // Returns the number of bytes written and ErrNilResult if result is nil.
 // Returns io.ErrShortWrite if the writer accepts fewer bytes than provided.
-func (a *Adapter) WriteObject(w io.Writer, result *graph.Result, opts ...WriteOption) (int64, error) {
-	data, err := a.MarshalObject(result, opts...)
+func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Snapshot, opts ...WriteOption) (int64, error) {
+	data, err := a.MarshalObject(ctx, result, opts...)
 	if err != nil {
 		return 0, err
 	}
@@ -99,8 +100,8 @@ func (a *Adapter) WriteObject(w io.Writer, result *graph.Result, opts ...WriteOp
 	return int64(n), err
 }
 
-// buildOutput constructs the JSON-serializable output map from a graph.Result.
-func (a *Adapter) buildOutput(result *graph.Result, cfg *writeConfig) map[string]any {
+// buildOutput constructs the JSON-serializable output map from a graph snapshot.
+func (a *Adapter) buildOutput(result *graph.Snapshot, cfg *writeConfig) map[string]any {
 	output := make(map[string]any)
 	s := result.Schema()
 
@@ -295,7 +296,7 @@ func unwrapValue(v immutable.Value) any {
 }
 
 // serializeDiagnostics creates the $diagnostics section with unresolved edges and duplicates.
-func serializeDiagnostics(result *graph.Result, s *schema.Schema) map[string]any {
+func serializeDiagnostics(result *graph.Snapshot, s *schema.Schema) map[string]any {
 	diag := make(map[string]any)
 
 	// Serialize unresolved edges

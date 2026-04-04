@@ -151,6 +151,7 @@ func TestLabel_Default(t *testing.T) {
 	t.Parallel()
 
 	a := New()
+	ctx := context.Background()
 	tests := []struct {
 		schema string
 		typ    string
@@ -167,7 +168,7 @@ func TestLabel_Default(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.schema+"_"+tt.typ, func(t *testing.T) {
 			t.Parallel()
-			got := a.Label(tt.schema, tt.typ)
+			got := a.Label(ctx, tt.schema, tt.typ)
 			if got != tt.want {
 				t.Errorf("Label(%q, %q) = %q; want %q", tt.schema, tt.typ, got, tt.want)
 			}
@@ -179,7 +180,7 @@ func TestLabel_CustomSeparator(t *testing.T) {
 	t.Parallel()
 
 	a := New(WithLabelSeparator("_"))
-	got := a.Label("msrb_emma", "Issuer")
+	got := a.Label(context.Background(), "msrb_emma", "Issuer")
 	want := "msrb_emma_Issuer"
 	if got != want {
 		t.Errorf("Label with custom separator = %q; want %q", got, want)
@@ -190,7 +191,7 @@ func TestLabel_WithPrefix(t *testing.T) {
 	t.Parallel()
 
 	a := New(WithLabelPrefix("app_"))
-	got := a.Label("msrb_emma", "Issuer")
+	got := a.Label(context.Background(), "msrb_emma", "Issuer")
 	want := "app_msrb_emma__Issuer"
 	if got != want {
 		t.Errorf("Label with prefix = %q; want %q", got, want)
@@ -201,6 +202,7 @@ func TestLabel_SanitizesComponents(t *testing.T) {
 	t.Parallel()
 
 	a := New()
+	ctx := context.Background()
 	tests := []struct {
 		schema string
 		typ    string
@@ -214,7 +216,7 @@ func TestLabel_SanitizesComponents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.schema+"_"+tt.typ, func(t *testing.T) {
 			t.Parallel()
-			got := a.Label(tt.schema, tt.typ)
+			got := a.Label(ctx, tt.schema, tt.typ)
 			if got != tt.want {
 				t.Errorf("Label(%q, %q) = %q; want %q", tt.schema, tt.typ, got, tt.want)
 			}
@@ -234,7 +236,7 @@ func TestDetectLabelCollisions_NoCollision(t *testing.T) {
 	}
 
 	a := New()
-	result = a.DetectLabelCollisions(s)
+	result = a.DetectLabelCollisions(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Errorf("DetectLabelCollisions returned errors for non-colliding schema: %v", err)
 	}
@@ -259,7 +261,7 @@ func TestDetectLabelCollisions_Collision(t *testing.T) {
 	}
 
 	a := New()
-	result := a.DetectLabelCollisions(s)
+	result := a.DetectLabelCollisions(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Errorf("unexpected collision errors: %v", err)
 	}

@@ -16,12 +16,12 @@ import (
 
 // makeAssociationTarget creates a simple type to be used as an association target.
 func makeAssociationTarget(name string) *schema.Type {
-	t := schema.NewType(name, location.SourceID{}, location.Span{}, "", false, false)
+	t := schema.InternalNewType(name, location.SourceID{}, location.Span{}, "", false, false)
 	pk := makeProp("id", schema.NewIntegerConstraint(), false, true)
-	t.SetProperties([]*schema.Property{pk})
-	t.SetAllProperties([]*schema.Property{pk})
-	t.SetPrimaryKeys([]*schema.Property{pk})
-	t.Seal()
+	schema.InternalSetTypeProperties(t, []*schema.Property{pk})
+	schema.InternalSetTypeAllProperties(t, []*schema.Property{pk})
+	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{pk})
+	schema.InternalSealType(t)
 	return t
 }
 
@@ -33,15 +33,15 @@ func makeTypeWithAssociation(
 	optional, many bool,
 	edgeProps []*schema.Property,
 ) *schema.Type {
-	t := schema.NewType(name, location.SourceID{}, location.Span{}, "", false, false)
+	t := schema.InternalNewType(name, location.SourceID{}, location.Span{}, "", false, false)
 
 	idProp := makeProp("id", schema.NewIntegerConstraint(), false, true)
-	t.SetProperties([]*schema.Property{idProp})
-	t.SetAllProperties([]*schema.Property{idProp})
-	t.SetPrimaryKeys([]*schema.Property{idProp})
+	schema.InternalSetTypeProperties(t, []*schema.Property{idProp})
+	schema.InternalSetTypeAllProperties(t, []*schema.Property{idProp})
+	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{idProp})
 
 	// Create association relation to target type
-	rel := schema.NewRelation(
+	rel := schema.InternalNewRelation(
 		schema.RelationAssociation,
 		relationName,
 		relationName, // fieldName
@@ -57,11 +57,11 @@ func makeTypeWithAssociation(
 		name,  // owner
 		edgeProps,
 	)
-	rel.Seal()
+	schema.InternalSealRelation(rel)
 
-	t.SetAssociations([]*schema.Relation{rel})
-	t.SetAllAssociations([]*schema.Relation{rel})
-	t.Seal()
+	schema.InternalSetTypeAssociations(t, []*schema.Relation{rel})
+	schema.InternalSetTypeAllAssociations(t, []*schema.Relation{rel})
+	schema.InternalSealType(t)
 	return t
 }
 
@@ -71,9 +71,9 @@ func TestValidateEdges_SingleFK(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -101,9 +101,9 @@ func TestValidateEdges_Many(t *testing.T) {
 	targetType := makeAssociationTarget("Tag")
 	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{itemType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -134,9 +134,9 @@ func TestValidateEdges_Optional_Nil(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -166,9 +166,9 @@ func TestValidateEdges_Required_Absent(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", false, false, nil) // NOT optional
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -195,9 +195,9 @@ func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil) // many=false
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -213,16 +213,16 @@ func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "expected object")
+	assert.Contains(t, failure.Summary(), "expected object")
 }
 
 func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
 	targetType := makeAssociationTarget("Tag")
 	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil) // many=true
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{itemType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -238,16 +238,16 @@ func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "expected array")
+	assert.Contains(t, failure.Summary(), "expected array")
 }
 
 func TestValidateEdges_MissingFK(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -263,16 +263,16 @@ func TestValidateEdges_MissingFK(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "_target_id")
+	assert.Contains(t, failure.Summary(), "_target_id")
 }
 
 func TestValidateEdges_UnknownField(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s) // Default: don't allow unknown fields
 
@@ -291,16 +291,16 @@ func TestValidateEdges_UnknownField(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "unknown field")
+	assert.Contains(t, failure.Summary(), "unknown field")
 }
 
 func TestValidateEdges_UnknownField_Allowed(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s, instance.WithAllowUnknownFields(true))
 
@@ -330,9 +330,9 @@ func TestValidateEdges_EdgePropertyValidation(t *testing.T) {
 	}
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, edgeProps)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -373,9 +373,9 @@ func TestValidateEdges_MissingRequiredEdgeProperty(t *testing.T) {
 	}
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, edgeProps)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -394,7 +394,7 @@ func TestValidateEdges_MissingRequiredEdgeProperty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "missing required edge property")
+	assert.Contains(t, failure.Summary(), "missing required edge property")
 }
 
 func TestValidateEdges_EdgePropertyInvalid(t *testing.T) {
@@ -405,9 +405,9 @@ func TestValidateEdges_EdgePropertyInvalid(t *testing.T) {
 	}
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, edgeProps)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -426,16 +426,16 @@ func TestValidateEdges_EdgePropertyInvalid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "rating")
+	assert.Contains(t, failure.Summary(), "rating")
 }
 
 func TestValidateEdges_FKTypeMismatch(t *testing.T) {
 	targetType := makeAssociationTarget("Company") // id is integer
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -453,16 +453,16 @@ func TestValidateEdges_FKTypeMismatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "_target_id")
+	assert.Contains(t, failure.Summary(), "_target_id")
 }
 
 func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
 	targetType := makeAssociationTarget("Tag")
 	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{itemType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -480,16 +480,16 @@ func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "expected object for edge target")
+	assert.Contains(t, failure.Summary(), "expected object for edge target")
 }
 
 func TestValidateEdges_OptionalEdgeWithEmptyArray(t *testing.T) {
 	targetType := makeAssociationTarget("Tag")
 	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil) // Optional, many
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{itemType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -520,9 +520,9 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 	targetType := makeAssociationTarget("Tag")
 	itemType := makeTypeWithAssociation("Item", targetType, "tags", false, true, nil) // NOT optional, many
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{itemType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -552,13 +552,13 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 //
 //nolint:unparam // name is always "Enrollment" in tests but kept for consistency with makeAssociationTarget
 func makeAssociationTargetComposite(name string, pk1Name, pk2Name string) *schema.Type {
-	t := schema.NewType(name, location.SourceID{}, location.Span{}, "", false, false)
+	t := schema.InternalNewType(name, location.SourceID{}, location.Span{}, "", false, false)
 	pk1 := makeProp(pk1Name, schema.NewStringConstraint(), false, true)
 	pk2 := makeProp(pk2Name, schema.NewIntegerConstraint(), false, true)
-	t.SetProperties([]*schema.Property{pk1, pk2})
-	t.SetAllProperties([]*schema.Property{pk1, pk2})
-	t.SetPrimaryKeys([]*schema.Property{pk1, pk2})
-	t.Seal()
+	schema.InternalSetTypeProperties(t, []*schema.Property{pk1, pk2})
+	schema.InternalSetTypeAllProperties(t, []*schema.Property{pk1, pk2})
+	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{pk1, pk2})
+	schema.InternalSealType(t)
 	return t
 }
 
@@ -566,9 +566,9 @@ func TestValidateEdges_CompositeFK(t *testing.T) {
 	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
 	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -600,9 +600,9 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
 	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -621,7 +621,7 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "incomplete composite FK")
+	assert.Contains(t, failure.Summary(), "incomplete composite FK")
 }
 
 // TestValidateEdges_FKCaseSensitive verifies that FK field matching is always case-sensitive,
@@ -631,9 +631,9 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	t.Run("wrong_case_fails_even_without_strict_mode", func(t *testing.T) {
 		// Default: StrictPropertyNames = false, but FK fields are ALWAYS case-sensitive
@@ -652,7 +652,7 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, valid, "Should fail: _target_ID != _target_id (case-sensitive)")
 		require.NotNil(t, failure)
-		assert.Contains(t, failure.Error(), "missing FK field")
+		assert.Contains(t, failure.Summary(), "missing FK field")
 	})
 
 	t.Run("wrong_case_fails_with_strict_mode", func(t *testing.T) {
@@ -672,7 +672,7 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, valid, "Should fail: _Target_id != _target_id (case-sensitive)")
 		require.NotNil(t, failure)
-		assert.Contains(t, failure.Error(), "missing FK field")
+		assert.Contains(t, failure.Summary(), "missing FK field")
 	})
 
 	t.Run("correct_case_succeeds", func(t *testing.T) {
@@ -700,9 +700,9 @@ func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil) // optional
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -718,7 +718,7 @@ func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid edge value")
+	assert.Contains(t, failure.Summary(), "null is not a valid edge value")
 
 	// Verify error code is E_EDGE_SHAPE_MISMATCH
 	issues := failure.Result.IssuesSlice()
@@ -747,9 +747,9 @@ func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", false, false, nil) // NOT optional
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -765,7 +765,7 @@ func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid edge value")
+	assert.Contains(t, failure.Summary(), "null is not a valid edge value")
 
 	issues := failure.Result.IssuesSlice()
 	require.Len(t, issues, 1)
@@ -777,9 +777,9 @@ func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 	targetType := makeAssociationTarget("Tag")
 	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil) // optional, many
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{itemType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -795,7 +795,7 @@ func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid edge value")
+	assert.Contains(t, failure.Summary(), "null is not a valid edge value")
 
 	issues := failure.Result.IssuesSlice()
 	require.Len(t, issues, 1)
@@ -817,9 +817,9 @@ func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -871,9 +871,9 @@ func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
 	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -937,9 +937,9 @@ func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 	targetType := makeAssociationTarget("Company")
 	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -987,9 +987,9 @@ func TestValidateEdges_CompositeFK_OneNullOneValid(t *testing.T) {
 	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
 	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -1024,9 +1024,9 @@ func TestValidateEdges_CompositeFK_OneNullOneMissing(t *testing.T) {
 	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
 	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -1078,9 +1078,9 @@ func TestValidateEdges_CompositeFK_OneNullOneInvalidType(t *testing.T) {
 	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
 	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -1118,9 +1118,9 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
 	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, targetType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -1340,9 +1340,9 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 			// Create type with the specific multiplicity configuration
 			sourceType := makeTypeWithAssociation("Source", targetType, "items", tc.optional, tc.many, nil)
 
-			s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-			s.SetTypes([]*schema.Type{sourceType, targetType})
-			s.Seal()
+			s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+			schema.InternalSetSchemaTypes(s, []*schema.Type{sourceType, targetType})
+			schema.InternalSealSchema(s)
 
 			validator := instance.NewValidator(s)
 

@@ -129,7 +129,7 @@ func (c *completer) completeTypes() bool {
 	// Set schema name on each type for cross-schema display.
 	schemaName := c.schema.Name()
 	for _, t := range c.schema.TypesSlice() {
-		t.SetSchemaName(schemaName)
+		schema.InternalSetTypeSchemaName(t, schemaName)
 	}
 
 	var completeType func(t *schema.Type) bool
@@ -203,11 +203,11 @@ func (c *completer) completeTypes() bool {
 			linearize(ref)
 		}
 
-		t.SetSuperTypes(supers)
+		schema.InternalSetTypeSuperTypes(t, supers)
 
 		// Merge properties from ancestors
 		allProps := c.mergeProperties(t, supers)
-		t.SetAllProperties(allProps)
+		schema.InternalSetTypeAllProperties(t, allProps)
 
 		// Extract primary keys
 		pks := make([]*schema.Property, 0)
@@ -223,19 +223,19 @@ func (c *completer) completeTypes() bool {
 				pks = append(pks, p)
 			}
 		}
-		t.SetPrimaryKeys(pks)
+		schema.InternalSetTypePrimaryKeys(t, pks)
 
 		// Merge associations from ancestors
 		allAssocs := c.mergeRelations(t, t.AssociationsSlice(), supers, schema.RelationAssociation)
-		t.SetAllAssociations(allAssocs)
+		schema.InternalSetTypeAllAssociations(t, allAssocs)
 
 		// Merge compositions from ancestors
 		allComps := c.mergeRelations(t, t.CompositionsSlice(), supers, schema.RelationComposition)
-		t.SetAllCompositions(allComps)
+		schema.InternalSetTypeAllCompositions(t, allComps)
 
 		// Merge invariants from ancestors
 		allInvs := c.mergeInvariants(t, supers)
-		t.SetAllInvariants(allInvs)
+		schema.InternalSetTypeAllInvariants(t, allInvs)
 
 		return ok
 	}
@@ -259,7 +259,7 @@ func (c *completer) completeTypes() bool {
 			if superType := c.resolveTypeID(superID); superType != nil {
 				subs := superType.SubTypesSlice()
 				subs = append(subs, schema.ResolvedTypeRefFromType(t, superID.SchemaPath().String()))
-				superType.SetSubTypes(subs)
+				schema.InternalSetTypeSubTypes(superType, subs)
 			}
 		}
 	}

@@ -16,16 +16,16 @@ import (
 )
 
 func TestWithLogger(t *testing.T) {
-	personType := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	idProp := schema.NewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	personType.SetProperties([]*schema.Property{idProp})
-	personType.SetAllProperties([]*schema.Property{idProp})
-	personType.SetPrimaryKeys([]*schema.Property{idProp})
-	personType.Seal()
+	personType := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	idProp := schema.InternalNewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	schema.InternalSetTypeProperties(personType, []*schema.Property{idProp})
+	schema.InternalSetTypeAllProperties(personType, []*schema.Property{idProp})
+	schema.InternalSetTypePrimaryKeys(personType, []*schema.Property{idProp})
+	schema.InternalSealType(personType)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType})
+	schema.InternalSealSchema(s)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
@@ -43,18 +43,18 @@ func TestWithLogger(t *testing.T) {
 }
 
 func TestWithMaxIssuesPerInstance(t *testing.T) {
-	personType := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	idProp := schema.NewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	nameProp := schema.NewProperty("name", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	ageProp := schema.NewProperty("age", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	personType.SetProperties([]*schema.Property{idProp, nameProp, ageProp})
-	personType.SetAllProperties([]*schema.Property{idProp, nameProp, ageProp})
-	personType.SetPrimaryKeys([]*schema.Property{idProp})
-	personType.Seal()
+	personType := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	idProp := schema.InternalNewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	nameProp := schema.InternalNewProperty("name", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	ageProp := schema.InternalNewProperty("age", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	schema.InternalSetTypeProperties(personType, []*schema.Property{idProp, nameProp, ageProp})
+	schema.InternalSetTypeAllProperties(personType, []*schema.Property{idProp, nameProp, ageProp})
+	schema.InternalSetTypePrimaryKeys(personType, []*schema.Property{idProp})
+	schema.InternalSealType(personType)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType})
+	schema.InternalSealSchema(s)
 
 	t.Run("limits_issues", func(t *testing.T) {
 		// Create validator with max 1 issue per instance
@@ -104,16 +104,16 @@ func TestWithMaxIssuesPerInstance(t *testing.T) {
 }
 
 func TestRecommendedValidatorOptions(t *testing.T) {
-	personType := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	idProp := schema.NewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	personType.SetProperties([]*schema.Property{idProp})
-	personType.SetAllProperties([]*schema.Property{idProp})
-	personType.SetPrimaryKeys([]*schema.Property{idProp})
-	personType.Seal()
+	personType := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	idProp := schema.InternalNewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	schema.InternalSetTypeProperties(personType, []*schema.Property{idProp})
+	schema.InternalSetTypeAllProperties(personType, []*schema.Property{idProp})
+	schema.InternalSetTypePrimaryKeys(personType, []*schema.Property{idProp})
+	schema.InternalSealType(personType)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType})
+	schema.InternalSealSchema(s)
 
 	// RecommendedValidatorOptions should return valid options
 	opts := instance.RecommendedValidatorOptions()
@@ -134,17 +134,17 @@ func TestRecommendedValidatorOptions(t *testing.T) {
 
 func TestOptionsWithProvenance(t *testing.T) {
 	// Test that provenance functions are covered in various scenarios
-	personType := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	idProp := schema.NewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	nameProp := schema.NewProperty("name", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	personType.SetProperties([]*schema.Property{idProp, nameProp})
-	personType.SetAllProperties([]*schema.Property{idProp, nameProp})
-	personType.SetPrimaryKeys([]*schema.Property{idProp})
-	personType.Seal()
+	personType := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	idProp := schema.InternalNewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	nameProp := schema.InternalNewProperty("name", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	schema.InternalSetTypeProperties(personType, []*schema.Property{idProp, nameProp})
+	schema.InternalSetTypeAllProperties(personType, []*schema.Property{idProp, nameProp})
+	schema.InternalSetTypePrimaryKeys(personType, []*schema.Property{idProp})
+	schema.InternalSealType(personType)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -181,16 +181,16 @@ func TestOptionsWithProvenance(t *testing.T) {
 
 func TestWithValueRegistry(t *testing.T) {
 	// Test WithValueRegistry option
-	personType := schema.NewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	idProp := schema.NewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	personType.SetProperties([]*schema.Property{idProp})
-	personType.SetAllProperties([]*schema.Property{idProp})
-	personType.SetPrimaryKeys([]*schema.Property{idProp})
-	personType.Seal()
+	personType := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	idProp := schema.InternalNewProperty("id", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	schema.InternalSetTypeProperties(personType, []*schema.Property{idProp})
+	schema.InternalSetTypeAllProperties(personType, []*schema.Property{idProp})
+	schema.InternalSetTypePrimaryKeys(personType, []*schema.Property{idProp})
+	schema.InternalSealType(personType)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType})
+	schema.InternalSealSchema(s)
 
 	// Create validator with custom value registry (zero-value registry for test)
 	validator := instance.NewValidator(s, instance.WithValueRegistry(value.Registry{}))

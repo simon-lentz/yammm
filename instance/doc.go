@@ -19,6 +19,12 @@
 // information for error reporting. [ValidInstance] is the immutable output
 // containing typed properties, validated edges, and the extracted primary key.
 //
+// These two types use different access patterns by design:
+//   - [RawInstance] uses public struct fields (Properties, Provenance) because
+//     callers construct it directly — it is an input DTO.
+//   - [ValidInstance] uses accessor methods because the library constructs it —
+//     it is an immutable output type whose internals are not caller-settable.
+//
 // # Validation Semantics
 //
 // The validator performs:
@@ -37,5 +43,4 @@
 // # Subpackages
 //
 //   - [instance/path] provides JSONPath-like syntax for error locations
-//   - [instance/eval] provides expression evaluation for invariants
 package instance

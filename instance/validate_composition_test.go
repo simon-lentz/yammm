@@ -24,9 +24,9 @@ func TestValidateCompositions_Single(t *testing.T) {
 	// Create parent type with composition
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -57,9 +57,9 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -91,9 +91,9 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -122,9 +122,9 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -153,9 +153,9 @@ func TestValidateCompositions_Required_Missing(t *testing.T) {
 	)
 	personType := makeTypeWithRequiredComposition(addressType)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -171,7 +171,7 @@ func TestValidateCompositions_Required_Missing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "missing required composition")
+	assert.Contains(t, failure.Summary(), "missing required composition")
 }
 
 func TestValidateCompositions_Required_Empty(t *testing.T) {
@@ -180,9 +180,9 @@ func TestValidateCompositions_Required_Empty(t *testing.T) {
 	)
 	personType := makeTypeWithRequiredComposition(addressType)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -198,7 +198,7 @@ func TestValidateCompositions_Required_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "required composition cannot be empty")
+	assert.Contains(t, failure.Summary(), "required composition cannot be empty")
 }
 
 func TestValidateCompositions_DuplicatePK(t *testing.T) {
@@ -207,9 +207,9 @@ func TestValidateCompositions_DuplicatePK(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -228,7 +228,7 @@ func TestValidateCompositions_DuplicatePK(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "duplicate primary key")
+	assert.Contains(t, failure.Summary(), "duplicate primary key")
 }
 
 func TestValidateCompositions_ChildValidationFails(t *testing.T) {
@@ -238,9 +238,9 @@ func TestValidateCompositions_ChildValidationFails(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -258,7 +258,7 @@ func TestValidateCompositions_ChildValidationFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "missing required")
+	assert.Contains(t, failure.Summary(), "missing required")
 }
 
 func TestValidateCompositions_InvalidChildShape(t *testing.T) {
@@ -267,9 +267,9 @@ func TestValidateCompositions_InvalidChildShape(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -287,7 +287,7 @@ func TestValidateCompositions_InvalidChildShape(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "composition child must be an object")
+	assert.Contains(t, failure.Summary(), "composition child must be an object")
 }
 
 func TestValidateCompositions_NotArray(t *testing.T) {
@@ -296,9 +296,9 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -314,7 +314,7 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "expected array")
+	assert.Contains(t, failure.Summary(), "expected array")
 }
 
 // --- Test Helper ---
@@ -323,15 +323,15 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 func makeTypeWithRequiredComposition(partType *schema.Type) *schema.Type {
 	const typeName = "Person"
 	const relationName = "addresses"
-	t := schema.NewType(typeName, location.SourceID{}, location.Span{}, "", false, false)
+	t := schema.InternalNewType(typeName, location.SourceID{}, location.Span{}, "", false, false)
 
 	idProp := makeProp("id", schema.NewIntegerConstraint(), false, true)
-	t.SetProperties([]*schema.Property{idProp})
-	t.SetAllProperties([]*schema.Property{idProp})
-	t.SetPrimaryKeys([]*schema.Property{idProp})
+	schema.InternalSetTypeProperties(t, []*schema.Property{idProp})
+	schema.InternalSetTypeAllProperties(t, []*schema.Property{idProp})
+	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{idProp})
 
 	// Create composition relation to part type (NOT optional)
-	rel := schema.NewRelation(
+	rel := schema.InternalNewRelation(
 		schema.RelationComposition,
 		relationName,
 		relationName, // fieldName
@@ -347,11 +347,11 @@ func makeTypeWithRequiredComposition(partType *schema.Type) *schema.Type {
 		typeName, // owner
 		nil,      // no edge properties for composition
 	)
-	rel.Seal()
+	schema.InternalSealRelation(rel)
 
-	t.SetCompositions([]*schema.Relation{rel})
-	t.SetAllCompositions([]*schema.Relation{rel})
-	t.Seal()
+	schema.InternalSetTypeCompositions(t, []*schema.Relation{rel})
+	schema.InternalSetTypeAllCompositions(t, []*schema.Relation{rel})
+	schema.InternalSealType(t)
 	return t
 }
 
@@ -364,9 +364,9 @@ func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses") // optional by default
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -382,7 +382,7 @@ func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid composition value")
+	assert.Contains(t, failure.Summary(), "null is not a valid composition value")
 
 	// Verify error code is E_EDGE_SHAPE_MISMATCH
 	issues := failure.Result.IssuesSlice()
@@ -413,9 +413,9 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 	)
 	personType := makeTypeWithRequiredComposition(addressType) // NOT optional
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -431,7 +431,7 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid composition value")
+	assert.Contains(t, failure.Summary(), "null is not a valid composition value")
 
 	issues := failure.Result.IssuesSlice()
 	require.Len(t, issues, 1)
@@ -447,9 +447,9 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 	)
 	personType := makeTypeWithRequiredComposition(addressType)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -482,7 +482,7 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 			hasRelation = true
 			assert.Equal(t, "addresses", d.Value)
 		}
-		if d.Key == diag.DetailKeyJsonField {
+		if d.Key == diag.DetailKeyJSONField {
 			hasJSONField = true
 			assert.Equal(t, "addresses", d.Value)
 		}
@@ -499,9 +499,9 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 	)
 	personType := makeTypeWithRequiredComposition(addressType)
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -534,7 +534,7 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 			hasRelation = true
 			assert.Equal(t, "addresses", d.Value)
 		}
-		if d.Key == diag.DetailKeyJsonField {
+		if d.Key == diag.DetailKeyJSONField {
 			hasJSONField = true
 			assert.Equal(t, "addresses", d.Value)
 		}
@@ -551,9 +551,9 @@ func TestValidateCompositions_DuplicatePK_PathFormat(t *testing.T) {
 	)
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -594,9 +594,9 @@ func TestValidateCompositions_CompositePK_PathFormat(t *testing.T) {
 	)
 	schoolType := makeTypeWithRelation("School", enrollmentType, "enrollments")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{schoolType, enrollmentType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{schoolType, enrollmentType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 
@@ -646,9 +646,9 @@ func TestOwnership_ValidateForCompositionIsolation(t *testing.T) {
 	// Create parent type with composition
 	personType := makeTypeWithRelation("Person", addressType, "addresses")
 
-	s := schema.NewSchema("test", location.SourceID{}, location.Span{}, "")
-	s.SetTypes([]*schema.Type{personType, addressType})
-	s.Seal()
+	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
+	schema.InternalSealSchema(s)
 
 	validator := instance.NewValidator(s)
 

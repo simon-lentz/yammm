@@ -9,7 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 )
 
-func TestValidationFailure_Error(t *testing.T) {
+func TestValidationFailure_Summary(t *testing.T) {
 	t.Run("with_errors", func(t *testing.T) {
 		collector := diag.NewCollector(0)
 		collector.Collect(diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, "first error").Build())
@@ -19,7 +19,7 @@ func TestValidationFailure_Error(t *testing.T) {
 		failure := instance.NewValidationFailure(raw, collector.Result())
 
 		// Should return the first error message
-		assert.Equal(t, "first error", failure.Error())
+		assert.Equal(t, "first error", failure.Summary())
 	})
 
 	t.Run("with_only_warning", func(t *testing.T) {
@@ -29,8 +29,8 @@ func TestValidationFailure_Error(t *testing.T) {
 		raw := instance.RawInstance{Properties: map[string]any{"id": int64(1)}}
 		failure := instance.NewValidationFailure(raw, collector.Result())
 
-		// Warning is not a failure severity, so Error() returns empty
-		assert.Equal(t, "", failure.Error())
+		// Warning is not a failure severity, so Summary() returns empty
+		assert.Equal(t, "", failure.Summary())
 	})
 
 	t.Run("empty_result", func(t *testing.T) {
@@ -38,7 +38,7 @@ func TestValidationFailure_Error(t *testing.T) {
 		raw := instance.RawInstance{Properties: map[string]any{"id": int64(1)}}
 		failure := instance.NewValidationFailure(raw, collector.Result())
 
-		assert.Equal(t, "", failure.Error())
+		assert.Equal(t, "", failure.Summary())
 	})
 }
 

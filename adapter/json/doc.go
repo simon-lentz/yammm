@@ -1,6 +1,6 @@
 // Package json provides a JSON adapter for parsing instance data into
 // [instance.RawInstance] values with optional source location tracking,
-// and for serializing [graph.Result] snapshots back to JSON.
+// and for serializing [graph.Snapshot] snapshots back to JSON.
 //
 // # Serialization
 //

@@ -51,9 +51,9 @@ type Relation struct {
 	sealed          bool          // true after completion; prevents further mutation
 }
 
-// NewRelation creates a new Relation. This is primarily for internal use;
+// newRelation creates a new Relation. This is primarily for internal use;
 // relations are typically created during schema parsing and completion.
-func NewRelation(
+func newRelation(
 	kind RelationKind,
 	name string,
 	fieldName string,
@@ -112,24 +112,24 @@ func (r *Relation) TargetID() TypeID {
 	return r.targetID
 }
 
-// SetTargetID sets the resolved canonical type identity.
+// setTargetID sets the resolved canonical type identity.
 // Internal use only; called during schema completion.
-// Panics if called after Seal().
-func (r *Relation) SetTargetID(id TypeID) {
+// Panics if called after seal().
+func (r *Relation) setTargetID(id TypeID) {
 	if r.sealed {
 		panic("relation: cannot mutate sealed relation")
 	}
 	r.targetID = id
 }
 
-// Seal prevents further mutation of the relation.
+// seal prevents further mutation of the relation.
 // Called during schema completion after target resolution.
-func (r *Relation) Seal() {
+func (r *Relation) seal() {
 	r.sealed = true
 }
 
-// IsSealed reports whether the relation has been sealed.
-func (r *Relation) IsSealed() bool {
+// isSealed reports whether the relation has been sealed.
+func (r *Relation) isSealed() bool {
 	return r.sealed
 }
 
