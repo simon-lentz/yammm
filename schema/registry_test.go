@@ -22,7 +22,7 @@ func TestRegistry_Register(t *testing.T) {
 	r := schema.NewRegistry()
 
 	srcID := location.MustNewSourceID("test://test.yammm")
-	s := schema.InternalNewSchema("test", srcID, location.Span{}, "")
+	s := schema.TestNewSchema("test", srcID, location.Span{}, "")
 
 	err := r.Register(s)
 	require.NoError(t, err)
@@ -41,8 +41,8 @@ func TestRegistry_Register_DuplicateSourceID(t *testing.T) {
 	r := schema.NewRegistry()
 
 	srcID := location.MustNewSourceID("test://test.yammm")
-	s1 := schema.InternalNewSchema("test1", srcID, location.Span{}, "")
-	s2 := schema.InternalNewSchema("test2", srcID, location.Span{}, "") // Same SourceID
+	s1 := schema.TestNewSchema("test1", srcID, location.Span{}, "")
+	s2 := schema.TestNewSchema("test2", srcID, location.Span{}, "") // Same SourceID
 
 	err := r.Register(s1)
 	require.NoError(t, err)
@@ -58,8 +58,8 @@ func TestRegistry_Register_DuplicateSourceID(t *testing.T) {
 func TestRegistry_Register_DuplicateName(t *testing.T) {
 	r := schema.NewRegistry()
 
-	s1 := schema.InternalNewSchema("test", location.MustNewSourceID("test://a.yammm"), location.Span{}, "")
-	s2 := schema.InternalNewSchema("test", location.MustNewSourceID("test://b.yammm"), location.Span{}, "") // Same name
+	s1 := schema.TestNewSchema("test", location.MustNewSourceID("test://a.yammm"), location.Span{}, "")
+	s2 := schema.TestNewSchema("test", location.MustNewSourceID("test://b.yammm"), location.Span{}, "") // Same name
 
 	err := r.Register(s1)
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func TestRegistry_LookupBySourceID(t *testing.T) {
 	r := schema.NewRegistry()
 
 	srcID := location.MustNewSourceID("test://test.yammm")
-	s := schema.InternalNewSchema("test", srcID, location.Span{}, "")
+	s := schema.TestNewSchema("test", srcID, location.Span{}, "")
 	_ = r.Register(s)
 
 	found, ok := r.LookupBySourceID(srcID)
@@ -91,7 +91,7 @@ func TestRegistry_LookupByName(t *testing.T) {
 	r := schema.NewRegistry()
 
 	srcID := location.MustNewSourceID("test://test.yammm")
-	s := schema.InternalNewSchema("myschema", srcID, location.Span{}, "")
+	s := schema.TestNewSchema("myschema", srcID, location.Span{}, "")
 	_ = r.Register(s)
 
 	found, ok := r.LookupByName("myschema")
@@ -106,11 +106,11 @@ func TestRegistry_LookupType(t *testing.T) {
 	r := schema.NewRegistry()
 
 	srcID := location.MustNewSourceID("test://test.yammm")
-	s := schema.InternalNewSchema("test", srcID, location.Span{}, "")
+	s := schema.TestNewSchema("test", srcID, location.Span{}, "")
 
 	// Create a type and add it to the schema
-	typ := schema.InternalNewType("Person", srcID, location.Span{}, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
+	typ := schema.TestNewType("Person", srcID, location.Span{}, "", false, false)
+	schema.TestSetSchemaTypes(s, []*schema.Type{typ})
 
 	_ = r.Register(s)
 
@@ -130,7 +130,7 @@ func TestRegistry_Contains(t *testing.T) {
 	r := schema.NewRegistry()
 
 	srcID := location.MustNewSourceID("test://test.yammm")
-	s := schema.InternalNewSchema("test", srcID, location.Span{}, "")
+	s := schema.TestNewSchema("test", srcID, location.Span{}, "")
 	_ = r.Register(s)
 
 	assert.True(t, r.Contains(srcID))
@@ -141,7 +141,7 @@ func TestRegistry_Clone(t *testing.T) {
 	r := schema.NewRegistry()
 
 	srcID := location.MustNewSourceID("test://test.yammm")
-	s := schema.InternalNewSchema("test", srcID, location.Span{}, "")
+	s := schema.TestNewSchema("test", srcID, location.Span{}, "")
 	_ = r.Register(s)
 
 	clone := r.Clone()
@@ -155,7 +155,7 @@ func TestRegistry_Clone(t *testing.T) {
 
 	// Modifying clone should not affect original
 	srcID2 := location.MustNewSourceID("test://other.yammm")
-	s2 := schema.InternalNewSchema("other", srcID2, location.Span{}, "")
+	s2 := schema.TestNewSchema("other", srcID2, location.Span{}, "")
 	_ = clone.Register(s2)
 
 	assert.Equal(t, 2, clone.Len())
@@ -165,8 +165,8 @@ func TestRegistry_Clone(t *testing.T) {
 func TestRegistry_All(t *testing.T) {
 	r := schema.NewRegistry()
 
-	s1 := schema.InternalNewSchema("s1", location.MustNewSourceID("test://a.yammm"), location.Span{}, "")
-	s2 := schema.InternalNewSchema("s2", location.MustNewSourceID("test://b.yammm"), location.Span{}, "")
+	s1 := schema.TestNewSchema("s1", location.MustNewSourceID("test://a.yammm"), location.Span{}, "")
+	s2 := schema.TestNewSchema("s2", location.MustNewSourceID("test://b.yammm"), location.Span{}, "")
 	_ = r.Register(s1)
 	_ = r.Register(s2)
 
@@ -179,9 +179,9 @@ func TestRegistry_All_OrderDeterminism(t *testing.T) {
 	r := schema.NewRegistry()
 
 	// Register multiple schemas
-	s1 := schema.InternalNewSchema("alpha", location.MustNewSourceID("test://a.yammm"), location.Span{}, "")
-	s2 := schema.InternalNewSchema("beta", location.MustNewSourceID("test://b.yammm"), location.Span{}, "")
-	s3 := schema.InternalNewSchema("gamma", location.MustNewSourceID("test://c.yammm"), location.Span{}, "")
+	s1 := schema.TestNewSchema("alpha", location.MustNewSourceID("test://a.yammm"), location.Span{}, "")
+	s2 := schema.TestNewSchema("beta", location.MustNewSourceID("test://b.yammm"), location.Span{}, "")
+	s3 := schema.TestNewSchema("gamma", location.MustNewSourceID("test://c.yammm"), location.Span{}, "")
 	_ = r.Register(s1)
 	_ = r.Register(s2)
 	_ = r.Register(s3)
@@ -213,7 +213,7 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 	// Pre-register some schemas
 	for i := range 10 {
 		srcID := location.MustNewSourceID("test://pre" + string(rune('a'+i)) + ".yammm")
-		s := schema.InternalNewSchema("pre"+string(rune('a'+i)), srcID, location.Span{}, "")
+		s := schema.TestNewSchema("pre"+string(rune('a'+i)), srcID, location.Span{}, "")
 		_ = r.Register(s)
 	}
 
@@ -252,7 +252,7 @@ func TestRegistry_Register_ZeroSourceID(t *testing.T) {
 	r := schema.NewRegistry()
 
 	// Schema with zero SourceID should be rejected
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	err := r.Register(s)
 	require.Error(t, err)
@@ -267,7 +267,7 @@ func TestRegistry_Register_EmptyName(t *testing.T) {
 
 	// Schema with empty name should be rejected
 	srcID := location.MustNewSourceID("test://test.yammm")
-	s := schema.InternalNewSchema("", srcID, location.Span{}, "")
+	s := schema.TestNewSchema("", srcID, location.Span{}, "")
 
 	err := r.Register(s)
 	require.Error(t, err)

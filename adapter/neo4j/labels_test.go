@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/schema/load"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestSanitizeIdentifier(t *testing.T) {
@@ -227,9 +227,9 @@ func TestLabel_SanitizesComponents(t *testing.T) {
 func TestDetectLabelCollisions_NoCollision(t *testing.T) {
 	t.Parallel()
 
-	s, result, err := load.Load(context.Background(), filepath.Join("testdata", "multiple_types.yammm"))
+	s, result, err := schema.Load(context.Background(), filepath.Join("testdata", "multiple_types.yammm"))
 	if err != nil {
-		t.Fatalf("load.Load failed: %v", err)
+		t.Fatalf("schema.Load failed: %v", err)
 	}
 	if err := result.Err(); err != nil {
 		t.Fatalf("schema has errors: %v", err)
@@ -252,9 +252,9 @@ func TestDetectLabelCollisions_Collision(t *testing.T) {
 	}
 
 	// Verify no collision on a valid schema.
-	s, loadResult, err := load.Load(context.Background(), filepath.Join("testdata", "basic.yammm"))
+	s, loadResult, err := schema.Load(context.Background(), filepath.Join("testdata", "basic.yammm"))
 	if err != nil {
-		t.Fatalf("load.Load failed: %v", err)
+		t.Fatalf("schema.Load failed: %v", err)
 	}
 	if err := loadResult.Err(); err != nil {
 		t.Fatalf("schema has errors: %v", err)

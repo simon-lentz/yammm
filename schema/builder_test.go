@@ -1,21 +1,19 @@
-package build_test
+package schema_test
 
 import (
 	"regexp"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuilder_SimpleType(t *testing.T) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("name", schema.NewStringConstraint()).
@@ -37,7 +35,7 @@ func TestBuilder_SimpleType(t *testing.T) {
 }
 
 func TestBuilder_MultipleTypes(t *testing.T) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("multi").
 		AddType("Person").
 		WithProperty("name", schema.NewStringConstraint()).
@@ -58,7 +56,7 @@ func TestBuilder_MultipleTypes(t *testing.T) {
 }
 
 func TestBuilder_OptionalProperty(t *testing.T) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("name", schema.NewStringConstraint()).
@@ -82,7 +80,7 @@ func TestBuilder_OptionalProperty(t *testing.T) {
 }
 
 func TestBuilder_PrimaryKey(t *testing.T) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewUUIDConstraint()).
@@ -106,7 +104,7 @@ func TestBuilder_PrimaryKey(t *testing.T) {
 }
 
 func TestBuilder_Relation(t *testing.T) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("name", schema.NewStringConstraint()).
@@ -130,7 +128,7 @@ func TestBuilder_Relation(t *testing.T) {
 }
 
 func TestBuilder_AbstractType(t *testing.T) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Base").
 		AsAbstract().
@@ -155,7 +153,7 @@ func TestBuilder_AbstractType(t *testing.T) {
 }
 
 func TestBuilder_PartType(t *testing.T) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Wheel").
 		AsPart().
@@ -173,7 +171,7 @@ func TestBuilder_PartType(t *testing.T) {
 
 func TestBuilder_DataType(t *testing.T) {
 	emailPattern := regexp.MustCompile(`^[a-z]+@[a-z]+\.[a-z]+$`)
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddDataType("Email", schema.NewPatternConstraint([]*regexp.Regexp{emailPattern})).
 		AddType("Person").
@@ -192,7 +190,7 @@ func TestBuilder_DataType(t *testing.T) {
 func TestBuilder_WithSourceID(t *testing.T) {
 	srcID := location.MustNewSourceID("test://builder/test.yammm")
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(srcID).
 		AddType("Person").
@@ -208,7 +206,7 @@ func TestBuilder_WithSourceID(t *testing.T) {
 func TestBuilder_AddImportRequiresSourceID(t *testing.T) {
 	// AddImport without WithSourceID should fail
 	// Builder never returns Go errors; all issues are diagnostics
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddImport("./other", "other").
 		AddType("Person").
@@ -226,7 +224,7 @@ func TestBuilder_AddImportRequiresSourceID(t *testing.T) {
 
 func TestBuilder_AddImportWithSourceID(t *testing.T) {
 	// Create a schema to import
-	importedSchema, importResult := build.NewBuilder().
+	importedSchema, importResult := schema.NewBuilder().
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
@@ -243,7 +241,7 @@ func TestBuilder_AddImportWithSourceID(t *testing.T) {
 
 	// Build a schema that imports the other
 	// Note: For builder imports, the path should match the schema name in the registry
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://main.yammm")).
 		WithRegistry(registry).
@@ -259,7 +257,7 @@ func TestBuilder_AddImportWithSourceID(t *testing.T) {
 }
 
 func TestBuilder_Documentation(t *testing.T) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithDocumentation("This is the test schema.").
 		AddType("Person").
@@ -279,7 +277,7 @@ func TestBuilder_Documentation(t *testing.T) {
 }
 
 func TestBuilder_Composition(t *testing.T) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Car").
 		WithProperty("model", schema.NewStringConstraint()).
@@ -306,7 +304,7 @@ func TestBuilder_Composition(t *testing.T) {
 func TestBuilder_ConstraintTypes(t *testing.T) {
 	emailPattern := regexp.MustCompile(`^[a-z]+@[a-z]+\.[a-z]+$`)
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("AllConstraints").
 		WithProperty("str", schema.StringLenBetween(1, 100)).
@@ -334,7 +332,7 @@ func TestBuilder_ConstraintTypes(t *testing.T) {
 
 func TestBuilder_EmptyNameFails(t *testing.T) {
 	// Building without calling WithName() should fail
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		AddType("Person").
 		WithProperty("name", schema.NewStringConstraint()).
 		Done().
@@ -350,7 +348,7 @@ func TestBuilder_EmptyNameFails(t *testing.T) {
 
 func TestBuilder_EmptyTypeNameFails(t *testing.T) {
 	// Adding a type with empty name should fail
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType(""). // Empty type name
 		WithProperty("name", schema.NewStringConstraint()).
@@ -367,7 +365,7 @@ func TestBuilder_EmptyTypeNameFails(t *testing.T) {
 
 func TestBuilder_NilConstraintFails(t *testing.T) {
 	// Adding a property with nil constraint should fail
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("name", nil). // Nil constraint
@@ -384,7 +382,7 @@ func TestBuilder_NilConstraintFails(t *testing.T) {
 
 func TestBuilder_EmptyPropertyNameFails(t *testing.T) {
 	// Adding a property with empty name should fail
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("", schema.NewStringConstraint()). // Empty property name
@@ -401,7 +399,7 @@ func TestBuilder_EmptyPropertyNameFails(t *testing.T) {
 
 func TestBuilder_EmptyRelationNameFails(t *testing.T) {
 	// Adding a relation with empty name should fail
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("name", schema.NewStringConstraint()).
@@ -422,7 +420,7 @@ func TestBuilder_EmptyRelationNameFails(t *testing.T) {
 
 func TestBuilder_WithIssueLimit(t *testing.T) {
 	// Test that WithIssueLimit affects the collector
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithIssueLimit(5). // Set custom limit
 		AddType("Person").
@@ -436,7 +434,7 @@ func TestBuilder_WithIssueLimit(t *testing.T) {
 
 func TestBuilder_CrossSchemaInheritance(t *testing.T) {
 	// Create base schema with a type to inherit from
-	baseSchema, baseResult := build.NewBuilder().
+	baseSchema, baseResult := schema.NewBuilder().
 		WithName("base").
 		WithSourceID(location.MustNewSourceID("test://base.yammm")).
 		AddType("Entity").
@@ -455,7 +453,7 @@ func TestBuilder_CrossSchemaInheritance(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create derived schema that imports and extends the base type
-	derivedSchema, derivedResult := build.NewBuilder().
+	derivedSchema, derivedResult := schema.NewBuilder().
 		WithName("derived").
 		WithSourceID(location.MustNewSourceID("test://derived.yammm")).
 		WithRegistry(registry).
@@ -493,7 +491,7 @@ func TestBuilder_CrossSchemaInheritance(t *testing.T) {
 
 func TestBuilder_DefaultSourceIDIsZero(t *testing.T) {
 	// If WithSourceID() not called, SourceID defaults to zero
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("name", schema.NewStringConstraint()).
@@ -507,7 +505,7 @@ func TestBuilder_DefaultSourceIDIsZero(t *testing.T) {
 
 func TestBuilder_SyntheticSourceIDValidation_RejectsAbsolutePath(t *testing.T) {
 	// Synthetic SourceID that looks like absolute path should be rejected
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.NewSourceID("/absolute/path/schema.yammm")). // Invalid!
 		AddType("Person").
@@ -531,7 +529,7 @@ func TestBuilder_SyntheticSourceIDValidation_RejectsAbsolutePath(t *testing.T) {
 
 func TestBuilder_SyntheticSourceIDValidation_AcceptsSchemePrefix(t *testing.T) {
 	// Synthetic SourceID with scheme prefix should be accepted
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.NewSourceID("test://unit/person.yammm")). // Valid!
 		AddType("Person").
@@ -550,7 +548,7 @@ func TestBuilder_FileBackedSourceIDSkipsValidation(t *testing.T) {
 	fileID, err := location.SourceIDFromAbsolutePath("/project/schemas/test.yammm")
 	require.NoError(t, err)
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(fileID).
 		AddType("Person").
@@ -566,7 +564,7 @@ func TestBuilder_FileBackedSourceIDSkipsValidation(t *testing.T) {
 
 func TestBuilder_ImportWithoutRegistry_ReturnsError(t *testing.T) {
 	// Imports require registry for resolution
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddImport("other", "other").
@@ -593,7 +591,7 @@ func TestBuilder_ImportNotFoundInRegistry_ReturnsError(t *testing.T) {
 	// Create empty registry
 	registry := schema.NewRegistry()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		WithRegistry(registry).
@@ -619,7 +617,7 @@ func TestBuilder_ImportNotFoundInRegistry_ReturnsError(t *testing.T) {
 
 func TestBuilder_CrossSchemaRelation(t *testing.T) {
 	// Create base schema with a type to reference
-	baseSchema, baseResult := build.NewBuilder().
+	baseSchema, baseResult := schema.NewBuilder().
 		WithName("base").
 		WithSourceID(location.MustNewSourceID("test://base.yammm")).
 		AddType("Organization").
@@ -636,7 +634,7 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create derived schema with relation to imported type
-	derivedSchema, derivedResult := build.NewBuilder().
+	derivedSchema, derivedResult := schema.NewBuilder().
 		WithName("derived").
 		WithSourceID(location.MustNewSourceID("test://derived.yammm")).
 		WithRegistry(registry).
@@ -677,7 +675,7 @@ func TestBuilder_WithInvariant(t *testing.T) {
 		expr.NewLiteral(int64(0)),
 	}
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("age", schema.NewIntegerConstraint()).
@@ -703,7 +701,7 @@ func TestBuilder_WithInvariant_Multiple(t *testing.T) {
 	posAge := expr.SExpr{expr.Op(">"), expr.SExpr{expr.Op("$"), expr.NewLiteral("age")}, expr.NewLiteral(int64(0))}
 	maxAge := expr.SExpr{expr.Op("<"), expr.SExpr{expr.Op("$"), expr.NewLiteral("age")}, expr.NewLiteral(int64(150))}
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("age", schema.NewIntegerConstraint()).
@@ -725,7 +723,7 @@ func TestBuilder_WithInvariant_Multiple(t *testing.T) {
 func TestBuilder_WithInvariant_EmptyNameFails(t *testing.T) {
 	ageExpr := expr.SExpr{expr.Op(">"), expr.SExpr{expr.Op("$"), expr.NewLiteral("age")}, expr.NewLiteral(int64(0))}
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("age", schema.NewIntegerConstraint()).
@@ -743,7 +741,7 @@ func TestBuilder_WithInvariant_EmptyNameFails(t *testing.T) {
 
 func TestBuilder_WithInvariant_NilExpression(t *testing.T) {
 	// nil expression should be rejected with E_INVALID_INVARIANT
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithProperty("age", schema.NewIntegerConstraint()).
@@ -765,7 +763,7 @@ func TestBuilder_ZeroSourceIDWithImports_Fails(t *testing.T) {
 	// Zero SourceID with imports should fail even if sourceIDSet is true
 	registry := schema.NewRegistry()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.SourceID{}). // Zero value - explicitly set but zero
 		WithRegistry(registry).
@@ -791,7 +789,7 @@ func TestBuilder_ZeroSourceIDWithImports_Fails(t *testing.T) {
 
 func TestBuilder_SyntheticSourceID_WithImportResolver(t *testing.T) {
 	// Create a schema to import
-	importedSchema, importResult := build.NewBuilder().
+	importedSchema, importResult := schema.NewBuilder().
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
@@ -816,7 +814,7 @@ func TestBuilder_SyntheticSourceID_WithImportResolver(t *testing.T) {
 	}
 
 	// Build a schema with synthetic SourceID and resolver
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("main").
 		WithSourceID(location.MustNewSourceID("test://main.yammm")).
 		WithRegistry(registry).
@@ -840,7 +838,7 @@ func TestBuilder_SyntheticSourceID_WithImportResolver(t *testing.T) {
 
 func TestBuilder_SyntheticSourceID_RelativePathWithoutResolver_Fails(t *testing.T) {
 	// Create a schema to import
-	importedSchema, importResult := build.NewBuilder().
+	importedSchema, importResult := schema.NewBuilder().
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
@@ -858,7 +856,7 @@ func TestBuilder_SyntheticSourceID_RelativePathWithoutResolver_Fails(t *testing.
 
 	// Build a schema with synthetic SourceID but NO resolver
 	// Using relative path should produce helpful error
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("main").
 		WithSourceID(location.MustNewSourceID("test://main.yammm")).
 		WithRegistry(registry).
@@ -887,7 +885,7 @@ func TestBuilder_SyntheticSourceID_RelativePathWithoutResolver_Fails(t *testing.
 
 func TestBuilder_SyntheticSourceID_SchemaNameFallback(t *testing.T) {
 	// Create a schema to import using schema name (not relative path)
-	importedSchema, importResult := build.NewBuilder().
+	importedSchema, importResult := schema.NewBuilder().
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
@@ -904,7 +902,7 @@ func TestBuilder_SyntheticSourceID_SchemaNameFallback(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build a schema using schema name (not relative path) - should work without resolver
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("main").
 		WithSourceID(location.MustNewSourceID("test://main.yammm")).
 		WithRegistry(registry).
@@ -930,7 +928,7 @@ func TestBuilder_DuplicateImportByResolvedSourceID(t *testing.T) {
 	// This tests the builder's enforcement of duplicate import detection
 
 	// Create a schema to import
-	commonSchema, commonResult := build.NewBuilder().
+	commonSchema, commonResult := schema.NewBuilder().
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
@@ -955,7 +953,7 @@ func TestBuilder_DuplicateImportByResolvedSourceID(t *testing.T) {
 	}
 
 	// Build a schema that imports the same schema twice with different paths
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		WithRegistry(registry).
@@ -999,7 +997,7 @@ func TestBuilder_FileBackedSourceID_RelativeImport(t *testing.T) {
 	helperID, err := location.SourceIDFromAbsolutePath("/project/schemas/helper.yammm")
 	require.NoError(t, err)
 
-	helperSchema, helperResult := build.NewBuilder().
+	helperSchema, helperResult := schema.NewBuilder().
 		WithName("helper").
 		WithSourceID(helperID).
 		AddType("Base").
@@ -1015,7 +1013,7 @@ func TestBuilder_FileBackedSourceID_RelativeImport(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build main schema with file-backed SourceID and relative import
-	mainSchema, mainResult := build.NewBuilder().
+	mainSchema, mainResult := schema.NewBuilder().
 		WithName("main").
 		WithSourceID(mainID).
 		WithRegistry(registry).
@@ -1044,7 +1042,7 @@ func TestBuilder_FileBackedSourceID_RelativeImport_NotFound(t *testing.T) {
 	registry := schema.NewRegistry()
 
 	// Build main schema with file-backed SourceID and relative import that won't be found
-	mainSchema, mainResult := build.NewBuilder().
+	mainSchema, mainResult := schema.NewBuilder().
 		WithName("main").
 		WithSourceID(mainID).
 		WithRegistry(registry).
@@ -1078,7 +1076,7 @@ func TestBuilder_FileBackedSourceID_ParentDirImport(t *testing.T) {
 	helperID, err := location.SourceIDFromAbsolutePath("/project/schemas/helper.yammm")
 	require.NoError(t, err)
 
-	helperSchema, helperResult := build.NewBuilder().
+	helperSchema, helperResult := schema.NewBuilder().
 		WithName("helper").
 		WithSourceID(helperID).
 		AddType("Base").
@@ -1094,7 +1092,7 @@ func TestBuilder_FileBackedSourceID_ParentDirImport(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build main schema with ../ relative import
-	mainSchema, mainResult := build.NewBuilder().
+	mainSchema, mainResult := schema.NewBuilder().
 		WithName("main").
 		WithSourceID(mainID).
 		WithRegistry(registry).
@@ -1118,7 +1116,7 @@ func TestBuilder_ImportResolver_NotFound(t *testing.T) {
 		return location.SourceID{}, false
 	}
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://main.yammm")).
 		WithRegistry(registry).
@@ -1155,7 +1153,7 @@ func TestBuilder_ImportResolver_ResolvesToUnregisteredSchema(t *testing.T) {
 		return location.SourceID{}, false
 	}
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://main.yammm")).
 		WithRegistry(registry).
@@ -1172,7 +1170,7 @@ func TestBuilder_ImportResolver_ResolvesToUnregisteredSchema(t *testing.T) {
 
 func TestBuilder_DuplicateImportByAlias(t *testing.T) {
 	// Test that duplicate import aliases are detected
-	commonSchema, commonResult := build.NewBuilder().
+	commonSchema, commonResult := schema.NewBuilder().
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
@@ -1182,7 +1180,7 @@ func TestBuilder_DuplicateImportByAlias(t *testing.T) {
 	require.NotNil(t, commonSchema)
 	require.False(t, commonResult.HasErrors())
 
-	other, otherResult := build.NewBuilder().
+	other, otherResult := schema.NewBuilder().
 		WithName("other").
 		WithSourceID(location.MustNewSourceID("test://other.yammm")).
 		AddType("Thing").
@@ -1197,7 +1195,7 @@ func TestBuilder_DuplicateImportByAlias(t *testing.T) {
 	require.NoError(t, registry.Register(other))
 
 	// Try to import with duplicate alias
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		WithRegistry(registry).
@@ -1226,7 +1224,7 @@ func TestBuilder_DuplicateImportByAlias(t *testing.T) {
 
 func TestBuilder_ReservedKeywordAlias(t *testing.T) {
 	// Test that reserved keywords are rejected as import aliases
-	commonSchema, commonResult := build.NewBuilder().
+	commonSchema, commonResult := schema.NewBuilder().
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
@@ -1240,7 +1238,7 @@ func TestBuilder_ReservedKeywordAlias(t *testing.T) {
 	require.NoError(t, registry.Register(commonSchema))
 
 	// Try to use "type" as alias (reserved keyword)
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		WithRegistry(registry).

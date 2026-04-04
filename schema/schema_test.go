@@ -11,9 +11,9 @@ import (
 )
 
 func TestSchema_Seal_PreventsSetTypes(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{})
-	schema.InternalSealSchema(s)
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.TestSetSchemaTypes(s, []*schema.Type{})
+	schema.TestSealSchema(s)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -21,12 +21,12 @@ func TestSchema_Seal_PreventsSetTypes(t *testing.T) {
 		}
 	}()
 
-	schema.InternalSetSchemaTypes(s, []*schema.Type{})
+	schema.TestSetSchemaTypes(s, []*schema.Type{})
 }
 
 func TestSchema_Seal_PreventsSetDataTypes(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSealSchema(s)
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.TestSealSchema(s)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -34,12 +34,12 @@ func TestSchema_Seal_PreventsSetDataTypes(t *testing.T) {
 		}
 	}()
 
-	schema.InternalSetSchemaDataTypes(s, []*schema.DataType{})
+	schema.TestSetSchemaDataTypes(s, []*schema.DataType{})
 }
 
 func TestSchema_Seal_PreventsSetImports(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSealSchema(s)
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.TestSealSchema(s)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -47,12 +47,12 @@ func TestSchema_Seal_PreventsSetImports(t *testing.T) {
 		}
 	}()
 
-	schema.InternalSetSchemaImports(s, []*schema.Import{})
+	schema.TestSetSchemaImports(s, []*schema.Import{})
 }
 
 func TestSchema_Seal_PreventsSetSources(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSealSchema(s)
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	schema.TestSealSchema(s)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -60,17 +60,17 @@ func TestSchema_Seal_PreventsSetSources(t *testing.T) {
 		}
 	}()
 
-	schema.InternalSetSchemaSources(s, nil)
+	schema.TestSetSchemaSources(s, nil)
 }
 
 func TestSchema_SettersWorkBeforeSeal(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	// These should not panic before sealing
-	schema.InternalSetSchemaTypes(s, []*schema.Type{})
-	schema.InternalSetSchemaDataTypes(s, []*schema.DataType{})
-	schema.InternalSetSchemaImports(s, []*schema.Import{})
-	schema.InternalSetSchemaSources(s, nil)
+	schema.TestSetSchemaTypes(s, []*schema.Type{})
+	schema.TestSetSchemaDataTypes(s, []*schema.DataType{})
+	schema.TestSetSchemaImports(s, []*schema.Import{})
+	schema.TestSetSchemaSources(s, nil)
 
 	// Verify no panic occurred by reaching this point
 }
@@ -85,7 +85,7 @@ func TestNewSchema(t *testing.T) {
 		End:    location.Position{Line: 50, Column: 1, Byte: 500},
 	}
 
-	s := schema.InternalNewSchema("users", sourceID, span, "User management schema")
+	s := schema.TestNewSchema("users", sourceID, span, "User management schema")
 
 	assert.NotNil(t, s)
 	assert.Equal(t, "users", s.Name())
@@ -95,7 +95,7 @@ func TestNewSchema(t *testing.T) {
 }
 
 func TestSchema_Name(t *testing.T) {
-	s := schema.InternalNewSchema("myschema", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("myschema", location.SourceID{}, location.Span{}, "")
 
 	assert.Equal(t, "myschema", s.Name())
 }
@@ -103,7 +103,7 @@ func TestSchema_Name(t *testing.T) {
 func TestSchema_SourceID(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://source")
 
-	s := schema.InternalNewSchema("test", sourceID, location.Span{}, "")
+	s := schema.TestNewSchema("test", sourceID, location.Span{}, "")
 
 	assert.Equal(t, sourceID, s.SourceID())
 }
@@ -115,7 +115,7 @@ func TestSchema_Span(t *testing.T) {
 		End:    location.Position{Line: 100, Column: 1, Byte: 1000},
 	}
 
-	s := schema.InternalNewSchema("test", location.SourceID{}, span, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, span, "")
 
 	result := s.Span()
 	assert.Equal(t, span.Start.Line, result.Start.Line)
@@ -123,15 +123,15 @@ func TestSchema_Span(t *testing.T) {
 }
 
 func TestSchema_Documentation(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "Schema documentation")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "Schema documentation")
 
 	assert.Equal(t, "Schema documentation", s.Documentation())
 }
 
 func TestSchema_Type_Found(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	typ := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
+	schema.TestSetSchemaTypes(s, []*schema.Type{typ})
 
 	result, ok := s.Type("Person")
 
@@ -140,7 +140,7 @@ func TestSchema_Type_Found(t *testing.T) {
 }
 
 func TestSchema_Type_NotFound(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	result, ok := s.Type("NonExistent")
 
@@ -149,10 +149,10 @@ func TestSchema_Type_NotFound(t *testing.T) {
 }
 
 func TestSchema_Types_Iterator(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	t1 := schema.InternalNewType("Type1", location.SourceID{}, location.Span{}, "", false, false)
-	t2 := schema.InternalNewType("Type2", location.SourceID{}, location.Span{}, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{t1, t2})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	t1 := schema.TestNewType("Type1", location.SourceID{}, location.Span{}, "", false, false)
+	t2 := schema.TestNewType("Type2", location.SourceID{}, location.Span{}, "", false, false)
+	schema.TestSetSchemaTypes(s, []*schema.Type{t1, t2})
 
 	count := 0
 	for name, typ := range s.Types() {
@@ -165,9 +165,9 @@ func TestSchema_Types_Iterator(t *testing.T) {
 }
 
 func TestSchema_TypesSlice(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	t1 := schema.InternalNewType("Type1", location.SourceID{}, location.Span{}, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{t1})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	t1 := schema.TestNewType("Type1", location.SourceID{}, location.Span{}, "", false, false)
+	schema.TestSetSchemaTypes(s, []*schema.Type{t1})
 
 	result := s.TypesSlice()
 
@@ -176,9 +176,9 @@ func TestSchema_TypesSlice(t *testing.T) {
 }
 
 func TestSchema_TypesSlice_DefensiveCopy(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	t1 := schema.InternalNewType("Type1", location.SourceID{}, location.Span{}, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{t1})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	t1 := schema.TestNewType("Type1", location.SourceID{}, location.Span{}, "", false, false)
+	schema.TestSetSchemaTypes(s, []*schema.Type{t1})
 
 	slice1 := s.TypesSlice()
 	slice2 := s.TypesSlice()
@@ -188,10 +188,10 @@ func TestSchema_TypesSlice_DefensiveCopy(t *testing.T) {
 }
 
 func TestSchema_TypeNames(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	t1 := schema.InternalNewType("Beta", location.SourceID{}, location.Span{}, "", false, false)
-	t2 := schema.InternalNewType("Alpha", location.SourceID{}, location.Span{}, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{t1, t2})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	t1 := schema.TestNewType("Beta", location.SourceID{}, location.Span{}, "", false, false)
+	t2 := schema.TestNewType("Alpha", location.SourceID{}, location.Span{}, "", false, false)
+	schema.TestSetSchemaTypes(s, []*schema.Type{t1, t2})
 
 	names := s.TypeNames()
 
@@ -202,21 +202,21 @@ func TestSchema_TypeNames(t *testing.T) {
 }
 
 func TestSchema_TypeCount(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 	assert.Equal(t, 0, s.TypeCount())
 
-	t1 := schema.InternalNewType("Type1", location.SourceID{}, location.Span{}, "", false, false)
-	t2 := schema.InternalNewType("Type2", location.SourceID{}, location.Span{}, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{t1, t2})
+	t1 := schema.TestNewType("Type1", location.SourceID{}, location.Span{}, "", false, false)
+	t2 := schema.TestNewType("Type2", location.SourceID{}, location.Span{}, "", false, false)
+	schema.TestSetSchemaTypes(s, []*schema.Type{t1, t2})
 
 	assert.Equal(t, 2, s.TypeCount())
 }
 
 func TestSchema_DataTypeNames(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	dt1 := schema.InternalNewDataType("Zebra", nil, location.Span{}, "")
-	dt2 := schema.InternalNewDataType("Apple", nil, location.Span{}, "")
-	schema.InternalSetSchemaDataTypes(s, []*schema.DataType{dt1, dt2})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	dt1 := schema.TestNewDataType("Zebra", nil, location.Span{}, "")
+	dt2 := schema.TestNewDataType("Apple", nil, location.Span{}, "")
+	schema.TestSetSchemaDataTypes(s, []*schema.DataType{dt1, dt2})
 
 	names := s.DataTypeNames()
 
@@ -227,20 +227,20 @@ func TestSchema_DataTypeNames(t *testing.T) {
 }
 
 func TestSchema_ImportCount(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 	assert.Equal(t, 0, s.ImportCount())
 
-	imp1 := schema.InternalNewImport("./a.yammm", "a", location.SourceID{}, location.Span{})
-	imp2 := schema.InternalNewImport("./b.yammm", "b", location.SourceID{}, location.Span{})
-	schema.InternalSetSchemaImports(s, []*schema.Import{imp1, imp2})
+	imp1 := schema.TestNewImport("./a.yammm", "a", location.SourceID{}, location.Span{})
+	imp2 := schema.TestNewImport("./b.yammm", "b", location.SourceID{}, location.Span{})
+	schema.TestSetSchemaImports(s, []*schema.Import{imp1, imp2})
 
 	assert.Equal(t, 2, s.ImportCount())
 }
 
 func TestSchema_ResolveType_Local(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	typ := schema.InternalNewType("Customer", location.SourceID{}, location.Span{}, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	typ := schema.TestNewType("Customer", location.SourceID{}, location.Span{}, "", false, false)
+	schema.TestSetSchemaTypes(s, []*schema.Type{typ})
 
 	ref := schema.NewTypeRef("", "Customer", location.Span{})
 	result, ok := s.ResolveType(ref)
@@ -250,7 +250,7 @@ func TestSchema_ResolveType_Local(t *testing.T) {
 }
 
 func TestSchema_ResolveType_LocalNotFound(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	ref := schema.NewTypeRef("", "NonExistent", location.Span{})
 	result, ok := s.ResolveType(ref)
@@ -260,7 +260,7 @@ func TestSchema_ResolveType_LocalNotFound(t *testing.T) {
 }
 
 func TestSchema_ResolveType_QualifiedNoImport(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	ref := schema.NewTypeRef("users", "Person", location.Span{})
 	result, ok := s.ResolveType(ref)
@@ -270,9 +270,9 @@ func TestSchema_ResolveType_QualifiedNoImport(t *testing.T) {
 }
 
 func TestSchema_DataType_Found(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	dt := schema.InternalNewDataType("Email", schema.NewStringConstraint(), location.Span{}, "")
-	schema.InternalSetSchemaDataTypes(s, []*schema.DataType{dt})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	dt := schema.TestNewDataType("Email", schema.NewStringConstraint(), location.Span{}, "")
+	schema.TestSetSchemaDataTypes(s, []*schema.DataType{dt})
 
 	result, ok := s.DataType("Email")
 
@@ -281,7 +281,7 @@ func TestSchema_DataType_Found(t *testing.T) {
 }
 
 func TestSchema_DataType_NotFound(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	result, ok := s.DataType("NonExistent")
 
@@ -290,10 +290,10 @@ func TestSchema_DataType_NotFound(t *testing.T) {
 }
 
 func TestSchema_DataTypes_Iterator(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	dt1 := schema.InternalNewDataType("Email", nil, location.Span{}, "")
-	dt2 := schema.InternalNewDataType("Phone", nil, location.Span{}, "")
-	schema.InternalSetSchemaDataTypes(s, []*schema.DataType{dt1, dt2})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	dt1 := schema.TestNewDataType("Email", nil, location.Span{}, "")
+	dt2 := schema.TestNewDataType("Phone", nil, location.Span{}, "")
+	schema.TestSetSchemaDataTypes(s, []*schema.DataType{dt1, dt2})
 
 	count := 0
 	for name, dt := range s.DataTypes() {
@@ -306,9 +306,9 @@ func TestSchema_DataTypes_Iterator(t *testing.T) {
 }
 
 func TestSchema_DataTypesSlice(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	dt := schema.InternalNewDataType("Money", nil, location.Span{}, "")
-	schema.InternalSetSchemaDataTypes(s, []*schema.DataType{dt})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	dt := schema.TestNewDataType("Money", nil, location.Span{}, "")
+	schema.TestSetSchemaDataTypes(s, []*schema.DataType{dt})
 
 	result := s.DataTypesSlice()
 
@@ -317,9 +317,9 @@ func TestSchema_DataTypesSlice(t *testing.T) {
 }
 
 func TestSchema_ResolveDataType_Local(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	dt := schema.InternalNewDataType("Currency", nil, location.Span{}, "")
-	schema.InternalSetSchemaDataTypes(s, []*schema.DataType{dt})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	dt := schema.TestNewDataType("Currency", nil, location.Span{}, "")
+	schema.TestSetSchemaDataTypes(s, []*schema.DataType{dt})
 
 	ref := schema.NewDataTypeRef("", "Currency", location.Span{})
 	result, ok := s.ResolveDataType(ref)
@@ -329,7 +329,7 @@ func TestSchema_ResolveDataType_Local(t *testing.T) {
 }
 
 func TestSchema_ResolveDataType_LocalNotFound(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	ref := schema.NewDataTypeRef("", "NonExistent", location.Span{})
 	result, ok := s.ResolveDataType(ref)
@@ -339,7 +339,7 @@ func TestSchema_ResolveDataType_LocalNotFound(t *testing.T) {
 }
 
 func TestSchema_ResolveDataType_QualifiedNoImport(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	ref := schema.NewDataTypeRef("types", "Email", location.Span{})
 	result, ok := s.ResolveDataType(ref)
@@ -349,10 +349,10 @@ func TestSchema_ResolveDataType_QualifiedNoImport(t *testing.T) {
 }
 
 func TestSchema_Imports_Iterator(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	imp1 := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	imp2 := schema.InternalNewImport("./users.yammm", "users", location.SourceID{}, location.Span{})
-	schema.InternalSetSchemaImports(s, []*schema.Import{imp1, imp2})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	imp1 := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	imp2 := schema.TestNewImport("./users.yammm", "users", location.SourceID{}, location.Span{})
+	schema.TestSetSchemaImports(s, []*schema.Import{imp1, imp2})
 
 	count := 0
 	for imp := range s.Imports() {
@@ -363,9 +363,9 @@ func TestSchema_Imports_Iterator(t *testing.T) {
 }
 
 func TestSchema_ImportsSlice(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	schema.InternalSetSchemaImports(s, []*schema.Import{imp})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	schema.TestSetSchemaImports(s, []*schema.Import{imp})
 
 	result := s.ImportsSlice()
 
@@ -374,9 +374,9 @@ func TestSchema_ImportsSlice(t *testing.T) {
 }
 
 func TestSchema_ImportsSlice_DefensiveCopy(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	schema.InternalSetSchemaImports(s, []*schema.Import{imp})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	schema.TestSetSchemaImports(s, []*schema.Import{imp})
 
 	slice1 := s.ImportsSlice()
 	slice2 := s.ImportsSlice()
@@ -386,9 +386,9 @@ func TestSchema_ImportsSlice_DefensiveCopy(t *testing.T) {
 }
 
 func TestSchema_ImportByAlias_Found(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	schema.InternalSetSchemaImports(s, []*schema.Import{imp})
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	schema.TestSetSchemaImports(s, []*schema.Import{imp})
 
 	result, ok := s.ImportByAlias("types")
 
@@ -397,7 +397,7 @@ func TestSchema_ImportByAlias_Found(t *testing.T) {
 }
 
 func TestSchema_ImportByAlias_NotFound(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	result, ok := s.ImportByAlias("nonexistent")
 
@@ -406,10 +406,10 @@ func TestSchema_ImportByAlias_NotFound(t *testing.T) {
 }
 
 func TestSchema_FindImportAlias_Found(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 	resolvedID := location.MustNewSourceID("test://types")
-	imp := schema.InternalNewImport("./types.yammm", "types", resolvedID, location.Span{})
-	schema.InternalSetSchemaImports(s, []*schema.Import{imp})
+	imp := schema.TestNewImport("./types.yammm", "types", resolvedID, location.Span{})
+	schema.TestSetSchemaImports(s, []*schema.Import{imp})
 
 	result := s.FindImportAlias(resolvedID)
 
@@ -417,7 +417,7 @@ func TestSchema_FindImportAlias_Found(t *testing.T) {
 }
 
 func TestSchema_FindImportAlias_NotFound(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	result := s.FindImportAlias(location.MustNewSourceID("test://unknown"))
 
@@ -426,7 +426,7 @@ func TestSchema_FindImportAlias_NotFound(t *testing.T) {
 
 func TestSchema_FindImportAlias_OwnPath(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://self")
-	s := schema.InternalNewSchema("test", sourceID, location.Span{}, "")
+	s := schema.TestNewSchema("test", sourceID, location.Span{}, "")
 
 	result := s.FindImportAlias(sourceID)
 
@@ -434,43 +434,43 @@ func TestSchema_FindImportAlias_OwnPath(t *testing.T) {
 }
 
 func TestSchema_Sources_Nil(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	assert.Nil(t, s.Sources())
 }
 
 func TestSchema_Sources_Set(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 	sources := schema.NewSources(nil) // nil registry creates nil Sources
 
-	schema.InternalSetSchemaSources(s, sources)
+	schema.TestSetSchemaSources(s, sources)
 
 	// NewSources(nil) returns nil
 	assert.Nil(t, s.Sources())
 }
 
 func TestSchema_IsSealed(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	// New schema should not be sealed
-	assert.False(t, schema.InternalIsSealedSchema(s), "new schema should not be sealed")
+	assert.False(t, schema.TestIsSealedSchema(s), "new schema should not be sealed")
 
 	// After sealing, IsSealed should return true
-	schema.InternalSealSchema(s)
-	assert.True(t, schema.InternalIsSealedSchema(s), "sealed schema should report IsSealed() == true")
+	schema.TestSealSchema(s)
+	assert.True(t, schema.TestIsSealedSchema(s), "sealed schema should report IsSealed() == true")
 }
 
 func TestSchema_HasSourceProvider_NilSources(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
 	assert.False(t, s.HasSourceProvider())
 }
 
 func TestSchema_HasSourceProvider_WithSources(t *testing.T) {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
+	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 	reg := source.NewRegistry()
 	sources := schema.NewSources(reg)
-	schema.InternalSetSchemaSources(s, sources)
+	schema.TestSetSchemaSources(s, sources)
 
 	assert.True(t, s.HasSourceProvider())
 }

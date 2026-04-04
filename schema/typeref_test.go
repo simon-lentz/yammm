@@ -417,8 +417,8 @@ func TestResolvedTypeRefFromType_SameSchema(t *testing.T) {
 		End:    location.Position{Line: 1, Column: 10, Byte: 10},
 	}
 
-	typ := schema.InternalNewType("User", sourceID, span, "", false, false)
-	schema.InternalSetTypeSchemaName(typ, "app")
+	typ := schema.TestNewType("User", sourceID, span, "", false, false)
+	schema.TestSetTypeSchemaName(typ, "app")
 
 	resolved := schema.ResolvedTypeRefFromType(typ, "test://app")
 
@@ -437,8 +437,8 @@ func TestResolvedTypeRefFromType_DifferentSchema(t *testing.T) {
 		End:    location.Position{Line: 1, Column: 10, Byte: 10},
 	}
 
-	typ := schema.InternalNewType("User", appSourceID, span, "", false, false)
-	schema.InternalSetTypeSchemaName(typ, "app")
+	typ := schema.TestNewType("User", appSourceID, span, "", false, false)
+	schema.TestSetTypeSchemaName(typ, "app")
 
 	resolved := schema.ResolvedTypeRefFromType(typ, "test://common")
 
@@ -456,8 +456,8 @@ func TestResolvedTypeRefFromType_PreservesTypeID(t *testing.T) {
 		End:    location.Position{Line: 5, Column: 20, Byte: 60},
 	}
 
-	typ := schema.InternalNewType("Entity", sourceID, span, "", false, false)
-	schema.InternalSetTypeSchemaName(typ, "schema")
+	typ := schema.TestNewType("Entity", sourceID, span, "", false, false)
+	schema.TestSetTypeSchemaName(typ, "schema")
 
 	resolved := schema.ResolvedTypeRefFromType(typ, "test://other")
 
@@ -474,8 +474,8 @@ func TestResolvedTypeRefFromType_PreservesSpan(t *testing.T) {
 		End:    location.Position{Line: 10, Column: 25, Byte: 120},
 	}
 
-	typ := schema.InternalNewType("Person", sourceID, span, "", false, false)
-	schema.InternalSetTypeSchemaName(typ, "schema")
+	typ := schema.TestNewType("Person", sourceID, span, "", false, false)
+	schema.TestSetTypeSchemaName(typ, "schema")
 
 	resolved := schema.ResolvedTypeRefFromType(typ, "test://schema")
 

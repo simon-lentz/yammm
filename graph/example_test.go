@@ -8,12 +8,11 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 func ExampleGraph_Add() {
 	// Build a schema with a relationship
-	s, _ := build.NewBuilder().
+	s, _ := schema.NewBuilder().
 		WithName("example").
 		WithSourceID(location.MustNewSourceID("test://example.yammm")).
 		AddType("Department").
@@ -70,7 +69,7 @@ func ExampleGraph_Add() {
 
 func ExampleGraph_Check() {
 	// Build schema
-	s, _ := build.NewBuilder().
+	s, _ := schema.NewBuilder().
 		WithName("example").
 		WithSourceID(location.MustNewSourceID("test://example.yammm")).
 		AddType("Parent").

@@ -1,4 +1,4 @@
-package build
+package schema
 
 import (
 	"fmt"
@@ -7,10 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
-	"github.com/simon-lentz/yammm/schema/internal/complete"
-	"github.com/simon-lentz/yammm/schema/internal/parse"
 )
 
 // ImportResolver resolves import paths to SourceIDs for synthetic sources.
@@ -39,11 +36,11 @@ type Builder struct {
 	name           string
 	sourceID       location.SourceID
 	sourceIDSet    bool
-	imports        []*parse.ImportDecl
+	imports        []*importDecl
 	types          []*typeBuilderState
-	dataTypes      []*parse.DataTypeDecl
+	dataTypes      []*dataTypeDecl
 	documentation  string
-	registry       *schema.Registry
+	registry       *Registry
 	issueLimit     int
 	importResolver ImportResolver
 }
@@ -51,10 +48,10 @@ type Builder struct {
 // typeBuilderState holds the state for a type being built.
 type typeBuilderState struct {
 	name          string
-	inherits      []*parse.TypeRef
-	properties    []*parse.PropertyDecl
-	relations     []*parse.RelationDecl
-	invariants    []*parse.InvariantDecl
+	inherits      []*astTypeRef
+	properties    []*propertyDecl
+	relations     []*relationDecl
+	invariants    []*invariantDecl
 	isPart        bool
 	isAbstract    bool
 	documentation string
@@ -68,9 +65,9 @@ type typeBuilderState struct {
 // for 3 slice headers).
 func NewBuilder() *Builder {
 	return &Builder{
-		imports:    make([]*parse.ImportDecl, 0),
+		imports:    make([]*importDecl, 0),
 		types:      make([]*typeBuilderState, 0),
-		dataTypes:  make([]*parse.DataTypeDecl, 0),
+		dataTypes:  make([]*dataTypeDecl, 0),
 		issueLimit: 100, // default limit
 	}
 }
@@ -100,7 +97,7 @@ func (b *Builder) WithDocumentation(doc string) *Builder {
 // WithRegistry provides a schema registry for cross-schema type resolution.
 //
 // If imports reference other schemas, those schemas must be in the registry.
-func (b *Builder) WithRegistry(r *schema.Registry) *Builder {
+func (b *Builder) WithRegistry(r *Registry) *Builder {
 	b.registry = r
 	return b
 }
@@ -134,7 +131,7 @@ func (b *Builder) WithIssueLimit(limit int) *Builder {
 //	        return location.SourceID{}, false
 //	    }
 //	}
-//	s, result := build.NewBuilder().
+//	s, result := NewBuilder().
 //	    WithSourceID(location.MustNewSourceID("test://main.yammm")).
 //	    WithImportResolver(resolver).
 //	    AddImport("./common", "common").
@@ -150,7 +147,7 @@ func (b *Builder) WithImportResolver(resolver ImportResolver) *Builder {
 // Requires WithSourceID() to have been called first.
 // If not, Build() will return an E_MISSING_SOURCE_ID error.
 func (b *Builder) AddImport(path, alias string) *Builder {
-	b.imports = append(b.imports, &parse.ImportDecl{
+	b.imports = append(b.imports, &importDecl{
 		Path:  path,
 		Alias: alias,
 		Span:  location.Span{}, // Synthetic - no source location
@@ -166,10 +163,10 @@ func (b *Builder) AddImport(path, alias string) *Builder {
 func (b *Builder) AddType(name string) *TypeBuilder {
 	state := &typeBuilderState{
 		name:       name,
-		inherits:   make([]*parse.TypeRef, 0),
-		properties: make([]*parse.PropertyDecl, 0),
-		relations:  make([]*parse.RelationDecl, 0),
-		invariants: make([]*parse.InvariantDecl, 0),
+		inherits:   make([]*astTypeRef, 0),
+		properties: make([]*propertyDecl, 0),
+		relations:  make([]*relationDecl, 0),
+		invariants: make([]*invariantDecl, 0),
 	}
 	b.types = append(b.types, state)
 	return &TypeBuilder{
@@ -179,8 +176,8 @@ func (b *Builder) AddType(name string) *TypeBuilder {
 }
 
 // AddDataType adds a named data type alias.
-func (b *Builder) AddDataType(name string, constraint schema.Constraint) *Builder {
-	b.dataTypes = append(b.dataTypes, &parse.DataTypeDecl{
+func (b *Builder) AddDataType(name string, constraint Constraint) *Builder {
+	b.dataTypes = append(b.dataTypes, &dataTypeDecl{
 		Name:       name,
 		Constraint: constraint,
 		Span:       location.Span{}, // Synthetic
@@ -195,7 +192,7 @@ func (b *Builder) AddDataType(name string, constraint schema.Constraint) *Builde
 //
 // Callers should check Result.HasErrors() to determine success.
 // Builder never returns Go errors; all issues are diagnostics.
-func (b *Builder) Build() (*schema.Schema, diag.Result) {
+func (b *Builder) Build() (*Schema, diag.Result) {
 	collector := diag.NewCollector(b.issueLimit)
 
 	// Validate schema name is non-empty (required for stable SourceID)
@@ -236,8 +233,8 @@ func (b *Builder) Build() (*schema.Schema, diag.Result) {
 		}
 	}
 
-	// Convert builder state to parse.Model
-	model := &parse.Model{
+	// Convert builder state to model
+	m := &model{
 		Name:          b.name,
 		Imports:       b.imports,
 		Types:         b.convertTypes(),
@@ -247,7 +244,7 @@ func (b *Builder) Build() (*schema.Schema, diag.Result) {
 	}
 
 	// Create a registry adapter if one was provided
-	var registry complete.Registry
+	var registry completionRegistry
 	if b.registry != nil {
 		registry = &registryAdapter{r: b.registry}
 	}
@@ -260,7 +257,7 @@ func (b *Builder) Build() (*schema.Schema, diag.Result) {
 	}
 
 	// Complete the schema with resolved imports
-	s := complete.Complete(model, sourceID, collector, registry, resolvedImports)
+	s := completeModel(m, sourceID, collector, registry, resolvedImports)
 	if s == nil {
 		return nil, collector.Result()
 	}
@@ -276,16 +273,16 @@ func (b *Builder) Build() (*schema.Schema, diag.Result) {
 	b.wireImports(s)
 
 	// Seal the schema to prevent further mutation
-	schema.InternalSealSchema(s)
+	s.seal()
 
 	return s, collector.Result()
 }
 
-// convertTypes converts the internal type state to parse.TypeDecl.
-func (b *Builder) convertTypes() []*parse.TypeDecl {
-	result := make([]*parse.TypeDecl, len(b.types))
+// convertTypes converts the internal type state to typeDecl.
+func (b *Builder) convertTypes() []*typeDecl {
+	result := make([]*typeDecl, len(b.types))
 	for i, state := range b.types {
-		result[i] = &parse.TypeDecl{
+		result[i] = &typeDecl{
 			Name:          state.name,
 			Inherits:      state.inherits,
 			Properties:    state.properties,
@@ -298,17 +295,6 @@ func (b *Builder) convertTypes() []*parse.TypeDecl {
 		}
 	}
 	return result
-}
-
-// registryAdapter adapts *schema.Registry to the complete.Registry interface.
-type registryAdapter struct {
-	r *schema.Registry
-}
-
-// LookupBySourceID implements the complete.Registry interface.
-func (a *registryAdapter) LookupBySourceID(id location.SourceID) (*schema.Schema, bool) {
-	s, ok := a.r.LookupBySourceID(id)
-	return s, ok
 }
 
 // validateInput performs shallow validation of builder input before completion.
@@ -474,7 +460,7 @@ func (b *Builder) resolveImportPath(importPath string) (location.SourceID, bool)
 
 // resolveImports resolves builder imports to SourceIDs via the registry.
 // Returns nil if no imports, or if resolution fails (with diagnostics collected).
-func (b *Builder) resolveImports(collector *diag.Collector) complete.ResolvedImports {
+func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 	if len(b.imports) == 0 {
 		return nil
 	}
@@ -486,9 +472,9 @@ func (b *Builder) resolveImports(collector *diag.Collector) complete.ResolvedImp
 		return nil
 	}
 
-	resolved := make(complete.ResolvedImports, len(b.imports))
+	resolved := make(resolvedImportMap, len(b.imports))
 	// Track seen SourceIDs for duplicate detection
-	seenSourceIDs := make(map[location.SourceID]*parse.ImportDecl)
+	seenSourceIDs := make(map[location.SourceID]*importDecl)
 	hasErrors := false
 	for _, imp := range b.imports {
 		resolvedID, ok := b.resolveImportPath(imp.Path)
@@ -537,7 +523,7 @@ func (b *Builder) resolveImports(collector *diag.Collector) complete.ResolvedImp
 }
 
 // wireImports wires schema pointers and seals imports after completion.
-func (b *Builder) wireImports(s *schema.Schema) {
+func (b *Builder) wireImports(s *Schema) {
 	if len(b.imports) == 0 || b.registry == nil {
 		return
 	}
@@ -547,10 +533,10 @@ func (b *Builder) wireImports(s *schema.Schema) {
 		if !imp.ResolvedSourceID().IsZero() {
 			resolved, ok := b.registry.LookupBySourceID(imp.ResolvedSourceID())
 			if ok {
-				schema.InternalSetImportSchema(imp, resolved)
+				imp.setSchema(resolved)
 			}
 		}
-		schema.InternalSealImport(imp)
+		imp.seal()
 	}
 }
 
@@ -561,8 +547,8 @@ type TypeBuilder struct {
 }
 
 // WithProperty adds a property to the type.
-func (t *TypeBuilder) WithProperty(name string, c schema.Constraint) *TypeBuilder {
-	t.state.properties = append(t.state.properties, &parse.PropertyDecl{
+func (t *TypeBuilder) WithProperty(name string, c Constraint) *TypeBuilder {
+	t.state.properties = append(t.state.properties, &propertyDecl{
 		Name:       name,
 		Constraint: c,
 		Optional:   false,
@@ -572,8 +558,8 @@ func (t *TypeBuilder) WithProperty(name string, c schema.Constraint) *TypeBuilde
 }
 
 // WithOptionalProperty adds an optional property to the type.
-func (t *TypeBuilder) WithOptionalProperty(name string, c schema.Constraint) *TypeBuilder {
-	t.state.properties = append(t.state.properties, &parse.PropertyDecl{
+func (t *TypeBuilder) WithOptionalProperty(name string, c Constraint) *TypeBuilder {
+	t.state.properties = append(t.state.properties, &propertyDecl{
 		Name:       name,
 		Constraint: c,
 		Optional:   true,
@@ -583,8 +569,8 @@ func (t *TypeBuilder) WithOptionalProperty(name string, c schema.Constraint) *Ty
 }
 
 // WithPrimaryKey adds a primary key property to the type.
-func (t *TypeBuilder) WithPrimaryKey(name string, c schema.Constraint) *TypeBuilder {
-	t.state.properties = append(t.state.properties, &parse.PropertyDecl{
+func (t *TypeBuilder) WithPrimaryKey(name string, c Constraint) *TypeBuilder {
+	t.state.properties = append(t.state.properties, &propertyDecl{
 		Name:         name,
 		Constraint:   c,
 		Optional:     false,
@@ -598,15 +584,15 @@ func (t *TypeBuilder) WithPrimaryKey(name string, c schema.Constraint) *TypeBuil
 //
 // By default, creates a required one-to-one association.
 // Use optional and many parameters to modify:
-//   - optional=false, many=false → required one (default)
-//   - optional=true, many=false → optional one
-//   - optional=false, many=true → required many
-//   - optional=true, many=true → optional many
-func (t *TypeBuilder) WithRelation(name string, target schema.TypeRef, optional, many bool) *TypeBuilder {
-	t.state.relations = append(t.state.relations, &parse.RelationDecl{
-		Kind:     parse.RelationAssociation,
+//   - optional=false, many=false -> required one (default)
+//   - optional=true, many=false -> optional one
+//   - optional=false, many=true -> required many
+//   - optional=true, many=true -> optional many
+func (t *TypeBuilder) WithRelation(name string, target TypeRef, optional, many bool) *TypeBuilder {
+	t.state.relations = append(t.state.relations, &relationDecl{
+		Kind:     RelationAssociation,
 		Name:     name,
-		Target:   &parse.TypeRef{Qualifier: target.Qualifier(), Name: target.Name(), Span: target.Span()},
+		Target:   &astTypeRef{Qualifier: target.Qualifier(), Name: target.Name(), Span: target.Span()},
 		Optional: optional,
 		Many:     many,
 		Span:     location.Span{}, // Synthetic
@@ -618,11 +604,11 @@ func (t *TypeBuilder) WithRelation(name string, target schema.TypeRef, optional,
 //
 // Compositions model parent-child ownership where the child's
 // lifecycle is tied to the parent.
-func (t *TypeBuilder) WithComposition(name string, target schema.TypeRef, optional, many bool) *TypeBuilder {
-	t.state.relations = append(t.state.relations, &parse.RelationDecl{
-		Kind:     parse.RelationComposition,
+func (t *TypeBuilder) WithComposition(name string, target TypeRef, optional, many bool) *TypeBuilder {
+	t.state.relations = append(t.state.relations, &relationDecl{
+		Kind:     RelationComposition,
 		Name:     name,
-		Target:   &parse.TypeRef{Qualifier: target.Qualifier(), Name: target.Name(), Span: target.Span()},
+		Target:   &astTypeRef{Qualifier: target.Qualifier(), Name: target.Name(), Span: target.Span()},
 		Optional: optional,
 		Many:     many,
 		Span:     location.Span{}, // Synthetic
@@ -631,8 +617,8 @@ func (t *TypeBuilder) WithComposition(name string, target schema.TypeRef, option
 }
 
 // Extends adds a type to inherit from.
-func (t *TypeBuilder) Extends(ref schema.TypeRef) *TypeBuilder {
-	t.state.inherits = append(t.state.inherits, &parse.TypeRef{
+func (t *TypeBuilder) Extends(ref TypeRef) *TypeBuilder {
+	t.state.inherits = append(t.state.inherits, &astTypeRef{
 		Qualifier: ref.Qualifier(),
 		Name:      ref.Name(),
 		Span:      ref.Span(),
@@ -673,7 +659,7 @@ func (t *TypeBuilder) WithTypeDocumentation(doc string) *TypeBuilder {
 //	// Or construct directly:
 //	ageExpr := expr.SExpr{expr.Op(">"), expr.SExpr{expr.Op("$"), expr.NewLiteral("age")}, expr.NewLiteral(int64(0))}
 func (t *TypeBuilder) WithInvariant(name string, e expr.Expression, doc string) *TypeBuilder {
-	t.state.invariants = append(t.state.invariants, &parse.InvariantDecl{
+	t.state.invariants = append(t.state.invariants, &invariantDecl{
 		Name:          name,
 		Expr:          e,
 		Documentation: doc,

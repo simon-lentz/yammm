@@ -13,14 +13,13 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 // testSchema creates a simple schema for testing.
 func testSchema(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("Person").
@@ -43,7 +42,7 @@ func testSchema(t *testing.T) *schema.Schema {
 func testSchemaWithPKLessType(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("Abstract").
@@ -112,7 +111,7 @@ func TestGraph_Add_NilInstance(t *testing.T) {
 
 func TestGraph_Add_SchemaMismatch(t *testing.T) {
 	// Instance validated against a completely different schema should fail
-	schemaA, _ := build.NewBuilder().
+	schemaA, _ := schema.NewBuilder().
 		WithName("schema_a").
 		WithSourceID(location.MustNewSourceID("test://a.yammm")).
 		AddType("TypeA").
@@ -120,7 +119,7 @@ func TestGraph_Add_SchemaMismatch(t *testing.T) {
 		Done().
 		Build()
 
-	schemaB, _ := build.NewBuilder().
+	schemaB, _ := schema.NewBuilder().
 		WithName("schema_b").
 		WithSourceID(location.MustNewSourceID("test://b.yammm")).
 		AddType("TypeB").
@@ -1197,7 +1196,7 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 	reg := schema.NewRegistry()
 
 	// Schema B with Product type
-	schemaB, _ := build.NewBuilder().
+	schemaB, _ := schema.NewBuilder().
 		WithName("schema_b").
 		WithSourceID(location.MustNewSourceID("test://b.yammm")).
 		AddType("Product").
@@ -1208,7 +1207,7 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 	_ = reg.Register(schemaB)
 
 	// Schema C with Product type (same name!)
-	schemaC, _ := build.NewBuilder().
+	schemaC, _ := schema.NewBuilder().
 		WithName("schema_c").
 		WithSourceID(location.MustNewSourceID("test://c.yammm")).
 		AddType("Product").
@@ -1219,7 +1218,7 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 	_ = reg.Register(schemaC)
 
 	// Main schema imports both
-	mainSchema, _ := build.NewBuilder().
+	mainSchema, _ := schema.NewBuilder().
 		WithName("main").
 		WithSourceID(location.MustNewSourceID("test://main.yammm")).
 		WithRegistry(reg).

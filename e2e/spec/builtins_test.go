@@ -5,7 +5,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/schema/load"
+	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +21,7 @@ func TestE2E_NonLambdaBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "Record")
 
-	s, result, err := load.Load(ctx, "testdata/builtins/non_lambda.yammm")
+	s, result, err := schema.Load(ctx, "testdata/builtins/non_lambda.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -99,7 +99,7 @@ func TestE2E_PositionalArgBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "Entry")
 
-	s, result, err := load.Load(ctx, "testdata/builtins/positional_args.yammm")
+	s, result, err := schema.Load(ctx, "testdata/builtins/positional_args.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -184,7 +184,7 @@ func TestE2E_StringBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "StringRecord")
 
-	s, result, err := load.Load(ctx, "testdata/builtins/string_builtins.yammm")
+	s, result, err := schema.Load(ctx, "testdata/builtins/string_builtins.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -275,7 +275,7 @@ func TestE2E_NumericBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "NumericRecord")
 
-	s, result, err := load.Load(ctx, "testdata/builtins/numeric_builtins.yammm")
+	s, result, err := schema.Load(ctx, "testdata/builtins/numeric_builtins.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -352,7 +352,7 @@ func TestE2E_CollectionBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "CollectionRecord")
 
-	s, result, err := load.Load(ctx, "testdata/builtins/collection_builtins.yammm")
+	s, result, err := schema.Load(ctx, "testdata/builtins/collection_builtins.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -427,7 +427,7 @@ func TestE2E_LambdaBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "LambdaRecord")
 
-	s, result, err := load.Load(ctx, "testdata/builtins/lambda.yammm")
+	s, result, err := schema.Load(ctx, "testdata/builtins/lambda.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
@@ -513,7 +513,7 @@ func TestE2E_ControlFlowBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "ControlRecord")
 
-	s, result, err := load.Load(ctx, "testdata/builtins/control_flow_builtins.yammm")
+	s, result, err := schema.Load(ctx, "testdata/builtins/control_flow_builtins.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 

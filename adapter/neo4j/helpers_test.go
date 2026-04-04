@@ -8,15 +8,14 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/load"
 )
 
 // loadSchema loads a test schema from testdata and returns the sealed schema.
 func loadSchema(t *testing.T, name string) *schema.Schema {
 	t.Helper()
-	s, result, err := load.Load(context.Background(), filepath.Join("testdata", name))
+	s, result, err := schema.Load(context.Background(), filepath.Join("testdata", name))
 	if err != nil {
-		t.Fatalf("load.Load(%s) failed: %v", name, err)
+		t.Fatalf("schema.Load(%s) failed: %v", name, err)
 	}
 	if err := result.Err(); err != nil {
 		t.Fatalf("schema %s has errors: %v", name, err)

@@ -118,48 +118,32 @@ func testLogger() *slog.Logger {
 // buildTestSnapshot creates a minimal analysis.Snapshot with a type symbol at a
 // known position. The source content is registered in the source.Registry so
 // that PositionFromLSP succeeds.
+//
+// Source layout (0-indexed lines):
+//
+//	0: schema "test"
+//	1: (empty)
+//	2: type Person {
+//	3:     name String
+//	4: }
 func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 	t.Helper()
 
-	content := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
-	sourceID := location.MustNewSourceID("test://test.yammm")
+	const content = "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
-	// Register content so PositionFromLSP can convert positions.
 	reg := source.NewRegistry()
-	require.NoError(t, reg.Register(sourceID, []byte(content)))
+	s, result, err := schema.LoadString(t.Context(), content, "test.yammm", schema.WithSourceRegistry(reg))
+	require.NoError(t, err)
+	require.True(t, result.OK(), "schema should parse without errors: %v", result)
 
-	// Build a schema with a type
-	schemaSpan := location.Range(sourceID, 1, 1, 1, 14)
-	typeSpan := location.Range(sourceID, 3, 1, 5, 2)
-	typeNameSpan := location.Range(sourceID, 3, 6, 3, 12)
+	sourceID := s.SourceID()
 
-	s := schema.InternalNewSchema("test", sourceID, schemaSpan, "")
-	typ := schema.InternalNewType("Person", sourceID, typeSpan, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
+	typ, ok := s.Type("Person")
+	require.True(t, ok, "schema should contain type Person")
 
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
-			{
-				Name:      "test",
-				Kind:      symbols.SymbolSchema,
-				SourceID:  sourceID,
-				Range:     schemaSpan,
-				Selection: schemaSpan,
-				Detail:    `schema "test"`,
-			},
-			{
-				Name:       "Person",
-				Kind:       symbols.SymbolType,
-				SourceID:   sourceID,
-				Range:      typeSpan,
-				Selection:  typeNameSpan,
-				ParentName: "test",
-				Detail:     "type Person",
-				Data:       typ,
-			},
-		},
-		References: []symbols.ReferenceSymbol{},
-	}
+	// Build the symbol index from the parsed schema so spans are
+	// parser-generated rather than hand-crafted.
+	idx := symbols.BuildSymbolIndex(s, reg)
 
 	snapshot := &analysis.Snapshot{
 		EntrySourceID:   sourceID,
@@ -169,6 +153,14 @@ func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 		Sources:         reg,
 		SymbolsBySource: map[location.SourceID]*symbols.SymbolIndex{sourceID: idx},
 	}
+
+	// Verify the symbol index contains the expected symbols so callers
+	// can rely on hover, definition, and completion finding them.
+	require.NotNil(t, idx.FindByName("test", symbols.SymbolSchema),
+		"symbol index should contain schema symbol 'test'")
+	personSym := idx.FindByName("Person", symbols.SymbolType)
+	require.NotNil(t, personSym, "symbol index should contain type symbol 'Person'")
+	require.Equal(t, typ, personSym.Data, "Person symbol should reference the parsed type")
 
 	doc := &docstate.Snapshot{
 		URI:      "file:///test.yammm",

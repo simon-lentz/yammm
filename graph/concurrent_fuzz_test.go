@@ -10,7 +10,6 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 // FuzzGraph_ConcurrentOperations tests that concurrent graph operations
@@ -63,7 +62,7 @@ func FuzzGraph_ConcurrentOperations(f *testing.F) {
 func buildFuzzSchema(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("fuzz").
 		WithSourceID(location.MustNewSourceID("test://fuzz.yammm")).
 		AddType("Person").

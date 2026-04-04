@@ -1,18 +1,17 @@
-package load
+package schema
 
 import (
 	"log/slog"
 
 	"github.com/simon-lentz/yammm/internal/source"
-	"github.com/simon-lentz/yammm/schema"
 )
 
-// Option configures the behavior of Load functions.
-type Option func(*config)
+// LoadOption configures the behavior of Load functions.
+type LoadOption func(*loadConfig)
 
-// config holds configuration for schema loading.
-type config struct {
-	registry        *schema.Registry
+// loadConfig holds configuration for schema loading.
+type loadConfig struct {
+	registry        *Registry
 	moduleRoot      string
 	issueLimit      int
 	sourceRegistry  *source.Registry
@@ -20,15 +19,15 @@ type config struct {
 	disallowImports bool
 }
 
-// defaultConfig returns a config with sensible defaults.
-func defaultConfig() *config {
-	return &config{
+// defaultLoadConfig returns a loadConfig with sensible defaults.
+func defaultLoadConfig() *loadConfig {
+	return &loadConfig{
 		issueLimit: 100,
 	}
 }
 
-// applyOptions applies all options to the config.
-func applyOptions(cfg *config, opts []Option) {
+// applyLoadOptions applies all options to the loadConfig.
+func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -37,17 +36,17 @@ func applyOptions(cfg *config, opts []Option) {
 // WithRegistry provides a schema registry for cross-schema type resolution.
 // Schemas loaded via imports will be registered automatically.
 // If nil, a new registry is created for the load operation.
-func WithRegistry(r *schema.Registry) Option {
-	return func(c *config) {
+func WithRegistry(r *Registry) LoadOption {
+	return func(c *loadConfig) {
 		c.registry = r
 	}
 }
 
 // WithModuleRoot sets the root directory for module-style imports.
 // This option is only meaningful for Load() which operates on filesystem paths.
-// For String() and Sources(), the module root is inferred or provided directly.
-func WithModuleRoot(root string) Option {
-	return func(c *config) {
+// For LoadString() and LoadSources(), the module root is inferred or provided directly.
+func WithModuleRoot(root string) LoadOption {
+	return func(c *loadConfig) {
 		c.moduleRoot = root
 	}
 }
@@ -55,34 +54,34 @@ func WithModuleRoot(root string) Option {
 // WithIssueLimit sets the maximum number of diagnostic issues to collect.
 // When the limit is reached, loading continues but additional issues are dropped.
 // Set to 0 for unlimited. Default is 100.
-func WithIssueLimit(limit int) Option {
-	return func(c *config) {
+func WithIssueLimit(limit int) LoadOption {
+	return func(c *loadConfig) {
 		c.issueLimit = limit
 	}
 }
 
 // WithSourceRegistry provides a source registry for position tracking.
 // If not provided, a new source registry is created for the load operation.
-func WithSourceRegistry(reg *source.Registry) Option {
-	return func(c *config) {
+func WithSourceRegistry(reg *source.Registry) LoadOption {
+	return func(c *loadConfig) {
 		c.sourceRegistry = reg
 	}
 }
 
 // WithDisallowImports prevents import declarations from being processed.
 // When enabled, any import statements in the source produce an
-// E_IMPORT_NOT_ALLOWED diagnostic. Used by String (unconditionally)
+// E_IMPORT_NOT_ALLOWED diagnostic. Used by LoadString (unconditionally)
 // and by the LSP markdown analysis path (isolated blocks).
-func WithDisallowImports() Option {
-	return func(c *config) {
+func WithDisallowImports() LoadOption {
+	return func(c *loadConfig) {
 		c.disallowImports = true
 	}
 }
 
 // WithLogger provides a structured logger for load operation diagnostics.
 // If not provided, logging is disabled.
-func WithLogger(logger *slog.Logger) Option {
-	return func(c *config) {
+func WithLogger(logger *slog.Logger) LoadOption {
+	return func(c *loadConfig) {
 		c.logger = logger
 	}
 }

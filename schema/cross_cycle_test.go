@@ -1,4 +1,4 @@
-package complete_test
+package schema_test
 
 import (
 	"testing"
@@ -9,24 +9,22 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
-	"github.com/simon-lentz/yammm/schema/internal/complete"
 )
 
 func TestDetectCrossSchemaInheritanceCycles_NilRegistry(t *testing.T) {
-	issues := complete.DetectCrossSchemaInheritanceCycles(nil)
+	issues := schema.TestDetectCrossSchemaInheritanceCycles(nil)
 	assert.Nil(t, issues)
 }
 
 func TestDetectCrossSchemaInheritanceCycles_EmptyRegistry(t *testing.T) {
 	registry := schema.NewRegistry()
-	issues := complete.DetectCrossSchemaInheritanceCycles(registry)
+	issues := schema.TestDetectCrossSchemaInheritanceCycles(registry)
 	assert.Empty(t, issues)
 }
 
 func TestDetectCrossSchemaInheritanceCycles_SingleSchema_NoCycle(t *testing.T) {
 	// Single schema with no cycles
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("Person").
@@ -40,13 +38,13 @@ func TestDetectCrossSchemaInheritanceCycles_SingleSchema_NoCycle(t *testing.T) {
 	registry := schema.NewRegistry()
 	require.NoError(t, registry.Register(s))
 
-	issues := complete.DetectCrossSchemaInheritanceCycles(registry)
+	issues := schema.TestDetectCrossSchemaInheritanceCycles(registry)
 	assert.Empty(t, issues)
 }
 
 func TestDetectCrossSchemaInheritanceCycles_LocalInheritance_NoCycle(t *testing.T) {
 	// Single schema with local inheritance (no cycles)
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("Entity").
@@ -65,13 +63,13 @@ func TestDetectCrossSchemaInheritanceCycles_LocalInheritance_NoCycle(t *testing.
 	registry := schema.NewRegistry()
 	require.NoError(t, registry.Register(s))
 
-	issues := complete.DetectCrossSchemaInheritanceCycles(registry)
+	issues := schema.TestDetectCrossSchemaInheritanceCycles(registry)
 	assert.Empty(t, issues)
 }
 
 func TestDetectCrossSchemaInheritanceCycles_CrossSchema_NoCycle(t *testing.T) {
 	// Two schemas: derived extends base - no cycle
-	baseSchema, baseResult := build.NewBuilder().
+	baseSchema, baseResult := schema.NewBuilder().
 		WithName("base").
 		WithSourceID(location.MustNewSourceID("test://base.yammm")).
 		AddType("Entity").
@@ -86,7 +84,7 @@ func TestDetectCrossSchemaInheritanceCycles_CrossSchema_NoCycle(t *testing.T) {
 	registry := schema.NewRegistry()
 	require.NoError(t, registry.Register(baseSchema))
 
-	derivedSchema, derivedResult := build.NewBuilder().
+	derivedSchema, derivedResult := schema.NewBuilder().
 		WithName("derived").
 		WithSourceID(location.MustNewSourceID("test://derived.yammm")).
 		WithRegistry(registry).
@@ -101,14 +99,14 @@ func TestDetectCrossSchemaInheritanceCycles_CrossSchema_NoCycle(t *testing.T) {
 	require.False(t, derivedResult.HasErrors())
 	require.NoError(t, registry.Register(derivedSchema))
 
-	issues := complete.DetectCrossSchemaInheritanceCycles(registry)
+	issues := schema.TestDetectCrossSchemaInheritanceCycles(registry)
 	assert.Empty(t, issues)
 }
 
 func TestDetectCrossSchemaInheritanceCycles_Diamond_NoCycle(t *testing.T) {
 	// Diamond inheritance: D extends B, C; B extends A; C extends A
 	// This is NOT a cycle - it's a valid diamond pattern
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("A").
@@ -138,7 +136,7 @@ func TestDetectCrossSchemaInheritanceCycles_Diamond_NoCycle(t *testing.T) {
 	registry := schema.NewRegistry()
 	require.NoError(t, registry.Register(s))
 
-	issues := complete.DetectCrossSchemaInheritanceCycles(registry)
+	issues := schema.TestDetectCrossSchemaInheritanceCycles(registry)
 	assert.Empty(t, issues, "Diamond inheritance should not be detected as a cycle")
 }
 
@@ -146,7 +144,7 @@ func TestDetectCrossSchemaInheritanceCycles_SimpleCycle(t *testing.T) {
 	// Local cycle: A extends B, B extends A
 	// Note: This would be caught by the existing local cycle detection,
 	// but the cross-schema detector should also catch it.
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("A").

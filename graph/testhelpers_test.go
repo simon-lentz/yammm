@@ -7,7 +7,6 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 // Test Schema Builders
@@ -18,7 +17,7 @@ import (
 func testSchemaWithAssociation(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("association").
 		WithSourceID(location.MustNewSourceID("test://association.yammm")).
 		AddType("Company").
@@ -42,7 +41,7 @@ func testSchemaWithAssociation(t *testing.T) *schema.Schema {
 func testSchemaWithOptionalAssociation(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("optional_association").
 		WithSourceID(location.MustNewSourceID("test://optional_association.yammm")).
 		AddType("Company").
@@ -66,7 +65,7 @@ func testSchemaWithOptionalAssociation(t *testing.T) *schema.Schema {
 func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("many_association").
 		WithSourceID(location.MustNewSourceID("test://many_association.yammm")).
 		AddType("Company").
@@ -90,7 +89,7 @@ func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
 func testSchemaWithChainedAssociations(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("chained").
 		WithSourceID(location.MustNewSourceID("test://chained.yammm")).
 		AddType("TypeC").
@@ -119,7 +118,7 @@ func testSchemaWithChainedAssociations(t *testing.T) *schema.Schema {
 func testSchemaWithComposition(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("composition").
 		WithSourceID(location.MustNewSourceID("test://composition.yammm")).
 		AddType("Child").
@@ -144,7 +143,7 @@ func testSchemaWithComposition(t *testing.T) *schema.Schema {
 func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("one_composition").
 		WithSourceID(location.MustNewSourceID("test://one_composition.yammm")).
 		AddType("Child").
@@ -169,7 +168,7 @@ func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
 func testSchemaWithPKLessChild(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("pkless").
 		WithSourceID(location.MustNewSourceID("test://pkless.yammm")).
 		AddType("Item").
@@ -193,7 +192,7 @@ func testSchemaWithPKLessChild(t *testing.T) *schema.Schema {
 func testSchemaWithNestedComposition(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("nested").
 		WithSourceID(location.MustNewSourceID("test://nested.yammm")).
 		AddType("GrandChild").
@@ -224,7 +223,7 @@ func testSchemaWithNestedComposition(t *testing.T) *schema.Schema {
 func testSchemaWithMultipleCompositions(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("multi_comp").
 		WithSourceID(location.MustNewSourceID("test://multi_comp.yammm")).
 		AddType("Note").
@@ -254,7 +253,7 @@ func testSchemaWithMultipleCompositions(t *testing.T) *schema.Schema {
 func testSchemaWithCompositeKey(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("composite").
 		WithSourceID(location.MustNewSourceID("test://composite.yammm")).
 		AddType("Record").
@@ -274,7 +273,7 @@ func testSchemaWithCompositeKey(t *testing.T) *schema.Schema {
 func testSchemaWithMutualAssociations(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("mutual").
 		WithSourceID(location.MustNewSourceID("test://mutual.yammm")).
 		AddType("TypeA").
@@ -299,7 +298,7 @@ func testSchemaWithMutualAssociations(t *testing.T) *schema.Schema {
 func testSchemaWithCircularChain(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("circular").
 		WithSourceID(location.MustNewSourceID("test://circular.yammm")).
 		AddType("TypeA").
@@ -509,7 +508,7 @@ func testMultiSchemaSetup(t *testing.T) (*schema.Schema, *schema.Schema) {
 	reg := schema.NewRegistry()
 
 	// Create the common schema first (to be imported)
-	commonSchema, result := build.NewBuilder().
+	commonSchema, result := schema.NewBuilder().
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Entity").
@@ -528,7 +527,7 @@ func testMultiSchemaSetup(t *testing.T) (*schema.Schema, *schema.Schema) {
 	}
 
 	// Create main schema that imports common
-	mainSchema, result := build.NewBuilder().
+	mainSchema, result := schema.NewBuilder().
 		WithName("main").
 		WithSourceID(location.MustNewSourceID("test://main.yammm")).
 		WithRegistry(reg).
@@ -555,7 +554,7 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 	reg = schema.NewRegistry()
 
 	// Schema C (base)
-	schemaC, result := build.NewBuilder().
+	schemaC, result := schema.NewBuilder().
 		WithName("schema_c").
 		WithSourceID(location.MustNewSourceID("test://c.yammm")).
 		AddType("BaseType").
@@ -573,7 +572,7 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 	}
 
 	// Schema B imports C
-	schemaB, result = build.NewBuilder().
+	schemaB, result = schema.NewBuilder().
 		WithName("schema_b").
 		WithSourceID(location.MustNewSourceID("test://b.yammm")).
 		WithRegistry(reg).
@@ -594,7 +593,7 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 	}
 
 	// Schema A imports B (but not C directly)
-	schemaA, result = build.NewBuilder().
+	schemaA, result = schema.NewBuilder().
 		WithName("schema_a").
 		WithSourceID(location.MustNewSourceID("test://a.yammm")).
 		WithRegistry(reg).

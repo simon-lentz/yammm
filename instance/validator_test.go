@@ -17,62 +17,39 @@ import (
 
 // --- Test Helpers ---
 
-// makeTestSchema creates a schema with the given types.
-func makeTestSchema(types ...*schema.Type) *schema.Schema {
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, types)
-	schema.InternalSealSchema(s)
+// mustBuild builds a schema from a Builder, failing the test on error.
+func mustBuild(t *testing.T, b *schema.Builder) *schema.Schema {
+	t.Helper()
+	s, result := b.Build()
+	require.False(t, result.HasErrors(), "schema build: %s", result)
 	return s
 }
 
-// makeType creates a type with the given properties.
-func makeType(name string, isAbstract, isPart bool, props ...*schema.Property) *schema.Type {
-	t := schema.InternalNewType(name, location.SourceID{}, location.Span{}, "", isAbstract, isPart)
-	schema.InternalSetTypeProperties(t, props)
-	schema.InternalSetTypeAllProperties(t, props)
-
-	// Separate PKs
-	var pks []*schema.Property
-	for _, p := range props {
-		if p.IsPrimaryKey() {
-			pks = append(pks, p)
-		}
-	}
-	schema.InternalSetTypePrimaryKeys(t, pks)
-	schema.InternalSealType(t)
-	return t
-}
-
-// makeProp creates a property.
-func makeProp(name string, constraint schema.Constraint, optional, isPK bool) *schema.Property {
-	return schema.InternalNewProperty(
-		name,
-		location.Span{},
-		"",
-		constraint,
-		schema.DataTypeRef{},
-		optional,
-		isPK,
-		schema.DeclaringScope{},
-	)
+// mustLoadString loads a schema from YAMMM DSL source, failing the test on error.
+func mustLoadString(t *testing.T, source, name string) *schema.Schema {
+	t.Helper()
+	s, result, err := schema.LoadString(t.Context(), source, name)
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "schema load: %s", result)
+	return s
 }
 
 // --- Tests ---
 
 func TestValidator_ValidateOne_Success(t *testing.T) {
-	// Create a simple Person type with id and name
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("name", schema.NewStringConstraint(), false, false),
-		makeProp("age", schema.NewIntegerConstraint(), true, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("name", schema.NewStringConstraint()).
+		WithOptionalProperty("age", schema.NewIntegerConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   int64(1),
+			"id":   "1",
 			"name": "Alice",
 			"age":  int64(30),
 		},
@@ -84,7 +61,7 @@ func TestValidator_ValidateOne_Success(t *testing.T) {
 	assert.Nil(t, failure)
 	require.NotNil(t, valid)
 	assert.Equal(t, "Person", valid.TypeName())
-	assert.Equal(t, "[1]", valid.PrimaryKey().String())
+	assert.Equal(t, `["1"]`, valid.PrimaryKey().String())
 
 	// Check property access
 	nameVal, ok := valid.Property("name")
@@ -95,13 +72,17 @@ func TestValidator_ValidateOne_Success(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_TypeNotFound(t *testing.T) {
-	s := makeTestSchema() // Empty schema
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Placeholder").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 		},
 	}
 
@@ -114,16 +95,18 @@ func TestValidator_ValidateOne_TypeNotFound(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_AbstractTypeRejected(t *testing.T) {
-	abstractType := makeType("Entity", true, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	s := makeTestSchema(abstractType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Entity").
+		AsAbstract().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 		},
 	}
 
@@ -136,16 +119,18 @@ func TestValidator_ValidateOne_AbstractTypeRejected(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_PartTypeRejected(t *testing.T) {
-	partType := makeType("Part", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	s := makeTestSchema(partType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Part").
+		AsPart().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 		},
 	}
 
@@ -158,17 +143,18 @@ func TestValidator_ValidateOne_PartTypeRejected(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_MissingRequiredProperty(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("name", schema.NewStringConstraint(), false, false), // Required
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("name", schema.NewStringConstraint()). // Required
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			// Missing "name"
 		},
 	}
@@ -182,17 +168,18 @@ func TestValidator_ValidateOne_MissingRequiredProperty(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_OptionalPropertyMissing(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("nickname", schema.NewStringConstraint(), true, false), // Optional
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithOptionalProperty("nickname", schema.NewStringConstraint()). // Optional
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			// Missing "nickname" is OK
 		},
 	}
@@ -205,17 +192,18 @@ func TestValidator_ValidateOne_OptionalPropertyMissing(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_TypeMismatch(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("age", schema.NewIntegerConstraint(), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("age", schema.NewIntegerConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":  int64(1),
+			"id":  "1",
 			"age": "not an integer", // Wrong type
 		},
 	}
@@ -229,16 +217,17 @@ func TestValidator_ValidateOne_TypeMismatch(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_UnknownField(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s) // Default: don't allow unknown fields
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":      int64(1),
+			"id":      "1",
 			"unknown": "value", // Unknown field
 		},
 	}
@@ -252,16 +241,17 @@ func TestValidator_ValidateOne_UnknownField(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_AllowUnknownFields(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s, instance.WithAllowUnknownFields(true))
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":      int64(1),
+			"id":      "1",
 			"unknown": "value", // Unknown field - should be ignored
 		},
 	}
@@ -274,18 +264,19 @@ func TestValidator_ValidateOne_AllowUnknownFields(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_CaseInsensitivePropertyMatch(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("firstName", schema.NewStringConstraint(), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("firstName", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s) // Default: case-insensitive
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"ID":        int64(1), // Different case
-			"FIRSTNAME": "Alice",  // Different case
+			"ID":        "1",     // Different case
+			"FIRSTNAME": "Alice", // Different case
 		},
 	}
 
@@ -304,17 +295,18 @@ func TestValidator_ValidateOne_CaseInsensitivePropertyMatch(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_StrictPropertyNames(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("firstName", schema.NewStringConstraint(), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("firstName", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s, instance.WithStrictPropertyNames(true))
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":        int64(1),
+			"id":        "1",
 			"FIRSTNAME": "Alice", // Wrong case - should fail
 		},
 	}
@@ -328,18 +320,19 @@ func TestValidator_ValidateOne_StrictPropertyNames(t *testing.T) {
 }
 
 func TestValidator_Validate_BatchSuccess(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("name", schema.NewStringConstraint(), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("name", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": int64(1), "name": "Alice"}},
-		{Properties: map[string]any{"id": int64(2), "name": "Bob"}},
-		{Properties: map[string]any{"id": int64(3), "name": "Charlie"}},
+		{Properties: map[string]any{"id": "1", "name": "Alice"}},
+		{Properties: map[string]any{"id": "2", "name": "Bob"}},
+		{Properties: map[string]any{"id": "3", "name": "Charlie"}},
 	}
 
 	valid, failures, err := validator.Validate(t.Context(), "Person", raws)
@@ -350,18 +343,19 @@ func TestValidator_Validate_BatchSuccess(t *testing.T) {
 }
 
 func TestValidator_Validate_PartialSuccess(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("name", schema.NewStringConstraint(), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("name", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": int64(1), "name": "Alice"}},
-		{Properties: map[string]any{"id": int64(2)}}, // Missing name
-		{Properties: map[string]any{"id": int64(3), "name": "Charlie"}},
+		{Properties: map[string]any{"id": "1", "name": "Alice"}},
+		{Properties: map[string]any{"id": "2"}}, // Missing name
+		{Properties: map[string]any{"id": "3", "name": "Charlie"}},
 	}
 
 	valid, failures, err := validator.Validate(t.Context(), "Person", raws)
@@ -372,10 +366,11 @@ func TestValidator_Validate_PartialSuccess(t *testing.T) {
 }
 
 func TestValidator_Validate_ContextCancellation(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
@@ -383,7 +378,7 @@ func TestValidator_Validate_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	raw := instance.RawInstance{
-		Properties: map[string]any{"id": int64(1)},
+		Properties: map[string]any{"id": "1"},
 	}
 
 	_, _, err := validator.ValidateOne(ctx, "Person", raw)
@@ -393,17 +388,18 @@ func TestValidator_Validate_ContextCancellation(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_ImmutableOutput(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("name", schema.NewStringConstraint(), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("name", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   int64(1),
+			"id":   "1",
 			"name": "Alice",
 		},
 	}
@@ -431,12 +427,12 @@ func TestValidator_ValidateOne_ImmutableOutput(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_IntegerBounds(t *testing.T) {
-	// Create type with bounded integer
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("age", schema.IntegerBetween(0, 150), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("age", schema.IntegerBetween(0, 150)).
+		Done())
 
 	validator := instance.NewValidator(s)
 
@@ -456,7 +452,7 @@ func TestValidator_ValidateOne_IntegerBounds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := instance.RawInstance{
 				Properties: map[string]any{
-					"id":  int64(1),
+					"id":  "1",
 					"age": tt.age,
 				},
 			}
@@ -476,12 +472,12 @@ func TestValidator_ValidateOne_IntegerBounds(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_StringBounds(t *testing.T) {
-	// Create type with bounded string
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("code", schema.StringLenBetween(3, 10), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("code", schema.StringLenBetween(3, 10)).
+		Done())
 
 	validator := instance.NewValidator(s)
 
@@ -501,7 +497,7 @@ func TestValidator_ValidateOne_StringBounds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := instance.RawInstance{
 				Properties: map[string]any{
-					"id":   int64(1),
+					"id":   "1",
 					"code": tt.code,
 				},
 			}
@@ -522,59 +518,24 @@ func TestValidator_ValidateOne_StringBounds(t *testing.T) {
 
 // --- ValidateForComposition Tests ---
 
-// makeTypeWithRelation creates a type with a composition relation to a part type.
-func makeTypeWithRelation(typeName string, partType *schema.Type, relationName string) *schema.Type {
-	t := schema.InternalNewType(typeName, location.SourceID{}, location.Span{}, "", false, false)
-
-	idProp := makeProp("id", schema.NewIntegerConstraint(), false, true)
-	schema.InternalSetTypeProperties(t, []*schema.Property{idProp})
-	schema.InternalSetTypeAllProperties(t, []*schema.Property{idProp})
-	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{idProp})
-
-	// Create composition relation to part type
-	rel := schema.InternalNewRelation(
-		schema.RelationComposition,
-		relationName,
-		relationName, // fieldName
-		schema.NewTypeRef("", partType.Name(), location.Span{}),
-		partType.ID(),
-		location.Span{},
-		"",
-		true,     // optional
-		true,     // many
-		"",       // backref
-		true,     // reverseOptional
-		false,    // reverseMany
-		typeName, // owner
-		nil,      // no edge properties for composition
-	)
-	schema.InternalSealRelation(rel)
-
-	schema.InternalSetTypeCompositions(t, []*schema.Relation{rel})
-	schema.InternalSetTypeAllCompositions(t, []*schema.Relation{rel})
-	schema.InternalSealType(t)
-	return t
-}
-
 func TestValidator_ValidateForComposition_Success(t *testing.T) {
-	// Create a part type
-	addressType := makeType("Address", false, true, // isPart = true
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("street", schema.NewStringConstraint(), false, false),
-	)
-
-	// Create parent type with composition
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("street", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": int64(1), "street": "Main St"}},
-		{Properties: map[string]any{"id": int64(2), "street": "Oak Ave"}},
+		{Properties: map[string]any{"id": "1", "street": "Main St"}},
+		{Properties: map[string]any{"id": "2", "street": "Oak Ave"}},
 	}
 
 	valid, failures, err := validator.ValidateForComposition(t.Context(), "Person", "addresses", raws)
@@ -585,12 +546,16 @@ func TestValidator_ValidateForComposition_Success(t *testing.T) {
 }
 
 func TestValidator_ValidateForComposition_ParentTypeNotFound(t *testing.T) {
-	s := makeTestSchema() // Empty schema
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Placeholder").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": int64(1)}},
+		{Properties: map[string]any{"id": "1"}},
 	}
 
 	valid, failures, err := validator.ValidateForComposition(t.Context(), "NonExistent", "children", raws)
@@ -603,15 +568,16 @@ func TestValidator_ValidateForComposition_ParentTypeNotFound(t *testing.T) {
 }
 
 func TestValidator_ValidateForComposition_RelationNotFound(t *testing.T) {
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": int64(1)}},
+		{Properties: map[string]any{"id": "1"}},
 	}
 
 	valid, failures, err := validator.ValidateForComposition(t.Context(), "Person", "nonexistent", raws)
@@ -624,14 +590,16 @@ func TestValidator_ValidateForComposition_RelationNotFound(t *testing.T) {
 }
 
 func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
@@ -639,7 +607,7 @@ func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": int64(1)}},
+		{Properties: map[string]any{"id": "1"}},
 	}
 
 	_, _, err := validator.ValidateForComposition(ctx, "Person", "addresses", raws)
@@ -649,7 +617,12 @@ func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
 }
 
 func TestValidator_ValidateForComposition_ParentTypeNotFound_EmptyInput(t *testing.T) {
-	s := makeTestSchema()
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Placeholder").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
+
 	validator := instance.NewValidator(s)
 
 	valid, failures, err := validator.ValidateForComposition(
@@ -663,12 +636,17 @@ func TestValidator_ValidateForComposition_ParentTypeNotFound_EmptyInput(t *testi
 }
 
 func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *testing.T) {
-	s := makeTestSchema()
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Placeholder").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
+
 	validator := instance.NewValidator(s)
 
 	prov := instance.NewProvenance("test.json", path.Root().Key("items").Index(0), location.Span{})
 	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": int64(1)}, Provenance: prov},
+		{Properties: map[string]any{"id": "1"}, Provenance: prov},
 	}
 
 	_, failures, err := validator.ValidateForComposition(
@@ -683,28 +661,6 @@ func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *te
 
 // --- Invariant Evaluation Tests ---
 
-// makeTypeWithInvariant creates a type with an invariant expression.
-func makeTypeWithInvariant(invName string, invExpr expr.Expression, props ...*schema.Property) *schema.Type {
-	t := schema.InternalNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	schema.InternalSetTypeProperties(t, props)
-	schema.InternalSetTypeAllProperties(t, props)
-
-	var pks []*schema.Property
-	for _, p := range props {
-		if p.IsPrimaryKey() {
-			pks = append(pks, p)
-		}
-	}
-	schema.InternalSetTypePrimaryKeys(t, pks)
-
-	inv := schema.InternalNewInvariant(invName, invExpr, location.Span{}, "")
-	schema.InternalSetTypeInvariants(t, []*schema.Invariant{inv})
-	schema.InternalSetTypeAllInvariants(t, []*schema.Invariant{inv})
-
-	schema.InternalSealType(t)
-	return t
-}
-
 func TestValidator_ValidateOne_InvariantPass(t *testing.T) {
 	// Invariant: age >= 0
 	// Expression: (>= ($ age) 0)
@@ -714,17 +670,19 @@ func TestValidator_ValidateOne_InvariantPass(t *testing.T) {
 		expr.NewLiteral(int64(0)),
 	}
 
-	personType := makeTypeWithInvariant("age must be non-negative", invExpr,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("age", schema.NewIntegerConstraint(), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("age", schema.NewIntegerConstraint()).
+		WithInvariant("age must be non-negative", invExpr, "").
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":  int64(1),
+			"id":  "1",
 			"age": int64(25),
 		},
 	}
@@ -744,17 +702,19 @@ func TestValidator_ValidateOne_InvariantFail(t *testing.T) {
 		expr.NewLiteral(int64(0)),
 	}
 
-	personType := makeTypeWithInvariant("age must be non-negative", invExpr,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("age", schema.NewIntegerConstraint(), false, false),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("age", schema.NewIntegerConstraint()).
+		WithInvariant("age must be non-negative", invExpr, "").
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":  int64(1),
+			"id":  "1",
 			"age": int64(-5), // Violates invariant
 		},
 	}
@@ -767,74 +727,29 @@ func TestValidator_ValidateOne_InvariantFail(t *testing.T) {
 	assert.Contains(t, failure.Summary(), "age must be non-negative")
 }
 
-func TestValidator_ValidateOne_InvariantWithoutMessage(t *testing.T) {
-	// Invariant without a name - should show "invariant failed"
-	invExpr := expr.SExpr{
-		expr.Op(">="),
-		expr.SExpr{expr.Op("$"), expr.NewLiteral("age")},
-		expr.NewLiteral(int64(0)),
-	}
-
-	personType := makeTypeWithInvariant("", invExpr, // Empty name
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("age", schema.NewIntegerConstraint(), false, false),
-	)
-	s := makeTestSchema(personType)
-
-	validator := instance.NewValidator(s)
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":  int64(1),
-			"age": int64(-5),
-		},
-	}
-
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
-
-	require.NoError(t, err)
-	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "invariant failed")
-}
-
-func TestValidator_ValidateOne_InvariantNilExpression(t *testing.T) {
-	// Invariant with nil expression should be skipped
-	personType := makeTypeWithInvariant("test", nil,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	s := makeTestSchema(personType)
-
-	validator := instance.NewValidator(s)
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{"id": int64(1)},
-	}
-
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
-
-	require.NoError(t, err)
-	assert.Nil(t, failure)
-	require.NotNil(t, valid)
-}
+// TestValidator_ValidateOne_InvariantWithoutMessage and
+// TestValidator_ValidateOne_InvariantNilExpression have been removed:
+// these tested unreachable states. The Builder rejects empty invariant names
+// and nil expressions, and the parser always provides both.
 
 // --- P1.1 Property Path Uses Schema Name Tests ---
 
 func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 	// Property paths should use schema property names, not input field names.
 	// When input uses different case (e.g., "firstname"), path should still use "FirstName".
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("FirstName", schema.NewIntegerConstraint(), false, false), // Integer type
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("FirstName", schema.NewIntegerConstraint()). // Integer type to cause mismatch
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	// Use different case in input - case-insensitive matching will find the property
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":        int64(1),
+			"id":        "1",
 			"firstname": "not_an_int", // Wrong type (string instead of int), lowercase input name
 		},
 	}
@@ -862,18 +777,19 @@ func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
 	// When input field name differs from schema property name,
 	// the diagnostic should include a "field" detail with the original input name.
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("FirstName", schema.NewIntegerConstraint(), false, false), // Integer to cause type error
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("FirstName", schema.NewIntegerConstraint()). // Integer to cause type error
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	// Use different case in input
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":        int64(1),
+			"id":        "1",
 			"firstname": "not_an_int", // Wrong type, lowercase input name
 		},
 	}
@@ -903,10 +819,11 @@ func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
 
 func TestValidator_Validate_NilInput_ReturnsNil(t *testing.T) {
 	// Validate(ctx, typeName, nil) should return (nil, nil, nil)
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
@@ -919,10 +836,11 @@ func TestValidator_Validate_NilInput_ReturnsNil(t *testing.T) {
 
 func TestValidator_Validate_EmptyInput_ReturnsEmptySlice(t *testing.T) {
 	// Validate(ctx, typeName, []RawInstance{}) should return ([]*ValidInstance{}, nil, nil)
-	personType := makeType("Person", false, false,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	s := makeTestSchema(personType)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done())
 
 	validator := instance.NewValidator(s)
 
@@ -935,14 +853,16 @@ func TestValidator_Validate_EmptyInput_ReturnsEmptySlice(t *testing.T) {
 
 func TestValidator_ValidateForComposition_NilInput_ReturnsNil(t *testing.T) {
 	// ValidateForComposition with nil input should return (nil, nil, nil)
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
@@ -955,14 +875,16 @@ func TestValidator_ValidateForComposition_NilInput_ReturnsNil(t *testing.T) {
 
 func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testing.T) {
 	// ValidateForComposition with empty input should return ([]*ValidInstance{}, nil, nil)
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
@@ -1024,30 +946,29 @@ func TestNewValidator_NilSchemaPanics(t *testing.T) {
 // TestOwnership_NestedMapIsolation verifies that mutating deeply nested maps
 // in the original data does not affect the ValidInstance properties.
 func TestOwnership_NestedMapIsolation(t *testing.T) {
-	// Create a part type for composition (compositions have nested map structure)
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("street", schema.NewStringConstraint(), false, false),
-		makeProp("city", schema.NewStringConstraint(), false, false),
-	)
-
-	// Create parent type with composition
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("street", schema.NewStringConstraint()).
+		WithProperty("city", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	// Create nested structure - the address data is a nested map
 	addressData := map[string]any{
-		"id":     int64(100),
+		"id":     "100",
 		"street": "Original Street",
 		"city":   "Original City",
 	}
 	rawData := map[string]any{
-		"id":        int64(1),
+		"id":        "1",
 		"addresses": []any{addressData},
 	}
 	raw := instance.RawInstance{Properties: rawData}
@@ -1089,27 +1010,26 @@ func TestOwnership_NestedMapIsolation(t *testing.T) {
 // (like adding/removing elements or modifying slice elements) in the original
 // data does not affect the ValidInstance.
 func TestOwnership_NestedSliceIsolation(t *testing.T) {
-	// Create a part type
-	noteType := makeType("Note", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("text", schema.NewStringConstraint(), false, false),
-	)
-
-	// Create parent type with composition
-	documentType := makeTypeWithRelation("Document", noteType, "notes")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{documentType, noteType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Note").
+		AsPart().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("text", schema.NewStringConstraint()).
+		Done().
+		AddType("Document").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithComposition("notes", schema.LocalTypeRef("Note", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	// Create data with slice of notes
-	note1 := map[string]any{"id": int64(1), "text": "Original Note 1"}
-	note2 := map[string]any{"id": int64(2), "text": "Original Note 2"}
+	note1 := map[string]any{"id": "1", "text": "Original Note 1"}
+	note2 := map[string]any{"id": "2", "text": "Original Note 2"}
 	notesSlice := []any{note1, note2}
 	rawData := map[string]any{
-		"id":    int64(1),
+		"id":    "1",
 		"notes": notesSlice,
 	}
 	raw := instance.RawInstance{Properties: rawData}
@@ -1125,7 +1045,7 @@ func TestOwnership_NestedSliceIsolation(t *testing.T) {
 	note2["text"] = "Mutated Note 2"
 
 	// Also try to mutate the slice structure (won't affect wrapped, but for completeness)
-	rawData["notes"] = []any{map[string]any{"id": int64(999), "text": "New Note"}}
+	rawData["notes"] = []any{map[string]any{"id": "999", "text": "New Note"}}
 
 	// The ValidInstance should NOT be affected
 	composed, ok := valid.Composed("notes")
@@ -1154,26 +1074,25 @@ func TestOwnership_NestedSliceIsolation(t *testing.T) {
 // TestOwnership_CompositionIsolation verifies that mutating composition data
 // in RawInstance does not affect recursively validated composed children.
 func TestOwnership_CompositionIsolation(t *testing.T) {
-	// Create a part type
-	itemType := makeType("Item", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("name", schema.NewStringConstraint(), false, false),
-	)
-
-	// Create parent type with composition
-	orderType := makeTypeWithRelation("Order", itemType, "items")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{orderType, itemType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Item").
+		AsPart().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("name", schema.NewStringConstraint()).
+		Done().
+		AddType("Order").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithComposition("items", schema.LocalTypeRef("Item", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	// Create composition data
-	itemData := map[string]any{"id": int64(100), "name": "Original Item"}
+	itemData := map[string]any{"id": "100", "name": "Original Item"}
 	compositionArray := []any{itemData}
 	rawData := map[string]any{
-		"id":    int64(1),
+		"id":    "1",
 		"items": compositionArray,
 	}
 	raw := instance.RawInstance{Properties: rawData}
@@ -1186,7 +1105,7 @@ func TestOwnership_CompositionIsolation(t *testing.T) {
 
 	// Mutate the composition data AFTER validation
 	itemData["name"] = "Mutated Item"
-	compositionArray[0] = map[string]any{"id": int64(999), "name": "Replaced Item"}
+	compositionArray[0] = map[string]any{"id": "999", "name": "Replaced Item"}
 	rawData["items"] = nil // Try to null out the composition
 
 	// The ValidInstance's composed children should NOT be affected
@@ -1207,32 +1126,31 @@ func TestOwnership_CompositionIsolation(t *testing.T) {
 }
 
 // TestOwnership_DeeplyNestedCompositionIsolation verifies isolation with
-// multiple levels of nesting (parent → child → child's nested properties).
+// multiple levels of nesting (parent -> child -> child's nested properties).
 func TestOwnership_DeeplyNestedCompositionIsolation(t *testing.T) {
-	// Create a part type with multiple properties
-	detailType := makeType("Detail", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("value", schema.NewStringConstraint(), false, false),
-		makeProp("count", schema.NewIntegerConstraint(), false, false),
-	)
-
-	// Create parent type
-	containerType := makeTypeWithRelation("Container", detailType, "details")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{containerType, detailType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Detail").
+		AsPart().
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("value", schema.NewStringConstraint()).
+		WithProperty("count", schema.NewIntegerConstraint()).
+		Done().
+		AddType("Container").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithComposition("details", schema.LocalTypeRef("Detail", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	// Create deeply nested structure
 	detailData := map[string]any{
-		"id":    int64(1),
+		"id":    "1",
 		"value": "Original Value",
 		"count": int64(42),
 	}
 	rawData := map[string]any{
-		"id":      int64(1),
+		"id":      "1",
 		"details": []any{detailData},
 	}
 	raw := instance.RawInstance{Properties: rawData}
@@ -1246,7 +1164,7 @@ func TestOwnership_DeeplyNestedCompositionIsolation(t *testing.T) {
 	// Mutate all nested data
 	detailData["value"] = "Mutated Value"
 	detailData["count"] = int64(999)
-	detailData["id"] = int64(888)
+	detailData["id"] = "888"
 
 	// The ValidInstance should NOT be affected
 	composed, ok := valid.Composed("details")
@@ -1272,35 +1190,34 @@ func TestOwnership_DeeplyNestedCompositionIsolation(t *testing.T) {
 	assert.Equal(t, int64(42), count, "deeply nested isolation failed: count was mutated")
 
 	// PK should also be isolated
-	assert.Equal(t, "[1]", child.PrimaryKey().String(), "deeply nested isolation failed: PK was mutated")
+	assert.Equal(t, `["1"]`, child.PrimaryKey().String(), "deeply nested isolation failed: PK was mutated")
 }
 
 // TestOwnership_EdgePropertyIsolation verifies that mutating edge properties
 // after validation does not affect ValidInstance edge data.
 func TestOwnership_EdgePropertyIsolation(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-
-	// Create edge with properties
-	edgeProps := []*schema.Property{
-		makeProp("role", schema.NewStringConstraint(), false, false),
-		makeProp("startDate", schema.NewStringConstraint(), true, false),
-	}
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, edgeProps)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustLoadString(t, `schema "test"
+type Company {
+    id String primary
+}
+type Person {
+    id String primary
+    --> employer (_) Company {
+        role String required
+        startDate String
+    }
+}`, "test.yammm")
 
 	validator := instance.NewValidator(s)
 
 	// Create edge with properties
 	edgeData := map[string]any{
-		"_target_id": int64(42),
+		"_target_id": "42",
 		"role":       "Original Role",
 		"startDate":  "2024-01-01",
 	}
 	rawData := map[string]any{
-		"id":       int64(1),
+		"id":       "1",
 		"employer": edgeData,
 	}
 	raw := instance.RawInstance{Properties: rawData}
@@ -1314,7 +1231,7 @@ func TestOwnership_EdgePropertyIsolation(t *testing.T) {
 	// Mutate edge properties AFTER validation
 	edgeData["role"] = "Mutated Role"
 	edgeData["startDate"] = "2099-12-31"
-	edgeData["_target_id"] = int64(999)
+	edgeData["_target_id"] = "999"
 
 	// The ValidInstance's edge should NOT be affected
 	edge, ok := valid.Edge("employer")
@@ -1338,5 +1255,5 @@ func TestOwnership_EdgePropertyIsolation(t *testing.T) {
 	assert.Equal(t, "2024-01-01", startDate, "edge property isolation failed: startDate was mutated")
 
 	// Target key should also be isolated
-	assert.Equal(t, "[42]", targets[0].TargetKey().String(), "edge property isolation failed: target key was mutated")
+	assert.Equal(t, `["42"]`, targets[0].TargetKey().String(), "edge property isolation failed: target key was mutated")
 }

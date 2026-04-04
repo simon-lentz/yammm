@@ -1,5 +1,8 @@
-// Package span provides utilities for building location.Span values from ANTLR tokens.
-package span
+// span.go provides utilities for building location.Span values from ANTLR tokens.
+//
+// It handles the conversion from ANTLR's rune-based positions to
+// byte-based positions required by the schema layer.
+package schema
 
 import (
 	"fmt"
@@ -9,22 +12,22 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// Builder creates location.Span values from ANTLR tokens.
+// spanBuilder creates location.Span values from ANTLR tokens.
 // It handles the conversion from ANTLR's rune-based positions to
 // byte-based positions required by the schema layer.
-type Builder struct {
+type spanBuilder struct {
 	sourceID  location.SourceID
 	registry  location.PositionRegistry
 	converter location.RuneOffsetConverter
 }
 
-// NewBuilder creates a Builder for the given source.
-func NewBuilder(
+// newSpanBuilder creates a spanBuilder for the given source.
+func newSpanBuilder(
 	sourceID location.SourceID,
 	registry location.PositionRegistry,
 	converter location.RuneOffsetConverter,
-) *Builder {
-	return &Builder{
+) *spanBuilder {
+	return &spanBuilder{
 		sourceID:  sourceID,
 		registry:  registry,
 		converter: converter,
@@ -32,7 +35,7 @@ func NewBuilder(
 }
 
 // FromToken creates a Span from a single ANTLR token.
-func (b *Builder) FromToken(token antlr.Token) location.Span {
+func (b *spanBuilder) FromToken(token antlr.Token) location.Span {
 	if token == nil {
 		return location.Span{}
 	}
@@ -45,7 +48,7 @@ func (b *Builder) FromToken(token antlr.Token) location.Span {
 }
 
 // FromContext creates a Span covering the entire parser rule context.
-func (b *Builder) FromContext(ctx antlr.ParserRuleContext) location.Span {
+func (b *spanBuilder) FromContext(ctx antlr.ParserRuleContext) location.Span {
 	if ctx == nil {
 		return location.Span{}
 	}
@@ -70,7 +73,7 @@ func (b *Builder) FromContext(ctx antlr.ParserRuleContext) location.Span {
 }
 
 // FromTokens creates a Span covering a range of tokens.
-func (b *Builder) FromTokens(start, stop antlr.Token) location.Span {
+func (b *spanBuilder) FromTokens(start, stop antlr.Token) location.Span {
 	if start == nil {
 		return location.Span{}
 	}
@@ -87,7 +90,7 @@ func (b *Builder) FromTokens(start, stop antlr.Token) location.Span {
 }
 
 // fromRuneOffsets creates a Span from rune-based start/end offsets.
-func (b *Builder) fromRuneOffsets(startRune, endRune int) location.Span {
+func (b *spanBuilder) fromRuneOffsets(startRune, endRune int) location.Span {
 	startByte := mustRuneToByteOffset(b.converter, b.sourceID, startRune)
 	endByte := mustRuneToByteOffset(b.converter, b.sourceID, endRune)
 
@@ -111,14 +114,6 @@ func mustRuneToByteOffset(conv location.RuneOffsetConverter, src location.Source
 // mustPositionAt converts a byte offset to a Position, panicking if the
 // registry returns a zero Position. This enforces the schema parsing invariant
 // that all byte offsets derived from ANTLR tokens must be resolvable.
-//
-// A zero Position during schema parsing indicates:
-//   - A bug in RuneToByteOffset (rune→byte conversion)
-//   - A bug in the ANTLR offset derivation pipeline
-//   - Source ID mismatch (wrong SourceID passed to registry)
-//   - Race condition (source cleared mid-parse)
-//
-// All of these are programmer errors, not content errors.
 func mustPositionAt(reg location.PositionRegistry, src location.SourceID, byteOffset int) location.Position {
 	pos := reg.PositionAt(src, byteOffset)
 	if pos.IsZero() {
@@ -127,18 +122,12 @@ func mustPositionAt(reg location.PositionRegistry, src location.SourceID, byteOf
 	return pos
 }
 
-// MustPositionAt is the exported version of mustPositionAt for use by other
-// packages that need the same invariant enforcement.
-func MustPositionAt(reg location.PositionRegistry, src location.SourceID, byteOffset int) location.Position {
-	return mustPositionAt(reg, src, byteOffset)
-}
-
 // Registry returns the underlying PositionRegistry.
-func (b *Builder) Registry() location.PositionRegistry {
+func (b *spanBuilder) Registry() location.PositionRegistry {
 	return b.registry
 }
 
 // Converter returns the underlying RuneOffsetConverter.
-func (b *Builder) Converter() location.RuneOffsetConverter {
+func (b *spanBuilder) Converter() location.RuneOffsetConverter {
 	return b.converter
 }

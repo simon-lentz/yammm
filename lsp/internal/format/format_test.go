@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/schema/load"
+	"github.com/simon-lentz/yammm/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -679,7 +679,7 @@ type JapaneseUser {
 	// Verify formatTokenStream result is parseable
 	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	s, diagResult, err := load.String(ctx, tsResult, "test")
+	s, diagResult, err := schema.LoadString(ctx, tsResult, "test")
 	require.NoError(t, err, "formatTokenStream output failed to load")
 	if !diagResult.OK() {
 		for issue := range diagResult.Issues() {

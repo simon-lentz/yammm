@@ -1,11 +1,10 @@
-package complete
+package schema
 
 import (
 	"maps"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
 
@@ -15,14 +14,14 @@ import (
 // (nil means unknown type -- skip member access validation).
 type staticScope struct {
 	names map[string]bool
-	vars  map[string]*schema.Type
+	vars  map[string]*Type
 }
 
 // buildStaticScope creates a staticScope from a completed type's merged members.
-func buildStaticScope(t *schema.Type) *staticScope {
+func buildStaticScope(t *Type) *staticScope {
 	scope := &staticScope{
 		names: make(map[string]bool),
-		vars:  make(map[string]*schema.Type),
+		vars:  make(map[string]*Type),
 	}
 
 	// Add all property names (own + inherited)
@@ -48,8 +47,8 @@ func (s *staticScope) hasName(name string) bool {
 
 // child returns a new scope with an additional lambda variable binding.
 // targetType may be nil if the type is unknown.
-func (s *staticScope) child(varName string, targetType *schema.Type) *staticScope {
-	newVars := make(map[string]*schema.Type, len(s.vars)+1)
+func (s *staticScope) child(varName string, targetType *Type) *staticScope {
+	newVars := make(map[string]*Type, len(s.vars)+1)
 	maps.Copy(newVars, s.vars)
 	newVars[varName] = targetType
 	return &staticScope{
@@ -84,7 +83,7 @@ func (c *completer) validateInvariantExpressions() bool {
 }
 
 // walkExpr recursively validates property/variable references in an expression.
-func (c *completer) walkExpr(e expr.Expression, scope *staticScope, ownerType *schema.Type, inv *schema.Invariant) bool {
+func (c *completer) walkExpr(e expr.Expression, scope *staticScope, ownerType *Type, inv *Invariant) bool {
 	if e == nil {
 		return true
 	}
@@ -114,7 +113,7 @@ var collectionBuiltins = map[string]bool{
 }
 
 // walkSExpr dispatches s-expression validation based on the operation.
-func (c *completer) walkSExpr(sexpr expr.SExpr, scope *staticScope, ownerType *schema.Type, inv *schema.Invariant) bool {
+func (c *completer) walkSExpr(sexpr expr.SExpr, scope *staticScope, ownerType *Type, inv *Invariant) bool {
 	op := sexpr.Op()
 	children := sexpr.Children()
 
@@ -152,7 +151,7 @@ func (c *completer) walkSExpr(sexpr expr.SExpr, scope *staticScope, ownerType *s
 // walkCollectionBuiltin handles All, Any, AllOrNone, Filter, Map, Count.
 // AST shape: SExpr{Op(name), lhs, args?, params?, body?}
 // The lambda parameter is bound to the LHS relation's target type.
-func (c *completer) walkCollectionBuiltin(children []expr.Expression, scope *staticScope, ownerType *schema.Type, inv *schema.Invariant) bool {
+func (c *completer) walkCollectionBuiltin(children []expr.Expression, scope *staticScope, ownerType *Type, inv *Invariant) bool {
 	ok := true
 
 	if len(children) == 0 {
@@ -200,7 +199,7 @@ func (c *completer) walkCollectionBuiltin(children []expr.Expression, scope *sta
 
 // walkReduceBuiltin handles Reduce with 2 lambda params (accumulator + element).
 // The accumulator type is unknown; the element type comes from the LHS relation target.
-func (c *completer) walkReduceBuiltin(children []expr.Expression, scope *staticScope, ownerType *schema.Type, inv *schema.Invariant) bool {
+func (c *completer) walkReduceBuiltin(children []expr.Expression, scope *staticScope, ownerType *Type, inv *Invariant) bool {
 	ok := true
 
 	if len(children) == 0 {
@@ -247,7 +246,7 @@ func (c *completer) walkReduceBuiltin(children []expr.Expression, scope *staticS
 
 // walkThenWithBuiltin handles Then and With.
 // Lambda param type is unknown (LHS could be anything).
-func (c *completer) walkThenWithBuiltin(children []expr.Expression, scope *staticScope, ownerType *schema.Type, inv *schema.Invariant) bool {
+func (c *completer) walkThenWithBuiltin(children []expr.Expression, scope *staticScope, ownerType *Type, inv *Invariant) bool {
 	ok := true
 
 	if len(children) == 0 {
@@ -289,7 +288,7 @@ func (c *completer) walkThenWithBuiltin(children []expr.Expression, scope *stati
 }
 
 // walkProperty validates a bare property reference: Op("p") with Literal{name}.
-func (c *completer) walkProperty(children []expr.Expression, scope *staticScope, ownerType *schema.Type, inv *schema.Invariant) bool {
+func (c *completer) walkProperty(children []expr.Expression, scope *staticScope, ownerType *Type, inv *Invariant) bool {
 	if len(children) != 1 {
 		return true // malformed -- skip
 	}
@@ -344,7 +343,7 @@ func (c *completer) walkVariable(children []expr.Expression, scope *staticScope)
 }
 
 // walkMemberAccess validates member access: Op(".") with LHS and Literal{member}.
-func (c *completer) walkMemberAccess(children []expr.Expression, scope *staticScope, ownerType *schema.Type, inv *schema.Invariant) bool {
+func (c *completer) walkMemberAccess(children []expr.Expression, scope *staticScope, ownerType *Type, inv *Invariant) bool {
 	if len(children) < 2 {
 		return true
 	}
@@ -446,7 +445,7 @@ func (c *completer) extractVarName(e expr.Expression) string {
 
 // lookupRelationTarget finds a relation on the type by field name and returns its target type.
 // Returns nil if the field name is not a relation or the target cannot be resolved.
-func (c *completer) lookupRelationTarget(ownerType *schema.Type, fieldName string) *schema.Type {
+func (c *completer) lookupRelationTarget(ownerType *Type, fieldName string) *Type {
 	lower := strings.ToLower(fieldName)
 
 	for _, r := range ownerType.AllAssociationsSlice() {
@@ -466,7 +465,7 @@ func (c *completer) lookupRelationTarget(ownerType *schema.Type, fieldName strin
 
 // lookupRelationTargetForExpr extracts a property name from an expression and
 // resolves it to a relation target type. Used for determining lambda parameter types.
-func (c *completer) lookupRelationTargetForExpr(e expr.Expression, ownerType *schema.Type) *schema.Type {
+func (c *completer) lookupRelationTargetForExpr(e expr.Expression, ownerType *Type) *Type {
 	sexpr, ok := e.(expr.SExpr)
 	if !ok {
 		return nil

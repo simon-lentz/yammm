@@ -7,7 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 
-	"github.com/simon-lentz/yammm/schema/load"
+	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
@@ -164,7 +164,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 		overlays := map[string][]byte{
 			virtualPath: []byte(block.Content),
 		}
-		snapshot, err := w.sched.analyzer.Analyze(analyzeCtx, virtualPath, overlays, "", w.PositionEncoding(), load.WithDisallowImports())
+		snapshot, err := w.sched.analyzer.Analyze(analyzeCtx, virtualPath, overlays, "", w.PositionEncoding(), schema.WithDisallowImports())
 		if err != nil {
 			w.logger.Warn("markdown block analysis failed",
 				slog.String("uri", uri), slog.Int("block", i), slog.Any("error", err))

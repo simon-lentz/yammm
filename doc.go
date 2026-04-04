@@ -25,9 +25,9 @@
 //
 // Schema loading:
 //
-//	import "github.com/simon-lentz/yammm/schema/load"
+//	import "github.com/simon-lentz/yammm/schema"
 //
-//	schema, result, err := load.Load(ctx, "path/to/schema.yammm")
+//	s, result, err := schema.Load(ctx, "path/to/schema.yammm")
 //	if err != nil {
 //	    // I/O or internal error
 //	}

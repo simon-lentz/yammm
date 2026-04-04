@@ -1,16 +1,13 @@
-package complete_test
+package schema_test
 
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/internal/complete"
-	"github.com/simon-lentz/yammm/schema/internal/parse"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func sourceID(t *testing.T, name string) location.SourceID {
@@ -19,14 +16,14 @@ func sourceID(t *testing.T, name string) location.SourceID {
 }
 
 func TestComplete_EmptySchema(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
 	}
 
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "empty.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.Equal(t, "test", s.Name())
@@ -34,12 +31,12 @@ func TestComplete_EmptySchema(t *testing.T) {
 }
 
 func TestComplete_SingleType(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
@@ -52,7 +49,7 @@ func TestComplete_SingleType(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "person.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	require.False(t, collector.HasErrors())
@@ -67,9 +64,9 @@ func TestComplete_SingleType(t *testing.T) {
 }
 
 func TestComplete_DuplicateType(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Person"},
 			{Name: "Person"},
 		},
@@ -78,25 +75,25 @@ func TestComplete_DuplicateType(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "dup.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_InheritanceCycle(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "A",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "B"},
 				},
 			},
 			{
 				Name: "B",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "A"},
 				},
 			},
@@ -106,19 +103,19 @@ func TestComplete_InheritanceCycle(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "cycle.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_SimpleInheritance(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Base",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "id",
 						Constraint: schema.NewStringConstraint(),
@@ -127,10 +124,10 @@ func TestComplete_SimpleInheritance(t *testing.T) {
 			},
 			{
 				Name: "Derived",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Base"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
@@ -143,7 +140,7 @@ func TestComplete_SimpleInheritance(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "inherit.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	require.False(t, collector.HasErrors())
@@ -170,12 +167,12 @@ func TestComplete_SimpleInheritance(t *testing.T) {
 }
 
 func TestComplete_CaseCollision(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Base",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
@@ -184,10 +181,10 @@ func TestComplete_CaseCollision(t *testing.T) {
 			},
 			{
 				Name: "Derived",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Base"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "Name", // Case collision with inherited "name"
 						Constraint: schema.NewStringConstraint(),
@@ -200,19 +197,19 @@ func TestComplete_CaseCollision(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "case.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_ReservedPrefix(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "_target_foo", // Reserved prefix
 						Constraint: schema.NewStringConstraint(),
@@ -225,16 +222,16 @@ func TestComplete_ReservedPrefix(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "reserved.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_InvalidImportAlias(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			{
 				Path:  "./other",
 				Alias: "type", // Reserved keyword
@@ -245,7 +242,7 @@ func TestComplete_InvalidImportAlias(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "alias.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
@@ -255,7 +252,7 @@ func TestComplete_NilModel(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "nil.yammm")
 
-	s := complete.Complete(nil, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(nil, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
@@ -263,12 +260,12 @@ func TestComplete_NilModel(t *testing.T) {
 
 func TestComplete_DiamondInheritance(t *testing.T) {
 	// Diamond pattern: D -> B, C -> A
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "A",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "id",
 						Constraint: schema.NewStringConstraint(),
@@ -277,19 +274,19 @@ func TestComplete_DiamondInheritance(t *testing.T) {
 			},
 			{
 				Name: "B",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "A"},
 				},
 			},
 			{
 				Name: "C",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "A"},
 				},
 			},
 			{
 				Name: "D",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "B"},
 					{Name: "C"},
 				},
@@ -300,7 +297,7 @@ func TestComplete_DiamondInheritance(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "diamond.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	require.False(t, collector.HasErrors())
@@ -318,15 +315,15 @@ func TestComplete_DiamondInheritance(t *testing.T) {
 
 func TestComplete_ForwardReferenceInheritance(t *testing.T) {
 	// Derived declared BEFORE Base - tests declaration order independence
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Derived",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Base"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
@@ -335,7 +332,7 @@ func TestComplete_ForwardReferenceInheritance(t *testing.T) {
 			},
 			{
 				Name: "Base",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "id",
 						Constraint: schema.NewStringConstraint(),
@@ -348,7 +345,7 @@ func TestComplete_ForwardReferenceInheritance(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "forward.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	require.False(t, collector.HasErrors())
@@ -382,15 +379,15 @@ func TestComplete_ForwardReferenceInheritance(t *testing.T) {
 func TestComplete_DeepChainForwardReference(t *testing.T) {
 	// Types declared in REVERSE order: D -> C -> B -> A
 	// Tests multi-level inheritance chain with forward references
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "D",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "C"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "d_prop",
 						Constraint: schema.NewStringConstraint(),
@@ -399,10 +396,10 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 			},
 			{
 				Name: "C",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "B"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "c_prop",
 						Constraint: schema.NewStringConstraint(),
@@ -411,10 +408,10 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 			},
 			{
 				Name: "B",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "A"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "b_prop",
 						Constraint: schema.NewStringConstraint(),
@@ -423,7 +420,7 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 			},
 			{
 				Name: "A",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "a_prop",
 						Constraint: schema.NewStringConstraint(),
@@ -436,7 +433,7 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "deep_chain.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	require.False(t, collector.HasErrors())
@@ -479,19 +476,19 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 
 func TestComplete_CompositionTarget_MustBePart(t *testing.T) {
 	// Composition targeting a non-part type should fail
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Regular", // Not a part type
 			},
 			{
 				Name: "Container",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationComposition,
+						Kind:   schema.RelationComposition,
 						Name:   "item",
-						Target: &parse.TypeRef{Name: "Regular"},
+						Target: &schema.TestASTTypeRef{Name: "Regular"},
 					},
 				},
 			},
@@ -501,7 +498,7 @@ func TestComplete_CompositionTarget_MustBePart(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "comp_non_part.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors(), "composition to non-part type should error")
@@ -509,9 +506,9 @@ func TestComplete_CompositionTarget_MustBePart(t *testing.T) {
 
 func TestComplete_CompositionTarget_CannotBeAbstract(t *testing.T) {
 	// Composition targeting an abstract part type should fail
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "AbstractPart",
 				IsPart:     true,
@@ -519,11 +516,11 @@ func TestComplete_CompositionTarget_CannotBeAbstract(t *testing.T) {
 			},
 			{
 				Name: "Container",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationComposition,
+						Kind:   schema.RelationComposition,
 						Name:   "item",
-						Target: &parse.TypeRef{Name: "AbstractPart"},
+						Target: &schema.TestASTTypeRef{Name: "AbstractPart"},
 					},
 				},
 			},
@@ -533,7 +530,7 @@ func TestComplete_CompositionTarget_CannotBeAbstract(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "comp_abstract.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors(), "composition to abstract part should error")
@@ -541,20 +538,20 @@ func TestComplete_CompositionTarget_CannotBeAbstract(t *testing.T) {
 
 func TestComplete_CompositionTarget_Valid(t *testing.T) {
 	// Valid composition: targeting a concrete part type
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:   "Part",
 				IsPart: true,
 			},
 			{
 				Name: "Container",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationComposition,
+						Kind:   schema.RelationComposition,
 						Name:   "item",
-						Target: &parse.TypeRef{Name: "Part"},
+						Target: &schema.TestASTTypeRef{Name: "Part"},
 					},
 				},
 			},
@@ -564,7 +561,7 @@ func TestComplete_CompositionTarget_Valid(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "comp_valid.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -599,12 +596,12 @@ func (m *mockRegistry) LookupByName(_ string) (*schema.Schema, bool) {
 func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 	// Create base schema with a type we'll inherit from
 	baseSourceID := sourceID(t, "base.yammm")
-	baseModel := &parse.Model{
+	baseModel := &schema.TestModel{
 		Name: "base",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "BaseType",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "id",
 						Constraint: schema.NewStringConstraint(),
@@ -614,7 +611,7 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 		},
 	}
 	baseCollector := diag.NewCollector(0)
-	baseSchema := complete.Complete(baseModel, baseSourceID, baseCollector, nil, nil)
+	baseSchema := schema.TestCompleteModel(baseModel, baseSourceID, baseCollector, nil, nil)
 	require.NotNil(t, baseSchema)
 	require.False(t, baseCollector.HasErrors())
 
@@ -627,21 +624,21 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 
 	// Create derived schema that inherits from base
 	derivedSourceID := sourceID(t, "derived.yammm")
-	derivedModel := &parse.Model{
+	derivedModel := &schema.TestModel{
 		Name: "derived",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			{
 				Path:  "base",
 				Alias: "base",
 			},
 		},
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "DerivedType",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Qualifier: "base", Name: "BaseType"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
@@ -657,7 +654,7 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 	}
 
 	derivedCollector := diag.NewCollector(0)
-	derivedSchema := complete.Complete(derivedModel, derivedSourceID, derivedCollector, registry, resolvedImports)
+	derivedSchema := schema.TestCompleteModel(derivedModel, derivedSourceID, derivedCollector, registry, resolvedImports)
 
 	require.NotNil(t, derivedSchema, "cross-schema inheritance should succeed with registry")
 	assert.False(t, derivedCollector.HasErrors())
@@ -684,18 +681,18 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 func TestComplete_CrossSchemaInheritance_DeferredWithoutRegistry(t *testing.T) {
 	// When registry is nil, cross-schema references should be deferred
 	// (not an error, just unresolved)
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			{
 				Path:  "other",
 				Alias: "other",
 			},
 		},
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "MyType",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Qualifier: "other", Name: "BaseType"},
 				},
 			},
@@ -707,7 +704,7 @@ func TestComplete_CrossSchemaInheritance_DeferredWithoutRegistry(t *testing.T) {
 
 	// With nil registry, cross-schema references are deferred to linking phase
 	// The Complete function should not error for qualified refs when registry is nil
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	// Note: This behavior depends on implementation - if cross-schema refs
 	// without registry are deferred, this should succeed. If they error
@@ -724,9 +721,9 @@ func TestComplete_CrossSchemaInheritance_DeferredWithoutRegistry(t *testing.T) {
 // ============================================================================
 
 func TestComplete_DataType_Simple(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		DataTypes: []*parse.DataTypeDecl{
+		DataTypes: []*schema.TestDataTypeDecl{
 			{
 				Name:       "Email",
 				Constraint: schema.NewStringConstraint(),
@@ -737,7 +734,7 @@ func TestComplete_DataType_Simple(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "datatype.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -748,9 +745,9 @@ func TestComplete_DataType_Simple(t *testing.T) {
 }
 
 func TestComplete_DataType_Duplicate(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		DataTypes: []*parse.DataTypeDecl{
+		DataTypes: []*schema.TestDataTypeDecl{
 			{Name: "Email", Constraint: schema.NewStringConstraint()},
 			{Name: "Email", Constraint: schema.NewStringConstraint()},
 		},
@@ -759,16 +756,16 @@ func TestComplete_DataType_Duplicate(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "dup_datatype.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_DataType_Multiple(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		DataTypes: []*parse.DataTypeDecl{
+		DataTypes: []*schema.TestDataTypeDecl{
 			{Name: "Email", Constraint: schema.NewStringConstraint()},
 			{Name: "Phone", Constraint: schema.NewStringConstraint()},
 			{Name: "Age", Constraint: schema.NewIntegerConstraint()},
@@ -778,7 +775,7 @@ func TestComplete_DataType_Multiple(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "multi_datatype.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -786,9 +783,9 @@ func TestComplete_DataType_Multiple(t *testing.T) {
 }
 
 func TestComplete_DataType_NilSkipped(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		DataTypes: []*parse.DataTypeDecl{
+		DataTypes: []*schema.TestDataTypeDecl{
 			nil, // nil entry should be skipped
 			{Name: "Email", Constraint: schema.NewStringConstraint()},
 		},
@@ -797,7 +794,7 @@ func TestComplete_DataType_NilSkipped(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "nil_datatype.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -809,15 +806,15 @@ func TestComplete_DataType_NilSkipped(t *testing.T) {
 // ============================================================================
 
 func TestComplete_Invariant_Single(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{Name: "age", Constraint: schema.NewIntegerConstraint()},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{Name: "valid_age", Expr: nil}, // nil expression is valid for testing
 				},
 			},
@@ -827,7 +824,7 @@ func TestComplete_Invariant_Single(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "invariant.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -841,16 +838,16 @@ func TestComplete_Invariant_Single(t *testing.T) {
 }
 
 func TestComplete_Invariant_Multiple(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{Name: "min", Constraint: schema.NewIntegerConstraint()},
 					{Name: "max", Constraint: schema.NewIntegerConstraint()},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{Name: "min_valid", Expr: nil},
 					{Name: "max_valid", Expr: nil},
 				},
@@ -861,7 +858,7 @@ func TestComplete_Invariant_Multiple(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "multi_invariant.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -874,12 +871,12 @@ func TestComplete_Invariant_Multiple(t *testing.T) {
 }
 
 func TestComplete_Invariant_NilSkipped(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					nil, // nil entry should be skipped
 					{Name: "check", Expr: nil},
 				},
@@ -890,7 +887,7 @@ func TestComplete_Invariant_NilSkipped(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "nil_invariant.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -908,22 +905,22 @@ func TestComplete_Invariant_NilSkipped(t *testing.T) {
 
 func TestComplete_RelationNormalizationCollision_Associations(t *testing.T) {
 	// Two associations with different raw names that normalize to same field name
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Target"},
 			{
 				Name: "Person",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "BestFriend",
-						Target: &parse.TypeRef{Name: "Target"},
+						Target: &schema.TestASTTypeRef{Name: "Target"},
 					},
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "best_friend", // Normalizes to same as BestFriend
-						Target: &parse.TypeRef{Name: "Target"},
+						Target: &schema.TestASTTypeRef{Name: "Target"},
 					},
 				},
 			},
@@ -933,7 +930,7 @@ func TestComplete_RelationNormalizationCollision_Associations(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "rel_collision.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
@@ -941,23 +938,23 @@ func TestComplete_RelationNormalizationCollision_Associations(t *testing.T) {
 
 func TestComplete_RelationNormalizationCollision_AssociationAndComposition(t *testing.T) {
 	// Association and composition with same normalized field name
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "RegularType"},
 			{Name: "PartType", IsPart: true},
 			{
 				Name: "Container",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "Items",
-						Target: &parse.TypeRef{Name: "RegularType"},
+						Target: &schema.TestASTTypeRef{Name: "RegularType"},
 					},
 					{
-						Kind:   parse.RelationComposition,
+						Kind:   schema.RelationComposition,
 						Name:   "items", // Normalizes to same as Items
-						Target: &parse.TypeRef{Name: "PartType"},
+						Target: &schema.TestASTTypeRef{Name: "PartType"},
 					},
 				},
 			},
@@ -967,7 +964,7 @@ func TestComplete_RelationNormalizationCollision_AssociationAndComposition(t *te
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "rel_collision_mixed.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
@@ -978,20 +975,20 @@ func TestComplete_RelationNormalizationCollision_AssociationAndComposition(t *te
 // ============================================================================
 
 func TestComplete_PropertyRelationCollision_Association(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Target"},
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{Name: "friend", Constraint: schema.NewStringConstraint()},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "Friend", // Normalizes to "friend", collides with property
-						Target: &parse.TypeRef{Name: "Target"},
+						Target: &schema.TestASTTypeRef{Name: "Target"},
 					},
 				},
 			},
@@ -1001,27 +998,27 @@ func TestComplete_PropertyRelationCollision_Association(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "prop_rel_collision.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_PropertyRelationCollision_Composition(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "PartType", IsPart: true},
 			{
 				Name: "Container",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{Name: "items", Constraint: schema.NewStringConstraint()},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationComposition,
+						Kind:   schema.RelationComposition,
 						Name:   "Items", // Normalizes to "items", collides with property
-						Target: &parse.TypeRef{Name: "PartType"},
+						Target: &schema.TestASTTypeRef{Name: "PartType"},
 					},
 				},
 			},
@@ -1031,7 +1028,7 @@ func TestComplete_PropertyRelationCollision_Composition(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "prop_comp_collision.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
@@ -1046,17 +1043,17 @@ func TestComplete_PropertyRelationCollision_Composition(t *testing.T) {
 
 func TestComplete_Association_ValidTarget(t *testing.T) {
 	// Test that a valid association with proper target works
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Target"},
 			{
 				Name: "Person",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "myFriend",
-						Target: &parse.TypeRef{Name: "Target"},
+						Target: &schema.TestASTTypeRef{Name: "Target"},
 					},
 				},
 			},
@@ -1066,7 +1063,7 @@ func TestComplete_Association_ValidTarget(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "valid_assoc.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -1074,17 +1071,17 @@ func TestComplete_Association_ValidTarget(t *testing.T) {
 
 func TestComplete_Composition_ValidTarget(t *testing.T) {
 	// Test that a valid composition with a part type target works
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "PartType", IsPart: true},
 			{
 				Name: "Container",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationComposition,
+						Kind:   schema.RelationComposition,
 						Name:   "MyPart",
-						Target: &parse.TypeRef{Name: "PartType"},
+						Target: &schema.TestASTTypeRef{Name: "PartType"},
 					},
 				},
 			},
@@ -1094,7 +1091,7 @@ func TestComplete_Composition_ValidTarget(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "valid_comp.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -1105,18 +1102,18 @@ func TestComplete_Composition_ValidTarget(t *testing.T) {
 // ============================================================================
 
 func TestComplete_AssociationTarget_Valid(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Person"},
 			{Name: "Company"},
 			{
 				Name: "Employee",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "employer",
-						Target: &parse.TypeRef{Name: "Company"},
+						Target: &schema.TestASTTypeRef{Name: "Company"},
 					},
 				},
 			},
@@ -1126,23 +1123,23 @@ func TestComplete_AssociationTarget_Valid(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "assoc_valid.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
 }
 
 func TestComplete_AssociationTarget_UnknownType(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "friend",
-						Target: &parse.TypeRef{Name: "NonExistent"},
+						Target: &schema.TestASTTypeRef{Name: "NonExistent"},
 					},
 				},
 			},
@@ -1152,26 +1149,26 @@ func TestComplete_AssociationTarget_UnknownType(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "assoc_unknown.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_AssociationTarget_CrossSchema_DeferredWithoutRegistry(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			{Path: "other", Alias: "other"},
 		},
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "external",
-						Target: &parse.TypeRef{Qualifier: "other", Name: "ExternalType"},
+						Target: &schema.TestASTTypeRef{Qualifier: "other", Name: "ExternalType"},
 					},
 				},
 			},
@@ -1182,7 +1179,7 @@ func TestComplete_AssociationTarget_CrossSchema_DeferredWithoutRegistry(t *testi
 	srcID := sourceID(t, "assoc_cross.yammm")
 
 	// Without registry, cross-schema refs are deferred
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	// Should not error - deferred to linking phase
 	if s != nil {
@@ -1195,30 +1192,30 @@ func TestComplete_AssociationTarget_CrossSchema_DeferredWithoutRegistry(t *testi
 // ============================================================================
 
 func TestComplete_RelationInheritance_Associations(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Target"},
 			{
 				Name: "Base",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "parent",
-						Target: &parse.TypeRef{Name: "Target"},
+						Target: &schema.TestASTTypeRef{Name: "Target"},
 					},
 				},
 			},
 			{
 				Name: "Derived",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Base"},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "child",
-						Target: &parse.TypeRef{Name: "Target"},
+						Target: &schema.TestASTTypeRef{Name: "Target"},
 					},
 				},
 			},
@@ -1228,7 +1225,7 @@ func TestComplete_RelationInheritance_Associations(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "rel_inherit.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -1245,31 +1242,31 @@ func TestComplete_RelationInheritance_Associations(t *testing.T) {
 }
 
 func TestComplete_RelationInheritance_Compositions(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "PartA", IsPart: true},
 			{Name: "PartB", IsPart: true},
 			{
 				Name: "Base",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationComposition,
+						Kind:   schema.RelationComposition,
 						Name:   "partA",
-						Target: &parse.TypeRef{Name: "PartA"},
+						Target: &schema.TestASTTypeRef{Name: "PartA"},
 					},
 				},
 			},
 			{
 				Name: "Derived",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Base"},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationComposition,
+						Kind:   schema.RelationComposition,
 						Name:   "partB",
-						Target: &parse.TypeRef{Name: "PartB"},
+						Target: &schema.TestASTTypeRef{Name: "PartB"},
 					},
 				},
 			},
@@ -1279,7 +1276,7 @@ func TestComplete_RelationInheritance_Compositions(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "comp_inherit.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -1298,35 +1295,35 @@ func TestComplete_RelationInheritance_Compositions(t *testing.T) {
 func TestComplete_RelationInheritance_ConflictingDifferentOptional(t *testing.T) {
 	// Conflicting relations from different ancestors - different optional flag
 	// This should trigger E_RELATION_COLLISION because the relations are not Equal()
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Target"},
 			{
 				Name: "BaseA",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:     parse.RelationAssociation,
+						Kind:     schema.RelationAssociation,
 						Name:     "ref",
-						Target:   &parse.TypeRef{Name: "Target"},
+						Target:   &schema.TestASTTypeRef{Name: "Target"},
 						Optional: false,
 					},
 				},
 			},
 			{
 				Name: "BaseB",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:     parse.RelationAssociation,
+						Kind:     schema.RelationAssociation,
 						Name:     "ref", // Same field name, different optional flag
-						Target:   &parse.TypeRef{Name: "Target"},
+						Target:   &schema.TestASTTypeRef{Name: "Target"},
 						Optional: true, // Different from BaseA
 					},
 				},
 			},
 			{
 				Name: "Derived",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "BaseA"},
 					{Name: "BaseB"},
 				},
@@ -1337,7 +1334,7 @@ func TestComplete_RelationInheritance_ConflictingDifferentOptional(t *testing.T)
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "rel_conflict.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
@@ -1348,9 +1345,9 @@ func TestComplete_RelationInheritance_ConflictingDifferentOptional(t *testing.T)
 // ============================================================================
 
 func TestComplete_Import_InvalidAlias_StartsWithNumber(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			{Path: "other", Alias: "123invalid"},
 		},
 	}
@@ -1358,16 +1355,16 @@ func TestComplete_Import_InvalidAlias_StartsWithNumber(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "import_invalid.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_Import_DuplicateAlias(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			{Path: "first", Alias: "other"},
 			{Path: "second", Alias: "other"}, // Duplicate alias
 		},
@@ -1376,7 +1373,7 @@ func TestComplete_Import_DuplicateAlias(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "import_dup.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
@@ -1384,9 +1381,9 @@ func TestComplete_Import_DuplicateAlias(t *testing.T) {
 
 func TestComplete_Import_DuplicateSourceID(t *testing.T) {
 	// Two imports with different aliases but same resolved SourceID
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			{Path: "common.yammm", Alias: "c", Span: location.Span{Start: location.Position{Line: 5}}},
 			{Path: "common.yammm", Alias: "common", Span: location.Span{Start: location.Position{Line: 12}}},
 		},
@@ -1402,7 +1399,7 @@ func TestComplete_Import_DuplicateSourceID(t *testing.T) {
 		"common": commonSourceID, // Same SourceID!
 	}
 
-	s := complete.Complete(model, srcID, collector, nil, resolvedImports)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, resolvedImports)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
@@ -1415,12 +1412,12 @@ func TestComplete_Import_DuplicateSourceID(t *testing.T) {
 }
 
 func TestComplete_Import_CollidesWithLocalType(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			{Path: "other", Alias: "Person"}, // Collides with local type
 		},
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Person"},
 		},
 	}
@@ -1428,16 +1425,16 @@ func TestComplete_Import_CollidesWithLocalType(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "import_collision.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_Import_NilSkipped(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			nil, // nil entry should be skipped
 		},
 	}
@@ -1445,16 +1442,16 @@ func TestComplete_Import_NilSkipped(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "import_nil.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
 }
 
 func TestComplete_Import_MissingResolution(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Imports: []*parse.ImportDecl{
+		Imports: []*schema.TestImportDecl{
 			{Path: "other", Alias: "other"},
 		},
 	}
@@ -1465,7 +1462,7 @@ func TestComplete_Import_MissingResolution(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "import_missing_res.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, resolvedImports)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, resolvedImports)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
@@ -1476,18 +1473,18 @@ func TestComplete_Import_MissingResolution(t *testing.T) {
 // ============================================================================
 
 func TestComplete_Association_WithEdgeProperties(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Target"},
 			{
 				Name: "Person",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "friend",
-						Target: &parse.TypeRef{Name: "Target"},
-						Properties: []*parse.PropertyDecl{
+						Target: &schema.TestASTTypeRef{Name: "Target"},
+						Properties: []*schema.TestPropertyDecl{
 							{Name: "since", Constraint: schema.NewDateConstraint()},
 							{Name: "closeness", Constraint: schema.NewIntegerConstraint()},
 						},
@@ -1500,7 +1497,7 @@ func TestComplete_Association_WithEdgeProperties(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "edge_props.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -1522,18 +1519,18 @@ func TestComplete_Association_WithEdgeProperties(t *testing.T) {
 }
 
 func TestComplete_Association_EdgePropertyNilSkipped(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Target"},
 			{
 				Name: "Person",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "friend",
-						Target: &parse.TypeRef{Name: "Target"},
-						Properties: []*parse.PropertyDecl{
+						Target: &schema.TestASTTypeRef{Name: "Target"},
+						Properties: []*schema.TestPropertyDecl{
 							nil, // nil should be skipped
 							{Name: "since", Constraint: schema.NewDateConstraint()},
 						},
@@ -1546,7 +1543,7 @@ func TestComplete_Association_EdgePropertyNilSkipped(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "edge_props_nil.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -1557,12 +1554,12 @@ func TestComplete_Association_EdgePropertyNilSkipped(t *testing.T) {
 // ============================================================================
 
 func TestComplete_UnknownTypeInExtends(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Derived",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "NonExistent"}, // Unknown local type
 				},
 			},
@@ -1572,16 +1569,16 @@ func TestComplete_UnknownTypeInExtends(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "unknown_extends.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors())
 }
 
 func TestComplete_NilTypeDecl_Skipped(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			nil, // nil entry should be skipped
 			{Name: "Valid"},
 		},
@@ -1590,7 +1587,7 @@ func TestComplete_NilTypeDecl_Skipped(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "nil_type.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -1598,12 +1595,12 @@ func TestComplete_NilTypeDecl_Skipped(t *testing.T) {
 }
 
 func TestComplete_NilPropertyDecl_Skipped(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					nil, // nil should be skipped
 					{Name: "name", Constraint: schema.NewStringConstraint()},
 				},
@@ -1614,7 +1611,7 @@ func TestComplete_NilPropertyDecl_Skipped(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "nil_prop.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -1625,18 +1622,18 @@ func TestComplete_NilPropertyDecl_Skipped(t *testing.T) {
 }
 
 func TestComplete_NilRelationDecl_Skipped(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Target"},
 			{
 				Name: "Person",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					nil, // nil should be skipped
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "friend",
-						Target: &parse.TypeRef{Name: "Target"},
+						Target: &schema.TestASTTypeRef{Name: "Target"},
 					},
 				},
 			},
@@ -1646,20 +1643,20 @@ func TestComplete_NilRelationDecl_Skipped(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "nil_rel.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
 }
 
 func TestComplete_NilInheritsRef_Skipped(t *testing.T) {
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Base"},
 			{
 				Name: "Derived",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					nil, // nil should be skipped
 					{Name: "Base"},
 				},
@@ -1670,7 +1667,7 @@ func TestComplete_NilInheritsRef_Skipped(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "nil_inherit.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
@@ -1682,18 +1679,18 @@ func TestComplete_NilInheritsRef_Skipped(t *testing.T) {
 
 func TestComplete_PartType_CannotDeclareAssociation(t *testing.T) {
 	// Part types cannot declare associations - they are composition-only targets
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{Name: "Target"},
 			{
 				Name:   "PartType",
 				IsPart: true,
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "ref",
-						Target: &parse.TypeRef{Name: "Target"},
+						Target: &schema.TestASTTypeRef{Name: "Target"},
 					},
 				},
 			},
@@ -1703,7 +1700,7 @@ func TestComplete_PartType_CannotDeclareAssociation(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "part_assoc.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors(), "part type declaring association should error")
@@ -1718,20 +1715,20 @@ func TestComplete_PartType_CannotDeclareAssociation(t *testing.T) {
 
 func TestComplete_Association_CannotTargetPartType(t *testing.T) {
 	// Associations cannot target part types - only compositions can
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:   "PartType",
 				IsPart: true,
 			},
 			{
 				Name: "Container",
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
-						Kind:   parse.RelationAssociation,
+						Kind:   schema.RelationAssociation,
 						Name:   "ref",
-						Target: &parse.TypeRef{Name: "PartType"},
+						Target: &schema.TestASTTypeRef{Name: "PartType"},
 					},
 				},
 			},
@@ -1741,7 +1738,7 @@ func TestComplete_Association_CannotTargetPartType(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "assoc_part_target.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
 	assert.True(t, collector.HasErrors(), "association targeting part type should error")
@@ -1757,13 +1754,13 @@ func TestNarrowing_ValidConstraintNarrowing(t *testing.T) {
 	t.Parallel()
 
 	// Abstract Entity{age Integer[0,150] optional}, Adult extends Entity{age Integer[18,150] optional}
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "Entity",
 				IsAbstract: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "age",
 						Constraint: schema.IntegerBetween(0, 150),
@@ -1773,10 +1770,10 @@ func TestNarrowing_ValidConstraintNarrowing(t *testing.T) {
 			},
 			{
 				Name: "Adult",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Entity"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "age",
 						Constraint: schema.IntegerBetween(18, 150),
@@ -1790,7 +1787,7 @@ func TestNarrowing_ValidConstraintNarrowing(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "narrow_valid.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile with valid narrowing")
 	require.False(t, collector.HasErrors(), "valid narrowing should not produce errors")
@@ -1817,13 +1814,13 @@ func TestNarrowing_ValidModifierOverride(t *testing.T) {
 	t.Parallel()
 
 	// Abstract Base{name String[1,100] optional}, Child extends Base{name String[1,100] required}
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "Base",
 				IsAbstract: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.StringLenBetween(1, 100),
@@ -1833,10 +1830,10 @@ func TestNarrowing_ValidModifierOverride(t *testing.T) {
 			},
 			{
 				Name: "Child",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Base"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.StringLenBetween(1, 100),
@@ -1850,7 +1847,7 @@ func TestNarrowing_ValidModifierOverride(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "narrow_modifier.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile with optional->required narrowing")
 	require.False(t, collector.HasErrors(), "optional->required narrowing should not produce errors")
@@ -1867,13 +1864,13 @@ func TestNarrowing_WideningRejected(t *testing.T) {
 	t.Parallel()
 
 	// Entity{age Integer[0,150]}, BadChild extends Entity{age Integer[0,200]} -> E_PROPERTY_CONFLICT
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "Entity",
 				IsAbstract: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "age",
 						Constraint: schema.IntegerBetween(0, 150),
@@ -1883,10 +1880,10 @@ func TestNarrowing_WideningRejected(t *testing.T) {
 			},
 			{
 				Name: "BadChild",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Entity"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "age",
 						Constraint: schema.IntegerBetween(0, 200),
@@ -1900,7 +1897,7 @@ func TestNarrowing_WideningRejected(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "narrow_widening.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s, "widening should cause schema completion to fail")
 	assert.True(t, collector.HasErrors(), "widening should produce E_PROPERTY_CONFLICT")
@@ -1914,13 +1911,13 @@ func TestNarrowing_RequiredToOptionalRejected(t *testing.T) {
 	t.Parallel()
 
 	// Base{field String required}, Child extends Base{field String optional} -> E_PROPERTY_CONFLICT
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "Base",
 				IsAbstract: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "field",
 						Constraint: schema.NewStringConstraint(),
@@ -1930,10 +1927,10 @@ func TestNarrowing_RequiredToOptionalRejected(t *testing.T) {
 			},
 			{
 				Name: "Child",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Base"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "field",
 						Constraint: schema.NewStringConstraint(),
@@ -1947,7 +1944,7 @@ func TestNarrowing_RequiredToOptionalRejected(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "narrow_req_opt.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s, "required->optional widening should cause schema completion to fail")
 	assert.True(t, collector.HasErrors(), "required->optional should produce E_PROPERTY_CONFLICT")
@@ -1961,13 +1958,13 @@ func TestNarrowing_EnumSubset(t *testing.T) {
 	t.Parallel()
 
 	// Base{status Enum["a","b","c"]}, Restricted extends Base{status Enum["a","b"]} -> compiles
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "Base",
 				IsAbstract: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "status",
 						Constraint: schema.NewEnumConstraint([]string{"a", "b", "c"}),
@@ -1977,10 +1974,10 @@ func TestNarrowing_EnumSubset(t *testing.T) {
 			},
 			{
 				Name: "Restricted",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Base"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "status",
 						Constraint: schema.NewEnumConstraint([]string{"a", "b"}),
@@ -1994,7 +1991,7 @@ func TestNarrowing_EnumSubset(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "narrow_enum.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile with enum subset narrowing")
 	require.False(t, collector.HasErrors(), "enum subset narrowing should not produce errors")

@@ -8,7 +8,6 @@ import (
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 func TestParse_ValidPaths(t *testing.T) {
@@ -999,7 +998,7 @@ func TestParseWithSchema_ArrayIndexOnly(t *testing.T) {
 func buildTestSchema(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	sch, result := build.NewBuilder().
+	sch, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).

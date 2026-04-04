@@ -15,7 +15,6 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 // Test Schema Builders
@@ -23,7 +22,7 @@ import (
 func testSchemaSimple(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("simple").
 		WithSourceID(location.MustNewSourceID("test://simple.yammm")).
 		AddType("Person").
@@ -42,7 +41,7 @@ func testSchemaSimple(t *testing.T) *schema.Schema {
 func testSchemaMultiType(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("multi").
 		WithSourceID(location.MustNewSourceID("test://multi.yammm")).
 		AddType("Person").
@@ -64,7 +63,7 @@ func testSchemaMultiType(t *testing.T) *schema.Schema {
 func testSchemaWithAssociation(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("association").
 		WithSourceID(location.MustNewSourceID("test://association.yammm")).
 		AddType("Company").
@@ -87,7 +86,7 @@ func testSchemaWithAssociation(t *testing.T) *schema.Schema {
 func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("many_association").
 		WithSourceID(location.MustNewSourceID("test://many_association.yammm")).
 		AddType("Company").
@@ -110,7 +109,7 @@ func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
 func testSchemaWithComposition(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("composition").
 		WithSourceID(location.MustNewSourceID("test://composition.yammm")).
 		AddType("Item").
@@ -134,7 +133,7 @@ func testSchemaWithComposition(t *testing.T) *schema.Schema {
 func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("one_composition").
 		WithSourceID(location.MustNewSourceID("test://one_composition.yammm")).
 		AddType("Engine").
@@ -798,7 +797,7 @@ func TestMarshalObject_ManyCompositionSingleChild(t *testing.T) {
 func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("camelcase").
 		WithSourceID(location.MustNewSourceID("test://camelcase.yammm")).
 		AddType("Proxy").

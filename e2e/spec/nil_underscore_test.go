@@ -5,7 +5,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/schema/load"
+	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +42,7 @@ func TestE2E_NilUnderscore(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			t.Parallel()
 
-			s, result, err := load.Load(ctx, sc.file)
+			s, result, err := schema.Load(ctx, sc.file)
 			require.NoError(t, err, "load schema %s", sc.file)
 			require.True(t, result.OK(), "schema %s has errors: %v", sc.file, result.Messages())
 
@@ -94,7 +94,7 @@ func TestE2E_BuiltinLen(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/nil_underscore/data.json", "Record")
 
-	s, result, err := load.Load(ctx, "testdata/nil_underscore/builtin_len.yammm")
+	s, result, err := schema.Load(ctx, "testdata/nil_underscore/builtin_len.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 

@@ -7,12 +7,11 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 func ExampleValidator_ValidateOne() {
 	// Build a simple schema
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("example").
 		WithSourceID(location.MustNewSourceID("test://example.yammm")).
 		AddType("Person").
@@ -60,7 +59,7 @@ func ExampleValidator_ValidateOne() {
 
 func ExampleValidator_Validate() {
 	// Build schema
-	s, _ := build.NewBuilder().
+	s, _ := schema.NewBuilder().
 		WithName("example").
 		WithSourceID(location.MustNewSourceID("test://example.yammm")).
 		AddType("Product").

@@ -1,4 +1,4 @@
-// Package parse contains ANTLR offset semantics verification tests.
+// Package schema contains ANTLR offset semantics verification tests.
 //
 // These tests verify the critical assumption that ANTLR-Go's Token.GetStart()
 // and Token.GetStop() return rune (character) indices, NOT byte indices.
@@ -12,7 +12,7 @@
 //
 // If these tests fail after an ANTLR-Go version upgrade, span derivation
 // in schema/internal/parse and adapter/json must be re-verified.
-package parse_test
+package schema_test
 
 import (
 	"strings"

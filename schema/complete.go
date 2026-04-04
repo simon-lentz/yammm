@@ -1,4 +1,4 @@
-package complete
+package schema
 
 import (
 	"fmt"
@@ -8,23 +8,20 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/ident"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/internal/alias"
-	"github.com/simon-lentz/yammm/schema/internal/parse"
 )
 
-// Registry provides lookup for cross-schema type resolution.
+// completionRegistry provides lookup for cross-schema type resolution.
 // This interface is implemented by schema.Registry.
-type Registry interface {
+type completionRegistry interface {
 	// LookupBySourceID returns the schema at the given source ID, if loaded.
-	LookupBySourceID(id location.SourceID) (*schema.Schema, bool)
+	LookupBySourceID(id location.SourceID) (*Schema, bool)
 }
 
-// ResolvedImports maps import aliases to their resolved SourceIDs.
+// resolvedImportMap maps import aliases to their resolved SourceIDs.
 // Passed from the loader to enable cross-schema type resolution during completion.
-type ResolvedImports map[string]location.SourceID
+type resolvedImportMap map[string]location.SourceID
 
-// Complete transforms a parsed AST model into a completed Schema.
+// completeModel transforms a parsed AST model into a completed Schema.
 //
 // The completion process:
 //  1. Creates the Schema and indexes types/datatypes
@@ -39,26 +36,26 @@ type ResolvedImports map[string]location.SourceID
 // fails with fatal errors. The registry is optional; when nil, cross-schema
 // references are deferred. The resolvedImports map provides pre-resolved
 // import alias to SourceID mappings from the loader.
-func Complete(
-	model *parse.Model,
+func completeModel(
+	m *model,
 	sourceID location.SourceID,
 	collector *diag.Collector,
-	registry Registry,
-	resolvedImports ResolvedImports,
-) *schema.Schema {
-	if model == nil {
+	registry completionRegistry,
+	resolvedImports resolvedImportMap,
+) *Schema {
+	if m == nil {
 		collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "no model to complete").Build())
 		return nil
 	}
 
 	c := &completer{
-		model:           model,
+		model:           m,
 		sourceID:        sourceID,
 		collector:       collector,
 		registry:        registry,
 		resolvedImports: resolvedImports,
-		typeIndex:       make(map[string]*schema.Type),
-		dataIndex:       make(map[string]*schema.DataType),
+		typeIndex:       make(map[string]*Type),
+		dataIndex:       make(map[string]*DataType),
 	}
 
 	return c.complete()
@@ -66,19 +63,19 @@ func Complete(
 
 // completer holds state during schema completion.
 type completer struct {
-	model           *parse.Model
+	model           *model
 	sourceID        location.SourceID
 	collector       *diag.Collector
-	registry        Registry
-	resolvedImports ResolvedImports
-	schema          *schema.Schema
-	typeIndex       map[string]*schema.Type
-	dataIndex       map[string]*schema.DataType
+	registry        completionRegistry
+	resolvedImports resolvedImportMap
+	schema          *Schema
+	typeIndex       map[string]*Type
+	dataIndex       map[string]*DataType
 }
 
-func (c *completer) complete() *schema.Schema {
+func (c *completer) complete() *Schema {
 	// Create the schema shell
-	c.schema = schema.InternalNewSchema(
+	c.schema = newSchema(
 		c.model.Name,
 		c.sourceID,
 		c.model.Span,
@@ -141,19 +138,19 @@ func (c *completer) complete() *schema.Schema {
 
 	// Phase 8: Seal all types and relations to prevent post-completion mutation
 	for _, t := range c.schema.TypesSlice() {
-		schema.InternalSealType(t)
+		t.seal()
 		// Seal all relations on this type
 		for rel := range t.AllAssociations() {
-			schema.InternalSealRelation(rel)
+			rel.seal()
 		}
 		for rel := range t.AllCompositions() {
-			schema.InternalSealRelation(rel)
+			rel.seal()
 		}
 	}
 
 	// Seal all data types for consistency with type/relation sealing
 	for _, dt := range c.schema.DataTypesSlice() {
-		schema.InternalSealDataType(dt)
+		dt.seal()
 	}
 
 	return c.schema
@@ -161,7 +158,7 @@ func (c *completer) complete() *schema.Schema {
 
 // indexTypes creates Type objects and indexes them by name.
 func (c *completer) indexTypes() bool {
-	types := make([]*schema.Type, 0, len(c.model.Types))
+	types := make([]*Type, 0, len(c.model.Types))
 
 	for _, td := range c.model.Types {
 		if td == nil {
@@ -175,7 +172,7 @@ func (c *completer) indexTypes() bool {
 			return false
 		}
 
-		t := schema.InternalNewType(
+		t := newType(
 			td.Name,
 			c.sourceID,
 			td.Span,
@@ -186,42 +183,42 @@ func (c *completer) indexTypes() bool {
 
 		// Set precise name span for go-to-definition accuracy
 		if !td.NameSpan.IsZero() {
-			schema.InternalSetTypeNameSpan(t, td.NameSpan)
+			t.setNameSpan(td.NameSpan)
 		}
 
 		// Convert declared inherits
-		inherits := make([]schema.TypeRef, 0, len(td.Inherits))
+		inherits := make([]TypeRef, 0, len(td.Inherits))
 		for _, ref := range td.Inherits {
 			if ref != nil {
-				inherits = append(inherits, ref.ToSchemaTypeRef())
+				inherits = append(inherits, NewTypeRef(ref.Qualifier, ref.Name, ref.Span))
 			}
 		}
-		schema.InternalSetTypeInherits(t, inherits)
+		t.setInherits(inherits)
 
 		// Convert and set declared properties
 		props := c.convertProperties(td.Properties, td.Name)
-		schema.InternalSetTypeProperties(t, props)
+		t.setProperties(props)
 
 		// Convert and set declared relations (split into associations/compositions)
 		assocs, comps := c.convertRelations(td.Relations, td.Name)
-		schema.InternalSetTypeAssociations(t, assocs)
-		schema.InternalSetTypeCompositions(t, comps)
+		t.setAssociations(assocs)
+		t.setCompositions(comps)
 
 		// Convert and set invariants
 		invariants := c.convertInvariants(td.Invariants)
-		schema.InternalSetTypeInvariants(t, invariants)
+		t.setInvariants(invariants)
 
 		c.typeIndex[td.Name] = t
 		types = append(types, t)
 	}
 
-	schema.InternalSetSchemaTypes(c.schema, types)
+	c.schema.setTypes(types)
 	return true
 }
 
 // indexDataTypes creates DataType objects and indexes them by name.
 func (c *completer) indexDataTypes() bool {
-	dataTypes := make([]*schema.DataType, 0, len(c.model.DataTypes))
+	dataTypes := make([]*DataType, 0, len(c.model.DataTypes))
 
 	for _, dd := range c.model.DataTypes {
 		if dd == nil {
@@ -235,7 +232,7 @@ func (c *completer) indexDataTypes() bool {
 			return false
 		}
 
-		dt := schema.InternalNewDataType(
+		dt := newDataType(
 			dd.Name,
 			dd.Constraint,
 			dd.Span,
@@ -246,15 +243,15 @@ func (c *completer) indexDataTypes() bool {
 		dataTypes = append(dataTypes, dt)
 	}
 
-	schema.InternalSetSchemaDataTypes(c.schema, dataTypes)
+	c.schema.setDataTypes(dataTypes)
 	return true
 }
 
 // indexImports validates and indexes import declarations.
 func (c *completer) indexImports() bool {
-	imports := make([]*schema.Import, 0, len(c.model.Imports))
-	aliasIndex := make(map[string]*parse.ImportDecl)
-	seenSourceIDs := make(map[location.SourceID]*parse.ImportDecl)
+	imports := make([]*Import, 0, len(c.model.Imports))
+	aliasIndex := make(map[string]*importDecl)
+	seenSourceIDs := make(map[location.SourceID]*importDecl)
 
 	for _, id := range c.model.Imports {
 		if id == nil {
@@ -262,7 +259,7 @@ func (c *completer) indexImports() bool {
 		}
 
 		// Validate alias is a valid identifier
-		if !alias.IsValidAlias(id.Alias) {
+		if !isValidAlias(id.Alias) {
 			c.errorf(id.Span, diag.E_INVALID_ALIAS,
 				"derived alias %q is not a valid identifier (aliases must start with a letter); use 'as <alias>' to provide a valid alias",
 				id.Alias)
@@ -270,7 +267,7 @@ func (c *completer) indexImports() bool {
 		}
 
 		// Validate alias is not a reserved keyword
-		if alias.IsReservedKeyword(id.Alias) {
+		if isReservedKeyword(id.Alias) {
 			c.errorf(id.Span, diag.E_INVALID_ALIAS,
 				"import alias %q is a reserved keyword; use 'as <alias>' to provide a different alias",
 				id.Alias)
@@ -327,19 +324,19 @@ func (c *completer) indexImports() bool {
 			seenSourceIDs[resolvedSourceID] = id
 		}
 		// If resolvedImports is nil, leave resolvedSourceID as zero for deferred resolution
-		imp := schema.InternalNewImport(id.Path, id.Alias, resolvedSourceID, id.Span)
+		imp := newImport(id.Path, id.Alias, resolvedSourceID, id.Span)
 		imports = append(imports, imp)
 	}
 
-	schema.InternalSetSchemaImports(c.schema, imports)
+	c.schema.setImports(imports)
 	return true
 }
 
-// convertProperties converts parse.PropertyDecl to schema.Property.
+// convertProperties converts propertyDecl to Property.
 // Detects duplicate property declarations within the same type.
-func (c *completer) convertProperties(decls []*parse.PropertyDecl, ownerType string) []*schema.Property {
-	props := make([]*schema.Property, 0, len(decls))
-	seen := make(map[string]*parse.PropertyDecl) // Track first occurrence for related info
+func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) []*Property {
+	props := make([]*Property, 0, len(decls))
+	seen := make(map[string]*propertyDecl) // Track first occurrence for related info
 
 	for _, pd := range decls {
 		if pd == nil {
@@ -359,8 +356,8 @@ func (c *completer) convertProperties(decls []*parse.PropertyDecl, ownerType str
 		}
 		seen[pd.Name] = pd
 
-		scope := schema.TypeScope(schema.NewTypeRef("", ownerType, pd.Span))
-		p := schema.InternalNewProperty(
+		scope := TypeScope(NewTypeRef("", ownerType, pd.Span))
+		p := newProperty(
 			pd.Name,
 			pd.Span,
 			pd.Documentation,
@@ -376,10 +373,10 @@ func (c *completer) convertProperties(decls []*parse.PropertyDecl, ownerType str
 	return props
 }
 
-// convertRelations converts parse.RelationDecl to schema.Relation, splitting by kind.
+// convertRelations converts relationDecl to Relation, splitting by kind.
 // Detects duplicate relation declarations within the same type.
-func (c *completer) convertRelations(decls []*parse.RelationDecl, ownerType string) (assocs, comps []*schema.Relation) {
-	seen := make(map[string]*parse.RelationDecl) // Track first occurrence by raw name
+func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (assocs, comps []*Relation) {
+	seen := make(map[string]*relationDecl) // Track first occurrence by raw name
 
 	for _, rd := range decls {
 		if rd == nil {
@@ -399,24 +396,24 @@ func (c *completer) convertRelations(decls []*parse.RelationDecl, ownerType stri
 		}
 		seen[rd.Name] = rd
 
-		var target schema.TypeRef
+		var target TypeRef
 		if rd.Target != nil {
-			target = rd.Target.ToSchemaTypeRef()
+			target = NewTypeRef(rd.Target.Qualifier, rd.Target.Name, rd.Target.Span)
 		}
 
 		// Compute field name using lower_snake normalization
 		fieldName := ident.ToLowerSnake(rd.Name)
 
 		// Convert edge properties (associations only)
-		var props []*schema.Property
-		if rd.Kind == parse.RelationAssociation && len(rd.Properties) > 0 {
-			props = make([]*schema.Property, 0, len(rd.Properties))
+		var props []*Property
+		if rd.Kind == RelationAssociation && len(rd.Properties) > 0 {
+			props = make([]*Property, 0, len(rd.Properties))
 			for _, pd := range rd.Properties {
 				if pd == nil {
 					continue
 				}
-				scope := schema.RelationScope(rd.Name)
-				p := schema.InternalNewProperty(
+				scope := RelationScope(rd.Name)
+				p := newProperty(
 					pd.Name,
 					pd.Span,
 					pd.Documentation,
@@ -430,21 +427,21 @@ func (c *completer) convertRelations(decls []*parse.RelationDecl, ownerType stri
 			}
 		}
 
-		// Map parse.RelationKind to schema.RelationKind
-		var kind schema.RelationKind
+		// Map relationDecl kind to RelationKind
+		var kind RelationKind
 		switch rd.Kind {
-		case parse.RelationAssociation:
-			kind = schema.RelationAssociation
-		case parse.RelationComposition:
-			kind = schema.RelationComposition
+		case RelationAssociation:
+			kind = RelationAssociation
+		case RelationComposition:
+			kind = RelationComposition
 		}
 
-		r := schema.InternalNewRelation(
+		r := newRelation(
 			kind,
 			rd.Name,
 			fieldName,
 			target,
-			schema.TypeID{}, // Resolved during completion
+			TypeID{}, // Resolved during completion
 			rd.Span,
 			rd.Documentation,
 			rd.Optional,
@@ -456,7 +453,7 @@ func (c *completer) convertRelations(decls []*parse.RelationDecl, ownerType stri
 			props,
 		)
 
-		if kind == schema.RelationAssociation {
+		if kind == RelationAssociation {
 			assocs = append(assocs, r)
 		} else {
 			comps = append(comps, r)
@@ -466,16 +463,16 @@ func (c *completer) convertRelations(decls []*parse.RelationDecl, ownerType stri
 	return assocs, comps
 }
 
-// convertInvariants converts parse.InvariantDecl to schema.Invariant.
-func (c *completer) convertInvariants(decls []*parse.InvariantDecl) []*schema.Invariant {
-	invs := make([]*schema.Invariant, 0, len(decls))
+// convertInvariants converts invariantDecl to Invariant.
+func (c *completer) convertInvariants(decls []*invariantDecl) []*Invariant {
+	invs := make([]*Invariant, 0, len(decls))
 
 	for _, id := range decls {
 		if id == nil {
 			continue
 		}
 
-		inv := schema.InternalNewInvariant(id.Name, id.Expr, id.Span, id.Documentation)
+		inv := newInvariant(id.Name, id.Expr, id.Span, id.Documentation)
 		invs = append(invs, inv)
 	}
 
@@ -489,38 +486,38 @@ func (c *completer) resolveAliasConstraints() bool {
 
 	// First, resolve DataType constraints (they may reference each other)
 	for _, dt := range c.schema.DataTypesSlice() {
-		if alias, isAlias := dt.Constraint().(schema.AliasConstraint); isAlias && !alias.IsResolved() {
+		if alias, isAlias := dt.Constraint().(AliasConstraint); isAlias && !alias.IsResolved() {
 			resolved, success := c.resolveAliasChain(alias.DataTypeName(), dt.Span(), make(map[string]bool))
 			if !success {
 				ok = false
 				continue
 			}
-			schema.InternalSetDataTypeConstraint(dt, resolved)
+			dt.setConstraint(resolved)
 		}
 	}
 
 	// Resolve List element aliases in DataTypes
 	for _, dt := range c.schema.DataTypesSlice() {
-		if _, isList := dt.Constraint().(schema.ListConstraint); isList {
+		if _, isList := dt.Constraint().(ListConstraint); isList {
 			resolved, success := c.resolveListElementAliases(dt.Constraint(), dt.Span())
 			if !success {
 				ok = false
 				continue
 			}
-			schema.InternalSetDataTypeConstraint(dt, resolved)
+			dt.setConstraint(resolved)
 		}
 	}
 
 	// Then, resolve property constraints on all types
 	for _, t := range c.schema.TypesSlice() {
 		for _, p := range t.PropertiesSlice() {
-			if alias, isAlias := p.Constraint().(schema.AliasConstraint); isAlias && !alias.IsResolved() {
+			if alias, isAlias := p.Constraint().(AliasConstraint); isAlias && !alias.IsResolved() {
 				resolved, success := c.resolveAliasChain(alias.DataTypeName(), p.Span(), make(map[string]bool))
 				if !success {
 					ok = false
 					continue
 				}
-				schema.InternalSetPropertyConstraint(p, resolved)
+				p.setConstraint(resolved)
 			}
 		}
 	}
@@ -528,13 +525,13 @@ func (c *completer) resolveAliasConstraints() bool {
 	// Resolve List element aliases in Properties
 	for _, t := range c.schema.TypesSlice() {
 		for _, p := range t.PropertiesSlice() {
-			if _, isList := p.Constraint().(schema.ListConstraint); isList {
+			if _, isList := p.Constraint().(ListConstraint); isList {
 				resolved, success := c.resolveListElementAliases(p.Constraint(), p.Span())
 				if !success {
 					ok = false
 					continue
 				}
-				schema.InternalSetPropertyConstraint(p, resolved)
+				p.setConstraint(resolved)
 			}
 		}
 	}
@@ -547,7 +544,7 @@ func (c *completer) resolveAliasConstraints() bool {
 // Returns the resolved AliasConstraint and success status.
 // If the datatype is not found, returns the original unresolved alias (not an error).
 // This allows for forward references and type-as-property patterns.
-func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, visited map[string]bool) (schema.Constraint, bool) {
+func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, visited map[string]bool) (Constraint, bool) {
 	// Cycle detection
 	if visited[dataTypeName] {
 		c.errorf(span, diag.E_INVALID_CONSTRAINT,
@@ -560,7 +557,7 @@ func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, v
 	qualifier, name := parseQualifiedName(dataTypeName)
 
 	// Lookup DataType
-	var dt *schema.DataType
+	var dt *DataType
 	var found bool
 	if qualifier == "" {
 		// Local datatype
@@ -570,18 +567,18 @@ func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, v
 		if c.registry == nil {
 			// Without registry, we cannot resolve cross-schema refs
 			// Return unresolved alias; will be validated at link time
-			return schema.NewAliasConstraint(dataTypeName, nil), true
+			return NewAliasConstraint(dataTypeName, nil), true
 		}
 		sourceID, ok := c.resolvedImports[qualifier]
 		if !ok {
 			// Unknown import alias - leave unresolved
 			// This might be a type reference pattern (e.g., b.Middle where Middle is a type)
-			return schema.NewAliasConstraint(dataTypeName, nil), true
+			return NewAliasConstraint(dataTypeName, nil), true
 		}
 		importedSchema, ok := c.registry.LookupBySourceID(sourceID)
 		if !ok {
 			// Imported schema not found - leave unresolved
-			return schema.NewAliasConstraint(dataTypeName, nil), true
+			return NewAliasConstraint(dataTypeName, nil), true
 		}
 		dt, found = importedSchema.DataType(name)
 	}
@@ -589,29 +586,29 @@ func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, v
 	if !found {
 		// Datatype not found - leave unresolved
 		// This might be a type reference pattern or forward reference
-		return schema.NewAliasConstraint(dataTypeName, nil), true
+		return NewAliasConstraint(dataTypeName, nil), true
 	}
 
 	underlying := dt.Constraint()
 
 	// If underlying is an unresolved alias, resolve it first
-	if alias, isAlias := underlying.(schema.AliasConstraint); isAlias && !alias.IsResolved() {
+	if alias, isAlias := underlying.(AliasConstraint); isAlias && !alias.IsResolved() {
 		resolved, ok := c.resolveAliasChain(alias.DataTypeName(), dt.Span(), visited)
 		if !ok {
 			return nil, false
 		}
-		return schema.NewAliasConstraint(dataTypeName, resolved), true
+		return NewAliasConstraint(dataTypeName, resolved), true
 	}
 
 	// Otherwise, return new alias with underlying as resolved
-	return schema.NewAliasConstraint(dataTypeName, underlying), true
+	return NewAliasConstraint(dataTypeName, underlying), true
 }
 
 // resolveListElementAliases recursively resolves alias constraints inside
 // ListConstraint elements. Returns the constraint with aliases resolved,
 // or the original if no resolution was needed.
-func (c *completer) resolveListElementAliases(constraint schema.Constraint, span location.Span) (schema.Constraint, bool) {
-	lc, ok := constraint.(schema.ListConstraint)
+func (c *completer) resolveListElementAliases(constraint Constraint, span location.Span) (Constraint, bool) {
+	lc, ok := constraint.(ListConstraint)
 	if !ok {
 		return constraint, true
 	}
@@ -626,7 +623,7 @@ func (c *completer) resolveListElementAliases(constraint schema.Constraint, span
 	elem = resolved
 
 	// Resolve alias if element is an alias
-	if alias, isAlias := elem.(schema.AliasConstraint); isAlias && !alias.IsResolved() {
+	if alias, isAlias := elem.(AliasConstraint); isAlias && !alias.IsResolved() {
 		resolvedAlias, success := c.resolveAliasChain(alias.DataTypeName(), span, make(map[string]bool))
 		if !success {
 			return constraint, false
@@ -640,13 +637,13 @@ func (c *completer) resolveListElementAliases(constraint schema.Constraint, span
 
 	switch {
 	case hasMin && hasMax:
-		return schema.ListLenBetween(elem, minLen, maxLen), true
+		return ListLenBetween(elem, minLen, maxLen), true
 	case hasMin:
-		return schema.ListMinLen(elem, minLen), true
+		return ListMinLen(elem, minLen), true
 	case hasMax:
-		return schema.ListMaxLen(elem, maxLen), true
+		return ListMaxLen(elem, maxLen), true
 	default:
-		return schema.NewListConstraint(elem), true
+		return NewListConstraint(elem), true
 	}
 }
 
@@ -688,15 +685,15 @@ func (c *completer) validateRelationProperties() bool {
 
 // isVectorConstraint checks if a constraint is or resolves to a Vector type.
 // Unwraps alias constraints to check the underlying type.
-func isVectorConstraint(constraint schema.Constraint) bool {
+func isVectorConstraint(constraint Constraint) bool {
 	if constraint == nil {
 		return false
 	}
 	for {
-		if constraint.Kind() == schema.KindVector {
+		if constraint.Kind() == KindVector {
 			return true
 		}
-		alias, ok := constraint.(schema.AliasConstraint)
+		alias, ok := constraint.(AliasConstraint)
 		if !ok || alias.Resolved() == nil {
 			return false
 		}
@@ -706,15 +703,15 @@ func isVectorConstraint(constraint schema.Constraint) bool {
 
 // isListConstraint checks if a constraint is or resolves to a List type.
 // Unwraps alias constraints to check the underlying type.
-func isListConstraint(constraint schema.Constraint) bool {
+func isListConstraint(constraint Constraint) bool {
 	if constraint == nil {
 		return false
 	}
 	for {
-		if constraint.Kind() == schema.KindList {
+		if constraint.Kind() == KindList {
 			return true
 		}
-		alias, ok := constraint.(schema.AliasConstraint)
+		alias, ok := constraint.(AliasConstraint)
 		if !ok || alias.Resolved() == nil {
 			return false
 		}
@@ -725,20 +722,20 @@ func isListConstraint(constraint schema.Constraint) bool {
 // isPrimaryKeyAllowed returns true if the constraint's underlying type is
 // permitted as a primary key. Only String, UUID, Date, and Timestamp are
 // allowed. Aliases are unwrapped to check the resolved type.
-func isPrimaryKeyAllowed(constraint schema.Constraint) bool {
+func isPrimaryKeyAllowed(constraint Constraint) bool {
 	if constraint == nil {
 		return false
 	}
 	// Unwrap aliases to the resolved type.
 	for {
-		alias, ok := constraint.(schema.AliasConstraint)
+		alias, ok := constraint.(AliasConstraint)
 		if !ok || alias.Resolved() == nil {
 			break
 		}
 		constraint = alias.Resolved()
 	}
 	switch constraint.Kind() {
-	case schema.KindString, schema.KindUUID, schema.KindDate, schema.KindTimestamp:
+	case KindString, KindUUID, KindDate, KindTimestamp:
 		return true
 	default:
 		return false

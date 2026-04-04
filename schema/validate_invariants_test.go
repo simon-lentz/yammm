@@ -1,4 +1,4 @@
-package complete_test
+package schema_test
 
 import (
 	"testing"
@@ -9,8 +9,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
-	"github.com/simon-lentz/yammm/schema/internal/complete"
-	"github.com/simon-lentz/yammm/schema/internal/parse"
 )
 
 // TestValidateInvariant_ValidProperty verifies that an invariant referencing
@@ -18,18 +16,18 @@ import (
 func TestValidateInvariant_ValidProperty(t *testing.T) {
 	t.Parallel()
 
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "name_not_empty",
 						// name != ""
@@ -47,7 +45,7 @@ func TestValidateInvariant_ValidProperty(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "valid_prop.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for valid property reference")
@@ -58,18 +56,18 @@ func TestValidateInvariant_ValidProperty(t *testing.T) {
 func TestValidateInvariant_UnknownProperty(t *testing.T) {
 	t.Parallel()
 
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "bad_invariant",
 						// fake_property != ""
@@ -87,7 +85,7 @@ func TestValidateInvariant_UnknownProperty(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "unknown_prop.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.Nil(t, s, "schema should fail to compile")
 	require.True(t, collector.HasErrors())
@@ -114,13 +112,13 @@ func TestValidateInvariant_LambdaValidProperty(t *testing.T) {
 	// Order has composition *-> ITEMS (many) LineItem.
 	// LineItem has property "quantity".
 	// Invariant: ITEMS -> All |$item| { $item.quantity > 0 }
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:   "LineItem",
 				IsPart: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
 						Constraint: schema.NewIntegerConstraint(),
@@ -129,22 +127,22 @@ func TestValidateInvariant_LambdaValidProperty(t *testing.T) {
 			},
 			{
 				Name: "Order",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
 						Constraint:   schema.NewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
 						Name:   "ITEMS",
-						Kind:   parse.RelationComposition,
-						Target: &parse.TypeRef{Name: "LineItem"},
+						Kind:   schema.RelationComposition,
+						Target: &schema.TestASTTypeRef{Name: "LineItem"},
 						Many:   true,
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "all_positive",
 						// ITEMS -> All |$item| { $item.quantity > 0 }
@@ -171,7 +169,7 @@ func TestValidateInvariant_LambdaValidProperty(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "lambda_valid.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for valid lambda property")
@@ -182,13 +180,13 @@ func TestValidateInvariant_LambdaValidProperty(t *testing.T) {
 func TestValidateInvariant_LambdaUnknownProperty(t *testing.T) {
 	t.Parallel()
 
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:   "LineItem",
 				IsPart: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
 						Constraint: schema.NewIntegerConstraint(),
@@ -197,22 +195,22 @@ func TestValidateInvariant_LambdaUnknownProperty(t *testing.T) {
 			},
 			{
 				Name: "Order",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
 						Constraint:   schema.NewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
 						Name:   "ITEMS",
-						Kind:   parse.RelationComposition,
-						Target: &parse.TypeRef{Name: "LineItem"},
+						Kind:   schema.RelationComposition,
+						Target: &schema.TestASTTypeRef{Name: "LineItem"},
 						Many:   true,
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "bad_lambda",
 						// ITEMS -> All |$item| { $item.nonexistent > 0 }
@@ -239,7 +237,7 @@ func TestValidateInvariant_LambdaUnknownProperty(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "lambda_bad.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.Nil(t, s, "schema should fail to compile")
 	require.True(t, collector.HasErrors())
@@ -260,18 +258,18 @@ func TestValidateInvariant_LambdaUnknownProperty(t *testing.T) {
 func TestValidateInvariant_SelfDotProperty(t *testing.T) {
 	t.Parallel()
 
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "self_name_not_empty",
 						// $self.name != ""
@@ -293,7 +291,7 @@ func TestValidateInvariant_SelfDotProperty(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "self_dot_prop.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for $self.name reference")
@@ -304,18 +302,18 @@ func TestValidateInvariant_SelfDotProperty(t *testing.T) {
 func TestValidateInvariant_SelfDotUnknownProperty(t *testing.T) {
 	t.Parallel()
 
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "self_bad_prop",
 						// $self.fake_prop != ""
@@ -337,7 +335,7 @@ func TestValidateInvariant_SelfDotUnknownProperty(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "self_dot_unknown.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.Nil(t, s, "schema should fail to compile")
 	require.True(t, collector.HasErrors())
@@ -357,13 +355,13 @@ func TestValidateInvariant_SelfDotUnknownProperty(t *testing.T) {
 func TestValidateInvariant_InheritedProperty(t *testing.T) {
 	t.Parallel()
 
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "Auditable",
 				IsAbstract: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "created_at",
 						Constraint: schema.NewTimestampConstraint(),
@@ -372,15 +370,15 @@ func TestValidateInvariant_InheritedProperty(t *testing.T) {
 			},
 			{
 				Name:     "Account",
-				Inherits: []*parse.TypeRef{{Name: "Auditable"}},
-				Properties: []*parse.PropertyDecl{
+				Inherits: []*schema.TestASTTypeRef{{Name: "Auditable"}},
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
 						Constraint:   schema.NewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "created_at_set",
 						// created_at != nil
@@ -398,7 +396,7 @@ func TestValidateInvariant_InheritedProperty(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "inherited_prop.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for inherited property reference")
@@ -409,18 +407,18 @@ func TestValidateInvariant_InheritedProperty(t *testing.T) {
 func TestValidateInvariant_CaseInsensitive(t *testing.T) {
 	t.Parallel()
 
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "case_check",
 						// Name != "" (uppercase N, property declared lowercase)
@@ -438,7 +436,7 @@ func TestValidateInvariant_CaseInsensitive(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "case_insensitive.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for case-insensitive property reference")
@@ -449,13 +447,13 @@ func TestValidateInvariant_CaseInsensitive(t *testing.T) {
 func TestValidateInvariant_RelationNameValid(t *testing.T) {
 	t.Parallel()
 
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:   "LineItem",
 				IsPart: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
 						Constraint: schema.NewIntegerConstraint(),
@@ -464,22 +462,22 @@ func TestValidateInvariant_RelationNameValid(t *testing.T) {
 			},
 			{
 				Name: "Order",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
 						Constraint:   schema.NewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
 						Name:   "ITEMS",
-						Kind:   parse.RelationComposition,
-						Target: &parse.TypeRef{Name: "LineItem"},
+						Kind:   schema.RelationComposition,
+						Target: &schema.TestASTTypeRef{Name: "LineItem"},
 						Many:   true,
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "has_items",
 						// ITEMS -> Len > 0
@@ -500,7 +498,7 @@ func TestValidateInvariant_RelationNameValid(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "relation_name.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for relation name reference in invariant")
@@ -514,13 +512,13 @@ func TestValidateInvariant_ReduceBuiltin(t *testing.T) {
 	// Order has composition *-> ITEMS (many) LineItem.
 	// LineItem has property "quantity".
 	// Invariant: ITEMS -> Reduce(0) |$acc, $item| { $acc + $item.quantity }
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:   "LineItem",
 				IsPart: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
 						Constraint: schema.NewIntegerConstraint(),
@@ -529,22 +527,22 @@ func TestValidateInvariant_ReduceBuiltin(t *testing.T) {
 			},
 			{
 				Name: "Order",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
 						Constraint:   schema.NewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
 						Name:   "ITEMS",
-						Kind:   parse.RelationComposition,
-						Target: &parse.TypeRef{Name: "LineItem"},
+						Kind:   schema.RelationComposition,
+						Target: &schema.TestASTTypeRef{Name: "LineItem"},
 						Many:   true,
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "total_quantity",
 						// ITEMS -> Reduce(0) |$acc, $item| { $acc + $item.quantity }
@@ -571,7 +569,7 @@ func TestValidateInvariant_ReduceBuiltin(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "reduce_builtin.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for valid Reduce builtin")
@@ -582,13 +580,13 @@ func TestValidateInvariant_ReduceBuiltin(t *testing.T) {
 func TestValidateInvariant_ReduceUnknownProperty(t *testing.T) {
 	t.Parallel()
 
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:   "LineItem",
 				IsPart: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
 						Constraint: schema.NewIntegerConstraint(),
@@ -597,22 +595,22 @@ func TestValidateInvariant_ReduceUnknownProperty(t *testing.T) {
 			},
 			{
 				Name: "Order",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
 						Constraint:   schema.NewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
 						Name:   "ITEMS",
-						Kind:   parse.RelationComposition,
-						Target: &parse.TypeRef{Name: "LineItem"},
+						Kind:   schema.RelationComposition,
+						Target: &schema.TestASTTypeRef{Name: "LineItem"},
 						Many:   true,
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "bad_reduce",
 						// ITEMS -> Reduce(0) |$acc, $item| { $acc + $item.fake_field }
@@ -639,7 +637,7 @@ func TestValidateInvariant_ReduceUnknownProperty(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "reduce_bad.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.Nil(t, s, "schema should fail to compile")
 	require.True(t, collector.HasErrors())
@@ -663,18 +661,18 @@ func TestValidateInvariant_ThenBuiltin(t *testing.T) {
 	// Person has property "name".
 	// Invariant: name -> Then |$n| { $n -> Len > 0 }
 	// $n has nil type (Then doesn't know the LHS type), so $n.anything should be skipped.
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name: "Person",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
 						Constraint: schema.NewStringConstraint(),
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "name_then_check",
 						// name -> Then |$n| { $n -> Len > 0 }
@@ -700,7 +698,7 @@ func TestValidateInvariant_ThenBuiltin(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "then_builtin.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for valid Then builtin")
@@ -715,13 +713,13 @@ func TestValidateInvariant_NestedCollectionBuiltins(t *testing.T) {
 	// LineItem has properties "quantity" and "active".
 	// Invariant: ITEMS -> Filter |$i| { $i.active } -> All |$j| { $j.quantity > 0 }
 	// Both $i and $j should resolve to LineItem.
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:   "LineItem",
 				IsPart: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
 						Constraint: schema.NewIntegerConstraint(),
@@ -734,22 +732,22 @@ func TestValidateInvariant_NestedCollectionBuiltins(t *testing.T) {
 			},
 			{
 				Name: "Order",
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
 						Constraint:   schema.NewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
-				Relations: []*parse.RelationDecl{
+				Relations: []*schema.TestRelationDecl{
 					{
 						Name:   "ITEMS",
-						Kind:   parse.RelationComposition,
-						Target: &parse.TypeRef{Name: "LineItem"},
+						Kind:   schema.RelationComposition,
+						Target: &schema.TestASTTypeRef{Name: "LineItem"},
 						Many:   true,
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "filtered_all_positive",
 						// ITEMS -> Filter |$i| { $i.active } -> All |$j| { $j.quantity > 0 }
@@ -785,7 +783,7 @@ func TestValidateInvariant_NestedCollectionBuiltins(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "nested_builtins.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for nested collection builtins")
@@ -798,19 +796,19 @@ func TestInvariantInheritance_SingleParent(t *testing.T) {
 	// Account extends Auditable with no own invariants.
 	// Account.InvariantsSlice() should be empty (own only).
 	// Account.AllInvariantsSlice() should contain ["must_be_active"].
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "Auditable",
 				IsAbstract: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "is_active",
 						Constraint: schema.NewBooleanConstraint(),
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "must_be_active",
 						Expr: expr.NewLiteral(true),
@@ -819,10 +817,10 @@ func TestInvariantInheritance_SingleParent(t *testing.T) {
 			},
 			{
 				Name: "Account",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Auditable"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "account_id",
 						Constraint:   schema.NewStringConstraint(),
@@ -836,7 +834,7 @@ func TestInvariantInheritance_SingleParent(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "inv_single_parent.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	require.False(t, collector.HasErrors(), "no errors expected")
@@ -860,19 +858,19 @@ func TestInvariantInheritance_ChildOverride(t *testing.T) {
 	// Child extends Base, declares own "check" (override) and "extra".
 	// Child.AllInvariantsSlice() should have 2: child's "check" first, then "extra".
 	// The parent's "check" is deduplicated because child already has it.
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "Base",
 				IsAbstract: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "value",
 						Constraint: schema.NewIntegerConstraint(),
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "check",
 						Expr: expr.NewLiteral(true),
@@ -881,17 +879,17 @@ func TestInvariantInheritance_ChildOverride(t *testing.T) {
 			},
 			{
 				Name: "Child",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Base"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "child_id",
 						Constraint:   schema.NewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "check",
 						Expr: expr.NewLiteral(false), // overrides parent's "check"
@@ -908,7 +906,7 @@ func TestInvariantInheritance_ChildOverride(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "inv_child_override.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	require.False(t, collector.HasErrors(), "no errors expected")
@@ -936,20 +934,20 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 	// Bottom extends Left, Right
 	// Bottom.AllInvariantsSlice() should have 3: root_check, left_check, right_check
 	// root_check is inherited via both Left and Right but deduplicated.
-	model := &parse.Model{
+	model := &schema.TestModel{
 		Name: "test",
-		Types: []*parse.TypeDecl{
+		Types: []*schema.TestTypeDecl{
 			{
 				Name:       "Root",
 				IsAbstract: true,
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
 						Constraint:   schema.NewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "root_check",
 						Expr: expr.NewLiteral(true),
@@ -959,10 +957,10 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 			{
 				Name:       "Left",
 				IsAbstract: true,
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Root"},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "left_check",
 						Expr: expr.NewLiteral(true),
@@ -972,10 +970,10 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 			{
 				Name:       "Right",
 				IsAbstract: true,
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Root"},
 				},
-				Invariants: []*parse.InvariantDecl{
+				Invariants: []*schema.TestInvariantDecl{
 					{
 						Name: "right_check",
 						Expr: expr.NewLiteral(true),
@@ -984,11 +982,11 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 			},
 			{
 				Name: "Bottom",
-				Inherits: []*parse.TypeRef{
+				Inherits: []*schema.TestASTTypeRef{
 					{Name: "Left"},
 					{Name: "Right"},
 				},
-				Properties: []*parse.PropertyDecl{
+				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "bottom_field",
 						Constraint: schema.NewStringConstraint(),
@@ -1001,7 +999,7 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "inv_diamond.yammm")
 
-	s := complete.Complete(model, srcID, collector, nil, nil)
+	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	require.NotNil(t, s, "schema should compile")
 	require.False(t, collector.HasErrors(), "no errors expected")

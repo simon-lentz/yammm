@@ -12,22 +12,20 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
-	"github.com/simon-lentz/yammm/schema/load"
 )
 
 // =============================================================================
 // Load functions
 // =============================================================================
 
-// TestLoading_LoadFromFile verifies that load.Load reads a .yammm file from
+// TestLoading_LoadFromFile verifies that schema.Load reads a .yammm file from
 // disk and produces a valid schema.
-// Source: SPEC.md, "load.Load reads a schema from a file path."
+// Source: SPEC.md, "schema.Load reads a schema from a file path."
 func TestLoading_LoadFromFile(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	s, result, err := load.Load(ctx, "testdata/loading/valid.yammm")
+	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm")
 
 	require.NoError(t, err, "Load should not return an I/O error for a valid file")
 	require.True(t, result.OK(), "result should be OK for a valid schema: %v", result.Messages())
@@ -35,15 +33,15 @@ func TestLoading_LoadFromFile(t *testing.T) {
 	assert.Equal(t, "Valid", s.Name())
 }
 
-// TestLoading_StringParameterOrder verifies that load.String accepts
+// TestLoading_StringParameterOrder verifies that schema.LoadString accepts
 // (ctx, sourceCode, sourceName) — content first, then display name.
-// Source: SPEC.md, "load.String loads a schema from a string."
+// Source: SPEC.md, "schema.LoadString loads a schema from a string."
 func TestLoading_StringParameterOrder(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
 	content := `schema "FromString" type Item { name String required }`
-	s, result, err := load.String(ctx, content, "test-source")
+	s, result, err := schema.LoadString(ctx, content, "test-source")
 
 	require.NoError(t, err, "String should not return an error for valid content")
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
@@ -51,9 +49,9 @@ func TestLoading_StringParameterOrder(t *testing.T) {
 	assert.Equal(t, "FromString", s.Name())
 }
 
-// TestLoading_Sources verifies that load.Sources loads a schema from
+// TestLoading_Sources verifies that schema.LoadSources loads a schema from
 // an in-memory source map keyed by file path.
-// Source: SPEC.md, "load.Sources loads from in-memory sources."
+// Source: SPEC.md, "schema.LoadSources loads from in-memory sources."
 func TestLoading_Sources(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -65,7 +63,7 @@ func TestLoading_Sources(t *testing.T) {
 		"entry.yammm": []byte(`schema "InMemory" type Widget { label String required }`),
 	}
 
-	s, result, err := load.Sources(ctx, sources, tmpDir)
+	s, result, err := schema.LoadSources(ctx, sources, tmpDir)
 
 	require.NoError(t, err, "Sources should not return an error")
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
@@ -84,7 +82,7 @@ func TestLoading_ErrorPattern_IOFailure(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	_, _, err := load.Load(ctx, "testdata/loading/does_not_exist.yammm")
+	_, _, err := schema.Load(ctx, "testdata/loading/does_not_exist.yammm")
 
 	require.Error(t, err, "Load should return an error for a nonexistent file")
 }
@@ -96,7 +94,7 @@ func TestLoading_ErrorPattern_SemanticFailure(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	_, result, err := load.Load(ctx, "testdata/loading/syntax_error.yammm")
+	_, result, err := schema.Load(ctx, "testdata/loading/syntax_error.yammm")
 
 	require.NoError(t, err, "Load should not return Go error for syntax problems")
 	assert.False(t, result.OK(), "result should report errors for a broken schema")
@@ -109,7 +107,7 @@ func TestLoading_ErrorPattern_Success(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	s, result, err := load.Load(ctx, "testdata/loading/valid.yammm")
+	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm")
 
 	require.NoError(t, err)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
@@ -132,7 +130,7 @@ func TestLoading_WithRegistry(t *testing.T) {
 
 	// Load a schema with the registry option. The schema itself does not use
 	// imports, but the option must be accepted without error.
-	s, result, err := load.Load(ctx, "testdata/loading/valid.yammm", load.WithRegistry(reg))
+	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm", schema.WithRegistry(reg))
 
 	require.NoError(t, err)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
@@ -152,8 +150,8 @@ func TestLoading_WithModuleRoot(t *testing.T) {
 	absTestdata, err := filepath.Abs("testdata/loading")
 	require.NoError(t, err)
 
-	s, result, loadErr := load.Load(ctx, "testdata/loading/valid.yammm",
-		load.WithModuleRoot(absTestdata))
+	s, result, loadErr := schema.Load(ctx, "testdata/loading/valid.yammm",
+		schema.WithModuleRoot(absTestdata))
 
 	require.NoError(t, loadErr)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
@@ -168,8 +166,8 @@ func TestLoading_WithIssueLimit(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	_, result, err := load.Load(ctx, "testdata/loading/many_errors.yammm",
-		load.WithIssueLimit(2))
+	_, result, err := schema.Load(ctx, "testdata/loading/many_errors.yammm",
+		schema.WithIssueLimit(2))
 
 	require.NoError(t, err, "Load should not return Go error for semantic issues")
 	assert.False(t, result.OK(), "schema with duplicate properties should not be OK")
@@ -186,8 +184,8 @@ func TestLoading_WithSourceRegistry(t *testing.T) {
 	ctx := t.Context()
 
 	srcReg := source.NewRegistry()
-	s, result, err := load.Load(ctx, "testdata/loading/valid.yammm",
-		load.WithSourceRegistry(srcReg))
+	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm",
+		schema.WithSourceRegistry(srcReg))
 
 	require.NoError(t, err)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
@@ -206,8 +204,8 @@ func TestLoading_WithLogger(t *testing.T) {
 		Level: slog.LevelDebug,
 	}))
 
-	s, result, err := load.Load(ctx, "testdata/loading/valid.yammm",
-		load.WithLogger(logger))
+	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm",
+		schema.WithLogger(logger))
 
 	require.NoError(t, err)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
@@ -218,7 +216,7 @@ func TestLoading_WithLogger(t *testing.T) {
 // Builder API
 // =============================================================================
 
-// TestLoading_BuilderAPI verifies that build.NewBuilder can construct a schema
+// TestLoading_BuilderAPI verifies that schema.NewBuilder can construct a schema
 // programmatically and that it produces a schema equivalent to one loaded from
 // a .yammm file (same type names, properties, validation behavior).
 // Source: SPEC.md, "Schemas can be constructed programmatically using the
@@ -227,7 +225,7 @@ func TestLoading_BuilderAPI(t *testing.T) {
 	t.Parallel()
 
 	// Build the same schema as valid.yammm: schema "Valid" with type Person { name String required }
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("Valid").
 		AddType("Person").
 		WithProperty("name", schema.NewStringConstraint()).

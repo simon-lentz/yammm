@@ -11,8 +11,14 @@ import (
 	"github.com/simon-lentz/yammm/internal/grammar"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
-	"github.com/simon-lentz/yammm/schema/internal/span"
 )
+
+// SpanFromContext builds a location.Span from an ANTLR parser rule context.
+// This interface decouples the expression compiler from the span building
+// implementation in the parent schema package.
+type SpanFromContext interface {
+	FromContext(ctx antlr.ParserRuleContext) location.Span
+}
 
 // Visitor compiles ANTLR expression parse trees into Expression ASTs.
 //
@@ -24,7 +30,7 @@ type Visitor struct {
 	grammar.BaseYammmGrammarVisitor
 	collector *diag.Collector
 	sourceID  location.SourceID
-	spans     *span.Builder
+	spans     SpanFromContext
 	hasErrs   bool
 }
 
@@ -32,13 +38,12 @@ type Visitor struct {
 func NewVisitor(
 	collector *diag.Collector,
 	sourceID location.SourceID,
-	registry location.PositionRegistry,
-	converter location.RuneOffsetConverter,
+	spans SpanFromContext,
 ) *Visitor {
 	return &Visitor{
 		collector: collector,
 		sourceID:  sourceID,
-		spans:     span.NewBuilder(sourceID, registry, converter),
+		spans:     spans,
 	}
 }
 

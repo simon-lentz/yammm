@@ -1,4 +1,4 @@
-package alias_test
+package schema_test
 
 import (
 	"slices"
@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/internal/grammar"
-	"github.com/simon-lentz/yammm/schema/internal/alias"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestIsReservedKeyword(t *testing.T) {
@@ -62,7 +62,7 @@ func TestIsReservedKeyword(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := alias.IsReservedKeyword(tt.input)
+			result := schema.TestIsReservedKeyword(tt.input)
 			assert.Equal(t, tt.expected, result, "IsReservedKeyword(%q)", tt.input)
 		})
 	}
@@ -95,7 +95,7 @@ func TestIsValidAlias(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := alias.IsValidAlias(tt.input)
+			result := schema.TestIsValidAlias(tt.input)
 			assert.Equal(t, tt.expected, result, "IsValidAlias(%q)", tt.input)
 		})
 	}
@@ -144,7 +144,7 @@ func TestDeriveAliasFromPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := alias.DeriveAliasFromPath(tt.input)
+			result := schema.TestDeriveAliasFromPath(tt.input)
 			assert.Equal(t, tt.expected, result, "DeriveAliasFromPath(%q)", tt.input)
 		})
 	}
@@ -159,7 +159,7 @@ func TestDeriveAliasFromPath(t *testing.T) {
 // This approach is filesystem-independent and more robust than parsing .g4 files.
 func TestGrammarAliasSynchronization(t *testing.T) {
 	grammarKeywords := extractKeywordsFromLexer()
-	codeKeywords := alias.ReservedKeywords()
+	codeKeywords := schema.TestReservedKeywords()
 
 	// Convert to sorted slices for comparison
 	grammarList := mapToSortedSlice(grammarKeywords)
@@ -280,8 +280,8 @@ func mapToSortedSlice(m map[string]bool) []string {
 }
 
 func TestReservedKeywordsReturnsDefensiveCopy(t *testing.T) {
-	kw1 := alias.ReservedKeywords()
-	kw2 := alias.ReservedKeywords()
+	kw1 := schema.TestReservedKeywords()
+	kw2 := schema.TestReservedKeywords()
 
 	// Modify kw1
 	kw1["new_keyword"] = true

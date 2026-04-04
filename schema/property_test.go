@@ -165,7 +165,7 @@ func TestNewProperty(t *testing.T) {
 	doc := "The user's name"
 	scope := schema.TypeScope(schema.NewTypeRef("", "User", location.Span{}))
 
-	p := schema.InternalNewProperty("name", span, doc, constraint, schema.DataTypeRef{}, false, false, scope)
+	p := schema.TestNewProperty("name", span, doc, constraint, schema.DataTypeRef{}, false, false, scope)
 
 	assert.NotNil(t, p)
 	assert.Equal(t, "name", p.Name())
@@ -187,7 +187,7 @@ func TestProperty_Accessors(t *testing.T) {
 	}
 	scope := schema.RelationScope("OWNS")
 
-	p := schema.InternalNewProperty("quantity", span, "Item count", constraint, schema.DataTypeRef{}, true, true, scope)
+	p := schema.TestNewProperty("quantity", span, "Item count", constraint, schema.DataTypeRef{}, true, true, scope)
 
 	assert.Equal(t, "quantity", p.Name())
 	assert.Equal(t, span, p.Span())
@@ -200,24 +200,24 @@ func TestProperty_Accessors(t *testing.T) {
 }
 
 func TestProperty_IsOptional(t *testing.T) {
-	optionalProp := schema.InternalNewProperty("opt", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
-	requiredProp := schema.InternalNewProperty("req", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	optionalProp := schema.TestNewProperty("opt", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
+	requiredProp := schema.TestNewProperty("req", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.True(t, optionalProp.IsOptional())
 	assert.False(t, requiredProp.IsOptional())
 }
 
 func TestProperty_IsRequired(t *testing.T) {
-	optionalProp := schema.InternalNewProperty("opt", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
-	requiredProp := schema.InternalNewProperty("req", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	optionalProp := schema.TestNewProperty("opt", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
+	requiredProp := schema.TestNewProperty("req", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, optionalProp.IsRequired())
 	assert.True(t, requiredProp.IsRequired())
 }
 
 func TestProperty_IsPrimaryKey(t *testing.T) {
-	pkProp := schema.InternalNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	normalProp := schema.InternalNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	pkProp := schema.TestNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	normalProp := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.True(t, pkProp.IsPrimaryKey())
 	assert.False(t, normalProp.IsPrimaryKey())
@@ -225,8 +225,8 @@ func TestProperty_IsPrimaryKey(t *testing.T) {
 
 func TestProperty_Equal_Identical(t *testing.T) {
 	constraint := schema.NewStringConstraint()
-	p1 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.TestNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.True(t, p1.Equal(p2))
 	assert.True(t, p2.Equal(p1))
@@ -234,51 +234,51 @@ func TestProperty_Equal_Identical(t *testing.T) {
 
 func TestProperty_Equal_DifferentName(t *testing.T) {
 	constraint := schema.NewStringConstraint()
-	p1 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.InternalNewProperty("title", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.TestNewProperty("title", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_DifferentOptional(t *testing.T) {
 	constraint := schema.NewStringConstraint()
-	p1 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
-	p2 := schema.InternalNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, true, false, schema.DeclaringScope{})
+	p2 := schema.TestNewProperty("name", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_DifferentPrimaryKey(t *testing.T) {
 	constraint := schema.NewStringConstraint()
-	p1 := schema.InternalNewProperty("id", location.Span{}, "", constraint, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
-	p2 := schema.InternalNewProperty("id", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("id", location.Span{}, "", constraint, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	p2 := schema.TestNewProperty("id", location.Span{}, "", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_DifferentConstraint(t *testing.T) {
-	p1 := schema.InternalNewProperty("value", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.InternalNewProperty("value", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("value", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.TestNewProperty("value", location.Span{}, "", schema.NewIntegerConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_NilConstraints(t *testing.T) {
-	p1 := schema.InternalNewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.InternalNewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.TestNewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.True(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_OneNilConstraint(t *testing.T) {
-	p1 := schema.InternalNewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.InternalNewProperty("value", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("value", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.TestNewProperty("value", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	assert.False(t, p1.Equal(p2))
 }
 
 func TestProperty_Equal_NilProperty(t *testing.T) {
-	p1 := schema.InternalNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 	var p2 *schema.Property
 
 	assert.False(t, p1.Equal(p2))
@@ -297,15 +297,15 @@ func TestProperty_Equal_IgnoresSpanAndDoc(t *testing.T) {
 	span1 := location.Span{Start: location.Position{Line: 1}}
 	span2 := location.Span{Start: location.Position{Line: 99}}
 
-	p1 := schema.InternalNewProperty("name", span1, "Doc 1", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.InternalNewProperty("name", span2, "Doc 2", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("name", span1, "Doc 1", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p2 := schema.TestNewProperty("name", span2, "Doc 2", constraint, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
 
 	// Equal should ignore span and doc (declaration-site specific)
 	assert.True(t, p1.Equal(p2))
 }
 
 func narrowProp(name string, constraint schema.Constraint, optional, pk bool) *schema.Property {
-	return schema.InternalNewProperty(name, location.Span{}, "", constraint, schema.DataTypeRef{}, optional, pk, schema.DeclaringScope{})
+	return schema.TestNewProperty(name, location.Span{}, "", constraint, schema.DataTypeRef{}, optional, pk, schema.DeclaringScope{})
 }
 
 func TestProperty_CanNarrowFrom(t *testing.T) {

@@ -1,10 +1,9 @@
-package complete
+package schema
 
 import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // crossVisitState tracks DFS progress for cross-schema cycle detection.
@@ -16,13 +15,13 @@ const (
 	crossVisited
 )
 
-// CrossSchemaRegistry provides type lookup across all loaded schemas.
-type CrossSchemaRegistry interface {
-	All() []*schema.Schema
-	LookupType(id schema.TypeID) (*schema.Type, bool)
+// crossSchemaRegistry provides type lookup across all loaded schemas.
+type crossSchemaRegistry interface {
+	All() []*Schema
+	LookupType(id TypeID) (*Type, bool)
 }
 
-// DetectCrossSchemaInheritanceCycles performs global inheritance cycle detection
+// detectCrossSchemaInheritanceCycles performs global inheritance cycle detection
 // across all schemas in the registry. Returns any detected cycle issues.
 //
 // This function should be called after all schemas are loaded and registered,
@@ -31,17 +30,17 @@ type CrossSchemaRegistry interface {
 // The algorithm uses DFS with three states (unvisited, visiting, visited) to
 // detect back-edges which indicate cycles. Diamond inheritance patterns are
 // correctly handled as non-cycles.
-func DetectCrossSchemaInheritanceCycles(registry CrossSchemaRegistry) []*diag.Issue {
+func detectCrossSchemaInheritanceCycles(registry crossSchemaRegistry) []*diag.Issue {
 	if registry == nil {
 		return nil
 	}
 
-	state := make(map[schema.TypeID]crossVisitState)
-	stack := make([]schema.TypeID, 0, 32)
+	state := make(map[TypeID]crossVisitState)
+	stack := make([]TypeID, 0, 32)
 	var issues []*diag.Issue
 
-	var dfs func(id schema.TypeID) bool
-	dfs = func(id schema.TypeID) bool {
+	var dfs func(id TypeID) bool
+	dfs = func(id TypeID) bool {
 		if state[id] == crossVisited {
 			return true // Already fully processed, no cycle here
 		}
@@ -97,10 +96,10 @@ func DetectCrossSchemaInheritanceCycles(registry CrossSchemaRegistry) []*diag.Is
 }
 
 // resolveInheritToTypeID resolves a TypeRef from the Inherits() clause to a TypeID.
-func resolveInheritToTypeID(registry CrossSchemaRegistry, ownerType *schema.Type, ref schema.TypeRef) schema.TypeID {
+func resolveInheritToTypeID(registry crossSchemaRegistry, ownerType *Type, ref TypeRef) TypeID {
 	if ref.Qualifier() == "" {
 		// Local type reference
-		return schema.NewTypeID(ownerType.SourceID(), ref.Name())
+		return NewTypeID(ownerType.SourceID(), ref.Name())
 	}
 
 	// Qualified reference - need to look up the import
@@ -109,16 +108,16 @@ func resolveInheritToTypeID(registry CrossSchemaRegistry, ownerType *schema.Type
 		if s.SourceID() == ownerType.SourceID() {
 			imp, ok := s.ImportByAlias(ref.Qualifier())
 			if !ok {
-				return schema.TypeID{} // Import not found
+				return TypeID{} // Import not found
 			}
-			return schema.NewTypeID(imp.ResolvedSourceID(), ref.Name())
+			return NewTypeID(imp.ResolvedSourceID(), ref.Name())
 		}
 	}
-	return schema.TypeID{}
+	return TypeID{}
 }
 
 // buildCrossSchemaPath creates a human-readable path for the cycle.
-func buildCrossSchemaPath(registry CrossSchemaRegistry, stack []schema.TypeID, target schema.TypeID) []string {
+func buildCrossSchemaPath(registry crossSchemaRegistry, stack []TypeID, target TypeID) []string {
 	// Find where target appears in stack
 	idx := -1
 	for i, id := range stack {
@@ -149,7 +148,7 @@ func buildCrossSchemaPath(registry CrossSchemaRegistry, stack []schema.TypeID, t
 // formatTypeID returns a human-readable type identifier.
 // For local types, returns just the name.
 // For cross-schema types, returns "schemaName:TypeName".
-func formatTypeID(registry CrossSchemaRegistry, id schema.TypeID) string {
+func formatTypeID(registry crossSchemaRegistry, id TypeID) string {
 	// Try to get a friendly schema name
 	for _, s := range registry.All() {
 		if s.SourceID() == id.SchemaPath() {

@@ -8,7 +8,6 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 // Cross-Schema Tests
@@ -281,7 +280,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 	reg := schema.NewRegistry()
 
 	// Schema B with Resource
-	schemaB, result := build.NewBuilder().
+	schemaB, result := schema.NewBuilder().
 		WithName("schema_b").
 		WithSourceID(location.MustNewSourceID("test://b.yammm")).
 		AddType("Resource").
@@ -298,7 +297,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 	}
 
 	// Schema C with Resource (same type name!)
-	schemaC, result := build.NewBuilder().
+	schemaC, result := schema.NewBuilder().
 		WithName("schema_c").
 		WithSourceID(location.MustNewSourceID("test://c.yammm")).
 		AddType("Resource").
@@ -315,7 +314,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 	}
 
 	// Schema A imports both B and C
-	schemaA, result := build.NewBuilder().
+	schemaA, result := schema.NewBuilder().
 		WithName("schema_a").
 		WithSourceID(location.MustNewSourceID("test://a.yammm")).
 		WithRegistry(reg).

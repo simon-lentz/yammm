@@ -15,26 +15,26 @@ import (
 // --- Composition Validation Tests ---
 
 func TestValidateCompositions_Single(t *testing.T) {
-	// Create a part type
-	addressType := makeType("Address", false, true, // isPart = true
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("street", schema.NewStringConstraint(), false, false),
-	)
-
-	// Create parent type with composition
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithProperty("street", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"addresses": []any{
-				map[string]any{"id": int64(100), "street": "Main St"},
+				map[string]any{"id": "100", "street": "Main St"},
 			},
 		},
 	}
@@ -51,25 +51,28 @@ func TestValidateCompositions_Single(t *testing.T) {
 }
 
 func TestValidateCompositions_Multiple(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("street", schema.NewStringConstraint(), false, false),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithProperty("street", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"addresses": []any{
-				map[string]any{"id": int64(100), "street": "Main St"},
-				map[string]any{"id": int64(101), "street": "Oak Ave"},
-				map[string]any{"id": int64(102), "street": "Pine Rd"},
+				map[string]any{"id": "100", "street": "Main St"},
+				map[string]any{"id": "101", "street": "Oak Ave"},
+				map[string]any{"id": "102", "street": "Pine Rd"},
 			},
 		},
 	}
@@ -86,20 +89,23 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 }
 
 func TestValidateCompositions_Optional_Nil(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			// "addresses" is not present - optional composition
 		},
 	}
@@ -117,20 +123,23 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 }
 
 func TestValidateCompositions_Optional_Empty(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":        int64(1),
+			"id":        "1",
 			"addresses": []any{}, // Empty array - valid for optional
 		},
 	}
@@ -148,20 +157,23 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 }
 
 func TestValidateCompositions_Required_Missing(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRequiredComposition(addressType)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			// "addresses" missing - required composition
 		},
 	}
@@ -175,20 +187,23 @@ func TestValidateCompositions_Required_Missing(t *testing.T) {
 }
 
 func TestValidateCompositions_Required_Empty(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRequiredComposition(addressType)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":        int64(1),
+			"id":        "1",
 			"addresses": []any{}, // Empty - not valid for required
 		},
 	}
@@ -202,23 +217,26 @@ func TestValidateCompositions_Required_Empty(t *testing.T) {
 }
 
 func TestValidateCompositions_DuplicatePK(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"addresses": []any{
-				map[string]any{"id": int64(100)},
-				map[string]any{"id": int64(100)}, // Duplicate PK
+				map[string]any{"id": "100"},
+				map[string]any{"id": "100"}, // Duplicate PK
 			},
 		},
 	}
@@ -232,23 +250,26 @@ func TestValidateCompositions_DuplicatePK(t *testing.T) {
 }
 
 func TestValidateCompositions_ChildValidationFails(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("street", schema.NewStringConstraint(), false, false), // Required
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithProperty("street", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"addresses": []any{
-				map[string]any{"id": int64(100)}, // Missing required "street"
+				map[string]any{"id": "100"}, // Missing required "street"
 			},
 		},
 	}
@@ -262,20 +283,23 @@ func TestValidateCompositions_ChildValidationFails(t *testing.T) {
 }
 
 func TestValidateCompositions_InvalidChildShape(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"addresses": []any{
 				"not an object", // Invalid - should be object
 			},
@@ -291,21 +315,24 @@ func TestValidateCompositions_InvalidChildShape(t *testing.T) {
 }
 
 func TestValidateCompositions_NotArray(t *testing.T) {
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":        int64(1),
-			"addresses": map[string]any{"id": int64(100)}, // Object instead of array
+			"id":        "1",
+			"addresses": map[string]any{"id": "100"}, // Object instead of array
 		},
 	}
 
@@ -317,62 +344,27 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 	assert.Contains(t, failure.Summary(), "expected array")
 }
 
-// --- Test Helper ---
-
-// makeTypeWithRequiredComposition creates a type with a required composition relation.
-func makeTypeWithRequiredComposition(partType *schema.Type) *schema.Type {
-	const typeName = "Person"
-	const relationName = "addresses"
-	t := schema.InternalNewType(typeName, location.SourceID{}, location.Span{}, "", false, false)
-
-	idProp := makeProp("id", schema.NewIntegerConstraint(), false, true)
-	schema.InternalSetTypeProperties(t, []*schema.Property{idProp})
-	schema.InternalSetTypeAllProperties(t, []*schema.Property{idProp})
-	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{idProp})
-
-	// Create composition relation to part type (NOT optional)
-	rel := schema.InternalNewRelation(
-		schema.RelationComposition,
-		relationName,
-		relationName, // fieldName
-		schema.NewTypeRef("", partType.Name(), location.Span{}),
-		partType.ID(),
-		location.Span{},
-		"",
-		false,    // NOT optional
-		true,     // many
-		"",       // backref
-		true,     // reverseOptional
-		false,    // reverseMany
-		typeName, // owner
-		nil,      // no edge properties for composition
-	)
-	schema.InternalSealRelation(rel)
-
-	schema.InternalSetTypeCompositions(t, []*schema.Relation{rel})
-	schema.InternalSetTypeAllCompositions(t, []*schema.Relation{rel})
-	schema.InternalSealType(t)
-	return t
-}
-
 // --- P0 Null vs Absent Tests ---
 
 func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 	// Per architecture spec: null is always a shape error, even for optional compositions.
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses") // optional by default
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":        int64(1),
+			"id":        "1",
 			"addresses": nil, // Explicit null - always a shape error
 		},
 	}
@@ -408,20 +400,23 @@ func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 
 func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 	// Per architecture spec: null is always a shape error.
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRequiredComposition(addressType) // NOT optional
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":        int64(1),
+			"id":        "1",
 			"addresses": nil, // Explicit null - always a shape error
 		},
 	}
@@ -442,20 +437,23 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 
 func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 	// Verify E_UNRESOLVED_REQUIRED_COMPOSITION includes reason="absent" for missing field.
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRequiredComposition(addressType)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			// "addresses" absent
 		},
 	}
@@ -494,20 +492,23 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 
 func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 	// Verify E_UNRESOLVED_REQUIRED_COMPOSITION includes reason="empty" for empty array.
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRequiredComposition(addressType)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":        int64(1),
+			"id":        "1",
 			"addresses": []any{}, // Empty array
 		},
 	}
@@ -546,23 +547,26 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 
 func TestValidateCompositions_DuplicatePK_PathFormat(t *testing.T) {
 	// Verify that duplicate PK errors use PK-based path format, not array index.
-	addressType := makeType("Address", false, true,
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-	)
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"addresses": []any{
-				map[string]any{"id": int64(100)},
-				map[string]any{"id": int64(100)}, // Duplicate PK
+				map[string]any{"id": "100"},
+				map[string]any{"id": "100"}, // Duplicate PK
 			},
 		},
 	}
@@ -581,31 +585,34 @@ func TestValidateCompositions_DuplicatePK_PathFormat(t *testing.T) {
 		}
 	}
 
-	// Path should use PK format: $.addresses[id=100], not $.addresses[1]
-	assert.Contains(t, foundPath, "[id=100]", "path should use PK-based format")
+	// Path should use PK format: $.addresses[id="100"], not $.addresses[1]
+	assert.Contains(t, foundPath, `[id="100"]`, "path should use PK-based format")
 	assert.NotContains(t, foundPath, "[1]", "path should not use array index")
 }
 
 func TestValidateCompositions_CompositePK_PathFormat(t *testing.T) {
 	// Verify that composite PKs are properly formatted in paths.
-	enrollmentType := makeType("Enrollment", false, true,
-		makeProp("region", schema.NewStringConstraint(), false, true),
-		makeProp("studentId", schema.NewIntegerConstraint(), false, true),
-	)
-	schoolType := makeTypeWithRelation("School", enrollmentType, "enrollments")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{schoolType, enrollmentType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Enrollment").
+		AsPart().
+		WithPrimaryKey("region", schema.StringConstraint{}).
+		WithPrimaryKey("studentId", schema.StringConstraint{}).
+		Done().
+		AddType("School").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("enrollments", schema.LocalTypeRef("Enrollment", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"enrollments": []any{
-				map[string]any{"region": "us", "studentId": int64(123)},
-				map[string]any{"region": "us", "studentId": int64(123)}, // Duplicate
+				map[string]any{"region": "us", "studentId": "123"},
+				map[string]any{"region": "us", "studentId": "123"}, // Duplicate
 			},
 		},
 	}
@@ -626,7 +633,7 @@ func TestValidateCompositions_CompositePK_PathFormat(t *testing.T) {
 
 	// Path should include composite PK: region="us",studentId=123
 	assert.Contains(t, foundPath, `region="us"`, "path should include string PK field")
-	assert.Contains(t, foundPath, "studentId=123", "path should include integer PK field")
+	assert.Contains(t, foundPath, `studentId="123"`, "path should include string PK field")
 }
 
 // --- Ownership Isolation Tests ---
@@ -637,24 +644,24 @@ func TestValidateCompositions_CompositePK_PathFormat(t *testing.T) {
 // This tests the streaming path for composition validation, ensuring it has the
 // same isolation guarantees as the inline validation path.
 func TestOwnership_ValidateForCompositionIsolation(t *testing.T) {
-	// Create a part type
-	addressType := makeType("Address", false, true, // isPart = true
-		makeProp("id", schema.NewIntegerConstraint(), false, true),
-		makeProp("street", schema.NewStringConstraint(), false, false),
-	)
-
-	// Create parent type with composition
-	personType := makeTypeWithRelation("Person", addressType, "addresses")
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, addressType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithProperty("street", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	// Create raw data for composition children
-	addr1Data := map[string]any{"id": int64(100), "street": "Original Street 1"}
-	addr2Data := map[string]any{"id": int64(101), "street": "Original Street 2"}
+	addr1Data := map[string]any{"id": "100", "street": "Original Street 1"}
+	addr2Data := map[string]any{"id": "101", "street": "Original Street 2"}
 
 	raws := []instance.RawInstance{
 		{Properties: addr1Data},
@@ -672,11 +679,11 @@ func TestOwnership_ValidateForCompositionIsolation(t *testing.T) {
 
 	// Mutate original data AFTER validation
 	addr1Data["street"] = "Mutated Street 1"
-	addr1Data["id"] = int64(999)
+	addr1Data["id"] = "999"
 	addr2Data["street"] = "Mutated Street 2"
 
 	// Also try replacing the entire slice
-	raws[0] = instance.RawInstance{Properties: map[string]any{"id": int64(888), "street": "Replaced"}}
+	raws[0] = instance.RawInstance{Properties: map[string]any{"id": "888", "street": "Replaced"}}
 
 	// The ValidInstance values should NOT be affected
 	street1Val, ok := valid[0].Property("street")
@@ -692,6 +699,6 @@ func TestOwnership_ValidateForCompositionIsolation(t *testing.T) {
 	assert.Equal(t, "Original Street 2", street2, "ValidateForComposition isolation failed: street2 was mutated")
 
 	// Primary keys should also be isolated
-	assert.Equal(t, "[100]", valid[0].PrimaryKey().String(), "ValidateForComposition isolation failed: PK was mutated")
-	assert.Equal(t, "[101]", valid[1].PrimaryKey().String(), "ValidateForComposition isolation failed: PK was mutated")
+	assert.Equal(t, `["100"]`, valid[0].PrimaryKey().String(), "ValidateForComposition isolation failed: PK was mutated")
+	assert.Equal(t, `["101"]`, valid[1].PrimaryKey().String(), "ValidateForComposition isolation failed: PK was mutated")
 }

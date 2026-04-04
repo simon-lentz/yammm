@@ -1,10 +1,9 @@
-package complete
+package schema
 
 import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // visitState tracks DFS progress for cycle detection.
@@ -86,7 +85,7 @@ func buildCyclePath(stack []string, target string) []string {
 // resolveTypeRefName resolves a TypeRef to a type name.
 // For local refs, returns the name directly.
 // For qualified refs, looks up the imported schema if registry is available.
-func (c *completer) resolveTypeRefName(ref schema.TypeRef) string {
+func (c *completer) resolveTypeRefName(ref TypeRef) string {
 	if ref.Name() == "" {
 		return ""
 	}
@@ -129,11 +128,11 @@ func (c *completer) completeTypes() bool {
 	// Set schema name on each type for cross-schema display.
 	schemaName := c.schema.Name()
 	for _, t := range c.schema.TypesSlice() {
-		schema.InternalSetTypeSchemaName(t, schemaName)
+		t.setSchemaName(schemaName)
 	}
 
-	var completeType func(t *schema.Type) bool
-	completeType = func(t *schema.Type) bool {
+	var completeType func(t *Type) bool
+	completeType = func(t *Type) bool {
 		if completed[t.Name()] {
 			return true
 		}
@@ -142,21 +141,21 @@ func (c *completer) completeTypes() bool {
 		completed[t.Name()] = true
 
 		// Complete supertypes first
-		supers := make([]schema.ResolvedTypeRef, 0)
-		seenSupers := make(map[schema.TypeID]bool)
+		supers := make([]ResolvedTypeRef, 0)
+		seenSupers := make(map[TypeID]bool)
 
 		// Initialize with current type to prevent self-inclusion via cross-schema cycles.
 		// If A extends B (cross-schema), and B's SuperTypes includes A, the seenSupers
 		// check will correctly skip adding A to its own supers.
 		// NOTE: This local seenSupers check prevents infinite loops during single-schema
 		// completion. Full cross-schema cycle detection (A → B → A spanning schemas)
-		// is performed separately via DetectCrossSchemaInheritanceCycles after all
+		// is performed separately via detectCrossSchemaInheritanceCycles after all
 		// schemas are loaded.
 		seenSupers[t.ID()] = true
 
 		// DFS traversal of inheritance, left-to-right, keep-first
-		var linearize func(ref schema.TypeRef) //nolint:staticcheck // recursive closure requires separate declaration
-		linearize = func(ref schema.TypeRef) {
+		var linearize func(ref TypeRef) //nolint:staticcheck // recursive closure requires separate declaration
+		linearize = func(ref TypeRef) {
 			resolved := c.resolveTypeRef(ref)
 			if resolved == nil {
 				// Only emit error for local refs; cross-schema refs are deferred
@@ -195,7 +194,7 @@ func (c *completer) completeTypes() bool {
 				}
 			}
 
-			supers = append(supers, schema.NewResolvedTypeRef(ref, id))
+			supers = append(supers, NewResolvedTypeRef(ref, id))
 		}
 
 		// Process declared inherits
@@ -203,14 +202,14 @@ func (c *completer) completeTypes() bool {
 			linearize(ref)
 		}
 
-		schema.InternalSetTypeSuperTypes(t, supers)
+		t.setSuperTypes(supers)
 
 		// Merge properties from ancestors
 		allProps := c.mergeProperties(t, supers)
-		schema.InternalSetTypeAllProperties(t, allProps)
+		t.setAllProperties(allProps)
 
 		// Extract primary keys
-		pks := make([]*schema.Property, 0)
+		pks := make([]*Property, 0)
 		for _, p := range allProps {
 			if p.IsPrimaryKey() {
 				if !isPrimaryKeyAllowed(p.Constraint()) {
@@ -223,19 +222,19 @@ func (c *completer) completeTypes() bool {
 				pks = append(pks, p)
 			}
 		}
-		schema.InternalSetTypePrimaryKeys(t, pks)
+		t.setPrimaryKeys(pks)
 
 		// Merge associations from ancestors
-		allAssocs := c.mergeRelations(t, t.AssociationsSlice(), supers, schema.RelationAssociation)
-		schema.InternalSetTypeAllAssociations(t, allAssocs)
+		allAssocs := c.mergeRelations(t, t.AssociationsSlice(), supers, RelationAssociation)
+		t.setAllAssociations(allAssocs)
 
 		// Merge compositions from ancestors
-		allComps := c.mergeRelations(t, t.CompositionsSlice(), supers, schema.RelationComposition)
-		schema.InternalSetTypeAllCompositions(t, allComps)
+		allComps := c.mergeRelations(t, t.CompositionsSlice(), supers, RelationComposition)
+		t.setAllCompositions(allComps)
 
 		// Merge invariants from ancestors
 		allInvs := c.mergeInvariants(t, supers)
-		schema.InternalSetTypeAllInvariants(t, allInvs)
+		t.setAllInvariants(allInvs)
 
 		return ok
 	}
@@ -258,8 +257,8 @@ func (c *completer) completeTypes() bool {
 			}
 			if superType := c.resolveTypeID(superID); superType != nil {
 				subs := superType.SubTypesSlice()
-				subs = append(subs, schema.ResolvedTypeRefFromType(t, superID.SchemaPath().String()))
-				schema.InternalSetTypeSubTypes(superType, subs)
+				subs = append(subs, ResolvedTypeRefFromType(t, superID.SchemaPath().String()))
+				superType.setSubTypes(subs)
 			}
 		}
 	}
@@ -268,7 +267,7 @@ func (c *completer) completeTypes() bool {
 }
 
 // resolveTypeRef resolves a TypeRef to a Type.
-func (c *completer) resolveTypeRef(ref schema.TypeRef) *schema.Type {
+func (c *completer) resolveTypeRef(ref TypeRef) *Type {
 	if ref.Name() == "" {
 		return nil
 	}
@@ -298,7 +297,7 @@ func (c *completer) resolveTypeRef(ref schema.TypeRef) *schema.Type {
 }
 
 // resolveTypeID resolves a TypeID to a Type.
-func (c *completer) resolveTypeID(id schema.TypeID) *schema.Type {
+func (c *completer) resolveTypeID(id TypeID) *Type {
 	if id.SchemaPath() == c.sourceID {
 		return c.typeIndex[id.Name()]
 	}
@@ -321,10 +320,10 @@ func (c *completer) resolveTypeID(id schema.TypeID) *schema.Type {
 // Identical properties from different ancestors are deduplicated (keep-first).
 // When a child re-declares a parent property, constraint narrowing is attempted:
 // the child's version is accepted if it narrows the parent's (via CanNarrowFrom).
-func (c *completer) mergeProperties(t *schema.Type, supers []schema.ResolvedTypeRef) []*schema.Property {
+func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Property {
 	// Start with own properties
 	result := t.PropertiesSlice()
-	seen := make(map[string]*schema.Property)
+	seen := make(map[string]*Property)
 	ownProps := make(map[string]bool)
 	for _, p := range result {
 		seen[p.Name()] = p
@@ -383,7 +382,7 @@ func (c *completer) mergeProperties(t *schema.Type, supers []schema.ResolvedType
 // mergeInvariants merges own invariants with inherited invariants.
 // Own invariants come first, then inherited (left-to-right supertype order).
 // Deduplication by name: keep-first (child can override parent's invariant by name).
-func (c *completer) mergeInvariants(t *schema.Type, supers []schema.ResolvedTypeRef) []*schema.Invariant {
+func (c *completer) mergeInvariants(t *Type, supers []ResolvedTypeRef) []*Invariant {
 	result := t.InvariantsSlice()
 	seen := make(map[string]bool)
 	for _, inv := range result {
@@ -412,9 +411,9 @@ func (c *completer) mergeInvariants(t *schema.Type, supers []schema.ResolvedType
 // Similar to mergeProperties but for relations of a specific kind.
 // Reports E_RELATION_COLLISION when an inherited relation conflicts
 // with an existing relation (own or from another ancestor).
-func (c *completer) mergeRelations(t *schema.Type, own []*schema.Relation, supers []schema.ResolvedTypeRef, kind schema.RelationKind) []*schema.Relation {
+func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTypeRef, kind RelationKind) []*Relation {
 	result := own
-	seen := make(map[string]*schema.Relation)
+	seen := make(map[string]*Relation)
 	for _, r := range result {
 		seen[r.FieldName()] = r
 	}
@@ -425,8 +424,8 @@ func (c *completer) mergeRelations(t *schema.Type, own []*schema.Relation, super
 			continue
 		}
 
-		var inherited []*schema.Relation
-		if kind == schema.RelationAssociation {
+		var inherited []*Relation
+		if kind == RelationAssociation {
 			inherited = superType.AllAssociationsSlice()
 		} else {
 			inherited = superType.AllCompositionsSlice()

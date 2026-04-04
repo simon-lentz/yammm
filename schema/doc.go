@@ -10,16 +10,16 @@
 //
 // # Loading Schemas
 //
-// Schemas are loaded using the schema/load package:
+// Schemas are loaded using the Load family of functions:
 //
 //	// Load from file
-//	s, result, err := load.Load(ctx, "schema.yammm")
+//	s, result, err := schema.Load(ctx, "schema.yammm")
 //
 //	// Load from string
-//	s, result, err := load.String(ctx, source, "schema.yammm")
+//	s, result, err := schema.LoadString(ctx, source, "schema.yammm")
 //
 //	// Load from multiple sources
-//	s, result, err := load.Sources(ctx, sources, moduleRoot)
+//	s, result, err := schema.LoadSources(ctx, sources, moduleRoot)
 //
 // The triple-return pattern ensures diagnostics are always available via
 // diag.Result, while err signals catastrophic failures (I/O, cancellation).
@@ -44,8 +44,8 @@
 //   - Alias constraints are resolved to their underlying types
 //
 // After completion, schemas are sealed to prevent further mutation. The
-// schema/load package handles completion automatically. The schema/build
-// package completes the schema when Build() is called. All types and
+// [Load] family handles completion automatically. The [NewBuilder] API
+// completes the schema when [Builder.Build] is called. All types and
 // constraints are immutable and thread-safe after sealing.
 //
 // # Type Identity
