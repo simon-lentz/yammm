@@ -399,8 +399,8 @@ func TestWithRegistry(t *testing.T) {
 	assert.False(t, result.HasErrors())
 
 	// The schema should be in the provided registry
-	found, status := registry.LookupByName("test")
-	assert.True(t, status.Found())
+	found, ok := registry.LookupByName("test")
+	assert.True(t, ok)
 	assert.Same(t, s, found)
 }
 
@@ -1519,9 +1519,9 @@ func TestLoad_WithSchemaRegistry(t *testing.T) {
 	assert.False(t, result.HasErrors())
 
 	// Verify schema was registered
-	found, status := reg.LookupBySourceID(s.SourceID())
+	found, ok := reg.LookupBySourceID(s.SourceID())
 	assert.NotNil(t, found)
-	assert.Equal(t, schema.LookupFound, status)
+	assert.True(t, ok)
 }
 
 func TestLoad_DiamondImport(t *testing.T) {

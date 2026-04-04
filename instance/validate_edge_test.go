@@ -213,7 +213,7 @@ func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "expected object")
+	assert.Contains(t, failure.Summary(), "expected object")
 }
 
 func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
@@ -238,7 +238,7 @@ func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "expected array")
+	assert.Contains(t, failure.Summary(), "expected array")
 }
 
 func TestValidateEdges_MissingFK(t *testing.T) {
@@ -263,7 +263,7 @@ func TestValidateEdges_MissingFK(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "_target_id")
+	assert.Contains(t, failure.Summary(), "_target_id")
 }
 
 func TestValidateEdges_UnknownField(t *testing.T) {
@@ -291,7 +291,7 @@ func TestValidateEdges_UnknownField(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "unknown field")
+	assert.Contains(t, failure.Summary(), "unknown field")
 }
 
 func TestValidateEdges_UnknownField_Allowed(t *testing.T) {
@@ -394,7 +394,7 @@ func TestValidateEdges_MissingRequiredEdgeProperty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "missing required edge property")
+	assert.Contains(t, failure.Summary(), "missing required edge property")
 }
 
 func TestValidateEdges_EdgePropertyInvalid(t *testing.T) {
@@ -426,7 +426,7 @@ func TestValidateEdges_EdgePropertyInvalid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "rating")
+	assert.Contains(t, failure.Summary(), "rating")
 }
 
 func TestValidateEdges_FKTypeMismatch(t *testing.T) {
@@ -453,7 +453,7 @@ func TestValidateEdges_FKTypeMismatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "_target_id")
+	assert.Contains(t, failure.Summary(), "_target_id")
 }
 
 func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
@@ -480,7 +480,7 @@ func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "expected object for edge target")
+	assert.Contains(t, failure.Summary(), "expected object for edge target")
 }
 
 func TestValidateEdges_OptionalEdgeWithEmptyArray(t *testing.T) {
@@ -621,7 +621,7 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "incomplete composite FK")
+	assert.Contains(t, failure.Summary(), "incomplete composite FK")
 }
 
 // TestValidateEdges_FKCaseSensitive verifies that FK field matching is always case-sensitive,
@@ -652,7 +652,7 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, valid, "Should fail: _target_ID != _target_id (case-sensitive)")
 		require.NotNil(t, failure)
-		assert.Contains(t, failure.Error(), "missing FK field")
+		assert.Contains(t, failure.Summary(), "missing FK field")
 	})
 
 	t.Run("wrong_case_fails_with_strict_mode", func(t *testing.T) {
@@ -672,7 +672,7 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, valid, "Should fail: _Target_id != _target_id (case-sensitive)")
 		require.NotNil(t, failure)
-		assert.Contains(t, failure.Error(), "missing FK field")
+		assert.Contains(t, failure.Summary(), "missing FK field")
 	})
 
 	t.Run("correct_case_succeeds", func(t *testing.T) {
@@ -718,7 +718,7 @@ func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid edge value")
+	assert.Contains(t, failure.Summary(), "null is not a valid edge value")
 
 	// Verify error code is E_EDGE_SHAPE_MISMATCH
 	issues := failure.Result.IssuesSlice()
@@ -765,7 +765,7 @@ func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid edge value")
+	assert.Contains(t, failure.Summary(), "null is not a valid edge value")
 
 	issues := failure.Result.IssuesSlice()
 	require.Len(t, issues, 1)
@@ -795,7 +795,7 @@ func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid edge value")
+	assert.Contains(t, failure.Summary(), "null is not a valid edge value")
 
 	issues := failure.Result.IssuesSlice()
 	require.Len(t, issues, 1)

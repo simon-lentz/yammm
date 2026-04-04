@@ -19,7 +19,7 @@ const (
 // CrossSchemaRegistry provides type lookup across all loaded schemas.
 type CrossSchemaRegistry interface {
 	All() []*schema.Schema
-	LookupType(id schema.TypeID) (*schema.Type, schema.LookupStatus)
+	LookupType(id schema.TypeID) (*schema.Type, bool)
 }
 
 // DetectCrossSchemaInheritanceCycles performs global inheritance cycle detection
@@ -66,8 +66,8 @@ func DetectCrossSchemaInheritanceCycles(registry CrossSchemaRegistry) []*diag.Is
 			stack = stack[:len(stack)-1]
 		}()
 
-		t, status := registry.LookupType(id)
-		if !status.Found() {
+		t, ok := registry.LookupType(id)
+		if !ok {
 			// Type not in registry; skip (already validated elsewhere)
 			return true
 		}

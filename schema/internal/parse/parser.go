@@ -872,7 +872,16 @@ func (b *astBuilder) ExitListT(ctx *grammar.ListTContext) {
 			WithSpan(b.spans.FromContext(ctx)).Build())
 	}
 
-	b.currentDT = schema.NewListConstraintBounded(elementConstraint, minLen, maxLen)
+	switch {
+	case minLen >= 0 && maxLen >= 0:
+		b.currentDT = schema.ListLenBetween(elementConstraint, minLen, maxLen)
+	case minLen >= 0:
+		b.currentDT = schema.ListMinLen(elementConstraint, minLen)
+	case maxLen >= 0:
+		b.currentDT = schema.ListMaxLen(elementConstraint, maxLen)
+	default:
+		b.currentDT = schema.NewListConstraint(elementConstraint)
+	}
 }
 
 func (b *astBuilder) ExitQualified_alias(ctx *grammar.Qualified_aliasContext) {

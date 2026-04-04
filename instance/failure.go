@@ -25,8 +25,8 @@ func NewValidationFailure(raw RawInstance, result diag.Result) ValidationFailure
 	}
 }
 
-// Error returns the first error message, or empty string if none.
-func (f ValidationFailure) Error() string {
+// Summary returns the first error message, or empty string if none.
+func (f ValidationFailure) Summary() string {
 	for issue := range f.Result.Issues() {
 		if issue.Severity().IsFailure() {
 			return issue.Message()

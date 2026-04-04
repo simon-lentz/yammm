@@ -1194,12 +1194,12 @@ func TestListConstraint_String(t *testing.T) {
 		},
 		{
 			name: "list bounded",
-			c:    schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 5),
+			c:    schema.ListLenBetween(schema.NewStringConstraint(), 1, 5),
 			want: "List<String>[1, 5]",
 		},
 		{
 			name: "both constrained",
-			c:    schema.NewListConstraintBounded(schema.StringMaxLen(6), 1, 5),
+			c:    schema.ListLenBetween(schema.StringMaxLen(6), 1, 5),
 			want: "List<String[_, 6]>[1, 5]",
 		},
 		{
@@ -1209,12 +1209,12 @@ func TestListConstraint_String(t *testing.T) {
 		},
 		{
 			name: "one-sided min",
-			c:    schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, -1),
+			c:    schema.ListMinLen(schema.NewStringConstraint(), 1),
 			want: "List<String>[1, _]",
 		},
 		{
 			name: "one-sided max",
-			c:    schema.NewListConstraintBounded(schema.NewStringConstraint(), -1, 10),
+			c:    schema.ListMaxLen(schema.NewStringConstraint(), 10),
 			want: "List<String>[_, 10]",
 		},
 	}
@@ -1241,8 +1241,8 @@ func TestListConstraint_Equal(t *testing.T) {
 		},
 		{
 			name: "same bounded",
-			a:    schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 5),
-			b:    schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 5),
+			a:    schema.ListLenBetween(schema.NewStringConstraint(), 1, 5),
+			b:    schema.ListLenBetween(schema.NewStringConstraint(), 1, 5),
 			want: true,
 		},
 		{
@@ -1253,14 +1253,14 @@ func TestListConstraint_Equal(t *testing.T) {
 		},
 		{
 			name: "different bounds",
-			a:    schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 5),
-			b:    schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 10),
+			a:    schema.ListLenBetween(schema.NewStringConstraint(), 1, 5),
+			b:    schema.ListLenBetween(schema.NewStringConstraint(), 1, 10),
 			want: false,
 		},
 		{
 			name: "bare vs bounded",
 			a:    schema.NewListConstraint(schema.NewStringConstraint()),
-			b:    schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 5),
+			b:    schema.ListLenBetween(schema.NewStringConstraint(), 1, 5),
 			want: false,
 		},
 		{
@@ -1301,19 +1301,19 @@ func TestListConstraint_NarrowsTo(t *testing.T) {
 		{
 			name:   "bare to bounded",
 			parent: schema.NewListConstraint(schema.NewStringConstraint()),
-			child:  schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 10),
+			child:  schema.ListLenBetween(schema.NewStringConstraint(), 1, 10),
 			want:   true,
 		},
 		{
 			name:   "bounded to tighter bounds",
-			parent: schema.NewListConstraintBounded(schema.NewStringConstraint(), 0, 100),
-			child:  schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 50),
+			parent: schema.ListLenBetween(schema.NewStringConstraint(), 0, 100),
+			child:  schema.ListLenBetween(schema.NewStringConstraint(), 1, 50),
 			want:   true,
 		},
 		{
 			name:   "bounded to wider bounds fails",
-			parent: schema.NewListConstraintBounded(schema.NewStringConstraint(), 5, 10),
-			child:  schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 10),
+			parent: schema.ListLenBetween(schema.NewStringConstraint(), 5, 10),
+			child:  schema.ListLenBetween(schema.NewStringConstraint(), 1, 10),
 			want:   false,
 		},
 		{
@@ -1342,7 +1342,7 @@ func TestListConstraint_NarrowsTo(t *testing.T) {
 		},
 		{
 			name:   "child lacks max when parent has max fails",
-			parent: schema.NewListConstraintBounded(schema.NewStringConstraint(), -1, 10),
+			parent: schema.ListMaxLen(schema.NewStringConstraint(), 10),
 			child:  schema.NewListConstraint(schema.NewStringConstraint()),
 			want:   false,
 		},
@@ -1389,7 +1389,7 @@ func TestListConstraint_Accessors(t *testing.T) {
 
 	t.Run("bounds present", func(t *testing.T) {
 		t.Parallel()
-		c := schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 5)
+		c := schema.ListLenBetween(schema.NewStringConstraint(), 1, 5)
 		minVal, hasMin := c.MinLen()
 		maxVal, hasMax := c.MaxLen()
 		assert.True(t, hasMin)

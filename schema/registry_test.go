@@ -79,12 +79,12 @@ func TestRegistry_LookupBySourceID(t *testing.T) {
 	s := schema.InternalNewSchema("test", srcID, location.Span{}, "")
 	_ = r.Register(s)
 
-	found, status := r.LookupBySourceID(srcID)
-	assert.True(t, status.Found())
+	found, ok := r.LookupBySourceID(srcID)
+	assert.True(t, ok)
 	assert.Same(t, s, found)
 
-	_, status = r.LookupBySourceID(location.MustNewSourceID("test://other.yammm"))
-	assert.False(t, status.Found())
+	_, ok = r.LookupBySourceID(location.MustNewSourceID("test://other.yammm"))
+	assert.False(t, ok)
 }
 
 func TestRegistry_LookupByName(t *testing.T) {
@@ -94,12 +94,12 @@ func TestRegistry_LookupByName(t *testing.T) {
 	s := schema.InternalNewSchema("myschema", srcID, location.Span{}, "")
 	_ = r.Register(s)
 
-	found, status := r.LookupByName("myschema")
-	assert.True(t, status.Found())
+	found, ok := r.LookupByName("myschema")
+	assert.True(t, ok)
 	assert.Same(t, s, found)
 
-	_, status = r.LookupByName("other")
-	assert.False(t, status.Found())
+	_, ok = r.LookupByName("other")
+	assert.False(t, ok)
 }
 
 func TestRegistry_LookupType(t *testing.T) {
@@ -116,14 +116,14 @@ func TestRegistry_LookupType(t *testing.T) {
 
 	// Lookup by TypeID
 	typeID := typ.ID()
-	found, status := r.LookupType(typeID)
-	assert.True(t, status.Found())
+	found, ok := r.LookupType(typeID)
+	assert.True(t, ok)
 	assert.Same(t, typ, found)
 
 	// Lookup non-existent type
 	fakeID := schema.NewTypeID(location.MustNewSourceID("test://other.yammm"), "Fake")
-	_, status = r.LookupType(fakeID)
-	assert.False(t, status.Found())
+	_, ok = r.LookupType(fakeID)
+	assert.False(t, ok)
 }
 
 func TestRegistry_Contains(t *testing.T) {
@@ -149,8 +149,8 @@ func TestRegistry_Clone(t *testing.T) {
 	assert.Equal(t, r.Len(), clone.Len())
 
 	// Clone should have the same schema
-	found, status := clone.LookupBySourceID(srcID)
-	assert.True(t, status.Found())
+	found, ok := clone.LookupBySourceID(srcID)
+	assert.True(t, ok)
 	assert.Same(t, s, found)
 
 	// Modifying clone should not affect original
@@ -239,11 +239,6 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 	for err := range errChan {
 		t.Errorf("concurrent access error: %v", err)
 	}
-}
-
-func TestLookupStatus(t *testing.T) {
-	assert.True(t, schema.LookupFound.Found())
-	assert.False(t, schema.LookupNotFound.Found())
 }
 
 func TestRegistryErrorKind_String(t *testing.T) {

@@ -110,7 +110,7 @@ func TestValidator_ValidateOne_TypeNotFound(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "not found")
+	assert.Contains(t, failure.Summary(), "not found")
 }
 
 func TestValidator_ValidateOne_AbstractTypeRejected(t *testing.T) {
@@ -132,7 +132,7 @@ func TestValidator_ValidateOne_AbstractTypeRejected(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "abstract")
+	assert.Contains(t, failure.Summary(), "abstract")
 }
 
 func TestValidator_ValidateOne_PartTypeRejected(t *testing.T) {
@@ -154,7 +154,7 @@ func TestValidator_ValidateOne_PartTypeRejected(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "part type")
+	assert.Contains(t, failure.Summary(), "part type")
 }
 
 func TestValidator_ValidateOne_MissingRequiredProperty(t *testing.T) {
@@ -178,7 +178,7 @@ func TestValidator_ValidateOne_MissingRequiredProperty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "missing required")
+	assert.Contains(t, failure.Summary(), "missing required")
 }
 
 func TestValidator_ValidateOne_OptionalPropertyMissing(t *testing.T) {
@@ -225,7 +225,7 @@ func TestValidator_ValidateOne_TypeMismatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "age")
+	assert.Contains(t, failure.Summary(), "age")
 }
 
 func TestValidator_ValidateOne_UnknownField(t *testing.T) {
@@ -248,7 +248,7 @@ func TestValidator_ValidateOne_UnknownField(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "unknown")
+	assert.Contains(t, failure.Summary(), "unknown")
 }
 
 func TestValidator_ValidateOne_AllowUnknownFields(t *testing.T) {
@@ -599,7 +599,7 @@ func TestValidator_ValidateForComposition_ParentTypeNotFound(t *testing.T) {
 	assert.Nil(t, valid)
 	require.Len(t, failures, 1)
 	assert.Equal(t, instance.ErrTypeNotFound, failures[0].Result.IssuesSlice()[0].Code())
-	assert.Contains(t, failures[0].Error(), "not found")
+	assert.Contains(t, failures[0].Summary(), "not found")
 }
 
 func TestValidator_ValidateForComposition_RelationNotFound(t *testing.T) {
@@ -620,7 +620,7 @@ func TestValidator_ValidateForComposition_RelationNotFound(t *testing.T) {
 	assert.Nil(t, valid)
 	require.Len(t, failures, 1)
 	assert.Equal(t, instance.ErrCompositionNotFound, failures[0].Result.IssuesSlice()[0].Code())
-	assert.Contains(t, failures[0].Error(), "not found")
+	assert.Contains(t, failures[0].Summary(), "not found")
 }
 
 func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
@@ -764,7 +764,7 @@ func TestValidator_ValidateOne_InvariantFail(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "age must be non-negative")
+	assert.Contains(t, failure.Summary(), "age must be non-negative")
 }
 
 func TestValidator_ValidateOne_InvariantWithoutMessage(t *testing.T) {
@@ -795,7 +795,7 @@ func TestValidator_ValidateOne_InvariantWithoutMessage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "invariant failed")
+	assert.Contains(t, failure.Summary(), "invariant failed")
 }
 
 func TestValidator_ValidateOne_InvariantNilExpression(t *testing.T) {

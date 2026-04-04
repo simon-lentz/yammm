@@ -171,7 +171,7 @@ func TestValidateCompositions_Required_Missing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "missing required composition")
+	assert.Contains(t, failure.Summary(), "missing required composition")
 }
 
 func TestValidateCompositions_Required_Empty(t *testing.T) {
@@ -198,7 +198,7 @@ func TestValidateCompositions_Required_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "required composition cannot be empty")
+	assert.Contains(t, failure.Summary(), "required composition cannot be empty")
 }
 
 func TestValidateCompositions_DuplicatePK(t *testing.T) {
@@ -228,7 +228,7 @@ func TestValidateCompositions_DuplicatePK(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "duplicate primary key")
+	assert.Contains(t, failure.Summary(), "duplicate primary key")
 }
 
 func TestValidateCompositions_ChildValidationFails(t *testing.T) {
@@ -258,7 +258,7 @@ func TestValidateCompositions_ChildValidationFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "missing required")
+	assert.Contains(t, failure.Summary(), "missing required")
 }
 
 func TestValidateCompositions_InvalidChildShape(t *testing.T) {
@@ -287,7 +287,7 @@ func TestValidateCompositions_InvalidChildShape(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "composition child must be an object")
+	assert.Contains(t, failure.Summary(), "composition child must be an object")
 }
 
 func TestValidateCompositions_NotArray(t *testing.T) {
@@ -314,7 +314,7 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "expected array")
+	assert.Contains(t, failure.Summary(), "expected array")
 }
 
 // --- Test Helper ---
@@ -382,7 +382,7 @@ func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid composition value")
+	assert.Contains(t, failure.Summary(), "null is not a valid composition value")
 
 	// Verify error code is E_EDGE_SHAPE_MISMATCH
 	issues := failure.Result.IssuesSlice()
@@ -431,7 +431,7 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
-	assert.Contains(t, failure.Error(), "null is not a valid composition value")
+	assert.Contains(t, failure.Summary(), "null is not a valid composition value")
 
 	issues := failure.Result.IssuesSlice()
 	require.Len(t, issues, 1)

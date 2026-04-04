@@ -9,21 +9,6 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// LookupStatus indicates the result of a registry lookup.
-type LookupStatus uint8
-
-const (
-	// LookupNotFound indicates the item was not found.
-	LookupNotFound LookupStatus = iota
-	// LookupFound indicates the item was found.
-	LookupFound
-)
-
-// Found reports whether the lookup succeeded.
-func (s LookupStatus) Found() bool {
-	return s == LookupFound
-}
-
 // Registry is a thread-safe registry of compiled schemas.
 //
 // The registry is append-only by design: once a schema is registered, it cannot
@@ -105,52 +90,40 @@ func (r *Registry) Register(s *Schema) error {
 }
 
 // LookupBySourceID returns the schema with the given source ID.
-func (r *Registry) LookupBySourceID(id location.SourceID) (*Schema, LookupStatus) {
+func (r *Registry) LookupBySourceID(id location.SourceID) (*Schema, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	s, ok := r.schemas[id]
-	if !ok {
-		return nil, LookupNotFound
-	}
-	return s, LookupFound
+	return s, ok
 }
 
 // LookupByName returns the schema with the given name.
-func (r *Registry) LookupByName(name string) (*Schema, LookupStatus) {
+func (r *Registry) LookupByName(name string) (*Schema, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	s, ok := r.byName[name]
-	if !ok {
-		return nil, LookupNotFound
-	}
-	return s, LookupFound
+	return s, ok
 }
 
 // LookupType returns the type with the given TypeID.
 // This provides O(1) cross-schema type lookup.
-func (r *Registry) LookupType(id TypeID) (*Type, LookupStatus) {
+func (r *Registry) LookupType(id TypeID) (*Type, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	t, ok := r.byTypeID[id]
-	if !ok {
-		return nil, LookupNotFound
-	}
-	return t, LookupFound
+	return t, ok
 }
 
 // LookupSchema returns the schema containing the type with the given TypeID.
-func (r *Registry) LookupSchema(id TypeID) (*Schema, LookupStatus) {
+func (r *Registry) LookupSchema(id TypeID) (*Schema, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	s, ok := r.schemas[id.schemaPath]
-	if !ok {
-		return nil, LookupNotFound
-	}
-	return s, LookupFound
+	return s, ok
 }
 
 // Contains reports whether a schema with the given source ID is registered.

@@ -486,8 +486,8 @@ type registryAdapter struct {
 
 // LookupBySourceID implements the complete.Registry interface.
 func (a *registryAdapter) LookupBySourceID(id location.SourceID) (*schema.Schema, bool) {
-	s, status := a.r.LookupBySourceID(id)
-	return s, status.Found()
+	s, ok := a.r.LookupBySourceID(id)
+	return s, ok
 }
 
 // newLoader creates a new loader with the given configuration.

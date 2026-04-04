@@ -559,7 +559,7 @@ func TestValidation_ConcurrentUse(t *testing.T) {
 				return
 			}
 			if failure != nil {
-				errs <- failure
+				errs <- failure.Result.Err()
 				return
 			}
 			errs <- nil

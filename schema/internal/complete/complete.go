@@ -637,13 +637,17 @@ func (c *completer) resolveListElementAliases(constraint schema.Constraint, span
 	// Rebuild with resolved element
 	minLen, hasMin := lc.MinLen()
 	maxLen, hasMax := lc.MaxLen()
-	if !hasMin {
-		minLen = -1
+
+	switch {
+	case hasMin && hasMax:
+		return schema.ListLenBetween(elem, minLen, maxLen), true
+	case hasMin:
+		return schema.ListMinLen(elem, minLen), true
+	case hasMax:
+		return schema.ListMaxLen(elem, maxLen), true
+	default:
+		return schema.NewListConstraint(elem), true
 	}
-	if !hasMax {
-		maxLen = -1
-	}
-	return schema.NewListConstraintBounded(elem, minLen, maxLen), true
 }
 
 // parseQualifiedName splits a qualified name into qualifier and local name.

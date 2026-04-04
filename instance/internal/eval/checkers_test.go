@@ -1397,7 +1397,7 @@ func TestChecker_CoerceValue_VectorWithCustomTypes(t *testing.T) {
 func TestCheckValue_List(t *testing.T) {
 	t.Parallel()
 	stringList := schema.NewListConstraint(schema.NewStringConstraint())
-	boundedList := schema.NewListConstraintBounded(schema.NewStringConstraint(), 1, 3)
+	boundedList := schema.ListLenBetween(schema.NewStringConstraint(), 1, 3)
 
 	tests := []struct {
 		name       string
