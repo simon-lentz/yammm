@@ -29,13 +29,15 @@ import (
 //	  "Person": [{"name": "Alice"}, {"name": "Bob"}],
 //	  "Company": [{"title": "Acme Inc"}]
 //	}
+//
+//nolint:revive // ctx reserved for future use (cancellation, tracing)
 func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 	result := make(map[string][]instance.RawInstance)
 
 	// Preprocess with jsonc if not strict
 	processedData := data
-	if !a.strictJSON {
+	if !a.config.strictJSON {
 		processedData = jsonc.ToJSON(data)
 	}
 
@@ -119,7 +121,7 @@ func (a *Adapter) ParseArray(ctx context.Context, source location.SourceID, data
 
 	// Preprocess with jsonc if not strict
 	processedData := data
-	if !a.strictJSON {
+	if !a.config.strictJSON {
 		processedData = jsonc.ToJSON(data)
 	}
 
@@ -175,7 +177,7 @@ func (a *Adapter) ParseArray(ctx context.Context, source location.SourceID, data
 		}
 
 		// Extract and validate type tag
-		typeTagVal, hasType := obj[a.typeField]
+		typeTagVal, hasType := obj[a.config.typeField]
 		if !hasType {
 			collector.Collect(*a.missingTypeTagError(source, startOffset, idx))
 			idx++
@@ -196,7 +198,7 @@ func (a *Adapter) ParseArray(ctx context.Context, source location.SourceID, data
 		}
 
 		// Remove the type field from properties
-		delete(obj, a.typeField)
+		delete(obj, a.config.typeField)
 
 		// Normalize json.Number to numeric types
 		normalizeNumbers(obj)
@@ -206,7 +208,7 @@ func (a *Adapter) ParseArray(ctx context.Context, source location.SourceID, data
 			Properties: obj,
 		}
 
-		if a.trackLocations && a.registry != nil {
+		if a.config.trackLocations && a.registry != nil {
 			prov := a.makeProvenance(source, path.Root().Index(idx), startOffset, endOffset)
 			raw.Provenance = prov
 		}
@@ -236,6 +238,8 @@ func (a *Adapter) ParseArray(ctx context.Context, source location.SourceID, data
 // Example input (with typeName="Person"):
 //
 //	[{"name": "Alice"}, {"name": "Bob"}]
+//
+//nolint:revive // ctx reserved for future use (cancellation, tracing)
 func (a *Adapter) ParseTypedArray(ctx context.Context, source location.SourceID, typeName string, data []byte) ([]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 
@@ -247,7 +251,7 @@ func (a *Adapter) ParseTypedArray(ctx context.Context, source location.SourceID,
 
 	// Preprocess with jsonc if not strict
 	processedData := data
-	if !a.strictJSON {
+	if !a.config.strictJSON {
 		processedData = jsonc.ToJSON(data)
 	}
 
@@ -274,6 +278,8 @@ func (a *Adapter) ParseTypedArray(ctx context.Context, source location.SourceID,
 // Example input (with typeName="Person"):
 //
 //	{"name": "Alice", "age": 30}
+//
+//nolint:revive // ctx reserved for future use (cancellation, tracing)
 func (a *Adapter) ParseOne(ctx context.Context, source location.SourceID, typeName string, data []byte) (instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 
@@ -285,7 +291,7 @@ func (a *Adapter) ParseOne(ctx context.Context, source location.SourceID, typeNa
 
 	// Preprocess with jsonc if not strict
 	processedData := data
-	if !a.strictJSON {
+	if !a.config.strictJSON {
 		processedData = jsonc.ToJSON(data)
 	}
 
@@ -313,7 +319,7 @@ func (a *Adapter) ParseOne(ctx context.Context, source location.SourceID, typeNa
 		Properties: obj,
 	}
 
-	if a.trackLocations && a.registry != nil {
+	if a.config.trackLocations && a.registry != nil {
 		prov := a.makeProvenance(source, path.Root(), startOffset, endOffset)
 		raw.Provenance = prov
 	}
@@ -385,7 +391,7 @@ func (a *Adapter) parseArray(dec *json.Decoder, source location.SourceID, basePa
 			Properties: obj,
 		}
 
-		if a.trackLocations && a.registry != nil {
+		if a.config.trackLocations && a.registry != nil {
 			prov := a.makeProvenance(source, basePath.Index(idx), startOffset, endOffset)
 			raw.Provenance = prov
 		}
@@ -429,7 +435,7 @@ func (a *Adapter) parseError(source location.SourceID, offset int, msg, detail s
 	ib := diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE, msg).
 		WithDetail(diag.DetailKeyFormat, "json").
 		WithDetail(diag.DetailKeyDetail, detail)
-	if a.trackLocations && a.registry != nil {
+	if a.config.trackLocations && a.registry != nil {
 		pos := a.registry.PositionAt(source, offset)
 		// Guard: only attach span if position is valid
 		if !pos.IsZero() {
@@ -443,9 +449,9 @@ func (a *Adapter) parseError(source location.SourceID, offset int, msg, detail s
 
 // missingTypeTagError creates an E_MISSING_TYPE_TAG issue.
 func (a *Adapter) missingTypeTagError(source location.SourceID, offset int, idx int) *diag.Issue {
-	msg := fmt.Sprintf("missing %s field in array element [%d]", a.typeField, idx)
+	msg := fmt.Sprintf("missing %s field in array element [%d]", a.config.typeField, idx)
 	ib := diag.NewIssue(diag.Error, diag.E_MISSING_TYPE_TAG, msg)
-	if a.trackLocations && a.registry != nil {
+	if a.config.trackLocations && a.registry != nil {
 		pos := a.registry.PositionAt(source, offset)
 		// Guard: only attach span if position is valid
 		if !pos.IsZero() {
@@ -460,11 +466,11 @@ func (a *Adapter) missingTypeTagError(source location.SourceID, offset int, idx 
 // invalidTypeTagError creates an E_INVALID_TYPE_TAG issue.
 // detail is a canonical reason string; got is the observed value/type.
 func (a *Adapter) invalidTypeTagError(source location.SourceID, offset int, idx int, detail, got string) *diag.Issue {
-	msg := fmt.Sprintf("invalid %s in array element [%d]: %s, got %s", a.typeField, idx, detail, got)
+	msg := fmt.Sprintf("invalid %s in array element [%d]: %s, got %s", a.config.typeField, idx, detail, got)
 	ib := diag.NewIssue(diag.Error, diag.E_INVALID_TYPE_TAG, msg).
 		WithDetail(diag.DetailKeyDetail, detail).
 		WithDetail(diag.DetailKeyGot, got)
-	if a.trackLocations && a.registry != nil {
+	if a.config.trackLocations && a.registry != nil {
 		pos := a.registry.PositionAt(source, offset)
 		// Guard: only attach span if position is valid
 		if !pos.IsZero() {
@@ -482,7 +488,7 @@ func (a *Adapter) typeTagError(source location.SourceID, offset int, typeName st
 	ib := diag.NewIssue(diag.Error, diag.E_INVALID_TYPE_TAG, msg).
 		WithDetail(diag.DetailKeyGot, typeName).
 		WithDetail(diag.DetailKeyDetail, err.Error())
-	if a.trackLocations && a.registry != nil {
+	if a.config.trackLocations && a.registry != nil {
 		pos := a.registry.PositionAt(source, offset)
 		// Guard: only attach span if position is valid
 		if !pos.IsZero() {

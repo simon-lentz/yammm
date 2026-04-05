@@ -125,7 +125,9 @@ func CypherReservedKeywords() map[string]bool {
 //	Label("msrb_emma", "Issuer")       -> "msrb_emma__Issuer"
 //	Label("census_tiger", "County")    -> "census_tiger__County"
 //	Label("", "Person")                -> "Person"
-func (a *Adapter) Label(_ context.Context, schemaName, typeName string) string {
+//
+//nolint:revive // ctx reserved for future use
+func (a *Adapter) Label(ctx context.Context, schemaName, typeName string) string {
 	trimmedType := strings.TrimSpace(typeName)
 	if trimmedType == "" {
 		return ""

@@ -1,0 +1,12 @@
+schema "csv_test"
+
+type Entity {
+    id String primary
+    name String required
+    count Integer
+    score Float
+    active Boolean
+    created_at Date
+    updated_at Timestamp
+    tags List<String>
+}

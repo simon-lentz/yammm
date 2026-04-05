@@ -8,7 +8,16 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
+)
+
+// Compile-time interface assertions.
+var (
+	_ NodeSource = (*graph.Instance)(nil)
+	_ NodeSource = (*instance.ValidInstance)(nil)
 )
 
 func TestNodeQueryFor_SinglePK(t *testing.T) {
@@ -938,5 +947,289 @@ func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
 		if err != nil {
 			t.Errorf("EdgeQueryFor failed for valid edge %s: %v", edge.Relation(), err)
 		}
+	}
+}
+
+// --- EdgeQueriesFor tests ---
+
+// validateInstance validates a single instance without building a graph.
+func validateInstance(t *testing.T, v *instance.Validator, typeName string, props map[string]any) *instance.ValidInstance {
+	t.Helper()
+	valid, result := v.ValidateOne(context.Background(), typeName, instance.RawInstance{Properties: props})
+	if !result.OK() {
+		t.Fatalf("validate %s: %v", typeName, result.Messages())
+	}
+	return valid
+}
+
+func TestEdgeQueriesFor_Basic(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
+	a := New()
+
+	shapes, result := a.ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an Issue that references an Issuer via IN_ISSUER.
+	valid := validateInstance(t, v, "Issue", map[string]any{
+		"issuer_id": "iss1",
+		"issue_id":  "issue1",
+		"title":     "Test Issue",
+		"in_issuer": map[string]any{"_target_issuer_id": "iss1"},
+	})
+
+	st, _ := s.Type("Issue")
+	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(queries) != 1 {
+		t.Fatalf("got %d queries; want 1", len(queries))
+	}
+
+	q := queries[0]
+	if !strings.Contains(q.Statement, "MERGE (from)-[r:IN_ISSUER]->(to)") {
+		t.Errorf("unexpected statement: %s", q.Statement)
+	}
+	if !strings.Contains(q.Statement, "MATCH (from:write_test__Issue") {
+		t.Errorf("missing source MATCH: %s", q.Statement)
+	}
+	if !strings.Contains(q.Statement, "MATCH (to:write_test__Issuer") {
+		t.Errorf("missing target MATCH: %s", q.Statement)
+	}
+	// Source keys use from_key_ prefix.
+	if q.Params["from_key_issuer_id"] != "iss1" || q.Params["from_key_issue_id"] != "issue1" {
+		t.Errorf("unexpected source key params: %v", q.Params)
+	}
+	// Target key uses to_key_ prefix.
+	if q.Params["to_key_issuer_id"] != "iss1" {
+		t.Errorf("unexpected target key params: %v", q.Params)
+	}
+}
+
+func TestEdgeQueriesFor_MultiTarget(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
+	a := New()
+
+	shapes, result := a.ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Issuer with ISSUES pointing to multiple Issues.
+	valid := validateInstance(t, v, "Issuer", map[string]any{
+		"issuer_id": "iss1",
+		"name":      "Test Issuer",
+		"issues": []any{
+			map[string]any{"_target_issuer_id": "iss1", "_target_issue_id": "issue1"},
+			map[string]any{"_target_issuer_id": "iss1", "_target_issue_id": "issue2"},
+		},
+	})
+
+	st, _ := s.Type("Issuer")
+	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(queries) != 2 {
+		t.Fatalf("got %d queries; want 2", len(queries))
+	}
+	for _, q := range queries {
+		if !strings.Contains(q.Statement, "MERGE (from)-[r:ISSUES]->(to)") {
+			t.Errorf("unexpected statement: %s", q.Statement)
+		}
+	}
+}
+
+func TestEdgeQueriesFor_EdgeProperties(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "edge_mixed.yammm")
+	a := New()
+
+	shapes, result := a.ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Employee with WORKS_AT edge that includes "note" property.
+	valid := validateInstance(t, v, "Employee", map[string]any{
+		"employee_id": "emp1",
+		"name":        "Alice",
+		"works_at": map[string]any{
+			"_target_company_id": "c1",
+			"note":               "senior engineer",
+		},
+	})
+
+	st, _ := s.Type("Employee")
+	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(queries) != 1 {
+		t.Fatalf("got %d queries; want 1", len(queries))
+	}
+
+	q := queries[0]
+	if !strings.Contains(q.Statement, "SET r += $rel_props") {
+		t.Errorf("missing rel_props SET: %s", q.Statement)
+	}
+	relProps, ok := q.Params["rel_props"].(map[string]any)
+	if !ok {
+		t.Fatalf("rel_props not map[string]any: %T", q.Params["rel_props"])
+	}
+	if relProps["note"] != "senior engineer" {
+		t.Errorf("rel_props[note] = %v; want 'senior engineer'", relProps["note"])
+	}
+}
+
+func TestEdgeQueriesFor_NoEdges(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "basic.yammm")
+	a := New()
+
+	shapes, result := a.ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	valid := validateInstance(t, v, "Entity", map[string]any{
+		"id":         "e1",
+		"name":       "test",
+		"count":      int64(5),
+		"active":     true,
+		"created_at": "2024-01-01T00:00:00Z",
+	})
+
+	st, _ := s.Type("Entity")
+	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 0 {
+		t.Errorf("got %d queries; want 0", len(queries))
+	}
+}
+
+func TestEdgeQueriesFor_MissingTargetShape(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
+	a := New()
+
+	valid := validateInstance(t, v, "Issue", map[string]any{
+		"issuer_id": "iss1",
+		"issue_id":  "issue1",
+		"title":     "Test",
+		"in_issuer": map[string]any{"_target_issuer_id": "iss1"},
+	})
+
+	// Provide shapes with only Issue (no Issuer shape).
+	incompleteShapes := &GraphShape{
+		Types: map[string]NodeShape{
+			"Issue": {
+				Type:        "Issue",
+				Label:       "write_test__Issue",
+				PrimaryKeys: []string{"issuer_id", "issue_id"},
+			},
+		},
+	}
+
+	st, _ := s.Type("Issue")
+	_, err := a.EdgeQueriesFor(context.Background(), valid, st, incompleteShapes)
+	if err == nil {
+		t.Fatal("expected error for missing target shape")
+	}
+	if !strings.Contains(err.Error(), "no shape for target type") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestNodeQueryFor_ValidInstance(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "basic.yammm")
+	a := New()
+
+	shape, result := a.ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use ValidInstance directly (streaming path) instead of *graph.Instance.
+	valid := validateInstance(t, v, "Entity", map[string]any{
+		"id":         "e1",
+		"name":       "test",
+		"count":      int64(5),
+		"active":     true,
+		"created_at": "2024-01-01T00:00:00Z",
+	})
+
+	ns := shape.Types["Entity"]
+	st, _ := s.Type("Entity")
+	q, err := a.NodeQueryFor(context.Background(), &ns, valid, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(q.Statement, "MERGE (n:basic_test__Entity {id: $key_id})") {
+		t.Errorf("unexpected statement: %s", q.Statement)
+	}
+	if q.Params["key_id"] != "e1" {
+		t.Errorf("key_id = %v; want e1", q.Params["key_id"])
+	}
+}
+
+// --- extractKeyFromImmutableKey tests ---
+
+func TestExtractKeyFromImmutableKey_SingleComponent(t *testing.T) {
+	t.Parallel()
+	key := immutable.WrapKey([]any{"val1"})
+	result, err := extractKeyFromImmutableKey(key, []string{"id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["id"] != "val1" {
+		t.Errorf("id = %v; want val1", result["id"])
+	}
+}
+
+func TestExtractKeyFromImmutableKey_Composite(t *testing.T) {
+	t.Parallel()
+	key := immutable.WrapKey([]any{"s1", "r1"})
+	result, err := extractKeyFromImmutableKey(key, []string{"schema_id", "record_id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["schema_id"] != "s1" {
+		t.Errorf("schema_id = %v; want s1", result["schema_id"])
+	}
+	if result["record_id"] != "r1" {
+		t.Errorf("record_id = %v; want r1", result["record_id"])
+	}
+}
+
+func TestExtractKeyFromImmutableKey_LengthMismatch(t *testing.T) {
+	t.Parallel()
+	key := immutable.WrapKey([]any{"val1"})
+	_, err := extractKeyFromImmutableKey(key, []string{"a", "b"})
+	if err == nil {
+		t.Fatal("expected error for length mismatch")
+	}
+	if !strings.Contains(err.Error(), "1 components but 2 key names") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestExtractKeyFromImmutableKey_NoKeys(t *testing.T) {
+	t.Parallel()
+	key := immutable.WrapKey([]any{"val1"})
+	_, err := extractKeyFromImmutableKey(key, nil)
+	if err == nil {
+		t.Fatal("expected error for no keys")
 	}
 }

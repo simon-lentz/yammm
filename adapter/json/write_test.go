@@ -232,7 +232,7 @@ func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk [
 // Tests
 
 func TestMarshalObject_NilResult(t *testing.T) {
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	_, err = adapter.MarshalObject(context.Background(), nil)
@@ -241,7 +241,7 @@ func TestMarshalObject_NilResult(t *testing.T) {
 }
 
 func TestWriteObject_NilResult(t *testing.T) {
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -255,7 +255,7 @@ func TestMarshalObject_EmptyGraph(t *testing.T) {
 	g := graph.New(s)
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -280,7 +280,7 @@ func TestMarshalObject_SingleType(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -322,7 +322,7 @@ func TestMarshalObject_MultipleInstances(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -354,7 +354,7 @@ func TestMarshalObject_MultipleTypes(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -397,7 +397,7 @@ func TestMarshalObject_WithEdge(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -452,7 +452,7 @@ func TestMarshalObject_WithManyEdges(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -496,7 +496,7 @@ func TestMarshalObject_WithComposition(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -536,7 +536,7 @@ func TestMarshalObject_WithOneComposition(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -568,7 +568,7 @@ func TestMarshalObject_WithIndent(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	// Compact
@@ -610,7 +610,7 @@ func TestMarshalObject_Deterministic(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	// Run multiple times and verify identical output
@@ -640,7 +640,7 @@ func TestWriteObject_WritesToBuffer(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -668,7 +668,7 @@ func TestMarshalObject_WithDiagnostics_NoIssues(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result, WithDiagnostics(true))
@@ -710,7 +710,7 @@ func TestMarshalObject_ManyAssociationSingleTarget(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -750,7 +750,7 @@ func TestMarshalObject_ManyCompositionSingleChild(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -820,7 +820,7 @@ func TestMarshalObject_LowerSnakeFieldNames(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result)
@@ -846,7 +846,7 @@ func TestMarshalObject_Deterministic_MultipleSnapshots(t *testing.T) {
 	ctx := t.Context()
 	s := testSchemaMultiType(t)
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	// Build graph multiple times in different orders and take snapshots
@@ -902,7 +902,7 @@ func TestMarshalObject_WithDiagnostics_Unresolved(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result, WithDiagnostics(true))
@@ -950,7 +950,7 @@ func TestMarshalObject_WithDiagnostics_Duplicates(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	data, err := adapter.MarshalObject(context.Background(), result, WithDiagnostics(true))
@@ -987,7 +987,7 @@ func TestWriteObject_ShortWrite(t *testing.T) {
 
 	result := g.Snapshot()
 
-	adapter, err := NewAdapter(nil)
+	adapter, err := New(nil)
 	require.NoError(t, err)
 
 	// Use a limited writer that only accepts first 5 bytes
@@ -1042,4 +1042,139 @@ func TestParseKeyString(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+// --- MarshalInstance tests ---
+
+func TestMarshalInstance_NilInstance(t *testing.T) {
+	t.Parallel()
+	a, err := New(nil)
+	require.NoError(t, err)
+
+	_, err = a.MarshalInstance(context.Background(), nil, nil)
+	assert.ErrorIs(t, err, ErrNilInstance)
+}
+
+func TestMarshalInstance_Properties(t *testing.T) {
+	t.Parallel()
+	s := testSchemaSimple(t)
+	a, err := New(nil)
+	require.NoError(t, err)
+
+	v := instance.NewValidator(s)
+	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
+		Properties: map[string]any{"id": "p1", "name": "Alice", "age": int64(30)},
+	})
+	require.True(t, result.OK(), result.String())
+
+	st, _ := s.Type("Person")
+	data, err := a.MarshalInstance(context.Background(), valid, st)
+	require.NoError(t, err)
+
+	var obj map[string]any
+	require.NoError(t, json.Unmarshal(data, &obj))
+	assert.Equal(t, "p1", obj["id"])
+	assert.Equal(t, "Alice", obj["name"])
+	assert.Equal(t, float64(30), obj["age"]) // JSON numbers are float64
+}
+
+func TestMarshalInstance_WithEdge(t *testing.T) {
+	t.Parallel()
+	s := testSchemaWithAssociation(t)
+	a, err := New(nil)
+	require.NoError(t, err)
+
+	v := instance.NewValidator(s)
+	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
+		Properties: map[string]any{
+			"id":       "p1",
+			"name":     "Alice",
+			"employer": map[string]any{"_target_id": "c1"},
+		},
+	})
+	require.True(t, result.OK(), result.String())
+
+	st, _ := s.Type("Person")
+	data, err := a.MarshalInstance(context.Background(), valid, st)
+	require.NoError(t, err)
+
+	var obj map[string]any
+	require.NoError(t, json.Unmarshal(data, &obj))
+	assert.Equal(t, "p1", obj["id"])
+	// FK is serialized as the key array (single cardinality).
+	assert.Equal(t, []any{"c1"}, obj["employer"])
+}
+
+func TestMarshalInstance_WithManyEdges(t *testing.T) {
+	t.Parallel()
+	s := testSchemaWithManyAssociation(t)
+	a, err := New(nil)
+	require.NoError(t, err)
+
+	v := instance.NewValidator(s)
+	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
+		Properties: map[string]any{
+			"id":   "p1",
+			"name": "Alice",
+			"employers": []any{
+				map[string]any{"_target_id": "c1"},
+				map[string]any{"_target_id": "c2"},
+			},
+		},
+	})
+	require.True(t, result.OK(), result.String())
+
+	st, _ := s.Type("Person")
+	data, err := a.MarshalInstance(context.Background(), valid, st)
+	require.NoError(t, err)
+
+	var obj map[string]any
+	require.NoError(t, json.Unmarshal(data, &obj))
+	// Many cardinality: array of key arrays.
+	fks, ok := obj["employers"].([]any)
+	require.True(t, ok, "employers should be array, got %T", obj["employers"])
+	assert.Len(t, fks, 2)
+}
+
+func TestMarshalInstance_WithIndent(t *testing.T) {
+	t.Parallel()
+	s := testSchemaSimple(t)
+	a, err := New(nil)
+	require.NoError(t, err)
+
+	v := instance.NewValidator(s)
+	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
+		Properties: map[string]any{"id": "p1", "name": "Bob", "age": int64(25)},
+	})
+	require.True(t, result.OK(), result.String())
+
+	st, _ := s.Type("Person")
+	data, err := a.MarshalInstance(context.Background(), valid, st, WithIndent("  "))
+	require.NoError(t, err)
+
+	// Indented output should contain newlines.
+	assert.Contains(t, string(data), "\n")
+	assert.Contains(t, string(data), "  ")
+}
+
+func TestMarshalInstance_NilSchemaType(t *testing.T) {
+	t.Parallel()
+	s := testSchemaSimple(t)
+	a, err := New(nil)
+	require.NoError(t, err)
+
+	v := instance.NewValidator(s)
+	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
+		Properties: map[string]any{"id": "p1", "name": "Carol", "age": int64(40)},
+	})
+	require.True(t, result.OK(), result.String())
+
+	// Pass nil schemaType — should still serialize properties.
+	data, err := a.MarshalInstance(context.Background(), valid, nil)
+	require.NoError(t, err)
+
+	var obj map[string]any
+	require.NoError(t, json.Unmarshal(data, &obj))
+	assert.Equal(t, "p1", obj["id"])
+	assert.Equal(t, "Carol", obj["name"])
 }

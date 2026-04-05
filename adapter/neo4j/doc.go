@@ -4,8 +4,8 @@
 // # Architectural Position
 //
 // The neo4j adapter lives alongside [github.com/simon-lentz/yammm/adapter/json]
-// in the adapter layer. It depends on library packages (schema, graph, immutable,
-// diag, location); library packages never depend on adapters.
+// in the adapter layer. It depends on library packages (schema, graph, instance,
+// immutable, diag); library packages never depend on adapters.
 //
 // # Neo4j Driver Dependency (Type-Only)
 //
@@ -55,7 +55,18 @@
 // schemas guarantee that alias chains are fully resolved, inheritance
 // is linearized, and type identities are assigned.
 //
+// # Dual-Mode Write Surface
+//
+// Write query generation supports two operational modes:
+//
+//   - Graph mode: [Adapter.BatchNodeQueries] and [Adapter.BatchEdgeQueries]
+//     operate on a complete [graph.Snapshot] for high-throughput batch writes.
+//
+//   - Instance mode: [Adapter.NodeQueryFor] accepts any [NodeSource] (including
+//     [*instance.ValidInstance]), and [Adapter.EdgeQueriesFor] generates edge
+//     queries directly from a validated instance's edge data — no graph needed.
+//
 // # Dependencies
 //
-//	adapter/neo4j  --imports-->  schema, graph, diag, neo4j-go-driver/v6 (dbtype only)
+//	adapter/neo4j  --imports-->  schema, graph, instance, immutable, diag, neo4j-go-driver/v6 (dbtype only)
 package neo4j

@@ -277,7 +277,7 @@ func (a *Adapter) listTypeConstraints(t *schema.Type, label string, collector *d
 			continue
 		}
 
-		c := effectiveConstraint(prop.Constraint())
+		c := schema.ResolveAlias(prop.Constraint())
 		lc, ok := c.(schema.ListConstraint)
 		if !ok {
 			continue
@@ -344,7 +344,7 @@ func (a *Adapter) scalarTypeConstraints(t *schema.Type, label string, collector 
 			continue
 		}
 
-		c := effectiveConstraint(prop.Constraint())
+		c := schema.ResolveAlias(prop.Constraint())
 
 		// Skip lists — handled by listTypeConstraints.
 		if c.Kind() == schema.KindList {
@@ -427,26 +427,10 @@ func constraintName(label string, properties []string, kind ConstraintKind) stri
 	return label + "_" + strings.Join(properties, "_") + "_" + suffix
 }
 
-// effectiveConstraint unwraps AliasConstraint chains to the terminal constraint.
-// After schema.Load(), Resolved() is always non-nil, so this terminates.
-func effectiveConstraint(c schema.Constraint) schema.Constraint {
-	for {
-		alias, ok := c.(schema.AliasConstraint)
-		if !ok {
-			return c
-		}
-		resolved := alias.Resolved()
-		if resolved == nil {
-			return c // defensive: should not happen post-Load()
-		}
-		c = resolved
-	}
-}
-
 // neo4jScalarType maps a yammm constraint to a Neo4j scalar type expression.
 // Returns ("", false) for constraints that cannot be expressed as Neo4j scalar types.
 func neo4jScalarType(c schema.Constraint) (string, bool) {
-	c = effectiveConstraint(c)
+	c = schema.ResolveAlias(c)
 	switch c.Kind() {
 	case schema.KindString:
 		return "STRING", true
@@ -478,7 +462,7 @@ func neo4jScalarType(c schema.Constraint) (string, bool) {
 // neo4jListElementType maps a yammm list element constraint to a Neo4j type string.
 // Returns the element type name used inside LIST<...> syntax (e.g., "STRING NOT NULL").
 func neo4jListElementType(c schema.Constraint) (string, error) {
-	c = effectiveConstraint(c)
+	c = schema.ResolveAlias(c)
 	switch c.Kind() {
 	case schema.KindString, schema.KindUUID, schema.KindEnum, schema.KindPattern:
 		return "STRING NOT NULL", nil
