@@ -27,9 +27,9 @@
 //
 //	import "github.com/simon-lentz/yammm/schema"
 //
-//	s, result, err := schema.Load(ctx, "path/to/schema.yammm")
-//	if err != nil {
-//	    // I/O or internal error
+//	s, result := schema.Load(ctx, "path/to/schema.yammm")
+//	if result.HasFatal() {
+//	    // I/O or cancellation error
 //	}
 //	if result.HasErrors() {
 //	    // Schema compilation errors
@@ -40,32 +40,26 @@
 //	import "github.com/simon-lentz/yammm/instance"
 //
 //	validator := instance.NewValidator(schema)
-//	valid, failures, err := validator.Validate(ctx, typeName, rawInstances)
-//	if err != nil {
-//	    // I/O or internal error
+//	valids, result := validator.Validate(ctx, typeName, rawInstances)
+//	if !result.OK() {
+//	    // Validation failures (type mismatch, missing required, etc.)
 //	}
-//	// valid contains successfully validated instances
-//	// failures contains validation failures with diagnostics
+//	// valids contains validated instances (nil entries for failed instances)
 //
 // Graph construction:
 //
 //	import "github.com/simon-lentz/yammm/graph"
 //
 //	g := graph.New(schema)
-//	for _, inst := range valid {
-//	    result, err := g.Add(ctx, inst)
-//	    if err != nil {
-//	        // Internal error or context cancelled
-//	    }
-//	    if err := result.Err(); err != nil {
+//	for _, inst := range valids {
+//	    if inst == nil { continue }
+//	    result := g.Add(ctx, inst)
+//	    if !result.OK() {
 //	        // Diagnostic issues (duplicate PK, etc.)
 //	    }
 //	}
-//	result, err := g.Check(ctx)
-//	if err != nil {
-//	    // Internal error or context cancelled
-//	}
-//	if err := result.Err(); err != nil {
+//	result := g.Check(ctx)
+//	if !result.OK() {
 //	    // Unresolved required associations
 //	}
 package yammm

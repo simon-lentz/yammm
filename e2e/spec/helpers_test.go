@@ -20,8 +20,7 @@ import (
 func loadSchema(t *testing.T, path string) *instance.Validator {
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := schema.Load(ctx, path)
-	require.NoError(t, err, "load schema %s", path)
+	s, result := schema.Load(ctx, path)
 	require.True(t, result.OK(), "schema %s has errors: %v", path, result.Messages())
 	return instance.NewValidator(s)
 }
@@ -30,8 +29,7 @@ func loadSchema(t *testing.T, path string) *instance.Validator {
 func loadSchemaRaw(t *testing.T, path string) (*schema.Schema, *instance.Validator) {
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := schema.Load(ctx, path)
-	require.NoError(t, err, "load schema %s", path)
+	s, result := schema.Load(ctx, path)
 	require.True(t, result.OK(), "schema %s has errors: %v", path, result.Messages())
 	return s, instance.NewValidator(s)
 }
@@ -41,8 +39,7 @@ func loadSchemaRaw(t *testing.T, path string) (*schema.Schema, *instance.Validat
 func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 	t.Helper()
 	ctx := t.Context()
-	_, result, err := schema.Load(ctx, path)
-	require.NoError(t, err, "load schema %s: unexpected I/O error", path)
+	_, result := schema.Load(ctx, path)
 	require.False(t, result.OK(), "schema %s should have errors but loaded cleanly", path)
 	return result
 }
@@ -51,8 +48,7 @@ func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 func loadSchemaString(t *testing.T, content, name string) *instance.Validator {
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := schema.LoadString(ctx, content, name)
-	require.NoError(t, err, "load schema string %s", name)
+	s, result := schema.LoadString(ctx, content, name)
 	require.True(t, result.OK(), "schema string %s has errors: %v", name, result.Messages())
 	return instance.NewValidator(s)
 }
@@ -61,8 +57,7 @@ func loadSchemaString(t *testing.T, content, name string) *instance.Validator {
 func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *instance.Validator) { //nolint:unparam // test helper — second return used selectively
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := schema.LoadString(ctx, content, name)
-	require.NoError(t, err, "load schema string %s", name)
+	s, result := schema.LoadString(ctx, content, name)
 	require.True(t, result.OK(), "schema string %s has errors: %v", name, result.Messages())
 	return s, instance.NewValidator(s)
 }
@@ -71,14 +66,13 @@ func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *i
 func loadSchemaStringExpectError(t *testing.T, content, name string) diag.Result {
 	t.Helper()
 	ctx := t.Context()
-	_, result, err := schema.LoadString(ctx, content, name)
-	require.NoError(t, err, "load schema string %s: unexpected I/O error", name)
+	_, result := schema.LoadString(ctx, content, name)
 	require.False(t, result.OK(), "schema string %s should have errors but loaded cleanly", name)
 	return result
 }
 
 // loadSchemaWithOpts loads a .yammm file with specific load options.
-func loadSchemaWithOpts(t *testing.T, path string, opts ...schema.LoadOption) (*schema.Schema, diag.Result, error) { //nolint:unparam // test helper — path varies across test files
+func loadSchemaWithOpts(t *testing.T, path string, opts ...schema.LoadOption) (*schema.Schema, diag.Result) { //nolint:unparam // test helper — path varies across test files
 	t.Helper()
 	ctx := t.Context()
 	return schema.Load(ctx, path, opts...)
@@ -106,9 +100,8 @@ func loadTestData(t *testing.T, dataPath, typeKey string) []instance.RawInstance
 func assertValid(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance) {
 	t.Helper()
 	ctx := t.Context()
-	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
-	require.NoError(t, err)
-	assert.Nil(t, failure, "expected valid %s instance, got: %v", typeName, failureMessages(failure))
+	valid, result := v.ValidateOne(ctx, typeName, raw)
+	require.True(t, result.OK(), "expected valid %s instance, got: %v", typeName, result.Messages())
 	assert.NotNil(t, valid)
 }
 
@@ -116,18 +109,17 @@ func assertValid(t *testing.T, v *instance.Validator, typeName string, raw insta
 func assertInvalid(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance, wantCodes ...diag.Code) {
 	t.Helper()
 	ctx := t.Context()
-	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
-	require.NoError(t, err)
+	valid, result := v.ValidateOne(ctx, typeName, raw)
 	assert.Nil(t, valid, "expected invalid %s instance", typeName)
-	require.NotNil(t, failure, "expected validation failure for %s", typeName)
+	require.False(t, result.OK(), "expected validation failure for %s", typeName)
 
 	issueCodes := map[string]bool{}
-	for issue := range failure.Result.Issues() {
+	for issue := range result.Issues() {
 		issueCodes[issue.Code().String()] = true
 	}
 	for _, wc := range wantCodes {
 		assert.True(t, issueCodes[wc.String()],
-			"expected code %s in diagnostics, got: %v", wc, failure.Result.Messages())
+			"expected code %s in diagnostics, got: %v", wc, result.Messages())
 	}
 }
 
@@ -135,13 +127,12 @@ func assertInvalid(t *testing.T, v *instance.Validator, typeName string, raw ins
 func assertInvariantFails(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance, wantNames ...string) { //nolint:unparam // test helper — typeName varies by test file
 	t.Helper()
 	ctx := t.Context()
-	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
-	require.NoError(t, err)
+	valid, result := v.ValidateOne(ctx, typeName, raw)
 	assert.Nil(t, valid, "expected invariant failure for %s", typeName)
-	require.NotNil(t, failure, "expected validation failure for %s", typeName)
+	require.False(t, result.OK(), "expected validation failure for %s", typeName)
 
 	failedInvariants := map[string]bool{}
-	for issue := range failure.Result.Issues() {
+	for issue := range result.Issues() {
 		if issue.Code() == diag.E_INVARIANT_FAIL {
 			failedInvariants[issue.Message()] = true
 		}
@@ -172,8 +163,7 @@ func buildGraph(t *testing.T, s *schema.Schema, instances ...*instance.ValidInst
 	ctx := t.Context()
 	g := graph.New(s)
 	for _, inst := range instances {
-		result, err := g.Add(ctx, inst)
-		require.NoError(t, err, "graph.Add failed")
+		result := g.Add(ctx, inst)
 		require.True(t, result.OK(), "graph.Add issues: %v", result.Messages())
 	}
 	return g.Snapshot()
@@ -183,17 +173,8 @@ func buildGraph(t *testing.T, s *schema.Schema, instances ...*instance.ValidInst
 func validateOne(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance) *instance.ValidInstance {
 	t.Helper()
 	ctx := t.Context()
-	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
-	require.NoError(t, err)
-	require.Nil(t, failure, "expected valid %s, got: %v", typeName, failureMessages(failure))
+	valid, result := v.ValidateOne(ctx, typeName, raw)
+	require.True(t, result.OK(), "expected valid %s, got: %v", typeName, result.Messages())
 	require.NotNil(t, valid)
 	return valid
-}
-
-// failureMessages extracts message strings from a validation failure.
-func failureMessages(f *instance.ValidationFailure) []string {
-	if f == nil {
-		return nil
-	}
-	return f.Result.Messages()
 }

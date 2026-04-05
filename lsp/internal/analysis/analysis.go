@@ -3,7 +3,7 @@ package analysis
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"maps"
 	"slices"
@@ -245,7 +245,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	allOpts := make([]schema.LoadOption, len(opts), len(opts)+1)
 	copy(allOpts, opts)
 	allOpts = append(allOpts, schema.WithSourceRegistry(sourceRegistry))
-	schemaResult, diagResult, loadErr := schema.LoadSourcesWithEntry(
+	schemaResult, diagResult := schema.LoadSourcesWithEntry(
 		ctx,
 		sources,
 		entryPath,
@@ -271,14 +271,13 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 		SymbolsBySource: make(map[location.SourceID]*symbols.SymbolIndex),
 	}
 
-	if loadErr != nil {
-		a.logger.Warn("load failed with error",
+	if diagResult.HasFatal() {
+		a.logger.Warn("load failed with fatal diagnostics",
 			slog.String("entry", entryPath),
-			slog.String("error", loadErr.Error()),
 		)
 		// Return partial snapshot with diagnostics
 		snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath, posEncoding)
-		return snapshot, fmt.Errorf("load schema: %w", loadErr)
+		return snapshot, errors.New("load schema: fatal diagnostics")
 	}
 
 	// Convert diagnostics to LSP format

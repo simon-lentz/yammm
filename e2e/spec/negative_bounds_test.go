@@ -18,8 +18,7 @@ func TestE2E_NegativeBounds(t *testing.T) {
 	ctx := t.Context()
 
 	// Load schema with negative float bounds
-	s, result, err := schema.Load(ctx, "testdata/negative_bounds/negative_bounds.yammm")
-	require.NoError(t, err, "load schema")
+	s, result := schema.Load(ctx, "testdata/negative_bounds/negative_bounds.yammm")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
 	// Verify the constraint bounds were parsed correctly
@@ -67,10 +66,9 @@ func TestE2E_NegativeBounds(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			valid, failure, err := validator.ValidateOne(ctx, "GeoPoint", records[tc.index])
-			require.NoError(t, err)
-			assert.Nil(t, failure, "expected valid instance, got failure: %v",
-				failureMessages(failure))
+			valid, valResult := validator.ValidateOne(ctx, "GeoPoint", records[tc.index])
+			assert.True(t, valResult.OK(), "expected valid instance, got failure: %v",
+				valResult.Messages())
 			assert.NotNil(t, valid)
 		})
 	}

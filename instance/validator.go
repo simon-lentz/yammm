@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -49,78 +50,78 @@ func NewValidator(s *schema.Schema, opts ...ValidatorOption) *Validator {
 // Validate validates a batch of raw instances of the given type.
 //
 // Returns:
-//   - valid: Successfully validated instances
-//   - failures: Instances that failed validation with diagnostics
-//   - err: System error (not validation errors)
+//   - valids: one entry per input instance; non-nil for successes, nil for failures
+//   - result: merged diagnostics for the entire batch (OK when all instances pass)
 //
-// The triple-return semantics allow callers to:
-//   - Process successful instances immediately
-//   - Report failures with detailed diagnostics
-//   - Handle system errors separately from validation errors
-func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance, opts ...ValidationOption) ([]*ValidInstance, []ValidationFailure, error) {
+// Panics if the receiver is nil or if ctx is nil.
+func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance, opts ...ValidationOption) ([]*ValidInstance, diag.Result) {
 	if v == nil {
-		return nil, nil, &InternalError{Kind: KindNilValidator, Cause: ErrNilValidator}
+		panic("instance.Validate: nil validator receiver")
 	}
 	if ctx == nil {
 		panic("instance.Validate: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
+		c := diag.NewCollectorUnlimited()
+		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, c.Result()
 	}
 
 	// Handle nil vs empty input per implementation checklist.
 	if raws == nil {
-		return nil, nil, nil
+		return nil, diag.OK()
 	}
 	if len(raws) == 0 {
-		return []*ValidInstance{}, nil, nil
+		return []*ValidInstance{}, diag.OK()
 	}
 
-	var valid []*ValidInstance
-	var failures []ValidationFailure
+	batchCollector := diag.NewCollectorUnlimited()
+	var valids []*ValidInstance
 
 	for i := range raws {
 		if err := ctx.Err(); err != nil {
-			return valid, failures, err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
+			batchCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+			return valids, batchCollector.Result()
 		}
 
-		instance, failure, err := v.ValidateOne(ctx, typeName, raws[i], opts...)
-		if err != nil {
-			return valid, failures, err
+		inst, result := v.ValidateOne(ctx, typeName, raws[i], opts...)
+		for issue := range result.Issues() {
+			augmented := diag.FromIssue(issue).
+				WithDetail(diag.DetailKeyInstanceIndex, strconv.Itoa(i)).
+				Build()
+			batchCollector.Collect(augmented)
 		}
-
-		if instance != nil {
-			valid = append(valid, instance)
-		} else if failure != nil {
-			failures = append(failures, *failure)
-		}
+		valids = append(valids, inst)
 	}
 
-	return valid, failures, nil
+	return valids, batchCollector.Result()
 }
 
 // ValidateOne validates a single raw instance.
 //
-// Returns exactly one of:
-//   - (valid, nil, nil) on success
-//   - (nil, failure, nil) on validation failure
-//   - (nil, nil, err) on system error
-func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance, opts ...ValidationOption) (*ValidInstance, *ValidationFailure, error) {
+// Returns:
+//   - valid: the validated instance, or nil on failure
+//   - result: diagnostics for this instance (OK on success, may contain warnings)
+//
+// Panics if the receiver is nil or if ctx is nil.
+func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance, opts ...ValidationOption) (*ValidInstance, diag.Result) {
 	applyValidationOptions(opts) // no per-call options defined yet
 	if v == nil {
-		return nil, nil, &InternalError{Kind: KindNilValidator, Cause: ErrNilValidator}
+		panic("instance.ValidateOne: nil validator receiver")
 	}
 	if ctx == nil {
 		panic("instance.ValidateOne: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
+		c := diag.NewCollectorUnlimited()
+		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, c.Result()
 	}
 
 	// Resolve type
 	typ, err := v.resolveType(typeName)
 	if err != nil {
-		return nil, v.typeResolutionFailure(raw, err), nil
+		return nil, v.typeResolutionResult(raw, err)
 	}
 
 	// Validate the instance, passing the resolved type to avoid redundant resolution.
@@ -131,39 +132,45 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 //
 // This is used when validating part types within a composition context.
 // Unlike direct validation, part types are allowed here.
-func (v *Validator) ValidateForComposition(ctx context.Context, parentType, relationName string, raws []RawInstance, opts ...ValidationOption) ([]*ValidInstance, []ValidationFailure, error) {
+//
+// Returns:
+//   - valids: one entry per input instance; non-nil for successes, nil for failures
+//   - result: merged diagnostics for the batch (OK when all instances pass)
+//
+// Panics if the receiver is nil or if ctx is nil.
+func (v *Validator) ValidateForComposition(ctx context.Context, parentType, relationName string, raws []RawInstance, opts ...ValidationOption) ([]*ValidInstance, diag.Result) {
 	applyValidationOptions(opts) // no per-call options defined yet
 	if v == nil {
-		return nil, nil, &InternalError{Kind: KindNilValidator, Cause: ErrNilValidator}
+		panic("instance.ValidateForComposition: nil validator receiver")
 	}
 	if ctx == nil {
 		panic("instance.ValidateForComposition: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
+		c := diag.NewCollectorUnlimited()
+		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, c.Result()
 	}
 
 	// Handle nil input per implementation checklist.
 	if raws == nil {
-		return nil, nil, nil
+		return nil, diag.OK()
 	}
 
 	// Look up the relation to find the child type
 	parent, err := v.resolveType(parentType)
 	if err != nil {
-		failure := v.typeResolutionFailureForBatch(err, raws)
-		return nil, []ValidationFailure{*failure}, nil
+		return nil, v.typeResolutionResultForBatch(err, raws)
 	}
 
 	rel, found := parent.Relation(relationName)
 	if !found {
-		failure := v.compositionResolutionFailure(parentType, relationName, raws)
-		return nil, []ValidationFailure{*failure}, nil
+		return nil, v.compositionResolutionResult(parentType, relationName, raws)
 	}
 
 	// Handle empty input after relation validation per implementation checklist.
 	if len(raws) == 0 {
-		return []*ValidInstance{}, nil, nil
+		return []*ValidInstance{}, diag.OK()
 	}
 
 	// Get the target type name (qualified form to handle imported types)
@@ -172,31 +179,29 @@ func (v *Validator) ValidateForComposition(ctx context.Context, parentType, rela
 	// Resolve target type once, pass to all instances
 	targetType, err := v.resolveType(targetTypeName)
 	if err != nil {
-		failure := v.typeResolutionFailureForBatch(err, raws)
-		return nil, []ValidationFailure{*failure}, nil
+		return nil, v.typeResolutionResultForBatch(err, raws)
 	}
 
-	var valid []*ValidInstance
-	var failures []ValidationFailure
+	batchCollector := diag.NewCollectorUnlimited()
+	var valids []*ValidInstance
 
 	for i := range raws {
 		if err := ctx.Err(); err != nil {
-			return valid, failures, err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
+			batchCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+			return valids, batchCollector.Result()
 		}
 
-		instance, failure, err := v.validateComposedInstance(ctx, targetTypeName, targetType, raws[i], true)
-		if err != nil {
-			return valid, failures, err
+		inst, result := v.validateComposedInstance(ctx, targetTypeName, targetType, raws[i], true)
+		for issue := range result.Issues() {
+			augmented := diag.FromIssue(issue).
+				WithDetail(diag.DetailKeyInstanceIndex, strconv.Itoa(i)).
+				Build()
+			batchCollector.Collect(augmented)
 		}
-
-		if instance != nil {
-			valid = append(valid, instance)
-		} else if failure != nil {
-			failures = append(failures, *failure)
-		}
+		valids = append(valids, inst)
 	}
 
-	return valid, failures, nil
+	return valids, batchCollector.Result()
 }
 
 // ValidationError represents a system-level validation error.
@@ -232,51 +237,36 @@ func (v *Validator) resolveType(typeName string) (*schema.Type, error) {
 	return typ, nil
 }
 
-// typeResolutionFailure creates a validation failure for type resolution errors.
-func (v *Validator) typeResolutionFailure(raw RawInstance, err error) *ValidationFailure {
-	failure := NewValidationFailure(raw, createErrorResult(ErrTypeNotFound, err.Error(), raw.Provenance))
-	return &failure
+// typeResolutionResult creates a diagnostic result for type resolution errors.
+func (v *Validator) typeResolutionResult(raw RawInstance, err error) diag.Result {
+	return createErrorResult(ErrTypeNotFound, err.Error(), raw.Provenance)
 }
 
-// compositionResolutionFailure creates a ValidationFailure for composition resolution errors.
+// compositionResolutionResult creates a diagnostic result for composition resolution errors.
 // When raws is empty, uses nil provenance.
-func (v *Validator) compositionResolutionFailure(parentType, relationName string, raws []RawInstance) *ValidationFailure {
+func (v *Validator) compositionResolutionResult(parentType, relationName string, raws []RawInstance) diag.Result {
 	var prov *Provenance
 	if len(raws) > 0 {
 		prov = raws[0].Provenance
 	}
-
-	failure := NewValidationFailure(
-		RawInstance{Provenance: prov},
-		createErrorResult(
-			ErrCompositionNotFound,
-			fmt.Sprintf("relation %q not found on type %q", relationName, parentType),
-			prov,
-		),
-	)
-	return &failure
+	return createErrorResult(ErrCompositionNotFound, fmt.Sprintf("relation %q not found on type %q", relationName, parentType), prov)
 }
 
-// typeResolutionFailureForBatch creates a ValidationFailure for type resolution errors in batch contexts.
+// typeResolutionResultForBatch creates a diagnostic result for type resolution errors in batch contexts.
 // When raws is empty, uses nil provenance.
-func (v *Validator) typeResolutionFailureForBatch(err error, raws []RawInstance) *ValidationFailure {
+func (v *Validator) typeResolutionResultForBatch(err error, raws []RawInstance) diag.Result {
 	var prov *Provenance
 	if len(raws) > 0 {
 		prov = raws[0].Provenance
 	}
-
-	failure := NewValidationFailure(
-		RawInstance{Provenance: prov},
-		createErrorResult(ErrTypeNotFound, err.Error(), prov),
-	)
-	return &failure
+	return createErrorResult(ErrTypeNotFound, err.Error(), prov)
 }
 
 // validateInstance validates a single instance against its type.
 // canonicalName is the original type name (potentially qualified like "alias.Type")
 // that should be preserved in the resulting ValidInstance.
 // typ is the resolved schema type (passed to avoid redundant resolution).
-func (v *Validator) validateInstance(ctx context.Context, canonicalName string, typ *schema.Type, raw RawInstance) (*ValidInstance, *ValidationFailure, error) {
+func (v *Validator) validateInstance(ctx context.Context, canonicalName string, typ *schema.Type, raw RawInstance) (*ValidInstance, diag.Result) {
 	return v.validateComposedInstance(ctx, canonicalName, typ, raw, false)
 }
 
@@ -284,16 +274,14 @@ func (v *Validator) validateInstance(ctx context.Context, canonicalName string, 
 // typeName is the canonical type name (potentially qualified like "alias.Type")
 // that should be preserved in the resulting ValidInstance.
 // typ is the resolved schema type (passed to avoid redundant resolution).
-func (v *Validator) validateComposedInstance(ctx context.Context, typeName string, typ *schema.Type, raw RawInstance, allowPartType bool) (*ValidInstance, *ValidationFailure, error) {
+func (v *Validator) validateComposedInstance(ctx context.Context, typeName string, typ *schema.Type, raw RawInstance, allowPartType bool) (*ValidInstance, diag.Result) {
 	// Check instantiation eligibility
 	if typ.IsAbstract() {
-		failure := NewValidationFailure(raw, createErrorResult(ErrAbstractType, fmt.Sprintf("cannot instantiate abstract type %q", typeName), raw.Provenance))
-		return nil, &failure, nil
+		return nil, createErrorResult(ErrAbstractType, fmt.Sprintf("cannot instantiate abstract type %q", typeName), raw.Provenance)
 	}
 
 	if !allowPartType && typ.IsPart() {
-		failure := NewValidationFailure(raw, createErrorResult(ErrPartTypeDirect, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), raw.Provenance))
-		return nil, &failure, nil
+		return nil, createErrorResult(ErrPartTypeDirect, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), raw.Provenance)
 	}
 
 	// Validate properties, preserving the canonical type name
@@ -303,7 +291,7 @@ func (v *Validator) validateComposedInstance(ctx context.Context, typeName strin
 // validateProperties validates all properties of an instance.
 // canonicalName is the type name (potentially qualified like "alias.Type")
 // that will be stored in the resulting ValidInstance.
-func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, canonicalName string, raw RawInstance) (*ValidInstance, *ValidationFailure, error) {
+func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, canonicalName string, raw RawInstance) (*ValidInstance, diag.Result) {
 	collector := diag.NewCollector(v.cfg.maxIssuesPerInstance)
 
 	// Build property name mapping (input name → schema name)
@@ -346,7 +334,9 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 		if err := v.checkValueWithRecovery(rawValue, prop.Constraint()); err != nil {
 			// Check if this is an internal error from panic recovery
 			if internalErr, ok := errors.AsType[*InternalError](err); ok {
-				return nil, nil, internalErr
+				collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).
+					WithDetail(diag.DetailKeyStackTrace, internalErr.Stack).Build())
+				return nil, collector.Result()
 			}
 			code := ErrTypeMismatch
 			if checkErr, ok := errors.AsType[*eval.CheckError](err); ok && checkErr.Kind == eval.KindConstraintFail {
@@ -371,7 +361,9 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 		if err != nil {
 			// Check if this is an internal error from panic recovery
 			if internalErr, ok := errors.AsType[*InternalError](err); ok {
-				return nil, nil, internalErr
+				collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).
+					WithDetail(diag.DetailKeyStackTrace, internalErr.Stack).Build())
+				return nil, collector.Result()
 			}
 			// This should not happen after successful CheckValue
 			issue := diag.NewIssue(
@@ -392,53 +384,57 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 		validatedProps[prop.Name()] = coercedValue
 	}
 
-	// If we have errors, return failure
+	// If we have errors, return diagnostic result
 	if collector.HasErrors() {
-		failure := NewValidationFailure(raw, collector.Result())
-		return nil, &failure, nil
+		return nil, collector.Result()
 	}
 
 	// Check context cancellation before continuing
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
+		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, collector.Result()
 	}
 
 	// Evaluate invariants
 	if err := v.evaluateInvariants(ctx, typ, validatedProps, collector, raw.Provenance); err != nil {
-		return nil, nil, err
+		if internalErr, ok := errors.AsType[*InternalError](err); ok {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).
+				WithDetail(diag.DetailKeyStackTrace, internalErr.Stack).Build())
+		} else {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		}
+		return nil, collector.Result()
 	}
 
-	// If invariant checks failed, return failure
+	// If invariant checks failed, return diagnostic result
 	if collector.HasErrors() {
-		failure := NewValidationFailure(raw, collector.Result())
-		return nil, &failure, nil
+		return nil, collector.Result()
 	}
 
 	// Extract primary key
 	pkComponents := v.extractPrimaryKey(typ, validatedProps, collector, raw.Provenance)
 	if collector.HasErrors() {
-		failure := NewValidationFailure(raw, collector.Result())
-		return nil, &failure, nil
+		return nil, collector.Result()
 	}
 
 	// Validate edges (associations)
 	edges := v.validateEdges(ctx, typ, raw.Properties, collector, raw.Provenance)
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
+		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, collector.Result()
 	}
 	if collector.HasErrors() {
-		failure := NewValidationFailure(raw, collector.Result())
-		return nil, &failure, nil
+		return nil, collector.Result()
 	}
 
 	// Validate compositions
 	composed := v.validateCompositions(ctx, typ, raw.Properties, collector, raw.Provenance)
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
+		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, collector.Result()
 	}
 	if collector.HasErrors() {
-		failure := NewValidationFailure(raw, collector.Result())
-		return nil, &failure, nil
+		return nil, collector.Result()
 	}
 
 	// Create ValidInstance with immutable wrappers
@@ -454,7 +450,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 		raw.Provenance,
 	)
 
-	return validInstance, nil, nil
+	return validInstance, collector.Result()
 }
 
 // buildPropertyMapping builds a mapping from schema property names to input property names.

@@ -2,7 +2,6 @@ package graph
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -27,18 +26,13 @@ func TestAddComposed_OneCardinality_Success(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add child via AddComposed
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child)
-	if err != nil {
-		t.Fatalf("AddComposed error: %v", err)
-	}
+	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child)
 	if err := result.Err(); err != nil {
 		t.Errorf("AddComposed should succeed: %v", err)
 	}
@@ -63,26 +57,19 @@ func TestAddComposed_OneCardinality_Duplicate(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add first child
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	if _, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child1); err != nil {
-		t.Fatalf("AddComposed child1 error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child1)
 
 	// Try to add second child (should fail for (one) cardinality)
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
 
-	result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child2)
-	if err != nil {
-		t.Fatalf("AddComposed child2 error: %v", err)
-	}
+	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child2)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for (one) cardinality with existing child")
@@ -110,19 +97,14 @@ func TestAddComposed_ManyWithPK_Success(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add multiple children
 	for _, id := range []string{"c1", "c2", "c3"} {
 		child := mustValidPartInstance(t, s, "Child",
 			[]any{id}, map[string]any{"name": "Child " + id})
 
-		result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
-		if err != nil {
-			t.Fatalf("AddComposed %s error: %v", id, err)
-		}
+		result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed %s should succeed: %v", id, err)
 		}
@@ -144,26 +126,19 @@ func TestAddComposed_ManyWithPK_Duplicate(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add first child
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	if _, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1); err != nil {
-		t.Fatalf("AddComposed child1 error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1)
 
 	// Try to add child with same PK
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1 Duplicate"})
 
-	result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
-	if err != nil {
-		t.Fatalf("AddComposed child2 error: %v", err)
-	}
+	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for duplicate child PK")
@@ -191,19 +166,14 @@ func TestAddComposed_ManyWithoutPK_Appends(t *testing.T) {
 	container := mustValidInstance(t, s, "Container",
 		[]any{"box1"}, map[string]any{"name": "Box 1"})
 
-	if _, err := g.Add(ctx, container); err != nil {
-		t.Fatalf("Add container error: %v", err)
-	}
+	g.Add(ctx, container)
 
 	// Add multiple PK-less children - all should succeed
 	for i := range 3 {
 		item := mustValidPKLessInstance(t, s, "Item",
 			map[string]any{"value": "item"})
 
-		result, err := g.AddComposed(ctx, "Container", FormatKey("box1"), "items", item)
-		if err != nil {
-			t.Fatalf("AddComposed item %d error: %v", i, err)
-		}
+		result := g.AddComposed(ctx, "Container", FormatKey("box1"), "items", item)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed item %d should succeed: %v", i, err)
 		}
@@ -225,18 +195,13 @@ func TestAddComposed_TypeMismatch(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Try to add Parent as child (wrong type)
 	wrongChild := mustValidInstance(t, s, "Parent",
 		[]any{"p2"}, map[string]any{"name": "Parent 2"})
 
-	result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", wrongChild)
-	if err != nil {
-		t.Fatalf("AddComposed error: %v", err)
-	}
+	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", wrongChild)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for wrong child type")
@@ -264,10 +229,7 @@ func TestAddComposed_ParentNotFound(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result, err := g.AddComposed(ctx, "Parent", FormatKey("missing"), "children", child)
-	if err != nil {
-		t.Fatalf("AddComposed error: %v", err)
-	}
+	result := g.AddComposed(ctx, "Parent", FormatKey("missing"), "children", child)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for missing parent")
@@ -294,10 +256,7 @@ func TestAddComposed_ParentTypeNotFound(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result, err := g.AddComposed(ctx, "NonExistentType", FormatKey("x"), "children", child)
-	if err != nil {
-		t.Fatalf("AddComposed error: %v", err)
-	}
+	result := g.AddComposed(ctx, "NonExistentType", FormatKey("x"), "children", child)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for unknown parent type")
@@ -325,18 +284,13 @@ func TestAddComposed_NotComposition(t *testing.T) {
 	person := mustValidInstance(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"})
 
-	if _, err := g.Add(ctx, person); err != nil {
-		t.Fatalf("Add person error: %v", err)
-	}
+	g.Add(ctx, person)
 
 	// Try to add Company as composed child (employer is association, not composition)
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "Acme"})
 
-	result, err := g.AddComposed(ctx, "Person", FormatKey("alice"), "employer", company)
-	if err != nil {
-		t.Fatalf("AddComposed error: %v", err)
-	}
+	result := g.AddComposed(ctx, "Person", FormatKey("alice"), "employer", company)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for association relation")
@@ -366,25 +320,19 @@ func TestAddComposed_AfterAdd_Mixed(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add child via AddComposed
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	if _, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1); err != nil {
-		t.Fatalf("AddComposed child1 error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1)
 
 	// Add another child
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
 
-	if _, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2); err != nil {
-		t.Fatalf("AddComposed child2 error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
 
 	// Verify both children are present
 	snap := g.Snapshot()
@@ -399,7 +347,7 @@ func TestAddComposed_AfterAdd_Mixed(t *testing.T) {
 }
 
 func TestAddComposed_NilChild(t *testing.T) {
-	// Nil child → ErrNilChild
+	// Nil child → panic
 	s := testSchemaWithComposition(t)
 	g := New(s)
 	ctx := t.Context()
@@ -408,19 +356,19 @@ func TestAddComposed_NilChild(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Try to add nil child
-	_, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", nil)
-	if !errors.Is(err, ErrNilChild) {
-		t.Errorf("AddComposed(nil) should return ErrNilChild, got %v", err)
-	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("AddComposed(nil child) should panic")
+		}
+	}()
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", nil)
 }
 
 func TestAddComposed_SchemaMismatch(t *testing.T) {
-	// Child validated against a different schema should fail
+	// Child validated against a different schema should panic
 	s := testSchemaWithComposition(t)
 	g := New(s)
 	ctx := t.Context()
@@ -429,9 +377,7 @@ func TestAddComposed_SchemaMismatch(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Create a completely different schema
 	otherSchema, _ := schema.NewBuilder().
@@ -453,14 +399,16 @@ func TestAddComposed_SchemaMismatch(t *testing.T) {
 	)
 
 	// Try to add child from different schema
-	_, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", otherChild)
-	if !errors.Is(err, ErrSchemaMismatch) {
-		t.Errorf("AddComposed with mismatched schema should return ErrSchemaMismatch, got %v", err)
-	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("AddComposed with mismatched schema should panic")
+		}
+	}()
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", otherChild)
 }
 
 func TestAddComposed_NilReceiver(t *testing.T) {
-	// Nil graph → ErrNilGraph
+	// Nil graph → panic
 	var g *Graph
 	ctx := t.Context()
 
@@ -469,14 +417,16 @@ func TestAddComposed_NilReceiver(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	_, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
-	if !errors.Is(err, ErrNilGraph) {
-		t.Errorf("AddComposed on nil Graph should return ErrNilGraph, got %v", err)
-	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("AddComposed on nil Graph should panic")
+		}
+	}()
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
 }
 
 func TestAddComposed_ContextCancelled(t *testing.T) {
-	// Cancelled context → context.Canceled
+	// Cancelled context → Fatal diagnostic in result
 	s := testSchemaWithComposition(t)
 	g := New(s)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -485,9 +435,20 @@ func TestAddComposed_ContextCancelled(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	_, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("AddComposed with canceled context should return context.Canceled, got %v", err)
+	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
+	if result.OK() {
+		t.Error("AddComposed with canceled context should produce a non-OK result")
+	}
+
+	hasFatal := false
+	for issue := range result.Issues() {
+		if issue.Severity() == diag.Fatal {
+			hasFatal = true
+			break
+		}
+	}
+	if !hasFatal {
+		t.Error("Expected Fatal diagnostic for canceled context")
 	}
 }
 
@@ -501,10 +462,7 @@ func TestAddComposed_ErrorDetails(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
-	if err != nil {
-		t.Fatalf("AddComposed error: %v", err)
-	}
+	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
 
 	// Check issue has expected details
 	found := false
@@ -553,26 +511,17 @@ func TestResult_Duplicates_IncludesComposedDuplicates_OneCardinality(t *testing.
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(ctx, parent)
-	if err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add first child
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	_, err = g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child1)
-	if err != nil {
-		t.Fatalf("AddComposed child1 error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child1)
 
 	// Try to add second child (should fail for (one) cardinality)
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
-	result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child2)
-	if err != nil {
-		t.Fatalf("AddComposed child2 error: %v", err)
-	}
+	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "child", child2)
 
 	if result.OK() {
 		t.Fatal("AddComposed should fail for (one) cardinality with existing child")
@@ -607,26 +556,17 @@ func TestResult_Duplicates_IncludesComposedDuplicates_ManyWithPK(t *testing.T) {
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(ctx, parent)
-	if err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add first child
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	_, err = g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1)
-	if err != nil {
-		t.Fatalf("AddComposed child1 error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1)
 
 	// Try to add child with same PK
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1 Duplicate"})
-	result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
-	if err != nil {
-		t.Fatalf("AddComposed child2 error: %v", err)
-	}
+	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
 
 	if result.OK() {
 		t.Fatal("AddComposed should fail for duplicate child PK")

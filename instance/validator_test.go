@@ -2,12 +2,12 @@ package instance_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
@@ -28,8 +28,7 @@ func mustBuild(t *testing.T, b *schema.Builder) *schema.Schema {
 // mustLoadString loads a schema from YAMMM DSL source, failing the test on error.
 func mustLoadString(t *testing.T, source, name string) *schema.Schema {
 	t.Helper()
-	s, result, err := schema.LoadString(t.Context(), source, name)
-	require.NoError(t, err)
+	s, result := schema.LoadString(t.Context(), source, name)
 	require.False(t, result.HasErrors(), "schema load: %s", result)
 	return s
 }
@@ -55,10 +54,9 @@ func TestValidator_ValidateOne_Success(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 	assert.Equal(t, "Person", valid.TypeName())
 	assert.Equal(t, `["1"]`, valid.PrimaryKey().String())
@@ -86,12 +84,11 @@ func TestValidator_ValidateOne_TypeNotFound(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "NonExistent", raw)
+	valid, result := validator.ValidateOne(t.Context(), "NonExistent", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "not found")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "not found")
 }
 
 func TestValidator_ValidateOne_AbstractTypeRejected(t *testing.T) {
@@ -110,12 +107,11 @@ func TestValidator_ValidateOne_AbstractTypeRejected(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Entity", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Entity", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "abstract")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "abstract")
 }
 
 func TestValidator_ValidateOne_PartTypeRejected(t *testing.T) {
@@ -134,12 +130,11 @@ func TestValidator_ValidateOne_PartTypeRejected(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Part", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Part", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "part type")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "part type")
 }
 
 func TestValidator_ValidateOne_MissingRequiredProperty(t *testing.T) {
@@ -159,12 +154,11 @@ func TestValidator_ValidateOne_MissingRequiredProperty(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "missing required")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "missing required")
 }
 
 func TestValidator_ValidateOne_OptionalPropertyMissing(t *testing.T) {
@@ -184,10 +178,9 @@ func TestValidator_ValidateOne_OptionalPropertyMissing(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 }
 
@@ -208,12 +201,11 @@ func TestValidator_ValidateOne_TypeMismatch(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "age")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "age")
 }
 
 func TestValidator_ValidateOne_UnknownField(t *testing.T) {
@@ -232,12 +224,11 @@ func TestValidator_ValidateOne_UnknownField(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "unknown")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "unknown")
 }
 
 func TestValidator_ValidateOne_AllowUnknownFields(t *testing.T) {
@@ -256,10 +247,9 @@ func TestValidator_ValidateOne_AllowUnknownFields(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 }
 
@@ -280,10 +270,9 @@ func TestValidator_ValidateOne_CaseInsensitivePropertyMatch(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Property should be stored with canonical name
@@ -311,11 +300,10 @@ func TestValidator_ValidateOne_StrictPropertyNames(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
+	require.False(t, result.OK())
 	// Should have both "unknown field" and "missing required" errors
 }
 
@@ -335,10 +323,9 @@ func TestValidator_Validate_BatchSuccess(t *testing.T) {
 		{Properties: map[string]any{"id": "3", "name": "Charlie"}},
 	}
 
-	valid, failures, err := validator.Validate(t.Context(), "Person", raws)
+	valid, result := validator.Validate(t.Context(), "Person", raws)
 
-	require.NoError(t, err)
-	assert.Len(t, failures, 0)
+	require.True(t, result.OK())
 	assert.Len(t, valid, 3)
 }
 
@@ -358,11 +345,14 @@ func TestValidator_Validate_PartialSuccess(t *testing.T) {
 		{Properties: map[string]any{"id": "3", "name": "Charlie"}},
 	}
 
-	valid, failures, err := validator.Validate(t.Context(), "Person", raws)
+	valid, result := validator.Validate(t.Context(), "Person", raws)
 
-	require.NoError(t, err)
-	assert.Len(t, failures, 1)
-	assert.Len(t, valid, 2)
+	require.False(t, result.OK())
+	// Batch returns positional nils: 3 entries, with index 1 nil for the failure
+	require.Len(t, valid, 3)
+	assert.NotNil(t, valid[0])
+	assert.Nil(t, valid[1])
+	assert.NotNil(t, valid[2])
 }
 
 func TestValidator_Validate_ContextCancellation(t *testing.T) {
@@ -381,10 +371,13 @@ func TestValidator_Validate_ContextCancellation(t *testing.T) {
 		Properties: map[string]any{"id": "1"},
 	}
 
-	_, _, err := validator.ValidateOne(ctx, "Person", raw)
+	_, result := validator.ValidateOne(ctx, "Person", raw)
 
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, context.Canceled))
+	require.True(t, result.HasFatal())
+	// Verify context cancellation diagnostic code
+	issues := result.IssuesSlice()
+	require.Len(t, issues, 1)
+	assert.Equal(t, diag.E_CONTEXT_CANCELLED, issues[0].Code())
 }
 
 func TestValidator_ValidateOne_ImmutableOutput(t *testing.T) {
@@ -404,9 +397,8 @@ func TestValidator_ValidateOne_ImmutableOutput(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
-	require.NoError(t, err)
-	require.Nil(t, failure)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Get the name before mutation
@@ -457,15 +449,14 @@ func TestValidator_ValidateOne_IntegerBounds(t *testing.T) {
 				},
 			}
 
-			valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
-			require.NoError(t, err)
+			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tt.wantErr {
 				assert.Nil(t, valid)
-				assert.NotNil(t, failure)
+				assert.False(t, result.OK())
 			} else {
 				assert.NotNil(t, valid)
-				assert.Nil(t, failure)
+				assert.True(t, result.OK())
 			}
 		})
 	}
@@ -502,15 +493,14 @@ func TestValidator_ValidateOne_StringBounds(t *testing.T) {
 				},
 			}
 
-			valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
-			require.NoError(t, err)
+			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tt.wantErr {
 				assert.Nil(t, valid)
-				assert.NotNil(t, failure)
+				assert.False(t, result.OK())
 			} else {
 				assert.NotNil(t, valid)
-				assert.Nil(t, failure)
+				assert.True(t, result.OK())
 			}
 		})
 	}
@@ -538,10 +528,9 @@ func TestValidator_ValidateForComposition_Success(t *testing.T) {
 		{Properties: map[string]any{"id": "2", "street": "Oak Ave"}},
 	}
 
-	valid, failures, err := validator.ValidateForComposition(t.Context(), "Person", "addresses", raws)
+	valid, result := validator.ValidateForComposition(t.Context(), "Person", "addresses", raws)
 
-	require.NoError(t, err)
-	assert.Len(t, failures, 0)
+	require.True(t, result.OK())
 	assert.Len(t, valid, 2)
 }
 
@@ -558,13 +547,14 @@ func TestValidator_ValidateForComposition_ParentTypeNotFound(t *testing.T) {
 		{Properties: map[string]any{"id": "1"}},
 	}
 
-	valid, failures, err := validator.ValidateForComposition(t.Context(), "NonExistent", "children", raws)
+	valid, result := validator.ValidateForComposition(t.Context(), "NonExistent", "children", raws)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.Len(t, failures, 1)
-	assert.Equal(t, instance.ErrTypeNotFound, failures[0].Result.IssuesSlice()[0].Code())
-	assert.Contains(t, failures[0].Summary(), "not found")
+	require.False(t, result.OK())
+	issues := result.IssuesSlice()
+	require.GreaterOrEqual(t, len(issues), 1)
+	assert.Equal(t, instance.ErrTypeNotFound, issues[0].Code())
+	assert.Contains(t, result.String(), "not found")
 }
 
 func TestValidator_ValidateForComposition_RelationNotFound(t *testing.T) {
@@ -580,13 +570,14 @@ func TestValidator_ValidateForComposition_RelationNotFound(t *testing.T) {
 		{Properties: map[string]any{"id": "1"}},
 	}
 
-	valid, failures, err := validator.ValidateForComposition(t.Context(), "Person", "nonexistent", raws)
+	valid, result := validator.ValidateForComposition(t.Context(), "Person", "nonexistent", raws)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.Len(t, failures, 1)
-	assert.Equal(t, instance.ErrCompositionNotFound, failures[0].Result.IssuesSlice()[0].Code())
-	assert.Contains(t, failures[0].Summary(), "not found")
+	require.False(t, result.OK())
+	issues := result.IssuesSlice()
+	require.GreaterOrEqual(t, len(issues), 1)
+	assert.Equal(t, instance.ErrCompositionNotFound, issues[0].Code())
+	assert.Contains(t, result.String(), "not found")
 }
 
 func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
@@ -610,10 +601,12 @@ func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
 		{Properties: map[string]any{"id": "1"}},
 	}
 
-	_, _, err := validator.ValidateForComposition(ctx, "Person", "addresses", raws)
+	_, result := validator.ValidateForComposition(ctx, "Person", "addresses", raws)
 
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, context.Canceled))
+	require.True(t, result.HasFatal())
+	issues := result.IssuesSlice()
+	require.Len(t, issues, 1)
+	assert.Equal(t, diag.E_CONTEXT_CANCELLED, issues[0].Code())
 }
 
 func TestValidator_ValidateForComposition_ParentTypeNotFound_EmptyInput(t *testing.T) {
@@ -625,14 +618,15 @@ func TestValidator_ValidateForComposition_ParentTypeNotFound_EmptyInput(t *testi
 
 	validator := instance.NewValidator(s)
 
-	valid, failures, err := validator.ValidateForComposition(
+	valid, result := validator.ValidateForComposition(
 		t.Context(), "NonExistent", "children", []instance.RawInstance{},
 	)
 
-	require.NoError(t, err)
 	assert.Empty(t, valid)
-	require.Len(t, failures, 1)
-	assert.Equal(t, instance.ErrTypeNotFound, failures[0].Result.IssuesSlice()[0].Code())
+	require.False(t, result.OK())
+	issues := result.IssuesSlice()
+	require.GreaterOrEqual(t, len(issues), 1)
+	assert.Equal(t, instance.ErrTypeNotFound, issues[0].Code())
 }
 
 func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *testing.T) {
@@ -649,14 +643,14 @@ func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *te
 		{Properties: map[string]any{"id": "1"}, Provenance: prov},
 	}
 
-	_, failures, err := validator.ValidateForComposition(
+	_, result := validator.ValidateForComposition(
 		t.Context(), "NonExistent", "children", raws,
 	)
 
-	require.NoError(t, err)
-	require.Len(t, failures, 1)
-	issue := failures[0].Result.IssuesSlice()[0]
-	assert.Equal(t, "test.json", issue.SourceName())
+	require.False(t, result.OK())
+	issues := result.IssuesSlice()
+	require.GreaterOrEqual(t, len(issues), 1)
+	assert.Equal(t, "test.json", issues[0].SourceName())
 }
 
 // --- Invariant Evaluation Tests ---
@@ -687,10 +681,9 @@ func TestValidator_ValidateOne_InvariantPass(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 }
 
@@ -719,12 +712,11 @@ func TestValidator_ValidateOne_InvariantFail(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "age must be non-negative")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "age must be non-negative")
 }
 
 // TestValidator_ValidateOne_InvariantWithoutMessage and
@@ -754,16 +746,14 @@ func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
+	require.False(t, result.OK())
 
 	// Check that the path uses schema property name "FirstName", not input name "firstname"
-	issues := failure.Result.Issues()
 	var foundPath string
-	for issue := range issues {
+	for issue := range result.Issues() {
 		if issue.Path() != "" {
 			foundPath = issue.Path()
 			break
@@ -794,16 +784,14 @@ func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
+	require.False(t, result.OK())
 
 	// Check that the issue has a "field" detail with the input field name
-	issues := failure.Result.Issues()
 	var foundFieldDetail bool
-	for issue := range issues {
+	for issue := range result.Issues() {
 		for _, detail := range issue.Details() {
 			if detail.Key == "field" && detail.Value == "firstname" {
 				foundFieldDetail = true
@@ -818,7 +806,7 @@ func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
 // --- P1.3 Empty Input Slice Tests ---
 
 func TestValidator_Validate_NilInput_ReturnsNil(t *testing.T) {
-	// Validate(ctx, typeName, nil) should return (nil, nil, nil)
+	// Validate(ctx, typeName, nil) should return (nil, OK result)
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
@@ -827,15 +815,14 @@ func TestValidator_Validate_NilInput_ReturnsNil(t *testing.T) {
 
 	validator := instance.NewValidator(s)
 
-	valid, failures, err := validator.Validate(t.Context(), "Person", nil)
+	valid, result := validator.Validate(t.Context(), "Person", nil)
 
-	require.NoError(t, err)
+	require.True(t, result.OK())
 	assert.Nil(t, valid, "nil input should return nil valid slice")
-	assert.Nil(t, failures, "nil input should return nil failures slice")
 }
 
 func TestValidator_Validate_EmptyInput_ReturnsEmptySlice(t *testing.T) {
-	// Validate(ctx, typeName, []RawInstance{}) should return ([]*ValidInstance{}, nil, nil)
+	// Validate(ctx, typeName, []RawInstance{}) should return ([]*ValidInstance{}, OK result)
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
@@ -844,15 +831,15 @@ func TestValidator_Validate_EmptyInput_ReturnsEmptySlice(t *testing.T) {
 
 	validator := instance.NewValidator(s)
 
-	valid, _, err := validator.Validate(t.Context(), "Person", []instance.RawInstance{})
+	valid, result := validator.Validate(t.Context(), "Person", []instance.RawInstance{})
 
-	require.NoError(t, err)
+	require.True(t, result.OK())
 	require.NotNil(t, valid, "empty input should return non-nil empty valid slice")
 	assert.Empty(t, valid, "empty input should return empty valid slice")
 }
 
 func TestValidator_ValidateForComposition_NilInput_ReturnsNil(t *testing.T) {
-	// ValidateForComposition with nil input should return (nil, nil, nil)
+	// ValidateForComposition with nil input should return (nil, OK result)
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Address").
@@ -866,15 +853,14 @@ func TestValidator_ValidateForComposition_NilInput_ReturnsNil(t *testing.T) {
 
 	validator := instance.NewValidator(s)
 
-	valid, failures, err := validator.ValidateForComposition(t.Context(), "Person", "addresses", nil)
+	valid, result := validator.ValidateForComposition(t.Context(), "Person", "addresses", nil)
 
-	require.NoError(t, err)
+	require.True(t, result.OK())
 	assert.Nil(t, valid, "nil input should return nil valid slice")
-	assert.Nil(t, failures, "nil input should return nil failures slice")
 }
 
 func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testing.T) {
-	// ValidateForComposition with empty input should return ([]*ValidInstance{}, nil, nil)
+	// ValidateForComposition with empty input should return ([]*ValidInstance{}, OK result)
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Address").
@@ -888,41 +874,34 @@ func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testin
 
 	validator := instance.NewValidator(s)
 
-	valid, _, err := validator.ValidateForComposition(t.Context(), "Person", "addresses", []instance.RawInstance{})
+	valid, result := validator.ValidateForComposition(t.Context(), "Person", "addresses", []instance.RawInstance{})
 
-	require.NoError(t, err)
+	require.True(t, result.OK())
 	require.NotNil(t, valid, "empty input should return non-nil empty valid slice")
 	assert.Empty(t, valid, "empty input should return empty valid slice")
 }
 
-// --- P1 Internal Error Sentinel Tests ---
+// --- P1 Nil Receiver Panic Tests ---
 
 func TestValidator_NilReceiver(t *testing.T) {
 	var v *instance.Validator
 
 	t.Run("Validate", func(t *testing.T) {
-		_, _, err := v.Validate(t.Context(), "Test", nil)
-		require.Error(t, err, "expected error for nil receiver")
-		assert.True(t, errors.Is(err, instance.ErrNilValidator), "expected ErrNilValidator, got %v", err)
-		assert.True(t, errors.Is(err, instance.ErrInternalFailure), "expected ErrInternalFailure (parent), got %v", err)
-
-		internalErr, ok := errors.AsType[*instance.InternalError](err)
-		require.True(t, ok, "expected InternalError type, got %T", err)
-		assert.Equal(t, instance.KindNilValidator, internalErr.Kind, "expected KindNilValidator")
+		require.Panics(t, func() {
+			v.Validate(t.Context(), "Test", nil)
+		})
 	})
 
 	t.Run("ValidateOne", func(t *testing.T) {
-		_, _, err := v.ValidateOne(t.Context(), "Test", instance.RawInstance{})
-		require.Error(t, err, "expected error for nil receiver")
-		assert.True(t, errors.Is(err, instance.ErrNilValidator), "expected ErrNilValidator, got %v", err)
-		assert.True(t, errors.Is(err, instance.ErrInternalFailure), "expected ErrInternalFailure (parent), got %v", err)
+		require.Panics(t, func() {
+			v.ValidateOne(t.Context(), "Test", instance.RawInstance{})
+		})
 	})
 
 	t.Run("ValidateForComposition", func(t *testing.T) {
-		_, _, err := v.ValidateForComposition(t.Context(), "Parent", "children", nil)
-		require.Error(t, err, "expected error for nil receiver")
-		assert.True(t, errors.Is(err, instance.ErrNilValidator), "expected ErrNilValidator, got %v", err)
-		assert.True(t, errors.Is(err, instance.ErrInternalFailure), "expected ErrInternalFailure (parent), got %v", err)
+		require.Panics(t, func() {
+			v.ValidateForComposition(t.Context(), "Parent", "children", nil)
+		})
 	})
 }
 
@@ -974,9 +953,8 @@ func TestOwnership_NestedMapIsolation(t *testing.T) {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
-	require.NoError(t, err)
-	require.Nil(t, failure)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Mutate the nested address data AFTER validation
@@ -1035,9 +1013,8 @@ func TestOwnership_NestedSliceIsolation(t *testing.T) {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(t.Context(), "Document", raw)
-	require.NoError(t, err)
-	require.Nil(t, failure)
+	valid, result := validator.ValidateOne(t.Context(), "Document", raw)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Mutate the slice: modify elements
@@ -1098,9 +1075,8 @@ func TestOwnership_CompositionIsolation(t *testing.T) {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(t.Context(), "Order", raw)
-	require.NoError(t, err)
-	require.Nil(t, failure)
+	valid, result := validator.ValidateOne(t.Context(), "Order", raw)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Mutate the composition data AFTER validation
@@ -1156,9 +1132,8 @@ func TestOwnership_DeeplyNestedCompositionIsolation(t *testing.T) {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(t.Context(), "Container", raw)
-	require.NoError(t, err)
-	require.Nil(t, failure)
+	valid, result := validator.ValidateOne(t.Context(), "Container", raw)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Mutate all nested data
@@ -1223,9 +1198,8 @@ type Person {
 	raw := instance.RawInstance{Properties: rawData}
 
 	// Validate
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
-	require.NoError(t, err)
-	require.Nil(t, failure)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Mutate edge properties AFTER validation

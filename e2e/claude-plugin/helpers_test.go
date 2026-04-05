@@ -19,8 +19,7 @@ import (
 func loadSchema(t *testing.T, path string) *instance.Validator {
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := schema.Load(ctx, path)
-	require.NoError(t, err, "load schema %s", path)
+	s, result := schema.Load(ctx, path)
 	require.True(t, result.OK(), "schema %s has errors: %v", path, result.Messages())
 	return instance.NewValidator(s)
 }
@@ -30,8 +29,7 @@ func loadSchema(t *testing.T, path string) *instance.Validator {
 func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 	t.Helper()
 	ctx := t.Context()
-	_, result, err := schema.Load(ctx, path)
-	require.NoError(t, err, "load schema %s: unexpected I/O error", path)
+	_, result := schema.Load(ctx, path)
 	require.False(t, result.OK(), "schema %s should have errors but loaded cleanly", path)
 	return result
 }
@@ -58,9 +56,8 @@ func loadTestData(t *testing.T, dataPath, typeKey string) []instance.RawInstance
 func assertValid(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance) {
 	t.Helper()
 	ctx := t.Context()
-	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
-	require.NoError(t, err)
-	assert.Nil(t, failure, "expected valid %s instance, got: %v", typeName, failureMessages(failure))
+	valid, result := v.ValidateOne(ctx, typeName, raw)
+	require.True(t, result.OK(), "expected valid %s instance, got: %v", typeName, result.Messages())
 	assert.NotNil(t, valid)
 }
 
@@ -68,18 +65,17 @@ func assertValid(t *testing.T, v *instance.Validator, typeName string, raw insta
 func assertInvalid(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance, wantCodes ...diag.Code) {
 	t.Helper()
 	ctx := t.Context()
-	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
-	require.NoError(t, err)
+	valid, result := v.ValidateOne(ctx, typeName, raw)
 	assert.Nil(t, valid, "expected invalid %s instance", typeName)
-	require.NotNil(t, failure, "expected validation failure for %s", typeName)
+	require.False(t, result.OK(), "expected validation failure for %s", typeName)
 
 	issueCodes := map[string]bool{}
-	for issue := range failure.Result.Issues() {
+	for issue := range result.Issues() {
 		issueCodes[issue.Code().String()] = true
 	}
 	for _, wc := range wantCodes {
 		assert.True(t, issueCodes[wc.String()],
-			"expected code %s in diagnostics, got: %v", wc, failure.Result.Messages())
+			"expected code %s in diagnostics, got: %v", wc, result.Messages())
 	}
 }
 
@@ -87,13 +83,12 @@ func assertInvalid(t *testing.T, v *instance.Validator, typeName string, raw ins
 func assertInvariantFails(t *testing.T, v *instance.Validator, typeName string, raw instance.RawInstance, wantNames ...string) {
 	t.Helper()
 	ctx := t.Context()
-	valid, failure, err := v.ValidateOne(ctx, typeName, raw)
-	require.NoError(t, err)
+	valid, result := v.ValidateOne(ctx, typeName, raw)
 	assert.Nil(t, valid, "expected invariant failure for %s", typeName)
-	require.NotNil(t, failure, "expected validation failure for %s", typeName)
+	require.False(t, result.OK(), "expected validation failure for %s", typeName)
 
 	failedInvariants := map[string]bool{}
-	for issue := range failure.Result.Issues() {
+	for issue := range result.Issues() {
 		if issue.Code() == diag.E_INVARIANT_FAIL {
 			failedInvariants[issue.Message()] = true
 		}
@@ -116,12 +111,4 @@ func assertDiagHasCode(t *testing.T, result diag.Result, code diag.Code) {
 		}
 	}
 	t.Errorf("expected diagnostic code %s, got: %v", code, result.Messages())
-}
-
-// failureMessages extracts message strings from a validation failure.
-func failureMessages(f *instance.ValidationFailure) []string {
-	if f == nil {
-		return nil
-	}
-	return f.Result.Messages()
 }

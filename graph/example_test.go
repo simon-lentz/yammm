@@ -38,8 +38,8 @@ func ExampleGraph_Add() {
 			"name": "Engineering",
 		},
 	}
-	deptValid, _, _ := validator.ValidateOne(ctx, "Department", deptRaw)
-	_, _ = g.Add(ctx, deptValid)
+	deptValid, _ := validator.ValidateOne(ctx, "Department", deptRaw)
+	g.Add(ctx, deptValid)
 
 	// Add an employee with reference to department
 	empRaw := instance.RawInstance{
@@ -49,11 +49,11 @@ func ExampleGraph_Add() {
 			"department": map[string]any{"_target_id": "eng"},
 		},
 	}
-	empValid, _, _ := validator.ValidateOne(ctx, "Employee", empRaw)
-	_, _ = g.Add(ctx, empValid)
+	empValid, _ := validator.ValidateOne(ctx, "Employee", empRaw)
+	g.Add(ctx, empValid)
 
 	// Check graph integrity
-	result, _ := g.Check(ctx)
+	result := g.Check(ctx)
 	fmt.Println("Graph OK:", result.OK())
 
 	// Get snapshot
@@ -92,11 +92,11 @@ func ExampleGraph_Check() {
 			"parent": map[string]any{"_target_id": "missing"},
 		},
 	}
-	childValid, _, _ := validator.ValidateOne(ctx, "Child", childRaw)
-	_, _ = g.Add(ctx, childValid)
+	childValid, _ := validator.ValidateOne(ctx, "Child", childRaw)
+	g.Add(ctx, childValid)
 
 	// Check will find unresolved reference
-	result, _ := g.Check(ctx)
+	result := g.Check(ctx)
 	fmt.Println("Graph OK:", result.OK())
 	fmt.Println("Has errors:", result.HasErrors())
 

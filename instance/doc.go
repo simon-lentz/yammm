@@ -6,12 +6,13 @@
 //
 // # Overview
 //
-// The validation pipeline takes [RawInstance] objects and produces either
-// [ValidInstance] (on success) or [ValidationFailure] (on error). The [Validator]
-// orchestrates this process using a compiled [schema.Schema].
+// The validation pipeline takes [RawInstance] objects and produces
+// [ValidInstance] objects (on success) along with a [diag.Result] containing
+// any diagnostics. The [Validator] orchestrates this process using a
+// compiled [schema.Schema].
 //
 //	validator := instance.NewValidator(compiledSchema)
-//	valid, failures, err := validator.Validate(ctx, "Person", raws)
+//	valids, result := validator.Validate(ctx, "Person", raws)
 //
 // # Instance Types
 //

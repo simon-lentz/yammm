@@ -58,10 +58,7 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 					nil, nil, nil,
 				)
 
-				_, err := g.Add(ctx, inst)
-				if err != nil {
-					t.Errorf("Add() error: %v", err)
-				}
+				g.Add(ctx, inst)
 			}
 		})
 	}
@@ -104,11 +101,7 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 				nil, nil, nil,
 			)
 
-			result, err := g.Add(ctx, inst)
-			if err != nil {
-				t.Errorf("Add() error: %v", err)
-				return
-			}
+			result := g.Add(ctx, inst)
 
 			if result.OK() {
 				mu.Lock()
@@ -165,9 +158,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 					nil, nil, nil,
 				)
 
-				if _, err := g.Add(ctx, inst); err != nil {
-					t.Errorf("Add Person error: %v", err)
-				}
+				g.Add(ctx, inst)
 			}
 		})
 	}
@@ -185,9 +176,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 					nil, nil, nil,
 				)
 
-				if _, err := g.Add(ctx, inst); err != nil {
-					t.Errorf("Add Company error: %v", err)
-				}
+				g.Add(ctx, inst)
 			}
 		})
 	}
@@ -239,9 +228,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 					nil, nil, nil,
 				)
 
-				if _, err := g.Add(ctx, inst); err != nil {
-					t.Errorf("Add error: %v", err)
-				}
+				g.Add(ctx, inst)
 			}
 		})
 	}
@@ -300,16 +287,12 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 				nil, nil, nil,
 			)
 
-			if _, err := g.Add(ctx, inst); err != nil {
-				t.Errorf("Add error: %v", err)
-			}
+			g.Add(ctx, inst)
 		})
 
 		wg.Go(func() {
 			// Check should not error even during concurrent adds
-			if _, err := g.Check(ctx); err != nil {
-				t.Errorf("Check error: %v", err)
-			}
+			g.Check(ctx)
 		})
 	}
 
@@ -346,9 +329,7 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 						nil, nil, nil,
 					)
 
-					if _, err := g.Add(ctx, inst); err != nil {
-						t.Errorf("Add error: %v", err)
-					}
+					g.Add(ctx, inst)
 				}
 			})
 		}
@@ -410,7 +391,7 @@ func BenchmarkGraph_Add_Concurrent(b *testing.B) {
 					immutable.WrapProperties(map[string]any{"name": pk}),
 					nil, nil, nil,
 				)
-				_, _ = g.Add(ctx, inst)
+				g.Add(ctx, inst)
 			}
 			i++
 		}
@@ -461,18 +442,11 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 	)
 
 	// Add in reverse order (forward refs)
-	if _, err := g.Add(ctx, top); err != nil {
-		t.Fatalf("Add top error: %v", err)
-	}
-	if _, err := g.Add(ctx, middle); err != nil {
-		t.Fatalf("Add middle error: %v", err)
-	}
+	g.Add(ctx, top)
+	g.Add(ctx, middle)
 
 	// Adding base from C should fail since A doesn't directly import C
-	result, err := g.Add(ctx, base)
-	if err != nil {
-		t.Fatalf("Add base error: %v", err)
-	}
+	result := g.Add(ctx, base)
 	// This should fail with type not found
 	if result.OK() {
 		t.Error("Expected failure when adding transitive import type")
@@ -507,18 +481,14 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 		[]any{"c1"}, map[string]any{"name": "C1"})
 
 	// Add in forward-ref order
-	if _, err := g.Add(ctx, typeA); err != nil {
-		t.Fatalf("Add A error: %v", err)
-	}
+	g.Add(ctx, typeA)
 
 	snap1 := g.Snapshot()
 	if len(snap1.Unresolved()) == 0 {
 		t.Error("Should have unresolved A→B")
 	}
 
-	if _, err := g.Add(ctx, typeB); err != nil {
-		t.Fatalf("Add B error: %v", err)
-	}
+	g.Add(ctx, typeB)
 
 	snap2 := g.Snapshot()
 	// A→B should be resolved, B→C still pending
@@ -526,9 +496,7 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 		t.Error("A→B edge should be resolved")
 	}
 
-	if _, err := g.Add(ctx, typeC); err != nil {
-		t.Fatalf("Add C error: %v", err)
-	}
+	g.Add(ctx, typeC)
 
 	// All should be resolved
 	snap3 := g.Snapshot()
@@ -550,19 +518,14 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Stream in children one by one
 	for i := range 5 {
 		child := mustValidPartInstance(t, s, "Child",
 			[]any{fmt.Sprintf("c%d", i)}, map[string]any{"name": fmt.Sprintf("Child %d", i)})
 
-		result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
-		if err != nil {
-			t.Fatalf("AddComposed child %d error: %v", i, err)
-		}
+		result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed child %d should succeed: %v", i, err)
 		}
@@ -613,9 +576,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 					immutable.WrapProperties(map[string]any{"name": pk}),
 					nil, nil, nil,
 				)
-				if _, err := g.Add(ctx, person); err != nil {
-					t.Errorf("Add person error: %v", err)
-				}
+				g.Add(ctx, person)
 
 				// Add company
 				ck := fmt.Sprintf("company-%d-%d", w, i)
@@ -625,9 +586,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 					immutable.WrapProperties(map[string]any{"name": ck}),
 					nil, nil, nil,
 				)
-				if _, err := g.Add(ctx, company); err != nil {
-					t.Errorf("Add company error: %v", err)
-				}
+				g.Add(ctx, company)
 			}
 		})
 	}
@@ -636,9 +595,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 	for range numWorkers {
 		wg.Go(func() {
 			for range opsPerWorker {
-				if _, err := g.Check(ctx); err != nil {
-					t.Errorf("Check error: %v", err)
-				}
+				g.Check(ctx)
 			}
 		})
 	}
@@ -692,9 +649,7 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 				map[string]any{"name": fmt.Sprintf("Person %d", i)},
 				"employer", [][]any{{"shared-company"}})
 
-			if _, err := g.Add(ctx, person); err != nil {
-				t.Errorf("Add person-%d error: %v", i, err)
-			}
+			g.Add(ctx, person)
 		})
 	}
 	wg.Wait()
@@ -708,9 +663,7 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 	// Add the target
 	company := mustValidInstance(t, s, "Company",
 		[]any{"shared-company"}, map[string]any{"name": "Shared Company"})
-	if _, err := g.Add(ctx, company); err != nil {
-		t.Fatalf("Add company error: %v", err)
-	}
+	g.Add(ctx, company)
 
 	// All should be resolved
 	snap2 := g.Snapshot()
@@ -747,9 +700,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	const numWriters = 10
 	const numReaders = 20
@@ -764,7 +715,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 				child := mustValidPartInstance(t, s, "Child",
 					[]any{fmt.Sprintf("c-%d-%d", w, i)},
 					map[string]any{"name": fmt.Sprintf("Child %d-%d", w, i)})
-				_, _ = g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
+				g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
 			}
 		})
 	}

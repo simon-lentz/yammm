@@ -107,6 +107,15 @@ const (
 
 	// DetailKeyImportCount is the count of imports (for limit diagnostics).
 	DetailKeyImportCount = "import_count"
+
+	// DetailKeyInstanceIndex is the zero-based index of an instance in a batch
+	// validation call. Used to correlate diagnostics with specific instances
+	// in [instance.Validator.Validate] and [instance.Validator.ValidateForComposition].
+	DetailKeyInstanceIndex = "instance_index"
+
+	// DetailKeyStackTrace is a stack trace captured from a recovered panic.
+	// Used with E_INTERNAL diagnostics to provide debugging context.
+	DetailKeyStackTrace = "stack_trace"
 )
 
 // ExpectedGot creates a pair of details for type mismatch diagnostics.

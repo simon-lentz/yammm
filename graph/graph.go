@@ -96,24 +96,25 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 // for associations, extracts composed children, and resolves any pending
 // forward references that target this instance.
 //
-// Return semantics:
-//   - (result, nil): Operation completed. Check [diag.Result.OK] for success.
-//   - (empty, error): Internal failure (nil receiver, nil instance, schema mismatch)
-//     or context cancellation.
+// Return semantics: check [diag.Result.OK] for success. A non-OK result
+// contains diagnostic issues. A Fatal issue indicates context cancellation.
+//
+// Panics if g is nil, inst is nil, or inst's schema does not match the graph's schema.
 //
 // Error codes that may appear in result:
 //   - E_GRAPH_TYPE_NOT_FOUND: Instance type not in schema
 //   - E_GRAPH_MISSING_PK: Type has no primary key
 //   - E_DUPLICATE_PK: Primary key already exists for this type
-func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Result, error) {
-	// Nil receiver check
+//   - E_CONTEXT_CANCELLED: Context was cancelled
+func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Result {
+	// Nil receiver check — programmer error
 	if g == nil {
-		return diag.OK(), ErrNilGraph
+		panic("graph.Add: nil *Graph receiver")
 	}
 
-	// Nil instance check
+	// Nil instance check — programmer error
 	if inst == nil {
-		return diag.OK(), ErrNilInstance
+		panic("graph.Add: nil ValidInstance")
 	}
 
 	// Nil context check
@@ -130,23 +131,21 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Res
 		slog.String("type", inst.TypeName()),
 		slog.String("pk", inst.PrimaryKey().String()),
 	)
-	var retErr error
-	defer func() { op.End(retErr) }()
+	defer func() { op.End(opCollector.Result().Err()) }()
 
 	// Context cancellation check
 	if err := ctx.Err(); err != nil {
-		retErr = err
-		return diag.OK(), retErr
+		opCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
+			"graph.Add cancelled: "+err.Error()).Build())
+		return opCollector.Result()
 	}
 
 	// Resolve type
 	typeID := inst.TypeID()
 
-	// Schema mismatch check: verify instance was validated against this graph's
-	// schema or one of its imports (programmer error detection)
+	// Schema mismatch check — programmer error
 	if !g.isKnownSchema(typeID.SchemaPath()) {
-		retErr = ErrSchemaMismatch
-		return diag.OK(), retErr
+		panic("graph.Add: instance schema does not match graph schema")
 	}
 
 	typ, ok := g.lookupType(typeID)
@@ -169,7 +168,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Res
 		g.mu.Lock()
 		g.collector.Collect(issue)
 		g.mu.Unlock()
-		return opCollector.Result(), nil
+		return opCollector.Result()
 	}
 
 	// Check type has primary key
@@ -181,7 +180,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Res
 		g.mu.Lock()
 		g.collector.Collect(issue)
 		g.mu.Unlock()
-		return opCollector.Result(), nil
+		return opCollector.Result()
 	}
 
 	// Check part types cannot be added directly
@@ -193,7 +192,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Res
 		g.mu.Lock()
 		g.collector.Collect(issue)
 		g.mu.Unlock()
-		return opCollector.Result(), nil
+		return opCollector.Result()
 	}
 
 	// Compute instance tag form and primary key
@@ -225,7 +224,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Res
 				slog.String("type", typeName),
 				slog.String("pk", pkString),
 			)
-			return opCollector.Result(), nil
+			return opCollector.Result()
 		}
 	} else {
 		g.instances[typeID] = make(map[string]*Instance)
@@ -348,7 +347,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Res
 	// Extract and attach composed children
 	g.extractCompositions(inst, graphInst, opCollector)
 
-	return opCollector.Result(), nil
+	return opCollector.Result()
 }
 
 // AddComposed adds a composed child to an existing parent in the graph.
@@ -373,9 +372,8 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Res
 //   - Include nested children inline in the parent's [instance.ValidInstance], or
 //   - Stream children only to top-level parents
 //
-// Return semantics:
-//   - (result, nil): Operation completed. Check [diag.Result.OK] for success.
-//   - (empty, error): Internal failure or context cancellation.
+// Return semantics: check [diag.Result.OK] for success. A non-OK result
+// contains diagnostic issues. A Fatal issue indicates context cancellation.
 //
 // Error codes that may appear in result:
 //   - E_GRAPH_TYPE_NOT_FOUND: Parent type not found
@@ -383,19 +381,20 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) (diag.Res
 //     format doesn't match [FormatKey] output)
 //   - E_GRAPH_INVALID_COMPOSITION: Relation not found or not a composition
 //   - E_DUPLICATE_COMPOSED_PK: Child with same PK already exists (for PK'd children)
+//   - E_CONTEXT_CANCELLED: Context was cancelled
 func (g *Graph) AddComposed(
 	ctx context.Context,
 	parentType, parentKey, relationName string,
 	child *instance.ValidInstance,
-) (diag.Result, error) {
-	// Nil receiver check
+) diag.Result {
+	// Nil receiver check — programmer error
 	if g == nil {
-		return diag.OK(), ErrNilGraph
+		panic("graph.AddComposed: nil *Graph receiver")
 	}
 
-	// Nil child check
+	// Nil child check — programmer error
 	if child == nil {
-		return diag.OK(), ErrNilChild
+		panic("graph.AddComposed: nil ValidInstance")
 	}
 
 	// Nil context check
@@ -414,20 +413,18 @@ func (g *Graph) AddComposed(
 		slog.String("relation", relationName),
 		slog.String("child_type", child.TypeName()),
 	)
-	var retErr error
-	defer func() { op.End(retErr) }()
+	defer func() { op.End(opCollector.Result().Err()) }()
 
 	// Context cancellation check
 	if err := ctx.Err(); err != nil {
-		retErr = err
-		return diag.OK(), retErr
+		opCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
+			"graph.AddComposed cancelled: "+err.Error()).Build())
+		return opCollector.Result()
 	}
 
-	// Schema mismatch check: verify child was validated against this graph's
-	// schema or one of its imports (programmer error detection)
+	// Schema mismatch check — programmer error
 	if !g.isKnownSchema(child.TypeID().SchemaPath()) {
-		retErr = ErrSchemaMismatch
-		return diag.OK(), retErr
+		panic("graph.AddComposed: instance schema does not match graph schema")
 	}
 
 	g.mu.Lock()
@@ -446,7 +443,7 @@ func (g *Graph) AddComposed(
 		issue := builder.Build()
 		opCollector.Collect(issue)
 		g.collector.Collect(issue)
-		return opCollector.Result(), nil
+		return opCollector.Result()
 	}
 
 	// Find parent instance
@@ -458,7 +455,7 @@ func (g *Graph) AddComposed(
 			WithDetail(diag.DetailKeyPrimaryKey, parentKey).Build()
 		opCollector.Collect(issue)
 		g.collector.Collect(issue)
-		return opCollector.Result(), nil
+		return opCollector.Result()
 	}
 
 	// Lookup parent type and relation
@@ -469,7 +466,7 @@ func (g *Graph) AddComposed(
 			WithDetail(diag.DetailKeyTypeName, parentType).Build()
 		opCollector.Collect(issue)
 		g.collector.Collect(issue)
-		return opCollector.Result(), nil
+		return opCollector.Result()
 	}
 
 	rel, ok := typ.Relation(relationName)
@@ -481,7 +478,7 @@ func (g *Graph) AddComposed(
 			WithDetail(diag.DetailKeyRelationName, relationName).Build()
 		opCollector.Collect(issue)
 		g.collector.Collect(issue)
-		return opCollector.Result(), nil
+		return opCollector.Result()
 	}
 
 	// Validate child type matches relation target
@@ -495,7 +492,7 @@ func (g *Graph) AddComposed(
 			WithDetail(diag.DetailKeyGot, child.TypeName()).Build()
 		opCollector.Collect(issue)
 		g.collector.Collect(issue)
-		return opCollector.Result(), nil
+		return opCollector.Result()
 	}
 
 	// Check for duplicates per
@@ -537,7 +534,7 @@ func (g *Graph) AddComposed(
 				slog.String("parent_pk", parentKey),
 				slog.String("relation", relationName),
 			)
-			return opCollector.Result(), nil
+			return opCollector.Result()
 		}
 	} else if hasPK {
 		// (many) with PK: check for duplicate PK among siblings
@@ -571,7 +568,7 @@ func (g *Graph) AddComposed(
 					slog.String("relation", relationName),
 					slog.String("child_pk", childPKString),
 				)
-				return opCollector.Result(), nil
+				return opCollector.Result()
 			}
 		}
 	}
@@ -583,7 +580,7 @@ func (g *Graph) AddComposed(
 	g.extractCompositions(child, childInst, opCollector) // Extract nested compositions from streamed child
 	parentInst.addComposed(relationName, childInst)
 
-	return opCollector.Result(), nil
+	return opCollector.Result()
 }
 
 // Check validates graph completeness.
@@ -591,15 +588,16 @@ func (g *Graph) AddComposed(
 // Check verifies that all required associations have resolved targets.
 // Optional associations may remain unresolved without error.
 //
-// Return semantics:
-//   - (result, nil): Check completed. Check [diag.Result.OK] for success.
-//   - (empty, error): Internal failure or context cancellation.
+// Return semantics: check [diag.Result.OK] for success. A non-OK result
+// contains diagnostic issues. A Fatal issue indicates context cancellation.
 //
 // Error codes that may appear in result:
 //   - E_UNRESOLVED_REQUIRED: Required association target not in graph
-func (g *Graph) Check(ctx context.Context) (diag.Result, error) {
+//   - E_CONTEXT_CANCELLED: Context was cancelled
+func (g *Graph) Check(ctx context.Context) diag.Result {
+	// Nil receiver check — programmer error
 	if g == nil {
-		return diag.OK(), ErrNilGraph
+		panic("graph.Check: nil *Graph receiver")
 	}
 
 	// Nil context check
@@ -615,13 +613,13 @@ func (g *Graph) Check(ctx context.Context) (diag.Result, error) {
 	// Operation boundary logging - must come before context check so
 	// cancellations are traced (consistency with walk package pattern)
 	op := trace.Begin(ctx, g.config.logger, "yammm.graph.check")
-	var retErr error
-	defer func() { op.End(retErr) }()
+	defer func() { op.End(opCollector.Result().Err()) }()
 
 	// Context cancellation check
 	if err := ctx.Err(); err != nil {
-		retErr = err
-		return diag.OK(), retErr
+		opCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
+			"graph.Check cancelled: "+err.Error()).Build())
+		return opCollector.Result()
 	}
 
 	g.mu.RLock()
@@ -691,7 +689,7 @@ func (g *Graph) Check(ctx context.Context) (diag.Result, error) {
 		)
 	}
 
-	return opCollector.Result(), nil
+	return opCollector.Result()
 }
 
 // Snapshot creates a point-in-time snapshot of the graph.

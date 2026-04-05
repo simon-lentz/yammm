@@ -28,9 +28,7 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add children via AddComposed
 	child1 := mustValidPartInstance(t, s, "Child",
@@ -38,12 +36,8 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
 
-	if _, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1); err != nil {
-		t.Fatalf("AddComposed child1 error: %v", err)
-	}
-	if _, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2); err != nil {
-		t.Fatalf("AddComposed child2 error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1)
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
 
 	// Get multiple snapshots
 	snap1 := g.Snapshot()
@@ -107,9 +101,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
 
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add children with specific data
 	child1 := mustValidPartInstance(t, s, "Child",
@@ -120,10 +112,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 		[]any{"c3"}, map[string]any{"name": "Third Child"})
 
 	for _, child := range []*instance.ValidInstance{child1, child2, child3} {
-		result, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
-		if err != nil {
-			t.Fatalf("AddComposed error: %v", err)
-		}
+		result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed should succeed: %v", err)
 		}
@@ -193,9 +182,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	// Add parent
 	parent := mustValidInstance(t, s, "Parent",
 		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Take snapshot BEFORE adding composed child
 	snap1 := g.Snapshot()
@@ -203,9 +190,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	// Add composed child AFTER snapshot
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	if _, err := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child); err != nil {
-		t.Fatalf("AddComposed error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
 
 	// Take second snapshot
 	snap2 := g.Snapshot()
@@ -253,9 +238,7 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 	person := mustValidInstance(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"})
 
-	if _, err := g.Add(ctx, person); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, person)
 
 	// Access the instance multiple times within the SAME snapshot
 	snap := g.Snapshot()
@@ -304,17 +287,13 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	// Add company
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "ACME Corp"})
-	if _, err := g.Add(ctx, company); err != nil {
-		t.Fatalf("Add company error: %v", err)
-	}
+	g.Add(ctx, company)
 
 	// Add person with reference to company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"employer", [][]any{{"acme"}})
-	if _, err := g.Add(ctx, person); err != nil {
-		t.Fatalf("Add person error: %v", err)
-	}
+	g.Add(ctx, person)
 
 	snap := g.Snapshot()
 

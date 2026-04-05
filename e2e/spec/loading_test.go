@@ -25,9 +25,8 @@ func TestLoading_LoadFromFile(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm")
+	s, result := schema.Load(ctx, "testdata/loading/valid.yammm")
 
-	require.NoError(t, err, "Load should not return an I/O error for a valid file")
 	require.True(t, result.OK(), "result should be OK for a valid schema: %v", result.Messages())
 	require.NotNil(t, s, "schema should not be nil on success")
 	assert.Equal(t, "Valid", s.Name())
@@ -41,9 +40,8 @@ func TestLoading_StringParameterOrder(t *testing.T) {
 	ctx := t.Context()
 
 	content := `schema "FromString" type Item { name String required }`
-	s, result, err := schema.LoadString(ctx, content, "test-source")
+	s, result := schema.LoadString(ctx, content, "test-source")
 
-	require.NoError(t, err, "String should not return an error for valid content")
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
 	require.NotNil(t, s, "schema should not be nil")
 	assert.Equal(t, "FromString", s.Name())
@@ -63,9 +61,8 @@ func TestLoading_Sources(t *testing.T) {
 		"entry.yammm": []byte(`schema "InMemory" type Widget { label String required }`),
 	}
 
-	s, result, err := schema.LoadSources(ctx, sources, tmpDir)
+	s, result := schema.LoadSources(ctx, sources, tmpDir)
 
-	require.NoError(t, err, "Sources should not return an error")
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
 	require.NotNil(t, s, "schema should not be nil")
 	assert.Equal(t, "InMemory", s.Name())
@@ -76,15 +73,15 @@ func TestLoading_Sources(t *testing.T) {
 // =============================================================================
 
 // TestLoading_ErrorPattern_IOFailure verifies that loading a nonexistent file
-// produces a Go error (error != nil).
-// Source: SPEC.md, "error != nil indicates catastrophic failure (I/O, corruption)."
+// produces a fatal diagnostic.
+// Source: SPEC.md, "A non-OK result with a nil Schema indicates failure."
 func TestLoading_ErrorPattern_IOFailure(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	_, _, err := schema.Load(ctx, "testdata/loading/does_not_exist.yammm")
+	_, result := schema.Load(ctx, "testdata/loading/does_not_exist.yammm")
 
-	require.Error(t, err, "Load should return an error for a nonexistent file")
+	require.True(t, result.HasFatal(), "Load should produce fatal diagnostic for a nonexistent file")
 }
 
 // TestLoading_ErrorPattern_SemanticFailure verifies that a syntactically broken
@@ -94,9 +91,8 @@ func TestLoading_ErrorPattern_SemanticFailure(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	_, result, err := schema.Load(ctx, "testdata/loading/syntax_error.yammm")
+	_, result := schema.Load(ctx, "testdata/loading/syntax_error.yammm")
 
-	require.NoError(t, err, "Load should not return Go error for syntax problems")
 	assert.False(t, result.OK(), "result should report errors for a broken schema")
 }
 
@@ -107,9 +103,8 @@ func TestLoading_ErrorPattern_Success(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm")
+	s, result := schema.Load(ctx, "testdata/loading/valid.yammm")
 
-	require.NoError(t, err)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
 	require.NotNil(t, s)
 }
@@ -130,9 +125,8 @@ func TestLoading_WithRegistry(t *testing.T) {
 
 	// Load a schema with the registry option. The schema itself does not use
 	// imports, but the option must be accepted without error.
-	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm", schema.WithRegistry(reg))
+	s, result := schema.Load(ctx, "testdata/loading/valid.yammm", schema.WithRegistry(reg))
 
-	require.NoError(t, err)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
 	require.NotNil(t, s)
 }
@@ -150,10 +144,9 @@ func TestLoading_WithModuleRoot(t *testing.T) {
 	absTestdata, err := filepath.Abs("testdata/loading")
 	require.NoError(t, err)
 
-	s, result, loadErr := schema.Load(ctx, "testdata/loading/valid.yammm",
+	s, result := schema.Load(ctx, "testdata/loading/valid.yammm",
 		schema.WithModuleRoot(absTestdata))
 
-	require.NoError(t, loadErr)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
 	require.NotNil(t, s)
 }
@@ -166,10 +159,9 @@ func TestLoading_WithIssueLimit(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	_, result, err := schema.Load(ctx, "testdata/loading/many_errors.yammm",
+	_, result := schema.Load(ctx, "testdata/loading/many_errors.yammm",
 		schema.WithIssueLimit(2))
 
-	require.NoError(t, err, "Load should not return Go error for semantic issues")
 	assert.False(t, result.OK(), "schema with duplicate properties should not be OK")
 	assert.True(t, result.LimitReached(),
 		"LimitReached() should be true when more issues exist than the limit")
@@ -184,10 +176,9 @@ func TestLoading_WithSourceRegistry(t *testing.T) {
 	ctx := t.Context()
 
 	srcReg := source.NewRegistry()
-	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm",
+	s, result := schema.Load(ctx, "testdata/loading/valid.yammm",
 		schema.WithSourceRegistry(srcReg))
 
-	require.NoError(t, err)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
 	require.NotNil(t, s)
 }
@@ -204,10 +195,9 @@ func TestLoading_WithLogger(t *testing.T) {
 		Level: slog.LevelDebug,
 	}))
 
-	s, result, err := schema.Load(ctx, "testdata/loading/valid.yammm",
+	s, result := schema.Load(ctx, "testdata/loading/valid.yammm",
 		schema.WithLogger(logger))
 
-	require.NoError(t, err)
 	require.True(t, result.OK(), "result should be OK: %v", result.Messages())
 	require.NotNil(t, s)
 }
@@ -249,14 +239,12 @@ func TestLoading_BuilderAPI(t *testing.T) {
 	v := instance.NewValidator(s)
 	ctx := t.Context()
 
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{"name": "Alice"}))
-	require.NoError(t, err)
-	assert.Nil(t, failure, "valid instance should not produce failure")
+	valid, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{"name": "Alice"}))
+	assert.True(t, valResult.OK(), "valid instance should not produce failure")
 	assert.NotNil(t, valid, "valid instance should be returned")
 
 	// Verify that missing required property fails validation.
-	valid2, failure2, err2 := v.ValidateOne(ctx, "Person", raw(map[string]any{}))
-	require.NoError(t, err2)
+	valid2, valResult2 := v.ValidateOne(ctx, "Person", raw(map[string]any{}))
 	assert.Nil(t, valid2, "instance missing required property should be invalid")
-	assert.NotNil(t, failure2, "missing required property should produce failure")
+	assert.False(t, valResult2.OK(), "missing required property should produce failure")
 }

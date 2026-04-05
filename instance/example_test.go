@@ -39,12 +39,8 @@ func ExampleValidator_ValidateOne() {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(ctx, "Person", raw)
-	if err != nil {
-		fmt.Println("Internal error:", err)
-		return
-	}
-	if failure != nil {
+	valid, result := validator.ValidateOne(ctx, "Person", raw)
+	if !result.OK() {
 		fmt.Println("Validation failed")
 		return
 	}
@@ -78,14 +74,14 @@ func ExampleValidator_Validate() {
 		{Properties: map[string]any{"sku": "PROD-003", "name": "Sprocket"}},
 	}
 
-	valid, failures, err := validator.Validate(ctx, "Product", raws)
-	if err != nil {
-		fmt.Println("Internal error:", err)
+	valid, result := validator.Validate(ctx, "Product", raws)
+	if !result.OK() {
+		fmt.Println("Validation failed")
 		return
 	}
 
-	fmt.Printf("Valid: %d, Failures: %d\n", len(valid), len(failures))
+	fmt.Printf("Valid: %d\n", len(valid))
 
 	// Output:
-	// Valid: 3, Failures: 0
+	// Valid: 3
 }

@@ -101,8 +101,8 @@ func runFuzzOperations(t *testing.T, g *Graph, s *schema.Schema, ctx context.Con
 				immutable.WrapProperties(map[string]any{"name": formatName(workerID, id)}),
 				nil, nil, nil,
 			)
-			// Ignore errors/results - we just want to test for races/panics
-			_, _ = g.Add(ctx, inst)
+			// Ignore results - we just want to test for races/panics
+			g.Add(ctx, inst)
 
 		case 1: // Snapshot
 			snap := g.Snapshot()
@@ -112,7 +112,7 @@ func runFuzzOperations(t *testing.T, g *Graph, s *schema.Schema, ctx context.Con
 			_ = snap.Unresolved()
 
 		case 2: // Check
-			_, _ = g.Check(ctx)
+			g.Check(ctx)
 
 		case 3: // InstanceByKey
 			id := r.Intn(100)
@@ -191,7 +191,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 				immutable.WrapProperties(map[string]any{"name": "Person-" + string(rune('0'+id))}),
 				nil, nil, nil,
 			)
-			_, _ = g.Add(ctx, inst)
+			g.Add(ctx, inst)
 		}
 
 		// Count unique IDs we tried to add

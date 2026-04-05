@@ -24,11 +24,13 @@
 //
 // # Entry Point Pattern
 //
-// All YAMMM public entry points follow a consistent pattern:
+// All YAMMM diagnostic-producing operations return (T, [Result]):
 //
-//   - err != nil: catastrophic failure (I/O, internal corruption, runtime failures)
-//   - err == nil and [Result.Err] != nil: semantic failure represented as structured issues
-//   - err == nil and [Result.Err] == nil: success (may still include warnings/info/hints)
+//   - [Result.HasFatal]: unrecoverable condition (I/O failure, context cancellation)
+//   - [Result.HasErrors]: semantic failure represented as structured issues
+//   - [Result.OK]: success (may still include warnings/info/hints)
+//
+// Pure transformations (serialization, query generation) return (T, error).
 //
 // # Severity Semantics
 //

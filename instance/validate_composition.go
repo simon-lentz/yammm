@@ -211,28 +211,15 @@ func (v *Validator) validateComposition(
 	}
 
 	// Recursively validate children
-	validChildren, failures, err := v.ValidateForComposition(ctx, rel.Owner(), rel.Name(), childRaws)
-	if err != nil {
-		issue := diag.NewIssue(
-			diag.Error,
-			ErrEvalError,
-			"composition validation error: "+err.Error(),
-		).WithDetail(diag.DetailKeyRelationName, rel.Name())
-		withProvenance(issue, prov, basePath.String())
-		collector.Collect(issue.Build())
-		return immutable.Value{}
-	}
+	validChildren, childResult := v.ValidateForComposition(ctx, rel.Owner(), rel.Name(), childRaws)
 
-	// Collect failures into the parent collector with relation context.
-	// Augment child issues with json_field detail for usability.
+	// Collect child diagnostics into the parent collector with relation context.
 	relationDetails := diag.PathRelation(rel.Name(), rel.FieldName())
-	for _, f := range failures {
-		for issue := range f.Result.Issues() {
-			augmented := diag.FromIssue(issue).
-				WithDetails(relationDetails...).
-				Build()
-			collector.Collect(augmented)
-		}
+	for issue := range childResult.Issues() {
+		augmented := diag.FromIssue(issue).
+			WithDetails(relationDetails...).
+			Build()
+		collector.Collect(augmented)
 	}
 
 	// Check for duplicate PKs among children - only for types that have PKs.
@@ -243,6 +230,9 @@ func (v *Validator) validateComposition(
 		if found && childType.HasPrimaryKey() {
 			seenPKs := make(map[string]int) // pk string -> first occurrence index
 			for i, child := range validChildren {
+				if child == nil {
+					continue // failed validation; diagnostics already collected
+				}
 				pkStr := child.PrimaryKey().String()
 				if firstIdx, exists := seenPKs[pkStr]; exists {
 					issue := diag.NewIssue(

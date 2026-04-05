@@ -13,17 +13,17 @@
 // Schemas are loaded using the Load family of functions:
 //
 //	// Load from file
-//	s, result, err := schema.Load(ctx, "schema.yammm")
+//	s, result := schema.Load(ctx, "schema.yammm")
 //
 //	// Load from string
-//	s, result, err := schema.LoadString(ctx, source, "schema.yammm")
+//	s, result := schema.LoadString(ctx, source, "schema.yammm")
 //
 //	// Load from multiple sources
-//	s, result, err := schema.LoadSources(ctx, sources, moduleRoot)
+//	s, result := schema.LoadSources(ctx, sources, moduleRoot)
 //
-// The triple-return pattern ensures diagnostics are always available via
-// diag.Result, while err signals catastrophic failures (I/O, cancellation).
-// Check result.HasErrors() to determine semantic success.
+// A non-OK result with a nil Schema indicates failure. Check result.HasFatal()
+// for I/O or cancellation errors. Check result.HasErrors() to determine
+// semantic success.
 //
 // # Immutability
 //

@@ -679,8 +679,7 @@ type JapaneseUser {
 	// Verify formatTokenStream result is parseable
 	tsResult, err := TokenStream(input)
 	require.NoError(t, err, "formatTokenStream returned error")
-	s, diagResult, err := schema.LoadString(ctx, tsResult, "test")
-	require.NoError(t, err, "formatTokenStream output failed to load")
+	s, diagResult := schema.LoadString(ctx, tsResult, "test")
 	if !diagResult.OK() {
 		for issue := range diagResult.Issues() {
 			t.Logf("issue: %v", issue)

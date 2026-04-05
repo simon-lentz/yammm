@@ -27,8 +27,7 @@ func TestResolveSymbol_LocalType(t *testing.T) {
 
 	src := "schema \"test\"\n\ntype Person {\n    id String primary\n    name String\n}"
 	reg := source.NewRegistry()
-	s, result, err := schema.LoadString(t.Context(), src, "test.yammm", schema.WithSourceRegistry(reg))
-	require.NoError(t, err)
+	s, result := schema.LoadString(t.Context(), src, "test.yammm", schema.WithSourceRegistry(reg))
 	require.True(t, result.OK(), "schema should parse without errors: %v", result)
 
 	typ, ok := s.Type("Person")
@@ -88,8 +87,7 @@ func TestSymbolToLocation(t *testing.T) {
 
 	src := "schema \"test\"\n\ntype Customer {\n    id String primary\n}"
 	reg := source.NewRegistry()
-	s, result, err := schema.LoadString(context.Background(), src, "types.yammm", schema.WithSourceRegistry(reg))
-	require.NoError(t, err)
+	s, result := schema.LoadString(context.Background(), src, "types.yammm", schema.WithSourceRegistry(reg))
 	require.True(t, result.OK(), "schema should parse without errors: %v", result)
 
 	typ, ok := s.Type("Customer")

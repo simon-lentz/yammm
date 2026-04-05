@@ -132,8 +132,7 @@ func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 	const content = "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
 	reg := source.NewRegistry()
-	s, result, err := schema.LoadString(t.Context(), content, "test.yammm", schema.WithSourceRegistry(reg))
-	require.NoError(t, err)
+	s, result := schema.LoadString(t.Context(), content, "test.yammm", schema.WithSourceRegistry(reg))
 	require.True(t, result.OK(), "schema should parse without errors: %v", result)
 
 	sourceID := s.SourceID()

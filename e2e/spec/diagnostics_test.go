@@ -231,12 +231,11 @@ type Item {
 
 	ctx := t.Context()
 	// Missing the required "name" field (and "id" primary key)
-	_, failure, err := v.ValidateOne(ctx, "Item", raw(map[string]any{
+	_, result := v.ValidateOne(ctx, "Item", raw(map[string]any{
 		"extra": "value",
 	}))
-	require.NoError(t, err)
-	require.NotNil(t, failure, "expected validation failure for missing required field")
-	assertDiagHasCode(t, failure.Result, diag.E_MISSING_REQUIRED)
+	require.False(t, result.OK(), "expected validation failure for missing required field")
+	assertDiagHasCode(t, result, diag.E_MISSING_REQUIRED)
 }
 
 // TestDiagnostics_Code_E_CONSTRAINT_FAIL verifies that a value violating a
@@ -255,13 +254,12 @@ type Score {
 
 	ctx := t.Context()
 	// value=200 exceeds the Integer[0,100] constraint
-	_, failure, err := v.ValidateOne(ctx, "Score", raw(map[string]any{
+	_, result := v.ValidateOne(ctx, "Score", raw(map[string]any{
 		"id":    "s1",
 		"value": 200,
 	}))
-	require.NoError(t, err)
-	require.NotNil(t, failure, "expected validation failure for constraint violation")
-	assertDiagHasCode(t, failure.Result, diag.E_CONSTRAINT_FAIL)
+	require.False(t, result.OK(), "expected validation failure for constraint violation")
+	assertDiagHasCode(t, result, diag.E_CONSTRAINT_FAIL)
 }
 
 // TestDiagnostics_Code_E_INVARIANT_FAIL verifies that a failing invariant
@@ -282,14 +280,13 @@ type Range {
 
 	ctx := t.Context()
 	// lo=10, hi=5 violates "lo < hi"
-	_, failure, err := v.ValidateOne(ctx, "Range", raw(map[string]any{
+	_, result := v.ValidateOne(ctx, "Range", raw(map[string]any{
 		"id": "r1",
 		"lo": 10,
 		"hi": 5,
 	}))
-	require.NoError(t, err)
-	require.NotNil(t, failure, "expected validation failure for invariant violation")
-	assertDiagHasCode(t, failure.Result, diag.E_INVARIANT_FAIL)
+	require.False(t, result.OK(), "expected validation failure for invariant violation")
+	assertDiagHasCode(t, result, diag.E_INVARIANT_FAIL)
 }
 
 // =============================================================================
