@@ -40,7 +40,7 @@ func loadTestData(t *testing.T, dataPath, typeKey string) []instance.RawInstance
 	dataBytes, err := os.ReadFile(dataPath)
 	require.NoError(t, err, "read test data %s", dataPath)
 
-	adapter, err := jsonadapter.NewAdapter(nil)
+	adapter, err := jsonadapter.New(nil)
 	require.NoError(t, err, "create JSON adapter")
 
 	sourceID := location.NewSourceID("test://" + dataPath)

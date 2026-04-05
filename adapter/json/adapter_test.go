@@ -43,34 +43,34 @@ func (m *mockRegistry) PositionAt(source location.SourceID, byteOffset int) loca
 	return pos
 }
 
-func TestNewAdapter(t *testing.T) {
+func TestNew(t *testing.T) {
 	t.Run("nil registry without tracking", func(t *testing.T) {
-		adapter, err := NewAdapter(nil)
+		adapter, err := New(nil)
 		require.NoError(t, err)
 		assert.NotNil(t, adapter)
 	})
 
 	t.Run("nil registry with tracking returns error", func(t *testing.T) {
-		_, err := NewAdapter(nil, WithTrackLocations(true))
+		_, err := New(nil, WithTrackLocations(true))
 		require.Error(t, err)
 		assert.Equal(t, ErrNilRegistry, err)
 	})
 
 	t.Run("valid registry with tracking", func(t *testing.T) {
 		reg := newMockRegistry()
-		adapter, err := NewAdapter(reg, WithTrackLocations(true))
+		adapter, err := New(reg, WithTrackLocations(true))
 		require.NoError(t, err)
 		assert.NotNil(t, adapter)
 	})
 
 	t.Run("custom type field", func(t *testing.T) {
-		adapter, err := NewAdapter(nil, WithTypeField("_type"))
+		adapter, err := New(nil, WithTypeField("_type"))
 		require.NoError(t, err)
 		assert.NotNil(t, adapter)
 	})
 
 	t.Run("empty type field returns error", func(t *testing.T) {
-		_, err := NewAdapter(nil, WithTypeField(""))
+		_, err := New(nil, WithTypeField(""))
 		require.Error(t, err)
 		assert.Equal(t, ErrEmptyTypeField, err)
 	})
@@ -80,7 +80,7 @@ func TestParseObject(t *testing.T) {
 	source := location.NewSourceID("test://object")
 
 	t.Run("single type with multiple instances", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{
 			"Person": [
 				{"name": "Alice", "age": 30},
@@ -99,7 +99,7 @@ func TestParseObject(t *testing.T) {
 	})
 
 	t.Run("multiple types", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{
 			"Person": [{"name": "Alice"}],
 			"Company": [{"title": "Acme Inc"}]
@@ -113,7 +113,7 @@ func TestParseObject(t *testing.T) {
 	})
 
 	t.Run("empty object", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{}`)
 
 		result, diags := adapter.ParseObject(context.Background(), source, data)
@@ -122,7 +122,7 @@ func TestParseObject(t *testing.T) {
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{invalid}`)
 
 		_, diags := adapter.ParseObject(context.Background(), source, data)
@@ -130,7 +130,7 @@ func TestParseObject(t *testing.T) {
 	})
 
 	t.Run("expected object at root", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[1, 2, 3]`)
 
 		_, diags := adapter.ParseObject(context.Background(), source, data)
@@ -138,7 +138,7 @@ func TestParseObject(t *testing.T) {
 	})
 
 	t.Run("invalid type name", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"person": [{"name": "Alice"}]}`) // lowercase type name
 
 		result, diags := adapter.ParseObject(context.Background(), source, data)
@@ -147,7 +147,7 @@ func TestParseObject(t *testing.T) {
 	})
 
 	t.Run("qualified type name", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"common.Person": [{"name": "Alice"}]}`)
 
 		result, diags := adapter.ParseObject(context.Background(), source, data)
@@ -156,7 +156,7 @@ func TestParseObject(t *testing.T) {
 	})
 
 	t.Run("with jsonc comments", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil) // jsonc enabled by default
+		adapter, _ := New(nil) // jsonc enabled by default
 		data := []byte(`{
 			// This is a comment
 			"Person": [
@@ -170,7 +170,7 @@ func TestParseObject(t *testing.T) {
 	})
 
 	t.Run("strict JSON rejects comments", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil, WithStrictJSON(true))
+		adapter, _ := New(nil, WithStrictJSON(true))
 		data := []byte(`{
 			// This is a comment
 			"Person": [{"name": "Alice"}]
@@ -185,7 +185,7 @@ func TestParseArray(t *testing.T) {
 	source := location.NewSourceID("test://array")
 
 	t.Run("mixed types", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[
 			{"$type": "Person", "name": "Alice"},
 			{"$type": "Company", "title": "Acme Inc"},
@@ -203,7 +203,7 @@ func TestParseArray(t *testing.T) {
 	})
 
 	t.Run("custom type field", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil, WithTypeField("_type"))
+		adapter, _ := New(nil, WithTypeField("_type"))
 		data := []byte(`[{"_type": "Person", "name": "Alice"}]`)
 
 		result, diags := adapter.ParseArray(context.Background(), source, data)
@@ -216,7 +216,7 @@ func TestParseArray(t *testing.T) {
 	})
 
 	t.Run("missing type field", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[{"name": "Alice"}]`)
 
 		_, diags := adapter.ParseArray(context.Background(), source, data)
@@ -224,7 +224,7 @@ func TestParseArray(t *testing.T) {
 	})
 
 	t.Run("non-string type field", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[{"$type": 123, "name": "Alice"}]`)
 
 		_, diags := adapter.ParseArray(context.Background(), source, data)
@@ -232,7 +232,7 @@ func TestParseArray(t *testing.T) {
 	})
 
 	t.Run("invalid type name syntax", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[{"$type": "person", "name": "Alice"}]`) // lowercase
 
 		_, diags := adapter.ParseArray(context.Background(), source, data)
@@ -240,7 +240,7 @@ func TestParseArray(t *testing.T) {
 	})
 
 	t.Run("empty array", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[]`)
 
 		result, diags := adapter.ParseArray(context.Background(), source, data)
@@ -249,7 +249,7 @@ func TestParseArray(t *testing.T) {
 	})
 
 	t.Run("expected array at root", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"Person": []}`)
 
 		_, diags := adapter.ParseArray(context.Background(), source, data)
@@ -261,7 +261,7 @@ func TestParseTypedArray(t *testing.T) {
 	source := location.NewSourceID("test://typed")
 
 	t.Run("basic usage", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[
 			{"name": "Alice", "age": 30},
 			{"name": "Bob", "age": 25}
@@ -276,7 +276,7 @@ func TestParseTypedArray(t *testing.T) {
 	})
 
 	t.Run("invalid type name", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[{"name": "Alice"}]`)
 
 		_, diags := adapter.ParseTypedArray(context.Background(), source, "person", data) // lowercase
@@ -284,7 +284,7 @@ func TestParseTypedArray(t *testing.T) {
 	})
 
 	t.Run("empty array", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[]`)
 
 		result, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
@@ -297,7 +297,7 @@ func TestParseOne(t *testing.T) {
 	source := location.NewSourceID("test://one")
 
 	t.Run("basic usage", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"name": "Alice", "age": 30}`)
 
 		result, diags := adapter.ParseOne(context.Background(), source, "Person", data)
@@ -308,7 +308,7 @@ func TestParseOne(t *testing.T) {
 	})
 
 	t.Run("nested objects", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{
 			"name": "Alice",
 			"address": {"city": "NYC", "zip": "10001"}
@@ -323,7 +323,7 @@ func TestParseOne(t *testing.T) {
 	})
 
 	t.Run("invalid type name", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"name": "Alice"}`)
 
 		_, diags := adapter.ParseOne(context.Background(), source, "person", data) // lowercase
@@ -331,7 +331,7 @@ func TestParseOne(t *testing.T) {
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{invalid}`)
 
 		_, diags := adapter.ParseOne(context.Background(), source, "Person", data)
@@ -341,7 +341,7 @@ func TestParseOne(t *testing.T) {
 
 func TestNumericConversion(t *testing.T) {
 	source := location.NewSourceID("test://numbers")
-	adapter, _ := NewAdapter(nil)
+	adapter, _ := New(nil)
 
 	t.Run("integers preserved as int64", func(t *testing.T) {
 		data := []byte(`{"value": 42}`)
@@ -399,7 +399,7 @@ func TestLocationTracking(t *testing.T) {
 		reg.register(source, 0, location.Position{Line: 1, Column: 1, Byte: 0})
 		reg.register(source, 28, location.Position{Line: 1, Column: 29, Byte: 28})
 
-		adapter, err := NewAdapter(reg, WithTrackLocations(true))
+		adapter, err := New(reg, WithTrackLocations(true))
 		require.NoError(t, err)
 
 		data := []byte(`{"name": "Alice", "age": 30}`)
@@ -410,7 +410,7 @@ func TestLocationTracking(t *testing.T) {
 	})
 
 	t.Run("no provenance when tracking disabled", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"name": "Alice"}`)
 
 		result, diags := adapter.ParseOne(context.Background(), source, "Person", data)
@@ -424,7 +424,7 @@ func TestEdgeCases(t *testing.T) {
 	source := location.NewSourceID("test://edge")
 
 	t.Run("unicode in values", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"name": "日本語", "emoji": "🎉"}`)
 
 		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
@@ -434,7 +434,7 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("null values", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"name": null}`)
 
 		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
@@ -443,7 +443,7 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("boolean values", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"active": true, "deleted": false}`)
 
 		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
@@ -453,7 +453,7 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("empty string", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"name": ""}`)
 
 		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
@@ -462,7 +462,7 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("empty object as value", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"data": {}}`)
 
 		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
@@ -474,7 +474,7 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("empty array as value", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"items": []}`)
 
 		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
@@ -490,7 +490,7 @@ func TestContinuesAfterErrors(t *testing.T) {
 	source := location.NewSourceID("test://continues")
 
 	t.Run("ParseArray continues after invalid type", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[
 			{"$type": "person", "name": "Alice"},
 			{"$type": "Person", "name": "Bob"},
@@ -505,7 +505,7 @@ func TestContinuesAfterErrors(t *testing.T) {
 	})
 
 	t.Run("ParseObject continues after invalid type", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{
 			"person": [{"name": "Alice"}],
 			"Person": [{"name": "Bob"}]
@@ -529,7 +529,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 	}
 
 	t.Run("parseError with tracking", func(t *testing.T) {
-		adapter, err := NewAdapter(reg, WithTrackLocations(true))
+		adapter, err := New(reg, WithTrackLocations(true))
 		require.NoError(t, err)
 
 		// Invalid JSON to trigger parse error
@@ -546,7 +546,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 	})
 
 	t.Run("missingTypeTagError with tracking", func(t *testing.T) {
-		adapter, err := NewAdapter(reg, WithTrackLocations(true))
+		adapter, err := New(reg, WithTrackLocations(true))
 		require.NoError(t, err)
 
 		// Array element missing type tag
@@ -563,7 +563,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 	})
 
 	t.Run("invalidTypeTagError with tracking", func(t *testing.T) {
-		adapter, err := NewAdapter(reg, WithTrackLocations(true))
+		adapter, err := New(reg, WithTrackLocations(true))
 		require.NoError(t, err)
 
 		// Array element with invalid (lowercase) type tag
@@ -579,7 +579,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 	})
 
 	t.Run("typeTagError with tracking - reserved keyword", func(t *testing.T) {
-		adapter, err := NewAdapter(reg, WithTrackLocations(true))
+		adapter, err := New(reg, WithTrackLocations(true))
 		require.NoError(t, err)
 
 		// Type name that is a reserved keyword
@@ -599,7 +599,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 	source := location.NewSourceID("test://errors")
 
 	t.Run("malformed JSON syntax error", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		// Malformed JSON
 		data := []byte(`[{"name": }]`)
 
@@ -611,7 +611,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("truncated JSON", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		// Truncated JSON
 		data := []byte(`[{"$type": "Person"`)
 
@@ -622,7 +622,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("not an array", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		// Object instead of array
 		data := []byte(`{"$type": "Person"}`)
 
@@ -634,7 +634,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("empty array", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[]`)
 
 		result, diags := adapter.ParseArray(context.Background(), source, data)
@@ -644,7 +644,7 @@ func TestParseArray_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("non-string type tag", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		// Type tag is a number, not string
 		data := []byte(`[{"$type": 123, "name": "Test"}]`)
 
@@ -660,7 +660,7 @@ func TestParseObject_ErrorPaths(t *testing.T) {
 	source := location.NewSourceID("test://object-errors")
 
 	t.Run("malformed JSON", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{invalid}`)
 
 		_, diags := adapter.ParseObject(context.Background(), source, data)
@@ -669,7 +669,7 @@ func TestParseObject_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("not an object", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		// Array instead of object
 		data := []byte(`[{"$type": "Person"}]`)
 
@@ -679,7 +679,7 @@ func TestParseObject_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("truncated JSON", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"Person": [{"name":`)
 
 		_, diags := adapter.ParseObject(context.Background(), source, data)
@@ -688,7 +688,7 @@ func TestParseObject_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("nested array with invalid element", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		// Person array with one valid, one invalid element
 		data := []byte(`{
 			"Person": [
@@ -709,7 +709,7 @@ func TestParseTypedArray_ErrorPaths(t *testing.T) {
 	source := location.NewSourceID("test://typed-errors")
 
 	t.Run("malformed JSON", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[{"name": }]`)
 
 		_, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
@@ -719,7 +719,7 @@ func TestParseTypedArray_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("not an array", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`{"name": "Alice"}`)
 
 		result, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
@@ -729,7 +729,7 @@ func TestParseTypedArray_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("truncated JSON", func(t *testing.T) {
-		adapter, _ := NewAdapter(nil)
+		adapter, _ := New(nil)
 		data := []byte(`[{"name": "Alice"`)
 
 		_, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
@@ -743,7 +743,7 @@ func TestParseArray_ErrorDetails_WithoutTracking(t *testing.T) {
 	// Tests error path code coverage without location tracking enabled.
 	// This exercises the non-tracking branches of error helper functions.
 	source := location.NewSourceID("test://details")
-	adapter, _ := NewAdapter(nil) // No registry, no tracking
+	adapter, _ := New(nil) // No registry, no tracking
 
 	t.Run("invalid_type_tag_details", func(t *testing.T) {
 		// Type tag is present but not a string - exercises invalidTypeTagError without tracking
@@ -824,7 +824,7 @@ func TestParseArray_ErrorDetails_WithoutTracking(t *testing.T) {
 func TestParseObject_NestedArrayErrors(t *testing.T) {
 	// Tests error recovery in nested arrays within ParseObject.
 	source := location.NewSourceID("test://nested-errors")
-	adapter, _ := NewAdapter(nil)
+	adapter, _ := New(nil)
 
 	t.Run("array_with_non_object_element", func(t *testing.T) {
 		// Array contains non-object (string) - should report error
@@ -852,7 +852,7 @@ func TestParseObject_NestedArrayErrors(t *testing.T) {
 // to stay synchronized for subsequent type names.
 func TestParseObject_NonArrayValues(t *testing.T) {
 	source := location.NewSourceID("test://non-array")
-	adapter, _ := NewAdapter(nil)
+	adapter, _ := New(nil)
 
 	tests := []struct {
 		name         string
@@ -925,7 +925,7 @@ func TestParseObject_NonArrayValues(t *testing.T) {
 // Regression tests for Issue 2: Null values should be rejected as invalid objects.
 func TestNullRejection(t *testing.T) {
 	source := location.NewSourceID("test://null")
-	adapter, _ := NewAdapter(nil)
+	adapter, _ := New(nil)
 
 	t.Run("ParseOne rejects null root", func(t *testing.T) {
 		data := []byte(`null`)
@@ -969,7 +969,7 @@ func TestNullRejection(t *testing.T) {
 // Regression tests for Issue 3: Trailing content after root value should be rejected.
 func TestTrailingContent(t *testing.T) {
 	source := location.NewSourceID("test://trailing")
-	adapter, _ := NewAdapter(nil)
+	adapter, _ := New(nil)
 
 	t.Run("ParseObject rejects trailing content", func(t *testing.T) {
 		tests := []struct {

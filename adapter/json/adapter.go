@@ -4,47 +4,54 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// Adapter parses JSON data into RawInstance values with optional location tracking.
-//
-// Thread Safety: Adapter is safe for concurrent Parse* calls after construction.
-// No shared mutable state exists; all context flows through parameters.
-type Adapter struct {
-	registry       location.PositionRegistry
+// adapterConfig holds JSON adapter configuration.
+type adapterConfig struct {
 	strictJSON     bool
 	trackLocations bool
 	typeField      string
 }
 
-// Option configures Adapter behavior.
-type Option func(*Adapter)
-
-// NewAdapter creates a new JSON adapter with the given options.
-//
-// If WithTrackLocations(true) is set but registry is nil, returns an error.
-// The registry parameter may be nil if WithTrackLocations is not used.
-func NewAdapter(registry location.PositionRegistry, opts ...Option) (*Adapter, error) {
-	a := &Adapter{
-		registry:       registry,
+func defaultConfig() adapterConfig {
+	return adapterConfig{
 		strictJSON:     false, // Use jsonc preprocessing by default
 		trackLocations: false, // Don't track locations by default
 		typeField:      "$type",
 	}
+}
 
+// Adapter parses JSON data into RawInstance values with optional location tracking.
+//
+// Thread Safety: Adapter is safe for concurrent Parse* calls after construction.
+// No shared mutable state exists; all context flows through parameters.
+type Adapter struct {
+	registry location.PositionRegistry
+	config   adapterConfig
+}
+
+// Option configures Adapter behavior at construction time.
+type Option func(*adapterConfig)
+
+// New creates a new JSON adapter with the given options.
+//
+// If WithTrackLocations(true) is set but registry is nil, returns an error.
+// The registry parameter may be nil if WithTrackLocations is not used.
+func New(registry location.PositionRegistry, opts ...Option) (*Adapter, error) {
+	cfg := defaultConfig()
 	for _, opt := range opts {
-		opt(a)
+		opt(&cfg)
 	}
 
 	// Validate: can't track locations without a registry
-	if a.trackLocations && a.registry == nil {
+	if cfg.trackLocations && registry == nil {
 		return nil, ErrNilRegistry
 	}
 
 	// Validate: type field cannot be empty
-	if a.typeField == "" {
+	if cfg.typeField == "" {
 		return nil, ErrEmptyTypeField
 	}
 
-	return a, nil
+	return &Adapter{registry: registry, config: cfg}, nil
 }
 
 // WithStrictJSON configures whether to use strict JSON parsing (no comments/trailing commas).
@@ -59,8 +66,8 @@ func NewAdapter(registry location.PositionRegistry, opts ...Option) (*Adapter, e
 //   - Strips comments and trailing commas before parsing
 //   - Preserves byte offsets for accurate diagnostics
 func WithStrictJSON(strict bool) Option {
-	return func(a *Adapter) {
-		a.strictJSON = strict
+	return func(c *adapterConfig) {
+		c.strictJSON = strict
 	}
 }
 
@@ -70,10 +77,10 @@ func WithStrictJSON(strict bool) Option {
 // them to line/column positions via the PositionRegistry. This enables accurate
 // diagnostic locations in error messages.
 //
-// Requires a non-nil PositionRegistry to be passed to NewAdapter.
+// Requires a non-nil PositionRegistry to be passed to New.
 func WithTrackLocations(track bool) Option {
-	return func(a *Adapter) {
-		a.trackLocations = track
+	return func(c *adapterConfig) {
+		c.trackLocations = track
 	}
 }
 
@@ -82,9 +89,9 @@ func WithTrackLocations(track bool) Option {
 // Default is "$type". This field is used by ParseArray to determine which
 // type each object belongs to.
 //
-// Returns ErrEmptyTypeField from NewAdapter if field is empty.
+// Returns ErrEmptyTypeField from New if field is empty.
 func WithTypeField(field string) Option {
-	return func(a *Adapter) {
-		a.typeField = field
+	return func(c *adapterConfig) {
+		c.typeField = field
 	}
 }

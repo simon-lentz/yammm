@@ -1,12 +1,15 @@
 package spec_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	csvadapter "github.com/simon-lentz/yammm/adapter/csv"
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 )
@@ -22,23 +25,23 @@ import (
 // Adapter Creation (2 claims)
 // ---------------------------------------------------------------------------
 
-// TestAdapter_NilRegistry verifies that NewAdapter succeeds with a nil registry
+// TestAdapter_NilRegistry verifies that New succeeds with a nil registry
 // when location tracking is not requested.
-// Source: SPEC.md, "adapter, err := json.NewAdapter(registry, opts...)"
+// Source: SPEC.md, "adapter, err := json.New(registry, opts...)"
 func TestAdapter_NilRegistry(t *testing.T) {
 	t.Parallel()
-	a, err := jsonadapter.NewAdapter(nil)
+	a, err := jsonadapter.New(nil)
 	require.NoError(t, err)
 	require.NotNil(t, a)
 }
 
-// TestAdapter_NonNilRegistry verifies that NewAdapter succeeds with a real
+// TestAdapter_NonNilRegistry verifies that New succeeds with a real
 // PositionRegistry implementation (source.Registry).
-// Source: SPEC.md, "adapter, err := json.NewAdapter(registry, opts...)"
+// Source: SPEC.md, "adapter, err := json.New(registry, opts...)"
 func TestAdapter_NonNilRegistry(t *testing.T) {
 	t.Parallel()
 	reg := source.NewRegistry()
-	a, err := jsonadapter.NewAdapter(reg)
+	a, err := jsonadapter.New(reg)
 	require.NoError(t, err)
 	require.NotNil(t, a)
 }
@@ -52,7 +55,7 @@ func TestAdapter_NonNilRegistry(t *testing.T) {
 // Source: SPEC.md, "WithStrictJSON — Use stdlib JSON only (no comments/trailing commas)"
 func TestAdapter_StrictJSON_RejectsComments(t *testing.T) {
 	t.Parallel()
-	a, err := jsonadapter.NewAdapter(nil, jsonadapter.WithStrictJSON(true))
+	a, err := jsonadapter.New(nil, jsonadapter.WithStrictJSON(true))
 	require.NoError(t, err)
 
 	jsonc := []byte(`{
@@ -69,7 +72,7 @@ func TestAdapter_StrictJSON_RejectsComments(t *testing.T) {
 // Source: SPEC.md, "WithStrictJSON — Use stdlib JSON only (no comments/trailing commas)"
 func TestAdapter_StrictJSON_RejectsTrailingCommas(t *testing.T) {
 	t.Parallel()
-	a, err := jsonadapter.NewAdapter(nil, jsonadapter.WithStrictJSON(true))
+	a, err := jsonadapter.New(nil, jsonadapter.WithStrictJSON(true))
 	require.NoError(t, err)
 
 	data := []byte(`{
@@ -93,7 +96,7 @@ func TestAdapter_TrackLocations(t *testing.T) {
 	data := []byte(`{"name": "Alice", "age": 30}`)
 	require.NoError(t, reg.Register(sourceID, data))
 
-	a, err := jsonadapter.NewAdapter(reg, jsonadapter.WithTrackLocations(true))
+	a, err := jsonadapter.New(reg, jsonadapter.WithTrackLocations(true))
 	require.NoError(t, err)
 
 	raw, result := a.ParseOne(t.Context(), sourceID, "Person", data)
@@ -106,7 +109,7 @@ func TestAdapter_TrackLocations(t *testing.T) {
 // Source: SPEC.md (implied), adapter.go: "WithTrackLocations(true) requires a non-nil PositionRegistry"
 func TestAdapter_TrackLocations_NilRegistryError(t *testing.T) {
 	t.Parallel()
-	_, err := jsonadapter.NewAdapter(nil, jsonadapter.WithTrackLocations(true))
+	_, err := jsonadapter.New(nil, jsonadapter.WithTrackLocations(true))
 	require.Error(t, err, "WithTrackLocations(true) with nil registry should error")
 }
 
@@ -115,7 +118,7 @@ func TestAdapter_TrackLocations_NilRegistryError(t *testing.T) {
 // Source: SPEC.md, "WithTypeField — Field name for type tagging (default: $type)"
 func TestAdapter_CustomTypeField(t *testing.T) {
 	t.Parallel()
-	a, err := jsonadapter.NewAdapter(nil, jsonadapter.WithTypeField("_type"))
+	a, err := jsonadapter.New(nil, jsonadapter.WithTypeField("_type"))
 	require.NoError(t, err)
 
 	data := []byte(`[{"_type": "Person", "name": "Alice"}]`)
@@ -139,7 +142,7 @@ func TestAdapter_CustomTypeField(t *testing.T) {
 // Source: SPEC.md, "Strips // and /* */ comments"
 func TestAdapter_JSONC_LineComments(t *testing.T) {
 	t.Parallel()
-	a, err := jsonadapter.NewAdapter(nil)
+	a, err := jsonadapter.New(nil)
 	require.NoError(t, err)
 
 	jsonc := []byte(`{
@@ -160,7 +163,7 @@ func TestAdapter_JSONC_LineComments(t *testing.T) {
 // Source: SPEC.md, "Strips // and /* */ comments"
 func TestAdapter_JSONC_BlockComments(t *testing.T) {
 	t.Parallel()
-	a, err := jsonadapter.NewAdapter(nil)
+	a, err := jsonadapter.New(nil)
 	require.NoError(t, err)
 
 	jsonc := []byte(`{
@@ -182,7 +185,7 @@ func TestAdapter_JSONC_BlockComments(t *testing.T) {
 // Source: SPEC.md, "Removes trailing commas"
 func TestAdapter_JSONC_TrailingCommas(t *testing.T) {
 	t.Parallel()
-	a, err := jsonadapter.NewAdapter(nil)
+	a, err := jsonadapter.New(nil)
 	require.NoError(t, err)
 
 	jsonc := []byte(`{
@@ -207,7 +210,7 @@ func TestAdapter_JSONC_TrailingCommas(t *testing.T) {
 // Source: SPEC.md, "ParseObject returns map[string][]RawInstance keyed by type"
 func TestAdapter_ParseObject_OutputShape(t *testing.T) {
 	t.Parallel()
-	a, err := jsonadapter.NewAdapter(nil)
+	a, err := jsonadapter.New(nil)
 	require.NoError(t, err)
 
 	data := []byte(`{
@@ -231,12 +234,73 @@ func TestAdapter_ParseObject_OutputShape(t *testing.T) {
 	assert.Nil(t, parsed["Unknown"], "non-existent type key should return nil")
 }
 
+// =============================================================================
+// CSV Adapter — basic integration
+// =============================================================================
+
+// TestCSVAdapter_ParseTyped_Basic verifies that the CSV adapter correctly
+// parses typed CSV data with schema-driven coercion.
+func TestCSVAdapter_ParseTyped_Basic(t *testing.T) {
+	t.Parallel()
+	s, _ := loadSchemaRaw(t, "../../adapter/csv/testdata/basic.yammm")
+	st, _ := s.Type("Entity")
+	a := csvadapter.New()
+
+	input := "id,name,count\ne1,Alice,5\n"
+	results, result := a.ParseTyped(t.Context(), location.SourceID{}, "Entity", strings.NewReader(input), st)
+	require.True(t, result.OK(), "CSV parse should succeed: %v", result.Messages())
+	require.Len(t, results, 1)
+	assert.Equal(t, "e1", results[0].Properties["id"])
+	assert.Equal(t, int64(5), results[0].Properties["count"])
+}
+
+// TestCSVAdapter_RoundTrip verifies parse -> validate -> marshal round-trip.
+func TestCSVAdapter_RoundTrip(t *testing.T) {
+	t.Parallel()
+	s, _ := loadSchemaRaw(t, "../../adapter/csv/testdata/basic.yammm")
+	st, _ := s.Type("Entity")
+	v := instance.NewValidator(s)
+	a := csvadapter.New()
+
+	input := "id,name\ne1,Alice\ne2,Bob\n"
+	parsed, result := a.ParseTyped(t.Context(), location.SourceID{}, "Entity", strings.NewReader(input), st)
+	require.True(t, result.OK(), result.String())
+
+	var valids []*instance.ValidInstance
+	for _, raw := range parsed {
+		valid, vResult := v.ValidateOne(t.Context(), "Entity", raw)
+		require.True(t, vResult.OK(), vResult.String())
+		valids = append(valids, valid)
+	}
+
+	data, err := a.MarshalTyped(t.Context(), valids, st)
+	require.NoError(t, err)
+	output := string(data)
+	assert.Contains(t, output, "e1")
+	assert.Contains(t, output, "Alice")
+	assert.Contains(t, output, "e2")
+	assert.Contains(t, output, "Bob")
+}
+
+// TestCSVAdapter_CustomDelimiter verifies TSV round-trip.
+func TestCSVAdapter_CustomDelimiter(t *testing.T) {
+	t.Parallel()
+	a := csvadapter.New(csvadapter.WithDelimiter('\t'))
+
+	input := "id\tname\ne1\tAlice\n"
+	results, result := a.ParseTyped(t.Context(), location.SourceID{}, "Entity", strings.NewReader(input), nil)
+	require.True(t, result.OK(), result.String())
+	require.Len(t, results, 1)
+	assert.Equal(t, "e1", results[0].Properties["id"])
+	assert.Equal(t, "Alice", results[0].Properties["name"])
+}
+
 // TestAdapter_ParseObject_RecordProperties verifies that parsed records contain
 // the expected property values in RawInstance.Properties.
 // Source: SPEC.md, parsed records contain expected properties
 func TestAdapter_ParseObject_RecordProperties(t *testing.T) {
 	t.Parallel()
-	a, err := jsonadapter.NewAdapter(nil)
+	a, err := jsonadapter.New(nil)
 	require.NoError(t, err)
 
 	data := []byte(`{

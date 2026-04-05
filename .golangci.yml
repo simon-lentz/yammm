@@ -85,6 +85,18 @@ linters:
       - path: "adapter/neo4j/errors\\.go"
         linters:
           - revive
+      - path: "adapter/csv/errors\\.go"
+        linters:
+          - revive
+      # Package names matching domain concepts (not stdlib collisions).
+      - path: "adapter/json/.*"
+        text: "avoid package names that conflict"
+        linters:
+          - revive
+      - path: "adapter/csv/.*"
+        text: "avoid package names that conflict"
+        linters:
+          - revive
       # ANTLR-generated method names use underscores (ExitSchema_name, etc.).
       - path: "schema/internal/parse/.*"
         linters:
@@ -94,9 +106,6 @@ linters:
         linters:
           - revive
       - path: "internal/trace/.*"
-        linters:
-          - revive
-      - path: "adapter/json/.*"
         linters:
           - revive
       - path: "schema/build/.*"

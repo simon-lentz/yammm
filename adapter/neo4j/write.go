@@ -1,16 +1,19 @@
 package neo4j
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -93,7 +96,15 @@ func WithEdgeChunkSize(size int) WriteOption {
 	}
 }
 
-// NodeQueryFor generates a single-node MERGE query for a graph instance.
+// NodeSource provides the data needed to generate a node MERGE query.
+//
+// Both [*graph.Instance] and [*instance.ValidInstance] satisfy this interface.
+type NodeSource interface {
+	TypeName() string
+	Properties() immutable.Properties
+}
+
+// NodeQueryFor generates a single-node MERGE query for an instance.
 //
 // The query uses the NodeShape's label and primary keys for MERGE matching,
 // and SET for all properties. If immutable keys are configured, uses
@@ -102,10 +113,15 @@ func WithEdgeChunkSize(size int) WriteOption {
 // schemaType provides constraint metadata for schema-aware slice coercion
 // (e.g., converting []any to []string for List<String> properties). This
 // matches the coercion behavior of [Adapter.BatchNodeQueries].
+//
+// Any type satisfying [NodeSource] may be passed — both [*graph.Instance]
+// (graph-based path) and [*instance.ValidInstance] (streaming path) work.
+//
+//nolint:revive // ctx reserved for future use (cancellation, tracing)
 func (a *Adapter) NodeQueryFor(
-	_ context.Context,
+	ctx context.Context,
 	shape *NodeShape,
-	inst *graph.Instance,
+	inst NodeSource,
 	schemaType *schema.Type,
 	opts ...WriteOption,
 ) (*NodeQuery, error) {
@@ -114,12 +130,12 @@ func (a *Adapter) NodeQueryFor(
 		opt(&cfg)
 	}
 
-	keyProps, err := extractKeyProps(inst, shape.PrimaryKeys)
+	keyProps, err := extractKeyProps(inst.Properties(), shape.PrimaryKeys)
 	if err != nil {
 		return nil, fmt.Errorf("type %q: %w", inst.TypeName(), err)
 	}
 
-	props := propsToParamMap(inst, schemaType)
+	props := propsToParamMap(inst.Properties(), schemaType)
 
 	params := make(map[string]any)
 	for k, v := range keyProps {
@@ -173,12 +189,12 @@ func (a *Adapter) BatchNodeQueries(
 		var rows []map[string]any
 
 		for _, inst := range instances {
-			keyProps, err := extractKeyProps(inst, nodeShape.PrimaryKeys)
+			keyProps, err := extractKeyProps(inst.Properties(), nodeShape.PrimaryKeys)
 			if err != nil {
 				return nil, fmt.Errorf("type %q: %w", typeName, err)
 			}
 
-			props := propsToParamMap(inst, schemaType)
+			props := propsToParamMap(inst.Properties(), schemaType)
 			row := make(map[string]any, len(keyProps)+2)
 			maps.Copy(row, keyProps)
 			row["props"] = props
@@ -204,7 +220,7 @@ func (a *Adapter) BatchNodeQueries(
 //
 //nolint:revive // opts reserved for future edge-level write options
 func (a *Adapter) EdgeQueryFor(
-	_ context.Context,
+	ctx context.Context,
 	edge *graph.Edge,
 	shapes *GraphShape,
 	opts ...WriteOption,
@@ -222,11 +238,11 @@ func (a *Adapter) EdgeQueryFor(
 		return nil, fmt.Errorf("no shape for target type %q", edge.Target().TypeName())
 	}
 
-	srcKeys, err := extractKeyProps(edge.Source(), srcShape.PrimaryKeys)
+	srcKeys, err := extractKeyProps(edge.Source().Properties(), srcShape.PrimaryKeys)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", edge.Source().TypeName(), err)
 	}
-	tgtKeys, err := extractKeyProps(edge.Target(), tgtShape.PrimaryKeys)
+	tgtKeys, err := extractKeyProps(edge.Target().Properties(), tgtShape.PrimaryKeys)
 	if err != nil {
 		return nil, fmt.Errorf("target %q: %w", edge.Target().TypeName(), err)
 	}
@@ -252,6 +268,90 @@ func (a *Adapter) EdgeQueryFor(
 	)
 
 	return &EdgeQuery{Statement: stmt, Params: params}, nil
+}
+
+// EdgeQueriesFor generates relationship MERGE queries for all association
+// edges of a validated instance.
+//
+// Unlike [Adapter.EdgeQueryFor] (which operates on a single resolved [*graph.Edge]),
+// this method works directly with a [*instance.ValidInstance], generating one
+// [EdgeQuery] per edge target across all association relations.
+//
+// The schemaType resolves relation metadata (target type, cardinality).
+// The shapes map must contain [NodeShape] entries for both the source type
+// and all target types referenced by the instance's edges.
+//
+//nolint:revive // opts reserved for future edge-level write options
+func (a *Adapter) EdgeQueriesFor(
+	ctx context.Context,
+	inst *instance.ValidInstance,
+	schemaType *schema.Type,
+	shapes *GraphShape,
+	opts ...WriteOption,
+) ([]*EdgeQuery, error) {
+	srcShape, ok := shapes.Types[inst.TypeName()]
+	if !ok {
+		return nil, fmt.Errorf("no shape for source type %q", inst.TypeName())
+	}
+
+	var queries []*EdgeQuery
+
+	for relationName, edgeData := range inst.Edges() {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("edge queries for: %w", err)
+		}
+
+		rel, ok := schemaType.Relation(relationName)
+		if !ok || rel.Kind() != schema.RelationAssociation {
+			continue
+		}
+
+		if err := ValidateIdentifier(relationName, "relationship type"); err != nil {
+			return nil, err
+		}
+
+		targetTypeName := rel.TargetID().Name()
+		tgtShape, ok := shapes.Types[targetTypeName]
+		if !ok {
+			return nil, fmt.Errorf("no shape for target type %q (relation %q)", targetTypeName, relationName)
+		}
+
+		srcKeys, err := extractKeyProps(inst.Properties(), srcShape.PrimaryKeys)
+		if err != nil {
+			return nil, fmt.Errorf("source %q: %w", inst.TypeName(), err)
+		}
+
+		for target := range edgeData.TargetsIter() {
+			tgtKeys, err := extractKeyFromImmutableKey(target.TargetKey(), tgtShape.PrimaryKeys)
+			if err != nil {
+				return nil, fmt.Errorf("target %q (relation %q): %w", targetTypeName, relationName, err)
+			}
+
+			params := make(map[string]any)
+			for k, v := range srcKeys {
+				params["from_key_"+k] = v
+			}
+			for k, v := range tgtKeys {
+				params["to_key_"+k] = v
+			}
+
+			hasProps := target.HasProperties()
+			if hasProps {
+				params["rel_props"] = target.Properties().Clone()
+			}
+
+			stmt := buildRelationshipMergeQuery(
+				srcShape.Label, srcShape.PrimaryKeys,
+				relationName,
+				tgtShape.Label, tgtShape.PrimaryKeys,
+				hasProps,
+			)
+
+			queries = append(queries, &EdgeQuery{Statement: stmt, Params: params})
+		}
+	}
+
+	return queries, nil
 }
 
 // BatchEdgeQueries generates UNWIND-batched MERGE queries for edges,
@@ -285,14 +385,14 @@ func (a *Adapter) BatchEdgeQueries(
 	for sig := range groups {
 		sigs = append(sigs, sig)
 	}
-	sort.Slice(sigs, func(i, j int) bool {
-		if sigs[i].sourceType != sigs[j].sourceType {
-			return sigs[i].sourceType < sigs[j].sourceType
+	slices.SortFunc(sigs, func(a, b edgeSignature) int {
+		if v := cmp.Compare(a.sourceType, b.sourceType); v != 0 {
+			return v
 		}
-		if sigs[i].relType != sigs[j].relType {
-			return sigs[i].relType < sigs[j].relType
+		if v := cmp.Compare(a.relType, b.relType); v != 0 {
+			return v
 		}
-		return sigs[i].targetType < sigs[j].targetType
+		return cmp.Compare(a.targetType, b.targetType)
 	})
 
 	var queries []*BatchEdgeQuery
@@ -323,11 +423,11 @@ func (a *Adapter) BatchEdgeQueries(
 
 		var rows []map[string]any
 		for _, edge := range sigEdges {
-			srcKeys, err := extractKeyProps(edge.Source(), srcShape.PrimaryKeys)
+			srcKeys, err := extractKeyProps(edge.Source().Properties(), srcShape.PrimaryKeys)
 			if err != nil {
 				return nil, fmt.Errorf("source %q: %w", sig.sourceType, err)
 			}
-			tgtKeys, err := extractKeyProps(edge.Target(), tgtShape.PrimaryKeys)
+			tgtKeys, err := extractKeyProps(edge.Target().Properties(), tgtShape.PrimaryKeys)
 			if err != nil {
 				return nil, fmt.Errorf("target %q: %w", sig.targetType, err)
 			}
@@ -374,8 +474,8 @@ func (a *Adapter) BatchEdgeQueries(
 // to native temporal types, using schema constraint metadata. Without this coercion,
 // Neo4j TYPE constraints (IS :: DATE, IS :: ZONED DATETIME) reject string values.
 // Date strings are coerced to dbtype.Date; Timestamp strings to time.Time.
-func propsToParamMap(inst *graph.Instance, schemaType *schema.Type) map[string]any {
-	raw := inst.Properties().Clone()
+func propsToParamMap(props immutable.Properties, schemaType *schema.Type) map[string]any {
+	raw := props.Clone()
 	if schemaType == nil {
 		return raw
 	}
@@ -411,7 +511,7 @@ func propsToParamMap(inst *graph.Instance, schemaType *schema.Type) map[string]a
 //
 // Returns the original string if parsing fails or the constraint is not temporal.
 func coerceTemporalScalar(s string, c schema.Constraint) any {
-	c = effectiveConstraint(c)
+	c = schema.ResolveAlias(c)
 	switch c.Kind() {
 	case schema.KindDate:
 		t, err := time.Parse("2006-01-02", s)
@@ -436,12 +536,12 @@ func coerceTemporalScalar(s string, c schema.Constraint) any {
 
 // coerceSlice converts []any to a concrete typed slice using schema constraint metadata.
 func coerceSlice(raw []any, c schema.Constraint) any {
-	c = effectiveConstraint(c)
+	c = schema.ResolveAlias(c)
 	lc, ok := c.(schema.ListConstraint)
 	if !ok {
 		return raw
 	}
-	elem := effectiveConstraint(lc.Element())
+	elem := schema.ResolveAlias(lc.Element())
 	switch elem.Kind() {
 	case schema.KindString, schema.KindUUID, schema.KindEnum, schema.KindPattern:
 		out := make([]string, len(raw))
@@ -570,9 +670,9 @@ func coerceToStringSlice(raw []any) any {
 	return out
 }
 
-// extractKeyProps extracts named primary key properties from an instance.
+// extractKeyProps extracts named primary key properties from immutable properties.
 // All keys must be present and non-nil.
-func extractKeyProps(inst *graph.Instance, keyNames []string) (map[string]any, error) {
+func extractKeyProps(props immutable.Properties, keyNames []string) (map[string]any, error) {
 	if len(keyNames) == 0 {
 		return nil, errors.New("no primary keys defined")
 	}
@@ -582,7 +682,7 @@ func extractKeyProps(inst *graph.Instance, keyNames []string) (map[string]any, e
 	var nilKeys []string
 
 	for _, name := range keyNames {
-		val, ok := inst.Properties().Get(name)
+		val, ok := props.Get(name)
 		if !ok {
 			missing = append(missing, name)
 			continue
@@ -600,6 +700,32 @@ func extractKeyProps(inst *graph.Instance, keyNames []string) (map[string]any, e
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required primary key(s): %v", missing)
+	}
+	if len(nilKeys) > 0 {
+		return nil, fmt.Errorf("nil primary key(s): %v", nilKeys)
+	}
+	return result, nil
+}
+
+// extractKeyFromImmutableKey extracts named key properties from a positional immutable.Key.
+// It zips key components with the provided names. The key must have exactly len(keyNames) components.
+func extractKeyFromImmutableKey(key immutable.Key, keyNames []string) (map[string]any, error) {
+	if len(keyNames) == 0 {
+		return nil, errors.New("no primary keys defined")
+	}
+	if key.Len() != len(keyNames) {
+		return nil, fmt.Errorf("key has %d components but %d key names provided", key.Len(), len(keyNames))
+	}
+
+	result := make(map[string]any, len(keyNames))
+	var nilKeys []string
+	for i, name := range keyNames {
+		val := key.Get(i).Unwrap()
+		if val == nil {
+			nilKeys = append(nilKeys, name)
+			continue
+		}
+		result[name] = val
 	}
 	if len(nilKeys) > 0 {
 		return nil, fmt.Errorf("nil primary key(s): %v", nilKeys)

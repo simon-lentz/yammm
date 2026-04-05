@@ -378,7 +378,7 @@ func TestValidation_JSONAdapterTopLevelKeys(t *testing.T) {
 	dataBytes, err := os.ReadFile("testdata/validation/data.json")
 	require.NoError(t, err)
 
-	adapter, err := jsonadapter.NewAdapter(nil)
+	adapter, err := jsonadapter.New(nil)
 	require.NoError(t, err)
 
 	sourceID := location.NewSourceID("test://validation/data.json")

@@ -146,12 +146,12 @@ func (c StringConstraint) String() string {
 }
 
 func (c StringConstraint) Equal(other Constraint) bool {
-	o, ok := resolveAlias(other).(StringConstraint)
+	o, ok := ResolveAlias(other).(StringConstraint)
 	return ok && c == o
 }
 
 func (c StringConstraint) NarrowsTo(child Constraint) bool {
-	o, ok := resolveAlias(child).(StringConstraint)
+	o, ok := ResolveAlias(child).(StringConstraint)
 	if !ok {
 		return false
 	}
@@ -218,12 +218,12 @@ func (c IntegerConstraint) String() string {
 }
 
 func (c IntegerConstraint) Equal(other Constraint) bool {
-	o, ok := resolveAlias(other).(IntegerConstraint)
+	o, ok := ResolveAlias(other).(IntegerConstraint)
 	return ok && c == o
 }
 
 func (c IntegerConstraint) NarrowsTo(child Constraint) bool {
-	o, ok := resolveAlias(child).(IntegerConstraint)
+	o, ok := ResolveAlias(child).(IntegerConstraint)
 	if !ok {
 		return false
 	}
@@ -290,12 +290,12 @@ func (c FloatConstraint) String() string {
 }
 
 func (c FloatConstraint) Equal(other Constraint) bool {
-	o, ok := resolveAlias(other).(FloatConstraint)
+	o, ok := ResolveAlias(other).(FloatConstraint)
 	return ok && c == o
 }
 
 func (c FloatConstraint) NarrowsTo(child Constraint) bool {
-	o, ok := resolveAlias(child).(FloatConstraint)
+	o, ok := ResolveAlias(child).(FloatConstraint)
 	if !ok {
 		return false
 	}
@@ -325,7 +325,7 @@ func (BooleanConstraint) constraint()          {}
 func (BooleanConstraint) String() string       { return "Boolean" }
 
 func (c BooleanConstraint) Equal(other Constraint) bool {
-	_, ok := resolveAlias(other).(BooleanConstraint)
+	_, ok := ResolveAlias(other).(BooleanConstraint)
 	return ok
 }
 
@@ -361,7 +361,7 @@ func (c TimestampConstraint) String() string {
 }
 
 func (c TimestampConstraint) Equal(other Constraint) bool {
-	o, ok := resolveAlias(other).(TimestampConstraint)
+	o, ok := ResolveAlias(other).(TimestampConstraint)
 	return ok && c.format == o.format
 }
 
@@ -382,7 +382,7 @@ func (DateConstraint) constraint()          {}
 func (DateConstraint) String() string       { return "Date" }
 
 func (c DateConstraint) Equal(other Constraint) bool {
-	_, ok := resolveAlias(other).(DateConstraint)
+	_, ok := ResolveAlias(other).(DateConstraint)
 	return ok
 }
 
@@ -403,7 +403,7 @@ func (UUIDConstraint) constraint()          {}
 func (UUIDConstraint) String() string       { return "UUID" }
 
 func (c UUIDConstraint) Equal(other Constraint) bool {
-	_, ok := resolveAlias(other).(UUIDConstraint)
+	_, ok := ResolveAlias(other).(UUIDConstraint)
 	return ok
 }
 
@@ -440,7 +440,7 @@ func (c EnumConstraint) String() string {
 
 // Equal compares using set equality (order-insensitive).
 func (c EnumConstraint) Equal(other Constraint) bool {
-	o, ok := resolveAlias(other).(EnumConstraint)
+	o, ok := ResolveAlias(other).(EnumConstraint)
 	if !ok || len(c.values) != len(o.values) {
 		return false
 	}
@@ -458,7 +458,7 @@ func (c EnumConstraint) Equal(other Constraint) bool {
 }
 
 func (c EnumConstraint) NarrowsTo(child Constraint) bool {
-	o, ok := resolveAlias(child).(EnumConstraint)
+	o, ok := ResolveAlias(child).(EnumConstraint)
 	if !ok {
 		return false
 	}
@@ -537,7 +537,7 @@ func (c PatternConstraint) String() string {
 
 // Equal compares using order-insensitive pattern string comparison.
 func (c PatternConstraint) Equal(other Constraint) bool {
-	o, ok := resolveAlias(other).(PatternConstraint)
+	o, ok := ResolveAlias(other).(PatternConstraint)
 	if !ok || len(c.patterns) != len(o.patterns) {
 		return false
 	}
@@ -574,7 +574,7 @@ func (c VectorConstraint) String() string {
 }
 
 func (c VectorConstraint) Equal(other Constraint) bool {
-	o, ok := resolveAlias(other).(VectorConstraint)
+	o, ok := ResolveAlias(other).(VectorConstraint)
 	return ok && c.dimension == o.dimension
 }
 
@@ -647,7 +647,7 @@ func (c ListConstraint) String() string {
 }
 
 func (c ListConstraint) Equal(other Constraint) bool {
-	o, ok := resolveAlias(other).(ListConstraint)
+	o, ok := ResolveAlias(other).(ListConstraint)
 	if !ok {
 		return false
 	}
@@ -658,7 +658,7 @@ func (c ListConstraint) Equal(other Constraint) bool {
 }
 
 func (c ListConstraint) NarrowsTo(child Constraint) bool {
-	o, ok := resolveAlias(child).(ListConstraint)
+	o, ok := ResolveAlias(child).(ListConstraint)
 	if !ok {
 		return false
 	}
@@ -710,7 +710,7 @@ func (c AliasConstraint) String() string {
 // This enables inheritance deduplication with different alias names but same constraint.
 // For unresolved aliases, compares by datatype name.
 //
-// This method is cycle-safe: it uses resolveAlias() to unwrap alias chains before
+// This method is cycle-safe: it uses ResolveAlias() to unwrap alias chains before
 // delegating to the terminal constraint's Equal method.
 func (c AliasConstraint) Equal(other Constraint) bool {
 	if c.resolved == nil {
@@ -720,10 +720,10 @@ func (c AliasConstraint) Equal(other Constraint) bool {
 		}
 		return false // Unresolved alias is never equal to non-alias or resolved alias
 	}
-	// Use resolveAlias for cycle-safety before delegating.
-	// If resolveAlias returns an AliasConstraint, a cycle was detected
+	// Use ResolveAlias for cycle-safety before delegating.
+	// If ResolveAlias returns an AliasConstraint, a cycle was detected
 	// and we cannot determine equality - return false.
-	term := resolveAlias(c.resolved)
+	term := ResolveAlias(c.resolved)
 	if _, ok := term.(AliasConstraint); ok {
 		return false // cycle or unresolved alias chain
 	}
@@ -733,16 +733,16 @@ func (c AliasConstraint) Equal(other Constraint) bool {
 // NarrowsTo delegates to the resolved underlying constraint's NarrowsTo method.
 // For unresolved aliases, returns false (cannot determine narrowing without resolution).
 //
-// This method is cycle-safe: it uses resolveAlias() to unwrap alias chains before
+// This method is cycle-safe: it uses ResolveAlias() to unwrap alias chains before
 // delegating to the terminal constraint's NarrowsTo method.
 func (c AliasConstraint) NarrowsTo(child Constraint) bool {
 	if c.resolved == nil {
 		return false
 	}
-	// Use resolveAlias for cycle-safety before delegating.
-	// If resolveAlias returns an AliasConstraint, a cycle was detected
+	// Use ResolveAlias for cycle-safety before delegating.
+	// If ResolveAlias returns an AliasConstraint, a cycle was detected
 	// and we cannot determine narrowing - return false.
-	term := resolveAlias(c.resolved)
+	term := ResolveAlias(c.resolved)
 	if _, ok := term.(AliasConstraint); ok {
 		return false // cycle or unresolved alias chain
 	}
@@ -761,23 +761,23 @@ func (c AliasConstraint) NarrowsTo(child Constraint) bool {
 // IsResolved() is always true. Encountering an unresolved constraint during
 // evaluation indicates a schema error.
 //
-// For alias chains (alias-of-alias), this method uses resolveAlias to unwrap
+// For alias chains (alias-of-alias), this method uses ResolveAlias to unwrap
 // the chain with cycle detection before checking the terminal constraint.
 func (c AliasConstraint) IsResolved() bool {
 	if c.resolved == nil {
 		return false
 	}
-	// Use resolveAlias for cycle-safety before checking resolution.
-	// If resolveAlias returns an AliasConstraint, a cycle was detected
+	// Use ResolveAlias for cycle-safety before checking resolution.
+	// If ResolveAlias returns an AliasConstraint, a cycle was detected
 	// or the alias chain does not terminate - return false.
-	term := resolveAlias(c.resolved)
+	term := ResolveAlias(c.resolved)
 	if _, ok := term.(AliasConstraint); ok {
 		return false // cycle or unresolved alias chain
 	}
 	return term.IsResolved()
 }
 
-// resolveAlias unwraps AliasConstraint chains to get the terminal constraint.
+// ResolveAlias unwraps AliasConstraint chains to get the terminal constraint.
 // Returns the input unchanged if not an alias.
 //
 // For alias chains (alias-of-alias), this iteratively unwraps until reaching
@@ -787,7 +787,7 @@ func (c AliasConstraint) IsResolved() bool {
 // Cycle detection uses datatype names (not constraint values) to avoid
 // hashability issues with slice-containing constraint types like EnumConstraint
 // and PatternConstraint.
-func resolveAlias(c Constraint) Constraint {
+func ResolveAlias(c Constraint) Constraint {
 	// Fast path: not an alias or unresolved
 	ac, ok := c.(AliasConstraint)
 	if !ok || ac.resolved == nil {

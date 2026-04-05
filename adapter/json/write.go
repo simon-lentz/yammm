@@ -12,6 +12,7 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -56,6 +57,8 @@ func WithDiagnostics(include bool) WriteOption {
 // unresolved edges and duplicates in a "$diagnostics" section.
 //
 // Returns ErrNilResult if result is nil.
+//
+//nolint:revive // ctx reserved for future use (cancellation, tracing)
 func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
 	if result == nil {
 		return nil, ErrNilResult
@@ -98,6 +101,139 @@ func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Sn
 		return int64(n), io.ErrShortWrite
 	}
 	return int64(n), err
+}
+
+// MarshalInstance serializes a single ValidInstance to JSON bytes.
+//
+// Unlike [Adapter.MarshalObject] (which operates on a complete [*graph.Snapshot]),
+// this method works directly with a [*instance.ValidInstance]. It serializes:
+//   - Properties from [instance.ValidInstance.Properties]
+//   - FK references from [instance.ValidInstance.Edges] (as inline key arrays)
+//   - Composed children from [instance.ValidInstance.Compositions] (recursively)
+//
+// The schemaType determines field names and cardinality for edges and compositions.
+// If schemaType is nil, relation names are used as field names and all edge
+// collections are serialized as arrays.
+//
+// Returns [ErrNilInstance] if inst is nil.
+//
+//nolint:revive // ctx reserved for future use (cancellation, tracing)
+func (a *Adapter) MarshalInstance(
+	ctx context.Context,
+	inst *instance.ValidInstance,
+	schemaType *schema.Type,
+	opts ...WriteOption,
+) ([]byte, error) {
+	if inst == nil {
+		return nil, ErrNilInstance
+	}
+
+	cfg := &writeConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	obj := serializeValidInstance(inst, schemaType)
+
+	var data []byte
+	var err error
+	if cfg.indent != "" {
+		data, err = json.MarshalIndent(obj, "", cfg.indent)
+	} else {
+		data, err = json.Marshal(obj)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("json marshal: %w", err)
+	}
+	return data, nil
+}
+
+// serializeValidInstance converts a ValidInstance to a JSON-serializable map.
+// This parallels [serializeInstance] but operates on ValidInstance directly,
+// reading edges and compositions from the instance's own data rather than
+// from a resolved graph snapshot.
+func serializeValidInstance(inst *instance.ValidInstance, schemaType *schema.Type) map[string]any {
+	obj := make(map[string]any)
+
+	// 1. Properties in sorted order for deterministic output.
+	for name, val := range inst.Properties().SortedRange() {
+		obj[name] = unwrapValue(val)
+	}
+
+	// 2. FK references from edges.
+	for relationName, edgeData := range inst.Edges() {
+		fieldName := relationName
+		isMany := true // default to array when schema unavailable
+		if schemaType != nil {
+			rel, ok := schemaType.Relation(relationName)
+			if !ok || rel.Kind() != schema.RelationAssociation {
+				continue
+			}
+			fieldName = rel.FieldName()
+			isMany = rel.IsMany()
+		}
+
+		targets := edgeData.Targets()
+		if len(targets) == 0 {
+			continue
+		}
+
+		if isMany {
+			fks := make([]any, len(targets))
+			for i := range targets {
+				fks[i] = targets[i].TargetKey().Clone()
+			}
+			obj[fieldName] = fks
+		} else {
+			// Single cardinality: inline the key directly.
+			obj[fieldName] = targets[0].TargetKey().Clone()
+		}
+	}
+
+	// 3. Composed children.
+	for relationName, composedValue := range inst.Compositions() {
+		fieldName := relationName
+		isMany := true // default to array when schema unavailable
+		if schemaType != nil {
+			rel, ok := schemaType.Relation(relationName)
+			if !ok {
+				continue
+			}
+			fieldName = rel.FieldName()
+			isMany = rel.IsMany()
+		}
+
+		// Compositions wrap *instance.ValidInstance children inside immutable.Slice.
+		// Child schema type resolution is not available from the parent's
+		// *schema.Type alone, so children serialize with nil schemaType
+		// (properties still serialize; nested relation field names use raw names).
+		unwrapped := composedValue.Unwrap()
+		if slice, ok := unwrapped.(immutable.Slice); ok {
+			if isMany {
+				children := make([]map[string]any, 0, slice.Len())
+				for i := range slice.Len() {
+					childValid, ok := slice.Get(i).Unwrap().(*instance.ValidInstance)
+					if !ok {
+						continue
+					}
+					children = append(children, serializeValidInstance(childValid, nil))
+				}
+				obj[fieldName] = children
+			} else if slice.Len() > 0 {
+				if childValid, ok := slice.Get(0).Unwrap().(*instance.ValidInstance); ok {
+					obj[fieldName] = serializeValidInstance(childValid, nil)
+				}
+			}
+			continue
+		}
+
+		// Defensive: bare *ValidInstance (not wrapped in slice).
+		if childValid, ok := unwrapped.(*instance.ValidInstance); ok {
+			obj[fieldName] = serializeValidInstance(childValid, nil)
+		}
+	}
+
+	return obj
 }
 
 // buildOutput constructs the JSON-serializable output map from a graph snapshot.
