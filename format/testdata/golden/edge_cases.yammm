@@ -1,0 +1,37 @@
+schema "edge_cases"
+
+import "./other" as other
+import "./more" as more
+
+/*
+ * DOC_COMMENT block:
+ * This schema tests edge cases for the formatter.
+ */
+
+abstract type Auditable {
+    created_at Timestamp required
+    updated_at Timestamp
+    created_by String
+}
+
+part type Detail {
+    key String primary
+    value String required
+}
+
+type Document extends Auditable {
+    title String primary
+    content String required
+    status Enum["draft", "published", "archived"] required
+
+    --> AUTHORED_BY (one) other.Person
+    *-> HAS_DETAIL (many) Detail
+    --> REFERENCES (_:many) more.Resource {
+        weight Float required
+        created_at Timestamp
+    }
+    --> LINKS (many) Document / linked_by (one)
+
+    ! "title_not_empty" title != ""
+    ! "valid_status" status != "archived" || content != ""
+}

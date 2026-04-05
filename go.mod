@@ -7,8 +7,11 @@ require (
 	github.com/creachadair/jrpc2 v1.3.5
 	github.com/google/uuid v1.6.0
 	github.com/neo4j/neo4j-go-driver/v6 v6.0.0
+	github.com/spf13/cobra v1.10.2
+	github.com/spf13/viper v1.12.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/jsonc v0.3.2
+	golang.org/x/term v0.41.0
 	golang.org/x/text v0.34.0
 )
 
@@ -177,10 +180,8 @@ require (
 	github.com/sourcegraph/go-diff v0.7.0 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
-	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/spf13/viper v1.12.0 // indirect
 	github.com/ssgreg/nlreturn/v2 v2.2.1 // indirect
 	github.com/stbenjam/no-sprintf-host-port v0.3.1 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
@@ -211,7 +212,7 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20260209203927-2842357ff358 // indirect
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

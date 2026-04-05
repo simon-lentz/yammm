@@ -1,0 +1,81 @@
+// Comprehensive formatting test fixture.
+// Exercises all formatting rules in a single file.
+schema "comprehensive"
+
+
+import "./census" as census
+import "./emma" as emma
+
+
+type StateFP = String[2, 2]
+type CountyFP = String[3,3]
+type GeoID = String[1, 15]
+type LongStatus = Enum["active", "inactive", "pending", "suspended", "terminated", "archived", "deleted", "expired", "revoked"]
+
+/*
+ * Abstract base type for auditable entities.
+ */
+abstract type   Auditable{
+    created_at Timestamp  required
+    updated_at Timestamp
+    created_by String
+    run_id String required
+}
+
+part type   LineItem{
+    quantity Integer[1, _] required
+    price Float[0.0,_] required
+    note String // optional note
+
+    ! "positive_qty" quantity > 0
+    ! "positive_price" price >= 0.0
+}
+
+
+type GeoState   extends Auditable {
+    geoid String primary
+    name String  required
+    name_norm String required
+    state_fp StateFP required // FIPS state code
+    land_area Float // sq meters
+    water_area Float
+
+    ! "name_norm_not_empty" name_norm != ""
+    ! "name_not_blank" name -> Len > 0
+}
+
+
+type   GeoCounty extends Auditable{
+    geoid String primary
+    name String required
+    name_norm String required
+    state_fp StateFP required
+    county_fp CountyFP required // county FIPS
+    functional_status Enum["A", "B", "C", "F", "N", "S"] required
+
+    --> IN_STATE (one) GeoState
+    --> ADJACENT_TO (_:many) GeoCounty // adjacency
+    *-> HAS_DETAIL (many) LineItem
+
+    ! "name_norm_not_empty" name_norm != ""
+    ! "has_state" state_fp != ""
+    ! "valid_status" functional_status == "A" || functional_status == "N"
+}
+
+
+type EmmaIssuer extends Auditable {
+    emma_id String primary
+    name String required
+    name_norm String required
+    state_code String[2, 2] required
+    is_active Boolean required
+    deactivated_at Timestamp
+    deactivated_reason Enum["removed_from_source", "matured", "merged", "manual"]
+    source_fetched_at Timestamp  required
+
+    --> LOCATED_IN (_:one) census.GeoState
+    --> ISSUES (many) emma.EmmaIssue / issued_by (one)
+
+    ! "name_not_empty" name_norm != ""
+    ! "active_or_reason" is_active || deactivated_reason != nil
+}

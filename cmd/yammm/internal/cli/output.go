@@ -1,0 +1,82 @@
+package cli
+
+import (
+	"fmt"
+	"io"
+
+	"golang.org/x/term"
+
+	"github.com/simon-lentz/yammm/diag"
+)
+
+// OutputFormat controls how diagnostic results are rendered.
+type OutputFormat string
+
+const (
+	FormatText OutputFormat = "text"
+	FormatJSON OutputFormat = "json"
+)
+
+// ParseOutputFormat validates and returns the output format.
+func ParseOutputFormat(s string) (OutputFormat, error) {
+	switch s {
+	case "text":
+		return FormatText, nil
+	case "json":
+		return FormatJSON, nil
+	default:
+		return "", fmt.Errorf("invalid output format %q: must be \"text\" or \"json\"", s)
+	}
+}
+
+// IsTTY reports whether the given file descriptor is a terminal.
+func IsTTY(fd uintptr) bool {
+	return term.IsTerminal(int(fd)) //nolint:gosec // fd is from os.File.Fd(); overflow is not possible on real platforms
+}
+
+// NewRenderer creates a diag.Renderer configured for CLI output.
+//
+// When format is FormatJSON, colors and excerpts are disabled regardless
+// of TTY state. The provider parameter may be nil.
+func NewRenderer(format OutputFormat, isTTY bool, noColor bool, provider diag.SourceProvider, moduleRoot string) *diag.Renderer {
+	colorize := isTTY && format == FormatText && !noColor
+	excerpts := isTTY && format == FormatText
+
+	opts := []diag.Option{
+		diag.WithColors(colorize),
+		diag.WithExcerpts(excerpts),
+	}
+
+	if provider != nil {
+		opts = append(opts, diag.WithSourceProvider(provider))
+	}
+	if moduleRoot != "" {
+		opts = append(opts, diag.WithModuleRoot(moduleRoot))
+	}
+
+	return diag.NewRenderer(opts...)
+}
+
+// RenderResult writes diagnostic output to w using the given renderer and format.
+func RenderResult(w io.Writer, renderer *diag.Renderer, format OutputFormat, result diag.Result) error {
+	if result.OK() {
+		return nil
+	}
+
+	switch format {
+	case FormatJSON:
+		data := renderer.FormatResultJSON(result)
+		if _, err := w.Write(data); err != nil {
+			return err
+		}
+		_, err := w.Write([]byte{'\n'})
+		return err
+	default:
+		text := renderer.FormatResult(result)
+		if text != "" {
+			_, err := fmt.Fprintln(w, text)
+			return err
+		}
+		return nil
+	}
+}

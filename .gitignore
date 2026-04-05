@@ -42,5 +42,7 @@ lsp/editors/vscode/out/
 lsp/editors/vscode/node_modules/
 lsp/editors/vscode/*.vsix
 
-# LSP binary build artifacts
+# Binary build artifacts
 bin/
+/yammm
+/yammm-lsp

@@ -1,0 +1,7 @@
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}

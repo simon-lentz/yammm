@@ -290,9 +290,9 @@ func TestTokenStream_EdgePropertyBlockBlanks(t *testing.T) {
 func TestTokenStream_GoldenFile(t *testing.T) {
 	t.Parallel()
 
-	unformatted, err := os.ReadFile("../../testdata/lsp/formatting/unformatted.yammm")
+	unformatted, err := os.ReadFile("testdata/golden/unformatted.yammm")
 	require.NoError(t, err, "failed to read unformatted fixture")
-	golden, err := os.ReadFile("../../testdata/lsp/formatting/formatted.yammm.golden")
+	golden, err := os.ReadFile("testdata/golden/formatted.yammm.golden")
 	require.NoError(t, err, "failed to read golden fixture")
 
 	result, err := TokenStream(string(unformatted))
@@ -303,7 +303,7 @@ func TestTokenStream_GoldenFile(t *testing.T) {
 func TestTokenStream_GoldenIdempotent(t *testing.T) {
 	t.Parallel()
 
-	golden, err := os.ReadFile("../../testdata/lsp/formatting/formatted.yammm.golden")
+	golden, err := os.ReadFile("testdata/golden/formatted.yammm.golden")
 	require.NoError(t, err, "failed to read golden fixture")
 
 	result, err := TokenStream(string(golden))
@@ -326,8 +326,8 @@ func TestTokenStream_GoldenFixtures(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			inputPath := filepath.Join("../../testdata", "lsp", "formatting", name+".yammm")
-			goldenPath := filepath.Join("../../testdata", "lsp", "formatting", name+".yammm.golden")
+			inputPath := filepath.Join("testdata", "golden", name+".yammm")
+			goldenPath := filepath.Join("testdata", "golden", name+".yammm.golden")
 
 			input, err := os.ReadFile(inputPath)
 			require.NoError(t, err, "failed to read fixture %s", name)
@@ -357,7 +357,7 @@ func TestTokenStream_GoldenIdempotentAll(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			goldenPath := filepath.Join("../../testdata", "lsp", "formatting", name)
+			goldenPath := filepath.Join("testdata", "golden", name)
 			golden, err := os.ReadFile(goldenPath)
 			require.NoError(t, err, "failed to read golden %s", name)
 

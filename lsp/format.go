@@ -8,7 +8,7 @@ import (
 	"github.com/creachadair/jrpc2"
 	"github.com/creachadair/jrpc2/handler"
 
-	"github.com/simon-lentz/yammm/lsp/internal/format"
+	"github.com/simon-lentz/yammm/format"
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 )

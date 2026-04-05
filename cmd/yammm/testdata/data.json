@@ -1,0 +1,6 @@
+{
+  "Person": [
+    {"id": "alice", "name": "Alice", "age": 30},
+    {"id": "bob", "name": "Bob", "age": 25}
+  ]
+}
