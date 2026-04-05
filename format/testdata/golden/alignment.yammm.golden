@@ -1,0 +1,31 @@
+schema "alignment"
+
+type StateFP  = String[2, 2]
+type CountyFP = String[3, 3]
+type GeoID    = String[1, 15]
+
+type GeoState {
+	geoid      String primary
+	name       String required
+	state_fp   StateFP required // FIPS code
+	land_area  Float            // sq meters
+	water_area Float
+}
+
+type GeoCounty {
+	geoid             String primary
+	name              String required
+	state_fp          StateFP required
+	county_fp         CountyFP required                           // county FIPS
+	functional_status Enum["A", "B", "C", "F", "N", "S"] required
+
+	--> IN_STATE        (one) GeoState
+	*-> HAS_SUBDIVISION (many) GeoSubdivision
+	--> ADJACENT_TO     (_:many) GeoCounty    // adjacency
+}
+
+part type GeoSubdivision {
+	geoid             String primary
+	name              String required
+	functional_status String
+}

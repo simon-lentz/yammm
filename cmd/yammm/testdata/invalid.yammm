@@ -1,0 +1,5 @@
+schema "test"
+
+type Broken {
+	id UnknownType primary
+}
