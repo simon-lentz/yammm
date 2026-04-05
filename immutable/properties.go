@@ -34,7 +34,7 @@ type Properties struct {
 //
 // Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
 // caller to freely retain and mutate the original.
-func WrapProperties(props map[string]any, opts ...WrapOption) Properties {
+func WrapProperties(props map[string]any, opts ...Option) Properties {
 	if props == nil {
 		return Properties{}
 	}

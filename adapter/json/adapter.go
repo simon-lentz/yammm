@@ -15,14 +15,14 @@ type Adapter struct {
 	typeField      string
 }
 
-// ParseOption configures Adapter behavior.
-type ParseOption func(*Adapter)
+// Option configures Adapter behavior.
+type Option func(*Adapter)
 
 // NewAdapter creates a new JSON adapter with the given options.
 //
 // If WithTrackLocations(true) is set but registry is nil, returns an error.
 // The registry parameter may be nil if WithTrackLocations is not used.
-func NewAdapter(registry location.PositionRegistry, opts ...ParseOption) (*Adapter, error) {
+func NewAdapter(registry location.PositionRegistry, opts ...Option) (*Adapter, error) {
 	a := &Adapter{
 		registry:       registry,
 		strictJSON:     false, // Use jsonc preprocessing by default
@@ -58,7 +58,7 @@ func NewAdapter(registry location.PositionRegistry, opts ...ParseOption) (*Adapt
 //   - Preprocesses input with tidwall/jsonc
 //   - Strips comments and trailing commas before parsing
 //   - Preserves byte offsets for accurate diagnostics
-func WithStrictJSON(strict bool) ParseOption {
+func WithStrictJSON(strict bool) Option {
 	return func(a *Adapter) {
 		a.strictJSON = strict
 	}
@@ -71,7 +71,7 @@ func WithStrictJSON(strict bool) ParseOption {
 // diagnostic locations in error messages.
 //
 // Requires a non-nil PositionRegistry to be passed to NewAdapter.
-func WithTrackLocations(track bool) ParseOption {
+func WithTrackLocations(track bool) Option {
 	return func(a *Adapter) {
 		a.trackLocations = track
 	}
@@ -83,7 +83,7 @@ func WithTrackLocations(track bool) ParseOption {
 // type each object belongs to.
 //
 // Returns ErrEmptyTypeField from NewAdapter if field is empty.
-func WithTypeField(field string) ParseOption {
+func WithTypeField(field string) Option {
 	return func(a *Adapter) {
 		a.typeField = field
 	}

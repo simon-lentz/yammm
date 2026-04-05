@@ -30,14 +30,14 @@ type rendererConfig struct {
 	truncationIndicator string
 }
 
-// RendererOption configures Renderer behavior.
-type RendererOption func(*rendererConfig)
+// Option configures Renderer behavior.
+type Option func(*rendererConfig)
 
 // WithSourceProvider sets the source content provider for excerpt rendering.
 //
 // If provider is nil, the Renderer omits source excerpts from output without
 // error. This is safe and produces valid (albeit less informative) diagnostics.
-func WithSourceProvider(p SourceProvider) RendererOption {
+func WithSourceProvider(p SourceProvider) Option {
 	return func(c *rendererConfig) {
 		c.provider = p
 	}
@@ -47,7 +47,7 @@ func WithSourceProvider(p SourceProvider) RendererOption {
 //
 // Excerpts require a SourceProvider. If no provider is set, excerpts are
 // silently omitted even if enabled.
-func WithExcerpts(on bool) RendererOption {
+func WithExcerpts(on bool) Option {
 	return func(c *rendererConfig) {
 		c.excerpts = on
 	}
@@ -57,7 +57,7 @@ func WithExcerpts(on bool) RendererOption {
 //
 // Lines longer than this are truncated with the truncation indicator.
 // Default is 120.
-func WithMaxLineColumns(n int) RendererOption {
+func WithMaxLineColumns(n int) Option {
 	return func(c *rendererConfig) {
 		c.maxCols = n
 	}
@@ -67,14 +67,14 @@ func WithMaxLineColumns(n int) RendererOption {
 //
 // When set, absolute paths that start with this root are displayed
 // relative to the root for cleaner output.
-func WithModuleRoot(root string) RendererOption {
+func WithModuleRoot(root string) Option {
 	return func(c *rendererConfig) {
 		c.moduleRoot = root
 	}
 }
 
 // WithColors enables or disables ANSI color output.
-func WithColors(on bool) RendererOption {
+func WithColors(on bool) Option {
 	return func(c *rendererConfig) {
 		c.colorize = on
 	}
@@ -85,7 +85,7 @@ func WithColors(on bool) RendererOption {
 // In text output, Fatal severity is typically rendered as "error" for
 // user-facing output. Set this to true to preserve the Fatal/Error distinction.
 // JSON output always uses the canonical String() values.
-func WithDistinguishFatal(distinguish bool) RendererOption {
+func WithDistinguishFatal(distinguish bool) Option {
 	return func(c *rendererConfig) {
 		c.distinguishFatal = distinguish
 	}
@@ -94,7 +94,7 @@ func WithDistinguishFatal(distinguish bool) RendererOption {
 // WithTruncationIndicator sets the indicator for truncated lines.
 //
 // Default is "...".
-func WithTruncationIndicator(s string) RendererOption {
+func WithTruncationIndicator(s string) Option {
 	return func(c *rendererConfig) {
 		c.truncationIndicator = s
 	}
@@ -102,7 +102,7 @@ func WithTruncationIndicator(s string) RendererOption {
 
 // Renderer provides formatting for diagnostic output.
 //
-// Create with [NewRenderer] and configure with [RendererOption] functions.
+// Create with [NewRenderer] and configure with [Option] functions.
 type Renderer struct {
 	provider            SourceProvider
 	excerpts            bool
@@ -114,7 +114,7 @@ type Renderer struct {
 }
 
 // NewRenderer creates a renderer with the given options.
-func NewRenderer(opts ...RendererOption) *Renderer {
+func NewRenderer(opts ...Option) *Renderer {
 	cfg := &rendererConfig{
 		maxCols:             120,
 		truncationIndicator: "...",
