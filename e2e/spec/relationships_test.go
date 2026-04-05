@@ -232,17 +232,14 @@ func TestRelationships_MultiplicityRequired_Check(t *testing.T) {
 	sourceInst := validateOne(t, v, "Source", sources[0])
 
 	g := graph.New(s)
-	result, err := g.Add(ctx, targetInst)
-	require.NoError(t, err)
+	result := g.Add(ctx, targetInst)
 	require.True(t, result.OK(), "Add target: %v", result.Messages())
 
-	result, err = g.Add(ctx, sourceInst)
-	require.NoError(t, err)
+	result = g.Add(ctx, sourceInst)
 	require.True(t, result.OK(), "Add source: %v", result.Messages())
 
 	// Check should report unresolved required associations
-	checkResult, err := g.Check(ctx)
-	require.NoError(t, err)
+	checkResult := g.Check(ctx)
 
 	// (one), (one:one), and (one:many) are all required multiplicities.
 	assert.False(t, checkResult.OK(),

@@ -28,12 +28,11 @@ func TestValidation_ValidateOne_Success(t *testing.T) {
 	v := loadSchema(t, "testdata/validation/basic.yammm")
 	ctx := t.Context()
 
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid, result := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"name": "Alice",
 		"age":  30,
 	}))
-	require.NoError(t, err)
-	assert.Nil(t, failure, "expected no failure, got: %v", failureMessages(failure))
+	require.True(t, result.OK(), "expected no failure, got: %v", result.Messages())
 	require.NotNil(t, valid, "expected valid instance")
 	assert.Equal(t, "Person", valid.TypeName())
 }
@@ -47,13 +46,12 @@ func TestValidation_ValidateOne_Failure(t *testing.T) {
 	ctx := t.Context()
 
 	// Missing required "name" property (which is also the primary key)
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid, result := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"age": 25,
 	}))
-	require.NoError(t, err)
 	assert.Nil(t, valid, "expected nil valid instance")
-	require.NotNil(t, failure, "expected validation failure")
-	assert.True(t, failure.HasErrors(), "failure should have errors")
+	require.False(t, result.OK(), "expected validation failure")
+	assert.True(t, result.HasErrors(), "failure should have errors")
 }
 
 // TestValidation_ValidateOne_TypeNotFound verifies that ValidateOne returns
@@ -64,22 +62,21 @@ func TestValidation_ValidateOne_TypeNotFound(t *testing.T) {
 	v := loadSchema(t, "testdata/validation/basic.yammm")
 	ctx := t.Context()
 
-	// Non-existent type name returns (nil, failure, nil), not (nil, nil, error).
+	// Non-existent type name returns (nil, result) where !result.OK().
 	// This is because type-not-found is a validation-level failure, not a system error.
-	valid, failure, err := v.ValidateOne(ctx, "NonExistentType", raw(map[string]any{
+	valid, result := v.ValidateOne(ctx, "NonExistentType", raw(map[string]any{
 		"name": "test",
 	}))
-	require.NoError(t, err, "type-not-found should not be a system error")
 	assert.Nil(t, valid)
-	require.NotNil(t, failure, "expected validation failure for nonexistent type")
+	require.False(t, result.OK(), "expected validation failure for nonexistent type")
 
 	// Verify the diagnostic code
 	issueCodes := map[string]bool{}
-	for issue := range failure.Result.Issues() {
+	for issue := range result.Issues() {
 		issueCodes[issue.Code().String()] = true
 	}
 	assert.True(t, issueCodes[diag.E_INSTANCE_TYPE_NOT_FOUND.String()],
-		"expected E_INSTANCE_TYPE_NOT_FOUND code, got issues: %v", failure.Result.Messages())
+		"expected E_INSTANCE_TYPE_NOT_FOUND code, got issues: %v", result.Messages())
 }
 
 // =============================================================================
@@ -100,13 +97,19 @@ func TestValidation_Validate_Batch(t *testing.T) {
 		raw(map[string]any{"age": 200}),                 // invalid: missing required "name"
 	}
 
-	valid, failures, err := v.Validate(ctx, "Person", raws)
-	require.NoError(t, err)
-	assert.Len(t, valid, 2, "expected 2 valid instances")
-	assert.Len(t, failures, 1, "expected 1 failure")
+	valids, result := v.Validate(ctx, "Person", raws)
+	assert.Len(t, valids, 3, "result slice length should match input length")
 
-	// Verify the failure is for the missing required field
-	assert.True(t, failures[0].HasErrors())
+	// Count non-nil (successfully validated) instances.
+	var validCount int
+	for _, vi := range valids {
+		if vi != nil {
+			validCount++
+		}
+	}
+	assert.Equal(t, 2, validCount, "expected 2 valid instances")
+	assert.False(t, result.OK(), "expected validation issues")
+	assert.True(t, result.HasErrors(), "expected errors for the missing required field")
 }
 
 // TestValidation_Validate_NilInput verifies that Validate returns (nil, nil, nil)
@@ -117,10 +120,9 @@ func TestValidation_Validate_NilInput(t *testing.T) {
 	v := loadSchema(t, "testdata/validation/basic.yammm")
 	ctx := t.Context()
 
-	valid, failures, err := v.Validate(ctx, "Person", nil)
-	require.NoError(t, err)
+	valid, result := v.Validate(ctx, "Person", nil)
 	assert.Nil(t, valid)
-	assert.Nil(t, failures)
+	assert.True(t, result.OK(), "nil input should produce OK result")
 }
 
 // TestValidation_Validate_EmptyInput verifies that Validate returns
@@ -131,11 +133,10 @@ func TestValidation_Validate_EmptyInput(t *testing.T) {
 	v := loadSchema(t, "testdata/validation/basic.yammm")
 	ctx := t.Context()
 
-	valid, failures, err := v.Validate(ctx, "Person", []instance.RawInstance{})
-	require.NoError(t, err)
+	valid, result := v.Validate(ctx, "Person", []instance.RawInstance{})
 	assert.NotNil(t, valid, "empty input should return non-nil empty slice")
 	assert.Empty(t, valid)
-	assert.Nil(t, failures)
+	assert.True(t, result.OK(), "empty input should produce OK result")
 }
 
 // =============================================================================
@@ -148,19 +149,17 @@ func TestValidation_Validate_EmptyInput(t *testing.T) {
 func TestValidation_WithLogger(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
-	require.NoError(t, err)
+	s, result := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.True(t, result.OK())
 
 	// Create validator with a logger — should not panic
 	v := instance.NewValidator(s, instance.WithLogger(slog.Default()))
 
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"name": "Alice",
 		"age":  30,
 	}))
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	assert.True(t, valResult.OK(), "validation should succeed: %v", valResult.Messages())
 	assert.NotNil(t, valid)
 }
 
@@ -174,19 +173,17 @@ func TestValidation_WithLogger(t *testing.T) {
 func TestValidation_StrictPropertyNames(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
-	require.NoError(t, err)
+	s, result := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.True(t, result.OK())
 
 	v := instance.NewValidator(s, instance.WithStrictPropertyNames(true))
 
 	// "Name" (capital N) should fail in strict mode — schema defines "name"
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"Name": "Alice",
 	}))
-	require.NoError(t, err)
 	assert.Nil(t, valid, "expected case-mismatched name to be rejected in strict mode")
-	require.NotNil(t, failure, "expected validation failure for case mismatch")
+	require.False(t, valResult.OK(), "expected validation failure for case mismatch")
 }
 
 // TestValidation_NonStrictPropertyNames verifies that the default (non-strict)
@@ -195,18 +192,16 @@ func TestValidation_StrictPropertyNames(t *testing.T) {
 func TestValidation_NonStrictPropertyNames(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
-	require.NoError(t, err)
+	s, result := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.True(t, result.OK())
 
 	// Default: non-strict, so "Name" should match "name"
 	v := instance.NewValidator(s, instance.WithStrictPropertyNames(false))
 
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"Name": "Alice",
 	}))
-	require.NoError(t, err)
-	assert.Nil(t, failure, "non-strict mode should accept case-insensitive names, got: %v", failureMessages(failure))
+	assert.True(t, valResult.OK(), "non-strict mode should accept case-insensitive names, got: %v", valResult.Messages())
 	assert.NotNil(t, valid)
 }
 
@@ -220,20 +215,18 @@ func TestValidation_NonStrictPropertyNames(t *testing.T) {
 func TestValidation_AllowUnknownFields(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
-	require.NoError(t, err)
+	s, result := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.True(t, result.OK())
 
 	v := instance.NewValidator(s, instance.WithAllowUnknownFields(true))
 
 	// Extra field "email" is not in the schema — should be silently ignored
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"name":  "Alice",
 		"age":   30,
 		"email": "alice@example.com",
 	}))
-	require.NoError(t, err)
-	assert.Nil(t, failure, "allowUnknownFields should ignore extra fields, got: %v", failureMessages(failure))
+	assert.True(t, valResult.OK(), "allowUnknownFields should ignore extra fields, got: %v", valResult.Messages())
 	assert.NotNil(t, valid)
 }
 
@@ -243,28 +236,26 @@ func TestValidation_AllowUnknownFields(t *testing.T) {
 func TestValidation_RejectUnknownFieldsByDefault(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
-	require.NoError(t, err)
+	s, result := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.True(t, result.OK())
 
 	// Default: unknown fields not allowed
 	v := instance.NewValidator(s)
 
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"name":  "Alice",
 		"email": "alice@example.com",
 	}))
-	require.NoError(t, err)
 	assert.Nil(t, valid, "default should reject unknown fields")
-	require.NotNil(t, failure, "expected failure for unknown field")
+	require.False(t, valResult.OK(), "expected failure for unknown field")
 
 	// Verify the diagnostic code is E_UNKNOWN_FIELD
 	issueCodes := map[string]bool{}
-	for issue := range failure.Result.Issues() {
+	for issue := range valResult.Issues() {
 		issueCodes[issue.Code().String()] = true
 	}
 	assert.True(t, issueCodes[diag.E_UNKNOWN_FIELD.String()],
-		"expected E_UNKNOWN_FIELD, got: %v", failure.Result.Messages())
+		"expected E_UNKNOWN_FIELD, got: %v", valResult.Messages())
 }
 
 // =============================================================================
@@ -295,15 +286,14 @@ type Record {
 
 	// Provide an instance missing all required fields (a through e) — should
 	// generate 5 errors but be capped at 1
-	valid, failure, err := cappedValidator.ValidateOne(ctx, "Record", raw(map[string]any{
+	valid, valResult := cappedValidator.ValidateOne(ctx, "Record", raw(map[string]any{
 		"id": "test",
 		// a, b, c, d, e all missing
 	}))
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
+	require.False(t, valResult.OK(), "expected validation failure")
 
-	issueCount := failure.Result.Len()
+	issueCount := valResult.Len()
 	assert.LessOrEqual(t, issueCount, 1,
 		"expected at most 1 issue with MaxIssuesPerInstance(1), got %d", issueCount)
 }
@@ -325,11 +315,10 @@ func TestValidation_MapInput(t *testing.T) {
 		"name": "Alice",
 		"age":  30,
 	}
-	valid, failure, err := v.ValidateOne(ctx, "Person", instance.RawInstance{
+	valid, valResult := v.ValidateOne(ctx, "Person", instance.RawInstance{
 		Properties: props,
 	})
-	require.NoError(t, err)
-	assert.Nil(t, failure, "map[string]any should be accepted, got: %v", failureMessages(failure))
+	assert.True(t, valResult.OK(), "map[string]any should be accepted, got: %v", valResult.Messages())
 	assert.NotNil(t, valid)
 }
 
@@ -364,11 +353,10 @@ func TestValidation_GoStructViaJSONRoundTrip(t *testing.T) {
 	var props map[string]any
 	require.NoError(t, json.Unmarshal(data, &props))
 
-	valid, failure, err := v.ValidateOne(ctx, "Person", instance.RawInstance{
+	valid, valResult := v.ValidateOne(ctx, "Person", instance.RawInstance{
 		Properties: props,
 	})
-	require.NoError(t, err)
-	assert.Nil(t, failure, "Go struct via JSON should validate, got: %v", failureMessages(failure))
+	assert.True(t, valResult.OK(), "Go struct via JSON should validate, got: %v", valResult.Messages())
 	assert.NotNil(t, valid)
 }
 
@@ -403,9 +391,8 @@ func TestValidation_JSONAdapterTopLevelKeys(t *testing.T) {
 
 	// Validate each parsed record
 	for i, rec := range personRecords {
-		valid, failure, err := v.ValidateOne(ctx, "Person", rec)
-		require.NoError(t, err, "record %d", i)
-		assert.Nil(t, failure, "record %d should be valid, got: %v", i, failureMessages(failure))
+		valid, valResult := v.ValidateOne(ctx, "Person", rec)
+		assert.True(t, valResult.OK(), "record %d should be valid, got: %v", i, valResult.Messages())
 		assert.NotNil(t, valid, "record %d should produce a valid instance", i)
 	}
 
@@ -414,10 +401,9 @@ func TestValidation_JSONAdapterTopLevelKeys(t *testing.T) {
 	require.NotEmpty(t, invalidRecords, "expected Person__invalid records")
 
 	for i, rec := range invalidRecords {
-		valid, failure, err := v.ValidateOne(ctx, "Person", rec)
-		require.NoError(t, err, "invalid record %d", i)
+		valid, valResult := v.ValidateOne(ctx, "Person", rec)
 		assert.Nil(t, valid, "invalid record %d should not validate", i)
-		assert.NotNil(t, failure, "invalid record %d should produce failure", i)
+		assert.False(t, valResult.OK(), "invalid record %d should produce failure", i)
 	}
 }
 
@@ -448,12 +434,11 @@ type Person {
 	// Default multiplicity is optional/one (not many), so edge data is a single
 	// object (not an array). The _target_ prefix names the FK fields referencing
 	// the target type's primary key properties.
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"name":     "Alice",
 		"works_at": map[string]any{"_target_title": "Acme Inc"},
 	}))
-	require.NoError(t, err)
-	assert.Nil(t, failure, "expected valid instance with edge, got: %v", failureMessages(failure))
+	assert.True(t, valResult.OK(), "expected valid instance with edge, got: %v", valResult.Messages())
 	require.NotNil(t, valid)
 
 	// Verify the edge was captured
@@ -483,15 +468,14 @@ type Article {
 	ctx := t.Context()
 
 	// Many-multiplicity edge uses an array of objects
-	valid, failure, err := v.ValidateOne(ctx, "Article", raw(map[string]any{
+	valid, valResult := v.ValidateOne(ctx, "Article", raw(map[string]any{
 		"title": "Hello World",
 		"tagged_with": []any{
 			map[string]any{"_target_label": "golang"},
 			map[string]any{"_target_label": "testing"},
 		},
 	}))
-	require.NoError(t, err)
-	assert.Nil(t, failure, "expected valid instance with many-edge, got: %v", failureMessages(failure))
+	assert.True(t, valResult.OK(), "expected valid instance with many-edge, got: %v", valResult.Messages())
 	require.NotNil(t, valid)
 
 	edge, found := valid.Edge("TAGGED_WITH")
@@ -509,28 +493,25 @@ type Article {
 func TestValidation_RecommendedOptions(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, result, err := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
-	require.NoError(t, err)
+	s, result := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.True(t, result.OK())
 
 	v := instance.NewValidator(s, instance.RecommendedValidatorOptions()...)
 
 	// Strict mode: "Name" (wrong case) should fail
-	valid, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"Name": "Alice",
 	}))
-	require.NoError(t, err)
 	assert.Nil(t, valid, "recommended options should reject case-mismatched names")
-	assert.NotNil(t, failure)
+	assert.False(t, valResult.OK())
 
 	// Unknown fields should also be rejected
-	valid2, failure2, err2 := v.ValidateOne(ctx, "Person", raw(map[string]any{
+	valid2, valResult2 := v.ValidateOne(ctx, "Person", raw(map[string]any{
 		"name":    "Bob",
 		"unknown": "field",
 	}))
-	require.NoError(t, err2)
 	assert.Nil(t, valid2, "recommended options should reject unknown fields")
-	assert.NotNil(t, failure2)
+	assert.False(t, valResult2.OK())
 }
 
 // =============================================================================
@@ -550,19 +531,11 @@ func TestValidation_ConcurrentUse(t *testing.T) {
 
 	for i := range goroutines {
 		go func(idx int) {
-			_, failure, err := v.ValidateOne(ctx, "Person", raw(map[string]any{
+			_, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{
 				"name": "Person",
 				"age":  idx,
 			}))
-			if err != nil {
-				errs <- err
-				return
-			}
-			if failure != nil {
-				errs <- failure.Result.Err()
-				return
-			}
-			errs <- nil
+			errs <- valResult.Err()
 		}(i)
 	}
 

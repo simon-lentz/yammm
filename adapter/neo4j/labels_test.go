@@ -227,10 +227,7 @@ func TestLabel_SanitizesComponents(t *testing.T) {
 func TestDetectLabelCollisions_NoCollision(t *testing.T) {
 	t.Parallel()
 
-	s, result, err := schema.Load(context.Background(), filepath.Join("testdata", "multiple_types.yammm"))
-	if err != nil {
-		t.Fatalf("schema.Load failed: %v", err)
-	}
+	s, result := schema.Load(context.Background(), filepath.Join("testdata", "multiple_types.yammm"))
 	if err := result.Err(); err != nil {
 		t.Fatalf("schema has errors: %v", err)
 	}
@@ -252,10 +249,7 @@ func TestDetectLabelCollisions_Collision(t *testing.T) {
 	}
 
 	// Verify no collision on a valid schema.
-	s, loadResult, err := schema.Load(context.Background(), filepath.Join("testdata", "basic.yammm"))
-	if err != nil {
-		t.Fatalf("schema.Load failed: %v", err)
-	}
+	s, loadResult := schema.Load(context.Background(), filepath.Join("testdata", "basic.yammm"))
 	if err := loadResult.Err(); err != nil {
 		t.Fatalf("schema has errors: %v", err)
 	}

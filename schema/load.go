@@ -18,6 +18,25 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
+// errorToFatalIssue converts a Go error to a Fatal diagnostic issue.
+// Context errors use E_CONTEXT_CANCELLED; all others use E_LOAD_IO_FAILURE.
+func errorToFatalIssue(err error) diag.Issue {
+	code := diag.E_LOAD_IO_FAILURE
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		code = diag.E_CONTEXT_CANCELLED
+	}
+	return diag.NewIssue(diag.Fatal, code, err.Error()).Build()
+}
+
+// fatalResult creates a diag.Result containing a single Fatal diagnostic from an error,
+// optionally merged with a partial result that may contain earlier diagnostics.
+func fatalResult(err error, partial diag.Result) (*Schema, diag.Result) {
+	c := diag.NewCollectorUnlimited()
+	c.Merge(partial)
+	c.Collect(errorToFatalIssue(err))
+	return nil, c.Result()
+}
+
 // rootLoader provides sandboxed file access for imports using os.Root.
 // This uses kernel-level file access controls rather than string-based
 // path validation, eliminating TOCTOU race conditions.
@@ -124,8 +143,8 @@ func (e *pathEscapeError) Error() string {
 // if WithModuleRoot is provided.
 //
 // ctx must not be nil. Passing nil will panic.
-// On error, Schema is nil but diag.Result may contain useful diagnostics.
-func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.Result, error) {
+// A non-OK result with a nil Schema indicates failure. Check result.HasFatal() for I/O or cancellation errors.
+func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
 		panic("load.Load: context must not be nil")
 	}
@@ -136,13 +155,13 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	// Resolve the path to an absolute, symlink-resolved canonical path
 	absPath, err := makeCanonicalPath(path)
 	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("resolve path %q: %w", path, err)
+		return fatalResult(fmt.Errorf("resolve path %q: %w", path, err), diag.Result{})
 	}
 
 	// Read the file content
 	content, err := os.ReadFile(absPath)
 	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("read %q: %w", absPath, err)
+		return fatalResult(fmt.Errorf("read %q: %w", absPath, err), diag.Result{})
 	}
 
 	// Determine module root and canonicalize for consistent path comparison.
@@ -155,7 +174,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 		var err error
 		moduleRoot, err = makeCanonicalPath(moduleRoot)
 		if err != nil {
-			return nil, diag.Result{}, fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err)
+			return fatalResult(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), diag.Result{})
 		}
 	}
 
@@ -164,8 +183,11 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	defer ldr.Close() // Release rootLoader resources when done
 
 	s, result, err := ldr.loadFile(ctx, absPath, content)
-	if err != nil || s == nil {
-		return s, result, err
+	if err != nil {
+		return fatalResult(err, result)
+	}
+	if s == nil {
+		return nil, result
 	}
 
 	// Perform cross-schema inheritance cycle detection if there are imports.
@@ -175,11 +197,11 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 			for _, issue := range cycleIssues {
 				ldr.collector.Collect(*issue)
 			}
-			return nil, ldr.collector.Result(), nil
+			return nil, ldr.collector.Result()
 		}
 	}
 
-	return s, result, err
+	return s, result
 }
 
 // LoadString loads a schema from a string source.
@@ -191,8 +213,8 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 // The loader always disallows imports for string sources, regardless of other options.
 //
 // ctx must not be nil. Passing nil will panic.
-// On error, Schema is nil but diag.Result may contain useful diagnostics.
-func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...LoadOption) (*Schema, diag.Result, error) {
+// A non-OK result with a nil Schema indicates failure. Check result.HasFatal() for I/O or cancellation errors.
+func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
 		panic("load.String: context must not be nil")
 	}
@@ -207,7 +229,10 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 	// Create loader and load from string
 	ldr := newLoader(cfg, "")
 	s, result, err := ldr.loadSource(ctx, sourceID, []byte(sourceCode))
-	return s, result, err
+	if err != nil {
+		return fatalResult(err, result)
+	}
+	return s, result
 }
 
 // LoadSources loads a schema from in-memory sources.
@@ -220,14 +245,14 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 // This function is useful for testing and embedded schemas.
 //
 // ctx must not be nil. Passing nil will panic.
-// On error, Schema is nil but diag.Result may contain useful diagnostics.
-func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot string, opts ...LoadOption) (*Schema, diag.Result, error) {
+// A non-OK result with a nil Schema indicates failure. Check result.HasFatal() for I/O or cancellation errors.
+func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
 		panic("load.Sources: context must not be nil")
 	}
 
 	if len(sources) == 0 {
-		return nil, diag.Result{}, errors.New("no sources provided")
+		return fatalResult(errors.New("no sources provided"), diag.Result{})
 	}
 
 	cfg := defaultLoadConfig()
@@ -239,7 +264,7 @@ func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot stri
 		var err error
 		moduleRoot, err = makeCanonicalPath(moduleRoot)
 		if err != nil {
-			return nil, diag.Result{}, fmt.Errorf("invalid module root %q: %w", moduleRoot, err)
+			return fatalResult(fmt.Errorf("invalid module root %q: %w", moduleRoot, err), diag.Result{})
 		}
 	}
 
@@ -261,16 +286,16 @@ func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot stri
 		// especially on systems with symlinks (e.g., macOS /var -> /private/var).
 		absPath, err := makeCanonicalPath(absPath)
 		if err != nil {
-			return nil, diag.Result{}, fmt.Errorf("canonicalize path %q: %w", path, err)
+			return fatalResult(fmt.Errorf("canonicalize path %q: %w", path, err), diag.Result{})
 		}
 
 		sourceID, err := location.SourceIDFromAbsolutePath(absPath)
 		if err != nil {
-			return nil, diag.Result{}, fmt.Errorf("invalid path %q: %w", path, err)
+			return fatalResult(fmt.Errorf("invalid path %q: %w", path, err), diag.Result{})
 		}
 
 		if err := ldr.sourceRegistry.Register(sourceID, content); err != nil {
-			return nil, diag.Result{}, fmt.Errorf("register source %q: %w", path, err)
+			return fatalResult(fmt.Errorf("register source %q: %w", path, err), diag.Result{})
 		}
 
 		ldr.sourceContent[sourceID] = content
@@ -294,18 +319,21 @@ func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot stri
 	// Canonicalize entry path to match sourceContent keys
 	entryAbsPath, err := makeCanonicalPath(entryAbsPath)
 	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("canonicalize entry path %q: %w", entryPath, err)
+		return fatalResult(fmt.Errorf("canonicalize entry path %q: %w", entryPath, err), diag.Result{})
 	}
 
 	sourceID, err := location.SourceIDFromAbsolutePath(entryAbsPath)
 	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("invalid entry path %q: %w", entryAbsPath, err)
+		return fatalResult(fmt.Errorf("invalid entry path %q: %w", entryAbsPath, err), diag.Result{})
 	}
 	content := ldr.sourceContent[sourceID]
 
 	s, result, err := ldr.loadSource(ctx, sourceID, content)
-	if err != nil || s == nil {
-		return s, result, err
+	if err != nil {
+		return fatalResult(err, result)
+	}
+	if s == nil {
+		return nil, result
 	}
 
 	// Perform cross-schema inheritance cycle detection if there are imports.
@@ -315,11 +343,11 @@ func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot stri
 			for _, issue := range cycleIssues {
 				ldr.collector.Collect(*issue)
 			}
-			return nil, ldr.collector.Result(), nil
+			return nil, ldr.collector.Result()
 		}
 	}
 
-	return s, result, err
+	return s, result
 }
 
 // LoadSourcesWithEntry loads a schema from in-memory sources with an explicit entry point.
@@ -337,14 +365,14 @@ func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot stri
 // key order selection like LoadSources.
 //
 // ctx must not be nil. Passing nil will panic.
-// On error, Schema is nil but diag.Result may contain useful diagnostics.
-func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...LoadOption) (*Schema, diag.Result, error) {
+// A non-OK result with a nil Schema indicates failure. Check result.HasFatal() for I/O or cancellation errors.
+func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
 		panic("load.SourcesWithEntry: context must not be nil")
 	}
 
 	if len(sources) == 0 {
-		return nil, diag.Result{}, errors.New("no sources provided")
+		return fatalResult(errors.New("no sources provided"), diag.Result{})
 	}
 
 	cfg := defaultLoadConfig()
@@ -356,7 +384,7 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		var err error
 		moduleRoot, err = makeCanonicalPath(moduleRoot)
 		if err != nil {
-			return nil, diag.Result{}, fmt.Errorf("invalid module root %q: %w", moduleRoot, err)
+			return fatalResult(fmt.Errorf("invalid module root %q: %w", moduleRoot, err), diag.Result{})
 		}
 	}
 
@@ -378,16 +406,16 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		// especially on systems with symlinks (e.g., macOS /var -> /private/var).
 		absPath, err := makeCanonicalPath(absPath)
 		if err != nil {
-			return nil, diag.Result{}, fmt.Errorf("canonicalize path %q: %w", path, err)
+			return fatalResult(fmt.Errorf("canonicalize path %q: %w", path, err), diag.Result{})
 		}
 
 		sourceID, err := location.SourceIDFromAbsolutePath(absPath)
 		if err != nil {
-			return nil, diag.Result{}, fmt.Errorf("invalid path %q: %w", path, err)
+			return fatalResult(fmt.Errorf("invalid path %q: %w", path, err), diag.Result{})
 		}
 
 		if err := ldr.sourceRegistry.Register(sourceID, content); err != nil {
-			return nil, diag.Result{}, fmt.Errorf("register source %q: %w", path, err)
+			return fatalResult(fmt.Errorf("register source %q: %w", path, err), diag.Result{})
 		}
 
 		ldr.sourceContent[sourceID] = content
@@ -417,22 +445,25 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	// Canonicalize entry path to match sourceContent keys
 	entryAbsPath, err := makeCanonicalPath(entryAbsPath)
 	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("canonicalize entry path %q: %w", selectedEntry, err)
+		return fatalResult(fmt.Errorf("canonicalize entry path %q: %w", selectedEntry, err), diag.Result{})
 	}
 
 	sourceID, err := location.SourceIDFromAbsolutePath(entryAbsPath)
 	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("invalid entry path %q: %w", entryAbsPath, err)
+		return fatalResult(fmt.Errorf("invalid entry path %q: %w", entryAbsPath, err), diag.Result{})
 	}
 
 	content, ok := ldr.sourceContent[sourceID]
 	if !ok {
-		return nil, diag.Result{}, fmt.Errorf("entry path %q not found in sources", selectedEntry)
+		return fatalResult(fmt.Errorf("entry path %q not found in sources", selectedEntry), diag.Result{})
 	}
 
 	s, result, err := ldr.loadSource(ctx, sourceID, content)
-	if err != nil || s == nil {
-		return s, result, err
+	if err != nil {
+		return fatalResult(err, result)
+	}
+	if s == nil {
+		return nil, result
 	}
 
 	// Perform cross-schema inheritance cycle detection if there are imports.
@@ -442,11 +473,11 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 			for _, issue := range cycleIssues {
 				ldr.collector.Collect(*issue)
 			}
-			return nil, ldr.collector.Result(), nil
+			return nil, ldr.collector.Result()
 		}
 	}
 
-	return s, result, err
+	return s, result
 }
 
 // resolvedImport holds the resolved identity and schema for an import.

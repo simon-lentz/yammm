@@ -21,8 +21,7 @@ func TestE2E_NonLambdaBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "Record")
 
-	s, result, err := schema.Load(ctx, "testdata/builtins/non_lambda.yammm")
-	require.NoError(t, err, "load schema")
+	s, result := schema.Load(ctx, "testdata/builtins/non_lambda.yammm")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
 	validator := instance.NewValidator(s)
@@ -38,10 +37,9 @@ func TestE2E_NonLambdaBuiltins(t *testing.T) {
 		// score_abs: 3.7 >= 0.0, Abs(3.7)=3.7==3.7 ✓
 		// desc_default_passthrough: Default("A valid description","none")=="A valid description" ✓
 		// desc_default_fallback: description != nil → short-circuits ✓
-		valid, failure, err := validator.ValidateOne(ctx, "Record", records[0])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "full record should pass all invariants, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "Record", records[0])
+		assert.True(t, valResult.OK(), "full record should pass all invariants, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -54,10 +52,9 @@ func TestE2E_NonLambdaBuiltins(t *testing.T) {
 		// score_abs: 0.0 >= 0.0, Abs(0.0)==0.0 ✓
 		// desc_default_passthrough: description=nil → short-circuits ✓
 		// desc_default_fallback: nil != nil → false, Default(nil,"none")="none"=="none" ✓
-		valid, failure, err := validator.ValidateOne(ctx, "Record", records[1])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "minimal record should pass all invariants, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "Record", records[1])
+		assert.True(t, valResult.OK(), "minimal record should pass all invariants, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -68,14 +65,13 @@ func TestE2E_NonLambdaBuiltins(t *testing.T) {
 		// score_floor: Floor(-2.5)=-3.0, -3.0 <= -2.5 && Ceil(-3.0)==-3.0 ✓ (passes)
 		// score_abs: -2.5 < 0.0, Abs(-2.5)=2.5, 0.0-(-2.5)=2.5==2.5 ✓ (passes)
 		// desc_default_passthrough: "" != nil, Default("","none")=""=="" ✓ (passes)
-		valid, failure, err := validator.ValidateOne(ctx, "Record", records[2])
-		require.NoError(t, err)
+		valid, valResult := validator.ValidateOne(ctx, "Record", records[2])
 		assert.Nil(t, valid, "empty description should fail")
-		require.NotNil(t, failure, "expected failure for empty description")
+		require.False(t, valResult.OK(), "expected failure for empty description")
 
 		// Collect the names of all failed invariants.
 		failedInvariants := map[string]bool{}
-		for issue := range failure.Result.Issues() {
+		for issue := range valResult.Issues() {
 			if issue.Code() == diag.E_INVARIANT_FAIL {
 				failedInvariants[issue.Message()] = true
 			}
@@ -99,8 +95,7 @@ func TestE2E_PositionalArgBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "Entry")
 
-	s, result, err := schema.Load(ctx, "testdata/builtins/positional_args.yammm")
-	require.NoError(t, err, "load schema")
+	s, result := schema.Load(ctx, "testdata/builtins/positional_args.yammm")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
 	validator := instance.NewValidator(s)
@@ -120,10 +115,9 @@ func TestE2E_PositionalArgBuiltins(t *testing.T) {
 		// coalesce_nil: _ -> Coalesce(0) == 0 ✓ (literal)
 		// coalesce_passthrough: value != nil, Coalesce(0)=42==42 ✓
 		// coalesce_fallback: value != nil → short-circuits ✓
-		valid, failure, err := validator.ValidateOne(ctx, "Entry", records[0])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "full entry should pass, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "Entry", records[0])
+		assert.True(t, valResult.OK(), "full entry should pass, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -137,10 +131,9 @@ func TestE2E_PositionalArgBuiltins(t *testing.T) {
 		// default_fallback: greeting != nil → false, Default(nil,"Hi")="Hi"=="Hi" ✓
 		// coalesce_passthrough: value != nil, Coalesce(0,0)=0==0 ✓
 		// coalesce_fallback: value != nil → short-circuits ✓
-		valid, failure, err := validator.ValidateOne(ctx, "Entry", records[1])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "minimal entry should pass, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "Entry", records[1])
+		assert.True(t, valResult.OK(), "minimal entry should pass, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -152,14 +145,13 @@ func TestE2E_PositionalArgBuiltins(t *testing.T) {
 		// replace_field: greeting != nil, "GoodMorning" Len=11 < 12 ✓
 		// All literal invariants always pass (data-independent)
 		// All Default/Coalesce field invariants pass (non-nil values)
-		valid, failure, err := validator.ValidateOne(ctx, "Entry", records[2])
-		require.NoError(t, err)
+		valid, valResult := validator.ValidateOne(ctx, "Entry", records[2])
 		assert.Nil(t, valid, "wrong prefix should fail name_starts_hello")
-		require.NotNil(t, failure, "expected failure for wrong prefix")
+		require.False(t, valResult.OK(), "expected failure for wrong prefix")
 
 		// Collect the names of all failed invariants.
 		failedInvariants := map[string]bool{}
-		for issue := range failure.Result.Issues() {
+		for issue := range valResult.Issues() {
 			if issue.Code() == diag.E_INVARIANT_FAIL {
 				failedInvariants[issue.Message()] = true
 			}
@@ -184,8 +176,7 @@ func TestE2E_StringBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "StringRecord")
 
-	s, result, err := schema.Load(ctx, "testdata/builtins/string_builtins.yammm")
-	require.NoError(t, err, "load schema")
+	s, result := schema.Load(ctx, "testdata/builtins/string_builtins.yammm")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
 	validator := instance.NewValidator(s)
@@ -205,10 +196,9 @@ func TestE2E_StringBuiltins(t *testing.T) {
 		// substring_field: Substring(0,5) Len=5 <= 5 ✓
 		// match: Match(/^(H)/) != nil ✓
 		// regex_match: "Hello World" =~ /^H/ ✓
-		valid, failure, err := validator.ValidateOne(ctx, "StringRecord", records[0])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "full string record should pass, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "StringRecord", records[0])
+		assert.True(t, valResult.OK(), "full string record should pass, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -224,10 +214,9 @@ func TestE2E_StringBuiltins(t *testing.T) {
 		// substring_field: "Hello" -> Substring(0,5) = "Hello", Len=5 <= 5 ✓
 		// match: Match(/^(H)/) != nil ✓
 		// regex_match: "Hello" =~ /^H/ ✓
-		valid, failure, err := validator.ValidateOne(ctx, "StringRecord", records[1])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "minimal string record should pass, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "StringRecord", records[1])
+		assert.True(t, valResult.OK(), "minimal string record should pass, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -241,14 +230,13 @@ func TestE2E_StringBuiltins(t *testing.T) {
 		// substring_field: "Farew" Len=5 <= 5 ✓
 		// match: Match(/^(H)/) on "Farewell" == nil, NOT != nil → FAIL
 		// regex_match: "Farewell" =~ /^H/ → false → FAIL
-		valid, failure, err := validator.ValidateOne(ctx, "StringRecord", records[2])
-		require.NoError(t, err)
+		valid, valResult := validator.ValidateOne(ctx, "StringRecord", records[2])
 		assert.Nil(t, valid, "non-H-starting text should fail match + regex_match")
-		require.NotNil(t, failure, "expected failure for regex mismatch")
+		require.False(t, valResult.OK(), "expected failure for regex mismatch")
 
 		// Collect the names of all failed invariants.
 		failedInvariants := map[string]bool{}
-		for issue := range failure.Result.Issues() {
+		for issue := range valResult.Issues() {
 			if issue.Code() == diag.E_INVARIANT_FAIL {
 				failedInvariants[issue.Message()] = true
 			}
@@ -275,8 +263,7 @@ func TestE2E_NumericBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "NumericRecord")
 
-	s, result, err := schema.Load(ctx, "testdata/builtins/numeric_builtins.yammm")
-	require.NoError(t, err, "load schema")
+	s, result := schema.Load(ctx, "testdata/builtins/numeric_builtins.yammm")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
 	validator := instance.NewValidator(s)
@@ -290,10 +277,9 @@ func TestE2E_NumericBuiltins(t *testing.T) {
 		// min_field: Min(42,10)=10, 10 <= 42 && 10 <= 10 ✓ (rhs-wins path)
 		// max_field: Max(42,10)=42, 42 >= 42 && 42 >= 10 ✓ (lhs-wins path)
 		// compare_field: Compare(42,0)=1 >= 0 ✓
-		valid, failure, err := validator.ValidateOne(ctx, "NumericRecord", records[0])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "positive numeric record should pass, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "NumericRecord", records[0])
+		assert.True(t, valResult.OK(), "positive numeric record should pass, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -305,10 +291,9 @@ func TestE2E_NumericBuiltins(t *testing.T) {
 		// min_field: Min(0,10)=0, 0 <= 0 && 0 <= 10 ✓ (lhs-wins path)
 		// max_field: Max(0,10)=10, 10 >= 0 && 10 >= 10 ✓ (rhs-wins path)
 		// compare_field: Compare(0,0)=0 >= 0 ✓
-		valid, failure, err := validator.ValidateOne(ctx, "NumericRecord", records[1])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "zero numeric record should pass, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "NumericRecord", records[1])
+		assert.True(t, valResult.OK(), "zero numeric record should pass, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -320,14 +305,13 @@ func TestE2E_NumericBuiltins(t *testing.T) {
 		// min_field: Min(-5,10)=-5, -5 <= -5 && -5 <= 10 ✓ (lhs-wins path)
 		// max_field: Max(-5,10)=10, 10 >= -5 && 10 >= 10 ✓ (rhs-wins path)
 		// compare_field: Compare(-5,0)=-1, NOT >= 0 → FAIL
-		valid, failure, err := validator.ValidateOne(ctx, "NumericRecord", records[2])
-		require.NoError(t, err)
+		valid, valResult := validator.ValidateOne(ctx, "NumericRecord", records[2])
 		assert.Nil(t, valid, "negative int should fail compare_field")
-		require.NotNil(t, failure, "expected failure for negative compare")
+		require.False(t, valResult.OK(), "expected failure for negative compare")
 
 		// Collect the names of all failed invariants.
 		failedInvariants := map[string]bool{}
-		for issue := range failure.Result.Issues() {
+		for issue := range valResult.Issues() {
 			if issue.Code() == diag.E_INVARIANT_FAIL {
 				failedInvariants[issue.Message()] = true
 			}
@@ -352,8 +336,7 @@ func TestE2E_CollectionBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "CollectionRecord")
 
-	s, result, err := schema.Load(ctx, "testdata/builtins/collection_builtins.yammm")
-	require.NoError(t, err, "load schema")
+	s, result := schema.Load(ctx, "testdata/builtins/collection_builtins.yammm")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
 	validator := instance.NewValidator(s)
@@ -382,10 +365,9 @@ func TestE2E_CollectionBuiltins(t *testing.T) {
 		// contains_list: [1,2,3] -> Contains(2) ✓
 		// contains_missing: [1,2,3] -> Contains(99) == false ✓
 		// contains_csv: Split("a,b,c", ",") -> Contains("a") ✓
-		valid, failure, err := validator.ValidateOne(ctx, "CollectionRecord", records[0])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "collection record with 'a' should pass, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "CollectionRecord", records[0])
+		assert.True(t, valResult.OK(), "collection record with 'a' should pass, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -394,14 +376,13 @@ func TestE2E_CollectionBuiltins(t *testing.T) {
 		// csv="x,y,z" → Split(",") = ["x","y","z"] → Contains("a") = false → FAIL
 		// All literal-based invariants still pass (sort_exact, reverse_exact, etc.)
 		// because they use hardcoded inputs, not the csv field.
-		valid, failure, err := validator.ValidateOne(ctx, "CollectionRecord", records[1])
-		require.NoError(t, err)
+		valid, valResult := validator.ValidateOne(ctx, "CollectionRecord", records[1])
 		assert.Nil(t, valid, "csv without 'a' should fail contains_csv")
-		require.NotNil(t, failure, "expected failure for missing 'a'")
+		require.False(t, valResult.OK(), "expected failure for missing 'a'")
 
 		// Collect the names of all failed invariants.
 		failedInvariants := map[string]bool{}
-		for issue := range failure.Result.Issues() {
+		for issue := range valResult.Issues() {
 			if issue.Code() == diag.E_INVARIANT_FAIL {
 				failedInvariants[issue.Message()] = true
 			}
@@ -427,8 +408,7 @@ func TestE2E_LambdaBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "LambdaRecord")
 
-	s, result, err := schema.Load(ctx, "testdata/builtins/lambda.yammm")
-	require.NoError(t, err, "load schema")
+	s, result := schema.Load(ctx, "testdata/builtins/lambda.yammm")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
 	validator := instance.NewValidator(s)
@@ -459,10 +439,9 @@ func TestE2E_LambdaBuiltins(t *testing.T) {
 		// reduce_subtract: Reduce(10)(-) == 4 (10-1-2-3) ✓
 		// reduce_single: [42] Reduce(0)(+) == 42 ✓
 		// split_filter: ["apple","avocado","banana"] Filter StartsWith("a") → Len 2 > 0 ✓
-		valid, failure, err := validator.ValidateOne(ctx, "LambdaRecord", records[0])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "lambda record with a-prefixed csv should pass, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "LambdaRecord", records[0])
+		assert.True(t, valResult.OK(), "lambda record with a-prefixed csv should pass, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -470,10 +449,9 @@ func TestE2E_LambdaBuiltins(t *testing.T) {
 		t.Parallel()
 		// name="Bob", csv=nil → split_filter short-circuits via csv == _
 		// All literal invariants pass (hardcoded inputs, independent of record data)
-		valid, failure, err := validator.ValidateOne(ctx, "LambdaRecord", records[1])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "nil csv should short-circuit, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "LambdaRecord", records[1])
+		assert.True(t, valResult.OK(), "nil csv should short-circuit, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -482,14 +460,13 @@ func TestE2E_LambdaBuiltins(t *testing.T) {
 		// name="Carol", csv="banana,cherry,date"
 		// split_filter: Filter StartsWith("a") → [], Len=0, NOT > 0 → FAIL
 		// All literal invariants still pass (hardcoded inputs)
-		valid, failure, err := validator.ValidateOne(ctx, "LambdaRecord", records[2])
-		require.NoError(t, err)
+		valid, valResult := validator.ValidateOne(ctx, "LambdaRecord", records[2])
 		assert.Nil(t, valid, "csv without a-prefixed items should fail")
-		require.NotNil(t, failure, "expected failure for no a-prefix")
+		require.False(t, valResult.OK(), "expected failure for no a-prefix")
 
 		// Collect the names of all failed invariants.
 		failedInvariants := map[string]bool{}
-		for issue := range failure.Result.Issues() {
+		for issue := range valResult.Issues() {
 			if issue.Code() == diag.E_INVARIANT_FAIL {
 				failedInvariants[issue.Message()] = true
 			}
@@ -513,8 +490,7 @@ func TestE2E_ControlFlowBuiltins(t *testing.T) {
 	ctx := t.Context()
 	records := loadTestData(t, "testdata/builtins/data.json", "ControlRecord")
 
-	s, result, err := schema.Load(ctx, "testdata/builtins/control_flow_builtins.yammm")
-	require.NoError(t, err, "load schema")
+	s, result := schema.Load(ctx, "testdata/builtins/control_flow_builtins.yammm")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 
 	validator := instance.NewValidator(s)
@@ -531,10 +507,9 @@ func TestE2E_ControlFlowBuiltins(t *testing.T) {
 		// with_transforms: "Alice" -> With -> Lower -> "alice" =~ /^[a-z]+$/ (proves Lower ran)
 		// with_binds_value: "Alice" -> With -> $x -> "Alice" == "Alice" (proves correct binding)
 		// with_nil_executes: "Ali" -> With -> "REPLACED" == "REPLACED" (proves body always runs)
-		valid, failure, err := validator.ValidateOne(ctx, "ControlRecord", records[0])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "full control record should pass, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "ControlRecord", records[0])
+		assert.True(t, valResult.OK(), "full control record should pass, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -550,10 +525,9 @@ func TestE2E_ControlFlowBuiltins(t *testing.T) {
 		// with_transforms: "Bob" -> With -> Lower -> "bob" =~ /^[a-z]+$/
 		// with_binds_value: "Bob" -> With -> $x -> "Bob" == "Bob"
 		// with_nil_executes: nil -> With -> "REPLACED" == "REPLACED" (proves With runs on nil)
-		valid, failure, err := validator.ValidateOne(ctx, "ControlRecord", records[1])
-		require.NoError(t, err)
-		assert.Nil(t, failure, "nil nickname should pass all invariants, got: %v",
-			failureMessages(failure))
+		valid, valResult := validator.ValidateOne(ctx, "ControlRecord", records[1])
+		assert.True(t, valResult.OK(), "nil nickname should pass all invariants, got: %v",
+			valResult.Messages())
 		assert.NotNil(t, valid)
 	})
 
@@ -569,14 +543,13 @@ func TestE2E_ControlFlowBuiltins(t *testing.T) {
 		// with_transforms: "" -> With -> Lower -> "" =~ /^[a-z]+$/ → FAIL (+ requires ≥1 char)
 		// with_binds_value: "" -> With -> "" == "" → pass
 		// with_nil_executes: nil -> With -> "REPLACED" == "REPLACED" → pass
-		valid, failure, err := validator.ValidateOne(ctx, "ControlRecord", records[2])
-		require.NoError(t, err)
+		valid, valResult := validator.ValidateOne(ctx, "ControlRecord", records[2])
 		assert.Nil(t, valid, "empty name should fail then_transforms + with_transforms")
-		require.NotNil(t, failure, "expected failure for empty name")
+		require.False(t, valResult.OK(), "expected failure for empty name")
 
 		// Collect the names of all failed invariants.
 		failedInvariants := map[string]bool{}
-		for issue := range failure.Result.Issues() {
+		for issue := range valResult.Issues() {
 			if issue.Code() == diag.E_INVARIANT_FAIL {
 				failedInvariants[issue.Message()] = true
 			}

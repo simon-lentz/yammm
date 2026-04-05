@@ -276,8 +276,7 @@ func TestMarshalObject_SingleType(t *testing.T) {
 		"name": "Alice",
 		"age":  int64(30),
 	})
-	_, err := g.Add(ctx, inst)
-	require.NoError(t, err)
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 
@@ -318,10 +317,8 @@ func TestMarshalObject_MultipleInstances(t *testing.T) {
 		"age":  int64(25),
 	})
 
-	_, err := g.Add(ctx, inst1)
-	require.NoError(t, err)
-	_, err = g.Add(ctx, inst2)
-	require.NoError(t, err)
+	g.Add(ctx, inst1)
+	g.Add(ctx, inst2)
 
 	result := g.Snapshot()
 
@@ -352,10 +349,8 @@ func TestMarshalObject_MultipleTypes(t *testing.T) {
 		"name": "Acme Inc",
 	})
 
-	_, err := g.Add(ctx, person)
-	require.NoError(t, err)
-	_, err = g.Add(ctx, company)
-	require.NoError(t, err)
+	g.Add(ctx, person)
+	g.Add(ctx, company)
 
 	result := g.Snapshot()
 
@@ -387,8 +382,7 @@ func TestMarshalObject_WithEdge(t *testing.T) {
 		"id":   "c1",
 		"name": "Acme Inc",
 	})
-	_, err := g.Add(ctx, company)
-	require.NoError(t, err)
+	g.Add(ctx, company)
 
 	// Add person with edge to company
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
@@ -399,8 +393,7 @@ func TestMarshalObject_WithEdge(t *testing.T) {
 		"EMPLOYER",
 		[][]any{{"c1"}},
 	)
-	_, err = g.Add(ctx, person)
-	require.NoError(t, err)
+	g.Add(ctx, person)
 
 	result := g.Snapshot()
 
@@ -443,10 +436,8 @@ func TestMarshalObject_WithManyEdges(t *testing.T) {
 		"id":   "c2",
 		"name": "Beta Corp",
 	})
-	_, err := g.Add(ctx, c1)
-	require.NoError(t, err)
-	_, err = g.Add(ctx, c2)
-	require.NoError(t, err)
+	g.Add(ctx, c1)
+	g.Add(ctx, c2)
 
 	// Add person with multiple employers
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
@@ -457,8 +448,7 @@ func TestMarshalObject_WithManyEdges(t *testing.T) {
 		"EMPLOYERS",
 		[][]any{{"c1"}, {"c2"}},
 	)
-	_, err = g.Add(ctx, person)
-	require.NoError(t, err)
+	g.Add(ctx, person)
 
 	result := g.Snapshot()
 
@@ -489,8 +479,7 @@ func TestMarshalObject_WithComposition(t *testing.T) {
 		"id":       "o1",
 		"customer": "Alice",
 	})
-	_, err := g.Add(ctx, order)
-	require.NoError(t, err)
+	g.Add(ctx, order)
 
 	// Add composed items
 	item1 := mustValidPartInstance(t, s, "Item", []any{"SKU-A"}, map[string]any{
@@ -502,10 +491,8 @@ func TestMarshalObject_WithComposition(t *testing.T) {
 		"qty": int64(1),
 	})
 
-	_, err = g.AddComposed(ctx, "Order", `["o1"]`, "ITEMS", item1)
-	require.NoError(t, err)
-	_, err = g.AddComposed(ctx, "Order", `["o1"]`, "ITEMS", item2)
-	require.NoError(t, err)
+	g.AddComposed(ctx, "Order", `["o1"]`, "ITEMS", item1)
+	g.AddComposed(ctx, "Order", `["o1"]`, "ITEMS", item2)
 
 	result := g.Snapshot()
 
@@ -539,15 +526,13 @@ func TestMarshalObject_WithOneComposition(t *testing.T) {
 		"vin":   "VIN123",
 		"model": "Sedan",
 	})
-	_, err := g.Add(ctx, car)
-	require.NoError(t, err)
+	g.Add(ctx, car)
 
 	engine := mustValidPartInstance(t, s, "Engine", []any{"ENG001"}, map[string]any{
 		"serial":       "ENG001",
 		"displacement": int64(2000),
 	})
-	_, err = g.AddComposed(ctx, "Car", `["VIN123"]`, "ENGINE", engine)
-	require.NoError(t, err)
+	g.AddComposed(ctx, "Car", `["VIN123"]`, "ENGINE", engine)
 
 	result := g.Snapshot()
 
@@ -579,8 +564,7 @@ func TestMarshalObject_WithIndent(t *testing.T) {
 		"name": "Alice",
 		"age":  int64(30),
 	})
-	_, err := g.Add(ctx, inst)
-	require.NoError(t, err)
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 
@@ -620,10 +604,8 @@ func TestMarshalObject_Deterministic(t *testing.T) {
 			"id":   string(rune('z' - i)),
 			"name": "Company" + string(rune('Z'-i)),
 		})
-		_, err := g.Add(ctx, p)
-		require.NoError(t, err)
-		_, err = g.Add(ctx, c)
-		require.NoError(t, err)
+		g.Add(ctx, p)
+		g.Add(ctx, c)
 	}
 
 	result := g.Snapshot()
@@ -654,8 +636,7 @@ func TestWriteObject_WritesToBuffer(t *testing.T) {
 		"name": "Alice",
 		"age":  int64(30),
 	})
-	_, err := g.Add(ctx, inst)
-	require.NoError(t, err)
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 
@@ -683,8 +664,7 @@ func TestMarshalObject_WithDiagnostics_NoIssues(t *testing.T) {
 		"name": "Alice",
 		"age":  int64(30),
 	})
-	_, err := g.Add(ctx, inst)
-	require.NoError(t, err)
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 
@@ -715,8 +695,7 @@ func TestMarshalObject_ManyAssociationSingleTarget(t *testing.T) {
 		"id":   "c1",
 		"name": "Acme Inc",
 	})
-	_, err := g.Add(ctx, company)
-	require.NoError(t, err)
+	g.Add(ctx, company)
 
 	// Add person with single employer (but relation is many)
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
@@ -727,8 +706,7 @@ func TestMarshalObject_ManyAssociationSingleTarget(t *testing.T) {
 		"EMPLOYERS",     // This is a (many) relation
 		[][]any{{"c1"}}, // Only one target
 	)
-	_, err = g.Add(ctx, person)
-	require.NoError(t, err)
+	g.Add(ctx, person)
 
 	result := g.Snapshot()
 
@@ -761,16 +739,14 @@ func TestMarshalObject_ManyCompositionSingleChild(t *testing.T) {
 		"id":       "o1",
 		"customer": "Alice",
 	})
-	_, err := g.Add(ctx, order)
-	require.NoError(t, err)
+	g.Add(ctx, order)
 
 	// Add only one item (but relation is many)
 	item := mustValidPartInstance(t, s, "Item", []any{"SKU-A"}, map[string]any{
 		"sku": "SKU-A",
 		"qty": int64(2),
 	})
-	_, err = g.AddComposed(ctx, "Order", `["o1"]`, "ITEMS", item)
-	require.NoError(t, err)
+	g.AddComposed(ctx, "Order", `["o1"]`, "ITEMS", item)
 
 	result := g.Snapshot()
 
@@ -829,8 +805,7 @@ func TestMarshalObject_LowerSnakeFieldNames(t *testing.T) {
 		"id":  "px1",
 		"url": "http://proxy.example.com",
 	})
-	_, err := g.Add(ctx, proxy)
-	require.NoError(t, err)
+	g.Add(ctx, proxy)
 
 	// Add service with HTTPProxy relation
 	service := mustValidInstanceWithEdge(t, s, "Service", []any{"svc1"},
@@ -841,8 +816,7 @@ func TestMarshalObject_LowerSnakeFieldNames(t *testing.T) {
 		"HTTPProxy",
 		[][]any{{"px1"}},
 	)
-	_, err = g.Add(ctx, service)
-	require.NoError(t, err)
+	g.Add(ctx, service)
 
 	result := g.Snapshot()
 
@@ -891,10 +865,8 @@ func TestMarshalObject_Deterministic_MultipleSnapshots(t *testing.T) {
 				"id":   string(rune('z' - idx)),
 				"name": "Company" + string(rune('Z'-idx)),
 			})
-			_, err := g.Add(ctx, p)
-			require.NoError(t, err)
-			_, err = g.Add(ctx, c)
-			require.NoError(t, err)
+			g.Add(ctx, p)
+			g.Add(ctx, c)
 		}
 
 		result := g.Snapshot()
@@ -926,8 +898,7 @@ func TestMarshalObject_WithDiagnostics_Unresolved(t *testing.T) {
 		"EMPLOYER",
 		[][]any{{"missing-company"}}, // Target doesn't exist
 	)
-	_, err := g.Add(ctx, person)
-	require.NoError(t, err)
+	g.Add(ctx, person)
 
 	result := g.Snapshot()
 
@@ -967,8 +938,7 @@ func TestMarshalObject_WithDiagnostics_Duplicates(t *testing.T) {
 		"name": "Alice",
 		"age":  int64(30),
 	})
-	_, err := g.Add(ctx, person1)
-	require.NoError(t, err)
+	g.Add(ctx, person1)
 
 	// Add duplicate with same PK
 	person2 := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{
@@ -976,8 +946,7 @@ func TestMarshalObject_WithDiagnostics_Duplicates(t *testing.T) {
 		"name": "Bob", // Different data but same key
 		"age":  int64(25),
 	})
-	_, err = g.Add(ctx, person2)
-	require.NoError(t, err)
+	g.Add(ctx, person2)
 
 	result := g.Snapshot()
 
@@ -1014,8 +983,7 @@ func TestWriteObject_ShortWrite(t *testing.T) {
 		"name": "Alice",
 		"age":  int64(30),
 	})
-	_, err := g.Add(ctx, inst)
-	require.NoError(t, err)
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 

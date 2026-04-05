@@ -39,10 +39,9 @@ func TestValidateCompositions_Single(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	composed, ok := valid.Composed("addresses")
@@ -77,10 +76,9 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	composed, ok := valid.Composed("addresses")
@@ -110,10 +108,9 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// No composition should be present
@@ -144,10 +141,9 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	assert.Nil(t, failure)
+	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Composition should be present but empty
@@ -178,12 +174,11 @@ func TestValidateCompositions_Required_Missing(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "missing required composition")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "missing required composition")
 }
 
 func TestValidateCompositions_Required_Empty(t *testing.T) {
@@ -208,12 +203,11 @@ func TestValidateCompositions_Required_Empty(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "required composition cannot be empty")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "required composition cannot be empty")
 }
 
 func TestValidateCompositions_DuplicatePK(t *testing.T) {
@@ -241,12 +235,11 @@ func TestValidateCompositions_DuplicatePK(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "duplicate primary key")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "duplicate primary key")
 }
 
 func TestValidateCompositions_ChildValidationFails(t *testing.T) {
@@ -274,12 +267,11 @@ func TestValidateCompositions_ChildValidationFails(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "missing required")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "missing required")
 }
 
 func TestValidateCompositions_InvalidChildShape(t *testing.T) {
@@ -306,12 +298,11 @@ func TestValidateCompositions_InvalidChildShape(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "composition child must be an object")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "composition child must be an object")
 }
 
 func TestValidateCompositions_NotArray(t *testing.T) {
@@ -336,12 +327,11 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "expected array")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "expected array")
 }
 
 // --- P0 Null vs Absent Tests ---
@@ -369,15 +359,14 @@ func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "null is not a valid composition value")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "null is not a valid composition value")
 
 	// Verify error code is E_EDGE_SHAPE_MISMATCH
-	issues := failure.Result.IssuesSlice()
+	issues := result.IssuesSlice()
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
 
@@ -421,14 +410,13 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
-	assert.Contains(t, failure.Summary(), "null is not a valid composition value")
+	require.False(t, result.OK())
+	assert.Contains(t, result.String(), "null is not a valid composition value")
 
-	issues := failure.Result.IssuesSlice()
+	issues := result.IssuesSlice()
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
 }
@@ -458,13 +446,12 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
+	require.False(t, result.OK())
 
-	issues := failure.Result.IssuesSlice()
+	issues := result.IssuesSlice()
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrUnresolvedRequiredComposition, issues[0].Code())
 
@@ -513,13 +500,12 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
 	assert.Nil(t, valid)
-	require.NotNil(t, failure)
+	require.False(t, result.OK())
 
-	issues := failure.Result.IssuesSlice()
+	issues := result.IssuesSlice()
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrUnresolvedRequiredComposition, issues[0].Code())
 
@@ -571,14 +557,13 @@ func TestValidateCompositions_DuplicatePK_PathFormat(t *testing.T) {
 		},
 	}
 
-	_, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	_, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
-	require.NotNil(t, failure)
+	require.False(t, result.OK())
 
 	// Find the duplicate PK error and check its path
 	var foundPath string
-	for issue := range failure.Result.Issues() {
+	for issue := range result.Issues() {
 		if issue.Code() == instance.ErrDuplicateComposedPK {
 			foundPath = issue.Path()
 			break
@@ -617,14 +602,13 @@ func TestValidateCompositions_CompositePK_PathFormat(t *testing.T) {
 		},
 	}
 
-	_, failure, err := validator.ValidateOne(t.Context(), "School", raw)
+	_, result := validator.ValidateOne(t.Context(), "School", raw)
 
-	require.NoError(t, err)
-	require.NotNil(t, failure)
+	require.False(t, result.OK())
 
 	// Find the duplicate PK error and check its path
 	var foundPath string
-	for issue := range failure.Result.Issues() {
+	for issue := range result.Issues() {
 		if issue.Code() == instance.ErrDuplicateComposedPK {
 			foundPath = issue.Path()
 			break
@@ -669,12 +653,11 @@ func TestOwnership_ValidateForCompositionIsolation(t *testing.T) {
 	}
 
 	// Validate using streaming path
-	valid, failures, err := validator.ValidateForComposition(
+	valid, result := validator.ValidateForComposition(
 		t.Context(), "Person", "addresses", raws,
 	)
 
-	require.NoError(t, err)
-	assert.Len(t, failures, 0)
+	require.True(t, result.OK())
 	require.Len(t, valid, 2)
 
 	// Mutate original data AFTER validation

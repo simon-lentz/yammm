@@ -26,9 +26,9 @@ func TestGraph_NewCreatesGraph(t *testing.T) {
 	assert.NotNil(t, g, "graph.New should return a non-nil graph")
 }
 
-// TestGraph_AddReturnsResult verifies that g.Add returns (diag.Result, error)
+// TestGraph_AddReturnsResult verifies that g.Add returns diag.Result
 // and that the result is OK for a valid instance addition.
-// Source: SPEC.md, "Graph Construction" — g.Add(ctx, validInstance) returns (diag.Result, error).
+// Source: SPEC.md, "Graph Construction" — g.Add(ctx, validInstance) returns diag.Result.
 func TestGraph_AddReturnsResult(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -40,8 +40,7 @@ func TestGraph_AddReturnsResult(t *testing.T) {
 		"name": "Fuji",
 	}))
 
-	result, err := g.Add(ctx, inst)
-	require.NoError(t, err, "g.Add should not return an error for a valid instance")
+	result := g.Add(ctx, inst)
 	assert.True(t, result.OK(), "g.Add result should be OK: %v", result.Messages())
 }
 
@@ -59,14 +58,12 @@ func TestGraph_CheckRequiredAssociation(t *testing.T) {
 		"id":   "emp1",
 		"name": "Alice",
 	}))
-	addResult, err := g.Add(ctx, inst)
-	require.NoError(t, err)
+	addResult := g.Add(ctx, inst)
 	// Add itself may succeed (the edge is unresolved/pending)
 	_ = addResult
 
 	// Check should report unresolved required association
-	checkResult, err := g.Check(ctx)
-	require.NoError(t, err, "g.Check should not return an error")
+	checkResult := g.Check(ctx)
 	assert.False(t, checkResult.OK(), "Check should report errors for missing required association")
 	assertDiagHasCode(t, checkResult, diag.E_UNRESOLVED_REQUIRED)
 }
@@ -85,8 +82,7 @@ func TestGraph_CheckRequiredAssociationSatisfied(t *testing.T) {
 		"id":   "eng",
 		"name": "Engineering",
 	}))
-	_, err := g.Add(ctx, dept)
-	require.NoError(t, err)
+	g.Add(ctx, dept)
 
 	// Add Employee with resolved BELONGS_TO edge
 	emp := validateOne(t, v, "Employee", raw(map[string]any{
@@ -94,12 +90,10 @@ func TestGraph_CheckRequiredAssociationSatisfied(t *testing.T) {
 		"name":       "Bob",
 		"belongs_to": map[string]any{"_target_id": "eng"},
 	}))
-	_, err = g.Add(ctx, emp)
-	require.NoError(t, err)
+	g.Add(ctx, emp)
 
 	// Check should pass
-	checkResult, err := g.Check(ctx)
-	require.NoError(t, err)
+	checkResult := g.Check(ctx)
 	assert.True(t, checkResult.OK(), "Check should pass with resolved required association: %v", checkResult.Messages())
 }
 
@@ -203,8 +197,7 @@ func TestGraph_OrderingEdges(t *testing.T) {
 		"id":   "acme",
 		"name": "Acme Corp",
 	}))
-	_, err := g.Add(ctx, company)
-	require.NoError(t, err)
+	g.Add(ctx, company)
 
 	// Add two Persons with edges, in reverse order by key: bob, then alice
 	bob := validateOne(t, v, "Person", raw(map[string]any{
@@ -212,16 +205,14 @@ func TestGraph_OrderingEdges(t *testing.T) {
 		"name":     "Bob",
 		"works_at": map[string]any{"_target_id": "acme"},
 	}))
-	_, err = g.Add(ctx, bob)
-	require.NoError(t, err)
+	g.Add(ctx, bob)
 
 	alice := validateOne(t, v, "Person", raw(map[string]any{
 		"id":       "alice",
 		"name":     "Alice",
 		"works_at": map[string]any{"_target_id": "acme"},
 	}))
-	_, err = g.Add(ctx, alice)
-	require.NoError(t, err)
+	g.Add(ctx, alice)
 
 	snap := g.Snapshot()
 	edges := snap.Edges()
@@ -258,10 +249,8 @@ func TestGraph_OrderingDuplicates(t *testing.T) {
 		"name": "Fuji",
 	}))
 
-	_, err := g.Add(ctx, zebraOrig)
-	require.NoError(t, err)
-	_, err = g.Add(ctx, appleOrig)
-	require.NoError(t, err)
+	g.Add(ctx, zebraOrig)
+	g.Add(ctx, appleOrig)
 
 	// Now add duplicates in reverse type order: Zebra first, then Apple
 	zebraDup := validateOne(t, v, "Zebra", raw(map[string]any{
@@ -274,10 +263,8 @@ func TestGraph_OrderingDuplicates(t *testing.T) {
 	}))
 
 	// Add duplicates
-	_, err = g.Add(ctx, zebraDup)
-	require.NoError(t, err)
-	_, err = g.Add(ctx, appleDup)
-	require.NoError(t, err)
+	g.Add(ctx, zebraDup)
+	g.Add(ctx, appleDup)
 
 	snap := g.Snapshot()
 	dups := snap.Duplicates()
@@ -306,16 +293,14 @@ func TestGraph_OrderingUnresolved(t *testing.T) {
 		"name":     "Bob",
 		"works_at": map[string]any{"_target_id": "ghost-corp"},
 	}))
-	_, err := g.Add(ctx, bob)
-	require.NoError(t, err)
+	g.Add(ctx, bob)
 
 	alice := validateOne(t, v, "Person", raw(map[string]any{
 		"id":       "alice",
 		"name":     "Alice",
 		"works_at": map[string]any{"_target_id": "phantom-inc"},
 	}))
-	_, err = g.Add(ctx, alice)
-	require.NoError(t, err)
+	g.Add(ctx, alice)
 
 	snap := g.Snapshot()
 	unresolved := snap.Unresolved()
@@ -356,12 +341,10 @@ func TestGraph_Duplicates(t *testing.T) {
 		"name": "Fuji (duplicate)",
 	}))
 
-	result1, err := g.Add(ctx, inst1)
-	require.NoError(t, err)
+	result1 := g.Add(ctx, inst1)
 	assert.True(t, result1.OK(), "first Add should succeed")
 
-	result2, err := g.Add(ctx, inst2)
-	require.NoError(t, err)
+	result2 := g.Add(ctx, inst2)
 	// The second Add returns a result with E_DUPLICATE_PK
 	assert.False(t, result2.OK(), "second Add should report duplicate")
 	assertDiagHasCode(t, result2, diag.E_DUPLICATE_PK)
@@ -392,7 +375,7 @@ func TestGraph_ConcurrentAdd(t *testing.T) {
 				"id":   fmt.Sprintf("item-%d", i),
 				"name": fmt.Sprintf("Item %d", i),
 			}))
-			_, _ = g.Add(ctx, inst)
+			g.Add(ctx, inst)
 		})
 	}
 	wg.Wait()
@@ -417,8 +400,7 @@ func TestGraph_ConcurrentAddComposed(t *testing.T) {
 	order := validateOne(t, v, "Order", raw(map[string]any{
 		"id": "order-1",
 	}))
-	_, err := g.Add(ctx, order)
-	require.NoError(t, err)
+	g.Add(ctx, order)
 
 	parentKey := graph.FormatKey("order-1")
 
@@ -431,16 +413,15 @@ func TestGraph_ConcurrentAddComposed(t *testing.T) {
 			"quantity":    i + 1,
 		}))
 	}
-	validChildren, failures, err := v.ValidateForComposition(ctx, "Order", "ITEMS", childRaws)
-	require.NoError(t, err)
-	require.Empty(t, failures, "all children should validate")
+	validChildren, result := v.ValidateForComposition(ctx, "Order", "ITEMS", childRaws)
+	require.True(t, result.OK(), "all children should validate: %v", result.Messages())
 	require.Len(t, validChildren, 10)
 
 	// Concurrently add all pre-validated children
 	var wg sync.WaitGroup
 	for i := range 10 {
 		wg.Go(func() {
-			_, _ = g.AddComposed(ctx, "Order", parentKey, "ITEMS", validChildren[i])
+			g.AddComposed(ctx, "Order", parentKey, "ITEMS", validChildren[i])
 		})
 	}
 	wg.Wait()
@@ -543,8 +524,7 @@ func TestGraph_AddComposedBasic(t *testing.T) {
 	order := validateOne(t, v, "Order", raw(map[string]any{
 		"id": "order-1",
 	}))
-	_, err := g.Add(ctx, order)
-	require.NoError(t, err)
+	g.Add(ctx, order)
 
 	parentKey := graph.FormatKey("order-1")
 
@@ -554,13 +534,11 @@ func TestGraph_AddComposedBasic(t *testing.T) {
 		"description": "Widget",
 		"quantity":    5,
 	})}
-	validChildren, failures, err := v.ValidateForComposition(ctx, "Order", "ITEMS", childRaws)
-	require.NoError(t, err)
-	require.Empty(t, failures, "child should validate")
+	validChildren, valResult := v.ValidateForComposition(ctx, "Order", "ITEMS", childRaws)
+	require.True(t, valResult.OK(), "child should validate: %v", valResult.Messages())
 	require.Len(t, validChildren, 1)
 
-	result, err := g.AddComposed(ctx, "Order", parentKey, "ITEMS", validChildren[0])
-	require.NoError(t, err)
+	result := g.AddComposed(ctx, "Order", parentKey, "ITEMS", validChildren[0])
 	assert.True(t, result.OK(), "AddComposed should succeed: %v", result.Messages())
 
 	// Verify in snapshot
@@ -591,8 +569,7 @@ func TestGraph_ForwardReferenceResolution(t *testing.T) {
 		"name":     "Alice",
 		"works_at": map[string]any{"_target_id": "acme"},
 	}))
-	_, err := g.Add(ctx, person)
-	require.NoError(t, err)
+	g.Add(ctx, person)
 
 	// At this point, edge is unresolved (forward reference)
 	snap1 := g.Snapshot()
@@ -604,8 +581,7 @@ func TestGraph_ForwardReferenceResolution(t *testing.T) {
 		"id":   "acme",
 		"name": "Acme Corp",
 	}))
-	_, err = g.Add(ctx, company)
-	require.NoError(t, err)
+	g.Add(ctx, company)
 
 	// Forward reference should now be resolved
 	snap2 := g.Snapshot()
@@ -637,8 +613,7 @@ func TestGraph_InlineCompositionExtraction(t *testing.T) {
 			map[string]any{"description": "Gadget", "quantity": 3},
 		},
 	}))
-	result, err := g.Add(ctx, order)
-	require.NoError(t, err)
+	result := g.Add(ctx, order)
 	assert.True(t, result.OK(), "Add with inline compositions should succeed: %v", result.Messages())
 
 	snap := g.Snapshot()
@@ -666,7 +641,7 @@ func TestGraph_SnapshotOK(t *testing.T) {
 		"id":   "a1",
 		"name": "Fuji",
 	}))
-	_, _ = g1.Add(ctx, inst)
+	g1.Add(ctx, inst)
 	snap1 := g1.Snapshot()
 	assert.True(t, snap1.OK(), "clean graph snapshot should be OK")
 
@@ -680,8 +655,8 @@ func TestGraph_SnapshotOK(t *testing.T) {
 		"id":   "a1",
 		"name": "Fuji Again",
 	}))
-	_, _ = g2.Add(ctx, inst1)
-	_, _ = g2.Add(ctx, inst2)
+	g2.Add(ctx, inst1)
+	g2.Add(ctx, inst2)
 	snap2 := g2.Snapshot()
 	assert.False(t, snap2.OK(), "graph with duplicates should not be OK")
 }

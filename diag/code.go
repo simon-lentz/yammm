@@ -123,6 +123,10 @@ var (
 	// E_INTERNAL indicates an unexpected invariant failure (internal bug indicator).
 	// Use for conditions that should never occur in correct code.
 	E_INTERNAL = NewCode("E_INTERNAL", CategorySentinel)
+
+	// E_CONTEXT_CANCELLED indicates the operation was cancelled via context.
+	// Used across all packages when ctx.Err() returns a non-nil error.
+	E_CONTEXT_CANCELLED = NewCode("E_CONTEXT_CANCELLED", CategorySentinel)
 )
 
 // Schema codes.
@@ -202,6 +206,10 @@ var (
 	// E_INVALID_PRIMARY_KEY_TYPE indicates a type not allowed as a primary key.
 	// Only String, UUID, Date, and Timestamp are permitted as primary key types.
 	E_INVALID_PRIMARY_KEY_TYPE = NewCode("E_INVALID_PRIMARY_KEY_TYPE", CategorySchema)
+
+	// E_LOAD_IO_FAILURE indicates an I/O error during schema loading.
+	// Covers file read failures, path resolution errors, and other filesystem issues.
+	E_LOAD_IO_FAILURE = NewCode("E_LOAD_IO_FAILURE", CategorySchema)
 )
 
 // Syntax codes.

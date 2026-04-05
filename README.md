@@ -60,24 +60,24 @@ import (
 
     "github.com/simon-lentz/yammm/graph"
     "github.com/simon-lentz/yammm/instance"
-    "github.com/simon-lentz/yammm/schema/load"
+    "github.com/simon-lentz/yammm/schema"
 )
 
 func main() {
     ctx := context.Background()
 
     // Load schema from file
-    schema, result, err := load.Load(ctx, "vehicles.yammm")
-    if err != nil {
-        log.Fatal("load error:", err)
+    s, result := schema.Load(ctx, "vehicles.yammm")
+    if result.HasFatal() {
+        log.Fatal("load error:", result)
     }
-    if !result.OK() {
+    if result.HasErrors() {
         log.Fatal("schema errors:", result)
     }
 
     // Create validator and graph
-    validator := instance.NewValidator(schema)
-    g := graph.New(schema)
+    validator := instance.NewValidator(s)
+    g := graph.New(s)
 
     // Validate a person instance
     personRaw := instance.RawInstance{
@@ -88,21 +88,19 @@ func main() {
         },
     }
 
-    person, failure, err := validator.ValidateOne(ctx, "Person", personRaw)
-    if err != nil {
-        log.Fatal("validation error:", err)
-    }
-    if failure != nil {
-        log.Fatal("validation failed:", failure.Result)
+    person, result := validator.ValidateOne(ctx, "Person", personRaw)
+    if !result.OK() {
+        log.Fatal("validation failed:", result)
     }
 
     // Add to graph
-    if result, err := g.Add(ctx, person); err != nil || !result.OK() {
-        log.Fatal("graph error")
+    result = g.Add(ctx, person)
+    if !result.OK() {
+        log.Fatal("graph error:", result)
     }
 
     // Check graph integrity
-    result, _ = g.Check(ctx)
+    result = g.Check(ctx)
     fmt.Println("Graph OK:", result.OK())
 }
 ```
@@ -113,10 +111,9 @@ func main() {
 import (
     "github.com/simon-lentz/yammm/location"
     "github.com/simon-lentz/yammm/schema"
-    "github.com/simon-lentz/yammm/schema/build"
 )
 
-s, result := build.NewBuilder().
+s, result := schema.NewBuilder().
     WithName("example").
     WithSourceID(location.MustNewSourceID("test://example.yammm")).
     AddType("Person").
@@ -138,7 +135,7 @@ The module is organized into layers with strict dependency ordering:
 ```text
 Primary API (stable)     : schema, instance, graph
 Foundation (stable)      : location, diag, immutable, source
-Adapter                  : adapter/json
+Adapter                  : adapter/json, adapter/neo4j
 Grammar                  : grammar (ANTLR4-generated lexer/parser)
 Internal                 : internal/* (no compatibility guarantees)
 ```
@@ -147,24 +144,27 @@ Internal                 : internal/* (no compatibility guarantees)
 
 | Package | Purpose |
 | ------- | ------- |
-| `schema` | Type system, constraints, and schema compilation |
-| `schema/load` | Load schemas from `.yammm` files |
-| `schema/build` | Programmatic schema construction |
+| `schema` | Type system, constraints, schema loading, and programmatic building |
+| `schema/expr` | Expression AST types for invariants |
 | `instance` | Instance validation and constraint checking |
 | `graph` | Instance graph construction and integrity checking |
+| `graph/walk` | Visitor-pattern graph traversal |
 | `diag` | Structured diagnostics with stable error codes |
 | `location` | Source positions, spans, and canonical paths |
 | `source` | Source content storage and position conversion |
 | `grammar` | ANTLR4-generated lexer, parser, and visitor |
 | `adapter/json` | JSON/JSONC parsing with location tracking |
+| `adapter/neo4j` | Neo4j constraint generation and Cypher query building |
 
 ### Entry Point Pattern
 
-All public entry points follow the `(Output, diag.Result, error)` pattern:
+Diagnostic-producing operations return `(T, diag.Result)`:
 
-- `err != nil`: Catastrophic failure (I/O, internal corruption)
-- `err == nil && !result.OK()`: Semantic failure (structured issues)
-- `err == nil && result.OK()`: Success (may have warnings)
+- `result.HasFatal()`: Unrecoverable condition (I/O failure, context cancellation)
+- `result.HasErrors()`: Semantic failure (structured issues)
+- `result.OK()`: Success (may have warnings)
+
+Pure transformations (serialization, query generation) return `(T, error)`.
 
 ## Schema Language
 

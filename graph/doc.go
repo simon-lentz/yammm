@@ -24,17 +24,14 @@
 //	g := graph.New(schema)
 //
 //	// Add validated instances (may be called concurrently)
-//	result, err := g.Add(ctx, validInstance)
-//	if err != nil {
-//	    // Internal error (nil instance, context cancellation)
-//	}
-//	if err := result.Err(); err != nil {
-//	    // Validation error (duplicate PK, type not found)
+//	result := g.Add(ctx, validInstance)
+//	if !result.OK() {
+//	    // Semantic error (duplicate PK, type not found)
 //	}
 //
 //	// Check completeness
-//	result, err = g.Check(ctx)
-//	if err := result.Err(); err != nil {
+//	result = g.Check(ctx)
+//	if !result.OK() {
 //	    // Required associations are missing
 //	}
 //
@@ -77,13 +74,13 @@
 //
 // # Error Handling
 //
-// Graph operations follow the (Output, diag.Result, error) pattern:
+// Graph operations return [diag.Result]:
 //
-//   - error != nil: Internal failure (nil receiver, nil instance, cancellation)
-//   - error == nil && [diag.Result.Err] != nil: Semantic failure (duplicate PK, type not found)
-//   - error == nil && [diag.Result.Err] == nil: Success (may have warnings)
+//   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED)
+//   - [diag.Result.HasErrors]: semantic failure (duplicate PK, type not found)
+//   - [diag.Result.OK]: success (may have warnings)
 //
-// Internal errors use the ErrInternal sentinel and related error types.
+// Programmer errors (nil receiver, nil instance, schema mismatch) panic.
 // Semantic issues use diag.Code values like E_DUPLICATE_PK, E_UNRESOLVED_REQUIRED.
 //
 // # Diagnostics Lifecycle

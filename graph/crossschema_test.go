@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/immutable"
@@ -31,10 +30,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	result, err := g.Add(ctx, user)
-	if err != nil {
-		t.Fatalf("Add user error: %v", err)
-	}
+	result := g.Add(ctx, user)
 	if err := result.Err(); err != nil {
 		t.Errorf("Add user should succeed: %v", err)
 	}
@@ -49,10 +45,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	_, err = g.Add(ctx, entity)
-	if err != nil {
-		t.Fatalf("Add entity error: %v", err)
-	}
+	g.Add(ctx, entity)
 
 	// Snapshot should have User but the Entity add should have triggered diagnostics
 	// because the type name lookup would fail with unqualified "Entity"
@@ -78,10 +71,7 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	result, err := g.Add(ctx, entity)
-	if err != nil {
-		t.Fatalf("Add entity error: %v", err)
-	}
+	result := g.Add(ctx, entity)
 	if err := result.Err(); err != nil {
 		t.Errorf("Add entity should succeed: %v", err)
 	}
@@ -95,7 +85,7 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 }
 
 func TestGraph_StrictResolution_UnknownAlias(t *testing.T) {
-	// Instance from completely unknown schema returns ErrSchemaMismatch
+	// Instance from completely unknown schema should panic
 	mainSchema, _ := testMultiSchemaSetup(t)
 	g := New(mainSchema)
 	ctx := t.Context()
@@ -110,10 +100,12 @@ func TestGraph_StrictResolution_UnknownAlias(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	_, err := g.Add(ctx, inst)
-	if !errors.Is(err, ErrSchemaMismatch) {
-		t.Errorf("Add with unknown schema should return ErrSchemaMismatch, got %v", err)
-	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Add with unknown schema should panic")
+		}
+	}()
+	g.Add(ctx, inst)
 }
 
 func TestGraph_InstanceByKey_Qualified(t *testing.T) {
@@ -132,9 +124,7 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, entity); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, entity)
 
 	snap := g.Snapshot()
 
@@ -170,9 +160,7 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, user); err != nil {
-		t.Fatalf("Add user error: %v", err)
-	}
+	g.Add(ctx, user)
 
 	// Add imported Entity
 	entityType, _ := commonSchema.Type("Entity")
@@ -184,9 +172,7 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, entity); err != nil {
-		t.Fatalf("Add entity error: %v", err)
-	}
+	g.Add(ctx, entity)
 
 	snap := g.Snapshot()
 	types := snap.Types()
@@ -221,9 +207,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, entity); err != nil {
-		t.Fatalf("Add entity error: %v", err)
-	}
+	g.Add(ctx, entity)
 
 	// Add User with edge to Entity
 	userType, _ := mainSchema.Type("User")
@@ -246,10 +230,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 		nil,
 	)
 
-	result, err := g.Add(ctx, user)
-	if err != nil {
-		t.Fatalf("Add user error: %v", err)
-	}
+	result := g.Add(ctx, user)
 	if err := result.Err(); err != nil {
 		t.Errorf("Add user should succeed: %v", err)
 	}
@@ -342,9 +323,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, instB); err != nil {
-		t.Fatalf("Add b.Resource error: %v", err)
-	}
+	g.Add(ctx, instB)
 
 	// Add c.Resource
 	resourceC, _ := schemaC.Type("Resource")
@@ -356,9 +335,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, instC); err != nil {
-		t.Fatalf("Add c.Resource error: %v", err)
-	}
+	g.Add(ctx, instC)
 
 	// Verify both are in graph with correct types
 	snap := g.Snapshot()

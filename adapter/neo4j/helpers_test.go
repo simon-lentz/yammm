@@ -13,10 +13,7 @@ import (
 // loadSchema loads a test schema from testdata and returns the sealed schema.
 func loadSchema(t *testing.T, name string) *schema.Schema {
 	t.Helper()
-	s, result, err := schema.Load(context.Background(), filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatalf("schema.Load(%s) failed: %v", name, err)
-	}
+	s, result := schema.Load(context.Background(), filepath.Join("testdata", name))
 	if err := result.Err(); err != nil {
 		t.Fatalf("schema %s has errors: %v", name, err)
 	}
@@ -37,18 +34,12 @@ func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, ins
 	g := graph.New(s)
 	for typeName, records := range instances {
 		for _, props := range records {
-			valid, failure, err := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
-			if err != nil {
-				t.Fatalf("validate %s: %v", typeName, err)
+			valid, valResult := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
+			if !valResult.OK() {
+				t.Fatalf("validate %s failed: %v", typeName, valResult.Messages())
 			}
-			if failure != nil {
-				t.Fatalf("validate %s failed: %v", typeName, failure.Result.Messages())
-			}
-			result, err := g.Add(ctx, valid)
-			if err != nil {
-				t.Fatalf("graph.Add %s: %v", typeName, err)
-			}
-			if err := result.Err(); err != nil {
+			addResult := g.Add(ctx, valid)
+			if err := addResult.Err(); err != nil {
 				t.Fatalf("graph.Add %s issues: %v", typeName, err)
 			}
 		}

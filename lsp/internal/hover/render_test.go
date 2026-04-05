@@ -33,8 +33,7 @@ func TestHoverForImport(t *testing.T) {
 		"/test/main.yammm":  []byte("schema \"main\"\nimport \"./parts\" as parts\n"),
 		"/test/parts.yammm": []byte("schema \"parts\"\ntype Wheel {\n  id String primary\n}\n"),
 	}
-	s, result, err := schema.LoadSources(t.Context(), sources, "/test")
-	require.NoError(t, err)
+	s, result := schema.LoadSources(t.Context(), sources, "/test")
 	require.False(t, result.HasErrors(), "load: %s", result)
 
 	// Get first import
@@ -280,8 +279,7 @@ func TestHoverForRelation_Composition(t *testing.T) {
 func TestHoverForDataType(t *testing.T) {
 	t.Parallel()
 
-	s, result, err := schema.LoadString(t.Context(), "schema \"test\"\n/* A short name string. */\ntype ShortName = String", "test.yammm")
-	require.NoError(t, err)
+	s, result := schema.LoadString(t.Context(), "schema \"test\"\n/* A short name string. */\ntype ShortName = String", "test.yammm")
 	require.False(t, result.HasErrors(), "load: %s", result)
 
 	dt, ok := s.DataType("ShortName")

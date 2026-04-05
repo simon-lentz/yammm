@@ -123,9 +123,7 @@ func TestInstance_NilVisitor_ReturnsError(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	snap := g.Snapshot()
 	instances := snap.InstancesOf("Person")
@@ -171,9 +169,7 @@ func TestWalk_SingleInstance(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 	visitor := &countingVisitor{}
@@ -210,9 +206,7 @@ func TestWalk_MultipleInstances(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"name": name, "age": 25}),
 			nil, nil, nil,
 		)
-		if _, err := g.Add(ctx, inst); err != nil {
-			t.Fatalf("Add Person error: %v", err)
-		}
+		g.Add(ctx, inst)
 	}
 
 	// Add companies
@@ -224,9 +218,7 @@ func TestWalk_MultipleInstances(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"name": name}),
 			nil, nil, nil,
 		)
-		if _, err := g.Add(ctx, inst); err != nil {
-			t.Fatalf("Add Company error: %v", err)
-		}
+		g.Add(ctx, inst)
 	}
 
 	result := g.Snapshot()
@@ -277,9 +269,7 @@ func TestWalk_PropertyOrder(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 	visitor := &countingVisitor{}
@@ -317,9 +307,7 @@ func TestWalk_ContextCancellation(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"name": name, "age": i}),
 			nil, nil, nil,
 		)
-		if _, err := g.Add(ctx, inst); err != nil {
-			t.Fatalf("Add error: %v", err)
-		}
+		g.Add(ctx, inst)
 	}
 
 	// Cancel context before walk
@@ -368,9 +356,7 @@ func TestWalk_VisitorError(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"name": name, "age": i}),
 			nil, nil, nil,
 		)
-		if _, err := g.Add(ctx, inst); err != nil {
-			t.Fatalf("Add error: %v", err)
-		}
+		g.Add(ctx, inst)
 	}
 
 	testErr := errors.New("test error")
@@ -416,9 +402,7 @@ func TestInstance_Single(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 	instances := result.InstancesOf("Person")
@@ -488,9 +472,7 @@ func TestBaseVisitor_Embedding(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 	visitor := &partialVisitor{}
@@ -605,9 +587,7 @@ func TestWalk_WithEdges(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Acme Corp"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, company); err != nil {
-		t.Fatalf("Add company error: %v", err)
-	}
+	g.Add(ctx, company)
 
 	// Add person with edge to company
 	person := instance.NewValidInstance(
@@ -618,9 +598,7 @@ func TestWalk_WithEdges(t *testing.T) {
 		makeEdges("employer", []any{"acme"}),
 		nil, nil,
 	)
-	if _, err := g.Add(ctx, person); err != nil {
-		t.Fatalf("Add person error: %v", err)
-	}
+	g.Add(ctx, person)
 
 	result := g.Snapshot()
 	visitor := &countingVisitor{}
@@ -658,9 +636,7 @@ func TestWalk_EdgeSorting(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Engineering"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, dept); err != nil {
-		t.Fatalf("Add dept error: %v", err)
-	}
+	g.Add(ctx, dept)
 
 	company := instance.NewValidInstance(
 		"Company",
@@ -669,9 +645,7 @@ func TestWalk_EdgeSorting(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Acme Corp"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, company); err != nil {
-		t.Fatalf("Add company error: %v", err)
-	}
+	g.Add(ctx, company)
 
 	// Add person with edges to both
 	person := instance.NewValidInstance(
@@ -685,9 +659,7 @@ func TestWalk_EdgeSorting(t *testing.T) {
 		}),
 		nil, nil,
 	)
-	if _, err := g.Add(ctx, person); err != nil {
-		t.Fatalf("Add person error: %v", err)
-	}
+	g.Add(ctx, person)
 
 	result := g.Snapshot()
 
@@ -740,9 +712,7 @@ func TestWalk_WithCompositions(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add children via AddComposed
 	for _, cID := range []string{"c1", "c2"} {
@@ -753,9 +723,7 @@ func TestWalk_WithCompositions(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"name": "Child " + cID}),
 			nil, nil, nil,
 		)
-		if _, err := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child); err != nil {
-			t.Fatalf("AddComposed %s error: %v", cID, err)
-		}
+		g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 	}
 
 	result := g.Snapshot()
@@ -825,9 +793,7 @@ func TestWalk_ExitInstanceError(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	testErr := errors.New("exit error")
 	result := g.Snapshot()
@@ -872,9 +838,7 @@ func TestWalk_VisitPropertyError(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	testErr := errors.New("property error")
 	result := g.Snapshot()
@@ -921,9 +885,7 @@ func TestWalk_VisitEdgeError(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Acme Corp"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, company); err != nil {
-		t.Fatalf("Add company error: %v", err)
-	}
+	g.Add(ctx, company)
 
 	// Add person with edge
 	person := instance.NewValidInstance(
@@ -934,9 +896,7 @@ func TestWalk_VisitEdgeError(t *testing.T) {
 		makeEdges("employer", []any{"acme"}),
 		nil, nil,
 	)
-	if _, err := g.Add(ctx, person); err != nil {
-		t.Fatalf("Add person error: %v", err)
-	}
+	g.Add(ctx, person)
 
 	testErr := errors.New("edge error")
 	result := g.Snapshot()
@@ -983,9 +943,7 @@ func TestWalk_EnterCompositionError(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add child via AddComposed
 	child := instance.NewValidInstance(
@@ -995,9 +953,7 @@ func TestWalk_EnterCompositionError(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Child 1"}),
 		nil, nil, nil,
 	)
-	if _, err := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child); err != nil {
-		t.Fatalf("AddComposed error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 
 	testErr := errors.New("enter composition error")
 	result := g.Snapshot()
@@ -1044,9 +1000,7 @@ func TestWalk_ExitCompositionError(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add child via AddComposed
 	child := instance.NewValidInstance(
@@ -1056,9 +1010,7 @@ func TestWalk_ExitCompositionError(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Child 1"}),
 		nil, nil, nil,
 	)
-	if _, err := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child); err != nil {
-		t.Fatalf("AddComposed error: %v", err)
-	}
+	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 
 	testErr := errors.New("exit composition error")
 	result := g.Snapshot()
@@ -1093,9 +1045,7 @@ func TestWalk_ContextCancellation_DuringCompositions(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"name": "Parent " + pID}),
 			nil, nil, nil,
 		)
-		if _, err := g.Add(ctx, parent); err != nil {
-			t.Fatalf("Add parent error: %v", err)
-		}
+		g.Add(ctx, parent)
 
 		// Add children via AddComposed
 		for j := range 5 {
@@ -1107,9 +1057,7 @@ func TestWalk_ContextCancellation_DuringCompositions(t *testing.T) {
 				immutable.WrapProperties(map[string]any{"name": "Child " + cID}),
 				nil, nil, nil,
 			)
-			if _, err := g.AddComposed(ctx, "Parent", graph.FormatKey(pID), "children", child); err != nil {
-				t.Fatalf("AddComposed %s error: %v", cID, err)
-			}
+			g.AddComposed(ctx, "Parent", graph.FormatKey(pID), "children", child)
 		}
 	}
 
@@ -1143,9 +1091,7 @@ func TestInstance_WithComposition(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add children via AddComposed
 	for _, cID := range []string{"c1", "c2"} {
@@ -1156,9 +1102,7 @@ func TestInstance_WithComposition(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"name": "Child " + cID}),
 			nil, nil, nil,
 		)
-		if _, err := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child); err != nil {
-			t.Fatalf("AddComposed %s error: %v", cID, err)
-		}
+		g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 	}
 
 	result := g.Snapshot()
@@ -1222,9 +1166,7 @@ func TestWalk_EdgeSorting_SameRelationDifferentTargets(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"name": id}),
 			nil, nil, nil,
 		)
-		if _, err := g.Add(ctx, company); err != nil {
-			t.Fatalf("Add company %s error: %v", id, err)
-		}
+		g.Add(ctx, company)
 	}
 
 	// Add person with multiple edges to the same relation (employers)
@@ -1236,9 +1178,7 @@ func TestWalk_EdgeSorting_SameRelationDifferentTargets(t *testing.T) {
 		makeEdges("employers", []any{"zeta"}, []any{"acme"}, []any{"beta"}),
 		nil, nil,
 	)
-	if _, err := g.Add(ctx, person); err != nil {
-		t.Fatalf("Add person error: %v", err)
-	}
+	g.Add(ctx, person)
 
 	result2 := g.Snapshot()
 
@@ -1294,9 +1234,7 @@ func TestWalk_WithOptions(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 	visitor := &countingVisitor{}
@@ -1326,9 +1264,7 @@ func TestInstance_WithOptions(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 	instances := result.InstancesOf("Person")
@@ -1362,9 +1298,7 @@ func TestNilContext_Panics(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	if _, err := g.Add(ctx, inst); err != nil {
-		t.Fatalf("Add error: %v", err)
-	}
+	g.Add(ctx, inst)
 
 	result := g.Snapshot()
 	instances := result.InstancesOf("Person")
@@ -1437,9 +1371,7 @@ func TestWalk_CompositionChildOrdering(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, parent); err != nil {
-		t.Fatalf("Add parent error: %v", err)
-	}
+	g.Add(ctx, parent)
 
 	// Add children in NON-alphabetical order: charlie, alice, bob
 	for _, pk := range []string{"charlie", "alice", "bob"} {
@@ -1450,9 +1382,7 @@ func TestWalk_CompositionChildOrdering(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"name": pk}),
 			nil, nil, nil,
 		)
-		if _, err := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child); err != nil {
-			t.Fatalf("AddComposed error: %v", err)
-		}
+		g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 	}
 
 	result := g.Snapshot()
@@ -1493,9 +1423,7 @@ func TestWalk_CompositionChildOrdering_PKLess(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"name": "Container 1"}),
 		nil, nil, nil,
 	)
-	if _, err := g.Add(ctx, container); err != nil {
-		t.Fatalf("Add container error: %v", err)
-	}
+	g.Add(ctx, container)
 
 	// Add PK-less items in specific order: third, first, second
 	// These should preserve insertion order (not be sorted alphabetically)
@@ -1508,9 +1436,7 @@ func TestWalk_CompositionChildOrdering_PKLess(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"value": val}),
 			nil, nil, nil,
 		)
-		if _, err := g.AddComposed(ctx, "Container", graph.FormatKey("c1"), "items", item); err != nil {
-			t.Fatalf("AddComposed error: %v", err)
-		}
+		g.AddComposed(ctx, "Container", graph.FormatKey("c1"), "items", item)
 	}
 
 	result := g.Snapshot()
@@ -1716,16 +1642,10 @@ func TestWalk_Logging(t *testing.T) {
 	g := graph.New(s)
 
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(t.Context(), parent)
-	if err != nil {
-		t.Fatalf("Add parent failed: %v", err)
-	}
+	g.Add(t.Context(), parent)
 
 	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-	_, err = g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child)
-	if err != nil {
-		t.Fatalf("AddComposed failed: %v", err)
-	}
+	g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child)
 
 	result := g.Snapshot()
 
@@ -1735,7 +1655,7 @@ func TestWalk_Logging(t *testing.T) {
 
 	// Walk with logging
 	visitor := &noopVisitor{}
-	err = Walk(t.Context(), result, visitor, WithLogger(logger))
+	err := Walk(t.Context(), result, visitor, WithLogger(logger))
 	if err != nil {
 		t.Fatalf("Walk failed: %v", err)
 	}
@@ -1760,10 +1680,7 @@ func TestInstance_Logging(t *testing.T) {
 	g := graph.New(s)
 
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(t.Context(), parent)
-	if err != nil {
-		t.Fatalf("Add parent failed: %v", err)
-	}
+	g.Add(t.Context(), parent)
 
 	result := g.Snapshot()
 	instances := result.InstancesOf("Parent")
@@ -1777,7 +1694,7 @@ func TestInstance_Logging(t *testing.T) {
 
 	// Walk single instance with logging
 	visitor := &noopVisitor{}
-	err = Instance(t.Context(), instances[0], visitor, WithLogger(logger))
+	err := Instance(t.Context(), instances[0], visitor, WithLogger(logger))
 	if err != nil {
 		t.Fatalf("Instance failed: %v", err)
 	}
@@ -1797,16 +1714,10 @@ func TestWalk_CompositionLogging(t *testing.T) {
 	g := graph.New(s)
 
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(t.Context(), parent)
-	if err != nil {
-		t.Fatalf("Add parent failed: %v", err)
-	}
+	g.Add(t.Context(), parent)
 
 	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-	_, err = g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child)
-	if err != nil {
-		t.Fatalf("AddComposed failed: %v", err)
-	}
+	g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child)
 
 	result := g.Snapshot()
 
@@ -1816,7 +1727,7 @@ func TestWalk_CompositionLogging(t *testing.T) {
 
 	// Walk with logging
 	visitor := &noopVisitor{}
-	err = Walk(t.Context(), result, visitor, WithLogger(logger))
+	err := Walk(t.Context(), result, visitor, WithLogger(logger))
 	if err != nil {
 		t.Fatalf("Walk failed: %v", err)
 	}
@@ -1836,16 +1747,13 @@ func TestWalk_NoLogging_WhenNilLogger(t *testing.T) {
 	g := graph.New(s)
 
 	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	_, err := g.Add(t.Context(), parent)
-	if err != nil {
-		t.Fatalf("Add parent failed: %v", err)
-	}
+	g.Add(t.Context(), parent)
 
 	result := g.Snapshot()
 
 	// Walk without logger - should not panic
 	visitor := &noopVisitor{}
-	err = Walk(t.Context(), result, visitor)
+	err := Walk(t.Context(), result, visitor)
 	if err != nil {
 		t.Fatalf("Walk failed: %v", err)
 	}
