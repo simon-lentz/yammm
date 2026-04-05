@@ -5,8 +5,8 @@ import (
 	"reflect"
 )
 
-// WrapOption configures the behavior of Wrap constructors.
-type WrapOption func(*wrapConfig)
+// Option configures the behavior of Wrap constructors.
+type Option func(*wrapConfig)
 
 type wrapConfig struct {
 	clone bool
@@ -16,11 +16,11 @@ type wrapConfig struct {
 // wrapping. The caller may freely retain and mutate the original value after
 // construction. Use this when the value comes from external sources, is shared,
 // or when ownership cannot be verified.
-func WithClone() WrapOption {
+func WithClone() Option {
 	return func(c *wrapConfig) { c.clone = true }
 }
 
-func resolveConfig(opts []WrapOption) wrapConfig {
+func resolveConfig(opts []Option) wrapConfig {
 	var cfg wrapConfig
 	for _, o := range opts {
 		o(&cfg)
@@ -48,7 +48,7 @@ type Value struct {
 //
 // Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
 // caller to freely retain and mutate the original.
-func Wrap(v any, opts ...WrapOption) Value {
+func Wrap(v any, opts ...Option) Value {
 	cfg := resolveConfig(opts)
 	return Value{val: wrapValue(v, cfg.clone)}
 }

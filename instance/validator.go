@@ -34,7 +34,7 @@ type Validator struct {
 
 // NewValidator creates a new Validator for the given schema.
 // Panics if schema is nil.
-func NewValidator(s *schema.Schema, opts ...ValidatorOption) *Validator {
+func NewValidator(s *schema.Schema, opts ...Option) *Validator {
 	if s == nil {
 		panic("instance.NewValidator: nil schema")
 	}
@@ -54,7 +54,7 @@ func NewValidator(s *schema.Schema, opts ...ValidatorOption) *Validator {
 //   - result: merged diagnostics for the entire batch (OK when all instances pass)
 //
 // Panics if the receiver is nil or if ctx is nil.
-func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance, opts ...ValidationOption) ([]*ValidInstance, diag.Result) {
+func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance) ([]*ValidInstance, diag.Result) {
 	if v == nil {
 		panic("instance.Validate: nil validator receiver")
 	}
@@ -84,7 +84,7 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 			return valids, batchCollector.Result()
 		}
 
-		inst, result := v.ValidateOne(ctx, typeName, raws[i], opts...)
+		inst, result := v.ValidateOne(ctx, typeName, raws[i])
 		for issue := range result.Issues() {
 			augmented := diag.FromIssue(issue).
 				WithDetail(diag.DetailKeyInstanceIndex, strconv.Itoa(i)).
@@ -104,8 +104,7 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 //   - result: diagnostics for this instance (OK on success, may contain warnings)
 //
 // Panics if the receiver is nil or if ctx is nil.
-func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance, opts ...ValidationOption) (*ValidInstance, diag.Result) {
-	applyValidationOptions(opts) // no per-call options defined yet
+func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance) (*ValidInstance, diag.Result) {
 	if v == nil {
 		panic("instance.ValidateOne: nil validator receiver")
 	}
@@ -138,8 +137,7 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 //   - result: merged diagnostics for the batch (OK when all instances pass)
 //
 // Panics if the receiver is nil or if ctx is nil.
-func (v *Validator) ValidateForComposition(ctx context.Context, parentType, relationName string, raws []RawInstance, opts ...ValidationOption) ([]*ValidInstance, diag.Result) {
-	applyValidationOptions(opts) // no per-call options defined yet
+func (v *Validator) ValidateForComposition(ctx context.Context, parentType, relationName string, raws []RawInstance) ([]*ValidInstance, diag.Result) {
 	if v == nil {
 		panic("instance.ValidateForComposition: nil validator receiver")
 	}

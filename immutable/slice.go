@@ -22,7 +22,7 @@ type Slice struct {
 //
 // Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
 // caller to freely retain and mutate the original.
-func WrapSlice(s []any, opts ...WrapOption) Slice {
+func WrapSlice(s []any, opts ...Option) Slice {
 	if s == nil {
 		return Slice{}
 	}

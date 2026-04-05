@@ -38,7 +38,7 @@ type Key struct {
 //
 // Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
 // caller to freely retain and mutate the original.
-func WrapKey(components []any, opts ...WrapOption) Key {
+func WrapKey(components []any, opts ...Option) Key {
 	if components == nil {
 		return Key{str: "[]"}
 	}

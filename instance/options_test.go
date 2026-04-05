@@ -91,7 +91,7 @@ func TestWithMaxIssuesPerInstance(t *testing.T) {
 	})
 }
 
-func TestRecommendedValidatorOptions(t *testing.T) {
+func TestRecommendedOptions(t *testing.T) {
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
@@ -99,8 +99,8 @@ func TestRecommendedValidatorOptions(t *testing.T) {
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		Done())
 
-	// RecommendedValidatorOptions should return valid options
-	opts := instance.RecommendedValidatorOptions()
+	// RecommendedOptions should return valid options
+	opts := instance.RecommendedOptions()
 	assert.Len(t, opts, 2)
 
 	// Should be usable

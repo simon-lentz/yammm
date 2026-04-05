@@ -24,7 +24,7 @@ type Map[K comparable] struct {
 //
 // Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
 // caller to freely retain and mutate the original.
-func WrapMap[K comparable](m map[K]any, opts ...WrapOption) Map[K] {
+func WrapMap[K comparable](m map[K]any, opts ...Option) Map[K] {
 	if m == nil {
 		return Map[K]{}
 	}

@@ -484,10 +484,10 @@ type Article {
 }
 
 // =============================================================================
-// RecommendedValidatorOptions
+// RecommendedOptions
 // =============================================================================
 
-// TestValidation_RecommendedOptions verifies that RecommendedValidatorOptions
+// TestValidation_RecommendedOptions verifies that RecommendedOptions
 // enables strict property names and disallows unknown fields.
 // Source: SPEC.md, "Instance Validation" — recommended defaults.
 func TestValidation_RecommendedOptions(t *testing.T) {
@@ -496,7 +496,7 @@ func TestValidation_RecommendedOptions(t *testing.T) {
 	s, result := loadSchemaWithOpts(t, "testdata/validation/basic.yammm")
 	require.True(t, result.OK())
 
-	v := instance.NewValidator(s, instance.RecommendedValidatorOptions()...)
+	v := instance.NewValidator(s, instance.RecommendedOptions()...)
 
 	// Strict mode: "Name" (wrong case) should fail
 	valid, valResult := v.ValidateOne(ctx, "Person", raw(map[string]any{
