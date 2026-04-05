@@ -17,7 +17,7 @@ func TestNewImport(t *testing.T) {
 		End:    location.Position{Line: 2, Column: 25, Byte: 35},
 	}
 
-	imp := schema.InternalNewImport("./types.yammm", "types", sourceID, span)
+	imp := schema.TestNewImport("./types.yammm", "types", sourceID, span)
 
 	assert.NotNil(t, imp)
 	assert.Equal(t, "./types.yammm", imp.Path())
@@ -39,7 +39,7 @@ func TestImport_Path(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			imp := schema.InternalNewImport(tt.path, "alias", location.SourceID{}, location.Span{})
+			imp := schema.TestNewImport(tt.path, "alias", location.SourceID{}, location.Span{})
 			assert.Equal(t, tt.expected, imp.Path())
 		})
 	}
@@ -58,7 +58,7 @@ func TestImport_Alias(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			imp := schema.InternalNewImport("./file.yammm", tt.alias, location.SourceID{}, location.Span{})
+			imp := schema.TestNewImport("./file.yammm", tt.alias, location.SourceID{}, location.Span{})
 			assert.Equal(t, tt.expected, imp.Alias())
 		})
 	}
@@ -67,13 +67,13 @@ func TestImport_Alias(t *testing.T) {
 func TestImport_ResolvedSourceID(t *testing.T) {
 	sourceID := location.MustNewSourceID("file:///absolute/path/types.yammm")
 
-	imp := schema.InternalNewImport("./types.yammm", "types", sourceID, location.Span{})
+	imp := schema.TestNewImport("./types.yammm", "types", sourceID, location.Span{})
 
 	assert.Equal(t, sourceID, imp.ResolvedSourceID())
 }
 
 func TestImport_ResolvedSourceID_Zero(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
 
 	assert.True(t, imp.ResolvedSourceID().IsZero())
 }
@@ -81,7 +81,7 @@ func TestImport_ResolvedSourceID_Zero(t *testing.T) {
 func TestImport_ResolvedPath_WithSourceID(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://resolved/path")
 
-	imp := schema.InternalNewImport("./types.yammm", "types", sourceID, location.Span{})
+	imp := schema.TestNewImport("./types.yammm", "types", sourceID, location.Span{})
 
 	// ResolvedPath returns the string representation of the resolved source ID
 	result := imp.ResolvedPath()
@@ -89,7 +89,7 @@ func TestImport_ResolvedPath_WithSourceID(t *testing.T) {
 }
 
 func TestImport_ResolvedPath_ZeroSourceID(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
 
 	// Returns empty string for zero SourceID
 	result := imp.ResolvedPath()
@@ -97,16 +97,16 @@ func TestImport_ResolvedPath_ZeroSourceID(t *testing.T) {
 }
 
 func TestImport_Schema_Nil(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
 
 	assert.Nil(t, imp.Schema())
 }
 
 func TestImport_Schema_Resolved(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	s := schema.InternalNewSchema("types", location.SourceID{}, location.Span{}, "")
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	s := schema.TestNewSchema("types", location.SourceID{}, location.Span{}, "")
 
-	schema.InternalSetImportSchema(imp, s)
+	schema.TestSetImportSchema(imp, s)
 
 	assert.Same(t, s, imp.Schema())
 }
@@ -118,7 +118,7 @@ func TestImport_Span(t *testing.T) {
 		End:    location.Position{Line: 3, Column: 30, Byte: 50},
 	}
 
-	imp := schema.InternalNewImport("./file.yammm", "file", location.SourceID{}, span)
+	imp := schema.TestNewImport("./file.yammm", "file", location.SourceID{}, span)
 
 	result := imp.Span()
 	assert.Equal(t, span.Source, result.Source)
@@ -127,8 +127,8 @@ func TestImport_Span(t *testing.T) {
 }
 
 func TestImport_Seal_PreventsSetResolvedSourceID(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	schema.InternalSealImport(imp)
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	schema.TestSealImport(imp)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -136,12 +136,12 @@ func TestImport_Seal_PreventsSetResolvedSourceID(t *testing.T) {
 		}
 	}()
 
-	schema.InternalSetImportResolvedSourceID(imp, location.MustNewSourceID("test://new"))
+	schema.TestSetImportResolvedSourceID(imp, location.MustNewSourceID("test://new"))
 }
 
 func TestImport_Seal_PreventsSetSchema(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	schema.InternalSealImport(imp)
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	schema.TestSealImport(imp)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -149,48 +149,48 @@ func TestImport_Seal_PreventsSetSchema(t *testing.T) {
 		}
 	}()
 
-	schema.InternalSetImportSchema(imp, schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, ""))
+	schema.TestSetImportSchema(imp, schema.TestNewSchema("test", location.SourceID{}, location.Span{}, ""))
 }
 
 func TestImport_SettersWorkBeforeSeal(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
 
 	// These should not panic before sealing
 	newSourceID := location.MustNewSourceID("test://updated")
-	schema.InternalSetImportResolvedSourceID(imp, newSourceID)
+	schema.TestSetImportResolvedSourceID(imp, newSourceID)
 	assert.Equal(t, newSourceID, imp.ResolvedSourceID())
 
-	s := schema.InternalNewSchema("types", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetImportSchema(imp, s)
+	s := schema.TestNewSchema("types", location.SourceID{}, location.Span{}, "")
+	schema.TestSetImportSchema(imp, s)
 	assert.Same(t, s, imp.Schema())
 }
 
 func TestImport_SetResolvedSourceID_UpdatesValue(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
 
 	newID := location.MustNewSourceID("test://updated")
-	schema.InternalSetImportResolvedSourceID(imp, newID)
+	schema.TestSetImportResolvedSourceID(imp, newID)
 
 	assert.Equal(t, newID, imp.ResolvedSourceID())
 }
 
 func TestImport_SetSchema_UpdatesValue(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	s := schema.InternalNewSchema("imported", location.SourceID{}, location.Span{}, "Imported schema")
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	s := schema.TestNewSchema("imported", location.SourceID{}, location.Span{}, "Imported schema")
 
-	schema.InternalSetImportSchema(imp, s)
+	schema.TestSetImportSchema(imp, s)
 
 	assert.Same(t, s, imp.Schema())
 	assert.Equal(t, "imported", imp.Schema().Name())
 }
 
 func TestImport_IsSealed(t *testing.T) {
-	imp := schema.InternalNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
 
 	// New import should not be sealed
-	assert.False(t, schema.InternalIsSealedImport(imp), "new import should not be sealed")
+	assert.False(t, schema.TestIsSealedImport(imp), "new import should not be sealed")
 
 	// After sealing, IsSealed should return true
-	schema.InternalSealImport(imp)
-	assert.True(t, schema.InternalIsSealedImport(imp), "sealed import should report IsSealed() == true")
+	schema.TestSealImport(imp)
+	assert.True(t, schema.TestIsSealedImport(imp), "sealed import should report IsSealed() == true")
 }

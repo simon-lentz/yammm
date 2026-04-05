@@ -9,14 +9,13 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 // testConcurrentSchema creates a schema for concurrency testing.
 func testConcurrentSchema(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("concurrent").
 		WithSourceID(location.MustNewSourceID("test://concurrent.yammm")).
 		AddType("Person").
@@ -381,7 +380,7 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 }
 
 func BenchmarkGraph_Add_Concurrent(b *testing.B) {
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("bench").
 		WithSourceID(location.MustNewSourceID("test://bench.yammm")).
 		AddType("Person").

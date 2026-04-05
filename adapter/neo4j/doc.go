@@ -51,7 +51,7 @@
 //
 // All schemas passed to the adapter should be sealed
 // (schema.IsSealed() == true), which is always the case after
-// [github.com/simon-lentz/yammm/schema/load.Load] completes. Sealed
+// [github.com/simon-lentz/yammm/schema.Load] completes. Sealed
 // schemas guarantee that alias chains are fully resolved, inheritance
 // is linearized, and type identities are assigned.
 //

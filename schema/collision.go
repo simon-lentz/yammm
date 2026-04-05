@@ -1,10 +1,9 @@
-package complete
+package schema
 
 import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // reservedPrefix is rejected for property and relation names.
@@ -24,7 +23,7 @@ func (c *completer) detectCollisions() bool {
 }
 
 // detectTypeCollisions checks for collisions within a single type.
-func (c *completer) detectTypeCollisions(t *schema.Type) bool {
+func (c *completer) detectTypeCollisions(t *Type) bool {
 	ok := true
 
 	// Check reserved prefixes on own properties.
@@ -74,9 +73,9 @@ func (c *completer) detectTypeCollisions(t *schema.Type) bool {
 }
 
 // checkPropertyCaseCollisions detects case-insensitive property name collisions.
-func (c *completer) checkPropertyCaseCollisions(t *schema.Type) bool {
+func (c *completer) checkPropertyCaseCollisions(t *Type) bool {
 	ok := true
-	seen := make(map[string]*schema.Property) // lowercase -> first property
+	seen := make(map[string]*Property) // lowercase -> first property
 
 	for _, p := range t.AllPropertiesSlice() {
 		lower := strings.ToLower(p.Name())
@@ -98,11 +97,11 @@ func (c *completer) checkPropertyCaseCollisions(t *schema.Type) bool {
 }
 
 // checkPropertyRelationCollisions detects collisions between property names and relation field names.
-func (c *completer) checkPropertyRelationCollisions(t *schema.Type) bool {
+func (c *completer) checkPropertyRelationCollisions(t *Type) bool {
 	ok := true
 
 	// Build property name set (lowercase for case-insensitive check)
-	propNames := make(map[string]*schema.Property)
+	propNames := make(map[string]*Property)
 	for _, p := range t.AllPropertiesSlice() {
 		propNames[strings.ToLower(p.Name())] = p
 	}
@@ -133,9 +132,9 @@ func (c *completer) checkPropertyRelationCollisions(t *schema.Type) bool {
 }
 
 // checkRelationCollisions detects relation name collisions after normalization.
-func (c *completer) checkRelationCollisions(t *schema.Type) bool {
+func (c *completer) checkRelationCollisions(t *Type) bool {
 	ok := true
-	seen := make(map[string]*schema.Relation) // fieldName -> first relation
+	seen := make(map[string]*Relation) // fieldName -> first relation
 
 	// Check associations
 	for _, r := range t.AllAssociationsSlice() {
@@ -231,7 +230,7 @@ func (c *completer) validateAssociationTargets() bool {
 }
 
 // validateRelationTarget checks that a relation target exists.
-func (c *completer) validateRelationTarget(_ *schema.Type, r *schema.Relation, kind string) bool {
+func (c *completer) validateRelationTarget(_ *Type, r *Relation, kind string) bool {
 	target := c.resolveTypeRef(r.Target())
 	if target == nil {
 		// Check if it's a qualified ref that we can't resolve yet
@@ -248,7 +247,7 @@ func (c *completer) validateRelationTarget(_ *schema.Type, r *schema.Relation, k
 	}
 
 	// Resolve the semantic identity
-	schema.InternalSetRelationTargetID(r, target.ID())
+	r.setTargetID(target.ID())
 
 	return true
 }
@@ -257,7 +256,7 @@ func (c *completer) validateRelationTarget(_ *schema.Type, r *schema.Relation, k
 // NOTE: When the target is a cross-schema ref and registry is nil, the IsPart and
 // IsAbstract checks are deferred. These constraints should be re-validated when
 // the schema is linked with a registry that can resolve cross-schema references.
-func (c *completer) validateCompositionTarget(t *schema.Type, r *schema.Relation) bool {
+func (c *completer) validateCompositionTarget(t *Type, r *Relation) bool {
 	target := c.resolveTypeRef(r.Target())
 	if target == nil {
 		// Cross-schema ref without registry: defer validation to linking phase.
@@ -288,7 +287,7 @@ func (c *completer) validateCompositionTarget(t *schema.Type, r *schema.Relation
 	}
 
 	// Resolve the semantic identity
-	schema.InternalSetRelationTargetID(r, target.ID())
+	r.setTargetID(target.ID())
 
 	return true
 }

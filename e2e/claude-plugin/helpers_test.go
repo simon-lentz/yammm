@@ -8,7 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/load"
+	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +19,7 @@ import (
 func loadSchema(t *testing.T, path string) *instance.Validator {
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := load.Load(ctx, path)
+	s, result, err := schema.Load(ctx, path)
 	require.NoError(t, err, "load schema %s", path)
 	require.True(t, result.OK(), "schema %s has errors: %v", path, result.Messages())
 	return instance.NewValidator(s)
@@ -30,7 +30,7 @@ func loadSchema(t *testing.T, path string) *instance.Validator {
 func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 	t.Helper()
 	ctx := t.Context()
-	_, result, err := load.Load(ctx, path)
+	_, result, err := schema.Load(ctx, path)
 	require.NoError(t, err, "load schema %s: unexpected I/O error", path)
 	require.False(t, result.OK(), "schema %s should have errors but loaded cleanly", path)
 	return result

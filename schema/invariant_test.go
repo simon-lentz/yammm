@@ -19,7 +19,7 @@ func TestNewInvariant(t *testing.T) {
 	doc := "Age must be positive"
 	e := expr.NewLiteral(true) // use a real expression
 
-	inv := schema.InternalNewInvariant("age must be positive", e, span, doc)
+	inv := schema.TestNewInvariant("age must be positive", e, span, doc)
 
 	assert.NotNil(t, inv)
 	assert.Equal(t, "age must be positive", inv.Name())
@@ -41,7 +41,7 @@ func TestInvariant_Name(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inv := schema.InternalNewInvariant(tt.message, nil, location.Span{}, "")
+			inv := schema.TestNewInvariant(tt.message, nil, location.Span{}, "")
 			assert.Equal(t, tt.expected, inv.Name())
 		})
 	}
@@ -59,7 +59,7 @@ func TestInvariant_Expression(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inv := schema.InternalNewInvariant("test", tt.expr, location.Span{}, "")
+			inv := schema.TestNewInvariant("test", tt.expr, location.Span{}, "")
 			assert.Equal(t, tt.expr, inv.Expression())
 		})
 	}
@@ -72,7 +72,7 @@ func TestInvariant_Span(t *testing.T) {
 		End:    location.Position{Line: 15, Column: 40, Byte: 235},
 	}
 
-	inv := schema.InternalNewInvariant("test", nil, span, "")
+	inv := schema.TestNewInvariant("test", nil, span, "")
 
 	result := inv.Span()
 	assert.Equal(t, span.Source, result.Source)
@@ -93,7 +93,7 @@ func TestInvariant_Documentation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inv := schema.InternalNewInvariant("test", nil, location.Span{}, tt.doc)
+			inv := schema.TestNewInvariant("test", nil, location.Span{}, tt.doc)
 			assert.Equal(t, tt.doc, inv.Documentation())
 		})
 	}

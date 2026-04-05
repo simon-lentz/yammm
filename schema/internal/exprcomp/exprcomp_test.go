@@ -3,15 +3,20 @@ package exprcomp_test
 import (
 	"testing"
 
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
 	"github.com/simon-lentz/yammm/schema/internal/exprcomp"
 )
+
+// noopSpans is a minimal SpanFromContext for tests that don't need real spans.
+type noopSpans struct{}
+
+func (noopSpans) FromContext(antlr.ParserRuleContext) location.Span { return location.Span{} }
 
 func TestCompileString_SimpleExpression(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://simple.yammm")
@@ -162,21 +167,17 @@ func TestCompileString_DatatypeLiteral(t *testing.T) {
 }
 
 func TestCompile_NilContext(t *testing.T) {
-	reg := source.NewRegistry()
 	sourceID := location.MustNewSourceID("test://test.yammm")
-	_ = reg.Register(sourceID, []byte("_"))
 	collector := diag.NewCollector(0)
 
-	result := exprcomp.Compile(nil, collector, sourceID, reg, reg)
+	result := exprcomp.Compile(nil, collector, sourceID, nil)
 	assert.Nil(t, result)
 }
 
 func TestVisitor_HasErrors(t *testing.T) {
-	reg := source.NewRegistry()
 	sourceID := location.MustNewSourceID("test://test.yammm")
-	_ = reg.Register(sourceID, []byte("_"))
 
-	visitor := exprcomp.NewVisitor(nil, sourceID, reg, reg)
+	visitor := exprcomp.NewVisitor(nil, sourceID, noopSpans{})
 	assert.False(t, visitor.HasErrors())
 }
 
@@ -217,12 +218,10 @@ func TestCompileString_FunctionCall_NilNormalization(t *testing.T) {
 // TestVisitor_NilTree verifies that Visit handles nil input gracefully.
 // This is related to visitor.go error handling paths.
 func TestVisitor_NilTree(t *testing.T) {
-	reg := source.NewRegistry()
 	sourceID := location.MustNewSourceID("test://nil-tree.yammm")
-	_ = reg.Register(sourceID, []byte("_"))
 	collector := diag.NewCollector(0)
 
-	visitor := exprcomp.NewVisitor(collector, sourceID, reg, reg)
+	visitor := exprcomp.NewVisitor(collector, sourceID, noopSpans{})
 	result := visitor.Visit(nil)
 	assert.Nil(t, result)
 	assert.False(t, visitor.HasErrors(), "nil tree should not trigger error")

@@ -33,6 +33,10 @@ func TestHandleDefinition_WithUnit(t *testing.T) {
 
 	snapshot, doc := buildTestSnapshot(t)
 
+	// LoadString produces a synthetic sourceID "string://test.yammm".
+	// Map it to a client URI so the remap assertion works.
+	sourceKey := snapshot.EntrySourceID.String()
+
 	h := handleDefinition(&fakeResolver{
 		unit: &workspace.Unit{
 			Snapshot:  snapshot,
@@ -41,7 +45,7 @@ func TestHandleDefinition_WithUnit(t *testing.T) {
 			LocalChar: 7, // cursor on "Person"
 		},
 		uriMap: map[string]string{
-			"test://test.yammm": "file:///client/test.yammm",
+			sourceKey: "file:///client/test.yammm",
 		},
 	}, testLogger())
 

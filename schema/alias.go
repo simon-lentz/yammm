@@ -1,4 +1,4 @@
-package alias
+package schema
 
 import (
 	"maps"
@@ -11,12 +11,12 @@ import (
 // underscores.
 var validAliasRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
-// reservedKeywords contains all tokens that cannot be used as import aliases
+// reservedKeywordsMap contains all tokens that cannot be used as import aliases
 // because the lexer tokenizes them as literal keywords rather than identifiers.
 //
 // This map must remain synchronized with the grammar. The Grammar-Alias
 // Synchronization Test in alias_test.go verifies this.
-var reservedKeywords = map[string]bool{
+var reservedKeywordsMap = map[string]bool{
 	// DSL keywords (from lc_keyword rule and others)
 	"schema":   true,
 	"import":   true,
@@ -54,28 +54,28 @@ var reservedKeywords = map[string]bool{
 	"nil": true,
 }
 
-// ReservedKeywords returns a copy of all reserved keywords that cannot be used
+// reservedKeywords returns a copy of all reserved keywords that cannot be used
 // as import aliases. This is primarily for testing and diagnostic purposes.
-func ReservedKeywords() map[string]bool {
-	return maps.Clone(reservedKeywords)
+func reservedKeywords() map[string]bool {
+	return maps.Clone(reservedKeywordsMap)
 }
 
-// IsReservedKeyword returns true if the alias is a reserved keyword that cannot
+// isReservedKeyword returns true if the alias is a reserved keyword that cannot
 // be used as an import alias. Reserved keywords are tokenized by the lexer as
 // literal tokens rather than identifiers, making them unusable as qualifiers.
-func IsReservedKeyword(alias string) bool {
-	return reservedKeywords[alias]
+func isReservedKeyword(alias string) bool {
+	return reservedKeywordsMap[alias]
 }
 
-// IsValidAlias returns true if the alias is a valid identifier per the grammar.
+// isValidAlias returns true if the alias is a valid identifier per the grammar.
 // Valid aliases must start with a letter (A-Z or a-z) and contain only letters,
 // digits, and underscores. This does NOT check for reserved keywords; use
-// IsReservedKeyword for that.
-func IsValidAlias(alias string) bool {
+// isReservedKeyword for that.
+func isValidAlias(alias string) bool {
 	return validAliasRE.MatchString(alias)
 }
 
-// DeriveAliasFromPath extracts the default alias from an import path.
+// deriveAliasFromPath extracts the default alias from an import path.
 //
 // Rules:
 //  1. Strip trailing slashes
@@ -85,8 +85,8 @@ func IsValidAlias(alias string) bool {
 //  5. Prepend "n" if first character is a digit (produces valid identifier)
 //  6. Return "n" if result is empty
 //
-// The alias is NOT uppercased: "./parts" → "parts", not "Parts".
-func DeriveAliasFromPath(path string) string {
+// The alias is NOT uppercased: "./parts" -> "parts", not "Parts".
+func deriveAliasFromPath(path string) string {
 	// Strip trailing slashes
 	path = strings.TrimRight(path, "/")
 
@@ -117,8 +117,8 @@ func DeriveAliasFromPath(path string) string {
 		return "n"
 	}
 	// If first character is not a letter, prepend "n" to produce a valid identifier
-	// (e.g., "2parts" → "n2parts", "___" → "n___"). This ensures the derived alias
-	// passes IsValidAlias which requires starting with a letter.
+	// (e.g., "2parts" -> "n2parts", "___" -> "n___"). This ensures the derived alias
+	// passes isValidAlias which requires starting with a letter.
 	first := segment[0]
 	isLetter := (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')
 	if !isLetter {

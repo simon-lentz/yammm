@@ -12,75 +12,25 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// --- Test Helpers for Associations ---
-
-// makeAssociationTarget creates a simple type to be used as an association target.
-func makeAssociationTarget(name string) *schema.Type {
-	t := schema.InternalNewType(name, location.SourceID{}, location.Span{}, "", false, false)
-	pk := makeProp("id", schema.NewIntegerConstraint(), false, true)
-	schema.InternalSetTypeProperties(t, []*schema.Property{pk})
-	schema.InternalSetTypeAllProperties(t, []*schema.Property{pk})
-	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{pk})
-	schema.InternalSealType(t)
-	return t
-}
-
-// makeTypeWithAssociation creates a type with an association relation.
-func makeTypeWithAssociation(
-	name string,
-	targetType *schema.Type,
-	relationName string,
-	optional, many bool,
-	edgeProps []*schema.Property,
-) *schema.Type {
-	t := schema.InternalNewType(name, location.SourceID{}, location.Span{}, "", false, false)
-
-	idProp := makeProp("id", schema.NewIntegerConstraint(), false, true)
-	schema.InternalSetTypeProperties(t, []*schema.Property{idProp})
-	schema.InternalSetTypeAllProperties(t, []*schema.Property{idProp})
-	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{idProp})
-
-	// Create association relation to target type
-	rel := schema.InternalNewRelation(
-		schema.RelationAssociation,
-		relationName,
-		relationName, // fieldName
-		schema.NewTypeRef("", targetType.Name(), location.Span{}),
-		targetType.ID(),
-		location.Span{},
-		"",
-		optional,
-		many,
-		"",    // backref
-		true,  // reverseOptional
-		false, // reverseMany
-		name,  // owner
-		edgeProps,
-	)
-	schema.InternalSealRelation(rel)
-
-	schema.InternalSetTypeAssociations(t, []*schema.Relation{rel})
-	schema.InternalSetTypeAllAssociations(t, []*schema.Relation{rel})
-	schema.InternalSealType(t)
-	return t
-}
-
 // --- Edge Validation Tests ---
 
 func TestValidateEdges_SingleFK(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":       int64(1),
-			"employer": map[string]any{"_target_id": int64(42)},
+			"id":       "1",
+			"employer": map[string]any{"_target_id": "42"},
 		},
 	}
 
@@ -94,26 +44,29 @@ func TestValidateEdges_SingleFK(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.Equal(t, 1, edge.TargetCount())
-	assert.Equal(t, "[42]", edge.Targets()[0].TargetKey().String())
+	assert.Equal(t, `["42"]`, edge.Targets()[0].TargetKey().String())
 }
 
 func TestValidateEdges_Many(t *testing.T) {
-	targetType := makeAssociationTarget("Tag")
-	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Tag").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Item").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"tags": []any{
-				map[string]any{"_target_id": int64(10)},
-				map[string]any{"_target_id": int64(20)},
-				map[string]any{"_target_id": int64(30)},
+				map[string]any{"_target_id": "10"},
+				map[string]any{"_target_id": "20"},
+				map[string]any{"_target_id": "30"},
 			},
 		},
 	}
@@ -131,18 +84,21 @@ func TestValidateEdges_Many(t *testing.T) {
 }
 
 func TestValidateEdges_Optional_Nil(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			// "employer" is not present - optional edge
 		},
 	}
@@ -163,18 +119,21 @@ func TestValidateEdges_Required_Absent(t *testing.T) {
 	// Per architecture spec: association presence is a graph-layer concern.
 	// Absent required associations are valid at instance layer; validated at graph.Check()
 	// via E_UNRESOLVED_REQUIRED.
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", false, false, nil) // NOT optional
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), false, false). // NOT optional
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			// "employer" absent - valid at instance layer
 		},
 	}
@@ -192,19 +151,22 @@ func TestValidateEdges_Required_Absent(t *testing.T) {
 }
 
 func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil) // many=false
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false). // many=false
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":       int64(1),
-			"employer": []any{map[string]any{"_target_id": int64(42)}}, // Array when expecting object
+			"id":       "1",
+			"employer": []any{map[string]any{"_target_id": "42"}}, // Array when expecting object
 		},
 	}
 
@@ -217,19 +179,22 @@ func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
 }
 
 func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
-	targetType := makeAssociationTarget("Tag")
-	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil) // many=true
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Tag").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Item").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true). // many=true
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   int64(1),
-			"tags": map[string]any{"_target_id": int64(10)}, // Object when expecting array
+			"id":   "1",
+			"tags": map[string]any{"_target_id": "10"}, // Object when expecting array
 		},
 	}
 
@@ -242,18 +207,21 @@ func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
 }
 
 func TestValidateEdges_MissingFK(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":       int64(1),
+			"id":       "1",
 			"employer": map[string]any{}, // Missing _target_id
 		},
 	}
@@ -267,20 +235,23 @@ func TestValidateEdges_MissingFK(t *testing.T) {
 }
 
 func TestValidateEdges_UnknownField(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s) // Default: don't allow unknown fields
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"employer": map[string]any{
-				"_target_id":    int64(42),
+				"_target_id":    "42",
 				"unknown_field": "value",
 			},
 		},
@@ -295,20 +266,23 @@ func TestValidateEdges_UnknownField(t *testing.T) {
 }
 
 func TestValidateEdges_UnknownField_Allowed(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s, instance.WithAllowUnknownFields(true))
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"employer": map[string]any{
-				"_target_id":    int64(42),
+				"_target_id":    "42",
 				"unknown_field": "value", // Should be ignored
 			},
 		},
@@ -322,37 +296,38 @@ func TestValidateEdges_UnknownField_Allowed(t *testing.T) {
 }
 
 func TestValidateEdges_EdgePropertyValidation(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-
-	// Create edge property
-	edgeProps := []*schema.Property{
-		makeProp("role", schema.NewStringConstraint(), false, false), // Required edge property
-	}
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, edgeProps)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s, result, err := schema.LoadString(t.Context(), `schema "test"
+type Company {
+    id String primary
+}
+type Person {
+    id String primary
+    --> EMPLOYER (_) Company {
+        role String required
+    }
+}`, "test.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "schema: %s", result)
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"employer": map[string]any{
-				"_target_id": int64(42),
+				"_target_id": "42",
 				"role":       "engineer",
 			},
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, failure, verr := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
+	require.NoError(t, verr)
 	assert.Nil(t, failure)
 	require.NotNil(t, valid)
 
-	edge, ok := valid.Edge("employer")
+	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.Equal(t, 1, edge.TargetCount())
@@ -366,84 +341,91 @@ func TestValidateEdges_EdgePropertyValidation(t *testing.T) {
 }
 
 func TestValidateEdges_MissingRequiredEdgeProperty(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-
-	edgeProps := []*schema.Property{
-		makeProp("role", schema.NewStringConstraint(), false, false), // Required
-	}
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, edgeProps)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s, result, err := schema.LoadString(t.Context(), `schema "test"
+type Company {
+    id String primary
+}
+type Person {
+    id String primary
+    --> EMPLOYER (_) Company {
+        role String required
+    }
+}`, "test.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "schema: %s", result)
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"employer": map[string]any{
-				"_target_id": int64(42),
+				"_target_id": "42",
 				// Missing "role"
 			},
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, failure, verr := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
+	require.NoError(t, verr)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
 	assert.Contains(t, failure.Summary(), "missing required edge property")
 }
 
 func TestValidateEdges_EdgePropertyInvalid(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-
-	edgeProps := []*schema.Property{
-		makeProp("rating", schema.NewIntegerConstraint(), false, false),
-	}
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, edgeProps)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s, result, err := schema.LoadString(t.Context(), `schema "test"
+type Company {
+    id String primary
+}
+type Person {
+    id String primary
+    --> EMPLOYER (_) Company {
+        rating Integer required
+    }
+}`, "test.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "schema: %s", result)
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"employer": map[string]any{
-				"_target_id": int64(42),
+				"_target_id": "42",
 				"rating":     "not an integer",
 			},
 		},
 	}
 
-	valid, failure, err := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, failure, verr := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.NoError(t, err)
+	require.NoError(t, verr)
 	assert.Nil(t, valid)
 	require.NotNil(t, failure)
 	assert.Contains(t, failure.Summary(), "rating")
 }
 
 func TestValidateEdges_FKTypeMismatch(t *testing.T) {
-	targetType := makeAssociationTarget("Company") // id is integer
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()). // id is string
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"employer": map[string]any{
-				"_target_id": "not an integer", // Wrong type
+				"_target_id": int64(999), // Wrong type - integer instead of string
 			},
 		},
 	}
@@ -457,18 +439,21 @@ func TestValidateEdges_FKTypeMismatch(t *testing.T) {
 }
 
 func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
-	targetType := makeAssociationTarget("Tag")
-	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Tag").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Item").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"tags": []any{
 				"not an object", // Invalid element
 			},
@@ -484,18 +469,21 @@ func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
 }
 
 func TestValidateEdges_OptionalEdgeWithEmptyArray(t *testing.T) {
-	targetType := makeAssociationTarget("Tag")
-	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil) // Optional, many
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Tag").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Item").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true). // Optional, many
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   int64(1),
+			"id":   "1",
 			"tags": []any{}, // Empty array - valid for optional
 		},
 	}
@@ -517,18 +505,21 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 	// Per architecture spec: association empty-array validation is a graph-layer concern.
 	// Empty arrays for required associations are valid at instance layer; validated at graph.Check()
 	// via E_UNRESOLVED_REQUIRED with reason="empty".
-	targetType := makeAssociationTarget("Tag")
-	itemType := makeTypeWithAssociation("Item", targetType, "tags", false, true, nil) // NOT optional, many
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Tag").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Item").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), false, true). // NOT optional, many
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   int64(1),
+			"id":   "1",
 			"tags": []any{}, // Empty array - valid at instance layer
 		},
 	}
@@ -548,36 +539,26 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 
 // --- Composite FK Tests ---
 
-// makeAssociationTargetComposite creates a type with composite primary key.
-//
-//nolint:unparam // name is always "Enrollment" in tests but kept for consistency with makeAssociationTarget
-func makeAssociationTargetComposite(name string, pk1Name, pk2Name string) *schema.Type {
-	t := schema.InternalNewType(name, location.SourceID{}, location.Span{}, "", false, false)
-	pk1 := makeProp(pk1Name, schema.NewStringConstraint(), false, true)
-	pk2 := makeProp(pk2Name, schema.NewIntegerConstraint(), false, true)
-	schema.InternalSetTypeProperties(t, []*schema.Property{pk1, pk2})
-	schema.InternalSetTypeAllProperties(t, []*schema.Property{pk1, pk2})
-	schema.InternalSetTypePrimaryKeys(t, []*schema.Property{pk1, pk2})
-	schema.InternalSealType(t)
-	return t
-}
-
 func TestValidateEdges_CompositeFK(t *testing.T) {
-	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
-	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Enrollment").
+		WithPrimaryKey("region", schema.NewStringConstraint()).
+		WithPrimaryKey("studentId", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"enrollment": map[string]any{
 				"_target_region":    "us-east",
-				"_target_studentId": int64(12345),
+				"_target_studentId": "12345",
 			},
 		},
 	}
@@ -597,18 +578,22 @@ func TestValidateEdges_CompositeFK(t *testing.T) {
 }
 
 func TestValidateEdges_PartialCompositeFK(t *testing.T) {
-	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
-	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Enrollment").
+		WithPrimaryKey("region", schema.NewStringConstraint()).
+		WithPrimaryKey("studentId", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"enrollment": map[string]any{
 				"_target_region": "us-east",
 				// Missing _target_studentId
@@ -628,12 +613,15 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 // regardless of the StrictPropertyNames setting.
 // Per architecture spec: "_target_ID" does NOT match expected "_target_id".
 func TestValidateEdges_FKCaseSensitive(t *testing.T) {
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		Done())
 
 	t.Run("wrong_case_fails_even_without_strict_mode", func(t *testing.T) {
 		// Default: StrictPropertyNames = false, but FK fields are ALWAYS case-sensitive
@@ -641,9 +629,9 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 
 		raw := instance.RawInstance{
 			Properties: map[string]any{
-				"id": int64(1),
+				"id": "1",
 				// Wrong case: _target_ID instead of _target_id
-				"employer": map[string]any{"_target_ID": int64(42)},
+				"employer": map[string]any{"_target_ID": "42"},
 			},
 		}
 
@@ -661,9 +649,9 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 
 		raw := instance.RawInstance{
 			Properties: map[string]any{
-				"id": int64(1),
+				"id": "1",
 				// Wrong case: _Target_id instead of _target_id
-				"employer": map[string]any{"_Target_id": int64(42)},
+				"employer": map[string]any{"_Target_id": "42"},
 			},
 		}
 
@@ -680,8 +668,8 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 
 		raw := instance.RawInstance{
 			Properties: map[string]any{
-				"id":       int64(1),
-				"employer": map[string]any{"_target_id": int64(42)},
+				"id":       "1",
+				"employer": map[string]any{"_target_id": "42"},
 			},
 		}
 
@@ -697,18 +685,21 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 
 func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 	// Per architecture spec: null is always a shape error, even for optional associations.
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil) // optional
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false). // optional
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":       int64(1),
+			"id":       "1",
 			"employer": nil, // Explicit null - always a shape error
 		},
 	}
@@ -744,18 +735,21 @@ func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 
 func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 	// Per architecture spec: null is always a shape error.
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", false, false, nil) // NOT optional
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), false, false). // NOT optional
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":       int64(1),
+			"id":       "1",
 			"employer": nil, // Explicit null - always a shape error
 		},
 	}
@@ -774,18 +768,21 @@ func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 
 func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 	// Per architecture spec: null is always a shape error (expects array).
-	targetType := makeAssociationTarget("Tag")
-	itemType := makeTypeWithAssociation("Item", targetType, "tags", true, true, nil) // optional, many
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{itemType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Tag").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Item").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true). // optional, many
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   int64(1),
+			"id":   "1",
 			"tags": nil, // Explicit null - expects array
 		},
 	}
@@ -814,18 +811,21 @@ func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 
 func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 	// Verify E_MISSING_FK_TARGET includes 'relation' and 'expected' details.
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":       int64(1),
+			"id":       "1",
 			"employer": map[string]any{"weight": 5}, // No _target_* fields
 		},
 	}
@@ -868,18 +868,22 @@ func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 
 func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 	// Verify E_PARTIAL_COMPOSITE_FK includes 'relation', 'expected', and 'got' details.
-	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
-	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Enrollment").
+		WithPrimaryKey("region", schema.NewStringConstraint()).
+		WithPrimaryKey("studentId", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"enrollment": map[string]any{
 				"_target_region": "US", // Only one of two required FK fields
 			},
@@ -934,18 +938,21 @@ func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 	// Single-PK + _target_id: null
 	// Spec: present=1 -> E_TYPE_MISMATCH for the null field (not E_MISSING_FK_TARGET)
-	targetType := makeAssociationTarget("Company")
-	personType := makeTypeWithAssociation("Person", targetType, "employer", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Company").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"employer": map[string]any{
 				"_target_id": nil, // null value - present but invalid
 			},
@@ -970,7 +977,7 @@ func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 	for _, d := range details {
 		if d.Key == diag.DetailKeyExpected {
 			hasExpected = true
-			assert.Equal(t, "integer", d.Value)
+			assert.Equal(t, "string", d.Value)
 		}
 		if d.Key == diag.DetailKeyGot {
 			hasGot = true
@@ -984,21 +991,25 @@ func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 func TestValidateEdges_CompositeFK_OneNullOneValid(t *testing.T) {
 	// Composite PK: all present, one null
 	// Spec: present==expected -> E_TYPE_MISMATCH for null field only (not E_PARTIAL_COMPOSITE_FK)
-	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
-	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Enrollment").
+		WithPrimaryKey("region", schema.NewStringConstraint()).
+		WithPrimaryKey("studentId", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"enrollment": map[string]any{
-				"_target_region":    nil,          // null - present but invalid
-				"_target_studentId": int64(12345), // valid
+				"_target_region":    nil,     // null - present but invalid
+				"_target_studentId": "12345", // valid
 			},
 		},
 	}
@@ -1021,18 +1032,22 @@ func TestValidateEdges_CompositeFK_OneNullOneValid(t *testing.T) {
 func TestValidateEdges_CompositeFK_OneNullOneMissing(t *testing.T) {
 	// Composite PK: one present (null), one missing
 	// Spec: present=1 -> E_PARTIAL_COMPOSITE_FK + E_TYPE_MISMATCH for null
-	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
-	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Enrollment").
+		WithPrimaryKey("region", schema.NewStringConstraint()).
+		WithPrimaryKey("studentId", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"enrollment": map[string]any{
 				"_target_region": nil, // present but null
 				// _target_studentId is missing
@@ -1075,21 +1090,25 @@ func TestValidateEdges_CompositeFK_OneNullOneMissing(t *testing.T) {
 func TestValidateEdges_CompositeFK_OneNullOneInvalidType(t *testing.T) {
 	// Composite PK: both present, both invalid (one null, one wrong type)
 	// Spec: present==expected -> E_TYPE_MISMATCH for each invalid field (not E_PARTIAL_COMPOSITE_FK)
-	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
-	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Enrollment").
+		WithPrimaryKey("region", schema.NewStringConstraint()).
+		WithPrimaryKey("studentId", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"enrollment": map[string]any{
-				"_target_region":    nil,              // null - present but invalid
-				"_target_studentId": "not an integer", // wrong type - present but invalid
+				"_target_region":    nil,        // null - present but invalid
+				"_target_studentId": int64(999), // wrong type (integer instead of string) - present but invalid
 			},
 		},
 	}
@@ -1115,18 +1134,22 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 	// Composite PK: one present (invalid type), one missing
 	// Spec: present=1 -> E_PARTIAL_COMPOSITE_FK + E_TYPE_MISMATCH
 	// This tests that 'got' includes present keys even if invalid
-	targetType := makeAssociationTargetComposite("Enrollment", "region", "studentId")
-	personType := makeTypeWithAssociation("Person", targetType, "enrollment", true, false, nil)
-
-	s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.InternalSetSchemaTypes(s, []*schema.Type{personType, targetType})
-	schema.InternalSealSchema(s)
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Enrollment").
+		WithPrimaryKey("region", schema.NewStringConstraint()).
+		WithPrimaryKey("studentId", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
+		Done())
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id": int64(1),
+			"id": "1",
 			"enrollment": map[string]any{
 				"_target_region": 12345, // wrong type (integer instead of string)
 				// _target_studentId is missing
@@ -1164,7 +1187,7 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 }
 
 // --- Multiplicity Matrix Test ---
-// Tests all 4 combinations of (optional/required) × (one/many) multiplicity.
+// Tests all 4 combinations of (optional/required) x (one/many) multiplicity.
 //
 // Note: Required edge enforcement happens at the graph layer (Check()), not
 // at instance validation. The instance layer validates edge _format_ (shape,
@@ -1172,9 +1195,6 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 // works correctly for all multiplicity combinations.
 
 func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
-	// Create target type
-	targetType := makeAssociationTarget("Item")
-
 	testCases := []struct {
 		name          string
 		optional      bool
@@ -1192,24 +1212,24 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 			input:         nil, // Not present in properties
 			expectSuccess: true,
 			expectEdges:   0,
-			description:   "(optional × one) absent edge is valid",
+			description:   "(optional x one) absent edge is valid",
 		},
 		{
 			name:          "optional_one_present",
 			optional:      true,
 			many:          false,
-			input:         map[string]any{"_target_id": int64(1)},
+			input:         map[string]any{"_target_id": "1"},
 			expectSuccess: true,
 			expectEdges:   1,
-			description:   "(optional × one) present edge is valid",
+			description:   "(optional x one) present edge is valid",
 		},
 		{
 			name:          "optional_one_wrong_shape",
 			optional:      true,
 			many:          false,
-			input:         []any{map[string]any{"_target_id": int64(1)}}, // Array instead of object
+			input:         []any{map[string]any{"_target_id": "1"}}, // Array instead of object
 			expectSuccess: false,
-			description:   "(optional × one) array shape fails",
+			description:   "(optional x one) array shape fails",
 		},
 
 		// --- Required One ---
@@ -1221,24 +1241,24 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 			input:         nil, // Not present - validated later at graph.Check()
 			expectSuccess: true,
 			expectEdges:   0,
-			description:   "(required × one) absent passes validation (enforced at graph.Check)",
+			description:   "(required x one) absent passes validation (enforced at graph.Check)",
 		},
 		{
 			name:          "required_one_present",
 			optional:      false,
 			many:          false,
-			input:         map[string]any{"_target_id": int64(1)},
+			input:         map[string]any{"_target_id": "1"},
 			expectSuccess: true,
 			expectEdges:   1,
-			description:   "(required × one) present edge is valid",
+			description:   "(required x one) present edge is valid",
 		},
 		{
 			name:          "required_one_wrong_shape",
 			optional:      false,
 			many:          false,
-			input:         []any{map[string]any{"_target_id": int64(1)}}, // Array instead of object
+			input:         []any{map[string]any{"_target_id": "1"}}, // Array instead of object
 			expectSuccess: false,
-			description:   "(required × one) array shape fails",
+			description:   "(required x one) array shape fails",
 		},
 
 		// --- Optional Many ---
@@ -1249,7 +1269,7 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 			input:         nil, // Not present
 			expectSuccess: true,
 			expectEdges:   0,
-			description:   "(optional × many) absent edge is valid",
+			description:   "(optional x many) absent edge is valid",
 		},
 		{
 			name:          "optional_many_empty",
@@ -1258,33 +1278,33 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 			input:         []any{},
 			expectSuccess: true,
 			expectEdges:   0,
-			description:   "(optional × many) empty array is valid",
+			description:   "(optional x many) empty array is valid",
 		},
 		{
 			name:          "optional_many_single",
 			optional:      true,
 			many:          true,
-			input:         []any{map[string]any{"_target_id": int64(1)}},
+			input:         []any{map[string]any{"_target_id": "1"}},
 			expectSuccess: true,
 			expectEdges:   1,
-			description:   "(optional × many) single element is valid",
+			description:   "(optional x many) single element is valid",
 		},
 		{
 			name:          "optional_many_multiple",
 			optional:      true,
 			many:          true,
-			input:         []any{map[string]any{"_target_id": int64(1)}, map[string]any{"_target_id": int64(2)}},
+			input:         []any{map[string]any{"_target_id": "1"}, map[string]any{"_target_id": "2"}},
 			expectSuccess: true,
 			expectEdges:   2,
-			description:   "(optional × many) multiple elements are valid",
+			description:   "(optional x many) multiple elements are valid",
 		},
 		{
 			name:          "optional_many_wrong_shape",
 			optional:      true,
 			many:          true,
-			input:         map[string]any{"_target_id": int64(1)}, // Object instead of array
+			input:         map[string]any{"_target_id": "1"}, // Object instead of array
 			expectSuccess: false,
-			description:   "(optional × many) object shape fails",
+			description:   "(optional x many) object shape fails",
 		},
 
 		// --- Required Many ---
@@ -1296,7 +1316,7 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 			input:         nil, // Not present - validated later at graph.Check()
 			expectSuccess: true,
 			expectEdges:   0,
-			description:   "(required × many) absent passes validation (enforced at graph.Check)",
+			description:   "(required x many) absent passes validation (enforced at graph.Check)",
 		},
 		{
 			name:          "required_many_empty",
@@ -1305,49 +1325,53 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 			input:         []any{},
 			expectSuccess: true,
 			expectEdges:   0,
-			description:   "(required × many) empty passes validation (enforced at graph.Check)",
+			description:   "(required x many) empty passes validation (enforced at graph.Check)",
 		},
 		{
 			name:          "required_many_single",
 			optional:      false,
 			many:          true,
-			input:         []any{map[string]any{"_target_id": int64(1)}},
+			input:         []any{map[string]any{"_target_id": "1"}},
 			expectSuccess: true,
 			expectEdges:   1,
-			description:   "(required × many) single element is valid",
+			description:   "(required x many) single element is valid",
 		},
 		{
 			name:          "required_many_multiple",
 			optional:      false,
 			many:          true,
-			input:         []any{map[string]any{"_target_id": int64(1)}, map[string]any{"_target_id": int64(2)}, map[string]any{"_target_id": int64(3)}},
+			input:         []any{map[string]any{"_target_id": "1"}, map[string]any{"_target_id": "2"}, map[string]any{"_target_id": "3"}},
 			expectSuccess: true,
 			expectEdges:   3,
-			description:   "(required × many) multiple elements are valid",
+			description:   "(required x many) multiple elements are valid",
 		},
 		{
 			name:          "required_many_wrong_shape",
 			optional:      false,
 			many:          true,
-			input:         map[string]any{"_target_id": int64(1)}, // Object instead of array
+			input:         map[string]any{"_target_id": "1"}, // Object instead of array
 			expectSuccess: false,
-			description:   "(required × many) object shape fails",
+			description:   "(required x many) object shape fails",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create type with the specific multiplicity configuration
-			sourceType := makeTypeWithAssociation("Source", targetType, "items", tc.optional, tc.many, nil)
-
-			s := schema.InternalNewSchema("test", location.SourceID{}, location.Span{}, "")
-			schema.InternalSetSchemaTypes(s, []*schema.Type{sourceType, targetType})
-			schema.InternalSealSchema(s)
+			// Create schema with the specific multiplicity configuration
+			s := mustBuild(t, schema.NewBuilder().
+				WithName("test").
+				AddType("Item").
+				WithPrimaryKey("id", schema.NewStringConstraint()).
+				Done().
+				AddType("Source").
+				WithPrimaryKey("id", schema.NewStringConstraint()).
+				WithRelation("items", schema.NewTypeRef("", "Item", location.Span{}), tc.optional, tc.many).
+				Done())
 
 			validator := instance.NewValidator(s)
 
 			// Build raw instance
-			props := map[string]any{"id": int64(1)}
+			props := map[string]any{"id": "1"}
 			if tc.input != nil {
 				props["items"] = tc.input
 			}

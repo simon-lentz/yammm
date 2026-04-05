@@ -15,20 +15,18 @@ import (
 // Compilation errors are collected in the provided collector. The function
 // returns nil if the context is nil or if there were fatal compilation errors.
 //
-// The registry and converter are used for span derivation (converting ANTLR's
-// rune-based positions to byte-based positions for diagnostics).
+// The spans parameter provides ANTLR-to-Span conversion for diagnostics.
 func Compile(
 	ctx grammar.IExprContext,
 	collector *diag.Collector,
 	sourceID location.SourceID,
-	registry location.PositionRegistry,
-	converter location.RuneOffsetConverter,
+	spans SpanFromContext,
 ) expr.Expression {
 	if ctx == nil {
 		return nil
 	}
 
-	visitor := NewVisitor(collector, sourceID, registry, converter)
+	visitor := NewVisitor(collector, sourceID, spans)
 	return visitor.Visit(ctx)
 }
 
@@ -96,5 +94,38 @@ func CompileString(
 		return nil
 	}
 
-	return Compile(exprCtx, collector, sourceID, localReg, localReg)
+	spans := &localSpanBuilder{sourceID: sourceID, registry: localReg, converter: localReg}
+	return Compile(exprCtx, collector, sourceID, spans)
+}
+
+// localSpanBuilder is a minimal SpanFromContext for CompileString.
+// It duplicates the rune-to-byte conversion logic from schema.spanBuilder
+// to avoid importing the parent schema package.
+type localSpanBuilder struct {
+	sourceID  location.SourceID
+	registry  location.PositionRegistry
+	converter location.RuneOffsetConverter
+}
+
+func (b *localSpanBuilder) FromContext(ctx antlr.ParserRuleContext) location.Span {
+	if ctx == nil {
+		return location.Span{}
+	}
+	start := ctx.GetStart()
+	stop := ctx.GetStop()
+	if start == nil {
+		return location.Span{}
+	}
+	startRune := start.GetStart()
+	var endRune int
+	if stop != nil {
+		endRune = stop.GetStop() + 1
+	} else {
+		endRune = start.GetStop() + 1
+	}
+	startByte, _ := b.converter.RuneToByteOffset(b.sourceID, startRune)
+	endByte, _ := b.converter.RuneToByteOffset(b.sourceID, endRune)
+	startPos := b.registry.PositionAt(b.sourceID, startByte)
+	endPos := b.registry.PositionAt(b.sourceID, endByte)
+	return location.Span{Source: b.sourceID, Start: startPos, End: endPos}
 }

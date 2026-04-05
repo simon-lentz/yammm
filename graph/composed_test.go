@@ -10,7 +10,6 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 // AddComposed Tests
@@ -435,7 +434,7 @@ func TestAddComposed_SchemaMismatch(t *testing.T) {
 	}
 
 	// Create a completely different schema
-	otherSchema, _ := build.NewBuilder().
+	otherSchema, _ := schema.NewBuilder().
 		WithName("other").
 		WithSourceID(location.MustNewSourceID("test://other.yammm")).
 		AddType("OtherChild").

@@ -10,8 +10,8 @@
 //   - Formatting with canonical style (tabs, LF)
 //
 // The server communicates via JSON-RPC 2.0 over stdio (using creachadair/jrpc2)
-// and implements LSP 3.16. It leverages the existing schema/load package for
-// analysis to ensure consistency between CLI and editor behavior.
+// and implements LSP 3.16. It leverages the schema package's Load functions
+// for analysis to ensure consistency between CLI and editor behavior.
 //
 // # Markdown Embedded Blocks
 //
@@ -32,7 +32,7 @@
 //   - Feature providers: Definition, hover, completion, symbols, formatting
 //   - internal/workspace: Manages open documents, markdown lifecycle, analysis scheduling, dependency tracking, and URI mapping
 //   - internal/docstate: Pure document types (.yammm overlays, text normalization, brace scanning) — true leaf, no internal imports
-//   - internal/analysis: Wraps schema/load for import-aware analysis
+//   - internal/analysis: Wraps schema loading for import-aware analysis
 //   - internal/symbols: Symbol extraction and indexing
 //   - internal/format: YAMMM document formatting
 //   - internal/markdown: Code block extraction from Markdown

@@ -12,7 +12,7 @@ import (
 func TestRelation_SetTargetID(t *testing.T) {
 	targetID := schema.NewTypeID(location.NewSourceID("test://schema"), "Target")
 
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation,
 		"REL",
 		"rel",
@@ -29,7 +29,7 @@ func TestRelation_SetTargetID(t *testing.T) {
 
 	assert.True(t, r.TargetID().IsZero(), "initially should be zero")
 
-	schema.InternalSetRelationTargetID(r, targetID)
+	schema.TestSetRelationTargetID(r, targetID)
 
 	assert.Equal(t, targetID, r.TargetID())
 	assert.False(t, r.TargetID().IsZero())
@@ -39,12 +39,12 @@ func TestRelation_Equal_WithTargetID(t *testing.T) {
 	targetID1 := schema.NewTypeID(location.NewSourceID("test://a"), "Target")
 	targetID2 := schema.NewTypeID(location.NewSourceID("test://b"), "Target")
 
-	r1 := schema.InternalNewRelation(
+	r1 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.NewTypeRef("", "Target", location.Span{}), targetID1,
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
-	r2 := schema.InternalNewRelation(
+	r2 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.NewTypeRef("", "Target", location.Span{}), targetID2,
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -52,19 +52,19 @@ func TestRelation_Equal_WithTargetID(t *testing.T) {
 
 	assert.False(t, r1.Equal(r2), "relations with different targetID should not be equal")
 
-	schema.InternalSetRelationTargetID(r2, targetID1)
+	schema.TestSetRelationTargetID(r2, targetID1)
 	assert.True(t, r1.Equal(r2), "relations with same targetID should be equal")
 }
 
 func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
 	// Two relations with zero targetIDs are equal if all other fields match
 	// This is the current (incorrect) behavior that CC3 aims to fix
-	r1 := schema.InternalNewRelation(
+	r1 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.NewTypeRef("", "Target", location.Span{}), schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
-	r2 := schema.InternalNewRelation(
+	r2 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.NewTypeRef("", "Target", location.Span{}), schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -75,7 +75,7 @@ func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
 }
 
 func TestRelation_Seal_PreventsSetTargetID(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation,
 		"REL",
 		"rel",
@@ -92,11 +92,11 @@ func TestRelation_Seal_PreventsSetTargetID(t *testing.T) {
 
 	// SetTargetID should work before sealing
 	targetID := schema.NewTypeID(location.NewSourceID("test://schema"), "Target")
-	schema.InternalSetRelationTargetID(r, targetID)
+	schema.TestSetRelationTargetID(r, targetID)
 	assert.Equal(t, targetID, r.TargetID())
 
 	// Seal the relation
-	schema.InternalSealRelation(r)
+	schema.TestSealRelation(r)
 
 	// SetTargetID should panic after sealing
 	defer func() {
@@ -106,11 +106,11 @@ func TestRelation_Seal_PreventsSetTargetID(t *testing.T) {
 	}()
 
 	newTargetID := schema.NewTypeID(location.NewSourceID("test://other"), "Other")
-	schema.InternalSetRelationTargetID(r, newTargetID)
+	schema.TestSetRelationTargetID(r, newTargetID)
 }
 
 func TestRelation_SetTargetID_WorksBeforeSeal(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation,
 		"REL",
 		"rel",
@@ -126,12 +126,12 @@ func TestRelation_SetTargetID_WorksBeforeSeal(t *testing.T) {
 	)
 
 	targetID := schema.NewTypeID(location.NewSourceID("test://schema"), "Target")
-	schema.InternalSetRelationTargetID(r, targetID)
+	schema.TestSetRelationTargetID(r, targetID)
 	assert.Equal(t, targetID, r.TargetID())
 
 	// Can set multiple times before sealing
 	newTargetID := schema.NewTypeID(location.NewSourceID("test://other"), "Other")
-	schema.InternalSetRelationTargetID(r, newTargetID)
+	schema.TestSetRelationTargetID(r, newTargetID)
 	assert.Equal(t, newTargetID, r.TargetID())
 }
 
@@ -146,10 +146,10 @@ func TestNewRelation(t *testing.T) {
 		End:    location.Position{Line: 10, Column: 50, Byte: 150},
 	}
 	props := []*schema.Property{
-		schema.InternalNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
 	}
 
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"works_at",
@@ -200,12 +200,12 @@ func TestRelationKind_String(t *testing.T) {
 }
 
 func TestRelation_Kind(t *testing.T) {
-	assoc := schema.InternalNewRelation(
+	assoc := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
-	comp := schema.InternalNewRelation(
+	comp := schema.TestNewRelation(
 		schema.RelationComposition, "PART", "part",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -216,7 +216,7 @@ func TestRelation_Kind(t *testing.T) {
 }
 
 func TestRelation_Name(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "BELONGS_TO", "belongs_to",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -226,7 +226,7 @@ func TestRelation_Name(t *testing.T) {
 }
 
 func TestRelation_FieldName(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "WORKS_AT", "works_at",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -238,7 +238,7 @@ func TestRelation_FieldName(t *testing.T) {
 func TestRelation_Target(t *testing.T) {
 	target := schema.NewTypeRef("users", "Person", location.Span{})
 
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		target, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -256,7 +256,7 @@ func TestRelation_Span(t *testing.T) {
 		End:    location.Position{Line: 15, Column: 40, Byte: 187},
 	}
 
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		span, "", false, false, "", false, false, "Owner", nil,
@@ -269,7 +269,7 @@ func TestRelation_Span(t *testing.T) {
 }
 
 func TestRelation_Documentation(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "Describes the relationship", false, false, "", false, false, "Owner", nil,
@@ -279,12 +279,12 @@ func TestRelation_Documentation(t *testing.T) {
 }
 
 func TestRelation_IsOptional(t *testing.T) {
-	optional := schema.InternalNewRelation(
+	optional := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", true, false, "", false, false, "Owner", nil,
 	)
-	required := schema.InternalNewRelation(
+	required := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -295,12 +295,12 @@ func TestRelation_IsOptional(t *testing.T) {
 }
 
 func TestRelation_IsMany(t *testing.T) {
-	many := schema.InternalNewRelation(
+	many := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, true, "", false, false, "Owner", nil,
 	)
-	one := schema.InternalNewRelation(
+	one := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -311,7 +311,7 @@ func TestRelation_IsMany(t *testing.T) {
 }
 
 func TestRelation_Backref(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "MANAGES", "manages",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "MANAGED_BY", false, false, "Manager", nil,
@@ -321,7 +321,7 @@ func TestRelation_Backref(t *testing.T) {
 }
 
 func TestRelation_Backref_Empty(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -331,7 +331,7 @@ func TestRelation_Backref_Empty(t *testing.T) {
 }
 
 func TestRelation_ReverseMultiplicity(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "REVERSE",
@@ -346,7 +346,7 @@ func TestRelation_ReverseMultiplicity(t *testing.T) {
 }
 
 func TestRelation_ReverseMultiplicity_OneToOne(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "REVERSE",
@@ -361,7 +361,7 @@ func TestRelation_ReverseMultiplicity_OneToOne(t *testing.T) {
 }
 
 func TestRelation_Owner(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "OWNS", "owns",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Company", nil,
@@ -372,11 +372,11 @@ func TestRelation_Owner(t *testing.T) {
 
 func TestRelation_Properties_Iterator(t *testing.T) {
 	props := []*schema.Property{
-		schema.InternalNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
-		schema.InternalNewProperty("role", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("role", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{}),
 	}
 
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", props,
@@ -391,7 +391,7 @@ func TestRelation_Properties_Iterator(t *testing.T) {
 }
 
 func TestRelation_Properties_Empty(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -406,10 +406,10 @@ func TestRelation_Properties_Empty(t *testing.T) {
 
 func TestRelation_PropertiesSlice(t *testing.T) {
 	props := []*schema.Property{
-		schema.InternalNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
 	}
 
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", props,
@@ -422,10 +422,10 @@ func TestRelation_PropertiesSlice(t *testing.T) {
 
 func TestRelation_PropertiesSlice_DefensiveCopy(t *testing.T) {
 	props := []*schema.Property{
-		schema.InternalNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
 	}
 
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", props,
@@ -441,11 +441,11 @@ func TestRelation_PropertiesSlice_DefensiveCopy(t *testing.T) {
 
 func TestRelation_Property_Found(t *testing.T) {
 	props := []*schema.Property{
-		schema.InternalNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
-		schema.InternalNewProperty("role", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, true, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("role", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, true, false, schema.DeclaringScope{}),
 	}
 
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", props,
@@ -462,7 +462,7 @@ func TestRelation_Property_Found(t *testing.T) {
 }
 
 func TestRelation_Property_NotFound(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -474,12 +474,12 @@ func TestRelation_Property_NotFound(t *testing.T) {
 }
 
 func TestRelation_IsAssociation(t *testing.T) {
-	assoc := schema.InternalNewRelation(
+	assoc := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
-	comp := schema.InternalNewRelation(
+	comp := schema.TestNewRelation(
 		schema.RelationComposition, "PART", "part",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -490,12 +490,12 @@ func TestRelation_IsAssociation(t *testing.T) {
 }
 
 func TestRelation_IsComposition(t *testing.T) {
-	assoc := schema.InternalNewRelation(
+	assoc := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
-	comp := schema.InternalNewRelation(
+	comp := schema.TestNewRelation(
 		schema.RelationComposition, "PART", "part",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -506,15 +506,15 @@ func TestRelation_IsComposition(t *testing.T) {
 }
 
 func TestRelation_HasProperties(t *testing.T) {
-	withProps := schema.InternalNewRelation(
+	withProps := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner",
 		[]*schema.Property{
-			schema.InternalNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+			schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
 		},
 	)
-	withoutProps := schema.InternalNewRelation(
+	withoutProps := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -525,12 +525,12 @@ func TestRelation_HasProperties(t *testing.T) {
 }
 
 func TestRelation_Equal_DifferentName(t *testing.T) {
-	r1 := schema.InternalNewRelation(
+	r1 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL_A", "rel_a",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
-	r2 := schema.InternalNewRelation(
+	r2 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL_B", "rel_b",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -540,12 +540,12 @@ func TestRelation_Equal_DifferentName(t *testing.T) {
 }
 
 func TestRelation_Equal_DifferentKind(t *testing.T) {
-	r1 := schema.InternalNewRelation(
+	r1 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
-	r2 := schema.InternalNewRelation(
+	r2 := schema.TestNewRelation(
 		schema.RelationComposition, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -555,12 +555,12 @@ func TestRelation_Equal_DifferentKind(t *testing.T) {
 }
 
 func TestRelation_Equal_DifferentMultiplicity(t *testing.T) {
-	r1 := schema.InternalNewRelation(
+	r1 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", true, false, "", false, false, "Owner", nil,
 	)
-	r2 := schema.InternalNewRelation(
+	r2 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, true, "", false, false, "Owner", nil,
@@ -570,12 +570,12 @@ func TestRelation_Equal_DifferentMultiplicity(t *testing.T) {
 }
 
 func TestRelation_Equal_DifferentBackref(t *testing.T) {
-	r1 := schema.InternalNewRelation(
+	r1 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "BACK_A", false, false, "Owner", nil,
 	)
-	r2 := schema.InternalNewRelation(
+	r2 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "BACK_B", false, false, "Owner", nil,
@@ -585,12 +585,12 @@ func TestRelation_Equal_DifferentBackref(t *testing.T) {
 }
 
 func TestRelation_Equal_DifferentReverseMultiplicity(t *testing.T) {
-	r1 := schema.InternalNewRelation(
+	r1 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "BACK", true, false, "Owner", nil,
 	)
-	r2 := schema.InternalNewRelation(
+	r2 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "BACK", false, true, "Owner", nil,
@@ -600,15 +600,15 @@ func TestRelation_Equal_DifferentReverseMultiplicity(t *testing.T) {
 }
 
 func TestRelation_Equal_DifferentPropertyCount(t *testing.T) {
-	r1 := schema.InternalNewRelation(
+	r1 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner",
 		[]*schema.Property{
-			schema.InternalNewProperty("p1", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+			schema.TestNewProperty("p1", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
 		},
 	)
-	r2 := schema.InternalNewRelation(
+	r2 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -618,7 +618,7 @@ func TestRelation_Equal_DifferentPropertyCount(t *testing.T) {
 }
 
 func TestRelation_Equal_Nil(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
@@ -637,16 +637,16 @@ func TestRelation_Equal_BothNil(t *testing.T) {
 }
 
 func TestRelation_IsSealed(t *testing.T) {
-	r := schema.InternalNewRelation(
+	r := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
 
 	// New relation should not be sealed
-	assert.False(t, schema.InternalIsSealedRelation(r), "new relation should not be sealed")
+	assert.False(t, schema.TestIsSealedRelation(r), "new relation should not be sealed")
 
 	// After sealing, IsSealed should return true
-	schema.InternalSealRelation(r)
-	assert.True(t, schema.InternalIsSealedRelation(r), "sealed relation should report IsSealed() == true")
+	schema.TestSealRelation(r)
+	assert.True(t, schema.TestIsSealedRelation(r), "sealed relation should report IsSealed() == true")
 }

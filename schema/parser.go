@@ -1,4 +1,4 @@
-package parse
+package schema
 
 import (
 	"fmt"
@@ -11,36 +11,34 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/grammar"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
-	"github.com/simon-lentz/yammm/schema/internal/alias"
 	"github.com/simon-lentz/yammm/schema/internal/exprcomp"
 )
 
-// Parser parses YAMMM schema source into an AST Model.
-type Parser struct {
+// schemaParser parses YAMMM schema source into an AST model.
+type schemaParser struct {
 	sourceID  location.SourceID
 	collector *diag.Collector
-	spans     *SpanBuilder
+	spans     *spanBuilder
 }
 
-// NewParser creates a new Parser for the given source.
-func NewParser(
+// newParser creates a new schemaParser for the given source.
+func newParser(
 	sourceID location.SourceID,
 	collector *diag.Collector,
 	registry location.PositionRegistry,
 	converter location.RuneOffsetConverter,
-) *Parser {
-	return &Parser{
+) *schemaParser {
+	return &schemaParser{
 		sourceID:  sourceID,
 		collector: collector,
-		spans:     NewSpanBuilder(sourceID, registry, converter),
+		spans:     newSpanBuilder(sourceID, registry, converter),
 	}
 }
 
-// Parse parses the source content and returns an AST Model.
+// Parse parses the source content and returns an AST model.
 // Parse errors are collected in the provided collector.
-func (p *Parser) Parse(source []byte) *Model {
+func (p *schemaParser) Parse(source []byte) *model {
 	input := antlr.NewInputStream(string(source))
 	lexer := grammar.NewYammmGrammarLexer(input)
 	stream := antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel)
@@ -74,7 +72,7 @@ type errorListener struct {
 	*antlr.DefaultErrorListener
 	collector *diag.Collector
 	sourceID  location.SourceID
-	spans     *SpanBuilder
+	spans     *spanBuilder
 }
 
 func (e *errorListener) SyntaxError(
@@ -101,25 +99,25 @@ func (e *errorListener) SyntaxError(
 	e.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX, msg).WithSpan(span).Build())
 }
 
-// astBuilder is an ANTLR listener that builds the AST Model.
+// astBuilder is an ANTLR listener that builds the AST model.
 type astBuilder struct {
 	*grammar.BaseYammmGrammarListener
-	parser    *Parser
+	parser    *schemaParser
 	sourceID  location.SourceID
 	collector *diag.Collector
-	spans     *SpanBuilder
+	spans     *spanBuilder
 
 	// Current parsing state
-	model          *Model
-	currentType    *TypeDecl
-	currentDT      schema.Constraint
-	currentDTRef   schema.DataTypeRef // Reference to DataType (for alias constraints)
-	currentProps   []*PropertyDecl
-	currentImports []*ImportDecl
+	model          *model
+	currentType    *typeDecl
+	currentDT      Constraint
+	currentDTRef   DataTypeRef // Reference to DataType (for alias constraints)
+	currentProps   []*propertyDecl
+	currentImports []*importDecl
 }
 
 // ExitSchema_name is called when exiting the schema_name production.
-func (b *astBuilder) ExitSchema_name(ctx *grammar.Schema_nameContext) {
+func (b *astBuilder) ExitSchema_name(ctx *grammar.Schema_nameContext) { //nolint:revive // ANTLR-generated name
 	nameToken := ctx.GetToken(grammar.YammmGrammarLexerSTRING, 0)
 	if nameToken == nil {
 		b.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_SYNTAX, "missing schema name").Build())
@@ -139,7 +137,7 @@ func (b *astBuilder) ExitSchema_name(ctx *grammar.Schema_nameContext) {
 		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
 	}
 
-	b.model = &Model{
+	b.model = &model{
 		Name:          name,
 		Span:          b.spans.FromContext(ctx),
 		Documentation: doc,
@@ -147,7 +145,7 @@ func (b *astBuilder) ExitSchema_name(ctx *grammar.Schema_nameContext) {
 }
 
 // ExitImport_decl is called when exiting the import_decl production.
-func (b *astBuilder) ExitImport_decl(ctx *grammar.Import_declContext) {
+func (b *astBuilder) ExitImport_decl(ctx *grammar.Import_declContext) { //nolint:revive // ANTLR-generated name
 	pathToken := ctx.GetPath()
 	if pathToken == nil {
 		return
@@ -165,18 +163,18 @@ func (b *astBuilder) ExitImport_decl(ctx *grammar.Import_declContext) {
 	if aliasCtx := ctx.GetAlias(); aliasCtx != nil {
 		importAlias = aliasCtx.GetText()
 	} else {
-		importAlias = alias.DeriveAliasFromPath(path)
+		importAlias = deriveAliasFromPath(path)
 	}
 
 	// Check for reserved keyword alias
-	if alias.IsReservedKeyword(importAlias) {
+	if isReservedKeyword(importAlias) {
 		span := b.spans.FromContext(ctx)
 		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
 			fmt.Sprintf("import alias %q is a reserved keyword", importAlias)).WithSpan(span).Build())
 		return
 	}
 
-	imp := &ImportDecl{
+	imp := &importDecl{
 		Path:  path,
 		Alias: importAlias,
 		Span:  b.spans.FromContext(ctx),
@@ -209,7 +207,7 @@ func (b *astBuilder) EnterType(ctx *grammar.TypeContext) {
 		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
 	}
 
-	b.currentType = &TypeDecl{
+	b.currentType = &typeDecl{
 		Name:          typeName,
 		NameSpan:      nameSpan,
 		IsAbstract:    ctx.GetIs_abstract() != nil,
@@ -229,7 +227,7 @@ func (b *astBuilder) ExitType(_ *grammar.TypeContext) {
 }
 
 // ExitExtends_types is called when exiting the extends_types production.
-func (b *astBuilder) ExitExtends_types(ctx *grammar.Extends_typesContext) {
+func (b *astBuilder) ExitExtends_types(ctx *grammar.Extends_typesContext) { //nolint:revive // ANTLR-generated name
 	if b.currentType == nil {
 		return
 	}
@@ -262,7 +260,7 @@ func (b *astBuilder) ExitProperty(ctx *grammar.PropertyContext) {
 		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
 	}
 
-	prop := &PropertyDecl{
+	prop := &propertyDecl{
 		Name:          propName,
 		Constraint:    b.currentDT,
 		DataTypeRef:   b.currentDTRef,
@@ -273,7 +271,7 @@ func (b *astBuilder) ExitProperty(ctx *grammar.PropertyContext) {
 	}
 	b.currentType.Properties = append(b.currentType.Properties, prop)
 	b.currentDT = nil
-	b.currentDTRef = schema.DataTypeRef{} // Clear for next property
+	b.currentDTRef = DataTypeRef{} // Clear for next property
 }
 
 // ExitDatatype is called when exiting the datatype production.
@@ -291,7 +289,7 @@ func (b *astBuilder) ExitDatatype(ctx *grammar.DatatypeContext) {
 		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
 	}
 
-	dt := &DataTypeDecl{
+	dt := &dataTypeDecl{
 		Name:          typeName,
 		Constraint:    b.currentDT,
 		Documentation: doc,
@@ -338,7 +336,7 @@ func (b *astBuilder) ExitAssociation(ctx *grammar.AssociationContext) {
 		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
 	}
 
-	rel := &RelationDecl{
+	rel := &relationDecl{
 		Kind:            RelationAssociation,
 		Name:            relName,
 		Target:          target,
@@ -393,7 +391,7 @@ func (b *astBuilder) ExitComposition(ctx *grammar.CompositionContext) {
 		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
 	}
 
-	rel := &RelationDecl{
+	rel := &relationDecl{
 		Kind:            RelationComposition,
 		Name:            relName,
 		Target:          target,
@@ -409,7 +407,7 @@ func (b *astBuilder) ExitComposition(ctx *grammar.CompositionContext) {
 }
 
 // ExitRel_property is called when exiting the rel_property production.
-func (b *astBuilder) ExitRel_property(ctx *grammar.Rel_propertyContext) {
+func (b *astBuilder) ExitRel_property(ctx *grammar.Rel_propertyContext) { //nolint:revive // ANTLR-generated name
 	propNameCtx := ctx.Property_name()
 	if propNameCtx == nil {
 		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
@@ -424,7 +422,7 @@ func (b *astBuilder) ExitRel_property(ctx *grammar.Rel_propertyContext) {
 		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
 	}
 
-	prop := &PropertyDecl{
+	prop := &propertyDecl{
 		Name:          propName,
 		Constraint:    b.currentDT,
 		DataTypeRef:   b.currentDTRef,
@@ -435,7 +433,7 @@ func (b *astBuilder) ExitRel_property(ctx *grammar.Rel_propertyContext) {
 	}
 	b.currentProps = append(b.currentProps, prop)
 	b.currentDT = nil
-	b.currentDTRef = schema.DataTypeRef{} // Clear for next property
+	b.currentDTRef = DataTypeRef{} // Clear for next property
 }
 
 // ExitInvariant is called when exiting the invariant production.
@@ -465,8 +463,7 @@ func (b *astBuilder) ExitInvariant(ctx *grammar.InvariantContext) {
 			exprCtx,
 			b.collector,
 			b.sourceID,
-			b.spans.Registry(),
-			b.spans.Converter(),
+			b.spans,
 		)
 	}
 
@@ -475,7 +472,7 @@ func (b *astBuilder) ExitInvariant(ctx *grammar.InvariantContext) {
 		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
 	}
 
-	inv := &InvariantDecl{
+	inv := &invariantDecl{
 		Name:          name,
 		Expr:          compiledExpr,
 		Documentation: doc,
@@ -496,6 +493,7 @@ func (b *astBuilder) boundSpan(neg, value antlr.Token) location.Span {
 	return b.spans.FromToken(value)
 }
 
+//nolint:revive // min/max shadow builtins but match domain semantics
 func (b *astBuilder) ExitIntegerT(ctx *grammar.IntegerTContext) {
 	var min, max int64
 	hasMin, hasMax := false, false
@@ -549,16 +547,17 @@ func (b *astBuilder) ExitIntegerT(ctx *grammar.IntegerTContext) {
 
 	switch {
 	case hasMin && hasMax:
-		b.currentDT = schema.IntegerBetween(min, max)
+		b.currentDT = IntegerBetween(min, max)
 	case hasMin:
-		b.currentDT = schema.IntegerMin(min)
+		b.currentDT = IntegerMin(min)
 	case hasMax:
-		b.currentDT = schema.IntegerMax(max)
+		b.currentDT = IntegerMax(max)
 	default:
-		b.currentDT = schema.NewIntegerConstraint()
+		b.currentDT = NewIntegerConstraint()
 	}
 }
 
+//nolint:revive // min/max shadow builtins but match domain semantics
 func (b *astBuilder) ExitFloatT(ctx *grammar.FloatTContext) {
 	var min, max float64
 	hasMin, hasMax := false, false
@@ -612,18 +611,18 @@ func (b *astBuilder) ExitFloatT(ctx *grammar.FloatTContext) {
 
 	switch {
 	case hasMin && hasMax:
-		b.currentDT = schema.FloatBetween(min, max)
+		b.currentDT = FloatBetween(min, max)
 	case hasMin:
-		b.currentDT = schema.FloatMin(min)
+		b.currentDT = FloatMin(min)
 	case hasMax:
-		b.currentDT = schema.FloatMax(max)
+		b.currentDT = FloatMax(max)
 	default:
-		b.currentDT = schema.NewFloatConstraint()
+		b.currentDT = NewFloatConstraint()
 	}
 }
 
 func (b *astBuilder) ExitBoolT(_ *grammar.BoolTContext) {
-	b.currentDT = schema.NewBooleanConstraint()
+	b.currentDT = NewBooleanConstraint()
 }
 
 func (b *astBuilder) ExitStringT(ctx *grammar.StringTContext) {
@@ -674,13 +673,13 @@ func (b *astBuilder) ExitStringT(ctx *grammar.StringTContext) {
 
 	switch {
 	case minLen >= 0 && maxLen >= 0:
-		b.currentDT = schema.StringLenBetween(minLen, maxLen)
+		b.currentDT = StringLenBetween(minLen, maxLen)
 	case minLen >= 0:
-		b.currentDT = schema.StringMinLen(minLen)
+		b.currentDT = StringMinLen(minLen)
 	case maxLen >= 0:
-		b.currentDT = schema.StringMaxLen(maxLen)
+		b.currentDT = StringMaxLen(maxLen)
 	default:
-		b.currentDT = schema.NewStringConstraint()
+		b.currentDT = NewStringConstraint()
 	}
 }
 
@@ -714,7 +713,7 @@ func (b *astBuilder) ExitEnumT(ctx *grammar.EnumTContext) {
 		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
 			fmt.Sprintf("enum must have at least two values (got %d)", len(values))).WithSpan(b.spans.FromContext(ctx)).Build())
 	}
-	b.currentDT = schema.NewEnumConstraint(values)
+	b.currentDT = NewEnumConstraint(values)
 }
 
 func (b *astBuilder) ExitPatternT(ctx *grammar.PatternTContext) {
@@ -743,31 +742,31 @@ func (b *astBuilder) ExitPatternT(ctx *grammar.PatternTContext) {
 			WithSpan(b.spans.FromContext(ctx)).Build())
 		patterns = patterns[:2] // Continue with first 2 for error recovery
 	}
-	b.currentDT = schema.NewPatternConstraint(patterns)
+	b.currentDT = NewPatternConstraint(patterns)
 }
 
 func (b *astBuilder) ExitTimestampT(ctx *grammar.TimestampTContext) {
 	if ctx.GetFormat() == nil {
-		b.currentDT = schema.NewTimestampConstraint()
+		b.currentDT = NewTimestampConstraint()
 	} else {
 		format, err := unquoteString(ctx.GetFormat().GetText())
 		if err != nil {
 			span := b.spans.FromToken(ctx.GetFormat())
 			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
 				fmt.Sprintf("invalid timestamp format: %v", err)).WithSpan(span).Build())
-			b.currentDT = schema.NewTimestampConstraint()
+			b.currentDT = NewTimestampConstraint()
 			return
 		}
-		b.currentDT = schema.NewTimestampConstraintFormatted(format)
+		b.currentDT = NewTimestampConstraintFormatted(format)
 	}
 }
 
 func (b *astBuilder) ExitDateT(_ *grammar.DateTContext) {
-	b.currentDT = schema.NewDateConstraint()
+	b.currentDT = NewDateConstraint()
 }
 
-func (b *astBuilder) ExitUuidT(_ *grammar.UuidTContext) {
-	b.currentDT = schema.NewUUIDConstraint()
+func (b *astBuilder) ExitUuidT(_ *grammar.UuidTContext) { //nolint:revive // ANTLR-generated name
+	b.currentDT = NewUUIDConstraint()
 }
 
 const (
@@ -813,7 +812,7 @@ func (b *astBuilder) ExitVectorT(ctx *grammar.VectorTContext) {
 		return
 	}
 
-	b.currentDT = schema.NewVectorConstraint(dim)
+	b.currentDT = NewVectorConstraint(dim)
 }
 
 func (b *astBuilder) ExitListT(ctx *grammar.ListTContext) {
@@ -874,17 +873,17 @@ func (b *astBuilder) ExitListT(ctx *grammar.ListTContext) {
 
 	switch {
 	case minLen >= 0 && maxLen >= 0:
-		b.currentDT = schema.ListLenBetween(elementConstraint, minLen, maxLen)
+		b.currentDT = ListLenBetween(elementConstraint, minLen, maxLen)
 	case minLen >= 0:
-		b.currentDT = schema.ListMinLen(elementConstraint, minLen)
+		b.currentDT = ListMinLen(elementConstraint, minLen)
 	case maxLen >= 0:
-		b.currentDT = schema.ListMaxLen(elementConstraint, maxLen)
+		b.currentDT = ListMaxLen(elementConstraint, maxLen)
 	default:
-		b.currentDT = schema.NewListConstraint(elementConstraint)
+		b.currentDT = NewListConstraint(elementConstraint)
 	}
 }
 
-func (b *astBuilder) ExitQualified_alias(ctx *grammar.Qualified_aliasContext) {
+func (b *astBuilder) ExitQualified_alias(ctx *grammar.Qualified_aliasContext) { //nolint:revive // ANTLR-generated name
 	nameToken := ctx.GetName()
 	if nameToken == nil {
 		// Syntax error recovery - no name token
@@ -906,15 +905,15 @@ func (b *astBuilder) ExitQualified_alias(ctx *grammar.Qualified_aliasContext) {
 
 	// AliasConstraint needs to be resolved during completion
 	// For now, store a placeholder with just the name
-	b.currentDT = schema.NewAliasConstraint(fullName, nil)
+	b.currentDT = NewAliasConstraint(fullName, nil)
 
 	// Capture the DataTypeRef with span for LSP navigation
-	b.currentDTRef = schema.NewDataTypeRef(qualifier, name, b.spans.FromContext(ctx))
+	b.currentDTRef = NewDataTypeRef(qualifier, name, b.spans.FromContext(ctx))
 }
 
 // --- Helper methods ---
 
-func (b *astBuilder) buildTypeRef(ctx grammar.IType_refContext) *TypeRef {
+func (b *astBuilder) buildTypeRef(ctx grammar.IType_refContext) *astTypeRef {
 	if ctx == nil {
 		return nil
 	}
@@ -931,7 +930,7 @@ func (b *astBuilder) buildTypeRef(ctx grammar.IType_refContext) *TypeRef {
 		qualifier = q.GetText()
 	}
 	name := nameCtx.GetText()
-	return &TypeRef{
+	return &astTypeRef{
 		Qualifier: qualifier,
 		Name:      name,
 		Span:      b.spans.FromContext(ctx),

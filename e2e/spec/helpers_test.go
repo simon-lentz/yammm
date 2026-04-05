@@ -10,7 +10,6 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/load"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +20,7 @@ import (
 func loadSchema(t *testing.T, path string) *instance.Validator {
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := load.Load(ctx, path)
+	s, result, err := schema.Load(ctx, path)
 	require.NoError(t, err, "load schema %s", path)
 	require.True(t, result.OK(), "schema %s has errors: %v", path, result.Messages())
 	return instance.NewValidator(s)
@@ -31,7 +30,7 @@ func loadSchema(t *testing.T, path string) *instance.Validator {
 func loadSchemaRaw(t *testing.T, path string) (*schema.Schema, *instance.Validator) {
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := load.Load(ctx, path)
+	s, result, err := schema.Load(ctx, path)
 	require.NoError(t, err, "load schema %s", path)
 	require.True(t, result.OK(), "schema %s has errors: %v", path, result.Messages())
 	return s, instance.NewValidator(s)
@@ -42,7 +41,7 @@ func loadSchemaRaw(t *testing.T, path string) (*schema.Schema, *instance.Validat
 func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 	t.Helper()
 	ctx := t.Context()
-	_, result, err := load.Load(ctx, path)
+	_, result, err := schema.Load(ctx, path)
 	require.NoError(t, err, "load schema %s: unexpected I/O error", path)
 	require.False(t, result.OK(), "schema %s should have errors but loaded cleanly", path)
 	return result
@@ -52,7 +51,7 @@ func loadSchemaExpectError(t *testing.T, path string) diag.Result {
 func loadSchemaString(t *testing.T, content, name string) *instance.Validator {
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := load.String(ctx, content, name)
+	s, result, err := schema.LoadString(ctx, content, name)
 	require.NoError(t, err, "load schema string %s", name)
 	require.True(t, result.OK(), "schema string %s has errors: %v", name, result.Messages())
 	return instance.NewValidator(s)
@@ -62,7 +61,7 @@ func loadSchemaString(t *testing.T, content, name string) *instance.Validator {
 func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *instance.Validator) { //nolint:unparam // test helper — second return used selectively
 	t.Helper()
 	ctx := t.Context()
-	s, result, err := load.String(ctx, content, name)
+	s, result, err := schema.LoadString(ctx, content, name)
 	require.NoError(t, err, "load schema string %s", name)
 	require.True(t, result.OK(), "schema string %s has errors: %v", name, result.Messages())
 	return s, instance.NewValidator(s)
@@ -72,17 +71,17 @@ func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *i
 func loadSchemaStringExpectError(t *testing.T, content, name string) diag.Result {
 	t.Helper()
 	ctx := t.Context()
-	_, result, err := load.String(ctx, content, name)
+	_, result, err := schema.LoadString(ctx, content, name)
 	require.NoError(t, err, "load schema string %s: unexpected I/O error", name)
 	require.False(t, result.OK(), "schema string %s should have errors but loaded cleanly", name)
 	return result
 }
 
 // loadSchemaWithOpts loads a .yammm file with specific load options.
-func loadSchemaWithOpts(t *testing.T, path string, opts ...load.Option) (*schema.Schema, diag.Result, error) { //nolint:unparam // test helper — path varies across test files
+func loadSchemaWithOpts(t *testing.T, path string, opts ...schema.LoadOption) (*schema.Schema, diag.Result, error) { //nolint:unparam // test helper — path varies across test files
 	t.Helper()
 	ctx := t.Context()
-	return load.Load(ctx, path, opts...)
+	return schema.Load(ctx, path, opts...)
 }
 
 // loadTestData reads a JSON data file and extracts instances by type key.

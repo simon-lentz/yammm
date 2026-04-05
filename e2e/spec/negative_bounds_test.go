@@ -5,7 +5,6 @@ import (
 
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/load"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +18,7 @@ func TestE2E_NegativeBounds(t *testing.T) {
 	ctx := t.Context()
 
 	// Load schema with negative float bounds
-	s, result, err := load.Load(ctx, "testdata/negative_bounds/negative_bounds.yammm")
+	s, result, err := schema.Load(ctx, "testdata/negative_bounds/negative_bounds.yammm")
 	require.NoError(t, err, "load schema")
 	require.True(t, result.OK(), "schema has errors: %v", result.Messages())
 

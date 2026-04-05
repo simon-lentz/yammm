@@ -18,7 +18,7 @@ func TestNewDataType(t *testing.T) {
 	}
 	doc := "Email address type"
 
-	dt := schema.InternalNewDataType("Email", constraint, span, doc)
+	dt := schema.TestNewDataType("Email", constraint, span, doc)
 
 	assert.NotNil(t, dt)
 	assert.Equal(t, "Email", dt.Name())
@@ -28,7 +28,7 @@ func TestNewDataType(t *testing.T) {
 }
 
 func TestDataType_Name(t *testing.T) {
-	dt := schema.InternalNewDataType("PhoneNumber", nil, location.Span{}, "")
+	dt := schema.TestNewDataType("PhoneNumber", nil, location.Span{}, "")
 
 	assert.Equal(t, "PhoneNumber", dt.Name())
 }
@@ -45,7 +45,7 @@ func TestDataType_Constraint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dt := schema.InternalNewDataType("Test", tt.constraint, location.Span{}, "")
+			dt := schema.TestNewDataType("Test", tt.constraint, location.Span{}, "")
 			assert.Equal(t, tt.constraint, dt.Constraint())
 		})
 	}
@@ -58,7 +58,7 @@ func TestDataType_Span(t *testing.T) {
 		End:    location.Position{Line: 5, Column: 20, Byte: 60},
 	}
 
-	dt := schema.InternalNewDataType("Money", nil, span, "")
+	dt := schema.TestNewDataType("Money", nil, span, "")
 
 	result := dt.Span()
 	assert.Equal(t, span.Source, result.Source)
@@ -78,7 +78,7 @@ func TestDataType_Documentation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dt := schema.InternalNewDataType("Test", nil, location.Span{}, tt.doc)
+			dt := schema.TestNewDataType("Test", nil, location.Span{}, tt.doc)
 			assert.Equal(t, tt.doc, dt.Documentation())
 		})
 	}

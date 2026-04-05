@@ -13,14 +13,13 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/build"
 )
 
 // testSchema creates a simple schema for testing.
 func testSchema(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("Person").
@@ -510,7 +509,7 @@ func TestBaseVisitor_Embedding(t *testing.T) {
 func testAssociationSchema(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("association").
 		WithSourceID(location.MustNewSourceID("test://association.yammm")).
 		AddType("Company").
@@ -534,7 +533,7 @@ func testAssociationSchema(t *testing.T) *schema.Schema {
 func testMultiRelationSchema(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("multi_relation").
 		WithSourceID(location.MustNewSourceID("test://multi_relation.yammm")).
 		AddType("Company").
@@ -1190,7 +1189,7 @@ func TestInstance_WithComposition(t *testing.T) {
 // TestWalk_EdgeSorting_SameRelationDifferentTargets tests edge sorting with same relation but different targets.
 func TestWalk_EdgeSorting_SameRelationDifferentTargets(t *testing.T) {
 	// Create a schema where one type can have multiple edges to same relation
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("multi_edge").
 		WithSourceID(location.MustNewSourceID("test://multi_edge.yammm")).
 		AddType("Company").
@@ -1624,7 +1623,7 @@ func hasMessage(records []slog.Record, msg string) bool {
 func testSchemaWithComposition(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("walk_test").
 		WithSourceID(location.MustNewSourceID("test://walk_test.yammm")).
 		AddType("Child").
@@ -1649,7 +1648,7 @@ func testSchemaWithComposition(t *testing.T) *schema.Schema {
 func testSchemaWithPKLessComposition(t *testing.T) *schema.Schema {
 	t.Helper()
 
-	s, result := build.NewBuilder().
+	s, result := schema.NewBuilder().
 		WithName("walk_pkless_test").
 		WithSourceID(location.MustNewSourceID("test://walk_pkless.yammm")).
 		AddType("Item").

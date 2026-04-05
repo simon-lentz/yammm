@@ -1,11 +1,13 @@
 package definition_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
@@ -23,61 +25,40 @@ func identityURI(path string) string {
 func TestResolveSymbol_LocalType(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://schema.yammm")
-	span := location.Range(sourceID, 5, 1, 10, 1)
-	selectionSpan := location.Range(sourceID, 5, 6, 5, 12)
+	src := "schema \"test\"\n\ntype Person {\n    id String primary\n    name String\n}"
+	reg := source.NewRegistry()
+	s, result, err := schema.LoadString(t.Context(), src, "test.yammm", schema.WithSourceRegistry(reg))
+	require.NoError(t, err)
+	require.True(t, result.OK(), "schema should parse without errors: %v", result)
 
-	typ := schema.InternalNewType("Person", sourceID, span, "A person type", false, false)
+	typ, ok := s.Type("Person")
+	require.True(t, ok, "schema should contain type Person")
+
+	nameSpan := typ.NameSpan()
+	fullSpan := typ.Span()
+	sourceID := s.SourceID()
 
 	sym := &symbols.Symbol{
 		Name:      "Person",
 		Kind:      symbols.SymbolType,
 		SourceID:  sourceID,
-		Range:     span,
-		Selection: selectionSpan,
+		Range:     fullSpan,
+		Selection: nameSpan,
 		Data:      typ,
 	}
 
-	// Snapshot with nil Sources triggers the fallback path in SymbolToLocation
 	snapshot := &analysis.Snapshot{
 		Root:    "/test",
-		Sources: nil, // Will use fallback path
+		Sources: reg,
 	}
 
 	loc := definition.ResolveSymbol(snapshot, sym, lsputil.PositionEncodingUTF16, identityURI)
 	require.NotNil(t, loc)
 	assert.NotEmpty(t, loc.URI)
 
-	// Range should be from the selection span (0-indexed: line 5 -> 4)
-	assert.Equal(t, uint32(4), loc.Range.Start.Line)
-	assert.Equal(t, uint32(5), loc.Range.Start.Character)
-}
-
-func TestResolveSymbol_ImportWithoutSchema(t *testing.T) {
-	t.Parallel()
-
-	mainSourceID := location.MustNewSourceID("test://main.yammm")
-	importedSourceID := location.MustNewSourceID("test://missing.yammm")
-	importSpan := location.Range(mainSourceID, 1, 1, 1, 30)
-
-	// Create an import WITHOUT a resolved schema (unresolved import)
-	imp := schema.InternalNewImport("./missing", "missing", importedSourceID, importSpan)
-	// Don't call imp.SetSchema() - simulates unresolved import
-
-	sym := &symbols.Symbol{
-		Name:     "missing",
-		Kind:     symbols.SymbolImport,
-		SourceID: mainSourceID,
-		Range:    importSpan,
-		Data:     imp,
-	}
-
-	snapshot := &analysis.Snapshot{
-		Root: "/test",
-	}
-
-	loc := definition.ResolveSymbol(snapshot, sym, lsputil.PositionEncodingUTF16, identityURI)
-	assert.Nil(t, loc, "expected nil result for unresolved import")
+	// The selection span comes from the parser. Verify that LSP range is
+	// 0-indexed and matches the name span position.
+	assert.Equal(t, lsputil.ToUInteger(nameSpan.Start.Line-1), loc.Range.Start.Line)
 }
 
 func TestResolveReference_NotFound(t *testing.T) {
@@ -105,31 +86,33 @@ func TestResolveReference_NotFound(t *testing.T) {
 func TestSymbolToLocation(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://types.yammm")
-	selectionSpan := location.Range(sourceID, 3, 6, 3, 12)
-	fullSpan := location.Range(sourceID, 3, 1, 8, 1)
+	src := "schema \"test\"\n\ntype Customer {\n    id String primary\n}"
+	reg := source.NewRegistry()
+	s, result, err := schema.LoadString(context.Background(), src, "types.yammm", schema.WithSourceRegistry(reg))
+	require.NoError(t, err)
+	require.True(t, result.OK(), "schema should parse without errors: %v", result)
+
+	typ, ok := s.Type("Customer")
+	require.True(t, ok, "schema should contain type Customer")
+
+	nameSpan := typ.NameSpan()
+	fullSpan := typ.Span()
+	sourceID := s.SourceID()
 
 	sym := &symbols.Symbol{
 		Name:      "Customer",
 		Kind:      symbols.SymbolType,
 		SourceID:  sourceID,
 		Range:     fullSpan,
-		Selection: selectionSpan,
+		Selection: nameSpan,
 	}
 
-	// Snapshot with nil Sources to test fallback path
-	snapshot := &analysis.Snapshot{
-		Root:    "/test",
-		Sources: nil,
-	}
-
-	loc := definition.SymbolToLocation(snapshot.Sources, sym, lsputil.PositionEncodingUTF16, identityURI)
+	loc := definition.SymbolToLocation(reg, sym, lsputil.PositionEncodingUTF16, identityURI)
 	require.NotNil(t, loc)
 	assert.NotEmpty(t, loc.URI)
 
-	// Should use selection span (0-indexed from 1-indexed)
-	assert.Equal(t, uint32(2), loc.Range.Start.Line)
-	assert.Equal(t, uint32(5), loc.Range.Start.Character)
+	// Should use selection span converted to 0-indexed LSP coordinates.
+	assert.Equal(t, lsputil.ToUInteger(nameSpan.Start.Line-1), loc.Range.Start.Line)
 }
 
 func TestSymbolToLocation_NilSymbol(t *testing.T) {

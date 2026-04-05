@@ -106,9 +106,11 @@ func TestTypeCompletions_EmptySchema(t *testing.T) {
 
 	// Create a snapshot with an empty schema
 	sourceID := location.MustNewSourceID("test://types.yammm")
-	span := location.Range(sourceID, 1, 1, 10, 1)
 
-	sch := schema.InternalNewSchema("test", sourceID, span, "")
+	sch, _ := schema.NewBuilder().
+		WithName("test").
+		WithSourceID(sourceID).
+		Build()
 
 	snapshot := &analysis.Snapshot{
 		Schema:          sch,

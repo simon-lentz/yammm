@@ -1,6 +1,7 @@
 package symbols_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,10 +26,10 @@ func TestExtractSymbols_NilSchema(t *testing.T) {
 func TestExtractSymbols_EmptySchema(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://empty.yammm")
-	span := location.Range(sourceID, 1, 1, 1, 20)
-
-	s := schema.InternalNewSchema("empty", sourceID, span, "")
+	ctx := context.Background()
+	s, result, err := schema.LoadString(ctx, `schema "empty"`, "empty.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
 
 	syms := symbols.ExtractSymbols(s, nil)
 	assert.Len(t, syms, 1, "should contain only the schema itself")
@@ -40,14 +41,16 @@ func TestExtractSymbols_EmptySchema(t *testing.T) {
 func TestExtractSymbols_WithType(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://person.yammm")
-	schemaSpan := location.Range(sourceID, 1, 1, 10, 1)
-	typeSpan := location.Range(sourceID, 3, 1, 7, 1)
+	ctx := context.Background()
+	src := `schema "People"
 
-	s := schema.InternalNewSchema("People", sourceID, schemaSpan, "")
-
-	typ := schema.InternalNewType("Person", sourceID, typeSpan, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
+type Person {
+    id String primary
+}
+`
+	s, result, err := schema.LoadString(ctx, src, "person.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
 
 	syms := symbols.ExtractSymbols(s, nil)
 
@@ -79,10 +82,10 @@ func TestExtractReferences_NilSchema(t *testing.T) {
 func TestBuildSymbolIndex(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://index.yammm")
-	schemaSpan := location.Range(sourceID, 1, 1, 10, 1)
-
-	s := schema.InternalNewSchema("Index", sourceID, schemaSpan, "")
+	ctx := context.Background()
+	s, result, err := schema.LoadString(ctx, `schema "Index"`, "index.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
 
 	idx := symbols.BuildSymbolIndex(s, nil)
 	require.NotNil(t, idx, "symbols.BuildSymbolIndex() returned nil")
@@ -103,18 +106,23 @@ func TestSymbolAtPosition_Empty(t *testing.T) {
 func TestSymbolAtPosition_FindsSymbol(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://find.yammm")
-	schemaSpan := location.Range(sourceID, 1, 1, 20, 1)
-	typeSpan := location.Range(sourceID, 5, 1, 15, 1)
+	ctx := context.Background()
+	src := `schema "Find"
 
-	s := schema.InternalNewSchema("Find", sourceID, schemaSpan, "")
-	typ := schema.InternalNewType("Target", sourceID, typeSpan, "", false, false)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
+type Target {
+    id String primary
+}
+`
+	s, result, err := schema.LoadString(ctx, src, "find.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
 
 	idx := symbols.BuildSymbolIndex(s, nil)
 
-	// Position inside the type
-	sym := idx.SymbolAtPosition(location.Position{Line: 7, Column: 5})
+	// Position on the type declaration line (line 3: "type Target {").
+	// Byte must be -1 (unknown) to force line/column comparison;
+	// a zero Byte would be interpreted as byte offset 0.
+	sym := idx.SymbolAtPosition(location.Position{Line: 3, Column: 5, Byte: -1})
 	require.NotNil(t, sym, "SymbolAtPosition() returned nil")
 	assert.Equal(t, "Target", sym.Name)
 }
@@ -320,16 +328,20 @@ func TestPositionBefore(t *testing.T) {
 func TestExtractTypeSymbols_AbstractAndPart(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://abstract.yammm")
-	schemaSpan := location.Range(sourceID, 1, 1, 20, 1)
-	abstractSpan := location.Range(sourceID, 3, 1, 5, 1)
-	partSpan := location.Range(sourceID, 7, 1, 9, 1)
+	ctx := context.Background()
+	src := `schema "Types"
 
-	s := schema.InternalNewSchema("Types", sourceID, schemaSpan, "")
+abstract type Entity {
+    id String primary
+}
 
-	abstract := schema.InternalNewType("Entity", sourceID, abstractSpan, "", true, false)
-	part := schema.InternalNewType("Wheel", sourceID, partSpan, "", false, true)
-	schema.InternalSetSchemaTypes(s, []*schema.Type{abstract, part})
+part type Wheel {
+    size Integer required
+}
+`
+	s, result, err := schema.LoadString(ctx, src, "abstract.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
 
 	syms := symbols.ExtractSymbols(s, nil)
 
@@ -401,15 +413,14 @@ func TestSpanToLSPRange_Conversion(t *testing.T) {
 func TestExtractSymbols_WithDataType(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://datatype.yammm")
-	schemaSpan := location.Range(sourceID, 1, 1, 10, 1)
-	dtSpan := location.Range(sourceID, 3, 1, 3, 30)
+	ctx := context.Background()
+	src := `schema "DataTypes"
 
-	s := schema.InternalNewSchema("DataTypes", sourceID, schemaSpan, "")
-
-	// Create a datatype alias
-	dt := schema.InternalNewDataType("ShortString", schema.NewStringConstraint(), dtSpan, "")
-	schema.InternalSetSchemaDataTypes(s, []*schema.DataType{dt})
+type ShortString = String[1, 50]
+`
+	s, result, err := schema.LoadString(ctx, src, "datatype.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
 
 	syms := symbols.ExtractSymbols(s, nil)
 
@@ -440,31 +451,19 @@ func TestExtractSymbols_WithDataType(t *testing.T) {
 func TestExtractReferences_DataTypeRef(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://dtref.yammm")
-	schemaSpan := location.Range(sourceID, 1, 1, 20, 1)
-	typeSpan := location.Range(sourceID, 3, 1, 10, 1)
-	propSpan := location.Range(sourceID, 5, 5, 5, 30)
-	dtRefSpan := location.Range(sourceID, 5, 15, 5, 25)
+	ctx := context.Background()
+	src := `schema "RefTest"
 
-	s := schema.InternalNewSchema("RefTest", sourceID, schemaSpan, "")
+type ShortString = String[1, 50]
 
-	// Create a type with a property that has a datatype reference
-	typ := schema.InternalNewType("Person", sourceID, typeSpan, "", false, false)
-
-	// Create a property with a DataTypeRef
-	dtRef := schema.LocalDataTypeRef("ShortString", dtRefSpan)
-	prop := schema.InternalNewProperty(
-		"name",
-		propSpan,
-		"",
-		schema.NewStringConstraint(),
-		dtRef,
-		false,
-		false,
-		schema.DeclaringScope{},
-	)
-	schema.InternalSetTypeProperties(typ, []*schema.Property{prop})
-	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
+type Person {
+    id String primary
+    name ShortString
+}
+`
+	s, result, err := schema.LoadString(ctx, src, "dtref.yammm")
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
 
 	refs := symbols.ExtractReferences(s)
 
@@ -484,31 +483,25 @@ func TestExtractReferences_DataTypeRef(t *testing.T) {
 func TestExtractReferences_QualifiedDataTypeRef(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://qualified.yammm")
-	schemaSpan := location.Range(sourceID, 1, 1, 20, 1)
-	typeSpan := location.Range(sourceID, 5, 1, 15, 1)
-	propSpan := location.Range(sourceID, 7, 5, 7, 40)
-	dtRefSpan := location.Range(sourceID, 7, 15, 7, 35)
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	sources := map[string][]byte{
+		"types.yammm": []byte(`schema "types"
+type Email = String[1, 254]
+`),
+		"main.yammm": []byte(`schema "QualifiedTest"
+import "./types" as types
 
-	s := schema.InternalNewSchema("QualifiedTest", sourceID, schemaSpan, "")
+type User {
+    id String primary
+    email types.Email
+}
+`),
+	}
 
-	// Create a type with a property that has a qualified datatype reference
-	typ := schema.InternalNewType("User", sourceID, typeSpan, "", false, false)
-
-	// Create a property with a qualified DataTypeRef (e.g., types.Email)
-	dtRef := schema.NewDataTypeRef("types", "Email", dtRefSpan)
-	prop := schema.InternalNewProperty(
-		"email",
-		propSpan,
-		"",
-		schema.NewStringConstraint(),
-		dtRef,
-		false,
-		false,
-		schema.DeclaringScope{},
-	)
-	schema.InternalSetTypeProperties(typ, []*schema.Property{prop})
-	schema.InternalSetSchemaTypes(s, []*schema.Type{typ})
+	s, result, err := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", tmpDir)
+	require.NoError(t, err)
+	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
 
 	refs := symbols.ExtractReferences(s)
 
@@ -589,67 +582,24 @@ func TestSnapshot_ResolveTypeReference_DataType_NotType(t *testing.T) {
 	assert.Nil(t, sym, "RefDataType should not resolve to SymbolType")
 }
 
-func TestFormatPropertyDetail_NilConstraint(t *testing.T) {
-	// Tests that formatPropertyDetail handles nil constraints without panicking.
-	// Properties can have nil constraints during partial parses or in early builder stages.
-	t.Parallel()
-
-	// Create a property with nil constraint (optional so not required)
-	prop := schema.InternalNewProperty(
-		"testProp",
-		location.Span{},
-		"",
-		nil, // nil constraint
-		schema.DataTypeRef{},
-		true,  // optional (so not required)
-		false, // not primary key
-		schema.DeclaringScope{},
-	)
-
-	// This should not panic and should return a valid detail string
-	detail := symbols.FormatPropertyDetail(prop)
-
-	// Should include property name and placeholder for unknown constraint
-	assert.Equal(t, "testProp <unknown>", detail)
-}
-
-func TestFormatPropertyDetail_NilConstraintWithModifiers(t *testing.T) {
-	// Tests that formatPropertyDetail correctly appends modifiers even with nil constraint.
-	t.Parallel()
-
-	// Create a property with nil constraint but with primary key and required flags
-	prop := schema.InternalNewProperty(
-		"id",
-		location.Span{},
-		"",
-		nil, // nil constraint
-		schema.DataTypeRef{},
-		false, // not optional (= required)
-		true,  // is primary key
-		schema.DeclaringScope{},
-	)
-
-	detail := symbols.FormatPropertyDetail(prop)
-
-	// Should include all modifiers
-	assert.Equal(t, "id <unknown> primary required", detail)
-}
-
 func TestFormatPropertyDetail_WithConstraint(t *testing.T) {
 	// Tests that formatPropertyDetail correctly formats a property with a constraint.
 	t.Parallel()
 
-	constraint := schema.NewStringConstraint()
-	prop := schema.InternalNewProperty(
-		"name",
-		location.Span{},
-		"",
-		constraint,
-		schema.DataTypeRef{},
-		true,  // optional
-		false, // not primary key
-		schema.DeclaringScope{},
-	)
+	s, result := schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithOptionalProperty("name", schema.NewStringConstraint()).
+		Done().
+		Build()
+	require.False(t, result.HasErrors(), "builder errors: %v", result)
+
+	typ, ok := s.Type("Person")
+	require.True(t, ok)
+	prop, ok := typ.Property("name")
+	require.True(t, ok)
 
 	detail := symbols.FormatPropertyDetail(prop)
 

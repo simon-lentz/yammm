@@ -1,4 +1,4 @@
-package load
+package schema
 
 import (
 	"context"
@@ -16,10 +16,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/internal/alias"
-	"github.com/simon-lentz/yammm/schema/internal/complete"
-	"github.com/simon-lentz/yammm/schema/internal/parse"
 )
 
 // rootLoader provides sandboxed file access for imports using os.Root.
@@ -129,13 +125,13 @@ func (e *pathEscapeError) Error() string {
 //
 // ctx must not be nil. Passing nil will panic.
 // On error, Schema is nil but diag.Result may contain useful diagnostics.
-func Load(ctx context.Context, path string, opts ...Option) (*schema.Schema, diag.Result, error) {
+func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.Result, error) {
 	if ctx == nil {
 		panic("load.Load: context must not be nil")
 	}
 
-	cfg := defaultConfig()
-	applyOptions(cfg, opts)
+	cfg := defaultLoadConfig()
+	applyLoadOptions(cfg, opts)
 
 	// Resolve the path to an absolute, symlink-resolved canonical path
 	absPath, err := makeCanonicalPath(path)
@@ -175,7 +171,7 @@ func Load(ctx context.Context, path string, opts ...Option) (*schema.Schema, dia
 	// Perform cross-schema inheritance cycle detection if there are imports.
 	// This runs after all schemas are loaded when full cross-schema visibility is available.
 	if ldr.registry.Len() > 1 {
-		if cycleIssues := complete.DetectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
+		if cycleIssues := detectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
 			for _, issue := range cycleIssues {
 				ldr.collector.Collect(*issue)
 			}
@@ -186,7 +182,7 @@ func Load(ctx context.Context, path string, opts ...Option) (*schema.Schema, dia
 	return s, result, err
 }
 
-// String loads a schema from a string source.
+// LoadString loads a schema from a string source.
 //
 // The sourceName is used as the display path in diagnostics. For
 // consistent error messages, use a meaningful path-like name.
@@ -196,13 +192,13 @@ func Load(ctx context.Context, path string, opts ...Option) (*schema.Schema, dia
 //
 // ctx must not be nil. Passing nil will panic.
 // On error, Schema is nil but diag.Result may contain useful diagnostics.
-func String(ctx context.Context, sourceCode, sourceName string, opts ...Option) (*schema.Schema, diag.Result, error) {
+func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...LoadOption) (*Schema, diag.Result, error) {
 	if ctx == nil {
 		panic("load.String: context must not be nil")
 	}
 
-	cfg := defaultConfig()
-	applyOptions(cfg, opts)
+	cfg := defaultLoadConfig()
+	applyLoadOptions(cfg, opts)
 	cfg.disallowImports = true // Always disallow imports from string, even if user opts try to enable
 
 	// Create a synthetic source ID (NewSourceID returns just SourceID, no error)
@@ -214,18 +210,18 @@ func String(ctx context.Context, sourceCode, sourceName string, opts ...Option) 
 	return s, result, err
 }
 
-// Sources loads a schema from in-memory sources.
+// LoadSources loads a schema from in-memory sources.
 //
 // The sources map keys are paths relative to moduleRoot, and values are
 // the file contents. The first entry (by sorted key order) is treated as the
-// entry point schema. Use SourcesWithEntry if you need to specify the
+// entry point schema. Use LoadSourcesWithEntry if you need to specify the
 // entry point explicitly.
 //
 // This function is useful for testing and embedded schemas.
 //
 // ctx must not be nil. Passing nil will panic.
 // On error, Schema is nil but diag.Result may contain useful diagnostics.
-func Sources(ctx context.Context, sources map[string][]byte, moduleRoot string, opts ...Option) (*schema.Schema, diag.Result, error) {
+func LoadSources(ctx context.Context, sources map[string][]byte, moduleRoot string, opts ...LoadOption) (*Schema, diag.Result, error) {
 	if ctx == nil {
 		panic("load.Sources: context must not be nil")
 	}
@@ -234,8 +230,8 @@ func Sources(ctx context.Context, sources map[string][]byte, moduleRoot string, 
 		return nil, diag.Result{}, errors.New("no sources provided")
 	}
 
-	cfg := defaultConfig()
-	applyOptions(cfg, opts)
+	cfg := defaultLoadConfig()
+	applyLoadOptions(cfg, opts)
 
 	// Canonicalize moduleRoot to absolute path if provided.
 	// This ensures SourceIDFromAbsolutePath will work correctly.
@@ -315,7 +311,7 @@ func Sources(ctx context.Context, sources map[string][]byte, moduleRoot string, 
 	// Perform cross-schema inheritance cycle detection if there are imports.
 	// This runs after all schemas are loaded when full cross-schema visibility is available.
 	if ldr.registry.Len() > 1 {
-		if cycleIssues := complete.DetectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
+		if cycleIssues := detectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
 			for _, issue := range cycleIssues {
 				ldr.collector.Collect(*issue)
 			}
@@ -326,10 +322,10 @@ func Sources(ctx context.Context, sources map[string][]byte, moduleRoot string, 
 	return s, result, err
 }
 
-// SourcesWithEntry loads a schema from in-memory sources with an explicit entry point.
+// LoadSourcesWithEntry loads a schema from in-memory sources with an explicit entry point.
 //
 // The sources map keys are paths relative to moduleRoot, and values are
-// the file contents. Unlike Sources, this function uses the provided
+// the file contents. Unlike LoadSources, this function uses the provided
 // entryPath as the entry point instead of selecting by sorted key order.
 //
 // This is useful when the caller knows which file should be the entry point,
@@ -338,11 +334,11 @@ func Sources(ctx context.Context, sources map[string][]byte, moduleRoot string, 
 //
 // The entryPath must exist in the sources map (as either an absolute path
 // or relative to moduleRoot). If entryPath is empty, falls back to sorted
-// key order selection like Sources.
+// key order selection like LoadSources.
 //
 // ctx must not be nil. Passing nil will panic.
 // On error, Schema is nil but diag.Result may contain useful diagnostics.
-func SourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...Option) (*schema.Schema, diag.Result, error) {
+func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...LoadOption) (*Schema, diag.Result, error) {
 	if ctx == nil {
 		panic("load.SourcesWithEntry: context must not be nil")
 	}
@@ -351,8 +347,8 @@ func SourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath 
 		return nil, diag.Result{}, errors.New("no sources provided")
 	}
 
-	cfg := defaultConfig()
-	applyOptions(cfg, opts)
+	cfg := defaultLoadConfig()
+	applyLoadOptions(cfg, opts)
 
 	// Canonicalize moduleRoot to absolute path if provided.
 	// This ensures SourceIDFromAbsolutePath will work correctly.
@@ -403,7 +399,7 @@ func SourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath 
 		// Use the provided entry path
 		selectedEntry = entryPath
 	} else {
-		// Fall back to lexicographic selection (same as Sources)
+		// Fall back to lexicographic selection (same as LoadSources)
 		for path := range sources {
 			if selectedEntry == "" || path < selectedEntry {
 				selectedEntry = path
@@ -442,7 +438,7 @@ func SourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath 
 	// Perform cross-schema inheritance cycle detection if there are imports.
 	// This runs after all schemas are loaded when full cross-schema visibility is available.
 	if ldr.registry.Len() > 1 {
-		if cycleIssues := complete.DetectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
+		if cycleIssues := detectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
 			for _, issue := range cycleIssues {
 				ldr.collector.Collect(*issue)
 			}
@@ -456,16 +452,16 @@ func SourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath 
 // resolvedImport holds the resolved identity and schema for an import.
 type resolvedImport struct {
 	sourceID location.SourceID
-	schema   *schema.Schema
-	decl     *parse.ImportDecl // original declaration for diagnostics
+	schema   *Schema
+	decl     *importDecl // original declaration for diagnostics
 }
 
 // loader handles the schema loading process.
 type loader struct {
-	cfg             *config
+	cfg             *loadConfig
 	moduleRoot      string
 	rootLoader      *rootLoader // sandboxed file access for imports (nil if no moduleRoot)
-	registry        *schema.Registry
+	registry        *Registry
 	sourceRegistry  *source.Registry
 	collector       *diag.Collector
 	logger          *slog.Logger
@@ -474,27 +470,27 @@ type loader struct {
 	// Tracking state
 	mu              sync.Mutex
 	sourceContent   map[location.SourceID][]byte
-	loadedSchemas   map[location.SourceID]*schema.Schema
+	loadedSchemas   map[location.SourceID]*Schema
 	loadingSchemas  map[location.SourceID]bool // For cycle detection
 	resolvedImports map[string]resolvedImport  // alias -> resolved import for current schema
 }
 
-// registryAdapter adapts *schema.Registry to the complete.Registry interface.
+// registryAdapter adapts *Registry to the completionRegistry interface.
 type registryAdapter struct {
-	r *schema.Registry
+	r *Registry
 }
 
-// LookupBySourceID implements the complete.Registry interface.
-func (a *registryAdapter) LookupBySourceID(id location.SourceID) (*schema.Schema, bool) {
+// LookupBySourceID implements the completionRegistry interface.
+func (a *registryAdapter) LookupBySourceID(id location.SourceID) (*Schema, bool) {
 	s, ok := a.r.LookupBySourceID(id)
 	return s, ok
 }
 
 // newLoader creates a new loader with the given configuration.
-func newLoader(cfg *config, moduleRoot string) *loader {
+func newLoader(cfg *loadConfig, moduleRoot string) *loader {
 	registry := cfg.registry
 	if registry == nil {
-		registry = schema.NewRegistry()
+		registry = NewRegistry()
 	}
 
 	sourceReg := cfg.sourceRegistry
@@ -517,7 +513,7 @@ func newLoader(cfg *config, moduleRoot string) *loader {
 		logger:          logger,
 		disallowImports: cfg.disallowImports,
 		sourceContent:   make(map[location.SourceID][]byte),
-		loadedSchemas:   make(map[location.SourceID]*schema.Schema),
+		loadedSchemas:   make(map[location.SourceID]*Schema),
 		loadingSchemas:  make(map[location.SourceID]bool),
 		resolvedImports: make(map[string]resolvedImport),
 	}
@@ -549,7 +545,7 @@ func (l *loader) Close() error {
 }
 
 // loadFile loads a schema from a file path.
-func (l *loader) loadFile(ctx context.Context, absPath string, content []byte) (*schema.Schema, diag.Result, error) {
+func (l *loader) loadFile(ctx context.Context, absPath string, content []byte) (*Schema, diag.Result, error) {
 	sourceID, err := location.SourceIDFromAbsolutePath(absPath)
 	if err != nil {
 		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
@@ -570,7 +566,7 @@ func (l *loader) loadFile(ctx context.Context, absPath string, content []byte) (
 }
 
 // loadSource loads a schema from source content.
-func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, content []byte) (*schema.Schema, diag.Result, error) {
+func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, content []byte) (*Schema, diag.Result, error) {
 	// Check if already loaded
 	l.mu.Lock()
 	if s, ok := l.loadedSchemas[sourceID]; ok {
@@ -625,20 +621,20 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	}
 
 	// Parse the schema
-	parser := parse.NewParser(sourceID, l.collector, l.sourceRegistry, l.sourceRegistry)
-	model := parser.Parse(content)
+	parser := newParser(sourceID, l.collector, l.sourceRegistry, l.sourceRegistry)
+	m := parser.Parse(content)
 
-	if model == nil {
+	if m == nil {
 		return nil, l.collector.Result(), nil
 	}
 
 	// Validate imports and check for duplicates
-	if !l.validateImports(sourceID, model) {
+	if !l.validateImports(sourceID, m) {
 		return nil, l.collector.Result(), nil
 	}
 
 	// Load imported schemas first
-	ok, err := l.loadImports(ctx, sourceID, model)
+	ok, err := l.loadImports(ctx, sourceID, m)
 	if err != nil {
 		return nil, l.collector.Result(), err // propagate cancellation
 	}
@@ -647,13 +643,13 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	}
 
 	// Build resolved imports map for completion
-	resolvedImports := make(complete.ResolvedImports, len(l.resolvedImports))
+	resolvedImports := make(resolvedImportMap, len(l.resolvedImports))
 	for alias, resolved := range l.resolvedImports {
 		resolvedImports[alias] = resolved.sourceID
 	}
 
 	// Complete the schema (resolve types, validate, etc.)
-	s := complete.Complete(model, sourceID, l.collector, &registryAdapter{l.registry}, resolvedImports)
+	s := completeModel(m, sourceID, l.collector, &registryAdapter{l.registry}, resolvedImports)
 
 	if s == nil {
 		return nil, l.collector.Result(), nil
@@ -662,13 +658,13 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// Wire resolved schema references (SourceID already set during completion)
 	for _, imp := range s.ImportsSlice() {
 		if resolved, ok := l.resolvedImports[imp.Alias()]; ok {
-			schema.InternalSetImportSchema(imp, resolved.schema)
+			imp.setSchema(resolved.schema)
 		}
 	}
 
 	// Seal all imports to prevent further mutation
 	for _, imp := range s.ImportsSlice() {
-		schema.InternalSealImport(imp)
+		imp.seal()
 	}
 
 	// Schema must be nil if any errors exist.
@@ -678,10 +674,10 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	}
 
 	// Attach sources for diagnostics rendering
-	schema.InternalSetSchemaSources(s, schema.NewSources(l.sourceRegistry))
+	s.setSources(NewSources(l.sourceRegistry))
 
 	// Seal the schema to prevent further mutation
-	schema.InternalSealSchema(s)
+	s.seal()
 
 	l.logger.Debug("schema loaded",
 		"source", sourceID.String(),
@@ -704,22 +700,22 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 }
 
 // validateImports checks for import issues.
-func (l *loader) validateImports(sourceID location.SourceID, model *parse.Model) bool {
-	if l.disallowImports && len(model.Imports) > 0 {
+func (l *loader) validateImports(sourceID location.SourceID, m *model) bool {
+	if l.disallowImports && len(m.Imports) > 0 {
 		// Per spec: single E_IMPORT_NOT_ALLOWED issue with import_count detail,
 		// positioned at the first import declaration.
 		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_NOT_ALLOWED,
 			"import declarations are not allowed in this context").
-			WithSpan(model.Imports[0].Span).
-			WithDetail(diag.DetailKeyImportCount, strconv.Itoa(len(model.Imports))).Build())
+			WithSpan(m.Imports[0].Span).
+			WithDetail(diag.DetailKeyImportCount, strconv.Itoa(len(m.Imports))).Build())
 		return false
 	}
 
 	// Check for duplicate imports (same path or alias)
-	seenPaths := make(map[string]*parse.ImportDecl)
-	seenAliases := make(map[string]*parse.ImportDecl)
+	seenPaths := make(map[string]*importDecl)
+	seenAliases := make(map[string]*importDecl)
 
-	for _, imp := range model.Imports {
+	for _, imp := range m.Imports {
 		// Check for duplicate path
 		if existing, ok := seenPaths[imp.Path]; ok {
 			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_IMPORT,
@@ -747,7 +743,7 @@ func (l *loader) validateImports(sourceID location.SourceID, model *parse.Model)
 		seenAliases[imp.Alias] = imp
 
 		// Check for reserved keyword alias
-		if alias.IsReservedKeyword(imp.Alias) {
+		if isReservedKeyword(imp.Alias) {
 			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
 				fmt.Sprintf("import alias %q is a reserved keyword", imp.Alias)).
 				WithSpan(imp.Span).Build())
@@ -757,14 +753,14 @@ func (l *loader) validateImports(sourceID location.SourceID, model *parse.Model)
 
 	// Check for alias collision with local type names and datatype aliases
 	localNames := make(map[string]location.Span)
-	for _, t := range model.Types {
+	for _, t := range m.Types {
 		localNames[t.Name] = t.Span
 	}
-	for _, dt := range model.DataTypes {
+	for _, dt := range m.DataTypes {
 		localNames[dt.Name] = dt.Span
 	}
 
-	for _, imp := range model.Imports {
+	for _, imp := range m.Imports {
 		if existingSpan, ok := localNames[imp.Alias]; ok {
 			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_ALIAS_COLLISION,
 				fmt.Sprintf("import alias %q collides with local type or datatype", imp.Alias)).
@@ -782,8 +778,8 @@ func (l *loader) validateImports(sourceID location.SourceID, model *parse.Model)
 }
 
 // loadImports loads all imported schemas.
-func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, model *parse.Model) (bool, error) {
-	if l.moduleRoot == "" && len(model.Imports) > 0 {
+func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, m *model) (bool, error) {
+	if l.moduleRoot == "" && len(m.Imports) > 0 {
 		// Without a module root, we can only resolve relative imports
 		// from file-based sources
 		if !sourceID.IsFilePath() {
@@ -793,7 +789,7 @@ func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, mo
 		}
 	}
 
-	for _, imp := range model.Imports {
+	for _, imp := range m.Imports {
 		// Check for cancellation before each import (/19)
 		// Per, cancellation is returned as error, not collected as diagnostic.
 		if err := ctx.Err(); err != nil {
@@ -846,7 +842,7 @@ func (l *loader) validateResolvedImports() bool {
 }
 
 // loadImport loads a single imported schema.
-func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp *parse.ImportDecl) (bool, error) {
+func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp *importDecl) (bool, error) {
 	l.logger.Debug("loading import", "path", imp.Path, "alias", imp.Alias)
 
 	// Resolve the import path to a relative path (relative to module root)
@@ -965,7 +961,7 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 
 // readImportFile reads an import file using sandboxed access via rootLoader.
 // Falls back to in-memory sources if available.
-func (l *loader) readImportFile(relativePath string, imp *parse.ImportDecl) ([]byte, location.SourceID, error) {
+func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, location.SourceID, error) {
 	// Try with .yammm extension first, then without
 	candidates := []string{relativePath}
 	if !strings.HasSuffix(relativePath, ".yammm") {

@@ -1,21 +1,19 @@
-package parse_test
+package schema_test
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/internal/parse"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // parseSchema is a helper to parse a schema and return the model and diagnostics.
-func parseSchema(t *testing.T, schemaSource string) (*parse.Model, diag.Result) {
+func parseSchema(t *testing.T, schemaSource string) (*schema.TestModel, diag.Result) {
 	t.Helper()
 	reg := source.NewRegistry()
 	sourceID := location.MustNewSourceID("test://coverage.yammm")
@@ -23,7 +21,7 @@ func parseSchema(t *testing.T, schemaSource string) (*parse.Model, diag.Result) 
 	require.NoError(t, err)
 
 	collector := diag.NewCollector(0)
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 	return model, collector.Result()
 }
@@ -40,7 +38,7 @@ func TestParse_FloatConstraints(t *testing.T) {
 		source       string
 		wantOK       bool
 		wantWarnings bool
-		checkFn      func(t *testing.T, model *parse.Model)
+		checkFn      func(t *testing.T, model *schema.TestModel)
 	}{
 		{
 			name: "float with min only",
@@ -49,7 +47,7 @@ type Thing {
 	value Float[0.0, _]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, model *parse.Model) {
+			checkFn: func(t *testing.T, model *schema.TestModel) {
 				t.Helper()
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
@@ -64,7 +62,7 @@ type Thing {
 	value Float[_, 100.0]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, model *parse.Model) {
+			checkFn: func(t *testing.T, model *schema.TestModel) {
 				t.Helper()
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
@@ -79,7 +77,7 @@ type Thing {
 	value Float[0.0, 100.0]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, model *parse.Model) {
+			checkFn: func(t *testing.T, model *schema.TestModel) {
 				t.Helper()
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
@@ -94,7 +92,7 @@ type Thing {
 	value Float
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, model *parse.Model) {
+			checkFn: func(t *testing.T, model *schema.TestModel) {
 				t.Helper()
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
@@ -109,7 +107,7 @@ type Thing {
 	value Float[-90.0, 90.0]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, model *parse.Model) {
+			checkFn: func(t *testing.T, model *schema.TestModel) {
 				t.Helper()
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
@@ -131,7 +129,7 @@ type Thing {
 	value Float[-180.0, -1.0]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, model *parse.Model) {
+			checkFn: func(t *testing.T, model *schema.TestModel) {
 				t.Helper()
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
@@ -153,7 +151,7 @@ type Thing {
 	value Float[-90.0, _]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, model *parse.Model) {
+			checkFn: func(t *testing.T, model *schema.TestModel) {
 				t.Helper()
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
@@ -182,7 +180,7 @@ type Thing {
 	value Float[-_, 100.0]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, _ *parse.Model) {
+			checkFn: func(t *testing.T, _ *schema.TestModel) {
 				t.Helper()
 				// Warning is checked via wantWarnings in the test loop
 			},
@@ -195,7 +193,7 @@ type Thing {
 	value Float[0.0, -_]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, _ *parse.Model) {
+			checkFn: func(t *testing.T, _ *schema.TestModel) {
 				t.Helper()
 			},
 			wantWarnings: true,
@@ -635,7 +633,7 @@ type B {
 				require.GreaterOrEqual(t, len(model.Types), 2)
 
 				// Find the type with the relation (type B)
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					if len(typ.Relations) > 0 {
 						rel = typ.Relations[0]
@@ -663,7 +661,7 @@ func TestParse_IntegerConstraintEdgeCases(t *testing.T) {
 		source       string
 		wantOK       bool
 		wantWarnings bool
-		checkFn      func(t *testing.T, model *parse.Model)
+		checkFn      func(t *testing.T, model *schema.TestModel)
 	}{
 		{
 			name: "integer with min only",
@@ -704,7 +702,7 @@ type Thing {
 	value Integer[-100, 100]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, model *parse.Model) {
+			checkFn: func(t *testing.T, model *schema.TestModel) {
 				t.Helper()
 				prop := model.Types[0].Properties[0]
 				ic, ok := prop.Constraint.(schema.IntegerConstraint)
@@ -724,7 +722,7 @@ type Thing {
 	value Integer[-200, -1]
 }`,
 			wantOK: true,
-			checkFn: func(t *testing.T, model *parse.Model) {
+			checkFn: func(t *testing.T, model *schema.TestModel) {
 				t.Helper()
 				prop := model.Types[0].Properties[0]
 				ic, ok := prop.Constraint.(schema.IntegerConstraint)
@@ -884,10 +882,10 @@ type Parent {
 				require.NotNil(t, model)
 
 				// Find the composition relation
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					for _, r := range typ.Relations {
-						if r.Kind == parse.RelationComposition {
+						if r.Kind == schema.RelationComposition {
 							rel = r
 							break
 						}
@@ -1014,7 +1012,7 @@ type C extends A, B {}`
 	require.Len(t, model.Types, 3)
 
 	// Find type C
-	var typeC *parse.TypeDecl
+	var typeC *schema.TestTypeDecl
 	for _, typ := range model.Types {
 		if typ.Name == "C" {
 			typeC = typ
@@ -1151,10 +1149,10 @@ type Source {
 				require.NotNil(t, model)
 
 				// Find the association relation with properties
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					for _, r := range typ.Relations {
-						if r.Kind == parse.RelationAssociation && len(r.Properties) > 0 {
+						if r.Kind == schema.RelationAssociation && len(r.Properties) > 0 {
 							rel = r
 							break
 						}
@@ -1331,10 +1329,10 @@ type Child {
 				require.NotNil(t, model)
 
 				// Find the association relation
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					for _, r := range typ.Relations {
-						if r.Kind == parse.RelationAssociation {
+						if r.Kind == schema.RelationAssociation {
 							rel = r
 							break
 						}
@@ -1383,10 +1381,10 @@ type Parent {
 				require.NotNil(t, model)
 
 				// Find the composition relation
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					for _, r := range typ.Relations {
-						if r.Kind == parse.RelationComposition {
+						if r.Kind == schema.RelationComposition {
 							rel = r
 							break
 						}
@@ -1536,7 +1534,7 @@ type Child extends A, B, {}`,
 				require.NotNil(t, model)
 
 				// Find the type that extends
-				var childType *parse.TypeDecl
+				var childType *schema.TestTypeDecl
 				for _, typ := range model.Types {
 					if len(typ.Inherits) > 0 {
 						childType = typ
@@ -1729,7 +1727,7 @@ type Source {
 				require.NotNil(t, model)
 
 				// Find the relation and check the target type ref
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					for _, r := range typ.Relations {
 						rel = r
@@ -1999,7 +1997,7 @@ type Source {
 				require.NotNil(t, model)
 
 				// Find the relation
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					for _, r := range typ.Relations {
 						rel = r
@@ -2063,7 +2061,7 @@ type Source {
 				require.NotNil(t, model)
 
 				// Find the relation
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					for _, r := range typ.Relations {
 						rel = r
@@ -2073,10 +2071,9 @@ type Source {
 				require.NotNil(t, rel, "should have a relation")
 				require.NotNil(t, rel.Target, "should have a target")
 
-				// Convert to schema.TypeRef
-				schemaRef := rel.Target.ToSchemaTypeRef()
-				assert.Equal(t, tt.wantQualif, schemaRef.Qualifier())
-				assert.Equal(t, tt.wantName, schemaRef.Name())
+				// Check the AST type ref fields directly
+				assert.Equal(t, tt.wantQualif, rel.Target.Qualifier)
+				assert.Equal(t, tt.wantName, rel.Target.Name)
 			} else {
 				assert.False(t, result.OK(), "expected errors")
 			}
@@ -2250,10 +2247,10 @@ type Parent {
 				require.NotNil(t, model)
 
 				// Find the composition relation
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					for _, r := range typ.Relations {
-						if r.Kind == parse.RelationComposition {
+						if r.Kind == schema.RelationComposition {
 							rel = r
 							break
 						}
@@ -2326,10 +2323,10 @@ type Child {
 				require.NotNil(t, model)
 
 				// Find the association relation
-				var rel *parse.RelationDecl
+				var rel *schema.TestRelationDecl
 				for _, typ := range model.Types {
 					for _, r := range typ.Relations {
-						if r.Kind == parse.RelationAssociation {
+						if r.Kind == schema.RelationAssociation {
 							rel = r
 							break
 						}
@@ -2983,11 +2980,11 @@ func TestParse_NilTypeRefHandling(t *testing.T) {
 	t.Parallel()
 
 	// Test TypeRef.String() and IsQualified() methods
-	ref := parse.TypeRef{Name: "Test"}
+	ref := schema.TestASTTypeRef{Name: "Test"}
 	assert.Equal(t, "Test", ref.String())
 	assert.False(t, ref.IsQualified())
 
-	qualRef := parse.TypeRef{Qualifier: "pkg", Name: "Test"}
+	qualRef := schema.TestASTTypeRef{Qualifier: "pkg", Name: "Test"}
 	assert.Equal(t, "pkg.Test", qualRef.String())
 	assert.True(t, qualRef.IsQualified())
 }
@@ -3000,11 +2997,11 @@ func TestRelationKind_AllValues(t *testing.T) {
 	t.Parallel()
 
 	// Test all RelationKind values
-	assert.Equal(t, "association", parse.RelationAssociation.String())
-	assert.Equal(t, "composition", parse.RelationComposition.String())
+	assert.Equal(t, "association", schema.RelationAssociation.String())
+	assert.Equal(t, "composition", schema.RelationComposition.String())
 
 	// Test unknown value
-	var unknown parse.RelationKind = 99
+	var unknown schema.RelationKind = 99
 	assert.Equal(t, "unknown", unknown.String())
 }
 
@@ -3109,10 +3106,10 @@ type Parent {
 			require.NotNil(t, model)
 
 			// Find the composition relation
-			var rel *parse.RelationDecl
+			var rel *schema.TestRelationDecl
 			for _, typ := range model.Types {
 				for _, r := range typ.Relations {
-					if r.Kind == parse.RelationComposition {
+					if r.Kind == schema.RelationComposition {
 						rel = r
 						break
 					}
@@ -3443,7 +3440,7 @@ type Parent {
 			t.Parallel()
 
 			// The main assertion: no panic should occur
-			var model *parse.Model
+			var model *schema.TestModel
 			var result diag.Result
 			assert.NotPanics(t, func() {
 				model, result = parseSchema(t, tt.source)

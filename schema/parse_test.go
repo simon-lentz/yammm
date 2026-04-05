@@ -1,16 +1,14 @@
-package parse_test
+package schema_test
 
 import (
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/internal/parse"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // registerSource is a helper to register a schema source for testing.
@@ -33,7 +31,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -63,7 +61,7 @@ type Pet extends Animal {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -92,7 +90,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -102,7 +100,7 @@ type Person {
 	require.Len(t, person.Relations, 1)
 
 	rel := person.Relations[0]
-	assert.Equal(t, parse.RelationAssociation, rel.Kind)
+	assert.Equal(t, schema.RelationAssociation, rel.Kind)
 	assert.Equal(t, "friends", rel.Name)
 	assert.Equal(t, "Car", rel.Target.Name)
 
@@ -125,7 +123,7 @@ type Car {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -141,7 +139,7 @@ type Car {
 	require.Len(t, car.Relations, 1)
 
 	rel := car.Relations[0]
-	assert.Equal(t, parse.RelationComposition, rel.Kind)
+	assert.Equal(t, schema.RelationComposition, rel.Kind)
 	assert.Equal(t, "wheels", rel.Name)
 	assert.Equal(t, "Wheel", rel.Target.Name)
 
@@ -160,7 +158,7 @@ abstract type Entity {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -191,7 +189,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -230,7 +228,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -262,7 +260,7 @@ type Car {
 	sourceID := registerSource(t, reg, schemaSource, "car.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -294,7 +292,7 @@ import "parts.yammm"
 	sourceID := registerSource(t, reg, schemaSource, "main.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -318,7 +316,7 @@ import "foo.yammm" as type
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	_ = parser.Parse([]byte(schemaSource))
 
 	result := collector.Result()
@@ -337,7 +335,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -366,7 +364,7 @@ type Order {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -392,7 +390,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	_ = parser.Parse([]byte(schemaSource))
 
 	result := collector.Result()
@@ -412,7 +410,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := parse.NewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector, reg, reg)
 	_ = parser.Parse([]byte(schemaSource))
 
 	result := collector.Result()
@@ -441,19 +439,19 @@ type Person {
 func TestTypeRef_String(t *testing.T) {
 	tests := []struct {
 		name      string
-		ref       parse.TypeRef
+		ref       schema.TestASTTypeRef
 		expected  string
 		qualified bool
 	}{
 		{
 			name:      "local type",
-			ref:       parse.TypeRef{Name: "Person"},
+			ref:       schema.TestASTTypeRef{Name: "Person"},
 			expected:  "Person",
 			qualified: false,
 		},
 		{
 			name:      "qualified type",
-			ref:       parse.TypeRef{Qualifier: "parts", Name: "Wheel"},
+			ref:       schema.TestASTTypeRef{Qualifier: "parts", Name: "Wheel"},
 			expected:  "parts.Wheel",
 			qualified: true,
 		},
@@ -467,11 +465,6 @@ func TestTypeRef_String(t *testing.T) {
 	}
 }
 
-func TestRelationKind_String(t *testing.T) {
-	assert.Equal(t, "association", parse.RelationAssociation.String())
-	assert.Equal(t, "composition", parse.RelationComposition.String())
-}
-
 func TestSpanBuilder_FromToken(t *testing.T) {
 	// Simple ASCII source
 	schemaSource := "schema \"test\""
@@ -479,7 +472,7 @@ func TestSpanBuilder_FromToken(t *testing.T) {
 	reg := source.NewRegistry()
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 
-	builder := parse.NewSpanBuilder(sourceID, reg, reg)
+	builder := schema.TestNewSpanBuilder(sourceID, reg, reg)
 
 	// FromToken with nil returns zero span
 	span := builder.FromToken(nil)
@@ -490,7 +483,7 @@ func TestSpanBuilder_FromContext(t *testing.T) {
 	reg := source.NewRegistry()
 	sourceID := registerSource(t, reg, "test", "test.yammm")
 
-	builder := parse.NewSpanBuilder(sourceID, reg, reg)
+	builder := schema.TestNewSpanBuilder(sourceID, reg, reg)
 
 	// FromContext with nil returns zero span
 	span := builder.FromContext(nil)
@@ -503,7 +496,7 @@ func TestMustPositionAt_Exported(t *testing.T) {
 	reg := source.NewRegistry()
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 
-	pos := parse.MustPositionAt(reg, sourceID, 0)
+	pos := schema.TestMustPositionAt(reg, sourceID, 0)
 	assert.Equal(t, 1, pos.Line)
 	assert.Equal(t, 1, pos.Column)
 }
@@ -513,6 +506,6 @@ func TestMustPositionAt_PanicOnUnknownSource(t *testing.T) {
 	unknownID := location.NewSourceID("unknown.yammm")
 
 	assert.Panics(t, func() {
-		parse.MustPositionAt(reg, unknownID, 0)
+		schema.TestMustPositionAt(reg, unknownID, 0)
 	})
 }
