@@ -530,7 +530,7 @@ Properties without modifiers are **optional** and may be omitted from instance d
 Only the following types may be used as primary keys:
 
 | Allowed | Why |
-|---------|-----|
+| ------- | --- |
 | `String` | Natural identifiers (names, codes, external IDs) |
 | `UUID` | Purpose-built for identity |
 | `Date` | Natural key for temporal data (daily reports, events) |
@@ -539,7 +539,7 @@ Only the following types may be used as primary keys:
 All other types are rejected:
 
 | Banned | Why |
-|--------|-----|
+| ------ | --- |
 | `Integer`, `Float` | Numeric values are typically mutable; no auto-increment |
 | `Boolean` | Cardinality of 2, useless as identity |
 | `Enum` | Small finite set, poor identity |
@@ -1010,7 +1010,7 @@ type Person {
     name String required
     age Integer[0, 150]
 
-    ! "name must not be empty" len(name) > 0
+    ! "name must not be empty" name -> Len > 0
     ! "age must be positive" age >= 0
 }
 ```
