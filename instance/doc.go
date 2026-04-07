@@ -43,5 +43,5 @@
 //
 // # Subpackages
 //
-//   - [instance/path] provides JSONPath-like syntax for error locations
+//   - [location/path] provides JSONPath-like syntax for error locations
 package instance

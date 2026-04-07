@@ -12,8 +12,8 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -243,7 +243,7 @@ func (v *Validator) typeResolutionResult(raw RawInstance, err error) diag.Result
 // compositionResolutionResult creates a diagnostic result for composition resolution errors.
 // When raws is empty, uses nil provenance.
 func (v *Validator) compositionResolutionResult(parentType, relationName string, raws []RawInstance) diag.Result {
-	var prov *Provenance
+	var prov *location.Provenance
 	if len(raws) > 0 {
 		prov = raws[0].Provenance
 	}
@@ -253,7 +253,7 @@ func (v *Validator) compositionResolutionResult(parentType, relationName string,
 // typeResolutionResultForBatch creates a diagnostic result for type resolution errors in batch contexts.
 // When raws is empty, uses nil provenance.
 func (v *Validator) typeResolutionResultForBatch(err error, raws []RawInstance) diag.Result {
-	var prov *Provenance
+	var prov *location.Provenance
 	if len(raws) > 0 {
 		prov = raws[0].Provenance
 	}
@@ -466,7 +466,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 //
 // Complexity: O(N+M) where N is input property count and M is schema property count,
 // using CanonicalPropertyMap() for O(1) case-insensitive lookups.
-func (v *Validator) buildPropertyMapping(typ *schema.Type, props map[string]any, collector *diag.Collector, prov *Provenance) map[string]string {
+func (v *Validator) buildPropertyMapping(typ *schema.Type, props map[string]any, collector *diag.Collector, prov *location.Provenance) map[string]string {
 	// Early return for empty input - no properties to map
 	if len(props) == 0 {
 		return make(map[string]string)
@@ -545,7 +545,7 @@ func (v *Validator) buildPropertyMapping(typ *schema.Type, props map[string]any,
 }
 
 // checkUnknownFields reports diagnostics for unknown fields in the input.
-func (v *Validator) checkUnknownFields(typ *schema.Type, props map[string]any, mapping map[string]string, collector *diag.Collector, prov *Provenance) {
+func (v *Validator) checkUnknownFields(typ *schema.Type, props map[string]any, mapping map[string]string, collector *diag.Collector, prov *location.Provenance) {
 	// Build reverse mapping to check which input names were matched as properties
 	matched := make(map[string]bool)
 	for _, inputName := range mapping {
@@ -601,7 +601,7 @@ func (v *Validator) checkUnknownFields(typ *schema.Type, props map[string]any, m
 //
 // This approach trades off "fail-fast" behavior for diagnostic completeness.
 // Users see all invariant violations at once rather than fixing them one at a time.
-func (v *Validator) evaluateInvariants(ctx context.Context, typ *schema.Type, props map[string]any, collector *diag.Collector, prov *Provenance) (err error) {
+func (v *Validator) evaluateInvariants(ctx context.Context, typ *schema.Type, props map[string]any, collector *diag.Collector, prov *location.Provenance) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = wrapPanicValue(r, KindInvariantPanic)
@@ -651,7 +651,7 @@ func (v *Validator) evaluateInvariants(ctx context.Context, typ *schema.Type, pr
 }
 
 // extractPrimaryKey extracts primary key components from validated properties.
-func (v *Validator) extractPrimaryKey(typ *schema.Type, props map[string]any, collector *diag.Collector, prov *Provenance) []any {
+func (v *Validator) extractPrimaryKey(typ *schema.Type, props map[string]any, collector *diag.Collector, prov *location.Provenance) []any {
 	var pkComponents []any
 
 	for pk := range typ.PrimaryKeys() {
@@ -674,7 +674,7 @@ func (v *Validator) extractPrimaryKey(typ *schema.Type, props map[string]any, co
 
 // withProvenance applies provenance to an issue builder (path and span when available).
 // This implements the architecture requirement to attach spans when provenance has one.
-func withProvenance(b *diag.IssueBuilder, prov *Provenance, pathStr string) *diag.IssueBuilder {
+func withProvenance(b *diag.IssueBuilder, prov *location.Provenance, pathStr string) *diag.IssueBuilder {
 	sourceName := ""
 	if prov != nil {
 		sourceName = prov.SourceName()
@@ -687,7 +687,7 @@ func withProvenance(b *diag.IssueBuilder, prov *Provenance, pathStr string) *dia
 }
 
 // createErrorResult creates a diag.Result with a single error issue.
-func createErrorResult(code diag.Code, message string, prov *Provenance) diag.Result {
+func createErrorResult(code diag.Code, message string, prov *location.Provenance) diag.Result {
 	collector := diag.NewCollectorUnlimited()
 	issue := diag.NewIssue(
 		diag.Error,
@@ -700,7 +700,7 @@ func createErrorResult(code diag.Code, message string, prov *Provenance) diag.Re
 }
 
 // provenancePath returns the path string from provenance, or "$" if nil.
-func provenancePath(prov *Provenance) string {
+func provenancePath(prov *location.Provenance) string {
 	if prov == nil {
 		return "$"
 	}
@@ -708,7 +708,7 @@ func provenancePath(prov *Provenance) string {
 }
 
 // provenancePathForProperty returns the path string for a property.
-func provenancePathForProperty(prov *Provenance, propName string) string {
+func provenancePathForProperty(prov *location.Provenance, propName string) string {
 	if prov == nil {
 		// Use path.Root().Key() to produce canonical path syntax
 		return path.Root().Key(propName).String()

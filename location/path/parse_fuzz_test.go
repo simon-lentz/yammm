@@ -58,19 +58,6 @@ func FuzzParse(f *testing.F) {
 	})
 }
 
-// FuzzExtractSegments verifies that extractSegments does not panic.
-func FuzzExtractSegments(f *testing.F) {
-	f.Add("$")
-	f.Add("$.foo")
-	f.Add("$[0]")
-	f.Add("$[id=123]")
-	f.Add("")
-
-	f.Fuzz(func(t *testing.T, input string) {
-		_, _ = extractSegments(input)
-	})
-}
-
 // FuzzParseQuotedString verifies quoted string parsing robustness.
 func FuzzParseQuotedString(f *testing.F) {
 	f.Add(`"hello"`)

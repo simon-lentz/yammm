@@ -3,8 +3,8 @@ package instance
 import (
 	"maps"
 
-	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 )
 
 // Builder constructs RawInstance values for testing and programmatic use.
@@ -16,7 +16,7 @@ import (
 // previously built instances (properties are copied on build).
 type Builder struct {
 	properties map[string]any
-	provenance *Provenance
+	provenance *location.Provenance
 }
 
 // EdgeBuilder constructs edge objects for associations.
@@ -79,19 +79,19 @@ func (b *Builder) ComposedMany(relationName string, children ...*Builder) *Build
 }
 
 // WithProvenance sets source location metadata for diagnostics.
-// The path follows instance/path canonical syntax (e.g., "$.Person[0]").
+// The path follows location/path canonical syntax (e.g., "$.Person[0]").
 // If the path cannot be parsed, it falls back to the root path.
 func (b *Builder) WithProvenance(sourceName, pathStr string) *Builder {
 	p, err := path.Parse(pathStr)
 	if err != nil {
 		p = path.Root()
 	}
-	b.provenance = NewProvenance(sourceName, p, location.Span{})
+	b.provenance = location.NewProvenance(sourceName, p, location.Span{})
 	return b
 }
 
 // WithFullProvenance sets complete provenance including span information.
-func (b *Builder) WithFullProvenance(p *Provenance) *Builder {
+func (b *Builder) WithFullProvenance(p *location.Provenance) *Builder {
 	b.provenance = p
 	return b
 }

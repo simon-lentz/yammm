@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -38,7 +38,7 @@ type Instance struct {
 
 	// provenance holds source location metadata for the instance.
 	// nil if no provenance was provided by the adapter.
-	provenance *instance.Provenance
+	provenance *location.Provenance
 }
 
 // TypeName returns the canonical instance tag form for this instance's type.
@@ -104,7 +104,7 @@ func (i *Instance) Properties() immutable.Properties {
 //
 // Returns nil if no provenance was provided by the adapter.
 // Provenance includes SourceName, Path, and Span for diagnostic reporting.
-func (i *Instance) Provenance() *instance.Provenance {
+func (i *Instance) Provenance() *location.Provenance {
 	if i == nil {
 		return nil
 	}
@@ -170,7 +170,7 @@ func newInstance(
 	typeID schema.TypeID,
 	primaryKey immutable.Key,
 	properties immutable.Properties,
-	provenance *instance.Provenance,
+	provenance *location.Provenance,
 ) *Instance {
 	return &Instance{
 		typeName:   typeName,
@@ -195,7 +195,7 @@ func (i *Instance) addComposed(relationName string, child *Instance) {
 // Returns the cloned instance and updates cloneMap with the new mapping.
 //
 // dependency: This function shares primaryKey (immutable.Key),
-// properties (immutable.Properties), and provenance (*instance.Provenance)
+// properties (immutable.Properties), and provenance (*location.Provenance)
 // by direct assignment rather than deep-copying.
 // This is safe because these types guarantee structural immutability:
 // all internal maps and slices are unexported and never modified after construction.

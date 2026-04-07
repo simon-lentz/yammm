@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -19,7 +20,7 @@ type ValidInstance struct {
 	properties immutable.Properties
 	edges      map[string]*ValidEdgeData
 	composed   map[string]immutable.Value
-	provenance *Provenance
+	provenance *location.Provenance
 }
 
 // NewValidInstance creates a new ValidInstance.
@@ -31,7 +32,7 @@ func NewValidInstance(
 	props immutable.Properties,
 	edges map[string]*ValidEdgeData,
 	composed map[string]immutable.Value,
-	provenance *Provenance,
+	provenance *location.Provenance,
 ) *ValidInstance {
 	return &ValidInstance{
 		typeName:   typeName,
@@ -92,7 +93,7 @@ func (v *ValidInstance) Composed(relationName string) (immutable.Value, bool) {
 
 // Provenance returns the source location metadata.
 // Returns nil if no provenance was provided.
-func (v *ValidInstance) Provenance() *Provenance {
+func (v *ValidInstance) Provenance() *location.Provenance {
 	return v.provenance
 }
 

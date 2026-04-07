@@ -2,13 +2,10 @@ package json
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"slices"
-	"strings"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
@@ -241,16 +238,13 @@ func (a *Adapter) buildOutput(result *graph.Snapshot, cfg *writeConfig) map[stri
 	output := make(map[string]any)
 	s := result.Schema()
 
-	// Build edge index for FK lookups
-	edgeIdx := buildEdgeIndex(result.Edges())
-
 	// Iterate types in sorted order for deterministic output
 	for _, typeName := range result.Types() {
 		instances := result.InstancesOf(typeName)
 		serialized := make([]map[string]any, 0, len(instances))
 
 		for _, inst := range instances {
-			obj := serializeInstance(inst, edgeIdx, s)
+			obj := serializeInstance(inst, result, s)
 			serialized = append(serialized, obj)
 		}
 
@@ -266,29 +260,6 @@ func (a *Adapter) buildOutput(result *graph.Snapshot, cfg *writeConfig) map[stri
 	}
 
 	return output
-}
-
-// edgeIndex maps: typeName -> pkString -> relationName -> []*graph.Edge
-type edgeIndex map[string]map[string]map[string][]*graph.Edge
-
-// buildEdgeIndex creates an index of edges by source instance for efficient FK lookup.
-// Edges are indexed by relation name (not field name) so that schema lookup can be used.
-func buildEdgeIndex(edges []*graph.Edge) edgeIndex {
-	idx := make(edgeIndex)
-	for _, e := range edges {
-		typeName := e.Source().TypeName()
-		pk := e.Source().PrimaryKey().String()
-		relName := e.Relation()
-
-		if idx[typeName] == nil {
-			idx[typeName] = make(map[string]map[string][]*graph.Edge)
-		}
-		if idx[typeName][pk] == nil {
-			idx[typeName][pk] = make(map[string][]*graph.Edge)
-		}
-		idx[typeName][pk][relName] = append(idx[typeName][pk][relName], e)
-	}
-	return idx
 }
 
 // lookupType resolves a TypeID to its schema.Type by checking local types and imports.
@@ -314,7 +285,8 @@ func lookupType(s *schema.Schema, id schema.TypeID) (*schema.Type, bool) {
 
 // serializeInstance converts a graph.Instance to a JSON-serializable map.
 // Uses schema to determine cardinality (scalar vs array) and field names.
-func serializeInstance(inst *graph.Instance, edgeIdx edgeIndex, s *schema.Schema) map[string]any {
+// Edge lookup uses snap.EdgesFrom for O(1) per-instance access.
+func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schema) map[string]any {
 	obj := make(map[string]any)
 
 	// Lookup the type for schema-based serialization
@@ -325,59 +297,52 @@ func serializeInstance(inst *graph.Instance, edgeIdx edgeIndex, s *schema.Schema
 		obj[name] = unwrapValue(val)
 	}
 
-	// 2. Add FK references for associations
-	typeName := inst.TypeName()
-	pk := inst.PrimaryKey().String()
-	if byPK, ok := edgeIdx[typeName]; ok {
-		if byRel, ok := byPK[pk]; ok {
-			// Get relation names in sorted order for deterministic output
-			relNames := make([]string, 0, len(byRel))
-			for relName := range byRel {
-				relNames = append(relNames, relName)
+	// 2. Add FK references for associations using the snapshot edge index.
+	// EdgesFrom returns edges already sorted by (relation, targetType, targetKey).
+	allEdges := snap.EdgesFrom(inst)
+	if len(allEdges) > 0 {
+		// Group edges by relation name, preserving sorted order within each group.
+		byRel := make(map[string][]*graph.Edge)
+		var relOrder []string
+		for _, e := range allEdges {
+			rel := e.Relation()
+			if _, seen := byRel[rel]; !seen {
+				relOrder = append(relOrder, rel)
 			}
-			slices.Sort(relNames)
+			byRel[rel] = append(byRel[rel], e)
+		}
 
-			for _, relName := range relNames {
-				edges := byRel[relName]
+		for _, relName := range relOrder {
+			edges := byRel[relName]
 
-				// Sort edges by target PK for deterministic output
-				slices.SortFunc(edges, func(a, b *graph.Edge) int {
-					return cmp.Compare(a.Target().PrimaryKey().String(), b.Target().PrimaryKey().String())
-				})
-
-				// Determine field name and cardinality from schema
-				fieldName := relName // fallback
-				isMany := len(edges) > 1
-				if hasType {
-					if rel, ok := schemaType.Relation(relName); ok {
-						fieldName = rel.FieldName()
-						isMany = rel.IsMany()
-					}
+			// Determine field name and cardinality from schema
+			fieldName := relName // fallback
+			isMany := len(edges) > 1
+			if hasType {
+				if rel, ok := schemaType.Relation(relName); ok {
+					fieldName = rel.FieldName()
+					isMany = rel.IsMany()
 				}
+			}
 
-				if isMany {
-					// Many cardinality: array of FK arrays
-					fks := make([]any, len(edges))
-					for i, e := range edges {
-						fks[i] = e.Target().PrimaryKey().Clone()
-					}
-					obj[fieldName] = fks
-				} else if len(edges) > 0 {
-					// One cardinality: FK as array of key components
-					obj[fieldName] = edges[0].Target().PrimaryKey().Clone()
+			if isMany {
+				// Many cardinality: array of FK arrays
+				fks := make([]any, len(edges))
+				for i, e := range edges {
+					fks[i] = e.Target().PrimaryKey().Clone()
 				}
+				obj[fieldName] = fks
+			} else if len(edges) > 0 {
+				// One cardinality: FK as array of key components
+				obj[fieldName] = edges[0].Target().PrimaryKey().Clone()
 			}
 		}
 	}
 
-	// 3. Add composed children in sorted order
+	// 3. Add composed children in sorted order.
+	// ComposedRelations returns sorted relation names; Composed returns a defensive copy.
 	for _, relName := range inst.ComposedRelations() {
 		children := inst.Composed(relName)
-
-		// Sort children by PK for deterministic output
-		slices.SortFunc(children, func(a, b *graph.Instance) int {
-			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
-		})
 
 		// Determine field name and cardinality from schema
 		fieldName := relName // fallback
@@ -393,12 +358,12 @@ func serializeInstance(inst *graph.Instance, edgeIdx edgeIndex, s *schema.Schema
 			// Many cardinality: array of objects
 			arr := make([]map[string]any, len(children))
 			for i, child := range children {
-				arr[i] = serializeInstance(child, edgeIdx, s)
+				arr[i] = serializeInstance(child, snap, s)
 			}
 			obj[fieldName] = arr
 		} else if len(children) > 0 {
 			// One cardinality: inline object
-			obj[fieldName] = serializeInstance(children[0], edgeIdx, s)
+			obj[fieldName] = serializeInstance(children[0], snap, s)
 		}
 	}
 
@@ -489,18 +454,7 @@ func parseKeyString(s string) []any {
 	// Normalize json.Number to int64/float64
 	for i, v := range result {
 		if num, ok := v.(json.Number); ok {
-			// Try int64 first
-			if intVal, err := num.Int64(); err == nil {
-				// Only use int64 if it was really an integer (no decimal point)
-				if !strings.Contains(num.String(), ".") {
-					result[i] = intVal
-					continue
-				}
-			}
-			// Fall back to float64
-			if floatVal, err := num.Float64(); err == nil {
-				result[i] = floatVal
-			}
+			result[i] = immutable.NormalizeNumber(num)
 		}
 	}
 	return result

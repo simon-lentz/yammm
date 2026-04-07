@@ -14,8 +14,8 @@ import (
 	"github.com/simon-lentz/yammm/adapter/json/internal/typetag"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 )
 
 // ParseObject parses JSON data structured as {"TypeName": [...], "OtherType": [...]}.
@@ -410,7 +410,7 @@ func (a *Adapter) parseArray(dec *json.Decoder, source location.SourceID, basePa
 
 // makeProvenance creates a Provenance from byte offsets.
 // If positions cannot be determined (IsZero), the span preserves only the source identity.
-func (a *Adapter) makeProvenance(source location.SourceID, p path.Builder, startOffset, endOffset int) *instance.Provenance {
+func (a *Adapter) makeProvenance(source location.SourceID, p path.Builder, startOffset, endOffset int) *location.Provenance {
 	startPos := a.registry.PositionAt(source, startOffset)
 	endPos := a.registry.PositionAt(source, endOffset)
 
@@ -426,7 +426,7 @@ func (a *Adapter) makeProvenance(source location.SourceID, p path.Builder, start
 		span = location.Span{Source: source}
 	}
 
-	return instance.NewProvenance(source.String(), p, span)
+	return location.NewProvenance(source.String(), p, span)
 }
 
 // parseError creates an E_ADAPTER_PARSE issue.

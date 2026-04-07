@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -128,7 +128,7 @@ func TestOptionsWithProvenance(t *testing.T) {
 	validator := instance.NewValidator(s)
 
 	t.Run("with_provenance_errors_show_path", func(t *testing.T) {
-		prov := instance.NewProvenance("test.json", path.Root().Key("person"), location.Span{})
+		prov := location.NewProvenance("test.json", path.Root().Key("person"), location.Span{})
 		raw := instance.RawInstance{
 			Properties: map[string]any{
 				"id": "1",

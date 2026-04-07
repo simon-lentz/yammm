@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 )
 
 func TestNewInstance(t *testing.T) {
@@ -196,7 +196,7 @@ func TestBuilder_WithProvenance(t *testing.T) {
 }
 
 func TestBuilder_WithFullProvenance(t *testing.T) {
-	prov := NewProvenance(
+	prov := location.NewProvenance(
 		"test.json",
 		path.Root().Key("users").Index(0),
 		location.Range(location.SourceID{}, 10, 1, 20, 100),

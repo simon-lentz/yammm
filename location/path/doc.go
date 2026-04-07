@@ -1,6 +1,11 @@
 // Package path provides canonical JSONPath-like syntax for identifying
 // positions within validated instance data.
 //
+// This package lives in the location layer because instance paths are
+// diagnostic/tracing infrastructure — they answer "where in the data
+// structure?" alongside the source location types (Span, Position, SourceID)
+// that answer "where in the source file?".
+//
 // # Path Syntax
 //
 // Paths always start with "$" (the root) and consist of segments:
