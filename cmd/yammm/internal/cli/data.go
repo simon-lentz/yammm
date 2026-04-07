@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // DetectFormat returns "json" or "csv" based on the file extension.
@@ -135,4 +137,54 @@ func WriteTo(data []byte, path string, w io.Writer) error {
 	}
 	_, err := w.Write(data)
 	return err
+}
+
+// IsSnapshotFile reports whether the file at path is a yammm snapshot (.ys)
+// file using content-based detection. It reads the first bytes and checks
+// for the {"yammm_snapshot": prefix.
+//
+// Returns (false, nil) for non-snapshot files (including non-JSON files).
+// Returns (false, err) only for genuine I/O errors.
+func IsSnapshotFile(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(io.LimitReader(f, 512))
+
+	// First token must be '{'.
+	tok, err := dec.Token()
+	if err != nil {
+		return false, nil // not valid JSON — not a snapshot
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok || delim != '{' {
+		return false, nil
+	}
+
+	// Second token must be the string "yammm_snapshot".
+	tok, err = dec.Token()
+	if err != nil {
+		return false, nil
+	}
+	key, ok := tok.(string)
+	if !ok {
+		return false, nil
+	}
+	return key == "yammm_snapshot", nil
+}
+
+// LoadSnapshotFile reads a .ys file and loads it into a [*graph.Snapshot].
+//
+// Returns (T, diag.Result, error) following the CLI helper convention:
+// error captures I/O failures, diag.Result captures semantic issues.
+func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts ...snapshot.LoadOption) (*graph.Snapshot, diag.Result, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
+	}
+	snap, result := snapshot.Load(ctx, data, s, opts...)
+	return snap, result, nil
 }

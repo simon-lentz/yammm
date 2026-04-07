@@ -31,6 +31,7 @@ Data commands (check, load, export) also accept:
 		newNeo4jCmd(),
 		newLoadCmd(),
 		newExportCmd(),
+		newSnapshotCmd(),
 	)
 
 	return cmd

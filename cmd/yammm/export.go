@@ -73,6 +73,17 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
+	// Check if the data file is a persisted snapshot.
+	isSnapshot, err := cli.IsSnapshotFile(dataPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: read data file: %v\n", err)
+		return &cli.ExitError{Code: cli.ExitRuntime}
+	}
+
+	if isSnapshot {
+		return exportFromSnapshot(cmd, s, dataPath, outputFormat, noColor, absSchemaPath, toFormat, outputPath, outputDir)
+	}
+
 	// Parse, validate, and build graph
 	result, g, err := loadGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
 	if err != nil {
@@ -249,4 +260,33 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 	}
 
 	return nil
+}
+
+func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, dataPath string, outputFormat cli.OutputFormat, noColor bool, absSchemaPath string, toFormat, outputPath, outputDir string) error {
+	snap, result, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return &cli.ExitError{Code: cli.ExitRuntime}
+	}
+
+	// Render warnings (e.g., unsupported hash algorithm).
+	if !result.OK() {
+		renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), result)
+	}
+	if result.HasErrors() {
+		return &cli.ExitError{Code: cli.ExitValidation}
+	}
+
+	// Route to adapter — same as raw data path.
+	switch strings.ToLower(toFormat) {
+	case "json":
+		return exportJSON(cmd, snap, outputPath)
+	case "csv":
+		return exportCSV(cmd, snap, s, outputPath, outputDir)
+	case "cypher":
+		return exportCypher(cmd, snap, s, outputPath)
+	default:
+		fmt.Fprintf(os.Stderr, "error: unsupported export format %q: must be json, csv, or cypher\n", toFormat)
+		return &cli.ExitError{Code: cli.ExitUsage}
+	}
 }
