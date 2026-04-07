@@ -257,6 +257,7 @@ func TestCodesByCategory_AllCategoriesCovered(t *testing.T) {
 		CategoryInstance,
 		CategoryGraph,
 		CategoryAdapter,
+		CategorySnapshot,
 	}
 
 	for _, cat := range categories {
