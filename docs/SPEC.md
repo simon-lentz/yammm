@@ -1482,6 +1482,8 @@ validator := instance.NewValidator(schema, opts...)
 | `WithMaxIssuesPerInstance` | Maximum issues per instance (default: 100) |
 | `WithValueRegistry` | Custom value registry for type classification |
 
+The `RecommendedOptions()` function returns a curated set of defaults (`WithStrictPropertyNames(true)`, `WithAllowUnknownFields(false)`) as a starting point for common use cases.
+
 ### Validation
 
 ```go
@@ -1579,6 +1581,18 @@ snap := g.Snapshot()
 
 `NewFromSnapshot` imports all instances, edges, duplicates, and unresolved records from the source snapshot. Subsequent `Add` calls may resolve previously-unresolved edges if they supply the missing targets.
 
+### Rebuilding from Parts
+
+The `RebuildSnapshot` function constructs a `Snapshot` directly from pre-resolved data without running the graph construction pipeline:
+
+```go
+snap, result := graph.RebuildSnapshot(schema, parts)
+```
+
+The `SnapshotParts` struct holds fully-resolved instances, edges, duplicates, and unresolved records using value types (`InstanceParts`, `EdgeParts`, `DuplicateParts`, `UnresolvedParts`). Pointer-based cross-references are resolved internally.
+
+Most users should construct snapshots via `Graph.Add` + `Graph.Snapshot`. `RebuildSnapshot` exists for the `snapshot.Load` deserialization path and testing.
+
 ### Snapshot Methods
 
 The `Snapshot` type provides read-only access to graph state:
@@ -1633,8 +1647,8 @@ type Visitor interface {
     ExitInstance(inst *graph.Instance) error
     VisitProperty(inst *graph.Instance, name string, value immutable.Value) error
     VisitEdge(edge *graph.Edge) error
-    EnterComposition(parent *graph.Instance, relation string) error
-    ExitComposition(parent *graph.Instance, relation string) error
+    EnterComposition(inst *graph.Instance, relationName string) error
+    ExitComposition(inst *graph.Instance, relationName string) error
 }
 ```
 
@@ -2029,14 +2043,25 @@ The `Constraint` struct contains the constraint `Name`, `Kind` (`ConstraintUniqu
 shapes, result := adapter.ShapeForSchema(ctx, s)
 ```
 
-`ShapeForSchema` returns a `*GraphShape` containing a `Types` map of `NodeShape` values. Each `NodeShape` describes the `Label`, `PrimaryKeys`, and `RequiredFields` for a type.
+`ShapeForSchema` returns a `*GraphShape` containing a `Types` map of `NodeShape` values. Each `NodeShape` describes the `Type` (original yammm type name), `Label` (fully qualified Neo4j label), `PrimaryKeys`, and `RequiredFields` for a type.
 
 ### Write Modes
 
 Write query generation supports two operational modes:
 
 - **Graph mode:** `BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes
-- **Instance mode:** `NodeQueryFor` accepts individual instances and `EdgeQueryFor`/`EdgeQueriesFor` generate edge queries from validated instance or edge data
+- **Instance mode:** `NodeQueryFor` accepts any `NodeSource` and `EdgeQueryFor`/`EdgeQueriesFor` generate edge queries from validated instance or edge data
+
+`NodeQueryFor` accepts a `NodeSource` interface rather than a concrete type:
+
+```go
+type NodeSource interface {
+    TypeName() string
+    Properties() immutable.Properties
+}
+```
+
+Both `*instance.ValidInstance` and `*graph.Instance` satisfy this interface.
 
 ```go
 // Graph mode — batch queries from a snapshot
@@ -2085,7 +2110,29 @@ diff := adapter.DiffConstraints(desired, actual, schemaName)
 query, params := adapter.IntrospectRelationshipsQueryFor(schemaFilter)
 ```
 
-This returns a parameterized Cypher query string and parameters — consumers execute it against their own driver. Package-level helpers `IntrospectConstraintsQuery()` and `IntrospectIndexesQuery()` return static Cypher strings for constraint and index introspection.
+This returns a parameterized Cypher query string and parameters — consumers execute it against their own driver. Package-level helpers assist with gathering introspection data:
+
+| Function | Description |
+| -------- | ----------- |
+| `IntrospectConstraintsQuery()` | Static Cypher for `SHOW CONSTRAINTS YIELD *` |
+| `IntrospectIndexesQuery()` | Static Cypher for `SHOW INDEXES YIELD *` |
+| `IntrospectRelationshipsQuery(labelPrefix)` | Parameterized Cypher for relationship topology discovery |
+| `ParseRemoteConstraints(records)` | Parse driver output into `[]RemoteConstraint` |
+| `ParseRemoteRelationships(records)` | Parse driver output into `[]RemoteRelationship` |
+
+The introspection types are:
+
+- `RemoteConstraint` — constraint metadata (name, type, entity type, labels/types, properties, property type)
+- `RemoteRelationship` — relationship topology (relation type, source/target labels)
+- `RemoteIndex` — index metadata (name, type, entity type, labels/types, properties)
+
+### Utility Functions
+
+| Function | Description |
+| -------- | ----------- |
+| `SanitizeIdentifier(s)` | Escape a string for use as a Neo4j label or property name |
+| `ValidateIdentifier(name, context)` | Validate that a name is a legal Neo4j identifier |
+| `CypherReservedKeywords()` | Return the set of Cypher reserved keywords |
 
 ## CSV Adapter
 
@@ -2163,6 +2210,10 @@ CSV is a flat format. Compositions are not supported in parsing and are silently
 ## Formatting
 
 The `format` package provides canonical formatting for `.yammm` schema files:
+
+```go
+func TokenStream(text string) (string, error)
+```
 
 ```go
 formatted, err := format.TokenStream(input)
