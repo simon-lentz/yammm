@@ -56,6 +56,9 @@ linters:
       - std-error-handling
       - common-false-positives
     rules:
+      # VS Code extension embeds npm packages that may contain Go files.
+      - path: "node_modules/"
+        text: ".*"
       - path: "yammm/.*"
         linters:
           - wrapcheck

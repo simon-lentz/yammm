@@ -14,7 +14,12 @@ tsconfig.json
 # Dependencies (bundled via esbuild)
 node_modules/**
 
-# Development files
+# Development and build files
 .gitignore
-.eslintrc.json
+.nvmrc
+eslint.config.mjs
 esbuild.mjs
+package-lock.json
+
+# Tests
+tests/**

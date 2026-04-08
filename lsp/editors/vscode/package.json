@@ -2,7 +2,7 @@
   "name": "yammm",
   "displayName": "YAMMM",
   "description": "Language support for YAMMM schema files",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "publisher": "simon-lentz",
   "license": "MIT",
   "icon": "icon.png",
@@ -47,6 +47,11 @@
         }
       }
     ],
+    "configurationDefaults": {
+      "files.associations": {
+        "*.ys": "json"
+      }
+    },
     "configuration": {
       "title": "YAMMM",
       "properties": {
@@ -100,7 +105,7 @@
     "compile": "node esbuild.mjs",
     "compile:prod": "node esbuild.mjs --production",
     "watch": "node esbuild.mjs --watch",
-    "lint": "eslint src --ext ts",
+    "lint": "eslint",
     "test:grammar": "npm run test:grammar:yammm && npm run test:grammar:injection",
     "test:grammar:yammm": "vscode-tmgrammar-snap tests/snapshot/*.yammm",
     "test:grammar:injection": "vscode-tmgrammar-snap -s text.html.markdown -g syntaxes/vendor/markdown.tmLanguage.json -g syntaxes/yammm.tmLanguage.json -g syntaxes/yammm.markdown.injection.json tests/snapshot/*.md",
@@ -113,14 +118,13 @@
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
+    "@types/node": "^22.0.0",
     "@types/vscode": "^1.75.0",
-    "@typescript-eslint/eslint-plugin": "^6.13.0",
-    "@typescript-eslint/parser": "^6.13.0",
     "@vscode/vsce": "^3.7.0",
-    "esbuild": "^0.24.0",
-    "eslint": "^8.54.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.0.0",
     "typescript": "^5.3.0",
+    "typescript-eslint": "^8.0.0",
     "vscode-tmgrammar-test": "^0.1.3"
   }
 }

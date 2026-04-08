@@ -112,7 +112,9 @@
 #    ^ source.yammm
 #     ^^^ source.yammm entity.name.function.relation.yammm
 #        ^^^^ source.yammm
-#            ^^^^^^^^^^^ source.yammm entity.name.type.yammm
+#            ^^^ source.yammm entity.name.namespace.yammm
+#               ^ source.yammm punctuation.accessor.yammm
+#                ^^^^^^^ source.yammm entity.name.type.yammm
 >	--> KNOWS  (one) Person / KNOWN_BY (many)
 #^ source.yammm
 # ^^^ source.yammm entity.name.function.relation.yammm
