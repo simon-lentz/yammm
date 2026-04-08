@@ -1,7 +1,3 @@
-# Dev stuff
-docs/
-!docs/SPEC.md
-
 # LLMs
 .claude/
 .codex/
