@@ -1,0 +1,14 @@
+schema "SnapshotMain"
+
+import "./parts"
+
+type Assembly {
+    id String primary
+    label String required
+    --> USES parts.Component
+}
+
+type Component {
+    id String primary
+    local_label String
+}

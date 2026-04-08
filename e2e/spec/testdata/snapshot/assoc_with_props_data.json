@@ -1,0 +1,17 @@
+{
+    "Company": [
+        {"id": "acme", "name": "Acme Corp"}
+    ],
+    "Person": [
+        {
+            "id": "p1",
+            "name": "Alice",
+            "works_at": {
+                "_target_id": "acme",
+                "role": "Engineer",
+                "since": "2022-01-15T00:00:00Z",
+                "active": true
+            }
+        }
+    ]
+}

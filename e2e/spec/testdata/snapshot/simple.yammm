@@ -1,0 +1,6 @@
+schema "SnapshotSimple"
+
+type Widget {
+    id String primary
+    label String
+}

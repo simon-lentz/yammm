@@ -1,0 +1,16 @@
+schema "SnapshotAssocProps"
+
+type Company {
+    id String primary
+    name String required
+}
+
+type Person {
+    id String primary
+    name String required
+    --> WORKS_AT Company {
+        role String required
+        since Timestamp
+        active Boolean
+    }
+}
