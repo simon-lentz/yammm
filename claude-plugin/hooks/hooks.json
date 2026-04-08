@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "if": "Edit(*.yammm)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | xargs yammm validate 2>&1 || true",
+            "timeout": 10,
+            "statusMessage": "Validating schema..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "if": "Write(*.yammm)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | xargs yammm validate 2>&1 || true",
+            "timeout": 10,
+            "statusMessage": "Validating schema..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/check-env.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

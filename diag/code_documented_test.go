@@ -1,18 +1,26 @@
-package diag
+package diag_test
 
 import (
 	"os"
 	"regexp"
+	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/diag"
+
+	// Blank imports register adapter-defined diagnostic codes so AllCodes()
+	// includes them. This is a test file, so the coupling is acceptable.
+	_ "github.com/simon-lentz/yammm/adapter/csv"
+	_ "github.com/simon-lentz/yammm/adapter/neo4j"
 )
 
 // diagnosticsRefPath is the path to the plugin's diagnostics reference file,
-// relative to the diag/ package directory. This file is authored in Phase 2
-// of the plugin refactor; the test skips gracefully if it doesn't exist yet.
+// relative to the diag/ package directory.
 const diagnosticsRefPath = "../claude-plugin/skills/yammm/references/diagnostics.md"
 
 // codePattern matches E_* diagnostic code identifiers in markdown content.
-var codePattern = regexp.MustCompile(`E_[A-Z][A-Z0-9_]+`)
+// The final [A-Z0-9] ensures wildcard references like "E_IMPORT_*" are not matched.
+var codePattern = regexp.MustCompile(`E_[A-Z][A-Z0-9_]*[A-Z0-9]`)
 
 // TestDocumentedCodesExist verifies that every E_* diagnostic code mentioned
 // in the plugin's references/diagnostics.md exists in the diag code registry.
@@ -31,7 +39,7 @@ func TestDocumentedCodesExist(t *testing.T) {
 
 	// Build a set of all registered code strings.
 	registered := make(map[string]bool)
-	for _, c := range AllCodes() {
+	for _, c := range diag.AllCodes() {
 		registered[c.String()] = true
 	}
 
@@ -55,4 +63,37 @@ func TestDocumentedCodesExist(t *testing.T) {
 	}
 
 	t.Logf("verified %d unique documented codes against %d registered codes", len(documented), len(registered))
+}
+
+// TestRegisteredCodesDocumented verifies that every registered diagnostic code
+// appears in the plugin's references/diagnostics.md.
+//
+// This is the reverse of TestDocumentedCodesExist: it catches new codes added
+// to the registry that are not yet documented. Together, the two tests enforce
+// bidirectional parity between the code registry and the reference file.
+func TestRegisteredCodesDocumented(t *testing.T) {
+	content, err := os.ReadFile(diagnosticsRefPath)
+	if os.IsNotExist(err) {
+		t.Skip("diagnostics reference file not found")
+	}
+	if err != nil {
+		t.Fatalf("read diagnostics reference: %v", err)
+	}
+
+	text := string(content)
+
+	var missing []string
+	for _, c := range diag.AllCodes() {
+		if !strings.Contains(text, c.String()) {
+			missing = append(missing, c.String())
+		}
+	}
+
+	if len(missing) > 0 {
+		for _, code := range missing {
+			t.Errorf("registered code %s is not documented in diagnostics.md", code)
+		}
+	}
+
+	t.Logf("verified %d registered codes are all documented", len(diag.AllCodes()))
 }
