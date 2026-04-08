@@ -156,6 +156,12 @@ required    primary
 one    many
 ```
 
+**Expression keywords:**
+
+```text
+in
+```
+
 **Data type keywords:**
 
 ```text
@@ -169,7 +175,9 @@ Timestamp    Date    UUID    Vector    List
 true    false
 ```
 
-A small set of keywords may be used as property names via the `lc_keyword` rule:
+**Reserved identifiers** (`datatype`, `includes`) are not used as structural grammar tokens but are reserved for forward compatibility.
+
+A small set of keywords and reserved identifiers may be used as property names via the `lc_keyword` rule. This allows properties named `schema`, `type`, etc. without ambiguity:
 
 ```text
 schema    type    datatype    required    primary    extends
@@ -1482,22 +1490,24 @@ Instance data is a top-level object keyed by type names whose values are arrays 
 }
 ```
 
-### Input Formats
+### Input Format
 
-Validation accepts:
-
-- `map[string]any` or typed string-keyed maps
-- Go structs
-- Wrapper implementations that expose map/slice/struct fields
+`RawInstance.Properties` is `map[string]any`. Go structs with typed fields must be marshaled to JSON and unmarshaled into `map[string]any` before validation. Property names may use any casing; the validator normalizes them.
 
 ## Graph Construction
 
 The `graph` package builds an in-memory graph from validated instances.
 
+### Graph Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithLogger` | Structured logger for graph operations (additions, edge resolution, duplicates) |
+
 ### Graph Operations
 
 ```go
-g := graph.New(schema)
+g := graph.New(schema, graph.WithLogger(logger))
 
 // Add validated instances
 result := g.Add(ctx, validInstance)
@@ -1505,8 +1515,8 @@ if !result.OK() {
     // Handle error
 }
 
-// Add composed children (part type instances embedded in a parent)
-result = g.AddComposed(ctx, parentInstance, "WHEELS", composedChildren)
+// Add a composed child (part type instance embedded in a parent)
+result = g.AddComposed(ctx, "Car", "vin-123", "WHEELS", composedChild)
 
 // Check completeness (required associations)
 result = g.Check(ctx)
@@ -1526,7 +1536,7 @@ A new mutable `Graph` can be seeded from an existing `Snapshot`, enabling increm
 
 ```go
 // Create a graph pre-populated with an existing snapshot's data
-g := graph.NewFromSnapshot(schema, existingSnap)
+g := graph.NewFromSnapshot(schema, existingSnap, opts...)
 
 // New instances can be added on top of the imported data
 result := g.Add(ctx, newInstance)
@@ -1838,13 +1848,53 @@ The `adapter/json` package parses JSON/JSONC into raw instances with optional lo
 adapter, err := json.New(registry, opts...)
 ```
 
+The `registry` parameter is a `location.PositionRegistry` used for byte-offset-to-position conversion when location tracking is enabled. It may be `nil` when `WithTrackLocations` is not set.
+
 ### Parse Options
 
 | Option | Description |
 | ------ | ----------- |
 | `WithStrictJSON` | Use stdlib JSON only (no comments/trailing commas) |
-| `WithTrackLocations` | Enable source position tracking |
+| `WithTrackLocations` | Enable source position tracking (requires non-nil registry) |
 | `WithTypeField` | Field name for type tagging (default: `$type`) |
+
+### Parsing
+
+All parse methods accept `[]byte` data:
+
+```go
+// Parse a top-level object keyed by type name: {"Person": [...], "Car": [...]}
+byType, result := adapter.ParseObject(ctx, source, data)
+
+// Parse an array with $type fields
+byType, result := adapter.ParseArray(ctx, source, data)
+
+// Parse an array where all elements share a known type
+raws, result := adapter.ParseTypedArray(ctx, source, typeName, data)
+
+// Parse a single JSON object as a known type
+raw, result := adapter.ParseOne(ctx, source, typeName, data)
+```
+
+### Serialization
+
+```go
+// Serialize a snapshot to JSON bytes
+data, err := adapter.MarshalObject(ctx, snap, writeOpts...)
+
+// Stream a snapshot to a writer (returns bytes written)
+n, err := adapter.WriteObject(ctx, w, snap, writeOpts...)
+
+// Serialize a single validated instance
+data, err := adapter.MarshalInstance(ctx, inst, schemaType, writeOpts...)
+```
+
+### Write Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithIndent` | Indentation string for formatted output |
+| `WithDiagnostics` | Include diagnostics in output |
 
 ### JSONC Support
 
@@ -1880,14 +1930,94 @@ adapter := neo4j.New(opts...)
 
 Enterprise edition supports all constraint types (UNIQUE, NOT NULL, NODE KEY, PROPERTY_TYPE). Community edition supports UNIQUE constraints only; all other types are silently omitted.
 
+### Labels
+
+```go
+// Generate a Neo4j label for a schema type
+label := adapter.Label(ctx, schemaName, typeName)
+
+// Detect label collisions across all types in a schema
+result := adapter.DetectLabelCollisions(ctx, s)
+```
+
+### Constraints
+
+Constraints can be generated as Cypher strings or as structured values:
+
+```go
+// Generate Cypher CREATE CONSTRAINT statements
+statements, result := adapter.ConstraintsForSchema(ctx, s)
+
+// Generate structured constraint descriptors
+constraints, result := adapter.ConstraintsStructured(ctx, s)
+```
+
+The `Constraint` struct contains the constraint `Name`, `Kind` (`ConstraintUnique`, `ConstraintNotNull`, `ConstraintType`, `ConstraintNodeKey`), `Label`, `Properties`, `TypeExpr`, and the complete `Statement`.
+
+### Graph Shape
+
+```go
+// Compute the graph shape (labels, primary keys, required fields) for a schema
+shapes, result := adapter.ShapeForSchema(ctx, s)
+```
+
+`ShapeForSchema` returns a `*GraphShape` containing a `Types` map of `NodeShape` values. Each `NodeShape` describes the `Label`, `PrimaryKeys`, and `RequiredFields` for a type.
+
 ### Write Modes
 
 Write query generation supports two operational modes:
 
 - **Graph mode:** `BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes
-- **Instance mode:** `NodeQueryFor` accepts individual instances and `EdgeQueriesFor` generates edge queries directly from validated instance edge data
+- **Instance mode:** `NodeQueryFor` accepts individual instances and `EdgeQueryFor`/`EdgeQueriesFor` generate edge queries from validated instance or edge data
 
-Write options include `WithImmutableKeys`, `WithNodeChunkSize`, and `WithEdgeChunkSize`.
+```go
+// Graph mode — batch queries from a snapshot
+shapes, _ := adapter.ShapeForSchema(ctx, s)
+nodeQueries, err := adapter.BatchNodeQueries(ctx, snap, shapes, writeOpts...)
+edgeQueries, err := adapter.BatchEdgeQueries(ctx, snap, shapes, writeOpts...)
+
+// Instance mode — single-instance queries
+nodeQuery, err := adapter.NodeQueryFor(ctx, &shape, inst, schemaType, writeOpts...)
+edgeQuery, err := adapter.EdgeQueryFor(ctx, edge, shapes, writeOpts...)
+edgeQueries, err := adapter.EdgeQueriesFor(ctx, validInst, schemaType, shapes, writeOpts...)
+```
+
+All write methods return query structs (`NodeQuery`, `BatchNodeQuery`, `EdgeQuery`, `BatchEdgeQuery`) with `Statement` and `Params` fields, ready for driver execution.
+
+### Write Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithImmutableKeys` | Properties only set on creation, not updated |
+| `WithNodeChunkSize` | `UNWIND` batch size for node queries (default: 5000) |
+| `WithEdgeChunkSize` | `UNWIND` batch size for edge queries (default: 5000) |
+
+### Schema Inference
+
+```go
+// Generate a .yammm scaffold from introspected Neo4j constraints and relationships
+yammmSource, err := adapter.InferSchema(constraints, relationships, schemaFilter)
+```
+
+`InferSchema` takes `[]RemoteConstraint` and `[]RemoteRelationship` values (obtained from introspection queries) and produces a `.yammm` source string. Helper functions `IntrospectConstraintsQuery`, `IntrospectRelationshipsQuery`, `ParseRemoteConstraints`, and `ParseRemoteRelationships` assist with gathering introspection data from a live database.
+
+### Constraint Diffing
+
+```go
+// Compute the semantic diff between desired schema constraints and actual database constraints
+diff := adapter.DiffConstraints(desired, actual, schemaName)
+```
+
+`DiffConstraints` returns a `*ConstraintDiffResult` with `Match` (identical), `Drift` (same key, different definition), `Create` (missing from database), and `Drop` (in database but not in schema) sets.
+
+### Introspection Queries
+
+```go
+// Get a Cypher query for introspecting relationship topology
+query, params := adapter.IntrospectRelationshipsQueryFor(schemaFilter)
+```
+
+This returns a parameterized Cypher query string and parameters — consumers execute it against their own driver. Package-level helpers `IntrospectConstraintsQuery()` and `IntrospectIndexesQuery()` return static Cypher strings for constraint and index introspection.
 
 ## CSV Adapter
 
@@ -1899,7 +2029,7 @@ The `adapter/csv` package parses delimited data into `instance.RawInstance` valu
 adapter := csv.New(opts...)
 ```
 
-### Options
+### Parse Options
 
 | Option | Description |
 | ------ | ----------- |
@@ -1908,6 +2038,44 @@ adapter := csv.New(opts...)
 | `WithTypeColumn` | Column name for type tagging |
 | `WithNullValue` | String treated as nil (default: `""`) |
 | `WithListSeparator` | Separator for list values (default: `\|`) |
+
+### Parsing
+
+Parse methods require a `*schema.Type` for type coercion. All accept an `io.Reader`:
+
+```go
+// Parse rows where all rows share a known type
+raws, result := adapter.ParseTyped(ctx, source, typeName, reader, schemaType)
+
+// Parse rows with a type-discriminator column (requires WithTypeColumn)
+byType, result := adapter.ParseWithTypeColumn(ctx, source, reader, typeResolver)
+
+// Parse a single pre-split row
+raw, result := adapter.ParseOne(ctx, source, typeName, columns, row, schemaType)
+```
+
+The `typeResolver` parameter is a `func(string) *schema.Type` that maps type column values to schema types.
+
+### Serialization
+
+```go
+// Serialize instances of a single type
+data, err := adapter.MarshalTyped(ctx, instances, schemaType, writeOpts...)
+n, err := adapter.WriteTyped(ctx, w, instances, schemaType, writeOpts...)
+
+// Serialize a full snapshot (returns one []byte per type)
+byType, err := adapter.MarshalSnapshot(ctx, snap, writeOpts...)
+
+// Stream a snapshot (writerFor provides a writer per type)
+err := adapter.WriteSnapshot(ctx, writerFor, snap, writeOpts...)
+```
+
+### Write Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithWriteHeader` | Include header row in output |
+| `WithWriteNullString` | String to emit for nil values |
 
 ### Type Coercion
 
