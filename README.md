@@ -59,10 +59,12 @@ import (
     "context"
     "fmt"
     "log"
+    "os"
 
     "github.com/simon-lentz/yammm/graph"
     "github.com/simon-lentz/yammm/instance"
     "github.com/simon-lentz/yammm/schema"
+    "github.com/simon-lentz/yammm/snapshot"
 )
 
 func main() {
@@ -104,6 +106,17 @@ func main() {
     // Check graph integrity
     result = g.Check(ctx)
     fmt.Println("Graph OK:", result.OK())
+
+    // Save graph snapshot to .ys file
+    snap := g.Snapshot()
+    data, result := snapshot.Marshal(ctx, snap)
+    if !result.OK() {
+        log.Fatal("marshal error:", result)
+    }
+    if err := os.WriteFile("vehicles.ys", data, 0o644); err != nil {
+        log.Fatal("write error:", err)
+    }
+    fmt.Println("Snapshot saved to vehicles.ys")
 }
 ```
 
@@ -198,6 +211,9 @@ type Person {
 }
 
 type Car {
+    owner_name String required
+    mechanic_name List<String>
+
     --> OWNER (one) Person              // required, single
     --> MECHANICS (many) Person         // optional, multiple
 }
@@ -279,7 +295,7 @@ Diagnostic codes are stable identifiers for programmatic matching (e.g., `E_TYPE
 The `yammm` binary ([`cmd/yammm/`](cmd/yammm/)) provides commands for working with schemas and data:
 
 ```bash
-yammm snapshot save <schema> <data...> -o <file.ys>    # build graph, persist
+yammm snapshot save <schema> <data...> -o <file.ys>     # build graph, persist
 yammm snapshot save <schema> <data...> --into <file.ys> # merge into existing
 yammm snapshot info <file.ys>                           # metadata + stats
 yammm snapshot verify <schema> <file.ys>                # schema compat check
