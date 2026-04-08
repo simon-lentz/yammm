@@ -2088,8 +2088,6 @@ func TestRemapPathToURI_NonexistentPathWithDotDot(t *testing.T) {
 	}
 }
 
-// --- Diagnostic hash deduplication tests ---
-
 // notificationCollector is a test helper that records LSP notifications.
 type notificationCollector struct {
 	mu      sync.Mutex
@@ -2265,8 +2263,6 @@ func TestHashDiagnostics_Deterministic(t *testing.T) {
 	require.True(t, ok3, "hashDiagnostics returned !ok for different input")
 	assert.NotEqual(t, h1, h3, "different diagnostics should produce different hash")
 }
-
-// --- Migrated from markdown_test.go (position conversion tests) ---
 
 func TestMarkdownPositionToBlock(t *testing.T) {
 	t.Parallel()
@@ -2631,8 +2627,6 @@ func TestPositionConversion_RoundTrip(t *testing.T) {
 	}
 }
 
-// --- Migrated from markdown_test.go (markdown document lifecycle) ---
-
 func Test_markdownDocumentOpened_CreatesEntry(t *testing.T) {
 	t.Parallel()
 
@@ -2921,8 +2915,6 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 	assert.Empty(t, diags, "expected no diagnostics for valid schema")
 }
 
-// --- Migrated from markdown_test.go (BuildBlockDocumentSnapshot) ---
-
 func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -2957,8 +2949,6 @@ func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	assert.Len(t, docSnap.LineState.BraceDepth, 5, "BraceDepth should have one entry per line")
 }
 
-// --- Migrated from markdown_test.go (benchmarks) ---
-
 func BenchmarkAnalyzeMarkdownAndPublish_ManyBlocks(b *testing.B) {
 	var sb strings.Builder
 	for i := range 50 {
@@ -2977,8 +2967,6 @@ func BenchmarkAnalyzeMarkdownAndPublish_ManyBlocks(b *testing.B) {
 		w.AnalyzeMarkdownAndPublish(ctx, uri)
 	}
 }
-
-// --- Migrated from root markdown_test.go (RemapDocumentSymbolRanges) ---
 
 func TestRemapDocumentSymbolRanges(t *testing.T) {
 	t.Parallel()
@@ -3086,8 +3074,6 @@ func TestRemapDocumentSymbolRanges(t *testing.T) {
 		})
 	}
 }
-
-// --- Migrated from root server_test.go (multi full-sync ChangeDocument) ---
 
 func TestChangeDocument_MultipleFullSyncChanges(t *testing.T) {
 	// Tests that when multiple full-sync ContentChange events (no Range)

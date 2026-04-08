@@ -51,7 +51,7 @@ func classifyLines(lines []string) []lineClass {
 	return classes
 }
 
-// collapseBlankLines enforces the Section 10 blank line rules on Phase 1 output.
+// collapseBlankLines enforces SPEC.md blank line rules on the token-rewritten output.
 // It operates in two passes: first collapse/remove excess blank lines, then
 // ensure required blank lines after schema and import declarations.
 func collapseBlankLines(text string) string {

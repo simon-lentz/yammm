@@ -8,8 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// --- IntegerOrString ---
-
 func TestIntegerOrString_MarshalInteger(t *testing.T) {
 	t.Parallel()
 	s := IntegerOrString{Value: Integer(42)}
@@ -62,8 +60,6 @@ func TestIntegerOrString_RoundTrip(t *testing.T) {
 		})
 	}
 }
-
-// --- BoolOrString ---
 
 func TestBoolOrString_MarshalBool(t *testing.T) {
 	t.Parallel()
@@ -138,8 +134,6 @@ func TestBoolOrString_String(t *testing.T) {
 	}
 }
 
-// --- ContentChange / ExtractFullSyncText ---
-
 func TestContentChange_IsFullSync(t *testing.T) {
 	t.Parallel()
 
@@ -196,8 +190,6 @@ func TestExtractFullSyncText_MixedChanges(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "full sync", text)
 }
-
-// --- ContentChange JSON round-trip ---
 
 func TestContentChange_JSONRoundTrip_FullSync(t *testing.T) {
 	t.Parallel()

@@ -217,7 +217,6 @@ func TestCamelTransforms_PreservesAcronymRuns(t *testing.T) {
 	assert.Equal(t, "IDNumber", ident.ToUpperCamel("ID_number"))
 }
 
-// D9: Missing empty string tests for ToUpperCamel and ToLowerCamel
 func TestToUpperCamel_EmptyString(t *testing.T) {
 	got := ident.ToUpperCamel("")
 	assert.Equal(t, "", got, "ToUpperCamel(\"\") should return empty string")

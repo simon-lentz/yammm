@@ -455,8 +455,6 @@ func TestConstraintsStructured(t *testing.T) {
 	}
 }
 
-// --- test helpers ---
-
 func assertContains(t *testing.T, stmts []string, substring string) {
 	t.Helper()
 	for _, stmt := range stmts {

@@ -1,7 +1,0 @@
-schema "ImportNoExt"
-
-import "./parts"
-
-type Wrapper {
-    name String required
-}

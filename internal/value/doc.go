@@ -53,8 +53,8 @@
 //   - json.Number("3.0") → FloatKind (has decimal point)
 //   - json.Number("3.14") → FloatKind
 //
-// Strict rejection of "3.0" for Integer schema types happens at validation time
-// (Phase 3), not in this classification layer.
+// Strict rejection of "3.0" for Integer schema types happens at instance
+// validation time, not in this classification layer.
 //
 // # Float Precision Warning
 //
@@ -108,7 +108,7 @@
 //
 // This follows the "determine what it IS, not what it should be" principle.
 // An empty []any{} is genuinely ambiguous—it could represent an empty vector,
-// an empty string list, or an empty object list. The validator (Phase 3) has
+// an empty string list, or an empty object list. The instance validator has
 // schema context and can properly interpret empty arrays based on the expected
 // type. Note that Vector[N] constraints always require N > 0, so empty vectors
 // would fail validation regardless of classification.
@@ -116,7 +116,7 @@
 // # Registry Integration
 //
 // [ClassifyWithRegistry] accepts a [Registry] for custom type recognition hooks.
-// The Registry hook is designed for Phase 3 (instance/eval) integration;
+// The Registry hook is designed for instance/eval integration;
 // see the [Registry] type documentation for details.
 // A zero-value Registry falls back to built-in type detection.
 //

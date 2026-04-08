@@ -233,7 +233,7 @@ func TestInfoLazy_DisabledLevel(t *testing.T) {
 	}
 }
 
-// D3: Missing symmetric test for InfoLazy enabled level
+// Symmetric test: InfoLazy must call fn when level is enabled.
 func TestInfoLazy_EnabledLevel(t *testing.T) {
 	h := newRecordHandler(slog.LevelInfo)
 	logger := slog.New(h)
@@ -301,7 +301,7 @@ func TestWarnLazy_DisabledLevel(t *testing.T) {
 	}
 }
 
-// D3: Missing symmetric test for WarnLazy enabled level
+// Symmetric test: WarnLazy must call fn when level is enabled.
 func TestWarnLazy_EnabledLevel(t *testing.T) {
 	h := newRecordHandler(slog.LevelWarn)
 	logger := slog.New(h)

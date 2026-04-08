@@ -2,6 +2,7 @@ package instance_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,8 +15,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
-
-// --- Test Helpers ---
 
 // mustBuild builds a schema from a Builder, failing the test on error.
 func mustBuild(t *testing.T, b *schema.Builder) *schema.Schema {
@@ -32,8 +31,6 @@ func mustLoadString(t *testing.T, source, name string) *schema.Schema {
 	require.False(t, result.HasErrors(), "schema load: %s", result)
 	return s
 }
-
-// --- Tests ---
 
 func TestValidator_ValidateOne_Success(t *testing.T) {
 	s := mustBuild(t, schema.NewBuilder().
@@ -506,8 +503,6 @@ func TestValidator_ValidateOne_StringBounds(t *testing.T) {
 	}
 }
 
-// --- ValidateForComposition Tests ---
-
 func TestValidator_ValidateForComposition_Success(t *testing.T) {
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
@@ -653,8 +648,6 @@ func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *te
 	assert.Equal(t, "test.json", issues[0].SourceName())
 }
 
-// --- Invariant Evaluation Tests ---
-
 func TestValidator_ValidateOne_InvariantPass(t *testing.T) {
 	// Invariant: age >= 0
 	// Expression: (>= ($ age) 0)
@@ -724,7 +717,139 @@ func TestValidator_ValidateOne_InvariantFail(t *testing.T) {
 // these tested unreachable states. The Builder rejects empty invariant names
 // and nil expressions, and the parser always provides both.
 
-// --- P1.1 Property Path Uses Schema Name Tests ---
+// TestValidator_NilUnderscoreEquivalence verifies that _ and nil are
+// interchangeable nil literals in invariant expressions. Both syntactic forms
+// must produce identical validation behavior.
+func TestValidator_NilUnderscoreEquivalence(t *testing.T) {
+	t.Parallel()
+
+	const schemaTemplate = `schema "%s"
+type Record {
+    id          String primary
+    name        String required
+    description String
+
+    ! "description_when_present"
+        description == %s || description != ""
+}
+`
+	cases := []struct {
+		name   string
+		input  map[string]any
+		wantOK bool
+	}{
+		{
+			name:   "non_empty_passes",
+			input:  map[string]any{"id": "1", "name": "A", "description": "hello"},
+			wantOK: true,
+		},
+		{
+			name:   "nil_passes",
+			input:  map[string]any{"id": "2", "name": "B"},
+			wantOK: true,
+		},
+		{
+			name:   "empty_string_fails",
+			input:  map[string]any{"id": "3", "name": "C", "description": ""},
+			wantOK: false,
+		},
+	}
+
+	for _, syntax := range []struct {
+		label, literal string
+	}{
+		{"underscore", "_"},
+		{"nil_keyword", "nil"},
+	} {
+		t.Run(syntax.label, func(t *testing.T) {
+			t.Parallel()
+			src := fmt.Sprintf(schemaTemplate, syntax.label, syntax.literal)
+			s := mustLoadString(t, src, syntax.label)
+			v := instance.NewValidator(s)
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					raw := instance.RawInstance{Properties: tc.input}
+					valid, result := v.ValidateOne(t.Context(), "Record", raw)
+					if tc.wantOK {
+						assert.True(t, result.OK(), "expected pass: %s", result)
+						assert.NotNil(t, valid)
+					} else {
+						assert.False(t, result.OK(), "expected fail")
+						assert.Nil(t, valid)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestValidator_InvariantLenPipeline verifies that the Len builtin works
+// correctly via the pipe operator in parsed invariants. This is a regression
+// test for VisitFcall body normalization (Issue 9, Bug 1), where the
+// expression `description -> Len > 0` was incorrectly compiled.
+func TestValidator_InvariantLenPipeline(t *testing.T) {
+	t.Parallel()
+
+	const src = `schema "len_pipe"
+type Record {
+    id          String primary
+    name        String required
+    description String
+
+    ! "description_when_present"
+        description == _ || description -> Len > 0
+}
+`
+	s := mustLoadString(t, src, "len_pipe")
+	v := instance.NewValidator(s)
+
+	cases := []struct {
+		name   string
+		input  map[string]any
+		wantOK bool
+	}{
+		{
+			name:   "non_empty_passes_via_Len",
+			input:  map[string]any{"id": "1", "name": "A", "description": "hello"},
+			wantOK: true,
+		},
+		{
+			name:   "nil_short_circuits_past_Len",
+			input:  map[string]any{"id": "2", "name": "B"},
+			wantOK: true,
+		},
+		{
+			name:   "empty_string_fails_Len_check",
+			input:  map[string]any{"id": "3", "name": "C", "description": ""},
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw := instance.RawInstance{Properties: tc.input}
+			valid, result := v.ValidateOne(t.Context(), "Record", raw)
+			if tc.wantOK {
+				assert.True(t, result.OK(), "expected pass: %s", result)
+				assert.NotNil(t, valid)
+			} else {
+				assert.False(t, result.OK(), "expected fail")
+				assert.Nil(t, valid)
+				hasInvariantFail := false
+				for issue := range result.Issues() {
+					if issue.Code() == diag.E_INVARIANT_FAIL {
+						hasInvariantFail = true
+						break
+					}
+				}
+				assert.True(t, hasInvariantFail, "expected E_INVARIANT_FAIL")
+			}
+		})
+	}
+}
 
 func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 	// Property paths should use schema property names, not input field names.
@@ -803,8 +928,6 @@ func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
 	assert.True(t, foundFieldDetail, "should include 'field' detail with original input name when it differs from schema name")
 }
 
-// --- P1.3 Empty Input Slice Tests ---
-
 func TestValidator_Validate_NilInput_ReturnsNil(t *testing.T) {
 	// Validate(ctx, typeName, nil) should return (nil, OK result)
 	s := mustBuild(t, schema.NewBuilder().
@@ -880,8 +1003,6 @@ func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testin
 	require.NotNil(t, valid, "empty input should return non-nil empty valid slice")
 	assert.Empty(t, valid, "empty input should return empty valid slice")
 }
-
-// --- P1 Nil Receiver Panic Tests ---
 
 func TestValidator_NilReceiver(t *testing.T) {
 	var v *instance.Validator

@@ -9,8 +9,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// --- TypeRef Tests ---
-
 func TestNewTypeRef(t *testing.T) {
 	span := location.Span{
 		Source: location.MustNewSourceID("test://typeref"),
@@ -115,8 +113,6 @@ func TestTypeRef_String_Local(t *testing.T) {
 	assert.Equal(t, "Customer", ref.String())
 }
 
-// --- DataTypeRef Tests ---
-
 func TestNewDataTypeRef(t *testing.T) {
 	span := location.Span{
 		Source: location.MustNewSourceID("test://datatype"),
@@ -188,8 +184,6 @@ func TestDataTypeRef_String_Local(t *testing.T) {
 
 	assert.Equal(t, "Email", ref.String())
 }
-
-// --- ResolvedTypeRef Tests ---
 
 func TestNewResolvedTypeRef(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://schema")
@@ -405,8 +399,6 @@ func TestResolvedTypeRef_Equal_IgnoresSyntacticDifferences(t *testing.T) {
 	// Same TypeID means equal, regardless of syntactic differences
 	assert.True(t, resolved1.Equal(resolved2))
 }
-
-// --- ResolvedTypeRefFromType Tests ---
 
 func TestResolvedTypeRefFromType_SameSchema(t *testing.T) {
 	// Type and viewing perspective are in the same schema → no qualifier

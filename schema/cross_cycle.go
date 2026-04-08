@@ -59,7 +59,7 @@ func detectCrossSchemaInheritanceCycles(registry crossSchemaRegistry) []*diag.Is
 		state[id] = crossVisiting
 		stack = append(stack, id)
 
-		// Use defer to ensure cleanup on ALL exit paths per DEV_WRITING_GO.md
+		// Use defer to ensure cleanup on all exit paths.
 		defer func() {
 			state[id] = crossVisited
 			stack = stack[:len(stack)-1]

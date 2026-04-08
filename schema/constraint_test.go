@@ -171,8 +171,6 @@ func TestAliasConstraint_Kind(t *testing.T) {
 	})
 }
 
-// --- StringConstraint Accessor Tests ---
-
 func TestStringConstraint_MinLen(t *testing.T) {
 	c := schema.StringLenBetween(5, 100)
 	minLen, hasMin := c.MinLen()
@@ -198,8 +196,6 @@ func TestStringConstraint_MaxLen_Unbounded(t *testing.T) {
 	_, hasMax := c.MaxLen()
 	assert.False(t, hasMax)
 }
-
-// --- IntegerConstraint Accessor Tests ---
 
 func TestIntegerConstraint_Min(t *testing.T) {
 	c := schema.IntegerBetween(10, 100)
@@ -245,8 +241,6 @@ func TestIntegerConstraint_Equal_DifferentMax(t *testing.T) {
 	assert.False(t, c1.Equal(c2))
 }
 
-// --- FloatConstraint Accessor Tests ---
-
 func TestFloatConstraint_Min(t *testing.T) {
 	c := schema.FloatBetween(1.5, 10.5)
 	minVal, hasMin := c.Min()
@@ -285,8 +279,6 @@ func TestFloatConstraint_Equal_DifferentMin(t *testing.T) {
 	assert.False(t, c1.Equal(c2))
 }
 
-// --- BooleanConstraint Tests ---
-
 func TestBooleanConstraint_Equal_Same(t *testing.T) {
 	c1 := schema.NewBooleanConstraint()
 	c2 := schema.NewBooleanConstraint()
@@ -298,8 +290,6 @@ func TestBooleanConstraint_Equal_DifferentType(t *testing.T) {
 	c2 := schema.NewStringConstraint()
 	assert.False(t, c1.Equal(c2))
 }
-
-// --- TimestampConstraint Tests ---
 
 func TestTimestampConstraint_Format(t *testing.T) {
 	c := schema.NewTimestampConstraintFormatted("2006-01-02")
@@ -331,8 +321,6 @@ func TestTimestampConstraint_Equal_NoFormatBoth(t *testing.T) {
 	assert.True(t, c1.Equal(c2))
 }
 
-// --- DateConstraint Tests ---
-
 func TestDateConstraint_Equal_Same(t *testing.T) {
 	c1 := schema.NewDateConstraint()
 	c2 := schema.NewDateConstraint()
@@ -345,8 +333,6 @@ func TestDateConstraint_Equal_DifferentType(t *testing.T) {
 	assert.False(t, c1.Equal(c2))
 }
 
-// --- UUIDConstraint Tests ---
-
 func TestUUIDConstraint_Equal_Same(t *testing.T) {
 	c1 := schema.NewUUIDConstraint()
 	c2 := schema.NewUUIDConstraint()
@@ -358,8 +344,6 @@ func TestUUIDConstraint_Equal_DifferentType(t *testing.T) {
 	c2 := schema.NewStringConstraint()
 	assert.False(t, c1.Equal(c2))
 }
-
-// --- PatternConstraint Tests ---
 
 func TestPatternConstraint_Kind(t *testing.T) {
 	p := regexp.MustCompile("^test")
@@ -447,8 +431,6 @@ func TestPatternConstraint_Equal_DifferentCount(t *testing.T) {
 	assert.False(t, c1.Equal(c2))
 }
 
-// --- VectorConstraint Tests ---
-
 func TestVectorConstraint_Dimension(t *testing.T) {
 	c := schema.NewVectorConstraint(256)
 	assert.Equal(t, 256, c.Dimension())
@@ -465,8 +447,6 @@ func TestVectorConstraint_Equal_Different(t *testing.T) {
 	c2 := schema.NewVectorConstraint(256)
 	assert.False(t, c1.Equal(c2))
 }
-
-// --- AliasConstraint Tests ---
 
 func TestAliasConstraint_DataTypeName(t *testing.T) {
 	c := schema.NewAliasConstraint("Email", schema.NewStringConstraint())
@@ -503,8 +483,6 @@ func TestFloatConstraint_StringStability(t *testing.T) {
 		})
 	}
 }
-
-// --- IsResolved Tests ---
 
 func TestConstraint_IsResolved_NonAliasConstraints(t *testing.T) {
 	// All non-alias constraints are always resolved (they have no references)
@@ -585,7 +563,6 @@ func TestConstraintKind_String_Unknown(t *testing.T) {
 	assert.Equal(t, "ConstraintKind(99)", result)
 }
 
-// --- resolveAlias Cycle Detection Tests ---
 // These tests verify that alias chain resolution is safe with non-hashable constraint types
 // (EnumConstraint, PatternConstraint) and handles cycles gracefully.
 
@@ -657,7 +634,6 @@ func TestAliasConstraint_Equal_DeepChainWithPattern(t *testing.T) {
 	assert.True(t, aliasA.Equal(aliasC))
 }
 
-// --- Cycle-Safety Tests ---
 // These tests verify that Equal and IsResolved terminate correctly
 // when alias chains contain unresolved terminals (which triggers the
 // AliasConstraint type check in the cycle-safety guards).

@@ -1,7 +1,0 @@
-schema "CycleB"
-
-import "./cycle_a"
-
-type B {
-    name String required
-}

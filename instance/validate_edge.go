@@ -176,8 +176,7 @@ func (v *Validator) validateEdgeData(
 }
 
 // validateEdgeTarget validates a single edge target object.
-// Uses per-target collector isolation to ensure each target is evaluated independently
-// (P1-4 fix: eliminates global collector coupling).
+// Uses per-target collector isolation to ensure each target is evaluated independently.
 func (v *Validator) validateEdgeTarget(
 	_ context.Context,
 	rel *schema.Relation,
@@ -186,7 +185,7 @@ func (v *Validator) validateEdgeTarget(
 	prov *location.Provenance,
 	targetPath path.Builder,
 ) *ValidEdgeTarget {
-	// P1-4: Use per-target collector to avoid coupling between targets.
+	// Use per-target collector to avoid coupling between targets.
 	// Use unlimited collector since issues will be merged into the parent
 	// collector which handles the actual limit.
 	targetCollector := diag.NewCollectorUnlimited()
@@ -248,7 +247,7 @@ func (v *Validator) validateEdgeTarget(
 		// Note: FK field matching is always case-sensitive per architecture spec.
 		// StrictPropertyNames only affects property name matching, not FK fields.
 
-		// Phase 1: Check key existence (not value)
+		// Check key existence (not value)
 		if !hasFKField {
 			missingFKFields = append(missingFKFields, fkFieldName)
 			continue
@@ -257,7 +256,7 @@ func (v *Validator) validateEdgeTarget(
 		// Key exists - track as present regardless of value
 		presentFKFields = append(presentFKFields, fkFieldName)
 
-		// Phase 2: Handle null value - present but invalid per spec
+		// Handle null value — present but invalid per spec.
 		if val == nil {
 			// Resolve alias to underlying type for user-friendly error messages
 			constraint := pk.Constraint()
@@ -278,7 +277,7 @@ func (v *Validator) validateEdgeTarget(
 			continue
 		}
 
-		// Phase 3: Validate FK type against PK constraint
+		// Validate FK type against PK constraint.
 		if err := v.checkValueWithRecovery(val, pk.Constraint()); err != nil {
 			code := ErrTypeMismatch
 			if checkErr, ok := errors.AsType[*eval.CheckError](err); ok && checkErr.Kind == eval.KindConstraintFail {
@@ -294,7 +293,7 @@ func (v *Validator) validateEdgeTarget(
 			continue
 		}
 
-		// Phase 4: Coerce and collect valid component
+		// Coerce and collect valid component.
 		coercedVal, err := v.coerceValueWithRecovery(val, pk.Constraint())
 		if err != nil {
 			coercedVal = val
@@ -476,7 +475,7 @@ func (v *Validator) validateEdgeTarget(
 		collector.Collect(issue)
 	}
 
-	// P1-4: Check per-target collector (not shared collector) to decide success
+	// Check per-target collector (not shared collector) to decide success.
 	if targetCollector.HasErrors() {
 		return nil
 	}

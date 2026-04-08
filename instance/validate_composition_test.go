@@ -12,8 +12,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// --- Composition Validation Tests ---
-
 func TestValidateCompositions_Single(t *testing.T) {
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
@@ -334,8 +332,6 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 	assert.Contains(t, result.String(), "expected array")
 }
 
-// --- P0 Null vs Absent Tests ---
-
 func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 	// Per architecture spec: null is always a shape error, even for optional compositions.
 	s := mustBuild(t, schema.NewBuilder().
@@ -420,8 +416,6 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
 }
-
-// --- Composition Reason Detail Tests ---
 
 func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 	// Verify E_UNRESOLVED_REQUIRED_COMPOSITION includes reason="absent" for missing field.
@@ -619,8 +613,6 @@ func TestValidateCompositions_CompositePK_PathFormat(t *testing.T) {
 	assert.Contains(t, foundPath, `region="us"`, "path should include string PK field")
 	assert.Contains(t, foundPath, `studentId="123"`, "path should include string PK field")
 }
-
-// --- Ownership Isolation Tests ---
 
 // TestOwnership_ValidateForCompositionIsolation verifies that mutating raw input
 // after ValidateForComposition() does not affect the returned ValidInstance values.

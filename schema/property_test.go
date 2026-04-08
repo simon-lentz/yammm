@@ -9,8 +9,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// --- DeclaringScopeKind Tests ---
-
 func TestDeclaringScopeKind_String_Type(t *testing.T) {
 	kind := schema.ScopeType
 
@@ -29,8 +27,6 @@ func TestDeclaringScopeKind_String_Unknown(t *testing.T) {
 
 	assert.Equal(t, "unknown", kind.String())
 }
-
-// --- DeclaringScope Tests ---
 
 func TestTypeScope(t *testing.T) {
 	typeRef := schema.NewTypeRef("", "Person", location.Span{})
@@ -152,8 +148,6 @@ func TestDeclaringScope_String_Unknown(t *testing.T) {
 	// Default kind is ScopeType (0), with empty typeRef, returns empty string
 	assert.Equal(t, "", scope.String())
 }
-
-// --- Property Tests ---
 
 func TestNewProperty(t *testing.T) {
 	constraint := schema.NewStringConstraint()

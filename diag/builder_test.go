@@ -108,7 +108,6 @@ func TestIssueBuilder_WithRelated_Variadic(t *testing.T) {
 }
 
 func TestIssueBuilder_WithDetail(t *testing.T) {
-	// B3: Test WithDetail single key-value convenience method
 	issue := NewIssue(Error, E_TYPE_MISMATCH, "test").
 		WithDetail(DetailKeyTypeName, "Person").
 		WithDetail(DetailKeyPropertyName, "name").

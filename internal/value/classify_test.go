@@ -158,8 +158,8 @@ func TestClassify_Vector(t *testing.T) {
 		}
 	})
 
-	// V2 CHANGE: Integer elements are now accepted in vectors
-	t.Run("[]any integer elements (v2 change)", func(t *testing.T) {
+	// Integer elements are accepted in vectors (coerced to float64).
+	t.Run("[]any integer elements", func(t *testing.T) {
 		tests := []struct {
 			name      string
 			input     []any

@@ -420,8 +420,6 @@ func TestSpanToLSPRange_NegativeLine(t *testing.T) {
 	assert.Equal(t, 0, startChar, "start[1] for column 1")
 }
 
-// --- LSP-005: SpanToLSPRange with unknown byte offset ---
-
 func TestSpanToLSPRange_UnknownByte(t *testing.T) {
 	t.Parallel()
 
@@ -485,8 +483,6 @@ func TestSpanToLSPRange_MixedByteKnowledge(t *testing.T) {
 	assert.Equal(t, 0, endLine, "end line")
 	assert.Equal(t, 5, endChar, "end char (Column-1 fallback for unknown byte)")
 }
-
-// --- LSP-008: UTF-8 mode clamps to end-of-line ---
 
 func TestByteOffsetFromLSP_UTF8_ClampsToEOL(t *testing.T) {
 	t.Parallel()
@@ -596,8 +592,6 @@ func TestClampToLineEnd_NoNewline(t *testing.T) {
 		})
 	}
 }
-
-// --- SpanToLSPRange with UTF-8 encoding ---
 
 func TestSpanToLSPRange_UTF8_ASCII(t *testing.T) {
 	// Tests SpanToLSPRange with UTF-8 encoding and ASCII content.

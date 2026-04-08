@@ -259,8 +259,6 @@ func TestVisitor_ErrorHandling_InvalidExpression(t *testing.T) {
 	}
 }
 
-// --- BuiltinRegistry Tests ---
-
 func TestBuiltinRegistry_NewBuiltinRegistry(t *testing.T) {
 	reg := exprcomp.NewBuiltinRegistry()
 
@@ -506,8 +504,6 @@ func TestBuiltinRegistry_Clone(t *testing.T) {
 		assert.True(t, clone.Has("Count"), "nil clone should have defaults")
 	})
 }
-
-// --- Additional Coverage Tests ---
 
 func TestCompileString_MulDivExpression(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://muldiv.yammm")

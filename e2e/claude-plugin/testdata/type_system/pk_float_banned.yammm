@@ -1,2 +1,0 @@
-schema "pk_float_banned"
-type R { id Float primary }

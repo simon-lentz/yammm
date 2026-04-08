@@ -166,7 +166,7 @@ func classifySlice(val any) (Kind, any) {
 	// Handle empty slices - only typed float slices become VectorKind.
 	// Empty []any{} returns UnspecifiedKind because it's genuinely ambiguous:
 	// we cannot distinguish an empty vector from an empty string list or empty
-	// object list without schema context. The validator (Phase 3) has schema
+	// object list without schema context. The instance validator has schema
 	// information and can properly interpret empty arrays. This follows the
 	// "determine what it IS, not what it should be" principle.
 	if rv.Len() == 0 {

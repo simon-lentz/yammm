@@ -835,8 +835,6 @@ func TestAlignColumns_EmptyAndPassthrough(t *testing.T) {
 	assert.Equal(t, nonAlignable, AlignColumns(nonAlignable), "non-alignable input should pass through unchanged")
 }
 
-// --- displayWidth ---
-
 func TestDisplayWidth(t *testing.T) {
 	t.Parallel()
 
@@ -861,8 +859,6 @@ func TestDisplayWidth(t *testing.T) {
 		})
 	}
 }
-
-// --- Enum wrapping tests ---
 
 func TestWrapLongLines_ShortEnumUnchanged(t *testing.T) {
 	t.Parallel()
@@ -944,8 +940,6 @@ func TestWrapLongLines_EnumInlineComment(t *testing.T) {
 	assert.Contains(t, lastLine, "] required // status field", "inline comment should reattach to ] line")
 }
 
-// --- Extends wrapping tests ---
-
 func TestWrapLongLines_ShortExtendsUnchanged(t *testing.T) {
 	t.Parallel()
 
@@ -1018,8 +1012,6 @@ func TestWrapLongLines_ExtendsAbstractType(t *testing.T) {
 	assert.Contains(t, result, "abstract type ComplexEntity extends\n", "abstract prefix should be preserved")
 }
 
-// --- Datatype alias tests ---
-
 func TestWrapLongLines_ShortDatatypeAliasUnchanged(t *testing.T) {
 	t.Parallel()
 
@@ -1050,8 +1042,6 @@ func TestWrapLongLines_DatatypeAliasCollapses(t *testing.T) {
 	expected := "type Status = Enum[\"a\", \"b\"]\n"
 	assert.Equal(t, expected, result, "multiline alias should collapse")
 }
-
-// --- Invariant wrapping tests ---
 
 func TestWrapLongLines_ShortInvariantUnchanged(t *testing.T) {
 	t.Parallel()
@@ -1194,8 +1184,6 @@ func TestWrapLongLines_InvariantRegexLiteralPreserved(t *testing.T) {
 	}
 }
 
-// --- Integration / edge case tests ---
-
 func TestWrapLongLines_NonWrappable(t *testing.T) {
 	t.Parallel()
 
@@ -1256,8 +1244,6 @@ func TestWrapLongLines_ExactlyAtThreshold(t *testing.T) {
 	result := WrapLongLines(line)
 	assert.Equal(t, line, result, "line at exactly 100 chars should NOT be wrapped")
 }
-
-// --- Full pipeline tests ---
 
 func TestTokenStream_WrapLongEnum(t *testing.T) {
 	t.Parallel()

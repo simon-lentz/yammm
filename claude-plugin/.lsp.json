@@ -1,0 +1,9 @@
+{
+  "yammm-lsp": {
+    "command": "yammm-lsp",
+    "args": ["--stdio"],
+    "extensionToLanguage": {
+      ".yammm": "yammm"
+    }
+  }
+}

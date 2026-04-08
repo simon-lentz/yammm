@@ -950,8 +950,6 @@ func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
 	}
 }
 
-// --- EdgeQueriesFor tests ---
-
 // validateInstance validates a single instance without building a graph.
 func validateInstance(t *testing.T, v *instance.Validator, typeName string, props map[string]any) *instance.ValidInstance {
 	t.Helper()
@@ -1183,8 +1181,6 @@ func TestNodeQueryFor_ValidInstance(t *testing.T) {
 		t.Errorf("key_id = %v; want e1", q.Params["key_id"])
 	}
 }
-
-// --- extractKeyFromImmutableKey tests ---
 
 func TestExtractKeyFromImmutableKey_SingleComponent(t *testing.T) {
 	t.Parallel()

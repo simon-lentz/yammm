@@ -983,10 +983,6 @@ func TestBuilder_DuplicateImportByResolvedSourceID(t *testing.T) {
 	assert.True(t, hasError, "should emit E_DUPLICATE_IMPORT when two imports resolve to the same schema")
 }
 
-// =============================================================================
-// Additional Coverage Tests for resolveImportPath
-// =============================================================================
-
 func TestBuilder_FileBackedSourceID_RelativeImport(t *testing.T) {
 	// Test Case 1: File-backed SourceID with relative import
 	// Create a file-backed SourceID (simulating a schema loaded from disk)

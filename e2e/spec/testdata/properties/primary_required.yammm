@@ -1,7 +1,0 @@
-schema "PrimaryRequired"
-
-type Car {
-    vin String primary
-    make String
-    model String
-}

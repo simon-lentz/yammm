@@ -260,8 +260,6 @@ func TestValidInstance_Provenance(t *testing.T) {
 	})
 }
 
-// --- ValidEdgeData tests ---
-
 func TestValidEdgeData_Targets(t *testing.T) {
 	t.Run("non_nil_with_targets", func(t *testing.T) {
 		targets := []instance.ValidEdgeTarget{
@@ -335,8 +333,6 @@ func TestValidEdgeData_IsEmpty(t *testing.T) {
 	})
 }
 
-// --- ValidEdgeTarget tests ---
-
 func TestValidEdgeTarget_TargetKey(t *testing.T) {
 	pk := immutable.WrapKey([]any{"us-east", int64(456)})
 	target := instance.NewValidEdgeTarget(pk, immutable.WrapProperties(nil))
@@ -374,8 +370,6 @@ func TestValidEdgeTarget_Properties(t *testing.T) {
 		assert.False(t, ok)
 	})
 }
-
-// --- New API method tests ---
 
 func TestValidInstance_HasProvenance(t *testing.T) {
 	t.Run("with_provenance", func(t *testing.T) {

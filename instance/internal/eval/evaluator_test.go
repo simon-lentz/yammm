@@ -867,7 +867,7 @@ func TestEvaluator_StringIndexing_UTF8(t *testing.T) {
 
 // TestEvaluator_IndexBoundsOverflow verifies that large int64 indices don't
 // cause incorrect behavior due to int64→int conversion overflow.
-// This is P2.1 fix: bounds checks must use int64 comparison, not int.
+// Regression: bounds checks must use int64 comparison, not int.
 func TestEvaluator_IndexBoundsOverflow(t *testing.T) {
 	ev := eval.NewEvaluator()
 	scope := eval.EmptyScope()
@@ -1288,8 +1288,8 @@ func TestEvaluator_BuiltinErrors(t *testing.T) {
 }
 
 // TestMethodStyleCallValidation verifies that method-style calls enforce the
-// same validation constraints as function-style calls. This tests the fix for
-// P0.1 where method-style calls were bypassing validation.
+// same validation constraints as function-style calls. Regression: method-style
+// calls were bypassing validation.
 func TestMethodStyleCallValidation(t *testing.T) {
 	ev := eval.NewEvaluator()
 	scope := eval.EmptyScope()
@@ -1406,10 +1406,6 @@ func TestMethodStyleCallValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "accepts at most")
 	})
 }
-
-// =============================================================================
-// Additional Coverage Tests for Uncovered Paths
-// =============================================================================
 
 func TestEvaluator_MemberAccessOnNonMap(t *testing.T) {
 	ev := eval.NewEvaluator()

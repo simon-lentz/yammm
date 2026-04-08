@@ -368,8 +368,6 @@ func TestBuiltin_Max(t *testing.T) {
 	})
 }
 
-// --- Collection builtins tests ---
-
 func TestBuiltin_Reduce(t *testing.T) {
 	ev := eval.NewEvaluator()
 	scope := eval.EmptyScope()
@@ -944,8 +942,6 @@ func TestBuiltin_Count_WithPredicate(t *testing.T) {
 	assert.Equal(t, int64(2), result)
 }
 
-// --- New Collection Builtins Tests ---
-
 func TestBuiltin_Sum(t *testing.T) {
 	ev := eval.NewEvaluator()
 	scope := eval.EmptyScope()
@@ -1207,8 +1203,6 @@ func TestBuiltin_Contains(t *testing.T) {
 	})
 }
 
-// --- String Builtins Tests ---
-
 func TestBuiltin_Upper(t *testing.T) {
 	ev := eval.NewEvaluator()
 	scope := eval.EmptyScope()
@@ -1420,8 +1414,6 @@ func TestBuiltin_Substring(t *testing.T) {
 		assert.Equal(t, "日本", result)
 	})
 }
-
-// --- Utility Builtins Tests ---
 
 func TestBuiltin_TypeOf(t *testing.T) {
 	ev := eval.NewEvaluator()

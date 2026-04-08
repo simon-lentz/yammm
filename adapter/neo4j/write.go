@@ -467,8 +467,6 @@ func (a *Adapter) BatchEdgeQueries(
 	return queries, nil
 }
 
-// --- internal helpers ---
-
 // propsToParamMap converts instance properties to a Neo4j-driver-compatible map.
 // Coerces []any slices to concrete typed slices, and scalar Date/Timestamp strings
 // to native temporal types, using schema constraint metadata. Without this coercion,

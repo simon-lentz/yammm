@@ -1,2 +1,0 @@
-schema "pk_integer_banned"
-type R { id Integer primary }

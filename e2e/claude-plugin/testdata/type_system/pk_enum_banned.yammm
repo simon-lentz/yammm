@@ -1,2 +1,0 @@
-schema "pk_enum_banned"
-type R { id Enum["a", "b"] primary }

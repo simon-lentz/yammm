@@ -360,7 +360,7 @@ func TestSlice_Iter2_Repeatability(t *testing.T) {
 }
 
 func TestSlice_Iter_ZeroValue(t *testing.T) {
-	// A4: Verify iterating over literal zero-value Slice{} handles gracefully
+	// Iterating over a zero-value Slice{} must not panic.
 	var s Slice
 
 	count := 0
@@ -374,7 +374,7 @@ func TestSlice_Iter_ZeroValue(t *testing.T) {
 }
 
 func TestSlice_Iter2_ZeroValue(t *testing.T) {
-	// A4: Verify iterating over literal zero-value Slice{} with Iter2 handles gracefully
+	// Iterating over a zero-value Slice{} with Iter2 must not panic.
 	var s Slice
 
 	count := 0

@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// C2: Test errors.Is() works for each sentinel error.
-// These tests verify that sentinel errors are usable for programmatic
-// error handling via errors.Is().
-
 func TestErrEmptySourceID_ErrorsIs(t *testing.T) {
 	err := ErrEmptySourceID
 

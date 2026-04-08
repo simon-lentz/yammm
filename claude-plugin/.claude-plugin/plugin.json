@@ -1,0 +1,15 @@
+{
+  "name": "yammm",
+  "version": "0.2.0",
+  "description": "Schema DSL, Go library, and CLI support for yammm — typed data validation, graph construction, and database export",
+  "author": {
+    "name": "Simon Lentz"
+  },
+  "homepage": "https://github.com/simon-lentz/yammm",
+  "repository": "https://github.com/simon-lentz/yammm",
+  "license": "MIT",
+  "keywords": ["yammm", "schema", "dsl", "graph", "validation", "neo4j", "go"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "lspServers": "./.lsp.json"
+}

@@ -115,7 +115,7 @@ type Bar {
 }
 
 func TestString_DataTypeResolution_PreservesCase(t *testing.T) {
-	// M3 fix: Verify datatype references preserve declared case end-to-end
+	// Verify datatype references preserve declared case end-to-end
 	source := `schema "test"
 
 type Name = String[1, 100]
@@ -673,8 +673,8 @@ type Person {
 
 // TestSources_RecoveryAfterParseFailure verifies that the loader properly cleans up
 // internal state after a parse failure, allowing subsequent loads to succeed.
-// This tests the fix for Executive Summary Item 6: loadingSchemas markers must be
-// cleared on all exit paths to prevent false "import cycle" errors.
+// Regression: loadingSchemas markers must be cleared on all exit paths to prevent
+// false "import cycle" errors.
 func TestSources_RecoveryAfterParseFailure(t *testing.T) {
 	ctx := t.Context()
 	tmpDir := t.TempDir()
@@ -708,8 +708,6 @@ type Person {
 
 // TestLoad_CrossSchemaInheritance_AllProperties verifies that cross-schema
 // inheritance properly inherits properties via AllProperties().
-// This tests that CC1 (AllProperties flattens inherited) and CC4 (cross-schema
-// supertype resolution) work together end-to-end.
 func TestLoad_CrossSchemaInheritance_AllProperties(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -810,7 +808,6 @@ type Base {
 
 // TestLoad_MultiImportSameLevel verifies that a schema importing multiple other
 // schemas at the same level correctly resolves references to all of them.
-// This tests the fix for C1: resolvedImports recursion safety.
 func TestLoad_MultiImportSameLevel(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -872,7 +869,6 @@ type Connector {
 
 // TestLoad_NestedImports verifies that nested import chains work correctly:
 // A imports B, B imports D. A should only see its own imports (b), not transitive (d).
-// This tests the fix for C1: resolvedImports recursion safety.
 func TestLoad_NestedImports(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -927,7 +923,6 @@ type Top extends b.Middle { age Integer }`
 
 // TestLoad_DiamondImportPattern verifies that diamond-shaped import graphs work:
 // A imports B and C, both B and C import D.
-// This tests the fix for C1: resolvedImports recursion safety.
 func TestLoad_DiamondImportPattern(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -988,10 +983,6 @@ type AType {
 	imports := s.ImportsSlice()
 	require.Len(t, imports, 2, "A should have 2 imports (b and c)")
 }
-
-// =============================================================================
-// A7: rootLoader Edge Case Tests
-// =============================================================================
 
 // TestLoad_PathEscape_MultiLevel verifies that multiple levels of ".." path
 // escape attempts are blocked by the rootLoader.
@@ -1175,10 +1166,6 @@ func TestLoad_DotDotInMiddleOfPath(t *testing.T) {
 	require.NotNil(t, s, "Relative import staying within root should work: %v", result.Messages())
 	assert.False(t, result.HasErrors())
 }
-
-// =============================================================================
-// Context Cancellation Tests (/19)
-// =============================================================================
 
 func TestString_CancellationReturnsError(t *testing.T) {
 	source := `schema "test" type Person { name String }`
@@ -1525,10 +1512,6 @@ type TypeA {
 	}
 	assert.False(t, result.HasErrors())
 }
-
-// =============================================================================
-// Invariant Property Validation Integration Tests
-// =============================================================================
 
 // TestString_InvariantUnknownProperty verifies that an invariant referencing
 // a property that does not exist on the type produces E_UNKNOWN_PROPERTY when

@@ -1,2 +1,0 @@
-schema "pk_boolean_banned"
-type R { id Boolean primary }

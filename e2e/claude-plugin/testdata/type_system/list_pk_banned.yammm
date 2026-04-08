@@ -1,5 +1,0 @@
-schema "list_pk_banned"
-
-type BadPK {
-    id List<String> primary
-}

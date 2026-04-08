@@ -723,10 +723,6 @@ func TestContainsBeforeClose(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Additional Coverage Tests for Uncovered Paths
-// =============================================================================
-
 func TestParse_ExtractSegmentsEdgeCases(t *testing.T) {
 	tests := []struct {
 		name    string
