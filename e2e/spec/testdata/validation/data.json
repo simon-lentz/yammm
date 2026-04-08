@@ -1,9 +1,0 @@
-{
-    "Person": [
-        {"name": "Alice", "age": 30},
-        {"name": "Bob"}
-    ],
-    "Person__invalid": [
-        {"age": 200}
-    ]
-}

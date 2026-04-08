@@ -1,2 +1,0 @@
-schema "pk_vector_banned"
-type R { id Vector[3] primary }

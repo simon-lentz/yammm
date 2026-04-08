@@ -1,8 +1,0 @@
-schema "OptionalField"
-
-type Config {
-    id String primary
-    label String
-    description String
-    priority Integer
-}

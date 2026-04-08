@@ -1,6 +1,0 @@
-schema "SnapshotParts"
-
-type Component {
-    id String primary
-    part_number String required
-}

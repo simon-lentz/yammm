@@ -1,7 +1,0 @@
-schema "pk_alias_banned"
-
-type Counter = Integer[0, _]
-
-type R {
-    id Counter primary
-}

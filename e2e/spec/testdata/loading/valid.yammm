@@ -1,5 +1,0 @@
-schema "Valid"
-
-type Person {
-    name String required
-}

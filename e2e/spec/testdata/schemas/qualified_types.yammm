@@ -1,8 +1,0 @@
-schema "QualifiedTypes"
-
-import "./parts"
-
-type Machine {
-    name String required
-    --> component parts.Component
-}

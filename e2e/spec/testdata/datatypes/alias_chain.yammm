@@ -1,8 +1,0 @@
-schema "AliasChain"
-
-type ShortString = String[1, 50]
-
-type Item {
-    id String primary
-    name ShortString required
-}

@@ -3,9 +3,13 @@ package snapshot_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -673,4 +677,172 @@ func TestWireStructFieldOrder(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- Property fidelity round-trip tests ---
+//
+// These tests verify that all property types survive the
+// marshal → load round-trip with correct values. The existing
+// round-trip tests above only exercise String properties.
+
+// fidelitySchema loads an inline schema with a single property of the given
+// type declaration and returns both the schema and a validator.
+func fidelitySchema(t *testing.T, propDecl string) (*schema.Schema, *instance.Validator) {
+	t.Helper()
+	src := `schema "PropTest"
+type Item {
+    id String primary
+    val ` + propDecl + `
+}`
+	s, result := schema.LoadString(t.Context(), src, "proptest")
+	require.False(t, result.HasErrors(), "fidelitySchema: %s", result)
+	return s, instance.NewValidator(s)
+}
+
+// fidelityRoundTrip validates an instance, builds a graph+snapshot,
+// marshals, loads, and returns the loaded property map.
+func fidelityRoundTrip(t *testing.T, s *schema.Schema, v *instance.Validator, val any) map[string]any {
+	t.Helper()
+	raw := instance.RawInstance{Properties: map[string]any{"id": "x", "val": val}}
+	valid, result := v.ValidateOne(t.Context(), "Item", raw)
+	require.True(t, result.OK(), "validate: %s", result)
+	require.NotNil(t, valid)
+
+	g := graph.New(s)
+	g.Add(t.Context(), valid)
+	snap := g.Snapshot()
+
+	data, mr := snapshot.Marshal(t.Context(), snap)
+	require.True(t, mr.OK(), "marshal: %s", mr)
+
+	loaded, lr := snapshot.Load(t.Context(), data, s)
+	require.True(t, lr.OK(), "load: %s", lr)
+
+	items := loaded.InstancesOf("Item")
+	require.Len(t, items, 1)
+	return items[0].Properties().Clone()
+}
+
+func TestMarshalLoad_PropertyFidelity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("int64_large_value", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "Integer")
+		props := fidelityRoundTrip(t, s, v, int64(9007199254740993))
+		assert.Equal(t, int64(9007199254740993), props["val"])
+	})
+
+	t.Run("int64_boundary", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "Integer")
+		props := fidelityRoundTrip(t, s, v, int64(math.MaxInt64))
+		assert.Equal(t, int64(math.MaxInt64), props["val"])
+	})
+
+	t.Run("float_scientific_notation", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "Float")
+		props := fidelityRoundTrip(t, s, v, 1.5e10)
+		assert.InDelta(t, 1.5e10, props["val"], 1.0)
+	})
+
+	t.Run("float_type_narrowing", func(t *testing.T) {
+		t.Parallel()
+		// float64(1.0) marshals as JSON "1", normalizes to int64(1) on load.
+		// The typed accessor should still return 1.0 via Float().
+		s, v := fidelitySchema(t, "Float")
+		raw := instance.RawInstance{Properties: map[string]any{"id": "x", "val": float64(1.0)}}
+		valid, result := v.ValidateOne(t.Context(), "Item", raw)
+		require.True(t, result.OK())
+
+		g := graph.New(s)
+		g.Add(t.Context(), valid)
+		snap := g.Snapshot()
+
+		data, mr := snapshot.Marshal(t.Context(), snap)
+		require.True(t, mr.OK())
+		loaded, lr := snapshot.Load(t.Context(), data, s)
+		require.True(t, lr.OK())
+
+		items := loaded.InstancesOf("Item")
+		require.Len(t, items, 1)
+		val, ok := items[0].Properties().Get("val")
+		require.True(t, ok)
+		f, fok := val.Float()
+		require.True(t, fok)
+		assert.Equal(t, float64(1.0), f)
+	})
+
+	t.Run("boolean_true_false", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "Boolean")
+		props := fidelityRoundTrip(t, s, v, true)
+		assert.Equal(t, true, props["val"])
+
+		props = fidelityRoundTrip(t, s, v, false)
+		assert.Equal(t, false, props["val"])
+	})
+
+	t.Run("string_unicode", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "String")
+		props := fidelityRoundTrip(t, s, v, "café ☕ 你好")
+		assert.Equal(t, "café ☕ 你好", props["val"])
+	})
+
+	t.Run("list_string", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "List<String>")
+		props := fidelityRoundTrip(t, s, v, []any{"a", "b", "c"})
+		list, ok := props["val"].([]any)
+		require.True(t, ok, "val should be []any")
+		assert.Equal(t, []any{"a", "b", "c"}, list)
+	})
+
+	t.Run("list_empty", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "List<String>")
+		props := fidelityRoundTrip(t, s, v, []any{})
+		list, ok := props["val"].([]any)
+		require.True(t, ok, "val should be []any, not nil")
+		assert.Empty(t, list)
+	})
+
+	t.Run("vector", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "Vector[3]")
+		props := fidelityRoundTrip(t, s, v, []any{0.1, 0.2, 0.3})
+		list, ok := props["val"].([]any)
+		require.True(t, ok, "val should be []any")
+		assert.Len(t, list, 3)
+	})
+
+	t.Run("enum", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, `Enum["active", "inactive"]`)
+		props := fidelityRoundTrip(t, s, v, "active")
+		assert.Equal(t, "active", props["val"])
+	})
+
+	t.Run("date", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "Date")
+		props := fidelityRoundTrip(t, s, v, "2026-03-15")
+		assert.Equal(t, "2026-03-15", props["val"])
+	})
+
+	t.Run("timestamp", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "Timestamp")
+		props := fidelityRoundTrip(t, s, v, "2026-01-01T00:00:00Z")
+		assert.Equal(t, "2026-01-01T00:00:00Z", props["val"])
+	})
+
+	t.Run("pattern", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, `Pattern["^[^@]+@[^@]+$"]`)
+		props := fidelityRoundTrip(t, s, v, "test@example.com")
+		assert.Equal(t, "test@example.com", props["val"])
+	})
 }

@@ -1,8 +1,0 @@
-schema "BlockComments"
-
-/* This is a block comment */
-type Record {
-	name String required
-	/* inline block */
-	value Integer
-}
