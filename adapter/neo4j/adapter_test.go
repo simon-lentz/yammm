@@ -394,37 +394,31 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 	// Run ConstraintsForSchema, ShapeForSchema, Label, BatchNodeQueries,
 	// and BatchEdgeQueries concurrently.
 	for range 10 {
-		wg.Add(5)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, result := a.ConstraintsForSchema(ctx, s)
 			if err := result.Err(); err != nil {
 				errs <- fmt.Errorf("constraints: %w", err)
 			}
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			_, result := a.ShapeForSchema(ctx, s)
 			if err := result.Err(); err != nil {
 				errs <- fmt.Errorf("shape: %w", err)
 			}
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			_ = a.Label(ctx, "test", "Type")
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			if _, err := a.BatchNodeQueries(ctx, graphResult, shape); err != nil {
 				errs <- fmt.Errorf("batch nodes: %w", err)
 			}
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			if _, err := a.BatchEdgeQueries(ctx, graphResult, shape); err != nil {
 				errs <- fmt.Errorf("batch edges: %w", err)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

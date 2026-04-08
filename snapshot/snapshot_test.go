@@ -638,7 +638,7 @@ func TestWireStructFieldOrder(t *testing.T) {
 	}{
 		{
 			name: "headerWire",
-			typ: reflect.TypeOf(struct {
+			typ: reflect.TypeFor[struct {
 				Version             int               `json:"version"`
 				SchemaName          string            `json:"schema_name"`
 				SchemaSource        string            `json:"schema_source"`
@@ -648,7 +648,7 @@ func TestWireStructFieldOrder(t *testing.T) {
 				Features            []string          `json:"features"`
 				CreatedAt           string            `json:"created_at,omitempty"`
 				Metadata            map[string]string `json:"metadata,omitempty"`
-			}{}),
+			}](),
 			expected: []string{
 				"version", "schema_name", "schema_source", "schema_hash",
 				"schema_hash_algorithm", "integrity_hash", "features",

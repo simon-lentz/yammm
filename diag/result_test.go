@@ -597,9 +597,9 @@ func TestResult_Err_ErrorsAs(t *testing.T) {
 		t.Fatal("Err() = nil; want non-nil")
 	}
 
-	var re *ResultError
-	if !errors.As(err, &re) {
-		t.Fatal("errors.As(*ResultError) = false; want true")
+	re, ok := errors.AsType[*ResultError](err)
+	if !ok {
+		t.Fatal("errors.AsType[*ResultError] = false; want true")
 	}
 
 	// Verify the Result is accessible and intact
@@ -619,9 +619,8 @@ func TestResult_Err_WrappableWithFmtErrorf(t *testing.T) {
 
 	wrapped := errors.Join(errors.New("schema validation failed"), r.Err())
 
-	var re *ResultError
-	if !errors.As(wrapped, &re) {
-		t.Fatal("errors.As through wrapped error = false; want true")
+	if _, ok := errors.AsType[*ResultError](wrapped); !ok {
+		t.Fatal("errors.AsType[*ResultError] through wrapped error = false; want true")
 	}
 }
 
