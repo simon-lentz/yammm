@@ -11,7 +11,7 @@ YAMMM is designed for structured data modeling with a focus on:
 - Invariants expressed as constraint expressions
 - Structured diagnostics with stable error codes
 
-The grammar is compact and regular, allowing for easy analysis by automatic tools. We use [ANTLR](https://en.wikipedia.org/wiki/ANTLR) to generate lexers and parsers from [`YammmGrammar.g4`](../grammar/YammmGrammar.g4).
+The grammar is compact and regular, allowing for easy analysis by automatic tools. We use [ANTLR](https://en.wikipedia.org/wiki/ANTLR) to generate lexers and parsers from [`YammmGrammar.g4`](../internal/grammar/YammmGrammar.g4).
 
 ## Notation
 
@@ -160,7 +160,7 @@ one    many
 
 ```text
 Integer    Float    Boolean    String    Enum    Pattern
-Timestamp    Date    UUID    Vector
+Timestamp    Date    UUID    Vector    List
 ```
 
 **Boolean literals:**
@@ -662,7 +662,7 @@ notes String[_, 1000]        // maximum 1000 runes
 Represents a value from a fixed set of string options:
 
 ```text
-EnumT = "Enum" "[" STRING { "," STRING } [ "," ] "]" .
+EnumT = "Enum" "[" STRING "," STRING { "," STRING } [ "," ] "]" .
 ```
 
 At least two options must be provided.
@@ -1348,19 +1348,19 @@ type Person {
 
 ## Loading Schemas
 
-Schemas are loaded from files or in-memory sources using the `schema/load` package.
+Schemas are loaded from files or in-memory sources using the `schema` package.
 
 ### Load Functions
 
 ```go
 // Load from file path
-schema, result, err := load.Load(ctx, "path/to/schema.yammm", opts...)
+s, result := schema.Load(ctx, "path/to/schema.yammm", opts...)
 
 // Load from string content (sourceCode first, then sourceName)
-schema, result, err := load.LoadString(ctx, content, "source-name", opts...)
+s, result := schema.LoadString(ctx, content, "source-name", opts...)
 
 // Load from in-memory sources with import resolution (moduleRoot is required)
-schema, result, err := load.LoadSources(ctx, sources, moduleRoot, opts...)
+s, result := schema.LoadSources(ctx, sources, moduleRoot, opts...)
 ```
 
 ### Load Options
@@ -1375,35 +1375,31 @@ schema, result, err := load.LoadSources(ctx, sources, moduleRoot, opts...)
 
 ### Error Handling Pattern
 
-All load functions follow the (Output, diag.Result, error) pattern:
+All load functions return `(*Schema, diag.Result)`:
 
-- `error != nil`: Catastrophic failure (I/O error, context cancellation)
-- `error == nil && !result.OK()`: Semantic failure (syntax errors, type resolution failures)
-- `error == nil && result.OK()`: Success (may have warnings)
+- `schema == nil && !result.OK()`: Failure (syntax errors, type resolution failures)
+- `schema != nil && result.OK()`: Success (result may contain warnings)
 
 ```go
-schema, result, err := load.Load(ctx, "schema.yammm")
-if err != nil {
-    return fmt.Errorf("load failed: %w", err)
-}
+s, result := schema.Load(ctx, "schema.yammm")
 if !result.OK() {
     // Use diag.Renderer to format issues
     return fmt.Errorf("schema errors: %v", result)
 }
-// Use schema
+// Use s
 ```
 
 ## Building Schemas Programmatically
 
-The `schema/build` package provides a fluent API for constructing schemas without parsing `.yammm` files.
+The `schema` package provides a fluent builder API for constructing schemas without parsing `.yammm` files.
 
 ```go
-s, result := build.NewBuilder().
+s, result := schema.NewBuilder().
     WithName("MySchema").
     WithSourceID(location.MustNewSourceID("test://my-schema.yammm")).
     AddType("Person").
         WithProperty("name", schema.NewStringConstraint()).
-        WithOptionalProperty("age", schema.NewIntegerConstraintBounded(0, true, 150, true)).
+        WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
         Done().
     AddType("Car").
         WithPrimaryKey("vin", schema.NewStringConstraint()).
@@ -1435,20 +1431,15 @@ validator := instance.NewValidator(schema, opts...)
 ### Validation
 
 ```go
-valid, failures, err := validator.Validate(ctx, "Person", rawInstances)
-if err != nil {
-    return err // Catastrophic failure
-}
-if len(failures) > 0 {
-    // Handle validation failures with diagnostics
-    for _, f := range failures {
-        fmt.Println(f.Result) // diag.Result with issues
-    }
+valid, result := validator.Validate(ctx, "Person", rawInstances)
+if !result.OK() {
+    // Use diag.Renderer to format issues
+    return fmt.Errorf("validation errors: %v", result)
 }
 // Process valid instances
 ```
 
-> **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (not a system error). This is consistent with the three-way return contract: `error` is reserved for catastrophic failures such as I/O errors or context cancellation.
+> **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state.
 
 ### Expected Instance Shape
 
@@ -1487,13 +1478,13 @@ The `graph` package builds an in-memory graph from validated instances.
 g := graph.New(schema)
 
 // Add validated instances
-result, err := g.Add(ctx, validInstance)
-if err != nil || !result.OK() {
+result := g.Add(ctx, validInstance)
+if !result.OK() {
     // Handle error
 }
 
 // Check completeness (required associations)
-result, err = g.Check(ctx)
+result = g.Check(ctx)
 
 // Get immutable snapshot
 snap := g.Snapshot()
@@ -1507,16 +1498,16 @@ for _, typeName := range snap.Types() {
 ### Thread Safety
 
 - `Graph` is safe for concurrent `Add` and `AddComposed` calls
-- `Result` snapshots are immutable and safe for concurrent reads
+- `Snapshot` values are immutable and safe for concurrent reads
 - All output slices are deterministically sorted
 
 ### Ordering Guarantees
 
-- `Result.Types()`: Lexicographic by type name
-- `Result.InstancesOf()`: Lexicographic by primary key
-- `Result.Edges()`: Lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
-- `Result.Duplicates()`: Lexicographic by (typeName, primaryKey)
-- `Result.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
+- `Snapshot.Types()`: Lexicographic by type name
+- `Snapshot.InstancesOf()`: Lexicographic by primary key
+- `Snapshot.Edges()`: Lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
+- `Snapshot.Duplicates()`: Lexicographic by (typeName, primaryKey)
+- `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
 
 ## Diagnostics
 
@@ -1568,7 +1559,7 @@ The `adapter/json` package parses JSON/JSONC into raw instances with optional lo
 ### Adapter Creation
 
 ```go
-adapter, err := json.NewAdapter(registry, opts...)
+adapter, err := json.New(registry, opts...)
 ```
 
 ### Parse Options
@@ -1625,17 +1616,18 @@ Multiplicity = "(" MultiplicitySpec ")" .
 
 Invariant  = "!" STRING Expr .
 
-BuiltIn    = "Integer" [ "[" Bound "," Bound "]" ]
-           | "Float" [ "[" Bound "," Bound "]" ]
+BuiltIn    = "Integer" [ "[" IntBound "," IntBound "]" ]
+           | "Float" [ "[" FloatBound "," FloatBound "]" ]
            | "Boolean"
-           | "String" [ "[" Bound "," Bound "]" ]
-           | "Enum" "[" STRING { "," STRING } [ "," ] "]"
+           | "String" [ "[" ListBound "," ListBound "]" ]
+           | "Enum" "[" STRING "," STRING { "," STRING } [ "," ] "]"
            | "Pattern" "[" STRING [ "," STRING ] "]"
            | "Timestamp" [ "[" STRING "]" ]
            | "Date"
            | "UUID"
            | "Vector" "[" INTEGER "]"
            | "List" "<" DataTypeRef ">" [ "[" ListBound "," ListBound "]" ] .
-Bound      = "_" | INTEGER | FLOAT .
+IntBound   = "_" | [ "-" ] INTEGER .
+FloatBound = "_" | [ "-" ] ( INTEGER | FLOAT ) .
 ListBound  = "_" | INTEGER .
 ```
