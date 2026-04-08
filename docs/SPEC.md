@@ -1421,6 +1421,38 @@ s, result := schema.NewBuilder().
     Build()
 ```
 
+### Builder Methods
+
+| Method | Description |
+| ------ | ----------- |
+| `NewBuilder()` | Create a new schema builder |
+| `WithName(name)` | Set the schema name |
+| `WithSourceID(id)` | Set the source ID (required if `AddImport` is used) |
+| `WithDocumentation(doc)` | Set schema-level documentation |
+| `WithRegistry(r)` | Provide a schema registry for cross-schema type resolution |
+| `WithIssueLimit(limit)` | Maximum diagnostics to collect (default: 100) |
+| `WithImportResolver(resolver)` | Custom resolver for import paths (needed for synthetic source IDs with relative imports) |
+| `AddImport(path, alias)` | Add an import declaration |
+| `AddType(name)` | Begin building a type definition (returns `TypeBuilder`) |
+| `AddDataType(name, constraint)` | Add a named data type alias |
+| `Build()` | Construct the final `*Schema` from builder state |
+
+### TypeBuilder Methods
+
+| Method | Description |
+| ------ | ----------- |
+| `WithProperty(name, constraint)` | Add a required property |
+| `WithOptionalProperty(name, constraint)` | Add an optional property |
+| `WithPrimaryKey(name, constraint)` | Add a primary key property |
+| `WithRelation(name, target, optional, many)` | Add an association |
+| `WithComposition(name, target, optional, many)` | Add a composition |
+| `Extends(ref)` | Add a parent type for inheritance |
+| `AsPart()` | Mark the type as a part type |
+| `AsAbstract()` | Mark the type as abstract |
+| `WithTypeDocumentation(doc)` | Set documentation for the type |
+| `WithInvariant(name, expr, doc)` | Add an invariant constraint |
+| `Done()` | Complete the type definition and return to the parent `Builder` |
+
 ## Instance Validation
 
 The `instance` package validates Go data against compiled schemas. Each instance is represented as an `instance.RawInstance` struct:
@@ -1671,7 +1703,34 @@ info, result := snapshot.Info(ctx, data)
 
 ### Snapshot Info
 
-`Info` returns a `SnapshotInfo` struct with header fields (version, schema name, schema hash, integrity status, created timestamp, metadata) and content summaries (type list, instance counts, edge count, duplicate count, unresolved count, file size).
+`Info` returns a `SnapshotInfo` struct:
+
+```go
+type SnapshotInfo struct {
+    // Header fields.
+    Version             int
+    Features            []string
+    SchemaName          string
+    SchemaSource        string
+    SchemaHash          string
+    SchemaHashAlgorithm int
+    IntegrityHash       string
+    CreatedAt           string            // RFC 3339 or empty
+    Metadata            map[string]string // user-provided annotations, nil if absent
+
+    // Content summary.
+    Types           []string
+    InstanceCounts  map[string]int // type name → count
+    TotalInstances  int
+    TotalEdges      int
+    DuplicateCount  int
+    UnresolvedCount int
+
+    // File metadata.
+    FileSize        int64  // len(data)
+    IntegrityStatus string // "ok", "mismatch", or "skipped"
+}
+```
 
 ## Diagnostics
 
@@ -1710,13 +1769,16 @@ result.IssuesAtLeastAsSevereAs(diag.Warning) // Issues at or above a threshold
 result.IssuesSlice()
 result.ErrorsSlice()
 result.WarningsSlice()
+result.BySeveritySlice(diag.Warning)          // Issues at exactly the given severity
+result.IssuesAtLeastAsSevereAsSlice(diag.Warning) // Issues at or above a threshold
 
 // Metadata
 result.Len()              // Total issue count
 result.Limit()            // Configured collection limit
 result.DroppedCount()     // Issues dropped after limit
 result.SeverityCounts()   // Counts by severity level
-result.Messages()         // All issue messages as strings
+result.Messages()         // Fatal and error issue messages as strings
+result.MessagesAtOrAbove(diag.Warning)        // Messages at or above a severity threshold
 
 // Conversion
 result.Err()              // Returns error if !OK(), nil otherwise
@@ -1834,6 +1896,12 @@ renderer := diag.NewRenderer(
     diag.WithTruncationIndicator("…"),  // truncation marker
 )
 output := renderer.FormatResult(result)
+
+// Format a single issue
+output := renderer.FormatIssue(issue)
+
+// Format a slice of issues
+output := renderer.FormatIssues(issues)
 ```
 
 All renderer options are optional. The zero-config `diag.NewRenderer()` produces plain-text output without excerpts or colors.
@@ -2100,12 +2168,13 @@ The `format` package provides canonical formatting for `.yammm` schema files:
 formatted, err := format.TokenStream(input)
 ```
 
-The formatter applies a four-phase pipeline:
+The formatter applies a five-phase pipeline:
 
 1. **Token-stream rewriting:** canonical spacing between tokens and indentation normalization
 2. **Blank line collapsing:** removes excess blank lines while preserving section breaks
 3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at the threshold
 4. **Column alignment:** aligns property types and modifiers within type blocks
+5. **Text finalization:** trims trailing whitespace from each line, removes trailing blank lines, and ensures the file ends with a newline
 
 Output is deterministic and idempotent. The formatter is used by the LSP server for `textDocument/formatting` and by the CLI for the `yammm fmt` command.
 
