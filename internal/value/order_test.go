@@ -77,7 +77,7 @@ type (
 // TestTypeStrata_NamedTypesInvalid verifies that named types (type aliases with
 // underlying predeclared types) return InvalidStrata. This ensures consistency
 // with GetInt64/GetFloat64/toStringComparable which use type switches and would
-// fail on named types. See DEV_V2_INTERNAL_VALUE_REVIEW.md issue #1.
+// fail on named types.
 func TestTypeStrata_NamedTypesInvalid(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -138,7 +138,7 @@ func TestOrder_NamedTypesError(t *testing.T) {
 
 // TestOrder_LargeUnsigned verifies that uint64/uintptr values > math.MaxInt64
 // can be compared correctly. This was a bug where GetInt64 rejected overflow,
-// causing Order to fail. See DEV_V2_INTERNAL_VALUE_REVIEW.md issue #2.
+// causing Order to fail.
 func TestOrder_LargeUnsigned(t *testing.T) {
 	const (
 		maxInt64      = int64(1<<63 - 1)  // 9223372036854775807

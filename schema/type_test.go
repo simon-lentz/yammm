@@ -762,7 +762,7 @@ func TestType_IsSealed(t *testing.T) {
 
 // TestType_CanonicalPropertyMap_Immutability verifies that CanonicalPropertyMap
 // returns a defensive copy, not the internal map. Mutations to the returned map
-// should not affect the internal state (M4 fix).
+// should not affect the internal state.
 func TestType_CanonicalPropertyMap_Immutability(t *testing.T) {
 	// Build a schema with properties to test immutability
 	s, result := schema.NewBuilder().

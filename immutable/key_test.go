@@ -525,7 +525,7 @@ func TestKey_String_WithNestedStructures(t *testing.T) {
 }
 
 func TestKey_Iter_ZeroValue(t *testing.T) {
-	// A4: Verify iterating over literal zero-value Key{} handles gracefully
+	// Iterating over a zero-value Key{} must not panic.
 	var k Key
 
 	count := 0

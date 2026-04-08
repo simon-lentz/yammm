@@ -196,7 +196,7 @@ func (v *Validator) validateComposition(
 			continue
 		}
 
-		// P1-3: Propagate parent's sourceName and span to children
+		// Propagate parent's sourceName and span to children.
 		var childProv *location.Provenance
 		if prov != nil {
 			childProv = location.NewProvenance(prov.SourceName(), basePath.Index(i), prov.Span())

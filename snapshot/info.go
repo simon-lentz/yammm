@@ -12,7 +12,7 @@ import (
 // SnapshotInfo uses exported fields rather than accessor methods. This is a
 // deliberate departure from the library's typical pattern — SnapshotInfo is
 // a read-only data transfer object with no invariants to protect.
-type SnapshotInfo struct { //nolint:revive // intentional name per design doc Section 6.2
+type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .ys format section name
 	// Header fields.
 	Version             int
 	Features            []string

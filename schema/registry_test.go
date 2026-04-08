@@ -174,7 +174,7 @@ func TestRegistry_All(t *testing.T) {
 	assert.Len(t, all, 2)
 }
 
-// E2: Test that Registry.All() returns schemas in deterministic order
+// Test that Registry.All() returns schemas in deterministic order.
 func TestRegistry_All_OrderDeterminism(t *testing.T) {
 	r := schema.NewRegistry()
 

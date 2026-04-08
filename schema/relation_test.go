@@ -58,7 +58,7 @@ func TestRelation_Equal_WithTargetID(t *testing.T) {
 
 func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
 	// Two relations with zero targetIDs are equal if all other fields match
-	// This is the current (incorrect) behavior that CC3 aims to fix
+	// Known limitation: zero targetIDs makes relations appear equal
 	r1 := schema.TestNewRelation(
 		schema.RelationAssociation, "REL", "rel",
 		schema.NewTypeRef("", "Target", location.Span{}), schema.TypeID{},
@@ -70,7 +70,7 @@ func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
 
-	// With zero targetIDs, they appear equal (this is the bug CC3 fixes)
+	// With zero targetIDs, they appear equal
 	assert.True(t, r1.Equal(r2), "relations with zero targetIDs are equal")
 }
 

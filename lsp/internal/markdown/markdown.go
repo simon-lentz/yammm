@@ -9,8 +9,8 @@ import (
 )
 
 // CodeBlock represents a yammm fenced code block extracted from a markdown document.
-// SourceID is intentionally zero-valued after extraction; Phase 2's workspace
-// integration populates it via VirtualSourceID.
+// SourceID is intentionally zero-valued after extraction; workspace integration
+// populates it via VirtualSourceID.
 type CodeBlock struct {
 	Content     string            // Block content (without fences), lines joined by "\n"
 	SourceID    location.SourceID // Virtual SourceID — zero-value from ExtractCodeBlocks

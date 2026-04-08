@@ -1680,7 +1680,7 @@ func TestGraph_resolveTypeName_UnqualifiedTypeNotFound(t *testing.T) {
 }
 
 // TestAddComposed_NestedComposition_Extracted tests that AddComposed extracts
-// nested compositions from streamed children (Issue 2.1 from graph review).
+// nested compositions from streamed children.
 func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 	s := testSchemaWithNestedComposition(t)
 	g := New(s)
@@ -1753,7 +1753,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 }
 
 // TestExtractCompositions_OneCardinality_MultipleChildren_Error tests that
-// (one) relations with multiple children emit an error (Issue 2.3 from graph review).
+// (one) relations with multiple children emit an error.
 func TestExtractCompositions_OneCardinality_MultipleChildren_Error(t *testing.T) {
 	s := testSchemaWithOneComposition(t) // Parent -> (one) Child
 	g := New(s)
@@ -1823,7 +1823,7 @@ func TestExtractCompositions_OneCardinality_MultipleChildren_Error(t *testing.T)
 }
 
 // TestExtractCompositions_BareValidInstance tests that extractCompositions
-// handles bare *ValidInstance (not wrapped in slice) defensively (Issue 2.2 from graph review).
+// handles bare *ValidInstance (not wrapped in slice) defensively.
 func TestExtractCompositions_BareValidInstance(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := New(s)

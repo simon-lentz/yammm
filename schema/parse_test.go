@@ -198,7 +198,7 @@ type Person {
 	dt := model.DataTypes[0]
 	assert.Equal(t, "Name", dt.Name) // datatype names preserve declared case
 
-	// M3 fix: Verify AliasConstraint preserves case for references
+	// Verify AliasConstraint preserves case for references
 	require.Len(t, model.Types, 1)
 	require.Len(t, model.Types[0].Properties, 1)
 

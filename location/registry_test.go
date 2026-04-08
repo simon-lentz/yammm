@@ -75,8 +75,6 @@ func TestMockRegistry_Basic(t *testing.T) {
 	}
 }
 
-// C3: RuneOffsetConverter interface compliance tests
-
 // mockRuneConverter is a mock implementation of RuneOffsetConverter for testing.
 type mockRuneConverter struct {
 	offsets map[SourceID]map[int]int // source -> runeOffset -> byteOffset

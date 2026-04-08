@@ -657,8 +657,6 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 	})
 }
 
-// --- P0 Null vs Absent Tests ---
-
 func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 	// Per architecture spec: null is always a shape error, even for optional associations.
 	s := mustBuild(t, schema.NewBuilder().
@@ -901,10 +899,6 @@ func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 	assert.True(t, hasExpected, "should have 'expected' detail")
 	assert.True(t, hasGot, "should have 'got' detail")
 }
-
-// --- P0 Null-Within-FK Tests ---
-// These tests verify that null FK field values are treated as "present but invalid"
-// (E_TYPE_MISMATCH) rather than "missing" (E_MISSING_FK_TARGET).
 
 func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 	// Single-PK + _target_id: null

@@ -469,11 +469,6 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 	assert.Equal(t, 3, superCount, "D should have 3 supertypes: A, B, C")
 }
 
-// A5: validateCompositionTarget Tests
-// These test that composition relations validate their targets:
-// - Composition targets must be part types (IsPart=true)
-// - Composition targets cannot be abstract
-
 func TestComplete_CompositionTarget_MustBePart(t *testing.T) {
 	// Composition targeting a non-part type should fail
 	model := &schema.TestModel{
@@ -576,9 +571,6 @@ func TestComplete_CompositionTarget_Valid(t *testing.T) {
 	}
 	assert.Equal(t, 1, relCount)
 }
-
-// A6: Cross-Schema Resolution Tests
-// mockRegistry implements schema.Registry interface for cross-schema type resolution
 
 type mockRegistry struct {
 	schemas map[location.SourceID]*schema.Schema
@@ -716,10 +708,6 @@ func TestComplete_CrossSchemaInheritance_DeferredWithoutRegistry(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// A7: DataType Tests (indexDataTypes coverage)
-// ============================================================================
-
 func TestComplete_DataType_Simple(t *testing.T) {
 	model := &schema.TestModel{
 		Name: "test",
@@ -800,10 +788,6 @@ func TestComplete_DataType_NilSkipped(t *testing.T) {
 	assert.False(t, collector.HasErrors())
 	assert.Equal(t, 1, len(s.DataTypesSlice()))
 }
-
-// ============================================================================
-// A8: Invariant Tests (convertInvariants coverage)
-// ============================================================================
 
 func TestComplete_Invariant_Single(t *testing.T) {
 	model := &schema.TestModel{
@@ -899,10 +883,6 @@ func TestComplete_Invariant_NilSkipped(t *testing.T) {
 	assert.Len(t, invs, 1)
 }
 
-// ============================================================================
-// A9: Relation Collision Tests (checkRelationCollisions coverage)
-// ============================================================================
-
 func TestComplete_RelationNormalizationCollision_Associations(t *testing.T) {
 	// Two associations with different raw names that normalize to same field name
 	model := &schema.TestModel{
@@ -970,10 +950,6 @@ func TestComplete_RelationNormalizationCollision_AssociationAndComposition(t *te
 	assert.True(t, collector.HasErrors())
 }
 
-// ============================================================================
-// A10: Property-Relation Collision Tests (checkPropertyRelationCollisions)
-// ============================================================================
-
 func TestComplete_PropertyRelationCollision_Association(t *testing.T) {
 	model := &schema.TestModel{
 		Name: "test",
@@ -1034,13 +1010,6 @@ func TestComplete_PropertyRelationCollision_Composition(t *testing.T) {
 	assert.True(t, collector.HasErrors())
 }
 
-// ============================================================================
-// A11: Association/Composition Valid Target Tests
-// Note: The reserved prefix check for relations uses FieldName() which is
-// normalized via ToLowerSnake(). Since ToLowerSnake strips leading underscores,
-// the reserved prefix "_target_" can never match through normal usage.
-// ============================================================================
-
 func TestComplete_Association_ValidTarget(t *testing.T) {
 	// Test that a valid association with proper target works
 	model := &schema.TestModel{
@@ -1096,10 +1065,6 @@ func TestComplete_Composition_ValidTarget(t *testing.T) {
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
 }
-
-// ============================================================================
-// A12: Association Target Tests (validateRelationTarget coverage)
-// ============================================================================
 
 func TestComplete_AssociationTarget_Valid(t *testing.T) {
 	model := &schema.TestModel{
@@ -1186,10 +1151,6 @@ func TestComplete_AssociationTarget_CrossSchema_DeferredWithoutRegistry(t *testi
 		assert.False(t, collector.HasErrors())
 	}
 }
-
-// ============================================================================
-// A13: Relation Inheritance Tests (mergeRelations coverage)
-// ============================================================================
 
 func TestComplete_RelationInheritance_Associations(t *testing.T) {
 	model := &schema.TestModel{
@@ -1340,10 +1301,6 @@ func TestComplete_RelationInheritance_ConflictingDifferentOptional(t *testing.T)
 	assert.True(t, collector.HasErrors())
 }
 
-// ============================================================================
-// A14: Import Validation Tests (indexImports coverage)
-// ============================================================================
-
 func TestComplete_Import_InvalidAlias_StartsWithNumber(t *testing.T) {
 	model := &schema.TestModel{
 		Name: "test",
@@ -1468,10 +1425,6 @@ func TestComplete_Import_MissingResolution(t *testing.T) {
 	assert.True(t, collector.HasErrors())
 }
 
-// ============================================================================
-// A15: Edge Properties Tests (convertRelations coverage)
-// ============================================================================
-
 func TestComplete_Association_WithEdgeProperties(t *testing.T) {
 	model := &schema.TestModel{
 		Name: "test",
@@ -1548,10 +1501,6 @@ func TestComplete_Association_EdgePropertyNilSkipped(t *testing.T) {
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
 }
-
-// ============================================================================
-// A16: Unknown Type in Extends Tests (completeTypes/linearize coverage)
-// ============================================================================
 
 func TestComplete_UnknownTypeInExtends(t *testing.T) {
 	model := &schema.TestModel{
@@ -1672,10 +1621,6 @@ func TestComplete_NilInheritsRef_Skipped(t *testing.T) {
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
 }
-
-// ============================================================================
-// A17: Part Type Association Restrictions Tests (validateAssociationTargets)
-// ============================================================================
 
 func TestComplete_PartType_CannotDeclareAssociation(t *testing.T) {
 	// Part types cannot declare associations - they are composition-only targets

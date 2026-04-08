@@ -303,7 +303,7 @@ func TestMap_Clone_WithNestedSlice(t *testing.T) {
 }
 
 func TestMap_Keys_ZeroValue(t *testing.T) {
-	// A4: Verify iterating over literal zero-value Map[string]{} Keys handles gracefully
+	// Iterating over a zero-value Map[string]{} Keys must not panic.
 	var m Map[string]
 
 	count := 0
@@ -317,7 +317,7 @@ func TestMap_Keys_ZeroValue(t *testing.T) {
 }
 
 func TestMap_Range_ZeroValue(t *testing.T) {
-	// A4: Verify iterating over literal zero-value Map[string]{} Range handles gracefully
+	// Iterating over a zero-value Map[string]{} Range must not panic.
 	var m Map[string]
 
 	count := 0

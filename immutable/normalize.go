@@ -25,7 +25,7 @@ import (
 //
 // Type narrowing: JSON has no int/float distinction. float64(1.0) marshals
 // as "1" (no decimal point), which NormalizeNumber converts to int64(1).
-// This is inherent to JSON and is documented in the fidelity contract (G1).
+// This is inherent to JSON's lack of int/float distinction.
 // The Value typed accessors (Int(), Float()) handle both representations
 // transparently.
 func NormalizeNumber(n json.Number) any {

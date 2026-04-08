@@ -31,7 +31,7 @@ var codePattern = regexp.MustCompile(`E_[A-Z][A-Z0-9_]*[A-Z0-9]`)
 func TestDocumentedCodesExist(t *testing.T) {
 	content, err := os.ReadFile(diagnosticsRefPath)
 	if os.IsNotExist(err) {
-		t.Skip("diagnostics reference file not yet written (Phase 2)")
+		t.Skip("diagnostics reference file not yet written")
 	}
 	if err != nil {
 		t.Fatalf("read diagnostics reference: %v", err)

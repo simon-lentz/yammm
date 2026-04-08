@@ -334,8 +334,6 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 	assert.Contains(t, result.String(), "expected array")
 }
 
-// --- P0 Null vs Absent Tests ---
-
 func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 	// Per architecture spec: null is always a shape error, even for optional compositions.
 	s := mustBuild(t, schema.NewBuilder().

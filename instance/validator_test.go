@@ -859,8 +859,6 @@ type Record {
 	}
 }
 
-// --- P1.1 Property Path Uses Schema Name Tests ---
-
 func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 	// Property paths should use schema property names, not input field names.
 	// When input uses different case (e.g., "firstname"), path should still use "FirstName".
@@ -938,8 +936,6 @@ func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
 	assert.True(t, foundFieldDetail, "should include 'field' detail with original input name when it differs from schema name")
 }
 
-// --- P1.3 Empty Input Slice Tests ---
-
 func TestValidator_Validate_NilInput_ReturnsNil(t *testing.T) {
 	// Validate(ctx, typeName, nil) should return (nil, OK result)
 	s := mustBuild(t, schema.NewBuilder().
@@ -1015,8 +1011,6 @@ func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testin
 	require.NotNil(t, valid, "empty input should return non-nil empty valid slice")
 	assert.Empty(t, valid, "empty input should return empty valid slice")
 }
-
-// --- P1 Nil Receiver Panic Tests ---
 
 func TestValidator_NilReceiver(t *testing.T) {
 	var v *instance.Validator
