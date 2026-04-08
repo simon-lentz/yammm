@@ -1361,6 +1361,10 @@ s, result := schema.LoadString(ctx, content, "source-name", opts...)
 
 // Load from in-memory sources with import resolution (moduleRoot is required)
 s, result := schema.LoadSources(ctx, sources, moduleRoot, opts...)
+
+// Load from in-memory sources with an explicit entry point
+// Useful in LSP scenarios where multiple documents are open but only one is being analyzed
+s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, opts...)
 ```
 
 ### Load Options
@@ -1372,6 +1376,7 @@ s, result := schema.LoadSources(ctx, sources, moduleRoot, opts...)
 | `WithIssueLimit` | Maximum diagnostic issues to collect (default: 100) |
 | `WithSourceRegistry` | Source registry for position tracking |
 | `WithLogger` | Structured logger for load diagnostics |
+| `WithDisallowImports` | Prevent import declarations from being processed |
 
 ### Error Handling Pattern
 
@@ -1410,7 +1415,16 @@ s, result := schema.NewBuilder().
 
 ## Instance Validation
 
-The `instance` package validates Go data against compiled schemas. Each instance is represented as an `instance.RawInstance` struct with a `Properties map[string]any` field. Go structs with typed fields must be marshaled to JSON and unmarshaled into `map[string]any` before validation.
+The `instance` package validates Go data against compiled schemas. Each instance is represented as an `instance.RawInstance` struct:
+
+```go
+type RawInstance struct {
+    Properties map[string]any         // raw property values keyed by name
+    Provenance *location.Provenance   // optional source location metadata for error reporting
+}
+```
+
+Go structs with typed fields must be marshaled to JSON and unmarshaled into `map[string]any` before validation.
 
 ### Validator Creation
 
@@ -1431,12 +1445,20 @@ validator := instance.NewValidator(schema, opts...)
 ### Validation
 
 ```go
+// Validate a batch of instances for a given type
 valid, result := validator.Validate(ctx, "Person", rawInstances)
 if !result.OK() {
     // Use diag.Renderer to format issues
     return fmt.Errorf("validation errors: %v", result)
 }
 // Process valid instances
+
+// Validate a single instance
+one, result := validator.ValidateOne(ctx, "Person", rawInstance)
+
+// Validate instances in a composition context (part types allowed,
+// primary key enforcement relaxed for composed children)
+composed, result := validator.ValidateForComposition(ctx, "Car", "WHEELS", rawWheels)
 ```
 
 > **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state.
@@ -1483,6 +1505,9 @@ if !result.OK() {
     // Handle error
 }
 
+// Add composed children (part type instances embedded in a parent)
+result = g.AddComposed(ctx, parentInstance, "WHEELS", composedChildren)
+
 // Check completeness (required associations)
 result = g.Check(ctx)
 
@@ -1494,6 +1519,43 @@ for _, typeName := range snap.Types() {
     }
 }
 ```
+
+### Seeding from a Snapshot
+
+A new mutable `Graph` can be seeded from an existing `Snapshot`, enabling incremental graph building on top of persisted or previously-constructed state:
+
+```go
+// Create a graph pre-populated with an existing snapshot's data
+g := graph.NewFromSnapshot(schema, existingSnap)
+
+// New instances can be added on top of the imported data
+result := g.Add(ctx, newInstance)
+
+// Edges referencing imported instances resolve automatically
+snap := g.Snapshot()
+```
+
+`NewFromSnapshot` imports all instances, edges, duplicates, and unresolved records from the source snapshot. Subsequent `Add` calls may resolve previously-unresolved edges if they supply the missing targets.
+
+### Snapshot Methods
+
+The `Snapshot` type provides read-only access to graph state:
+
+| Method | Description |
+| ------ | ----------- |
+| `Schema()` | The schema used for validation |
+| `Types()` | All type names (sorted) |
+| `InstancesOf(typeName)` | Instances of a type (sorted by primary key) |
+| `Instances()` | Map of type name to instance slices (non-deterministic iteration order) |
+| `AllInstances()` | Iterator over all instances in deterministic order |
+| `InstanceByKey(typeName, key)` | O(1) lookup by type and primary key |
+| `Edges()` | All resolved edges (sorted) |
+| `EdgesFrom(inst)` | Outgoing edges for a specific instance |
+| `Duplicates()` | Duplicate primary key records (sorted) |
+| `Unresolved()` | Unresolved edge records (sorted) |
+| `Diagnostics()` | Construction diagnostics |
+| `OK()` | No fatal or error diagnostics |
+| `HasErrors()` | Has error-level diagnostics |
 
 ### Thread Safety
 
@@ -1508,6 +1570,98 @@ for _, typeName := range snap.Types() {
 - `Snapshot.Edges()`: Lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
 - `Snapshot.Duplicates()`: Lexicographic by (typeName, primaryKey)
 - `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
+
+The `Instances()` map has non-deterministic iteration order per Go semantics. For deterministic iteration, use `AllInstances()` (iterator) or `Types()` + `InstancesOf()` (slice-based).
+
+### Graph Traversal
+
+The `graph/walk` package provides a visitor-pattern traversal over a `Snapshot`:
+
+```go
+err := walk.Walk(ctx, snap, visitor, walk.WithLogger(logger))
+```
+
+Traversal is deterministic: types are visited lexicographically, instances by primary key, properties alphabetically, edges in sorted order, and compositions by relation name. The walker returns on the first error from a visitor method or on context cancellation.
+
+Implement the `walk.Visitor` interface (or embed `walk.BaseVisitor` for no-op defaults):
+
+```go
+type Visitor interface {
+    EnterInstance(inst *graph.Instance) error
+    ExitInstance(inst *graph.Instance) error
+    VisitProperty(inst *graph.Instance, name string, value immutable.Value) error
+    VisitEdge(edge *graph.Edge) error
+    EnterComposition(parent *graph.Instance, relation string) error
+    ExitComposition(parent *graph.Instance, relation string) error
+}
+```
+
+## Schema Identity
+
+The `schema` package provides a content-based hashing function for structural compatibility checks:
+
+```go
+hash := schema.StructuralHash(s) // returns "sha256:<hex>"
+```
+
+`StructuralHash` computes a deterministic hash of a schema's structural shape. Two schemas produce the same hash if and only if they define the same types, properties, relations, compositions, data types, and constraints (by name, kind, and parameters).
+
+Invariants are deliberately excluded from the hash — they constrain runtime validation but do not affect structural shape.
+
+The hash is used by the `snapshot` package to verify that a persisted snapshot is compatible with the schema provided at load time. `StructuralHashVersion` (currently `1`) identifies the hashing algorithm version.
+
+## Snapshot Persistence
+
+The `snapshot` package serializes and deserializes `graph.Snapshot` values to and from the yammm snapshot persistence format (`.ys`).
+
+### File Format
+
+The `.ys` format is JSON-based and preserves full structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip.
+
+The format includes:
+
+- A **version** field for format evolution
+- A **schema structural hash** for compatibility verification (see [Schema Identity](#schema-identity))
+- An **integrity hash** (SHA-256 over the document body) for corruption detection
+- A **features array** for forward compatibility
+
+### Functions
+
+```go
+// Serialize a snapshot to .ys bytes (deterministic by default)
+data, result := snapshot.Marshal(ctx, snap, opts...)
+
+// Deserialize .ys bytes back to a snapshot (verifies schema compatibility)
+snap, result := snapshot.Load(ctx, data, schema, loadOpts...)
+
+// Validate a .ys file without materializing a snapshot
+// Memory usage is O(keys + edge references)
+result := snapshot.Verify(ctx, data, schema, loadOpts...)
+
+// Read summary metadata and statistics without full deserialization
+// Memory usage is constant regardless of snapshot size
+info, result := snapshot.Info(ctx, data)
+```
+
+`Load` does not re-validate instance data — the persisted snapshot is assumed to contain valid data. However, `Load` performs structural validation of the `.ys` format itself and verifies schema compatibility using `schema.StructuralHash`.
+
+### Marshal Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithIndent` | Indentation string (`""` for compact, `"\t"` for tabs) |
+| `WithCreatedAt` | Set `created_at` timestamp (omitted by default for determinism) |
+| `WithMetadata` | User-provided key-value annotations |
+
+### Load Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithSkipIntegrityCheck` | Disable integrity hash verification (for debugging hand-edited files) |
+
+### Snapshot Info
+
+`Info` returns a `SnapshotInfo` struct with header fields (version, schema name, schema hash, integrity status, created timestamp, metadata) and content summaries (type list, instance counts, edge count, duplicate count, unresolved count, file size).
 
 ## Diagnostics
 
@@ -1526,31 +1680,153 @@ The `diag` package provides structured diagnostics with stable error codes.
 ### Result Methods
 
 ```go
-result.OK()           // No fatal or error issues
-result.HasErrors()    // Has error-level issues
-result.LimitReached() // Issue collection limit was reached
-result.Issues()       // All collected issues
-result.Errors()       // Error-level issues only
+// Status checks
+result.OK()             // No fatal or error issues
+result.HasErrors()      // Has fatal or error issues
+result.HasFatal()       // Has fatal issues
+result.HasWarnings()    // Has warning issues
+result.HasInfo()        // Has info issues
+result.HasHints()       // Has hint issues
+result.LimitReached()   // Issue collection limit was reached
+
+// Issue access (returns iter.Seq[Issue])
+result.Issues()                          // All collected issues
+result.Errors()                          // Fatal and error issues
+result.Warnings()                        // Warning issues
+result.BySeverity(diag.Warning)          // Issues at a specific severity
+result.IssuesAtLeastAsSevereAs(diag.Warning) // Issues at or above a threshold
+
+// Slice variants (returns []Issue)
+result.IssuesSlice()
+result.ErrorsSlice()
+result.WarningsSlice()
+
+// Metadata
+result.Len()              // Total issue count
+result.Limit()            // Configured collection limit
+result.DroppedCount()     // Issues dropped after limit
+result.SeverityCounts()   // Counts by severity level
+result.Messages()         // All issue messages as strings
+
+// Conversion
+result.Err()              // Returns error if !OK(), nil otherwise
+result.String()           // "OK" when OK(), formatted issues otherwise
 ```
 
 ### Diagnostic Codes
 
-Codes are stable identifiers for programmatic matching. Categories include:
+Codes are stable identifiers for programmatic matching. The authoritative list is in `diag/code.go`. Categories and their codes:
 
-- **Sentinel**: `E_LIMIT_REACHED`, `E_INTERNAL`
-- **Schema**: `E_TYPE_COLLISION`, `E_INHERIT_CYCLE`, `E_DUPLICATE_PROPERTY`, etc.
-- **Syntax**: `E_SYNTAX`
-- **Import**: `E_IMPORT_RESOLVE`, `E_IMPORT_CYCLE`, `E_PATH_ESCAPE`, etc.
-- **Instance**: `E_TYPE_MISMATCH`, `E_MISSING_REQUIRED`, `E_CONSTRAINT_FAIL`, `E_INVARIANT_FAIL`, etc.
-- **Graph**: `E_DUPLICATE_PK`, `E_UNRESOLVED_REQUIRED`, etc.
-- **Adapter**: `E_ADAPTER_PARSE`
+**Sentinel** — internal conditions:
+
+- `E_LIMIT_REACHED` — issue collection limit reached
+- `E_INTERNAL` — unexpected invariant failure (internal bug indicator)
+- `E_CONTEXT_CANCELLED` — operation cancelled via context
+
+**Schema** — schema compilation errors:
+
+- `E_TYPE_COLLISION`, `E_DUPLICATE_TYPE` — type name conflicts
+- `E_INHERIT_CYCLE` — circular inheritance chain
+- `E_SCHEMA_TYPE_NOT_FOUND`, `E_UNKNOWN_TYPE` — unresolvable type reference
+- `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — property definition errors
+- `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION`, `E_RELATION_NORMALIZATION_COLLISION` — relation conflicts
+- `E_CASE_COLLISION` — names differ only by case
+- `E_PROPERTY_RELATION_COLLISION` — property and relation share a name
+- `E_RESERVED_PREFIX` — name uses a reserved prefix
+- `E_INVALID_RELATION`, `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
+- `E_INVALID_CONSTRAINT` — constraint definition error
+- `E_INVALID_INVARIANT` — invariant expression error
+- `E_INVALID_NAME` — invalid identifier format
+- `E_INVALID_PRIMARY_KEY_TYPE` — disallowed type for primary key
+- `E_LIST_ON_EDGE` — List type used in relationship property
+- `E_PROPERTY_CONFLICT` — conflicting inherited properties
+- `E_UPSTREAM_FAIL` — imported schema failed to compile
+- `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
+- `E_LOAD_IO_FAILURE` — I/O error during schema loading
+
+**Syntax** — parse errors:
+
+- `E_SYNTAX` — syntax error in schema source
+
+**Import** — import resolution errors:
+
+- `E_IMPORT_RESOLVE` — import path could not be resolved
+- `E_IMPORT_CYCLE` — circular import dependency
+- `E_INVALID_ALIAS` — import alias is not a valid identifier
+- `E_PATH_ESCAPE` — import path escapes allowed directory
+- `E_IMPORT_NOT_ALLOWED` — imports disabled via `WithDisallowImports`
+- `E_DUPLICATE_IMPORT` — same schema imported multiple times
+- `E_IMPORT_ALIAS_COLLISION` — import alias collides with local name
+
+**Instance** — validation errors:
+
+- `E_INSTANCE_TYPE_NOT_FOUND` — type not found in schema
+- `E_ABSTRACT_TYPE` — attempt to instantiate abstract type
+- `E_PART_TYPE_DIRECT` — attempt to directly instantiate part type
+- `E_TYPE_MISMATCH` — value has wrong type
+- `E_MISSING_REQUIRED` — required property missing
+- `E_MISSING_PRIMARY_KEY` — primary key property missing
+- `E_UNKNOWN_FIELD` — unexpected field in instance data
+- `E_CONSTRAINT_FAIL` — constraint check failed
+- `E_INVARIANT_FAIL` — invariant check failed
+- `E_EVAL_ERROR` — expression evaluation error
+- `E_UNKNOWN_BUILTIN` — unknown built-in function
+- `E_MISSING_FK_TARGET` — foreign key target missing
+- `E_PARTIAL_COMPOSITE_FK` — partial composite foreign key
+- `E_UNKNOWN_EDGE_FIELD` — unknown field in edge data
+- `E_EDGE_SHAPE_MISMATCH` — edge has wrong shape (object vs array)
+- `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
+- `E_COMPOSITION_NOT_FOUND` — referenced composition not found
+- `E_MISSING_TYPE_TAG`, `E_INVALID_TYPE_TAG` — `$type` tag errors
+- `E_CASE_FOLD_COLLISION` — input fields collide after case-folding
+
+**Graph** — graph construction errors:
+
+- `E_DUPLICATE_PK` — duplicate primary key
+- `E_DUPLICATE_COMPOSED_PK` — duplicate composed child primary key
+- `E_UNRESOLVED_REQUIRED` — required association unresolved
+- `E_GRAPH_TYPE_NOT_FOUND` — type not found in graph operations
+- `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
+- `E_GRAPH_INVALID_COMPOSITION` — invalid composition
+- `E_GRAPH_MISSING_PK` — primary key missing in graph operations
+
+**Snapshot** — persistence errors:
+
+- `E_SNAPSHOT_MALFORMED` — invalid JSON or missing required fields
+- `E_SNAPSHOT_UNSUPPORTED_VERSION` — unrecognized format version
+- `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
+- `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch
+- `E_SNAPSHOT_UNKNOWN_TYPE` — type name not found in schema
+- `E_SNAPSHOT_TYPE_MISMATCH` — types array inconsistent with instances
+- `E_SNAPSHOT_TYPEID_MISMATCH` — persisted type ID does not match schema
+- `E_SNAPSHOT_DANGLING_REFERENCE` — edge target or duplicate conflict not found
+- `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges
+- `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
+- `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
+- `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match
+- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` (Warning) — unrecognized schema hash algorithm
+- `E_SNAPSHOT_PATH_FALLBACK` (Warning) — provenance path string could not be canonicalized
+
+**Adapter** — format-specific errors:
+
+- `E_ADAPTER_PARSE` — parsing error in adapter input
 
 ### Rendering Diagnostics
 
 ```go
-renderer := diag.NewRenderer()
+renderer := diag.NewRenderer(
+    diag.WithSourceProvider(provider),   // source text for excerpts
+    diag.WithExcerpts(true),             // show source excerpts
+    diag.WithMaxLineColumns(120),        // max columns for excerpts
+    diag.WithModuleRoot("/project"),     // strip prefix from paths
+    diag.WithColors(true),              // ANSI color output
+    diag.WithDistinguishFatal(true),    // distinguish fatal from error
+    diag.WithTruncationIndicator("…"),  // truncation marker
+)
 output := renderer.FormatResult(result)
 ```
+
+All renderer options are optional. The zero-config `diag.NewRenderer()` produces plain-text output without excerpts or colors.
 
 ## JSON Adapter
 
@@ -1578,9 +1854,97 @@ By default, the adapter uses `tidwall/jsonc` to preprocess input:
 - Removes trailing commas
 - Preserves byte offsets for accurate diagnostics
 
+## Neo4j Adapter
+
+The `adapter/neo4j` package generates Neo4j 5 constraint statements, label mappings, graph shape metadata, and parameterized write queries from yammm schemas. It does not import connection, session, or transaction packages — consumers supply their own driver.
+
+### Adapter Creation
+
+```go
+adapter := neo4j.New(opts...)
+```
+
+### Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithEdition` | Neo4j edition (`Enterprise` or `Community`); controls constraint types |
+| `WithLabelSeparator` | Separator for multi-label nodes (default: `:`) |
+| `WithLabelPrefix` | Prefix for all generated labels |
+| `WithScalarTypeConstraints` | Emit `PROPERTY_TYPE` constraints (Enterprise only) |
+| `WithRequiredOnlyTypeConstraints` | Emit type constraints only for required properties |
+| `WithNodeKeyConstraints` | Emit `NODE KEY` constraints (requires Neo4j 5.7+) |
+| `WithNamedConstraints` | Use named constraints for idempotent `IF NOT EXISTS` |
+
+### Edition Gating
+
+Enterprise edition supports all constraint types (UNIQUE, NOT NULL, NODE KEY, PROPERTY_TYPE). Community edition supports UNIQUE constraints only; all other types are silently omitted.
+
+### Write Modes
+
+Write query generation supports two operational modes:
+
+- **Graph mode:** `BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes
+- **Instance mode:** `NodeQueryFor` accepts individual instances and `EdgeQueriesFor` generates edge queries directly from validated instance edge data
+
+Write options include `WithImmutableKeys`, `WithNodeChunkSize`, and `WithEdgeChunkSize`.
+
+## CSV Adapter
+
+The `adapter/csv` package parses delimited data into `instance.RawInstance` values and serializes validated instances to CSV.
+
+### Adapter Creation
+
+```go
+adapter := csv.New(opts...)
+```
+
+### Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithDelimiter` | Field delimiter rune (default: `,`) |
+| `WithHeader` | Whether input has a header row (default: true) |
+| `WithTypeColumn` | Column name for type tagging |
+| `WithNullValue` | String treated as nil (default: `""`) |
+| `WithListSeparator` | Separator for list values (default: `\|`) |
+
+### Type Coercion
+
+CSV values are strings. The adapter uses schema constraint metadata to coerce values:
+
+- **Integer**: `strconv.ParseInt`
+- **Float**: `strconv.ParseFloat`
+- **Boolean**: `strconv.ParseBool` (`"true"`, `"false"`, `"1"`, `"0"`)
+- **Date**: validated as `"2006-01-02"` format, kept as string
+- **Timestamp**: validated as RFC 3339, kept as string
+- **List**: split by list separator, elements coerced recursively
+
+### Limitations
+
+CSV is a flat format. Compositions are not supported in parsing and are silently omitted during serialization. Foreign key columns are included in headers but require `instance.ValidInstance` values (not `graph.Instance`) to populate edge data.
+
+## Formatting
+
+The `format` package provides canonical formatting for `.yammm` schema files:
+
+```go
+formatted, err := format.TokenStream(input)
+```
+
+The formatter applies a four-phase pipeline:
+
+1. **Token-stream rewriting:** canonical spacing between tokens and indentation normalization
+2. **Blank line collapsing:** removes excess blank lines while preserving section breaks
+3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at the threshold
+4. **Column alignment:** aligns property types and modifiers within type blocks
+
+Output is deterministic and idempotent. The formatter is used by the LSP server for `textDocument/formatting` and by the CLI for the `yammm fmt` command.
+
 ## File Extension and Conventions
 
 - Schema files use the `.yammm` extension
+- Snapshot files use the `.ys` extension
 - UTF-8 encoding is required
 - One schema per file
 - Import paths are case-sensitive on case-sensitive filesystems
