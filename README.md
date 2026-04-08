@@ -119,9 +119,9 @@ s, result := schema.NewBuilder().
     WithName("example").
     WithSourceID(location.MustNewSourceID("test://example.yammm")).
     AddType("Person").
-        WithPrimaryKey("id", schema.StringConstraint{}).
-        WithProperty("name", schema.StringConstraint{}).
-        WithOptionalProperty("age", schema.IntegerConstraint{}).
+        WithPrimaryKey("id", schema.NewStringConstraint()).
+        WithProperty("name", schema.NewStringConstraint()).
+        WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
         Done().
     Build()
 
