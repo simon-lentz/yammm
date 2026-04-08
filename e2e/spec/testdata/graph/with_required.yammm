@@ -1,6 +1,6 @@
 schema "GraphRequired"
 
-// Source: SPEC.md, "Graph Construction" — required association for Check tests
+// Source: API.md, "Graph Construction" — required association for Check tests
 
 type Department {
     id String primary

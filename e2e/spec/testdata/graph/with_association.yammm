@@ -1,6 +1,6 @@
 schema "GraphAssoc"
 
-// Source: SPEC.md, "Graph Construction" — association edge tests
+// Source: API.md, "Graph Construction" — association edge tests
 
 type Company {
     id String primary

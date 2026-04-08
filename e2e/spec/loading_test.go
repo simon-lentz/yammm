@@ -20,7 +20,7 @@ import (
 
 // TestLoading_LoadFromFile verifies that schema.Load reads a .yammm file from
 // disk and produces a valid schema.
-// Source: SPEC.md, "schema.Load reads a schema from a file path."
+// Source: API.md, "schema.Load reads a schema from a file path."
 func TestLoading_LoadFromFile(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -34,7 +34,7 @@ func TestLoading_LoadFromFile(t *testing.T) {
 
 // TestLoading_StringParameterOrder verifies that schema.LoadString accepts
 // (ctx, sourceCode, sourceName) — content first, then display name.
-// Source: SPEC.md, "schema.LoadString loads a schema from a string."
+// Source: API.md, "schema.LoadString loads a schema from a string."
 func TestLoading_StringParameterOrder(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -49,7 +49,7 @@ func TestLoading_StringParameterOrder(t *testing.T) {
 
 // TestLoading_Sources verifies that schema.LoadSources loads a schema from
 // an in-memory source map keyed by file path.
-// Source: SPEC.md, "schema.LoadSources loads from in-memory sources."
+// Source: API.md, "schema.LoadSources loads from in-memory sources."
 func TestLoading_Sources(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -74,7 +74,7 @@ func TestLoading_Sources(t *testing.T) {
 
 // TestLoading_ErrorPattern_IOFailure verifies that loading a nonexistent file
 // produces a fatal diagnostic.
-// Source: SPEC.md, "A non-OK result with a nil Schema indicates failure."
+// Source: API.md, "A non-OK result with a nil Schema indicates failure."
 func TestLoading_ErrorPattern_IOFailure(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -86,7 +86,7 @@ func TestLoading_ErrorPattern_IOFailure(t *testing.T) {
 
 // TestLoading_ErrorPattern_SemanticFailure verifies that a syntactically broken
 // schema produces error == nil but !result.OK().
-// Source: SPEC.md, "error == nil && !result.OK() indicates semantic failure."
+// Source: API.md, "error == nil && !result.OK() indicates semantic failure."
 func TestLoading_ErrorPattern_SemanticFailure(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -98,7 +98,7 @@ func TestLoading_ErrorPattern_SemanticFailure(t *testing.T) {
 
 // TestLoading_ErrorPattern_Success verifies the success path: error == nil &&
 // result.OK() with a non-nil schema.
-// Source: SPEC.md, "error == nil && result.OK() indicates success."
+// Source: API.md, "error == nil && result.OK() indicates success."
 func TestLoading_ErrorPattern_Success(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -115,7 +115,7 @@ func TestLoading_ErrorPattern_Success(t *testing.T) {
 
 // TestLoading_WithRegistry verifies that WithRegistry enables cross-schema
 // type resolution during loading.
-// Source: SPEC.md, "WithRegistry provides a schema registry for cross-schema
+// Source: API.md, "WithRegistry provides a schema registry for cross-schema
 // type resolution."
 func TestLoading_WithRegistry(t *testing.T) {
 	t.Parallel()
@@ -133,7 +133,7 @@ func TestLoading_WithRegistry(t *testing.T) {
 
 // TestLoading_WithModuleRoot verifies that WithModuleRoot is accepted by Load
 // and influences import resolution context.
-// Source: SPEC.md, "WithModuleRoot sets the root directory for module-style
+// Source: API.md, "WithModuleRoot sets the root directory for module-style
 // imports."
 func TestLoading_WithModuleRoot(t *testing.T) {
 	t.Parallel()
@@ -153,7 +153,7 @@ func TestLoading_WithModuleRoot(t *testing.T) {
 
 // TestLoading_WithIssueLimit verifies that WithIssueLimit caps collected
 // diagnostics and that result.LimitReached() returns true when exceeded.
-// Source: SPEC.md, "WithIssueLimit sets the maximum number of diagnostic
+// Source: API.md, "WithIssueLimit sets the maximum number of diagnostic
 // issues to collect."
 func TestLoading_WithIssueLimit(t *testing.T) {
 	t.Parallel()
@@ -169,7 +169,7 @@ func TestLoading_WithIssueLimit(t *testing.T) {
 
 // TestLoading_WithSourceRegistry verifies that WithSourceRegistry accepts a
 // *source.Registry and the load succeeds.
-// Source: SPEC.md, "WithSourceRegistry provides a custom source registry for
+// Source: API.md, "WithSourceRegistry provides a custom source registry for
 // position tracking."
 func TestLoading_WithSourceRegistry(t *testing.T) {
 	t.Parallel()
@@ -185,7 +185,7 @@ func TestLoading_WithSourceRegistry(t *testing.T) {
 
 // TestLoading_WithLogger verifies that WithLogger is accepted and does not
 // cause a panic during loading.
-// Source: SPEC.md, "WithLogger provides a structured logger for load operation
+// Source: API.md, "WithLogger provides a structured logger for load operation
 // diagnostics."
 func TestLoading_WithLogger(t *testing.T) {
 	t.Parallel()
@@ -209,7 +209,7 @@ func TestLoading_WithLogger(t *testing.T) {
 // TestLoading_BuilderAPI verifies that schema.NewBuilder can construct a schema
 // programmatically and that it produces a schema equivalent to one loaded from
 // a .yammm file (same type names, properties, validation behavior).
-// Source: SPEC.md, "Schemas can be constructed programmatically using the
+// Source: API.md, "Schemas can be constructed programmatically using the
 // Builder API."
 func TestLoading_BuilderAPI(t *testing.T) {
 	t.Parallel()

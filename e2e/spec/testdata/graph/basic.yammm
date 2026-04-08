@@ -1,6 +1,6 @@
 schema "GraphBasic"
 
-// Source: SPEC.md, "Graph Construction" — basic graph with multiple types for ordering tests
+// Source: API.md, "Graph Construction" — basic graph with multiple types for ordering tests
 
 type Zebra {
     id String primary

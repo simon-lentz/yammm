@@ -18,7 +18,7 @@ import (
 // =============================================================================
 
 // TestGraph_NewCreatesGraph verifies that graph.New(schema) creates a non-nil graph.
-// Source: SPEC.md, "Graph Construction" — graph.New(schema) creates graph.
+// Source: API.md, "Graph Construction" — graph.New(schema) creates graph.
 func TestGraph_NewCreatesGraph(t *testing.T) {
 	t.Parallel()
 	s, _ := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -28,7 +28,7 @@ func TestGraph_NewCreatesGraph(t *testing.T) {
 
 // TestGraph_AddReturnsResult verifies that g.Add returns diag.Result
 // and that the result is OK for a valid instance addition.
-// Source: SPEC.md, "Graph Construction" — g.Add(ctx, validInstance) returns diag.Result.
+// Source: API.md, "Graph Construction" — g.Add(ctx, validInstance) returns diag.Result.
 func TestGraph_AddReturnsResult(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -46,7 +46,7 @@ func TestGraph_AddReturnsResult(t *testing.T) {
 
 // TestGraph_CheckRequiredAssociation verifies that g.Check reports errors
 // when required associations are missing.
-// Source: SPEC.md, "Graph Construction" — g.Check(ctx) checks required association completeness.
+// Source: API.md, "Graph Construction" — g.Check(ctx) checks required association completeness.
 func TestGraph_CheckRequiredAssociation(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_required.yammm")
@@ -70,7 +70,7 @@ func TestGraph_CheckRequiredAssociation(t *testing.T) {
 
 // TestGraph_CheckRequiredAssociationSatisfied verifies that g.Check passes
 // when required associations are satisfied.
-// Source: SPEC.md, "Graph Construction" — Check passes when all required edges are resolved.
+// Source: API.md, "Graph Construction" — Check passes when all required edges are resolved.
 func TestGraph_CheckRequiredAssociationSatisfied(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_required.yammm")
@@ -99,7 +99,7 @@ func TestGraph_CheckRequiredAssociationSatisfied(t *testing.T) {
 
 // TestGraph_SnapshotBasic verifies that g.Snapshot() returns a result with
 // Types() and InstancesOf() reflecting the added instances.
-// Source: SPEC.md, "Graph Construction" — g.Snapshot() returns immutable snapshot
+// Source: API.md, "Graph Construction" — g.Snapshot() returns immutable snapshot
 // with Types(), InstancesOf().
 func TestGraph_SnapshotBasic(t *testing.T) {
 	t.Parallel()
@@ -127,7 +127,7 @@ func TestGraph_SnapshotBasic(t *testing.T) {
 
 // TestGraph_OrderingTypes verifies that Types() returns type names in
 // lexicographic order regardless of insertion order.
-// Source: SPEC.md, "Graph Construction" — Types(): lexicographic by type name.
+// Source: API.md, "Graph Construction" — Types(): lexicographic by type name.
 func TestGraph_OrderingTypes(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -156,7 +156,7 @@ func TestGraph_OrderingTypes(t *testing.T) {
 
 // TestGraph_OrderingInstancesOf verifies that InstancesOf() returns instances
 // sorted by primary key string.
-// Source: SPEC.md, "Graph Construction" — InstancesOf(): lexicographic by primary key.
+// Source: API.md, "Graph Construction" — InstancesOf(): lexicographic by primary key.
 func TestGraph_OrderingInstancesOf(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -185,7 +185,7 @@ func TestGraph_OrderingInstancesOf(t *testing.T) {
 
 // TestGraph_OrderingEdges verifies that Edges() returns edges sorted by
 // (sourceType, sourceKey, relation, targetType, targetKey).
-// Source: SPEC.md, "Graph Construction" — Edges(): lexicographic tuple.
+// Source: API.md, "Graph Construction" — Edges(): lexicographic tuple.
 func TestGraph_OrderingEdges(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_association.yammm")
@@ -232,7 +232,7 @@ func TestGraph_OrderingEdges(t *testing.T) {
 
 // TestGraph_OrderingDuplicates verifies that Duplicates() returns duplicate
 // records sorted by (typeName, primaryKey).
-// Source: SPEC.md, "Graph Construction" — Duplicates(): lexicographic by (typeName, primaryKey).
+// Source: API.md, "Graph Construction" — Duplicates(): lexicographic by (typeName, primaryKey).
 func TestGraph_OrderingDuplicates(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -279,7 +279,7 @@ func TestGraph_OrderingDuplicates(t *testing.T) {
 
 // TestGraph_OrderingUnresolved verifies that Unresolved() returns unresolved
 // edge records sorted by (sourceType, sourceKey, relation, targetType, targetKey).
-// Source: SPEC.md, "Graph Construction" — Unresolved(): lexicographic by tuple.
+// Source: API.md, "Graph Construction" — Unresolved(): lexicographic by tuple.
 func TestGraph_OrderingUnresolved(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_association.yammm")
@@ -325,7 +325,7 @@ func TestGraph_OrderingUnresolved(t *testing.T) {
 
 // TestGraph_Duplicates verifies that adding the same instance twice (same
 // type + primary key) produces a duplicate record in the snapshot.
-// Source: SPEC.md, "Graph Construction" — duplicate PK detection.
+// Source: API.md, "Graph Construction" — duplicate PK detection.
 func TestGraph_Duplicates(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -361,7 +361,7 @@ func TestGraph_Duplicates(t *testing.T) {
 
 // TestGraph_ConcurrentAdd verifies that concurrent Add calls do not race.
 // Run with: go test -race -run TestGraph_ConcurrentAdd
-// Source: SPEC.md, "Graph Construction" — concurrent Add is safe.
+// Source: API.md, "Graph Construction" — concurrent Add is safe.
 func TestGraph_ConcurrentAdd(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -389,7 +389,7 @@ func TestGraph_ConcurrentAdd(t *testing.T) {
 // TestGraph_ConcurrentAddComposed verifies that concurrent AddComposed calls
 // do not race when adding children to the same parent.
 // Run with: go test -race -run TestGraph_ConcurrentAddComposed
-// Source: SPEC.md, "Graph Construction" — concurrent AddComposed is safe.
+// Source: API.md, "Graph Construction" — concurrent AddComposed is safe.
 func TestGraph_ConcurrentAddComposed(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_composition.yammm")
@@ -437,7 +437,7 @@ func TestGraph_ConcurrentAddComposed(t *testing.T) {
 // TestGraph_SnapshotImmutableConcurrentReads verifies that a snapshot can be
 // read concurrently from multiple goroutines without races.
 // Run with: go test -race -run TestGraph_SnapshotImmutableConcurrentReads
-// Source: SPEC.md, "Graph Construction" — snapshot is immutable for concurrent reads.
+// Source: API.md, "Graph Construction" — snapshot is immutable for concurrent reads.
 func TestGraph_SnapshotImmutableConcurrentReads(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -473,7 +473,7 @@ func TestGraph_SnapshotImmutableConcurrentReads(t *testing.T) {
 
 // TestGraph_SnapshotDefensiveCopies verifies that slice-returning methods on
 // Result return nil when empty, and that returned slices are defensive copies.
-// Source: SPEC.md, "Graph Construction" — all slice-returning methods return
+// Source: API.md, "Graph Construction" — all slice-returning methods return
 // defensive copies, nil if empty.
 func TestGraph_SnapshotDefensiveCopies(t *testing.T) {
 	t.Parallel()
@@ -513,7 +513,7 @@ func TestGraph_SnapshotDefensiveCopies(t *testing.T) {
 
 // TestGraph_AddComposedBasic verifies that AddComposed attaches a composed child
 // to an existing parent instance.
-// Source: SPEC.md, "Graph Construction" — AddComposed attaches children.
+// Source: API.md, "Graph Construction" — AddComposed attaches children.
 func TestGraph_AddComposedBasic(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_composition.yammm")
@@ -556,7 +556,7 @@ func TestGraph_AddComposedBasic(t *testing.T) {
 
 // TestGraph_ForwardReferenceResolution verifies that edges are resolved when
 // the target instance is added after the source.
-// Source: SPEC.md, "Graph Construction" — forward references are resolved.
+// Source: API.md, "Graph Construction" — forward references are resolved.
 func TestGraph_ForwardReferenceResolution(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_association.yammm")
@@ -598,7 +598,7 @@ func TestGraph_ForwardReferenceResolution(t *testing.T) {
 
 // TestGraph_InlineCompositionExtraction verifies that compositions included
 // inline in instance data are automatically extracted during Add.
-// Source: SPEC.md, "Graph Construction" — Add extracts composed children.
+// Source: API.md, "Graph Construction" — Add extracts composed children.
 func TestGraph_InlineCompositionExtraction(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_composition.yammm")
@@ -629,7 +629,7 @@ func TestGraph_InlineCompositionExtraction(t *testing.T) {
 
 // TestGraph_SnapshotOK verifies that Result.OK() returns true for a clean graph
 // and false for a graph with errors (e.g., duplicates).
-// Source: SPEC.md, "Graph Construction" — Result.OK() checks construction success.
+// Source: API.md, "Graph Construction" — Result.OK() checks construction success.
 func TestGraph_SnapshotOK(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/basic.yammm")
@@ -667,7 +667,7 @@ func TestGraph_SnapshotOK(t *testing.T) {
 
 // TestGraph_DataDrivenEdges verifies edge creation and resolution using
 // test data loaded from JSON, matching the existing testdata conventions.
-// Source: SPEC.md, "Graph Construction" — edges from association data.
+// Source: API.md, "Graph Construction" — edges from association data.
 func TestGraph_DataDrivenEdges(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaRaw(t, "testdata/graph/with_association.yammm")

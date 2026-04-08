@@ -15,7 +15,7 @@ import (
 )
 
 // =============================================================================
-// JSON Adapter — SPEC.md §JSON Adapter (10 claims)
+// JSON Adapter — API.md §JSON Adapter (10 claims)
 //
 // These tests verify that the JSON adapter creates correctly, respects parse
 // options, supports JSONC by default, and produces the expected output shape.
@@ -27,7 +27,7 @@ import (
 
 // TestAdapter_NilRegistry verifies that New succeeds with a nil registry
 // when location tracking is not requested.
-// Source: SPEC.md, "adapter, err := json.New(registry, opts...)"
+// Source: API.md, "adapter, err := json.New(registry, opts...)"
 func TestAdapter_NilRegistry(t *testing.T) {
 	t.Parallel()
 	a, err := jsonadapter.New(nil)
@@ -37,7 +37,7 @@ func TestAdapter_NilRegistry(t *testing.T) {
 
 // TestAdapter_NonNilRegistry verifies that New succeeds with a real
 // PositionRegistry implementation (source.Registry).
-// Source: SPEC.md, "adapter, err := json.New(registry, opts...)"
+// Source: API.md, "adapter, err := json.New(registry, opts...)"
 func TestAdapter_NonNilRegistry(t *testing.T) {
 	t.Parallel()
 	reg := source.NewRegistry()
@@ -52,7 +52,7 @@ func TestAdapter_NonNilRegistry(t *testing.T) {
 
 // TestAdapter_StrictJSON_RejectsComments verifies that WithStrictJSON(true)
 // causes the adapter to reject input containing line comments.
-// Source: SPEC.md, "WithStrictJSON — Use stdlib JSON only (no comments/trailing commas)"
+// Source: API.md, "WithStrictJSON — Use stdlib JSON only (no comments/trailing commas)"
 func TestAdapter_StrictJSON_RejectsComments(t *testing.T) {
 	t.Parallel()
 	a, err := jsonadapter.New(nil, jsonadapter.WithStrictJSON(true))
@@ -69,7 +69,7 @@ func TestAdapter_StrictJSON_RejectsComments(t *testing.T) {
 
 // TestAdapter_StrictJSON_RejectsTrailingCommas verifies that WithStrictJSON(true)
 // causes the adapter to reject input containing trailing commas.
-// Source: SPEC.md, "WithStrictJSON — Use stdlib JSON only (no comments/trailing commas)"
+// Source: API.md, "WithStrictJSON — Use stdlib JSON only (no comments/trailing commas)"
 func TestAdapter_StrictJSON_RejectsTrailingCommas(t *testing.T) {
 	t.Parallel()
 	a, err := jsonadapter.New(nil, jsonadapter.WithStrictJSON(true))
@@ -85,7 +85,7 @@ func TestAdapter_StrictJSON_RejectsTrailingCommas(t *testing.T) {
 
 // TestAdapter_TrackLocations verifies that WithTrackLocations(true) enables
 // provenance tracking on parsed instances when a valid registry is provided.
-// Source: SPEC.md, "WithTrackLocations — Enable source position tracking"
+// Source: API.md, "WithTrackLocations — Enable source position tracking"
 func TestAdapter_TrackLocations(t *testing.T) {
 	t.Parallel()
 
@@ -106,7 +106,7 @@ func TestAdapter_TrackLocations(t *testing.T) {
 
 // TestAdapter_TrackLocations_NilRegistryError verifies that requesting location
 // tracking without a registry returns an error.
-// Source: SPEC.md (implied), adapter.go: "WithTrackLocations(true) requires a non-nil PositionRegistry"
+// Source: API.md (implied), adapter.go: "WithTrackLocations(true) requires a non-nil PositionRegistry"
 func TestAdapter_TrackLocations_NilRegistryError(t *testing.T) {
 	t.Parallel()
 	_, err := jsonadapter.New(nil, jsonadapter.WithTrackLocations(true))
@@ -115,7 +115,7 @@ func TestAdapter_TrackLocations_NilRegistryError(t *testing.T) {
 
 // TestAdapter_CustomTypeField verifies that WithTypeField changes the field name
 // used for type discrimination in ParseArray.
-// Source: SPEC.md, "WithTypeField — Field name for type tagging (default: $type)"
+// Source: API.md, "WithTypeField — Field name for type tagging (default: $type)"
 func TestAdapter_CustomTypeField(t *testing.T) {
 	t.Parallel()
 	a, err := jsonadapter.New(nil, jsonadapter.WithTypeField("_type"))
@@ -139,7 +139,7 @@ func TestAdapter_CustomTypeField(t *testing.T) {
 
 // TestAdapter_JSONC_LineComments verifies that line comments (//) are stripped
 // by default (JSONC preprocessing).
-// Source: SPEC.md, "Strips // and /* */ comments"
+// Source: API.md, "Strips // and /* */ comments"
 func TestAdapter_JSONC_LineComments(t *testing.T) {
 	t.Parallel()
 	a, err := jsonadapter.New(nil)
@@ -160,7 +160,7 @@ func TestAdapter_JSONC_LineComments(t *testing.T) {
 
 // TestAdapter_JSONC_BlockComments verifies that block comments (/* */) are
 // stripped by default (JSONC preprocessing).
-// Source: SPEC.md, "Strips // and /* */ comments"
+// Source: API.md, "Strips // and /* */ comments"
 func TestAdapter_JSONC_BlockComments(t *testing.T) {
 	t.Parallel()
 	a, err := jsonadapter.New(nil)
@@ -182,7 +182,7 @@ func TestAdapter_JSONC_BlockComments(t *testing.T) {
 
 // TestAdapter_JSONC_TrailingCommas verifies that trailing commas are removed
 // by default (JSONC preprocessing).
-// Source: SPEC.md, "Removes trailing commas"
+// Source: API.md, "Removes trailing commas"
 func TestAdapter_JSONC_TrailingCommas(t *testing.T) {
 	t.Parallel()
 	a, err := jsonadapter.New(nil)
@@ -207,7 +207,7 @@ func TestAdapter_JSONC_TrailingCommas(t *testing.T) {
 // TestAdapter_ParseObject_OutputShape verifies that ParseObject returns a
 // map[string][]RawInstance keyed by type name, with records containing the
 // expected properties.
-// Source: SPEC.md, "ParseObject returns map[string][]RawInstance keyed by type"
+// Source: API.md, "ParseObject returns map[string][]RawInstance keyed by type"
 func TestAdapter_ParseObject_OutputShape(t *testing.T) {
 	t.Parallel()
 	a, err := jsonadapter.New(nil)
@@ -297,7 +297,7 @@ func TestCSVAdapter_CustomDelimiter(t *testing.T) {
 
 // TestAdapter_ParseObject_RecordProperties verifies that parsed records contain
 // the expected property values in RawInstance.Properties.
-// Source: SPEC.md, parsed records contain expected properties
+// Source: API.md, parsed records contain expected properties
 func TestAdapter_ParseObject_RecordProperties(t *testing.T) {
 	t.Parallel()
 	a, err := jsonadapter.New(nil)

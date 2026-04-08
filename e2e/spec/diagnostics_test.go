@@ -128,7 +128,7 @@ func TestDiagnostics_HintStillOK(t *testing.T) {
 
 // TestDiagnostics_ResultOK_Empty verifies that an empty collector produces an
 // OK result.
-// Source: SPEC.md §Diagnostics — "result.OK() → no fatal or error issues"
+// Source: API.md §Diagnostics — "result.OK() → no fatal or error issues"
 func TestDiagnostics_ResultOK_Empty(t *testing.T) {
 	t.Parallel()
 
@@ -142,7 +142,7 @@ func TestDiagnostics_ResultOK_Empty(t *testing.T) {
 
 // TestDiagnostics_ResultLimitReached verifies that LimitReached() returns true
 // when the collector's issue limit is exceeded.
-// Source: SPEC.md §Diagnostics — "result.LimitReached() → issue limit was reached"
+// Source: API.md §Diagnostics — "result.LimitReached() → issue limit was reached"
 func TestDiagnostics_ResultLimitReached(t *testing.T) {
 	t.Parallel()
 
@@ -160,7 +160,7 @@ func TestDiagnostics_ResultLimitReached(t *testing.T) {
 
 // TestDiagnostics_ResultIssuesIterator verifies that Issues() yields all
 // collected issues.
-// Source: SPEC.md §Diagnostics — "result.Issues() → iterate over all issues"
+// Source: API.md §Diagnostics — "result.Issues() → iterate over all issues"
 func TestDiagnostics_ResultIssuesIterator(t *testing.T) {
 	t.Parallel()
 
@@ -295,7 +295,7 @@ type Range {
 
 // TestDiagnostics_RendererFormatResult verifies that FormatResult produces
 // non-empty output for a result containing errors.
-// Source: SPEC.md §Diagnostics — "Render() produces formatted text"
+// Source: API.md §Diagnostics — "Render() produces formatted text"
 // Note: SPEC says Render() but actual API is FormatResult().
 func TestDiagnostics_RendererFormatResult(t *testing.T) {
 	t.Parallel()
@@ -313,7 +313,7 @@ func TestDiagnostics_RendererFormatResult(t *testing.T) {
 
 // TestDiagnostics_RendererFormatIssue verifies that FormatIssue produces
 // non-empty output for a single issue.
-// Source: SPEC.md §Diagnostics — "Renderer formats individual issues"
+// Source: API.md §Diagnostics — "Renderer formats individual issues"
 func TestDiagnostics_RendererFormatIssue(t *testing.T) {
 	t.Parallel()
 

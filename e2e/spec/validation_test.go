@@ -21,7 +21,7 @@ import (
 
 // TestValidation_ValidateOne_Success verifies that ValidateOne returns
 // (valid, nil, nil) for a valid instance.
-// Source: SPEC.md, "Instance Validation" — ValidateOne returns exactly one of
+// Source: API.md, "Instance Validation" — ValidateOne returns exactly one of
 // three outcomes: valid, failure, or error.
 func TestValidation_ValidateOne_Success(t *testing.T) {
 	t.Parallel()
@@ -39,7 +39,7 @@ func TestValidation_ValidateOne_Success(t *testing.T) {
 
 // TestValidation_ValidateOne_Failure verifies that ValidateOne returns
 // (nil, failure, nil) when validation fails (e.g., missing required property).
-// Source: SPEC.md, "Instance Validation" — validation failure returns diagnostics.
+// Source: API.md, "Instance Validation" — validation failure returns diagnostics.
 func TestValidation_ValidateOne_Failure(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
@@ -56,7 +56,7 @@ func TestValidation_ValidateOne_Failure(t *testing.T) {
 
 // TestValidation_ValidateOne_TypeNotFound verifies that ValidateOne returns
 // a validation failure (not a system error) when the type name does not exist.
-// Source: SPEC.md, "Instance Validation" — type resolution failure semantics.
+// Source: API.md, "Instance Validation" — type resolution failure semantics.
 func TestValidation_ValidateOne_TypeNotFound(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
@@ -85,7 +85,7 @@ func TestValidation_ValidateOne_TypeNotFound(t *testing.T) {
 
 // TestValidation_Validate_Batch verifies that Validate processes a batch of
 // instances and separates valid from invalid results.
-// Source: SPEC.md, "Instance Validation" — Validate batch returns valid + failures.
+// Source: API.md, "Instance Validation" — Validate batch returns valid + failures.
 func TestValidation_Validate_Batch(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
@@ -114,7 +114,7 @@ func TestValidation_Validate_Batch(t *testing.T) {
 
 // TestValidation_Validate_NilInput verifies that Validate returns (nil, nil, nil)
 // when passed a nil slice.
-// Source: SPEC.md, "Instance Validation" — nil input handling.
+// Source: API.md, "Instance Validation" — nil input handling.
 func TestValidation_Validate_NilInput(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
@@ -127,7 +127,7 @@ func TestValidation_Validate_NilInput(t *testing.T) {
 
 // TestValidation_Validate_EmptyInput verifies that Validate returns
 // (empty-slice, nil, nil) when passed an empty slice.
-// Source: SPEC.md, "Instance Validation" — empty input handling.
+// Source: API.md, "Instance Validation" — empty input handling.
 func TestValidation_Validate_EmptyInput(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
@@ -145,7 +145,7 @@ func TestValidation_Validate_EmptyInput(t *testing.T) {
 
 // TestValidation_WithLogger verifies that creating a validator with WithLogger
 // does not panic and validation proceeds normally.
-// Source: SPEC.md, "Instance Validation" — WithLogger option.
+// Source: API.md, "Instance Validation" — WithLogger option.
 func TestValidation_WithLogger(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -169,7 +169,7 @@ func TestValidation_WithLogger(t *testing.T) {
 
 // TestValidation_StrictPropertyNames verifies that WithStrictPropertyNames(true)
 // rejects case-mismatched property names.
-// Source: SPEC.md, "Instance Validation" — strict property name matching.
+// Source: API.md, "Instance Validation" — strict property name matching.
 func TestValidation_StrictPropertyNames(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -188,7 +188,7 @@ func TestValidation_StrictPropertyNames(t *testing.T) {
 
 // TestValidation_NonStrictPropertyNames verifies that the default (non-strict)
 // mode accepts case-insensitive property name matching.
-// Source: SPEC.md, "Instance Validation" — default case-insensitive property matching.
+// Source: API.md, "Instance Validation" — default case-insensitive property matching.
 func TestValidation_NonStrictPropertyNames(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -211,7 +211,7 @@ func TestValidation_NonStrictPropertyNames(t *testing.T) {
 
 // TestValidation_AllowUnknownFields verifies that WithAllowUnknownFields(true)
 // silently ignores extra fields that are not in the schema.
-// Source: SPEC.md, "Instance Validation" — unknown field handling.
+// Source: API.md, "Instance Validation" — unknown field handling.
 func TestValidation_AllowUnknownFields(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -232,7 +232,7 @@ func TestValidation_AllowUnknownFields(t *testing.T) {
 
 // TestValidation_RejectUnknownFieldsByDefault verifies that the default
 // (allowUnknownFields=false) rejects extra fields.
-// Source: SPEC.md, "Instance Validation" — default rejects unknown fields.
+// Source: API.md, "Instance Validation" — default rejects unknown fields.
 func TestValidation_RejectUnknownFieldsByDefault(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -264,7 +264,7 @@ func TestValidation_RejectUnknownFieldsByDefault(t *testing.T) {
 
 // TestValidation_MaxIssuesPerInstance verifies that WithMaxIssuesPerInstance
 // caps the number of diagnostics collected for a single instance.
-// Source: SPEC.md, "Instance Validation" — issue count capping.
+// Source: API.md, "Instance Validation" — issue count capping.
 func TestValidation_MaxIssuesPerInstance(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -304,7 +304,7 @@ type Record {
 
 // TestValidation_MapInput verifies that validation accepts map[string]any input
 // via RawInstance.Properties.
-// Source: SPEC.md, "Instance Validation" — map[string]any accepted.
+// Source: API.md, "Instance Validation" — map[string]any accepted.
 func TestValidation_MapInput(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")
@@ -333,7 +333,7 @@ func TestValidation_MapInput(t *testing.T) {
 //
 // Note: RawInstance.Properties requires map[string]any. Go structs cannot be
 // passed directly — they must be converted via JSON round-trip or reflection.
-// Source: SPEC.md, "Instance Validation" — typed input handling.
+// Source: API.md, "Instance Validation" — typed input handling.
 func TestValidation_GoStructViaJSONRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -367,7 +367,7 @@ func TestValidation_GoStructViaJSONRoundTrip(t *testing.T) {
 // TestValidation_JSONAdapterTopLevelKeys verifies that the JSON adapter parses
 // a top-level object where each key is a type name mapping to an array of
 // instances, and these instances validate correctly.
-// Source: SPEC.md, "Instance Validation" — JSON top-level object keyed by type names.
+// Source: API.md, "Instance Validation" — JSON top-level object keyed by type names.
 func TestValidation_JSONAdapterTopLevelKeys(t *testing.T) {
 	t.Parallel()
 
@@ -413,7 +413,7 @@ func TestValidation_JSONAdapterTopLevelKeys(t *testing.T) {
 
 // TestValidation_AssociationEdgeTargetConvention verifies that association edge
 // data uses the _target_ prefix convention for foreign key references.
-// Source: SPEC.md, "Instance Validation" — _target_ convention for edges.
+// Source: API.md, "Instance Validation" — _target_ convention for edges.
 func TestValidation_AssociationEdgeTargetConvention(t *testing.T) {
 	t.Parallel()
 
@@ -449,7 +449,7 @@ type Person {
 
 // TestValidation_AssociationEdgeManyTargets verifies that a many-multiplicity
 // association accepts an array of edge target objects.
-// Source: SPEC.md, "Instance Validation" — many-edge array shape.
+// Source: API.md, "Instance Validation" — many-edge array shape.
 func TestValidation_AssociationEdgeManyTargets(t *testing.T) {
 	t.Parallel()
 
@@ -489,7 +489,7 @@ type Article {
 
 // TestValidation_RecommendedOptions verifies that RecommendedOptions
 // enables strict property names and disallows unknown fields.
-// Source: SPEC.md, "Instance Validation" — recommended defaults.
+// Source: API.md, "Instance Validation" — recommended defaults.
 func TestValidation_RecommendedOptions(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -520,7 +520,7 @@ func TestValidation_RecommendedOptions(t *testing.T) {
 
 // TestValidation_ConcurrentUse verifies that a Validator is safe for concurrent
 // use from multiple goroutines.
-// Source: SPEC.md, "Instance Validation" — Validator is stateless and concurrent-safe.
+// Source: API.md, "Instance Validation" — Validator is stateless and concurrent-safe.
 func TestValidation_ConcurrentUse(t *testing.T) {
 	t.Parallel()
 	v := loadSchema(t, "testdata/validation/basic.yammm")

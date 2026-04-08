@@ -1,6 +1,6 @@
 schema "GraphComp"
 
-// Source: SPEC.md, "Graph Construction" — composition for AddComposed tests
+// Source: API.md, "Graph Construction" — composition for AddComposed tests
 
 part type LineItem {
     description String required
