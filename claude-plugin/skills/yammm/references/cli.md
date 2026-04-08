@@ -223,3 +223,4 @@ yammm export --to cypher schema.yammm data.json | cypher-shell -u neo4j
 | 0 | Success (no errors) |
 | 1 | Errors in input (validation failures, constraint violations) |
 | 2 | Usage error (bad flags, missing arguments) |
+| 3 | Runtime error (connection failure, I/O error) |

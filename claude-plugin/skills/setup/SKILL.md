@@ -18,7 +18,7 @@ argument-hint: "[tool-name]"
 
 !uname -s
 !uname -m
-!command -v yammm && yammm version 2>&1 || echo "yammm: not installed"
+!command -v yammm && yammm --version 2>&1 || echo "yammm: not installed"
 !command -v yammm-lsp && yammm-lsp --version 2>&1 || echo "yammm-lsp: not installed"
 !command -v jq && jq --version 2>&1 || echo "jq: not installed"
 

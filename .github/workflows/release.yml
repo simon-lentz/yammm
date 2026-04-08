@@ -21,7 +21,9 @@ jobs:
       - name: Build all platforms
         env:
           VERSION: ${{ github.ref_name }}
-        run: make build-all VERSION="$VERSION"
+        run: |
+          make build-all VERSION="$VERSION"
+          make build-cli-all VERSION="$VERSION"
       - name: Create archives
         env:
           VERSION: ${{ github.ref_name }}
@@ -29,9 +31,11 @@ jobs:
           cd bin
           for dir in darwin-arm64 darwin-amd64 linux-amd64 linux-arm64; do
             tar -czf "yammm-lsp-${VERSION}-${dir}.tar.gz" -C "${dir}" yammm-lsp
+            tar -czf "yammm-${VERSION}-${dir}.tar.gz" -C "${dir}" yammm
           done
           for dir in windows-amd64 windows-arm64; do
             (cd "${dir}" && zip "../yammm-lsp-${VERSION}-${dir}.zip" yammm-lsp.exe)
+            (cd "${dir}" && zip "../yammm-${VERSION}-${dir}.zip" yammm.exe)
           done
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -44,3 +48,9 @@ jobs:
             bin/yammm-lsp-${{ github.ref_name }}-linux-arm64.tar.gz
             bin/yammm-lsp-${{ github.ref_name }}-windows-amd64.zip
             bin/yammm-lsp-${{ github.ref_name }}-windows-arm64.zip
+            bin/yammm-${{ github.ref_name }}-darwin-arm64.tar.gz
+            bin/yammm-${{ github.ref_name }}-darwin-amd64.tar.gz
+            bin/yammm-${{ github.ref_name }}-linux-amd64.tar.gz
+            bin/yammm-${{ github.ref_name }}-linux-arm64.tar.gz
+            bin/yammm-${{ github.ref_name }}-windows-amd64.zip
+            bin/yammm-${{ github.ref_name }}-windows-arm64.zip
