@@ -135,8 +135,6 @@ func TestRelation_SetTargetID_WorksBeforeSeal(t *testing.T) {
 	assert.Equal(t, newTargetID, r.TargetID())
 }
 
-// --- Constructor and Accessor Tests ---
-
 func TestNewRelation(t *testing.T) {
 	target := schema.NewTypeRef("users", "Person", location.Span{})
 	targetID := schema.NewTypeID(location.MustNewSourceID("test://users"), "Person")

@@ -481,8 +481,6 @@ func (b *astBuilder) ExitInvariant(ctx *grammar.InvariantContext) {
 	b.currentType.Invariants = append(b.currentType.Invariants, inv)
 }
 
-// --- Constraint builders ---
-
 // boundSpan returns a span covering a bound value, including the optional
 // leading minus sign. When neg is nil, it falls back to spanning only the
 // value token.
@@ -911,8 +909,6 @@ func (b *astBuilder) ExitQualified_alias(ctx *grammar.Qualified_aliasContext) { 
 	b.currentDTRef = NewDataTypeRef(qualifier, name, b.spans.FromContext(ctx))
 }
 
-// --- Helper methods ---
-
 func (b *astBuilder) buildTypeRef(ctx grammar.IType_refContext) *astTypeRef {
 	if ctx == nil {
 		return nil
@@ -936,8 +932,6 @@ func (b *astBuilder) buildTypeRef(ctx grammar.IType_refContext) *astTypeRef {
 		Span:      b.spans.FromContext(ctx),
 	}
 }
-
-// --- Utility functions ---
 
 // handleMultiplicity parses the multiplicity context and returns (optional, many).
 // When multiplicity is omitted (ctx == nil), defaults to optional/one (true, false).

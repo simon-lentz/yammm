@@ -23,10 +23,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// =============================================================================
-// Test Helpers
-// =============================================================================
-
 // newTestHarness creates a harness for integration testing with a real LSP server.
 func newTestHarness(t *testing.T, root string) *testutil.Harness {
 	t.Helper()
@@ -103,10 +99,6 @@ func (c *notificationCollector) diagnosticsFor(uri string) []protocol.Diagnostic
 	return nil
 }
 
-// =============================================================================
-// Server Creation & Configuration
-// =============================================================================
-
 func TestNewServer(t *testing.T) {
 	t.Parallel()
 
@@ -169,10 +161,6 @@ func TestServer_WorkspaceCreated(t *testing.T) {
 	// The workspace should inherit the config's module root
 	assert.Equal(t, "/test", server.Workspace().FindModuleRoot("/any/path/file.yammm"))
 }
-
-// =============================================================================
-// Core Integration Tests
-// =============================================================================
 
 func TestIntegration_InitializeSuccess(t *testing.T) {
 	t.Parallel()
@@ -451,10 +439,6 @@ func TestIntegration_MultiDocumentWorkflow(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Formatting
-// =============================================================================
-
 func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 	t.Parallel()
 
@@ -604,10 +588,6 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Completion (UTF-8)
-// =============================================================================
-
 func TestCompletion_UTF8Mode_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -688,10 +668,6 @@ func TestCompletion_UTF8Mode_NoPanic(t *testing.T) {
 
 	assert.NotEmpty(t, items, "expected completion items for type body context")
 }
-
-// =============================================================================
-// Temporal (Debounce, Concurrency, Race Detection)
-// =============================================================================
 
 const (
 	analysisTimeout   = 5 * time.Second
@@ -855,10 +831,6 @@ func TestTemporal_ConcurrentOpenCloseRace(t *testing.T) {
 	wg.Wait()
 	ws.Shutdown()
 }
-
-// =============================================================================
-// Markdown Integration
-// =============================================================================
 
 func TestMarkdownIntegration_DiagnosticsInCodeBlock(t *testing.T) {
 	t.Parallel()

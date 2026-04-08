@@ -1167,10 +1167,6 @@ func TestLoad_DotDotInMiddleOfPath(t *testing.T) {
 	assert.False(t, result.HasErrors())
 }
 
-// =============================================================================
-// Context Cancellation Tests (/19)
-// =============================================================================
-
 func TestString_CancellationReturnsError(t *testing.T) {
 	source := `schema "test" type Person { name String }`
 
@@ -1516,10 +1512,6 @@ type TypeA {
 	}
 	assert.False(t, result.HasErrors())
 }
-
-// =============================================================================
-// Invariant Property Validation Integration Tests
-// =============================================================================
 
 // TestString_InvariantUnknownProperty verifies that an invariant referencing
 // a property that does not exist on the type produces E_UNKNOWN_PROPERTY when

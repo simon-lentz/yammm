@@ -21,8 +21,6 @@ import (
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
-// --- Test helpers ---
-
 func testSchema(t *testing.T) *schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
@@ -109,8 +107,6 @@ func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidI
 	}
 	return g.Snapshot()
 }
-
-// --- Sub-phase A tests (Marshal + Verify + Info) ---
 
 func TestMarshal_NilPanics(t *testing.T) {
 	defer func() {
@@ -508,8 +504,6 @@ func TestMarshalLoad_ContextCancellation(t *testing.T) {
 	}
 }
 
-// --- Sub-phase B tests (Load-specific) ---
-
 func TestConstructionPathEquivalence(t *testing.T) {
 	s := testSchema(t)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
@@ -630,8 +624,6 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 	}
 }
 
-// --- Wire struct field ordering test ---
-
 func TestWireStructFieldOrder(t *testing.T) {
 	// Verify that JSON serialization produces keys in the expected order.
 	// This guards against accidental field reordering in wire structs.
@@ -679,8 +671,6 @@ func TestWireStructFieldOrder(t *testing.T) {
 	}
 }
 
-// --- Property fidelity round-trip tests ---
-//
 // These tests verify that all property types survive the
 // marshal → load round-trip with correct values. The existing
 // round-trip tests above only exercise String properties.

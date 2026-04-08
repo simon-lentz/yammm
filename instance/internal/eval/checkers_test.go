@@ -252,8 +252,6 @@ func TestInEnum(t *testing.T) {
 	}
 }
 
-// --- CheckValue Tests ---
-
 func TestCheckValue_Nil(t *testing.T) {
 	// nil is always valid (required check is done separately)
 	err := eval.CheckValue(nil, schema.NewStringConstraint())
@@ -598,8 +596,6 @@ func TestCheckerFor(t *testing.T) {
 	assert.NotEmpty(t, msg)
 }
 
-// --- NaN/Inf Rejection Tests ---
-
 func TestCheckValue_Float_NaNInf(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -722,8 +718,6 @@ func TestCoerceValue_Vector_NaNInf(t *testing.T) {
 	}
 }
 
-// --- Checker with Registry Tests ---
-//
 // NOTE: The Registry enables custom type KIND DETECTION via ClassifyWithRegistry,
 // but named scalar types (e.g., `type MyInt int64`) remain unsupported for value
 // extraction (GetInt64/GetFloat64 don't convert them). This is by design.
@@ -826,10 +820,6 @@ func TestChecker_Method_vs_PackageLevel(t *testing.T) {
 		}
 	}
 }
-
-// =============================================================================
-// Additional Coverage Tests for Uncovered Paths
-// =============================================================================
 
 func TestCoerceValue_AliasConstraint(t *testing.T) {
 	checker := eval.NewChecker(value.Registry{})
@@ -972,10 +962,6 @@ func TestCheckValue_BooleanConstraint(t *testing.T) {
 	})
 }
 
-// =============================================================================
-// Float64 Whole Number Integer Coercion Tests (Issue 1 fix)
-// =============================================================================
-
 func TestIsInteger_Float64WholeNumber(t *testing.T) {
 	checker := eval.IsInteger()
 
@@ -1094,10 +1080,6 @@ func TestCoerceValue_Integer_Float64WholeNumber(t *testing.T) {
 		})
 	}
 }
-
-// =============================================================================
-// Native time.Time and uuid.UUID Acceptance Tests (Issue 3 fix)
-// =============================================================================
 
 func TestIsTimestamp_TimeTime(t *testing.T) {
 	checker := eval.IsTimestamp()
@@ -1389,10 +1371,6 @@ func TestChecker_CoerceValue_VectorWithCustomTypes(t *testing.T) {
 		assert.Equal(t, []float64{1.0, 2.0, 3.0}, result)
 	})
 }
-
-// =============================================================================
-// List Constraint Tests
-// =============================================================================
 
 func TestCheckValue_List(t *testing.T) {
 	t.Parallel()

@@ -197,8 +197,6 @@ func TestSnapshotSave_CSVWithTypeFlag(t *testing.T) {
 	assert.Contains(t, string(data), "yammm_snapshot")
 }
 
-// --- --into tests ---
-
 func TestSnapshotSave_Into_BasicMerge(t *testing.T) {
 	t.Parallel()
 

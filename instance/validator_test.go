@@ -16,8 +16,6 @@ import (
 	"github.com/simon-lentz/yammm/schema/expr"
 )
 
-// --- Test Helpers ---
-
 // mustBuild builds a schema from a Builder, failing the test on error.
 func mustBuild(t *testing.T, b *schema.Builder) *schema.Schema {
 	t.Helper()
@@ -33,8 +31,6 @@ func mustLoadString(t *testing.T, source, name string) *schema.Schema {
 	require.False(t, result.HasErrors(), "schema load: %s", result)
 	return s
 }
-
-// --- Tests ---
 
 func TestValidator_ValidateOne_Success(t *testing.T) {
 	s := mustBuild(t, schema.NewBuilder().
@@ -507,8 +503,6 @@ func TestValidator_ValidateOne_StringBounds(t *testing.T) {
 	}
 }
 
-// --- ValidateForComposition Tests ---
-
 func TestValidator_ValidateForComposition_Success(t *testing.T) {
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
@@ -653,8 +647,6 @@ func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *te
 	require.GreaterOrEqual(t, len(issues), 1)
 	assert.Equal(t, "test.json", issues[0].SourceName())
 }
-
-// --- Invariant Evaluation Tests ---
 
 func TestValidator_ValidateOne_InvariantPass(t *testing.T) {
 	// Invariant: age >= 0

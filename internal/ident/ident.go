@@ -65,8 +65,6 @@ func ToLowerCamel(s string) string {
 	return joinCamelTokens(splitIdentifier(s), true)
 }
 
-// --- Internal tokenization types and functions ---
-
 type token struct {
 	text      string
 	isNumber  bool

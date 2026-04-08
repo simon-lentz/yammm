@@ -26,10 +26,6 @@ func parseSchema(t *testing.T, schemaSource string) (*schema.TestModel, diag.Res
 	return model, collector.Result()
 }
 
-// =============================================================================
-// Float Constraint Tests
-// =============================================================================
-
 func TestParse_FloatConstraints(t *testing.T) {
 	t.Parallel()
 
@@ -219,10 +215,6 @@ type Thing {
 	}
 }
 
-// =============================================================================
-// Boolean Property Tests
-// =============================================================================
-
 func TestParse_BooleanProperty(t *testing.T) {
 	t.Parallel()
 
@@ -250,10 +242,6 @@ type Thing {
 	assert.Equal(t, schema.KindBoolean, enabled.Constraint.Kind())
 	assert.False(t, enabled.Optional)
 }
-
-// =============================================================================
-// Pattern Constraint Tests
-// =============================================================================
 
 func TestParse_PatternConstraint(t *testing.T) {
 	t.Parallel()
@@ -315,10 +303,6 @@ type Thing {
 	}
 }
 
-// =============================================================================
-// Timestamp Property Tests
-// =============================================================================
-
 func TestParse_TimestampProperty(t *testing.T) {
 	t.Parallel()
 
@@ -363,10 +347,6 @@ type Event {
 	}
 }
 
-// =============================================================================
-// Date Property Tests
-// =============================================================================
-
 func TestParse_DateProperty(t *testing.T) {
 	t.Parallel()
 
@@ -385,10 +365,6 @@ type Event {
 	assert.Equal(t, "date", prop.Name)
 	assert.Equal(t, schema.KindDate, prop.Constraint.Kind())
 }
-
-// =============================================================================
-// Vector Property Tests
-// =============================================================================
 
 func TestParse_VectorProperty(t *testing.T) {
 	t.Parallel()
@@ -433,10 +409,6 @@ type Embedding {
 		})
 	}
 }
-
-// =============================================================================
-// List Property Tests
-// =============================================================================
 
 func TestParse_ListProperty(t *testing.T) {
 	t.Parallel()
@@ -538,10 +510,6 @@ type R {
 	}
 }
 
-// =============================================================================
-// Relation Properties Tests
-// =============================================================================
-
 func TestParse_RelationProperties(t *testing.T) {
 	t.Parallel()
 
@@ -564,10 +532,6 @@ type Person {
 	require.NotNil(t, model)
 	_ = result // May have errors due to duplicate type
 }
-
-// =============================================================================
-// Multiplicity Variants Tests
-// =============================================================================
 
 func TestParse_MultiplicityVariants(t *testing.T) {
 	t.Parallel()
@@ -648,10 +612,6 @@ type B {
 		})
 	}
 }
-
-// =============================================================================
-// Integer Constraint Edge Cases Tests
-// =============================================================================
 
 func TestParse_IntegerConstraintEdgeCases(t *testing.T) {
 	t.Parallel()
@@ -787,10 +747,6 @@ type Thing {
 	}
 }
 
-// =============================================================================
-// Enum Edge Cases Tests
-// =============================================================================
-
 func TestParse_EnumEdgeCases(t *testing.T) {
 	t.Parallel()
 
@@ -837,10 +793,6 @@ type Thing {
 		})
 	}
 }
-
-// =============================================================================
-// Composition Multiplicity Tests
-// =============================================================================
 
 func TestParse_CompositionMultiplicity(t *testing.T) {
 	t.Parallel()
@@ -900,10 +852,6 @@ type Parent {
 	}
 }
 
-// =============================================================================
-// Import Statement Variations
-// =============================================================================
-
 func TestParse_ImportStatementVariations(t *testing.T) {
 	t.Parallel()
 
@@ -952,10 +900,6 @@ import "common.yammm"`,
 	}
 }
 
-// =============================================================================
-// Schema Name Tests
-// =============================================================================
-
 func TestParse_SchemaNameVariations(t *testing.T) {
 	t.Parallel()
 
@@ -994,10 +938,6 @@ func TestParse_SchemaNameVariations(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Multiple Inheritance Tests
-// =============================================================================
-
 func TestParse_MultipleInheritance(t *testing.T) {
 	t.Parallel()
 
@@ -1024,10 +964,6 @@ type C extends A, B {}`
 	assert.Equal(t, "A", typeC.Inherits[0].Name)
 	assert.Equal(t, "B", typeC.Inherits[1].Name)
 }
-
-// =============================================================================
-// Invariant Edge Cases Tests
-// =============================================================================
 
 func TestParse_InvariantEdgeCases(t *testing.T) {
 	t.Parallel()
@@ -1073,10 +1009,6 @@ type Thing {
 		})
 	}
 }
-
-// =============================================================================
-// Extended Relation Property Tests (ExitRel_property)
-// =============================================================================
 
 func TestParse_RelationPropertiesExtended(t *testing.T) {
 	t.Parallel()
@@ -1167,10 +1099,6 @@ type Source {
 	}
 }
 
-// =============================================================================
-// Timestamp Format Tests
-// =============================================================================
-
 func TestParse_TimestampFormats(t *testing.T) {
 	t.Parallel()
 
@@ -1226,10 +1154,6 @@ type Event {
 	}
 }
 
-// =============================================================================
-// Vector Dimension Tests
-// =============================================================================
-
 func TestParse_VectorDimensions(t *testing.T) {
 	t.Parallel()
 
@@ -1284,10 +1208,6 @@ type Embedding {
 		})
 	}
 }
-
-// =============================================================================
-// Association Reverse Tests
-// =============================================================================
 
 func TestParse_AssociationReverse(t *testing.T) {
 	t.Parallel()
@@ -1347,10 +1267,6 @@ type Child {
 	}
 }
 
-// =============================================================================
-// Composition Reverse Tests
-// =============================================================================
-
 func TestParse_CompositionReverse(t *testing.T) {
 	t.Parallel()
 
@@ -1399,10 +1315,6 @@ type Parent {
 	}
 }
 
-// =============================================================================
-// Extended Import Path Tests
-// =============================================================================
-
 func TestParse_ImportPathVariations(t *testing.T) {
 	t.Parallel()
 
@@ -1443,10 +1355,6 @@ import "../parent/types.yammm" as parent`,
 		})
 	}
 }
-
-// =============================================================================
-// Schema DocComment Tests
-// =============================================================================
 
 func TestParse_SchemaDocComment(t *testing.T) {
 	t.Parallel()
@@ -1492,10 +1400,6 @@ type Foo { id UUID primary }`,
 		})
 	}
 }
-
-// =============================================================================
-// Type Extends Tests (trailing comma)
-// =============================================================================
 
 func TestParse_TypeExtendsTrailingComma(t *testing.T) {
 	t.Parallel()
@@ -1549,10 +1453,6 @@ type Child extends A, B, {}`,
 		})
 	}
 }
-
-// =============================================================================
-// Extended Invariant Expression Tests
-// =============================================================================
 
 func TestParse_InvariantExpressionVarieties(t *testing.T) {
 	t.Parallel()
@@ -1683,10 +1583,6 @@ type Thing {
 	}
 }
 
-// =============================================================================
-// ToSchemaTypeRef Tests
-// =============================================================================
-
 func TestTypeRef_ToSchemaTypeRef(t *testing.T) {
 	t.Parallel()
 
@@ -1742,10 +1638,6 @@ type Source {
 		})
 	}
 }
-
-// =============================================================================
-// String Escape Sequence Tests (stripDelimiters, unquoteString)
-// =============================================================================
 
 func TestParse_StringEscapeSequences(t *testing.T) {
 	t.Parallel()
@@ -1809,10 +1701,6 @@ type Foo {
 	}
 }
 
-// =============================================================================
-// Syntax Error Recovery Tests
-// =============================================================================
-
 func TestParse_SyntaxErrorRecovery(t *testing.T) {
 	t.Parallel()
 
@@ -1865,10 +1753,6 @@ type Foo {
 	}
 }
 
-// =============================================================================
-// Import Alias Tests
-// =============================================================================
-
 func TestParse_ImportAlias(t *testing.T) {
 	t.Parallel()
 
@@ -1916,10 +1800,6 @@ import "types.yammm"`,
 		})
 	}
 }
-
-// =============================================================================
-// Extended Multiplicity Tests
-// =============================================================================
 
 func TestParse_ExtendedMultiplicityVariants(t *testing.T) {
 	t.Parallel()
@@ -2014,10 +1894,6 @@ type Source {
 	}
 }
 
-// =============================================================================
-// ToSchemaTypeRef Tests
-// =============================================================================
-
 func TestTypeRef_ToSchemaTypeRefConversion(t *testing.T) {
 	t.Parallel()
 
@@ -2081,10 +1957,6 @@ type Source {
 	}
 }
 
-// =============================================================================
-// Type and Property DocComment Tests
-// =============================================================================
-
 func TestParse_TypeDocComment(t *testing.T) {
 	t.Parallel()
 
@@ -2134,10 +2006,6 @@ type Foo { id UUID primary }`,
 		})
 	}
 }
-
-// =============================================================================
-// Datatype Alias Tests
-// =============================================================================
 
 func TestParse_DatatypeAlias(t *testing.T) {
 	t.Parallel()
@@ -2203,10 +2071,6 @@ type Person {
 	}
 }
 
-// =============================================================================
-// Composition with Reverse Multiplicity Tests
-// =============================================================================
-
 func TestParse_CompositionReverseMultiplicity(t *testing.T) {
 	t.Parallel()
 
@@ -2264,10 +2128,6 @@ type Parent {
 		})
 	}
 }
-
-// =============================================================================
-// Association with Reverse Multiplicity Tests
-// =============================================================================
 
 func TestParse_AssociationReverseMultiplicity(t *testing.T) {
 	t.Parallel()
@@ -2341,10 +2201,6 @@ type Child {
 		})
 	}
 }
-
-// =============================================================================
-// Invariant Without Expression Tests
-// =============================================================================
 
 func TestParse_InvariantScenarios(t *testing.T) {
 	t.Parallel()
@@ -2496,10 +2352,6 @@ type Thing {
 	}
 }
 
-// =============================================================================
-// Property Documentation Tests
-// =============================================================================
-
 func TestParse_PropertyDocumentation(t *testing.T) {
 	t.Parallel()
 
@@ -2524,10 +2376,6 @@ type Foo {
 		assert.NotEmpty(t, prop.Documentation, "property %s should have documentation", prop.Name)
 	}
 }
-
-// =============================================================================
-// Relation Documentation Tests
-// =============================================================================
 
 func TestParse_RelationDocumentation(t *testing.T) {
 	t.Parallel()
@@ -2555,10 +2403,6 @@ type Parent {
 		}
 	}
 }
-
-// =============================================================================
-// Error Path Tests - Cover uncovered error branches
-// =============================================================================
 
 func TestParse_ErrorPaths(t *testing.T) {
 	t.Parallel()
@@ -2613,10 +2457,6 @@ type lowercase {}`,
 	}
 }
 
-// =============================================================================
-// Edge Cases for Extended Types
-// =============================================================================
-
 func TestParse_ExtendedTypeEdgeCases(t *testing.T) {
 	t.Parallel()
 
@@ -2663,10 +2503,6 @@ type Child extends base.Parent {}`,
 		})
 	}
 }
-
-// =============================================================================
-// Extended Datatype Tests
-// =============================================================================
 
 func TestParse_ExtendedDatatypeDefinitions(t *testing.T) {
 	t.Parallel()
@@ -2723,10 +2559,6 @@ type Item {
 	}
 }
 
-// =============================================================================
-// Using Clause Tests
-// =============================================================================
-
 func TestParse_UsingClause(t *testing.T) {
 	t.Parallel()
 
@@ -2777,10 +2609,6 @@ type Graph {
 	}
 }
 
-// =============================================================================
-// Relation Edge Property Doc Comments
-// =============================================================================
-
 func TestParse_RelationEdgePropertyDocComments(t *testing.T) {
 	t.Parallel()
 
@@ -2811,10 +2639,6 @@ type Source {
 		}
 	}
 }
-
-// =============================================================================
-// Comprehensive Syntax Tests
-// =============================================================================
 
 func TestParse_ComprehensiveSyntaxCoverage(t *testing.T) {
 	t.Parallel()
@@ -2884,10 +2708,6 @@ type Organization extends Entity {
 	assert.GreaterOrEqual(t, len(model.Types), 4)
 }
 
-// =============================================================================
-// UUID Property Tests
-// =============================================================================
-
 func TestParse_UUIDProperty(t *testing.T) {
 	t.Parallel()
 
@@ -2907,10 +2727,6 @@ type Entity {
 	assert.True(t, model.Types[0].Properties[0].IsPrimaryKey)
 	assert.False(t, model.Types[0].Properties[1].IsPrimaryKey)
 }
-
-// =============================================================================
-// String Constraint Tests
-// =============================================================================
 
 func TestParse_StringConstraints(t *testing.T) {
 	t.Parallel()
@@ -2972,10 +2788,6 @@ type Foo {
 	}
 }
 
-// =============================================================================
-// Nil TypeRef Edge Cases
-// =============================================================================
-
 func TestParse_NilTypeRefHandling(t *testing.T) {
 	t.Parallel()
 
@@ -2989,10 +2801,6 @@ func TestParse_NilTypeRefHandling(t *testing.T) {
 	assert.True(t, qualRef.IsQualified())
 }
 
-// =============================================================================
-// Relation Kind String Tests
-// =============================================================================
-
 func TestRelationKind_AllValues(t *testing.T) {
 	t.Parallel()
 
@@ -3004,10 +2812,6 @@ func TestRelationKind_AllValues(t *testing.T) {
 	var unknown schema.RelationKind = 99
 	assert.Equal(t, "unknown", unknown.String())
 }
-
-// =============================================================================
-// Extended Qualified Reference Tests
-// =============================================================================
 
 func TestParse_QualifiedInherits(t *testing.T) {
 	t.Parallel()
@@ -3032,10 +2836,6 @@ type Child extends base.Entity, base.Auditable {
 	assert.Equal(t, "base", child.Inherits[1].Qualifier)
 	assert.Equal(t, "Auditable", child.Inherits[1].Name)
 }
-
-// =============================================================================
-// Additional Coverage Tests for Edge Cases
-// =============================================================================
 
 func TestParse_CompositionWithMultiplicity(t *testing.T) {
 	t.Parallel()
@@ -3324,9 +3124,6 @@ type Thing {
 	require.NotNil(t, model.Types[0].Invariants[0].Expr)
 }
 
-// =============================================================================
-// Nil-Safety Tests
-// =============================================================================
 // These tests verify that the parser handles malformed input gracefully without
 // panicking. Per v2 error handling contracts, content errors (malformed user input)
 // must be reported via diag.Collector, not panics.
@@ -3511,10 +3308,6 @@ type Foo {
 		})
 	}
 }
-
-// =============================================================================
-// Additional Error Path Tests for Coverage
-// =============================================================================
 
 func TestParse_TimestampInvalidFormat(t *testing.T) {
 	t.Parallel()

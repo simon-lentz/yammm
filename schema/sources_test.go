@@ -11,8 +11,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// --- Test Helpers ---
-
 func registerTestSource(t *testing.T, reg *source.Registry, content, name string) location.SourceID {
 	t.Helper()
 	sourceID := location.MustNewSourceID("test://" + name)
@@ -20,8 +18,6 @@ func registerTestSource(t *testing.T, reg *source.Registry, content, name string
 	require.NoError(t, err)
 	return sourceID
 }
-
-// --- Constructor Tests ---
 
 func TestNewSources_NilRegistry(t *testing.T) {
 	s := schema.NewSources(nil)
@@ -36,8 +32,6 @@ func TestNewSources_ValidRegistry(t *testing.T) {
 
 	assert.NotNil(t, s)
 }
-
-// --- Nil Receiver Tests ---
 
 func TestSources_ContentBySource_NilReceiver(t *testing.T) {
 	var s *schema.Sources
@@ -106,8 +100,6 @@ func TestSources_Len_NilReceiver(t *testing.T) {
 
 	assert.Equal(t, 0, result)
 }
-
-// --- Valid Sources Tests ---
 
 func TestSources_ContentBySource_Valid(t *testing.T) {
 	reg := source.NewRegistry()
@@ -211,8 +203,6 @@ func TestSources_Len_Valid(t *testing.T) {
 
 	assert.Equal(t, 2, s.Len())
 }
-
-// --- SourceIDsIter Tests ---
 
 func TestSources_SourceIDsIter_NilReceiver(t *testing.T) {
 	var s *schema.Sources

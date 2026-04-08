@@ -12,8 +12,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// --- Edge Validation Tests ---
-
 func TestValidateEdges_SingleFK(t *testing.T) {
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
@@ -518,8 +516,6 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 	assert.True(t, edge.IsEmpty())
 }
 
-// --- Composite FK Tests ---
-
 func TestValidateEdges_CompositeFK(t *testing.T) {
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
@@ -777,8 +773,6 @@ func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 		}
 	}
 }
-
-// --- FK Diagnostic Detail Tests ---
 
 func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 	// Verify E_MISSING_FK_TARGET includes 'relation' and 'expected' details.
@@ -1146,7 +1140,6 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 	assert.True(t, hasTypeMismatch, "should have E_TYPE_MISMATCH")
 }
 
-// --- Multiplicity Matrix Test ---
 // Tests all 4 combinations of (optional/required) x (one/many) multiplicity.
 //
 // Note: Required edge enforcement happens at the graph layer (Check()), not

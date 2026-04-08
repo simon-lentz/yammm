@@ -1407,10 +1407,6 @@ func TestMethodStyleCallValidation(t *testing.T) {
 	})
 }
 
-// =============================================================================
-// Additional Coverage Tests for Uncovered Paths
-// =============================================================================
-
 func TestEvaluator_MemberAccessOnNonMap(t *testing.T) {
 	ev := eval.NewEvaluator()
 	scope := eval.EmptyScope()

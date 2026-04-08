@@ -1574,10 +1574,6 @@ func TestCompareUint64Float64_Quick(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// IsWholeNumber and GetInt64FromFloat Tests
-// =============================================================================
-
 func TestIsWholeNumber(t *testing.T) {
 	tests := []struct {
 		name   string

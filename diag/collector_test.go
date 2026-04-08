@@ -393,10 +393,6 @@ func TestCollector_NegativeLimit(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Deterministic Ordering Tests
-// -----------------------------------------------------------------------------
-
 func TestCompareIssues_SpanBackedBeforePathOnly(t *testing.T) {
 	source := location.MustNewSourceID("test://a.yammm")
 

@@ -15,8 +15,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// --- helpers ---
-
 var zeroSpan = location.Span{}
 
 func testSourceID(name string) location.SourceID {
@@ -89,13 +87,9 @@ func buildTypeWithProps(name string, props []*schema.Property) *schema.Type {
 	return typ
 }
 
-// --- StructuralHashVersion ---
-
 func TestStructuralHashVersion(t *testing.T) {
 	assert.Equal(t, 1, schema.StructuralHashVersion)
 }
-
-// --- Nil panics ---
 
 func TestStructuralHash_NilPanics(t *testing.T) {
 	assert.PanicsWithValue(t,
@@ -103,8 +97,6 @@ func TestStructuralHash_NilPanics(t *testing.T) {
 		func() { schema.StructuralHash(nil) },
 	)
 }
-
-// --- Determinism ---
 
 func TestStructuralHash_Determinism(t *testing.T) {
 	prop := makeProp("id", schema.NewUUIDConstraint(), false, true)
@@ -120,16 +112,12 @@ func TestStructuralHash_Determinism(t *testing.T) {
 	assert.Len(t, strings.TrimPrefix(h1, "sha256:"), 64)
 }
 
-// --- Empty schema ---
-
 func TestStructuralHash_EmptySchema(t *testing.T) {
 	s := buildMinimalSchema("empty", nil, nil)
 
 	h := schema.StructuralHash(s)
 	assert.True(t, strings.HasPrefix(h, "sha256:"))
 }
-
-// --- Name sensitivity ---
 
 func TestStructuralHash_NameSensitivity(t *testing.T) {
 	s1 := buildMinimalSchema("alpha", nil, nil)
@@ -138,8 +126,6 @@ func TestStructuralHash_NameSensitivity(t *testing.T) {
 	assert.NotEqual(t, schema.StructuralHash(s1), schema.StructuralHash(s2),
 		"schemas with different names must have different hashes")
 }
-
-// --- Property constraint sensitivity ---
 
 func TestStructuralHash_PropertyConstraintSensitivity(t *testing.T) {
 	propA := makeProp("name", schema.NewStringConstraint(), false, false)
@@ -154,8 +140,6 @@ func TestStructuralHash_PropertyConstraintSensitivity(t *testing.T) {
 		"different property constraints must produce different hashes")
 }
 
-// --- Required vs optional ---
-
 func TestStructuralHash_RequiredVsOptional(t *testing.T) {
 	propReq := makeProp("email", schema.NewStringConstraint(), false, false) // required
 	typReq := buildTypeWithProps("User", []*schema.Property{propReq})
@@ -168,8 +152,6 @@ func TestStructuralHash_RequiredVsOptional(t *testing.T) {
 	assert.NotEqual(t, schema.StructuralHash(sReq), schema.StructuralHash(sOpt),
 		"required vs optional must produce different hashes")
 }
-
-// --- Association sensitivity ---
 
 func TestStructuralHash_AssociationTargetSensitivity(t *testing.T) {
 	assocA := makeAssoc("WORKS_AT", "Company", false, false, nil)
@@ -223,8 +205,6 @@ func TestStructuralHash_AssociationEdgeProperties(t *testing.T) {
 		"association with vs without edge properties must differ")
 }
 
-// --- Composition sensitivity ---
-
 func TestStructuralHash_CompositionSensitivity(t *testing.T) {
 	compA := makeComp("CONTAINS", "Wheel", false, true)
 	typA := buildTypeWithProps("Car", nil)
@@ -241,8 +221,6 @@ func TestStructuralHash_CompositionSensitivity(t *testing.T) {
 	assert.NotEqual(t, schema.StructuralHash(sA), schema.StructuralHash(sB),
 		"different composition targets must produce different hashes")
 }
-
-// --- Constraint kind tests ---
 
 func TestStructuralHash_StringConstraintMinMax(t *testing.T) {
 	t.Run("unbounded vs min", func(t *testing.T) {
@@ -376,8 +354,6 @@ func TestStructuralHash_ListConstraint(t *testing.T) {
 	})
 }
 
-// --- DataType sensitivity ---
-
 func TestStructuralHash_DataTypeSensitivity(t *testing.T) {
 	dtA := schema.TestNewDataType("Email", schema.StringMinLen(1), zeroSpan, "")
 	sA := buildMinimalSchema("app", nil, []*schema.DataType{dtA})
@@ -400,8 +376,6 @@ func TestStructuralHash_DataTypeName(t *testing.T) {
 		"different data type names must produce different hashes")
 }
 
-// --- SuperType sensitivity ---
-
 func TestStructuralHash_SuperTypeSensitivity(t *testing.T) {
 	// Type with a super type reference.
 	typ1 := buildTypeWithProps("Admin", nil)
@@ -420,8 +394,6 @@ func TestStructuralHash_SuperTypeSensitivity(t *testing.T) {
 		"type with vs without supertypes must produce different hashes")
 }
 
-// --- PrimaryKey sensitivity ---
-
 func TestStructuralHash_PrimaryKeySensitivity(t *testing.T) {
 	propPK := makeProp("id", schema.NewUUIDConstraint(), false, true)
 	typPK := buildTypeWithProps("User", []*schema.Property{propPK})
@@ -434,8 +406,6 @@ func TestStructuralHash_PrimaryKeySensitivity(t *testing.T) {
 	assert.NotEqual(t, schema.StructuralHash(sPK), schema.StructuralHash(sNonPK),
 		"PK vs non-PK property must produce different hashes")
 }
-
-// --- Alias constraint resolution ---
 
 func TestStructuralHash_AliasResolution(t *testing.T) {
 	// Schema with a direct StringMinLen(1) constraint on a property.
@@ -453,8 +423,6 @@ func TestStructuralHash_AliasResolution(t *testing.T) {
 		"alias constraint must resolve to same hash as direct constraint")
 }
 
-// --- Multiple types ordering ---
-
 func TestStructuralHash_TypeOrderingDeterministic(t *testing.T) {
 	// Create schema with types added in one order.
 	propA := makeProp("id", schema.NewUUIDConstraint(), false, true)
@@ -470,8 +438,6 @@ func TestStructuralHash_TypeOrderingDeterministic(t *testing.T) {
 		"type insertion order must not affect hash")
 }
 
-// --- Format validation ---
-
 func TestStructuralHash_Format(t *testing.T) {
 	s := buildMinimalSchema("test", nil, nil)
 	h := schema.StructuralHash(s)
@@ -484,8 +450,6 @@ func TestStructuralHash_Format(t *testing.T) {
 			"hex digit must be lowercase hex: %c", c)
 	}
 }
-
-// --- Comprehensive schema ---
 
 func TestStructuralHash_ComprehensiveSchema(t *testing.T) {
 	// Build a schema with types, properties, associations, compositions, data types.
@@ -524,8 +488,6 @@ func TestStructuralHash_ComprehensiveSchema(t *testing.T) {
 	assert.True(t, strings.HasPrefix(h1, "sha256:"))
 }
 
-// --- Constraint assertion helpers ---
-
 // assertConstraintsDiffer verifies two properties with different constraints
 // produce different schema hashes.
 func assertConstraintsDiffer(t *testing.T, propA, propB *schema.Property) {
@@ -547,8 +509,6 @@ func assertConstraintsMatch(t *testing.T, propA, propB *schema.Property) {
 	sB := buildMinimalSchema("s", []*schema.Type{typB}, nil)
 	assert.Equal(t, schema.StructuralHash(sA), schema.StructuralHash(sB))
 }
-
-// --- Constraint field coverage via reflection ---
 
 // TestStructuralHash_ConstraintFieldCoverage uses reflection to enumerate all
 // fields of each concrete constraint type and verifies that each field is covered
@@ -650,8 +610,6 @@ func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 		}
 	}
 }
-
-// --- Cross-language test vectors ---
 
 // TestStructuralHashVectors reads schema/testdata/hash_vectors.json and verifies
 // that programmatically constructed schemas produce the expected hashes. These

@@ -173,8 +173,6 @@ func TestType_SettersWorkBeforeSeal(t *testing.T) {
 	// Verify no panic occurred by reaching this point
 }
 
-// --- Accessor Tests ---
-
 func TestNewType(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://type")
 	span := location.Span{

@@ -75,8 +75,6 @@ func TestSchema_SettersWorkBeforeSeal(t *testing.T) {
 	// Verify no panic occurred by reaching this point
 }
 
-// --- Constructor and Accessor Tests ---
-
 func TestNewSchema(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://schema")
 	span := location.Span{

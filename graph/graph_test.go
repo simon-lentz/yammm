@@ -1367,10 +1367,6 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Additional Coverage Tests for Uncovered Paths
-// =============================================================================
-
 func TestResult_Instances(t *testing.T) {
 	s := testSchema(t)
 	g := New(s)
@@ -1878,8 +1874,6 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 		t.Errorf("Expected child name 'Child 1', got %q", name)
 	}
 }
-
-// ===== Per-Operation Diagnostics Tests =====
 
 // TestAdd_PerOperationDiagnostics verifies that Add() returns per-operation results,
 // not cumulative results. A successful Add after a failed Add should return OK.

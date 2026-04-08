@@ -585,8 +585,6 @@ func TestExtractCodeBlocks_FixtureIndented_Details(t *testing.T) {
 	assert.Contains(t, block.Content, "type IndentClose")
 }
 
-// --- hasSchemaDeclaration tests ---
-
 func TestHasSchemaDeclaration(t *testing.T) {
 	t.Parallel()
 
@@ -649,8 +647,6 @@ func TestHasSchemaDeclaration(t *testing.T) {
 		})
 	}
 }
-
-// --- Benchmarks ---
 
 func BenchmarkExtractCodeBlocks_ManyBlocks(b *testing.B) {
 	var sb strings.Builder

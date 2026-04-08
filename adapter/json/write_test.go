@@ -1044,8 +1044,6 @@ func TestParseKeyString(t *testing.T) {
 	}
 }
 
-// --- MarshalInstance tests ---
-
 func TestMarshalInstance_NilInstance(t *testing.T) {
 	t.Parallel()
 	a, err := New(nil)

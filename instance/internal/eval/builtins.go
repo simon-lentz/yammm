@@ -1034,8 +1034,6 @@ func builtinCoalesce(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr
 	return nil, nil //nolint:nilnil // all values were nil
 }
 
-// --- Helper functions ---
-
 // asSlice converts a value to []any for iteration.
 func asSlice(funcName string, val any) ([]any, error) {
 	if val == nil {

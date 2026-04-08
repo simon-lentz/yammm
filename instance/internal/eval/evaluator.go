@@ -564,8 +564,6 @@ func (e *Evaluator) evalBuiltin(def builtinDef, children []expr.Expression, scop
 	return e.callBuiltin(def, lhs, args, params, body, scope)
 }
 
-// --- Arithmetic operators ---
-
 func (e *Evaluator) add(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("+ requires 2 operands")
@@ -705,8 +703,6 @@ func (e *Evaluator) numericOp(left, right any, intOp func(int64, int64) any, flo
 	return nil, false
 }
 
-// --- Comparison operators ---
-
 func (e *Evaluator) equal(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("== requires 2 operands")
@@ -835,8 +831,6 @@ func (e *Evaluator) inOp(args []any) (any, error) {
 	return false, nil
 }
 
-// --- Logical operators ---
-
 func (e *Evaluator) not(args []any) (any, error) {
 	if len(args) != 1 {
 		return nil, errors.New("! requires 1 operand")
@@ -862,8 +856,6 @@ func (e *Evaluator) xor(args []any) (any, error) {
 	}
 	return left != right, nil
 }
-
-// --- Helper functions ---
 
 // isNumericVar checks if a variable name is numeric ($0, $1, etc.)
 func isNumericVar(name string) bool {
