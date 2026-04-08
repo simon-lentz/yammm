@@ -11,6 +11,8 @@ YAMMM is designed for structured data modeling with a focus on:
 - Invariants expressed as constraint expressions
 - Structured diagnostics with stable error codes
 
+YAMMM's design draws inspiration from [CUE](https://cuelang.org/)'s constraint-based approach to data validation, adapted for a nominal type system with explicit relationships. Where CUE uses structural typing and lattice-based unification, YAMMM uses named types with inheritance and constraint narrowing.
+
 The grammar is compact and regular, allowing for easy analysis by automatic tools. We use [ANTLR](https://en.wikipedia.org/wiki/ANTLR) to generate lexers and parsers from [`YammmGrammar.g4`](../internal/grammar/YammmGrammar.g4).
 
 ## Notation
@@ -175,6 +177,12 @@ Timestamp    Date    UUID    Vector    List
 true    false
 ```
 
+**Nil literal:**
+
+```text
+nil
+```
+
 **Reserved identifiers** (`datatype`, `includes`) are not used as structural grammar tokens but are reserved for forward compatibility.
 
 A small set of keywords and reserved identifiers may be used as property names via the `lc_keyword` rule. This allows properties named `schema`, `type`, etc. without ambiguity:
@@ -183,6 +191,8 @@ A small set of keywords and reserved identifiers may be used as property names v
 schema    type    datatype    required    primary    extends
 includes    abstract    one    many    import
 ```
+
+The keywords `as`, `part`, and `in` cannot be used as property names because they would create parsing ambiguity in import declarations (`as`), type modifiers (`part`), and membership expressions (`in`) respectively.
 
 ### Operators and Punctuation
 
@@ -361,14 +371,15 @@ import "./common/types" as common   // explicit alias
 
 - Strip trailing slashes and `.yammm` extension
 - Replace non-alphanumeric/underscore characters with underscore (e.g., `address-types` becomes `address_types`)
+- If the first character is not a letter, `n` is prepended to produce a valid identifier (e.g., `3rdparty` becomes `n3rdparty`, `_internal` becomes `n_internal`)
 
-**Alias identifier requirements:** Aliases must be valid identifiers per the grammar—they must start with a letter (A-Z or a-z) and contain only letters, digits, and underscores. If the derived alias would be invalid (e.g., starts with a digit or underscore), an explicit `as` clause is required:
+**Alias identifier requirements:** Aliases must be valid identifiers per the grammar—they must start with a letter (A-Z or a-z) and contain only letters, digits, and underscores. When automatic derivation would produce an invalid identifier (starting with a digit or underscore), `n` is prepended automatically. An explicit `as` clause can always be used to override the derived alias:
 
 ```yammm
-// ERROR: "./3rdparty" derives alias "_3rdparty" which starts with underscore
+// OK: "./3rdparty" derives alias "n3rdparty" (digit-first, so "n" is prepended)
 import "./3rdparty"
 
-// OK: explicit alias starting with a letter
+// OK: explicit alias overrides the derived one
 import "./3rdparty" as thirdparty
 ```
 
@@ -377,6 +388,7 @@ import "./3rdparty" as thirdparty
 - DSL keywords: `schema`, `import`, `as`, `type`, `datatype`, `required`, `primary`, `extends`, `includes`, `abstract`, `part`, `one`, `many`, `in`
 - Built-in type keywords: `Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`
 - Boolean literals: `true`, `false`
+- Nil literal: `nil`
 
 **Qualified type references:** Imported types must be referenced with their alias qualifier:
 
@@ -429,6 +441,14 @@ type Person {
 }
 ```
 
+### Type Identity
+
+A type's identity is the pair (schema source, type name). Types with the same name from different schemas are distinct — an imported `Person` and a local `Person` are not the same type. This enables:
+
+- Cross-schema type comparison without name collisions
+- Proper diamond inheritance deduplication (same ancestor via different paths is recognized as one type)
+- Safe use as map keys in type-indexed data structures (graph, snapshot)
+
 ### Type Modifiers
 
 **Abstract types** cannot be instantiated directly but can be extended by other types:
@@ -455,6 +475,10 @@ type Car {
     *-> WHEELS (one:many) Wheel
 }
 ```
+
+### Immutability
+
+After compilation, all schema objects — types, relations, data types, and the schema itself — are sealed and become immutable. Slice accessors on sealed objects return defensive copies. This guarantees thread-safe concurrent read access without synchronization.
 
 ### Inheritance
 
@@ -486,6 +510,46 @@ Inheritance rules:
 - Properties, associations, and compositions are inherited from parent types
 - Child types may override inherited properties with compatible narrower constraints
 - Relationship definitions must be unique after inheritance; duplicate name/target pairs are reported as errors
+
+**Linearization order:** Ancestors are linearized using depth-first, left-to-right traversal with keep-first deduplication. The resulting order determines property and invariant precedence:
+
+1. Own declarations (from the type body) come first
+2. Inherited members follow in linearization order (left-to-right through the `extends` clause, depth-first through each ancestor chain)
+3. When the same ancestor is reachable via multiple paths (diamond inheritance), the first occurrence is kept and duplicates are skipped
+
+**Property conflict resolution:**
+
+| Situation | Result |
+| --------- | ------ |
+| Child re-declares with narrower constraint | Child's version is used |
+| Inherited property narrows an earlier ancestor's | Narrower version replaces wider |
+| Two inherited properties are incompatible | `E_PROPERTY_CONFLICT` is emitted |
+
+**Invariant merging:** Own invariants come first, then inherited invariants in linearization order. If a child declares an invariant with the same name as an inherited one, the child's version takes precedence.
+
+### Constraint Narrowing
+
+When a child type re-declares an inherited property, the child's constraint must be a valid _narrowing_ of the parent's constraint. The principle: every value accepted by the child constraint must also be accepted by the parent (the child's valid set is a subset of the parent's).
+
+| Constraint | Narrowing Rule |
+| ---------- | -------------- |
+| `String` | Child min length >= parent min AND child max length <= parent max |
+| `Integer` | Child min >= parent min AND child max <= parent max |
+| `Float` | Child min >= parent min AND child max <= parent max |
+| `Enum` | Child values must be a subset of parent values |
+| `List` | Element constraint narrows AND length bounds narrow |
+| `Boolean`, `Date`, `UUID` | Equal only (no parameterized narrowing) |
+| `Timestamp` | Equal only (format must match exactly) |
+| `Pattern` | Equal only (pattern strings must match) |
+| `Vector` | Equal only (dimension must match) |
+
+Data type aliases are resolved to their underlying constraint before narrowing is checked.
+
+**Property narrowing rules:**
+
+- **Optionality** can narrow (optional to required) but not widen (required to optional)
+- **Primary key status** cannot change (structural identity)
+- **Names** must match exactly (case-sensitive)
 
 ### Type References
 
@@ -1351,8 +1415,32 @@ type Person {
 
 - The evaluator only works against the in-memory instance graph
 - There is no implicit database lookup or multi-hop relation navigation
-- Evaluation errors (undefined property/variable, type errors) surface as fatal issues
+- Evaluation errors (undefined property/variable, type errors) surface as error-severity diagnostics; validation continues collecting further issues
 - Panics (e.g., divide-by-zero) are recovered as errors annotated with the operator stack
+
+### Evaluation Model
+
+Invariant expressions are always evaluated against concrete instance data. There is no concept of deferred or incomplete evaluation — all property values must be resolved before invariant checking begins.
+
+**Scope chain:** Invariant expressions are evaluated in a scope containing the instance's property values, overlaid with variables. When a variable and a property share a name, the variable takes precedence.
+
+**`$self` binding:** `$self` is bound to the instance's property map during invariant evaluation. It is inherited by child scopes (e.g., inside lambda bodies) unless explicitly overridden by a lambda parameter named `$self`.
+
+**Evaluation order:** Expressions are evaluated eagerly, left-to-right, with the following exceptions:
+
+- `&&` and `||` short-circuit: the right operand is skipped when the left operand determines the result
+- The ternary operator (`?`) evaluates only the selected branch
+- Collection functions (`Map`, `Filter`, `All`, etc.) evaluate their body expression once per element
+
+**Variable resolution:**
+
+- Numeric variables (`$0`, `$1`, ...) evaluate to `nil` when not bound
+- Named variables (`$item`, `$acc`, ...) produce an evaluation error if not bound
+- Lambda parameters shadow outer variables for the duration of the body
+
+**Division semantics:** Integer division by zero produces an evaluation error. Float division by zero yields +/-Inf per IEEE 754. Integer modulo by zero produces an evaluation error.
+
+**Panic recovery:** Panics during constraint checking or invariant evaluation are recovered at the validator boundary. Recovered panics become `E_INTERNAL` fatal diagnostics with a captured stack trace.
 
 ## Diagnostics
 
@@ -1433,7 +1521,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
 - `E_COMPOSITION_NOT_FOUND` — referenced composition not found
 - `E_MISSING_TYPE_TAG`, `E_INVALID_TYPE_TAG` — `$type` tag errors
-- `E_CASE_FOLD_COLLISION` — input fields collide after case-folding
+- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When colliding fields are detected (e.g., both `"Name"` and `"name"` in the input), the collision is reported and neither field is mapped
 
 **Graph** — graph construction errors:
 
@@ -1459,8 +1547,8 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
 - `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match
-- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` (Warning) — unrecognized schema hash algorithm
-- `E_SNAPSHOT_PATH_FALLBACK` (Warning) — provenance path string could not be canonicalized
+- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` (Warning) — the schema hash algorithm in the snapshot header is not recognized; schema hash verification is skipped and the load proceeds without the compatibility check
+- `E_SNAPSHOT_PATH_FALLBACK` (Warning) — a provenance path string could not be parsed into a canonical path and fell back to the root path; the original string is preserved for round-trip fidelity
 
 **Adapter** — format-specific errors:
 
@@ -1474,6 +1562,18 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - One schema per file
 - Import paths are case-sensitive on case-sensitive filesystems
 - Canonical formatting is defined by `format.TokenStream` (see [API.md](API.md#formatting))
+
+## Schema Identity
+
+Each compiled schema has a deterministic structural hash (SHA-256) computed over:
+
+- Schema name
+- Type names, properties (with constraints and modifiers), relations (with targets and cardinalities), and inheritance edges
+- Data type names and constraints
+
+Invariants are deliberately excluded — they affect runtime validation but not structural shape. The hash is deterministic: all inputs are sorted lexicographically before hashing.
+
+The hash format is `sha256:<hex>`. A structural hash version (currently `1`) is bumped when the algorithm changes. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
 
 ## Grammar Summary
 
