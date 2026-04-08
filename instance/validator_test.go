@@ -9,8 +9,8 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -638,7 +638,7 @@ func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *te
 
 	validator := instance.NewValidator(s)
 
-	prov := instance.NewProvenance("test.json", path.Root().Key("items").Index(0), location.Span{})
+	prov := location.NewProvenance("test.json", path.Root().Key("items").Index(0), location.Span{})
 	raws := []instance.RawInstance{
 		{Properties: map[string]any{"id": "1"}, Provenance: prov},
 	}

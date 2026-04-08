@@ -8,8 +8,8 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -230,7 +230,7 @@ func TestValidInstance_Composed(t *testing.T) {
 
 func TestValidInstance_Provenance(t *testing.T) {
 	t.Run("with_provenance", func(t *testing.T) {
-		prov := instance.NewProvenance(
+		prov := location.NewProvenance(
 			"test.json",
 			path.Root().Key("users").Index(0),
 			location.Range(location.SourceID{}, 10, 1, 20, 100),
@@ -379,7 +379,7 @@ func TestValidEdgeTarget_Properties(t *testing.T) {
 
 func TestValidInstance_HasProvenance(t *testing.T) {
 	t.Run("with_provenance", func(t *testing.T) {
-		prov := instance.NewProvenance(
+		prov := location.NewProvenance(
 			"test.json",
 			path.Root(),
 			location.Span{},

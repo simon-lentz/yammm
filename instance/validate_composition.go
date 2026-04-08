@@ -8,8 +8,8 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -49,7 +49,7 @@ func (v *Validator) validateCompositions(
 	typ *schema.Type,
 	props map[string]any,
 	collector *diag.Collector,
-	prov *Provenance,
+	prov *location.Provenance,
 ) map[string]immutable.Value {
 	composed := make(map[string]immutable.Value)
 
@@ -113,7 +113,7 @@ func (v *Validator) validateComposition(
 	rawValue any,
 	hasValue bool,
 	collector *diag.Collector,
-	prov *Provenance,
+	prov *location.Provenance,
 	basePath path.Builder,
 ) immutable.Value {
 	// Handle absent field - emit error for required compositions.
@@ -197,11 +197,11 @@ func (v *Validator) validateComposition(
 		}
 
 		// P1-3: Propagate parent's sourceName and span to children
-		var childProv *Provenance
+		var childProv *location.Provenance
 		if prov != nil {
-			childProv = NewProvenance(prov.SourceName(), basePath.Index(i), prov.Span())
+			childProv = location.NewProvenance(prov.SourceName(), basePath.Index(i), prov.Span())
 		} else {
-			childProv = NewProvenance("", basePath.Index(i), location.Span{})
+			childProv = location.NewProvenance("", basePath.Index(i), location.Span{})
 		}
 
 		childRaws = append(childRaws, RawInstance{

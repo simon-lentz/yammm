@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,4 +42,50 @@ func TestDetectFormat(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestIsSnapshotFile_ValidSnapshot(t *testing.T) {
+	t.Parallel()
+	tmp := filepath.Join(t.TempDir(), "test.ys")
+	require.NoError(t, os.WriteFile(tmp, []byte(`{"yammm_snapshot":{"version":1},"types":[]}`), 0o600))
+
+	ok, err := IsSnapshotFile(tmp)
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestIsSnapshotFile_JSONDataFile(t *testing.T) {
+	t.Parallel()
+	tmp := filepath.Join(t.TempDir(), "data.json")
+	require.NoError(t, os.WriteFile(tmp, []byte(`{"Person":[{"id":"a"}]}`), 0o600))
+
+	ok, err := IsSnapshotFile(tmp)
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestIsSnapshotFile_CSVFile(t *testing.T) {
+	t.Parallel()
+	tmp := filepath.Join(t.TempDir(), "data.csv")
+	require.NoError(t, os.WriteFile(tmp, []byte("id,name\na,b\n"), 0o600))
+
+	ok, err := IsSnapshotFile(tmp)
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestIsSnapshotFile_NonexistentFile(t *testing.T) {
+	t.Parallel()
+	_, err := IsSnapshotFile(filepath.Join(t.TempDir(), "nope.ys"))
+	require.Error(t, err)
+}
+
+func TestIsSnapshotFile_EmptyFile(t *testing.T) {
+	t.Parallel()
+	tmp := filepath.Join(t.TempDir(), "empty")
+	require.NoError(t, os.WriteFile(tmp, []byte{}, 0o600))
+
+	ok, err := IsSnapshotFile(tmp)
+	require.NoError(t, err)
+	assert.False(t, ok)
 }

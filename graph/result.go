@@ -41,6 +41,11 @@ type Snapshot struct {
 	// edges contains all resolved edges in sorted order.
 	edges []*Edge
 
+	// edgeIndex maps each instance to its outgoing edges for O(1) lookup.
+	// Built eagerly in newSnapshot from the sorted edges slice.
+	// Uses pointer identity: only instances from this snapshot are found.
+	edgeIndex map[*Instance][]*Edge
+
 	// duplicates contains duplicate records in sorted order.
 	duplicates []*Duplicate
 
@@ -56,6 +61,11 @@ type Snapshot struct {
 // This provides access to type definitions and relation metadata,
 // which is needed for schema-aware serialization (e.g., determining
 // whether a relation is one-to-one or one-to-many).
+//
+// For snapshots loaded from persisted .ys files, this returns the schema
+// provided to snapshot.Load, not the schema used at original construction
+// time. The loaded schema is verified for structural compatibility via
+// schema.StructuralHash.
 func (r *Snapshot) Schema() *schema.Schema {
 	if r == nil {
 		return nil
@@ -178,11 +188,41 @@ func (r *Snapshot) Edges() []*Edge {
 	return result
 }
 
+// EdgesFrom returns the outgoing edges for the given instance, sorted by
+// (relation, targetType, targetKey).
+//
+// This is the preferred way to access per-instance edges. Unlike iterating
+// Edges() and filtering by source, EdgesFrom uses a precomputed index for
+// O(1) lookup per instance.
+//
+// The instance must belong to this snapshot. Instances from other snapshots
+// or from a mutable Graph always return nil (the index uses pointer identity).
+//
+// Returns nil if the instance has no outgoing edges.
+// Returns a defensive copy; modifications do not affect the snapshot.
+func (r *Snapshot) EdgesFrom(inst *Instance) []*Edge {
+	if r == nil || inst == nil || r.edgeIndex == nil {
+		return nil
+	}
+	edges := r.edgeIndex[inst]
+	if len(edges) == 0 {
+		return nil
+	}
+	result := make([]*Edge, len(edges))
+	copy(result, edges)
+	return result
+}
+
 // Diagnostics returns validation issues from graph construction.
 //
 // This includes errors and warnings from [Graph.Add] and [Graph.AddComposed] calls.
 // [Graph.Check] results are returned separately per-call and are not accumulated
 // here, making Check idempotent: multiple calls have no effect on snapshot diagnostics.
+//
+// For snapshots loaded from persisted .ys files, Diagnostics returns diag.OK()
+// because construction diagnostics are transient and not persisted. Consumers
+// should check [Snapshot.Duplicates] and [Snapshot.Unresolved] for structural
+// issues that are preserved across serialization.
 //
 // Use [diag.Result.OK] to check if the graph construction succeeded.
 func (r *Snapshot) Diagnostics() diag.Result {
@@ -227,6 +267,11 @@ func (r *Snapshot) Unresolved() []*UnresolvedEdge {
 //
 // This is a convenience method equivalent to r.Diagnostics().OK().
 // A graph may have warnings and still be OK.
+//
+// For snapshots loaded from persisted .ys files, OK always returns true
+// because construction diagnostics are transient. This reflects
+// construction-time diagnostics only, not structural issues — check
+// [Snapshot.Duplicates] and [Snapshot.Unresolved] separately.
 func (r *Snapshot) OK() bool {
 	if r == nil {
 		return true
@@ -237,6 +282,9 @@ func (r *Snapshot) OK() bool {
 // HasErrors reports whether the graph has any errors.
 //
 // This is a convenience method equivalent to r.Diagnostics().HasErrors().
+//
+// For snapshots loaded from persisted .ys files, HasErrors always returns
+// false because construction diagnostics are transient. See [Snapshot.OK].
 func (r *Snapshot) HasErrors() bool {
 	if r == nil {
 		return false
@@ -256,7 +304,7 @@ func newSnapshot(
 	unresolved []*UnresolvedEdge,
 	diagnostics diag.Result,
 ) *Snapshot {
-	return &Snapshot{
+	snap := &Snapshot{
 		schema:        s,
 		types:         types,
 		instances:     instances,
@@ -266,4 +314,11 @@ func newSnapshot(
 		unresolved:    unresolved,
 		diagnostics:   diagnostics,
 	}
+	if len(edges) > 0 {
+		snap.edgeIndex = make(map[*Instance][]*Edge)
+		for _, e := range edges {
+			snap.edgeIndex[e.source] = append(snap.edgeIndex[e.source], e)
+		}
+	}
+	return snap
 }

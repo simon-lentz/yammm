@@ -2,6 +2,7 @@ package spec_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
@@ -10,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/snapshot"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,7 +56,7 @@ func loadSchemaString(t *testing.T, content, name string) *instance.Validator {
 }
 
 // loadSchemaStringRaw loads a schema from inline string content, returning both schema and validator.
-func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *instance.Validator) { //nolint:unparam // test helper — second return used selectively
+func loadSchemaStringRaw(t *testing.T, content, name string) (*schema.Schema, *instance.Validator) {
 	t.Helper()
 	ctx := t.Context()
 	s, result := schema.LoadString(ctx, content, name)
@@ -177,4 +179,127 @@ func validateOne(t *testing.T, v *instance.Validator, typeName string, raw insta
 	require.True(t, result.OK(), "expected valid %s, got: %v", typeName, result.Messages())
 	require.NotNil(t, valid)
 	return valid
+}
+
+// =============================================================================
+// Snapshot helpers
+// =============================================================================
+
+// marshalSnapshot marshals a snapshot to .ys bytes, failing on error.
+func marshalSnapshot(t *testing.T, snap *graph.Snapshot, opts ...snapshot.Option) []byte {
+	t.Helper()
+	data, result := snapshot.Marshal(t.Context(), snap, opts...)
+	require.Nil(t, result.Err(), "snapshot.Marshal failed: %v", result.Messages())
+	return data
+}
+
+// loadSnapshot loads .ys bytes back into a snapshot, failing on error.
+func loadSnapshot(t *testing.T, data []byte, s *schema.Schema, opts ...snapshot.LoadOption) *graph.Snapshot { //nolint:unparam // test helper — opts used by negative tests
+	t.Helper()
+	snap, result := snapshot.Load(t.Context(), data, s, opts...)
+	require.Nil(t, result.Err(), "snapshot.Load failed: %v", result.Messages())
+	require.NotNil(t, snap)
+	return snap
+}
+
+// buildSnapshotFromData runs the full e2e pipeline: schema.Load -> JSON parse
+// -> validate -> graph.Add -> Snapshot. typeKeys specifies which keys from
+// data.json to include. Keys with "__" suffixes are negative variants and are
+// NOT included unless explicitly listed.
+func buildSnapshotFromData(t *testing.T, schemaPath, dataPath string, typeKeys []string) (*schema.Schema, *graph.Snapshot) {
+	t.Helper()
+	ctx := t.Context()
+
+	s, result := schema.Load(ctx, schemaPath)
+	require.True(t, result.OK(), "schema %s has errors: %v", schemaPath, result.Messages())
+
+	dataBytes, err := os.ReadFile(dataPath)
+	require.NoError(t, err, "read %s", dataPath)
+
+	adapter, err := jsonadapter.New(nil)
+	require.NoError(t, err, "create JSON adapter")
+
+	sourceID := location.NewSourceID("test://" + dataPath)
+	parsed, parseResult := adapter.ParseObject(ctx, sourceID, dataBytes)
+	require.True(t, parseResult.OK(), "JSON parse %s failed: %v", dataPath, parseResult.Messages())
+
+	v := instance.NewValidator(s)
+	g := graph.New(s)
+
+	for _, typeKey := range typeKeys {
+		records := parsed[typeKey]
+		require.NotEmpty(t, records, "no %q records in %s", typeKey, dataPath)
+
+		// Resolve the schema type name (strip __ suffix variants).
+		typeName := typeKey
+		if idx := strings.Index(typeName, "__"); idx >= 0 {
+			typeName = typeName[:idx]
+		}
+
+		for _, rec := range records {
+			valid, valResult := v.ValidateOne(ctx, typeName, rec)
+			require.True(t, valResult.OK(), "validate %s failed: %v", typeName, valResult.Messages())
+			g.Add(ctx, valid)
+		}
+	}
+
+	return s, g.Snapshot()
+}
+
+// buildSnapshotFromDataAllTypes is like buildSnapshotFromData but auto-discovers
+// type keys from the JSON data, excluding keys with "__" suffixes.
+func buildSnapshotFromDataAllTypes(t *testing.T, schemaPath, dataPath string) (*schema.Schema, *graph.Snapshot) {
+	t.Helper()
+	ctx := t.Context()
+
+	dataBytes, err := os.ReadFile(dataPath)
+	require.NoError(t, err, "read %s", dataPath)
+
+	adapter, err := jsonadapter.New(nil)
+	require.NoError(t, err, "create JSON adapter")
+
+	sourceID := location.NewSourceID("test://" + dataPath)
+	parsed, parseResult := adapter.ParseObject(ctx, sourceID, dataBytes)
+	require.True(t, parseResult.OK(), "JSON parse %s failed: %v", dataPath, parseResult.Messages())
+
+	var typeKeys []string
+	for key := range parsed {
+		if !strings.Contains(key, "__") {
+			typeKeys = append(typeKeys, key)
+		}
+	}
+
+	return buildSnapshotFromData(t, schemaPath, dataPath, typeKeys)
+}
+
+// verifySnapshot runs snapshot.Verify and asserts no errors. Warnings are allowed.
+func verifySnapshot(t *testing.T, data []byte, s *schema.Schema, opts ...snapshot.LoadOption) {
+	t.Helper()
+	result := snapshot.Verify(t.Context(), data, s, opts...)
+	require.False(t, result.HasErrors(), "snapshot.Verify had errors: %v", result.Messages())
+}
+
+// verifySnapshotFails runs snapshot.Verify and asserts the given diagnostic code.
+func verifySnapshotFails(t *testing.T, data []byte, s *schema.Schema, code diag.Code, opts ...snapshot.LoadOption) {
+	t.Helper()
+	result := snapshot.Verify(t.Context(), data, s, opts...)
+	require.True(t, result.HasErrors(), "snapshot.Verify should have errors")
+	assertDiagHasCode(t, result, code)
+}
+
+// snapshotInfo calls snapshot.Info and returns the result, failing on error.
+func snapshotInfo(t *testing.T, data []byte) *snapshot.SnapshotInfo {
+	t.Helper()
+	info, result := snapshot.Info(t.Context(), data)
+	require.Nil(t, result.Err(), "snapshot.Info failed: %v", result.Messages())
+	require.NotNil(t, info)
+	return info
+}
+
+// corruptBytesAt returns a copy of data with a single bit flipped at the given offset.
+func corruptBytesAt(data []byte, offset int) []byte {
+	corrupted := make([]byte, len(data))
+	copy(corrupted, data)
+	corrupted[offset] ^= 0x01
+	return corrupted
 }

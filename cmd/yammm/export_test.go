@@ -127,3 +127,58 @@ func TestExport_RequiresToFlag(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err) // --to is required
 }
+
+func TestExport_FromSnapshot_ToJSON(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	ysPath := filepath.Join(tmpDir, "test.ys")
+
+	// Create a .ys fixture.
+	code := executeCmd(t, "snapshot", "save", "testdata/valid.yammm", "testdata/data.json", "-o", ysPath)
+	require.Equal(t, 0, code)
+
+	// Export from snapshot to JSON.
+	cmd := newRootCmd("test")
+	var outBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetArgs([]string{"export", "--to", "json", "testdata/valid.yammm", ysPath})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, outBuf.String(), `"Person"`)
+	assert.Contains(t, outBuf.String(), `"alice"`)
+}
+
+func TestExport_FromSnapshot_ToCypher(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	ysPath := filepath.Join(tmpDir, "test.ys")
+
+	code := executeCmd(t, "snapshot", "save", "testdata/valid.yammm", "testdata/data.json", "-o", ysPath)
+	require.Equal(t, 0, code)
+
+	cmd := newRootCmd("test")
+	var outBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetArgs([]string{"export", "--to", "cypher", "testdata/valid.yammm", ysPath})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, outBuf.String(), "MERGE")
+}
+
+func TestExport_SnapshotDetection_NonSnapshotJSON(t *testing.T) {
+	t.Parallel()
+
+	// A regular JSON data file should NOT be detected as a snapshot.
+	cmd := newRootCmd("test")
+	var outBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetArgs([]string{"export", "--to", "json", "testdata/valid.yammm", "testdata/data.json"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, outBuf.String(), `"Person"`)
+}

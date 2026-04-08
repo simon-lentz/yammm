@@ -13,8 +13,10 @@ YAMMM (Yet Another Meta-Meta Model) is a Go library for defining schemas in a sm
 - **Relationship modeling**: Associations (references) and compositions (ownership) with multiplicity
 - **Invariants**: Boolean constraint expressions evaluated at validation time
 - **Graph construction**: Build in-memory graphs from validated instances with integrity checking
+- **Graph persistence**: Save, load, verify, and inspect graph snapshots (`.ys` format)
 - **Structured diagnostics**: Stable error codes with source location tracking
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
+- **CLI tool**: `yammm` binary for snapshot management, data export, and validation
 
 ## Installation
 
@@ -133,10 +135,11 @@ if result.HasErrors() {
 The module is organized into layers with strict dependency ordering:
 
 ```text
-Primary API (stable)     : schema, instance, graph
-Foundation (stable)      : location, diag, immutable, source
-Adapter                  : adapter/json, adapter/neo4j
-Grammar                  : grammar (ANTLR4-generated lexer/parser)
+Primary API (stable)     : schema, instance, graph, snapshot
+Foundation (stable)      : location, diag, immutable, format
+Adapter                  : adapter/json, adapter/csv, adapter/neo4j
+LSP                      : lsp (Language Server Protocol server)
+CLI                      : cmd/yammm, cmd/yammm-lsp
 Internal                 : internal/* (no compatibility guarantees)
 ```
 
@@ -149,12 +152,15 @@ Internal                 : internal/* (no compatibility guarantees)
 | `instance` | Instance validation and constraint checking |
 | `graph` | Instance graph construction and integrity checking |
 | `graph/walk` | Visitor-pattern graph traversal |
+| `snapshot` | Graph persistence: marshal, load, verify, and inspect `.ys` files |
 | `diag` | Structured diagnostics with stable error codes |
 | `location` | Source positions, spans, and canonical paths |
-| `source` | Source content storage and position conversion |
-| `grammar` | ANTLR4-generated lexer, parser, and visitor |
+| `immutable` | Immutable data structures for validated output |
+| `format` | Canonical `.yammm` file formatting |
 | `adapter/json` | JSON/JSONC parsing with location tracking |
+| `adapter/csv` | CSV data parsing and writing |
 | `adapter/neo4j` | Neo4j constraint generation and Cypher query building |
+| `lsp` | Language Server Protocol server for `.yammm` files |
 
 ### Entry Point Pattern
 
@@ -238,6 +244,7 @@ type Person {
 | `Date` | Date without time component |
 | `UUID` | Universally unique identifier |
 | `Vector[dimensions]` | Fixed-dimension numeric vector |
+| `List<T>[min, max]` | Ordered collection of typed values with optional length bounds |
 
 Use `_` for unbounded limits: `Integer[0, _]` means non-negative.
 
@@ -266,6 +273,18 @@ if !result.OK() {
 ```
 
 Diagnostic codes are stable identifiers for programmatic matching (e.g., `E_TYPE_MISMATCH`, `E_MISSING_REQUIRED`, `E_INVARIANT_FAIL`).
+
+## CLI
+
+The `yammm` binary ([`cmd/yammm/`](cmd/yammm/)) provides commands for working with schemas and data:
+
+```bash
+yammm snapshot save <schema> <data...> -o <file.ys>    # build graph, persist
+yammm snapshot save <schema> <data...> --into <file.ys> # merge into existing
+yammm snapshot info <file.ys>                           # metadata + stats
+yammm snapshot verify <schema> <file.ys>                # schema compat check
+yammm export <schema> <data...> -o <file>               # CSV/JSON export
+```
 
 ## IDE Support
 

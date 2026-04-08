@@ -1,7 +1,6 @@
 package walk
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -116,7 +115,7 @@ func Instance(ctx context.Context, inst *graph.Instance, visitor Visitor, opts .
 		config:  cfg,
 	}
 
-	err := w.walkInstance(ctx, inst, nil)
+	err := w.walkInstance(ctx, inst)
 	op.End(err)
 	return err
 }
@@ -133,9 +132,6 @@ func (w *walker) walk(ctx context.Context) error {
 		return err //nolint:wrapcheck // context errors should be returned unwrapped
 	}
 
-	// Build edge lookup for efficient edge retrieval per instance
-	edgesBySource := w.buildEdgeLookup()
-
 	// Visit types in sorted order
 	for _, typeName := range w.result.Types() {
 		// Check context between types
@@ -145,7 +141,7 @@ func (w *walker) walk(ctx context.Context) error {
 
 		// Visit instances in sorted order
 		for _, inst := range w.result.InstancesOf(typeName) {
-			if err := w.walkInstance(ctx, inst, edgesBySource); err != nil {
+			if err := w.walkInstance(ctx, inst); err != nil {
 				return err
 			}
 		}
@@ -154,7 +150,7 @@ func (w *walker) walk(ctx context.Context) error {
 	return nil
 }
 
-func (w *walker) walkInstance(ctx context.Context, inst *graph.Instance, edgesBySource map[instanceKey][]*graph.Edge) error {
+func (w *walker) walkInstance(ctx context.Context, inst *graph.Instance) error {
 	// Check context before each instance
 	if err := ctx.Err(); err != nil {
 		return err //nolint:wrapcheck // context errors pass through unwrapped
@@ -177,18 +173,15 @@ func (w *walker) walkInstance(ctx context.Context, inst *graph.Instance, edgesBy
 		}
 	}
 
-	// Visit edges for this instance
-	if edgesBySource != nil {
-		key := instanceKey{typeName: inst.TypeName(), pk: inst.PrimaryKey().String()}
-		for _, edge := range edgesBySource[key] {
-			if err := w.visitor.VisitEdge(edge); err != nil {
-				return err //nolint:wrapcheck // visitor errors pass through unwrapped
-			}
+	// Visit edges for this instance (uses Snapshot.EdgesFrom precomputed index)
+	for _, edge := range w.result.EdgesFrom(inst) {
+		if err := w.visitor.VisitEdge(edge); err != nil {
+			return err //nolint:wrapcheck // visitor errors pass through unwrapped
 		}
 	}
 
 	// Visit compositions in sorted order
-	if err := w.walkCompositions(ctx, inst, edgesBySource); err != nil {
+	if err := w.walkCompositions(ctx, inst); err != nil {
 		return err
 	}
 
@@ -200,9 +193,9 @@ func (w *walker) walkInstance(ctx context.Context, inst *graph.Instance, edgesBy
 	return nil
 }
 
-func (w *walker) walkCompositions(ctx context.Context, inst *graph.Instance, edgesBySource map[instanceKey][]*graph.Edge) error {
+func (w *walker) walkCompositions(ctx context.Context, inst *graph.Instance) error {
 	// Get composition relation names
-	relationNames := w.getCompositionRelations(inst)
+	relationNames := inst.ComposedRelations()
 	if len(relationNames) == 0 {
 		return nil
 	}
@@ -235,7 +228,7 @@ func (w *walker) walkCompositions(ctx context.Context, inst *graph.Instance, edg
 
 		// Visit composed children recursively
 		for _, child := range children {
-			if err := w.walkInstance(ctx, child, edgesBySource); err != nil {
+			if err := w.walkInstance(ctx, child); err != nil {
 				return err
 			}
 		}
@@ -247,69 +240,4 @@ func (w *walker) walkCompositions(ctx context.Context, inst *graph.Instance, edg
 	}
 
 	return nil
-}
-
-// getCompositionRelations returns sorted relation names that have composed children.
-func (w *walker) getCompositionRelations(inst *graph.Instance) []string {
-	return inst.ComposedRelations()
-}
-
-// instanceKey identifies an instance for edge lookup.
-type instanceKey struct {
-	typeName string
-	pk       string
-}
-
-// buildEdgeLookup creates a map from source instance to its outgoing edges.
-func (w *walker) buildEdgeLookup() map[instanceKey][]*graph.Edge {
-	edges := w.result.Edges()
-	if len(edges) == 0 {
-		return nil
-	}
-
-	lookup := make(map[instanceKey][]*graph.Edge)
-	for _, edge := range edges {
-		source := edge.Source()
-		if source == nil {
-			continue
-		}
-		key := instanceKey{
-			typeName: source.TypeName(),
-			pk:       source.PrimaryKey().String(),
-		}
-		lookup[key] = append(lookup[key], edge)
-	}
-
-	// Sort edges within each source for determinism
-	for key, sourceEdges := range lookup {
-		slices.SortFunc(sourceEdges, edgeCompare)
-		lookup[key] = sourceEdges
-	}
-
-	return lookup
-}
-
-// edgeCompare compares edges for sorting, returning -1, 0, or +1.
-//
-// The nil target check is defensive programming - nil targets cannot occur
-// in practice because edge creation (graph.go) only creates edges with
-// resolved, non-nil targets. This check provides cheap insurance against
-// potential invariant violations.
-func edgeCompare(a, b *graph.Edge) int {
-	// Compare by relation name first
-	if c := cmp.Compare(a.Relation(), b.Relation()); c != 0 {
-		return c
-	}
-
-	// Then by target type
-	// Defensive: treat nil targets as equal (should never occur)
-	if a.Target() != nil && b.Target() != nil {
-		if c := cmp.Compare(a.Target().TypeName(), b.Target().TypeName()); c != 0 {
-			return c
-		}
-		// Then by target key
-		return cmp.Compare(a.Target().PrimaryKey().String(), b.Target().PrimaryKey().String())
-	}
-
-	return 0
 }

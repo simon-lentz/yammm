@@ -116,6 +116,38 @@ const (
 	// DetailKeyStackTrace is a stack trace captured from a recovered panic.
 	// Used with E_INTERNAL diagnostics to provide debugging context.
 	DetailKeyStackTrace = "stack_trace"
+
+	// DetailKeyExpectedHash is the expected hash value.
+	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA and E_SNAPSHOT_INTEGRITY_MISMATCH.
+	DetailKeyExpectedHash = "expected_hash"
+
+	// DetailKeyActualHash is the actual computed hash value.
+	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA and E_SNAPSHOT_INTEGRITY_MISMATCH.
+	DetailKeyActualHash = "actual_hash"
+
+	// DetailKeySchemaName is the schema name from the snapshot header.
+	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA.
+	DetailKeySchemaName = "schema_name"
+
+	// DetailKeyVersion is the format version number.
+	// Used with E_SNAPSHOT_UNSUPPORTED_VERSION.
+	DetailKeyVersion = "version"
+
+	// DetailKeyFeature is the unrecognized feature flag name.
+	// Used with E_SNAPSHOT_UNSUPPORTED_FEATURE.
+	DetailKeyFeature = "feature"
+
+	// DetailKeyOriginalPath is the original provenance path string before fallback.
+	// Used with E_SNAPSHOT_PATH_FALLBACK.
+	DetailKeyOriginalPath = "original_path"
+
+	// DetailKeyDepth is the actual nesting depth that exceeded the limit.
+	// Used with E_SNAPSHOT_DEPTH_EXCEEDED.
+	DetailKeyDepth = "depth"
+
+	// DetailKeyHashAlgorithm is the unrecognized hash algorithm version.
+	// Used with E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM.
+	DetailKeyHashAlgorithm = "hash_algorithm"
 )
 
 // ExpectedGot creates a pair of details for type mismatch diagnostics.

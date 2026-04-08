@@ -30,6 +30,9 @@ const (
 
 	// CategoryAdapter is for format adapter parsing errors.
 	CategoryAdapter
+
+	// CategorySnapshot is for snapshot persistence errors.
+	CategorySnapshot
 )
 
 // String returns a human-readable label for the category.
@@ -49,6 +52,8 @@ func (c CodeCategory) String() string {
 		return "graph"
 	case CategoryAdapter:
 		return "adapter"
+	case CategorySnapshot:
+		return "snapshot"
 	default:
 		return "unknown"
 	}
@@ -337,6 +342,69 @@ var (
 
 	// E_GRAPH_MISSING_PK indicates a primary key is missing in graph operations.
 	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK", CategoryGraph)
+)
+
+// Snapshot persistence codes.
+var (
+	// E_SNAPSHOT_MALFORMED indicates the .ys file is not valid JSON or has
+	// wrong top-level structure (e.g., missing yammm_snapshot header as first key).
+	E_SNAPSHOT_MALFORMED = NewCode("E_SNAPSHOT_MALFORMED", CategorySnapshot)
+
+	// E_SNAPSHOT_UNSUPPORTED_VERSION indicates the format version is not recognized.
+	E_SNAPSHOT_UNSUPPORTED_VERSION = NewCode("E_SNAPSHOT_UNSUPPORTED_VERSION", CategorySnapshot)
+
+	// E_SNAPSHOT_UNSUPPORTED_FEATURE indicates an unrecognized feature flag in the header.
+	// One diagnostic is emitted per unrecognized feature.
+	E_SNAPSHOT_UNSUPPORTED_FEATURE = NewCode("E_SNAPSHOT_UNSUPPORTED_FEATURE", CategorySnapshot)
+
+	// E_SNAPSHOT_INCOMPATIBLE_SCHEMA indicates the schema structural hash does not
+	// match between the .ys file and the provided schema.
+	E_SNAPSHOT_INCOMPATIBLE_SCHEMA = NewCode("E_SNAPSHOT_INCOMPATIBLE_SCHEMA", CategorySnapshot)
+
+	// E_SNAPSHOT_UNKNOWN_TYPE indicates a type name in the .ys file does not exist
+	// in the provided schema.
+	E_SNAPSHOT_UNKNOWN_TYPE = NewCode("E_SNAPSHOT_UNKNOWN_TYPE", CategorySnapshot)
+
+	// E_SNAPSHOT_TYPE_MISMATCH indicates the types array is inconsistent with the
+	// instances map keys (structural malformation).
+	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH", CategorySnapshot)
+
+	// E_SNAPSHOT_TYPEID_MISMATCH indicates a persisted type_id does not match the
+	// corresponding type in the provided schema (schema evolution).
+	E_SNAPSHOT_TYPEID_MISMATCH = NewCode("E_SNAPSHOT_TYPEID_MISMATCH", CategorySnapshot)
+
+	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target or duplicate conflict
+	// references an instance that does not exist in the snapshot.
+	E_SNAPSHOT_DANGLING_REFERENCE = NewCode("E_SNAPSHOT_DANGLING_REFERENCE", CategorySnapshot)
+
+	// E_SNAPSHOT_INVALID_COMPOSED indicates a composed child instance carries edges,
+	// which violates the composed children invariant (edges are only on root instances).
+	E_SNAPSHOT_INVALID_COMPOSED = NewCode("E_SNAPSHOT_INVALID_COMPOSED", CategorySnapshot)
+
+	// E_SNAPSHOT_COMPOSED_ON_DUPLICATE indicates a duplicate record's instance contains
+	// composed children, violating the duplicate structural constraint.
+	E_SNAPSHOT_COMPOSED_ON_DUPLICATE = NewCode("E_SNAPSHOT_COMPOSED_ON_DUPLICATE", CategorySnapshot)
+
+	// E_SNAPSHOT_EDGES_ON_DUPLICATE indicates a duplicate record's instance contains
+	// edges, violating the duplicate structural constraint.
+	E_SNAPSHOT_EDGES_ON_DUPLICATE = NewCode("E_SNAPSHOT_EDGES_ON_DUPLICATE", CategorySnapshot)
+
+	// E_SNAPSHOT_DEPTH_EXCEEDED indicates composed nesting exceeds the depth limit (32).
+	E_SNAPSHOT_DEPTH_EXCEEDED = NewCode("E_SNAPSHOT_DEPTH_EXCEEDED", CategorySnapshot)
+
+	// E_SNAPSHOT_INTEGRITY_MISMATCH indicates the integrity hash does not match the
+	// document content. The file may be corrupted, truncated, or modified.
+	E_SNAPSHOT_INTEGRITY_MISMATCH = NewCode("E_SNAPSHOT_INTEGRITY_MISMATCH", CategorySnapshot)
+
+	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM (Warning) indicates the schema hash
+	// algorithm version in the .ys header is not recognized. Schema hash verification
+	// is skipped; load proceeds without the schema compatibility check.
+	E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM = NewCode("E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM", CategorySnapshot)
+
+	// E_SNAPSHOT_PATH_FALLBACK (Warning) indicates a provenance path string could
+	// not be parsed and fell back to the root path. The original path string is
+	// preserved for round-trip fidelity via Provenance.RawPath().
+	E_SNAPSHOT_PATH_FALLBACK = NewCode("E_SNAPSHOT_PATH_FALLBACK", CategorySnapshot)
 )
 
 // AllCodes returns all registered diagnostic codes in registration order.

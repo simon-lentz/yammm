@@ -1,0 +1,12 @@
+schema "SnapshotRequired"
+
+type Team {
+    id String primary
+    name String required
+}
+
+type Member {
+    id String primary
+    name String required
+    --> BELONGS_TO (one:one) Team
+}

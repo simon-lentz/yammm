@@ -30,7 +30,23 @@ type Duplicate struct {
 
 	// Diagnostic contains the E_DUPLICATE_PK or E_DUPLICATE_COMPOSED_PK issue
 	// with details about the conflict.
+	//
+	// For snapshots loaded from persisted .ys files, this field is zero-valued
+	// because construction diagnostics are transient and not persisted. Use
+	// [Duplicate.HasDiagnostic] to guard access to this field in code that may
+	// operate on both constructed and loaded snapshots.
 	Diagnostic diag.Issue
+}
+
+// HasDiagnostic reports whether this duplicate record has an associated
+// construction diagnostic.
+//
+// Returns false for duplicates loaded from persisted snapshots (.ys files),
+// where construction diagnostics are transient and not persisted. The
+// structural data (Instance, Conflict) is always available regardless of
+// this method's return value.
+func (d *Duplicate) HasDiagnostic() bool {
+	return !d.Diagnostic.Code().IsZero()
 }
 
 // UnresolvedEdge records an association edge whose target was not found in the graph.

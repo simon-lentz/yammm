@@ -11,7 +11,8 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -26,7 +27,7 @@ func (v *Validator) validateEdges(
 	typ *schema.Type,
 	props map[string]any,
 	collector *diag.Collector,
-	prov *Provenance,
+	prov *location.Provenance,
 ) map[string]*ValidEdgeData {
 	edges := make(map[string]*ValidEdgeData)
 
@@ -90,7 +91,7 @@ func (v *Validator) validateEdgeData(
 	rawValue any,
 	hasValue bool,
 	collector *diag.Collector,
-	prov *Provenance,
+	prov *location.Provenance,
 	basePath path.Builder,
 ) *ValidEdgeData {
 	// Handle absent field - valid for associations (graph-layer concern).
@@ -182,7 +183,7 @@ func (v *Validator) validateEdgeTarget(
 	rel *schema.Relation,
 	elem any,
 	collector *diag.Collector,
-	prov *Provenance,
+	prov *location.Provenance,
 	targetPath path.Builder,
 ) *ValidEdgeTarget {
 	// P1-4: Use per-target collector to avoid coupling between targets.
@@ -492,7 +493,7 @@ func (v *Validator) validateEdgeTarget(
 }
 
 // provenancePathBuilder returns a path builder from provenance, or Root() if nil.
-func provenancePathBuilder(prov *Provenance) path.Builder {
+func provenancePathBuilder(prov *location.Provenance) path.Builder {
 	if prov == nil {
 		return path.Root()
 	}

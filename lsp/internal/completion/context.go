@@ -302,7 +302,7 @@ func IsInsideTypeBody(doc *docstate.Snapshot, lines []string, currentLine, curso
 // The cursorCol parameter is the byte offset within the current line.
 func isInsideTypeBodyDirect(lines []string, currentLine, cursorCol int) bool {
 	var bs docstate.BraceScanner
-	for i := 0; i <= currentLine && i < len(lines); i++ {
+	for i := range min(currentLine+1, len(lines)) {
 		maxCol := len(lines[i])
 		if i == currentLine && cursorCol < maxCol {
 			maxCol = cursorCol

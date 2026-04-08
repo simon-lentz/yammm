@@ -6,8 +6,8 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 )
 
 // Forward Reference Tests
@@ -686,7 +686,7 @@ func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {
 	}
 
 	// Create provenance with a specific span
-	prov := instance.NewProvenance(
+	prov := location.NewProvenance(
 		"test.json",
 		path.Root().Key("people").Index(0),
 		location.Span{

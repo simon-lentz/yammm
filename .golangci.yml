@@ -115,7 +115,7 @@ linters:
       - path: "schema/build/.*"
         linters:
           - revive
-      - path: "instance/path/.*"
+      - path: "location/path/.*"
         linters:
           - revive
   settings:
