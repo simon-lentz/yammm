@@ -55,7 +55,7 @@ rm yammm.tar.gz
 ### Verify
 
 ```bash
-yammm version
+yammm --version
 ```
 
 ---
@@ -106,7 +106,7 @@ Required for the automatic schema validation hook (PostToolUse). Without it, the
 
 | Tool | Plugin features unlocked |
 |------|--------------------------|
-| `yammm` | Schema compilation, formatting, export, PostToolUse auto-validation, `Bash(yammm *)` in skills/agents |
+| `yammm` | Schema compilation, formatting, export, PostToolUse auto-validation, `Bash(yammm *)` in skills |
 | `yammm-lsp` | Editor diagnostics, completions, hover, go-to-definition |
 | `jq` | PostToolUse auto-validation hook (parses stdin JSON to extract file paths) |
 

@@ -41,6 +41,17 @@
 
 set -euo pipefail
 
+# Bail silently if jq is not installed. The hook depends on jq for parsing
+# stdin JSON, so we must check this before the first jq call. Without this
+# guard, `set -e` would cause the script to fail with a "jq: command not
+# found" error rather than silently skipping, which would contradict the
+# README's "silently skips if either is missing" documentation and violate
+# this script's stated "exits 0 on every path" contract. SessionStart's
+# check-env.sh is responsible for warning the user about missing jq.
+if ! command -v jq >/dev/null 2>&1; then
+  exit 0
+fi
+
 # Read tool input JSON from stdin. Claude Code passes the full tool
 # invocation payload here; we only need tool_input.file_path.
 tool_input=$(cat)

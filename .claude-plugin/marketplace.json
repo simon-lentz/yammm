@@ -1,9 +1,10 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "yammm",
-  "description": "Local marketplace wrapper for the yammm Claude Code plugin",
   "owner": {
     "name": "Simon Lentz"
+  },
+  "metadata": {
+    "description": "Local marketplace wrapper for the yammm Claude Code plugin"
   },
   "plugins": [
     {
