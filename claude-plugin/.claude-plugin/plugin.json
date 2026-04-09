@@ -8,8 +8,5 @@
   "homepage": "https://github.com/simon-lentz/yammm",
   "repository": "https://github.com/simon-lentz/yammm",
   "license": "MIT",
-  "keywords": ["yammm", "schema", "dsl", "graph", "validation", "neo4j", "go"],
-  "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
-  "lspServers": "./.lsp.json"
+  "keywords": ["yammm", "schema", "dsl", "graph", "validation", "neo4j", "go"]
 }

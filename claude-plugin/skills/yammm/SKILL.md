@@ -1,7 +1,5 @@
 ---
 name: yammm
-metadata:
-  version: 0.1.0
 description: >-
   YAMMM schema DSL, Go library, and CLI. ALWAYS activate when
   working with .yammm files, writing Go code that imports yammm
@@ -11,7 +9,6 @@ description: >-
   Triggers on "yammm schema", "yammm validate", ".yammm file",
   "yammm API", "yammm export", "yammm invariant".
 allowed-tools: Read Grep Glob Bash(yammm *)
-paths: "**/*.yammm"
 argument-hint: "[question about yammm]"
 ---
 
@@ -52,9 +49,9 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 - **"I want to validate data in a Go application"** -- Read `references/api-pipeline.md`
 - **"I want to export data to Neo4j / JSON / CSV"** -- Read `references/adapters.md` and `references/cli.md`
 - **"I want to understand an error"** -- Read `references/diagnostics.md`
-- **"I want feedback on my schema"** -- Use `/review-schema`
-- **"I want to write a new schema from scratch"** -- Use `/author-schema`
-- **"I need to install the toolchain"** -- Run `/setup`
+- **"I want feedback on my schema"** -- Use `/yammm:review-schema`
+- **"I want to write a new schema from scratch"** -- Use `/yammm:author-schema`
+- **"I need to install the toolchain"** -- Run `/yammm:setup`
 - **"I want to traverse a graph programmatically"** -- Read `references/graph-traversal.md`
 
 ---
@@ -83,8 +80,15 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 | `references/adapters.md` | JSON/CSV/Neo4j adapter usage | Exporting or importing data |
 | `references/diagnostics.md` | Error codes, troubleshooting | Understanding or fixing errors |
 | `references/cli.md` | CLI commands and workflows | Using yammm from the terminal |
-| `../../docs/SPEC.md` | Canonical DSL specification | Resolving ambiguities or edge cases not covered by reference files |
-| `../../docs/API.md` | Canonical Go library API documentation | Detailed API semantics beyond what `api-pipeline.md` covers |
+
+### Canonical upstream documentation (requires network)
+
+For edge cases and ambiguities that the reference files above don't cover, the canonical sources live in the yammm repository on GitHub. These are **fetched** (via `WebFetch`), not read from disk — the URLs are plain HTTP, so they require network access at fetch time but work identically from any install path (dev-load, marketplace install, or otherwise).
+
+- **DSL specification** — `https://raw.githubusercontent.com/simon-lentz/yammm/main/docs/SPEC.md` — use when resolving grammar ambiguities or edge cases not covered by `references/dsl-syntax.md`, `references/type-system.md`, or `references/expressions.md`.
+- **Go library API** — `https://raw.githubusercontent.com/simon-lentz/yammm/main/docs/API.md` — use when detailed API semantics go beyond what `references/api-pipeline.md` or `references/adapters.md` covers.
+
+Both URLs track the `main` branch so the skill always reflects the latest canonical documentation without requiring a per-release URL update. Raw URLs (`raw.githubusercontent.com`) are used instead of the GitHub blob viewer (`github.com/.../blob/...`) so that `WebFetch` receives the markdown content directly rather than GitHub's HTML page chrome.
 
 ---
 

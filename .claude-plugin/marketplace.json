@@ -1,0 +1,18 @@
+{
+  "name": "yammm",
+  "owner": {
+    "name": "Simon Lentz"
+  },
+  "metadata": {
+    "description": "Local marketplace wrapper for the yammm Claude Code plugin"
+  },
+  "plugins": [
+    {
+      "name": "yammm",
+      "source": "./claude-plugin",
+      "description": "Schema DSL, Go library, and CLI support for yammm — typed data validation, graph construction, and database export",
+      "category": "development",
+      "homepage": "https://github.com/simon-lentz/yammm"
+    }
+  ]
+}

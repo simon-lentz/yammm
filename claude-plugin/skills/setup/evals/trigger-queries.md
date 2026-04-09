@@ -11,7 +11,7 @@
 7. "Get me the pre-built binary for yammm on Linux ARM"
 8. "Configure my editor for .yammm files"
 9. "What tools do I need for the full yammm plugin experience?"
-10. "/setup"
+10. "/yammm:setup"
 
 ## Should NOT Trigger (10)
 

@@ -1,7 +1,5 @@
 ---
 name: setup
-metadata:
-  version: 0.1.0
 description: >-
   Install and configure yammm toolchain (CLI, LSP, jq).
   Use when setting up yammm for the first time or when
@@ -16,11 +14,13 @@ argument-hint: "[tool-name]"
 
 ## Current Environment
 
-!uname -s
-!uname -m
-!command -v yammm && yammm --version 2>&1 || echo "yammm: not installed"
-!command -v yammm-lsp && yammm-lsp --version 2>&1 || echo "yammm-lsp: not installed"
-!command -v jq && jq --version 2>&1 || echo "jq: not installed"
+```!
+uname -s
+uname -m
+command -v yammm && yammm --version 2>&1 || echo "yammm: not installed"
+command -v yammm-lsp && yammm-lsp --version 2>&1 || echo "yammm-lsp: not installed"
+command -v jq && jq --version 2>&1 || echo "jq: not installed"
+```
 
 Based on the detected platform and installed tools above, provide installation instructions for any missing tools. Skip tools that are already installed.
 
@@ -55,7 +55,7 @@ rm yammm.tar.gz
 ### Verify
 
 ```bash
-yammm version
+yammm --version
 ```
 
 ---
@@ -106,7 +106,7 @@ Required for the automatic schema validation hook (PostToolUse). Without it, the
 
 | Tool | Plugin features unlocked |
 |------|--------------------------|
-| `yammm` | Schema compilation, formatting, export, PostToolUse auto-validation, `Bash(yammm *)` in skills/agents |
+| `yammm` | Schema compilation, formatting, export, PostToolUse auto-validation, `Bash(yammm *)` in skills |
 | `yammm-lsp` | Editor diagnostics, completions, hover, go-to-definition |
 | `jq` | PostToolUse auto-validation hook (parses stdin JSON to extract file paths) |
 
