@@ -14,20 +14,39 @@ All tools are optional. The plugin provides full knowledge and review capabiliti
 
 ## Installation
 
-There are two supported paths. Choose based on whether you want the plugin permanently enabled or only for development iteration.
+### Primary: install from GitHub (recommended)
 
-### Permanent install (user scope)
+Inside any Claude Code session:
 
-The plugin is wrapped by a local marketplace at the repo root (`.claude-plugin/marketplace.json`). Inside a Claude Code session:
+```txt
+/plugin marketplace add simon-lentz/yammm
+/plugin install yammm@yammm
+```
+
+The first command registers this repo as a marketplace via GitHub — Claude Code clones the repo, reads `.claude-plugin/marketplace.json` from the repo root, and caches the plugin locally. The second command installs the `yammm` plugin from that marketplace. After installation, the plugin is enabled in `~/.claude/settings.json` as `yammm@yammm` and available in every Claude Code session.
+
+To pin to a specific release rather than tracking the default branch, append `@<ref>` to the marketplace source:
+
+```txt
+/plugin marketplace add simon-lentz/yammm@v0.2.0
+```
+
+Refs can be branches, tags, or commit SHAs. Omit the ref to track the default branch.
+
+Updates come via `/plugin marketplace update yammm` inside a Claude Code session, or automatically if you have plugin auto-updates enabled.
+
+### Alternative: install from a local clone
+
+If you already have a local clone of the repo — for example, when working on a fork or in an offline environment — you can add the marketplace from the local path instead:
 
 ```txt
 /plugin marketplace add /absolute/path/to/yammm
 /plugin install yammm@yammm
 ```
 
-The first command registers this repo as a marketplace named `yammm`; the second installs the `yammm` plugin from it. After installation, the plugin is enabled in `~/.claude/settings.json` as `yammm@yammm`.
+Same installation result, but Claude Code reads the marketplace and plugin directly from your local working tree rather than cloning from GitHub. Useful when you need to test against a non-default branch you've checked out locally, or when GitHub is unreachable from your environment.
 
-### Per-session dev load
+### Dev iteration: per-session load without installing
 
 For iterating on the plugin itself without installing, start Claude Code with `--plugin-dir` pointing at the plugin directory:
 
