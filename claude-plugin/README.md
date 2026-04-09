@@ -8,21 +8,38 @@ All tools are optional. The plugin provides full knowledge and review capabiliti
 
 | Tool | Enables | Install |
 |------|---------|---------|
-| `yammm` CLI | Schema compilation, formatting, export, auto-validation | `/setup` |
-| `yammm-lsp` | Editor diagnostics, completions, hover, go-to-definition | `/setup` |
-| `jq` | PostToolUse auto-validation hook | `/setup` |
+| `yammm` CLI | Schema compilation, formatting, export, auto-validation | `/yammm:setup` |
+| `yammm-lsp` | Editor diagnostics, completions, hover, go-to-definition | `/yammm:setup` |
+| `jq` | PostToolUse auto-validation hook | `/yammm:setup` |
 
 ## Installation
 
-```bash
-claude plugin add ./claude-plugin
+There are two supported paths. Choose based on whether you want the plugin permanently enabled or only for development iteration.
+
+### Permanent install (user scope)
+
+The plugin is wrapped by a local marketplace at the repo root (`.claude-plugin/marketplace.json`). Inside a Claude Code session:
+
+```
+/plugin marketplace add /absolute/path/to/yammm
+/plugin install yammm@yammm
 ```
 
-Or load for a single session:
+The first command registers this repo as a marketplace named `yammm`; the second installs the `yammm` plugin from it. After installation, the plugin is enabled in `~/.claude/settings.json` as `yammm@yammm`.
+
+### Per-session dev load
+
+For iterating on the plugin itself without installing, start Claude Code with `--plugin-dir` pointing at the plugin directory:
 
 ```bash
-claude --plugin-dir ./claude-plugin
+claude --plugin-dir /absolute/path/to/yammm/claude-plugin
 ```
+
+This loads the plugin only for that session, additively alongside your installed plugins. Per the official docs, if a `--plugin-dir` plugin has the same name as an installed one, the local copy takes precedence for that session — useful for testing changes to an already-installed version. The flag is repeatable for loading multiple plugins at once.
+
+### Reloading changes
+
+After edits to skill, hook, or LSP files, run `/reload-plugins` to pick up changes without restarting Claude Code.
 
 ## Skills
 
@@ -30,15 +47,15 @@ claude --plugin-dir ./claude-plugin
 
 Holistic knowledge surface covering the full yammm ecosystem. Auto-triggers on any yammm-related question or when working with `.yammm` files. Includes an orientation layer and 9 reference files for progressive depth.
 
-### `/author-schema [description]`
+### `/yammm:author-schema [description]`
 
 Designs and writes `.yammm` schema files from requirements. Follows a 4-step process: understand, design, write, verify (compile-check). Also triggers on natural-language requests like "write me a schema" or "model this dataset."
 
-### `/review-schema [path]`
+### `/yammm:review-schema [path]`
 
 Structured schema quality review. Compiles the schema, applies a 10-item review checklist, and produces an Errors/Warnings/Suggestions/Summary report. Also triggers on natural-language requests like "review my schema."
 
-### `/setup [tool-name]`
+### `/yammm:setup [tool-name]`
 
 Platform-aware toolchain installation guide. Detects your OS and currently installed tools, then provides download instructions for missing components.
 
@@ -50,7 +67,7 @@ After any Edit or Write to a `.yammm` file, automatically runs `yammm validate` 
 
 ### SessionStart: Environment check
 
-On session start, checks for `yammm`, `yammm-lsp`, and `jq`. Reports missing tools as warnings (never blocks) and directs to `/setup` for installation.
+On session start, checks for `yammm`, `yammm-lsp`, and `jq`. Reports missing tools as warnings (never blocks) and directs to `/yammm:setup` for installation.
 
 ## Reference Files
 
@@ -68,7 +85,7 @@ On session start, checks for `yammm`, `yammm-lsp`, and `jq`. Reports missing too
 
 ## Troubleshooting
 
-**Skill not triggering**: Ensure the plugin is loaded (`claude --plugin-dir ./claude-plugin`). The `yammm` skill should trigger on any question mentioning yammm, `.yammm` files, or yammm-related Go packages.
+**Skill not triggering**: Ensure the plugin is installed and enabled (`/plugin` to inspect, or check `enabledPlugins` in `~/.claude/settings.json` for `yammm@yammm`). The `yammm` skill should trigger on any question mentioning yammm, `.yammm` files, or yammm-related Go packages.
 
 **PostToolUse hook not running**: Verify `yammm` and `jq` are installed (`command -v yammm && command -v jq`). The hook silently skips if either is missing.
 

@@ -1,7 +1,5 @@
 ---
 name: setup
-metadata:
-  version: 0.1.0
 description: >-
   Install and configure yammm toolchain (CLI, LSP, jq).
   Use when setting up yammm for the first time or when
@@ -16,11 +14,13 @@ argument-hint: "[tool-name]"
 
 ## Current Environment
 
-!uname -s
-!uname -m
-!command -v yammm && yammm --version 2>&1 || echo "yammm: not installed"
-!command -v yammm-lsp && yammm-lsp --version 2>&1 || echo "yammm-lsp: not installed"
-!command -v jq && jq --version 2>&1 || echo "jq: not installed"
+```!
+uname -s
+uname -m
+command -v yammm && yammm --version 2>&1 || echo "yammm: not installed"
+command -v yammm-lsp && yammm-lsp --version 2>&1 || echo "yammm-lsp: not installed"
+command -v jq && jq --version 2>&1 || echo "jq: not installed"
+```
 
 Based on the detected platform and installed tools above, provide installation instructions for any missing tools. Skip tools that are already installed.
 

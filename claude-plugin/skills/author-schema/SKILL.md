@@ -1,7 +1,5 @@
 ---
 name: author-schema
-metadata:
-  version: 0.1.0
 description: >-
   Designs and writes .yammm schema files from requirements.
   Use when creating a new schema, designing a data model in

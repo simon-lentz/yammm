@@ -1,7 +1,5 @@
 ---
 name: yammm
-metadata:
-  version: 0.1.0
 description: >-
   YAMMM schema DSL, Go library, and CLI. ALWAYS activate when
   working with .yammm files, writing Go code that imports yammm
@@ -52,9 +50,9 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 - **"I want to validate data in a Go application"** -- Read `references/api-pipeline.md`
 - **"I want to export data to Neo4j / JSON / CSV"** -- Read `references/adapters.md` and `references/cli.md`
 - **"I want to understand an error"** -- Read `references/diagnostics.md`
-- **"I want feedback on my schema"** -- Use `/review-schema`
-- **"I want to write a new schema from scratch"** -- Use `/author-schema`
-- **"I need to install the toolchain"** -- Run `/setup`
+- **"I want feedback on my schema"** -- Use `/yammm:review-schema`
+- **"I want to write a new schema from scratch"** -- Use `/yammm:author-schema`
+- **"I need to install the toolchain"** -- Run `/yammm:setup`
 - **"I want to traverse a graph programmatically"** -- Read `references/graph-traversal.md`
 
 ---

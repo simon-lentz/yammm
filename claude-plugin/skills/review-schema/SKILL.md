@@ -1,7 +1,5 @@
 ---
 name: review-schema
-metadata:
-  version: 0.1.0
 description: >-
   Reviews .yammm schema files for quality, consistency, and
   common mistakes. Use when reviewing a schema, checking for

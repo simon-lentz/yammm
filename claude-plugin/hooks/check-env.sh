@@ -25,5 +25,5 @@ fi
 
 if [ -n "$missing" ] || [ -n "$warn" ]; then
   echo ""
-  echo "Run /setup for installation instructions."
+  echo "Run /yammm:setup for installation instructions."
 fi
