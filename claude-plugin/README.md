@@ -7,7 +7,7 @@ Claude Code plugin for the yammm schema DSL, Go library, and CLI. Provides a hol
 All tools are optional. The plugin provides full knowledge and review capabilities without them.
 
 | Tool | Enables | Install |
-|------|---------|---------|
+| ---- | ------- | ------- |
 | `yammm` CLI | Schema compilation, formatting, export, auto-validation | `/yammm:setup` |
 | `yammm-lsp` | Editor diagnostics, completions, hover, go-to-definition | `/yammm:setup` |
 | `jq` | PostToolUse auto-validation hook | `/yammm:setup` |
@@ -20,7 +20,7 @@ There are two supported paths. Choose based on whether you want the plugin perma
 
 The plugin is wrapped by a local marketplace at the repo root (`.claude-plugin/marketplace.json`). Inside a Claude Code session:
 
-```
+```txt
 /plugin marketplace add /absolute/path/to/yammm
 /plugin install yammm@yammm
 ```
@@ -72,7 +72,7 @@ On session start, checks for `yammm`, `yammm-lsp`, and `jq`. Reports missing too
 ## Reference Files
 
 | File | Topic |
-|------|-------|
+| ---- | ----- |
 | `dsl-syntax.md` | Full grammar: types, properties, relationships, imports |
 | `expressions.md` | Operators, pipeline, lambdas, built-in functions |
 | `type-system.md` | Constraint types, aliases, abstract/part, inheritance |
