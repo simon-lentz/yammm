@@ -7,7 +7,7 @@
 //
 // Adapters are the outermost layer of the module. This design provides:
 //
-//   - Dependency hygiene via import granularity: Go modules are granular at the
+//   - Dependency hygiene via import granularity: Go packages are granular at the
 //     import level. Consumers who import only schema and instance do not
 //     transitively depend on tidwall/jsonc. Adapter dependencies are pulled only
 //     when adapter/json is imported.
@@ -40,7 +40,7 @@
 // Adapters depend on library packages; library packages never depend on adapters:
 //
 //	adapter/csv    ──imports──▶  instance, diag, location, graph, immutable, schema
-//	adapter/json   ──imports──▶  instance, diag, location, graph, immutable, schema
+//	adapter/json   ──imports──▶  instance, diag, location, location/path, graph, immutable, schema
 //	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag
 //
 // # Layering Discipline
@@ -50,7 +50,7 @@
 //
 // # Subpackages
 //
-//   - [csv]: CSV/TSV adapter with schema-driven type coercion (FK columns empty in snapshot mode; see package csv doc)
+//   - [csv]: CSV/TSV adapter with schema-driven type coercion
 //   - [json]: JSON adapter with optional location tracking and JSONC support
 //   - [neo4j]: Neo4j 5 constraint generation, label mapping, and write query generation
 package adapter

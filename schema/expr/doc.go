@@ -9,7 +9,7 @@
 // The package provides these expression node types:
 //
 //   - [SExpr]: S-expression representing an operation with children
-//   - [Literal]: Literal value (string, int64, float64, bool, *regexp.Regexp, nil)
+//   - [Literal]: Literal value (string, int64, float64, bool, *regexp.Regexp, nil, []Expression, []string)
 //   - [Op]: Operation name (e.g., "+", "&&", "Any")
 //   - [DatatypeLiteral]: Data type name for type checking expressions
 //
@@ -19,6 +19,24 @@
 // by the internal exprcomp package. Evaluation is handled separately by the
 // instance layer, which provides the runtime context (property values,
 // variables, etc.) needed to execute expressions.
+//
+// # Helper Functions
+//
+// The package provides helper functions for inspecting expression nodes:
+//
+//   - [StringLiteral]: extract a string value from a Literal expression
+//   - [IsNilLiteral]: check if an expression is a nil literal
+//   - [IsRegexpLiteral]: check if an expression is a compiled regexp
+//   - [ArgsLiteral]: extract argument list from a Literal expression
+//   - [ParamsLiteral]: extract parameter names from a Literal expression
+//
+// # Thread Safety
+//
+// All expression types are immutable value types, safe for concurrent access.
+//
+// # Dependencies
+//
+//	schema/expr  ──imports──▶  (stdlib only)
 //
 // # Known Limitations
 //

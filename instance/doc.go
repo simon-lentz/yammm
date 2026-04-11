@@ -26,6 +26,17 @@
 //   - [ValidInstance] uses accessor methods because the library constructs it —
 //     it is an immutable output type whose internals are not caller-settable.
 //
+// # Builder
+//
+// [Builder] and [EdgeBuilder] provide fluent construction of [RawInstance]
+// values, useful for tests and non-adapter use cases:
+//
+//	raw := instance.NewInstance().
+//	    Prop("id", "p1").
+//	    Prop("name", "Alice").
+//	    Edge("WORKS_AT").Target("c1").Done().
+//	    Build()
+//
 // # Validation Semantics
 //
 // The validator performs:
@@ -36,12 +47,25 @@
 //   - Edge object validation (associations and compositions)
 //   - Invariant expression evaluation
 //
+// [Validator.ValidateForComposition] is a second entry point for streaming
+// composition scenarios where composed children are validated separately
+// from their parent.
+//
+// # Validator Options
+//
+// [NewValidator] accepts [Option] values to configure behavior:
+//
+//   - [WithLogger]: structured logger for validation diagnostics
+//   - [WithStrictPropertyNames]: reject properties not defined in the schema
+//   - [WithAllowUnknownFields]: allow extra properties without diagnostics
+//   - [WithMaxIssuesPerInstance]: cap diagnostics per instance
+//
 // # Thread Safety
 //
 // [Validator] is stateless and safe for concurrent use. Multiple goroutines
 // may call [Validator.Validate] simultaneously with different inputs.
 //
-// # Subpackages
+// # Dependencies
 //
-//   - [location/path] provides JSONPath-like syntax for error locations
+//	instance  ──imports──▶  schema, diag, location, location/path, immutable
 package instance

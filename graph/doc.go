@@ -21,7 +21,7 @@
 //
 // # Basic Usage
 //
-//	g := graph.New(schema)
+//	g := graph.New(s)
 //
 //	// Add validated instances (may be called concurrently)
 //	result := g.Add(ctx, validInstance)
@@ -42,6 +42,27 @@
 //	        // Process instances
 //	    }
 //	}
+//
+// # Alternative Constructors
+//
+// [RebuildSnapshot] constructs a [Snapshot] from pre-validated parts
+// (types, instances, edges, duplicates, unresolved records). This is the
+// deserialization entry point used by the snapshot package.
+//
+// # Key Types
+//
+// [Instance] provides immutable access to a graph node's data:
+// [Instance.TypeName], [Instance.PrimaryKey], [Instance.Properties],
+// [Instance.Composed], [Instance.ComposedRelations], [Instance.Provenance].
+//
+// [Edge] represents a resolved association between two instances:
+// [Edge.Relation], [Edge.Source], [Edge.Target], [Edge.Properties].
+//
+// # Graph Options
+//
+// [graph.New] accepts [Option] values:
+//
+//   - [WithLogger]: structured logger for graph construction diagnostics
 //
 // # Type Names
 //
@@ -141,4 +162,8 @@
 //	childInstance := ... // includes GrandChild in composed property
 //	g.AddComposed(ctx, "Parent", parentKey, "children", childInstance)
 //	// Both Child and GrandChild are now attached
+//
+// # Dependencies
+//
+//	graph  ──imports──▶  schema, instance, diag, location, immutable
 package graph

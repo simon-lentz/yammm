@@ -19,14 +19,17 @@
 //
 // # Core Types
 //
-// [Value] wraps an arbitrary Go value and provides immutable access:
+// [Value] wraps an arbitrary Go value and provides immutable access.
+// [Wrap] handles typed maps (e.g., map[string]int) and typed slices
+// (e.g., []string) via reflection — callers do not need to convert to
+// map[K]any or []any before wrapping:
 //
 //	val := immutable.Wrap(someData)
 //	if s, ok := val.String(); ok {
 //	    fmt.Println(s)
 //	}
 //
-// [Map] provides immutable access to a map with pre-wrapped values:
+// [Map] provides immutable access to a map with pre-wrapped values.
 //
 //	m := immutable.WrapMap(data)
 //	for k, v := range m.Range() {
@@ -54,10 +57,8 @@
 //	key := immutable.WrapKey([]any{"us", 12345})
 //	fmt.Println(key.String()) // ["us",12345]
 //
-// Note: [Wrap] handles typed maps (e.g., map[string]int) and typed slices
-// (e.g., []string) via reflection. Callers do not need to convert to
-// map[K]any or []any before wrapping. The specialized [WrapMap] and [WrapSlice]
-// functions require map[K]any and []any respectively.
+// The specialized [WrapMap] and [WrapSlice] functions require map[K]any and
+// []any respectively.
 //
 // # Ownership Semantics
 //
@@ -108,7 +109,7 @@
 //	v.IsNil()     // true (literal nil)
 //	v.Map()       // (zero Map, false) - NOT a map
 //
-// # Concurrency Safety
+// # Thread Safety
 //
 // All immutable types are safe for concurrent read access. The underlying data
 // structures are never modified after construction. Multiple goroutines can
@@ -136,8 +137,9 @@
 //	mutable := props.Clone()
 //	mutable["newKey"] = "newValue"
 //
-// # Package Dependencies
+// # Dependencies
 //
-// immutable imports only stdlib packages (reflect, iter, cmp, encoding/json).
+// immutable imports only stdlib packages (cmp, encoding/json, fmt, iter, math,
+// reflect, slices, strconv, strings).
 // It must not import schema, instance, graph, or adapter.
 package immutable

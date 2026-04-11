@@ -9,10 +9,24 @@
 // integrity hash for corruption detection, and a features array for forward
 // compatibility.
 //
+// # Usage
+//
+//	// Serialize
+//	data, result := snapshot.Marshal(ctx, snap)
+//
+//	// Deserialize
+//	snap, result := snapshot.Load(ctx, data, s)
+//
+//	// Validate without loading
+//	result := snapshot.Verify(ctx, data, s)
+//
+//	// Read metadata only
+//	info, result := snapshot.Info(ctx, data)
+//
 // # Functions
 //
 // [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
-// by default (no timestamp unless WithCreatedAt is used).
+// by default (no timestamp unless [WithCreatedAt] is used).
 //
 // [Load] deserializes .ys bytes back to a *graph.Snapshot, verifying structural
 // integrity and schema compatibility.
@@ -21,9 +35,40 @@
 // CI pipelines and pre-flight checks.
 //
 // [Info] reads summary metadata and statistics from a .ys file without loading
-// the schema or materializing instance objects.
+// the schema or materializing instance objects. Returns a [SnapshotInfo] with
+// schema name, hash, instance counts per type, totals, and integrity status.
 //
-// # File extension
+// # Marshal Options
+//
+// [Marshal] accepts [Option] values:
+//
+//   - [WithIndent]: pretty-print JSON output with the given indent string
+//   - [WithCreatedAt]: embed a creation timestamp in the snapshot
+//   - [WithMetadata]: embed arbitrary key-value metadata
+//
+// # Load Options
+//
+// [Load] and [Verify] accept [LoadOption] values:
+//
+//   - [WithSkipIntegrityCheck]: skip SHA-256 integrity verification (useful for debugging)
+//
+// # Error Handling
+//
+// All functions return [diag.Result]:
+//
+//   - Fatal: I/O failure or context cancellation
+//   - Error: schema hash mismatch, integrity check failure, structural corruption
+//   - OK: success (may include warnings)
+//
+// # File Extension
 //
 // The conventional file extension is .ys (yammm snapshot).
+//
+// # Thread Safety
+//
+// All functions are stateless and safe for concurrent use.
+//
+// # Dependencies
+//
+//	snapshot  ──imports──▶  graph, schema, instance, diag, location, immutable
 package snapshot

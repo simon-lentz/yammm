@@ -56,15 +56,25 @@
 // "previous definition here" for duplicate type errors or showing edges of an
 // import cycle. Use the Msg* constants for consistent message formatting.
 //
+// # Provenance
+//
+// [Provenance] tracks the origin of a parsed data element through the
+// adapter → validator → graph pipeline. It carries the source name,
+// a [github.com/simon-lentz/yammm/location/path] builder for JSONPath-like
+// instance paths, and an optional [Span] for byte-level source location.
+// Create via [NewProvenance]; use [Provenance.AtKey] and [Provenance.AtIndex]
+// to extend the path during recursive parsing.
+//
 // # PositionRegistry
 //
 // PositionRegistry is an interface for byte-offset-to-position conversion,
 // bridging format adapters (JSON, CSV) and source content registries. The
-// primary implementation is schema.SourceRegistry.
+// concrete implementation is source.Registry (internal), surfaced via the
+// schema.SourceRegistry interface.
 //
 // # Dependencies
 //
-// This package depends only on the standard library and golang.org/x/text/unicode/norm
-// (for NFC normalization). It does not import any other packages, enabling it
-// to be imported by all other packages without cycles.
+// This package depends only on the standard library, golang.org/x/text/unicode/norm
+// (for NFC normalization), and its own sub-package location/path (for provenance
+// path tracking). It can be imported by all other packages without cycles.
 package location

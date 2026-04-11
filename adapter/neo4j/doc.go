@@ -1,5 +1,6 @@
 // Package neo4j generates Neo4j 5 constraint statements, label mappings,
-// graph shape metadata, and parameterized write queries from yammm schemas.
+// graph shape metadata, parameterized write queries, and schema inference
+// from yammm schemas and live Neo4j databases.
 //
 // # Architectural Position
 //
@@ -20,17 +21,84 @@
 // HTTP libraries — it produces bytes. adapter/neo4j does not import the
 // Neo4j session API — it produces Cypher and driver-compatible parameters.
 //
-// # Thread Safety
+// # Constraint Generation
 //
-// An [Adapter] is safe for concurrent use after construction.
-// Configuration is immutable after [New] returns. All methods use only
-// local allocations and read-only access to the frozen config.
+// [Adapter.ConstraintsForSchema] returns constraint statements as raw Cypher
+// strings. [Adapter.ConstraintsStructured] returns [Constraint] values with
+// parsed metadata (kind, label, properties, type expression):
 //
-// # External Dependencies
+//	adapter := neo4j.New()
+//	constraints, result := adapter.ConstraintsStructured(ctx, s)
 //
-// The package depends on the Go standard library, yammm library packages,
-// and [github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype] (type definitions
-// only, zero transitive dependencies). No test frameworks beyond [testing].
+// Constraint kinds include [ConstraintUnique], [ConstraintNotNull],
+// [ConstraintType], and [ConstraintNodeKey]. Generation is controlled by
+// adapter options (see Configuration below).
+//
+// # Label Mapping
+//
+// [Adapter.Label] generates namespaced Neo4j labels from schema and type names.
+// [Adapter.DetectLabelCollisions] checks for collisions after sanitization.
+// [SanitizeIdentifier] and [ValidateIdentifier] apply Neo4j naming rules,
+// and [CypherReservedKeywords] returns the set of reserved keywords.
+//
+// # Graph Shape
+//
+// [Adapter.ShapeForSchema] converts a schema into a [GraphShape] describing
+// the Neo4j node structure (labels, primary keys, required fields per type).
+// The shape is required input for write query generation.
+//
+// # Dual-Mode Write Surface
+//
+// Write query generation supports two operational modes:
+//
+//   - Graph mode: [Adapter.BatchNodeQueries] and [Adapter.BatchEdgeQueries]
+//     operate on a complete [graph.Snapshot] for high-throughput batch writes.
+//
+//   - Instance mode: [Adapter.NodeQueryFor] accepts any [NodeSource] (including
+//     [*instance.ValidInstance]), and [Adapter.EdgeQueriesFor] generates edge
+//     queries directly from a validated instance's edge data — no graph needed.
+//
+// Single-instance queries ([Adapter.NodeQueryFor], [Adapter.EdgeQueryFor])
+// complement the batch entry points for streaming pipelines.
+//
+// # Introspection
+//
+// The package generates Cypher queries for inspecting a live Neo4j database:
+//
+//   - [IntrospectConstraintsQuery]: fetches all constraints
+//   - [IntrospectIndexesQuery]: fetches non-constraint-backing indexes
+//   - [IntrospectRelationshipsQuery] / [Adapter.IntrospectRelationshipsQueryFor]: discovers relationship signatures
+//
+// Parse the results with [ParseRemoteConstraints], [ParseRemoteIndexes],
+// and [ParseRemoteRelationships].
+//
+// # Schema Inference
+//
+// [Adapter.InferSchema] generates a .yammm DSL scaffold from remote
+// constraints and relationships discovered via introspection.
+//
+// # Constraint Diffing
+//
+// [Adapter.DiffConstraints] produces a [ConstraintDiffResult] classifying
+// desired vs. actual constraints into four categories: matched, drifted
+// (same target but different definition), to-create, and to-drop.
+//
+// # Configuration
+//
+// Adapter options control constraint generation behavior:
+//
+//   - [WithEdition]: target Neo4j edition ([Enterprise] or [Community])
+//   - [WithNodeKeyConstraints]: use NODE KEY instead of separate UNIQUE + NOT NULL
+//   - [WithScalarTypeConstraints]: emit PROPERTY_TYPE constraints for scalar properties
+//   - [WithRequiredOnlyTypeConstraints]: restrict type constraints to required properties
+//   - [WithNamedConstraints]: include explicit constraint names
+//   - [WithLabelSeparator]: separator between schema and type in labels (default "__")
+//   - [WithLabelPrefix]: global prefix for all labels
+//
+// Write options control query generation:
+//
+//   - [WithImmutableKeys]: properties set only on node creation
+//   - [WithNodeChunkSize] / [WithEdgeChunkSize]: max rows per UNWIND batch
 //
 // # Edition Gating
 //
@@ -49,22 +117,17 @@
 //
 // # Sealed Schemas
 //
-// All schemas passed to the adapter should be sealed
-// (schema.IsSealed() == true), which is always the case after
-// [github.com/simon-lentz/yammm/schema.Load] completes. Sealed
-// schemas guarantee that alias chains are fully resolved, inheritance
-// is linearized, and type identities are assigned.
+// All schemas passed to the adapter must be sealed, which is always
+// the case for schemas returned by [github.com/simon-lentz/yammm/schema.Load]
+// or [github.com/simon-lentz/yammm/schema.Builder.Build]. Sealed schemas
+// guarantee that alias chains are fully resolved, inheritance is
+// linearized, and type identities are assigned.
 //
-// # Dual-Mode Write Surface
+// # Thread Safety
 //
-// Write query generation supports two operational modes:
-//
-//   - Graph mode: [Adapter.BatchNodeQueries] and [Adapter.BatchEdgeQueries]
-//     operate on a complete [graph.Snapshot] for high-throughput batch writes.
-//
-//   - Instance mode: [Adapter.NodeQueryFor] accepts any [NodeSource] (including
-//     [*instance.ValidInstance]), and [Adapter.EdgeQueriesFor] generates edge
-//     queries directly from a validated instance's edge data — no graph needed.
+// An [Adapter] is safe for concurrent use after construction.
+// Configuration is immutable after [New] returns. All methods use only
+// local allocations and read-only access to the frozen config.
 //
 // # Dependencies
 //

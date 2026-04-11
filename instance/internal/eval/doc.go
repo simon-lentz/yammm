@@ -1,6 +1,6 @@
 // Package eval provides expression evaluation for instance validation.
 //
-// This package evaluates compiled expressions from [schema/expr] against
+// This package evaluates compiled expressions from [github.com/simon-lentz/yammm/schema/expr] against
 // instance property values. It is used internally by the instance validation
 // layer to evaluate invariants and constraints.
 //
@@ -34,10 +34,12 @@
 //
 // The evaluator supports all DSL built-in functions:
 //
-//   - Collection: map, filter, count, all, any, all_or_none, reduce, compact, unique
-//   - Numeric: len, abs, floor, ceil, round, min, max, compare
+//   - Collection: map, filter, count, all, any, all_or_none, reduce, compact, unique, len, sum, first, last, sort, reverse, flatten, contains
+//   - Numeric: abs, floor, ceil, round, min, max, compare
+//   - String: upper, lower, trim, trim_prefix, trim_suffix, split, join, starts_with, ends_with, replace, substring
 //   - Control flow: then, lest, with
 //   - Pattern matching: match
+//   - Utility: type_of, is_nil, default, coalesce
 //
 // # Configuration
 //

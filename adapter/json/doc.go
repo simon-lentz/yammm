@@ -5,7 +5,8 @@
 // # Serialization
 //
 // The adapter can serialize a completed graph to JSON using [Adapter.MarshalObject]
-// or [Adapter.WriteObject]. The output format groups instances by type name:
+// or [Adapter.WriteObject], and individual validated instances using
+// [Adapter.MarshalInstance]. The output format groups instances by type name:
 //
 //	{
 //	  "Person": [{"id": "p1", "name": "Alice"}, ...],
@@ -19,6 +20,15 @@
 //
 // Use [WithIndent] for pretty-printed output and [WithDiagnostics] to include
 // unresolved edges and duplicates in a "$diagnostics" section.
+//
+// # Parsing
+//
+// Parse methods return [instance.RawInstance] values:
+//
+//   - [Adapter.ParseObject]: parse a JSON object keyed by type name
+//   - [Adapter.ParseArray]: parse a JSON array of instances of a given type
+//   - [Adapter.ParseTypedArray]: parse a JSON array where each element has a $type field
+//   - [Adapter.ParseOne]: parse a single JSON object as one instance
 //
 // # Parsing Modes
 //

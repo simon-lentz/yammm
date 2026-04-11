@@ -43,10 +43,10 @@
 // from the raw property map, identical to the JSON adapter path.
 //
 // During snapshot serialization ([Adapter.MarshalSnapshot], [Adapter.WriteSnapshot]),
-// FK columns are included in the header but are empty because [graph.Instance]
-// does not carry edge data (edges are stored externally in the graph). To
-// populate FK columns, use [Adapter.MarshalTyped] or [Adapter.WriteTyped] with
-// [instance.ValidInstance] values that have resolved edge data.
+// FK columns are populated from the snapshot's edge index via [graph.Snapshot]
+// edge lookup. Both snapshot and typed serialization paths resolve FK data;
+// snapshot mode uses graph edges while typed mode uses [instance.ValidInstance]
+// edge data directly.
 //
 // # Compositions
 //

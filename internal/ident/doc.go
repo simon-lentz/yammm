@@ -5,8 +5,7 @@
 //
 // This package is internal to the YAMMM module and is not importable by
 // external consumers per Go's internal/ package semantics. It is used by the
-// schema layer for relation name normalization and by code generation for
-// deriving Go export names.
+// schema layer for relation name normalization.
 //
 // # lower_snake Algorithm
 //

@@ -2,7 +2,7 @@
 //
 // This package provides the single diagnostic infrastructure used across schema
 // loading, parsing, compilation, and instance validation. It depends only on
-// [location] and the standard library.
+// [github.com/simon-lentz/yammm/location] and the standard library.
 //
 // # Design Principles
 //
@@ -86,8 +86,8 @@
 //	)
 //	output := renderer.FormatResult(result)
 //
-// # Package Dependencies
+// # Dependencies
 //
-// diag imports only stdlib and [location]. It must not import schema, instance,
+// diag imports only stdlib and [github.com/simon-lentz/yammm/location]. It must not import schema, instance,
 // graph, or adapter.
 package diag

@@ -25,9 +25,27 @@
 //  2. Blank line collapsing: removes excess blank lines while preserving
 //     intentional section breaks.
 //  3. Line wrapping: wraps long lines (enums, extends clauses, invariants)
-//     at the [LineWidthThreshold].
+//     at the [LineWidthThreshold] (100 columns).
 //  4. Column alignment: aligns property types and modifiers within type blocks.
+//
+// # Additional Functions
+//
+// The individual pipeline phases are also exported for use by the LSP and
+// other consumers:
+//
+//   - [WrapLongLines]: wrap lines exceeding [LineWidthThreshold]
+//   - [AlignColumns]: align property types and modifiers within type blocks
+//   - [NormalizeIndentation]: convert spaces to tabs
+//   - [DisplayWidth]: compute visual width of a line (tab-aware)
 //
 // The formatter is used by the LSP server for textDocument/formatting and by
 // the CLI for the "yammm fmt" command.
+//
+// # Thread Safety
+//
+// All functions are stateless and safe for concurrent use.
+//
+// # Dependencies
+//
+//	format  ──imports──▶  (stdlib + internal/grammar)
 package format

@@ -9,15 +9,15 @@
 //
 // The module's packages and what they provide:
 //
-//   - [location]: Source positions, spans, and canonical paths
-//   - [diag]: Structured diagnostics with stable error codes
-//   - [schema]: Type system, constraints, schema loading, and programmatic building
-//   - [schema/expr]: Expression AST types for invariants
-//   - [instance]: Instance validation and constraint checking
-//   - [graph]: Instance graph construction and integrity checking
-//   - [graph/walk]: Visitor-pattern graph traversal
-//   - [adapter/json]: JSON parsing and serialization
-//   - [adapter/neo4j]: Neo4j constraint generation and Cypher query building
+//   - [github.com/simon-lentz/yammm/location]: Source positions, spans, and canonical paths
+//   - [github.com/simon-lentz/yammm/diag]: Structured diagnostics with stable error codes
+//   - [github.com/simon-lentz/yammm/schema]: Type system, constraints, schema loading, and programmatic building
+//   - [github.com/simon-lentz/yammm/schema/expr]: Expression AST types for invariants
+//   - [github.com/simon-lentz/yammm/instance]: Instance validation and constraint checking
+//   - [github.com/simon-lentz/yammm/graph]: Instance graph construction and integrity checking
+//   - [github.com/simon-lentz/yammm/graph/walk]: Visitor-pattern graph traversal
+//   - [github.com/simon-lentz/yammm/adapter/json]: JSON parsing and serialization
+//   - [github.com/simon-lentz/yammm/adapter/neo4j]: Neo4j constraint generation and Cypher query building
 //
 // Adapters depend on library packages; library packages never depend on adapters.
 //
@@ -39,7 +39,7 @@
 //
 //	import "github.com/simon-lentz/yammm/instance"
 //
-//	validator := instance.NewValidator(schema)
+//	validator := instance.NewValidator(s)
 //	valids, result := validator.Validate(ctx, typeName, rawInstances)
 //	if !result.OK() {
 //	    // Validation failures (type mismatch, missing required, etc.)
@@ -50,7 +50,7 @@
 //
 //	import "github.com/simon-lentz/yammm/graph"
 //
-//	g := graph.New(schema)
+//	g := graph.New(s)
 //	for _, inst := range valids {
 //	    if inst == nil { continue }
 //	    result := g.Add(ctx, inst)

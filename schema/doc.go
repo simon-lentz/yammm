@@ -4,9 +4,23 @@
 //
 // This package implements the schema layer, which is responsible for:
 //   - Loading and parsing schema definitions from *.yammm files
-//   - Building schemas programmatically using the Builder API
+//   - Building schemas programmatically using the [Builder] API
 //   - Providing an immutable, thread-safe schema representation
 //   - Supporting cross-schema imports and inheritance
+//
+// # Key Types
+//
+// The schema object model consists of:
+//
+//   - [Schema]: Top-level container with types, data types, and imports
+//   - [Type]: Named type with properties, relations, invariants, and inheritance
+//   - [Property]: Typed property with optionality, primary key, and constraint metadata
+//   - [Relation]: Association (reference) or composition (ownership) between types
+//   - [Invariant]: Named boolean constraint expression evaluated at validation time
+//   - [DataType]: Named constraint alias (e.g., "type Email = String /pattern/")
+//   - [Import]: Cross-schema import declaration with alias
+//   - [TypeID]: Canonical type identity tuple (SourceID, name) for cross-schema resolution
+//   - [TypeRef]: Syntactic type reference preserving user's original syntax
 //
 // # Loading Schemas
 //
@@ -15,15 +29,73 @@
 //	// Load from file
 //	s, result := schema.Load(ctx, "schema.yammm")
 //
-//	// Load from string
+//	// Load from string (imports disallowed)
 //	s, result := schema.LoadString(ctx, source, "schema.yammm")
 //
-//	// Load from multiple sources
+//	// Load from multiple in-memory sources
 //	s, result := schema.LoadSources(ctx, sources, moduleRoot)
+//
+//	// Load with explicit entry point (useful for LSP)
+//	s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot)
 //
 // A non-OK result with a nil Schema indicates failure. Check result.HasFatal()
 // for I/O or cancellation errors. Check result.HasErrors() to determine
 // semantic success.
+//
+// # Load Options
+//
+// Load functions accept [LoadOption] values to configure behavior:
+//
+//   - [WithRegistry]: schema registry for cross-schema type resolution
+//   - [WithModuleRoot]: root directory for module-style imports
+//   - [WithIssueLimit]: maximum diagnostic issues to collect (default 100)
+//   - [WithSourceRegistry]: source registry for position tracking
+//   - [WithDisallowImports]: prevent import processing
+//   - [WithLogger]: structured logger for diagnostics
+//
+// # Builder API
+//
+// [NewBuilder] provides programmatic schema construction:
+//
+//	s, result := schema.NewBuilder().
+//	    WithName("People").
+//	    AddType("Person").
+//	        WithPrimaryKey("id", schema.NewUUIDConstraint()).
+//	        WithProperty("name", schema.StringLenBetween(1, 100)).
+//	        WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
+//	        Done().
+//	    Build()
+//
+// The builder completes and seals the schema when [Builder.Build] is called.
+//
+// # Constraint System
+//
+// Properties carry typed constraints that define valid value ranges. The
+// [Constraint] interface is implemented by concrete types for each DSL data
+// type: [StringConstraint], [IntegerConstraint], [FloatConstraint],
+// [BooleanConstraint], [TimestampConstraint], [DateConstraint],
+// [UUIDConstraint], [EnumConstraint], [PatternConstraint],
+// [VectorConstraint], [ListConstraint], and [AliasConstraint].
+//
+// Each constraint type has constructors for bounded and unbounded variants
+// (e.g., [NewStringConstraint], [StringLenBetween]). Use [ResolveAlias] to
+// unwrap alias chains.
+//
+// # Registry
+//
+// [Registry] provides thread-safe, append-only storage for cross-schema type
+// resolution. Register schemas after loading and pass the registry to
+// subsequent [Load] calls via [WithRegistry]:
+//
+//	reg := schema.NewRegistry()
+//	reg.Register(baseSchema)
+//	s, result := schema.Load(ctx, "derived.yammm", schema.WithRegistry(reg))
+//
+// # Structural Hash
+//
+// [StructuralHash] computes a deterministic SHA-256 hash of a schema's
+// structure (types, properties, relations, constraints). Used by the
+// snapshot package for compatibility verification.
 //
 // # Immutability
 //
@@ -39,18 +111,26 @@
 //
 // Schemas undergo a completion phase that resolves all internal references:
 //   - Import declarations are resolved to their target schemas
-//   - Type inheritance is computed (LinearizedAncestors)
+//   - Type inheritance is computed ([Type.SuperTypes])
 //   - Property collisions are detected across the inheritance hierarchy
 //   - Alias constraints are resolved to their underlying types
 //
 // After completion, schemas are sealed to prevent further mutation. The
 // [Load] family handles completion automatically. The [NewBuilder] API
-// completes the schema when [Builder.Build] is called. All types and
-// constraints are immutable and thread-safe after sealing.
+// completes the schema when [Builder.Build] is called.
 //
 // # Type Identity
 //
-// Types are identified by TypeID, a tuple of (SourceID, name). This enables
+// Types are identified by [TypeID], a tuple of (SourceID, name). This enables
 // cross-schema type resolution and proper handling of imported types.
 // Two types are equal if and only if they have the same TypeID.
+//
+// # Thread Safety
+//
+// All schema types are immutable and safe for concurrent read access after
+// loading. [Registry] is safe for concurrent use (read-write).
+//
+// # Dependencies
+//
+//	schema  ──imports──▶  location, diag, immutable
 package schema
