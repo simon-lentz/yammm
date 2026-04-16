@@ -46,6 +46,13 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // Info verifies the integrity hash and reports the result in IntegrityStatus.
 // Schema hash cannot be verified (no schema available).
 //
+// Cost scales with file size because Info decodes the instance sections
+// to populate [SnapshotInfo.InstanceCounts] and [SnapshotInfo.TotalEdges].
+// For dispatch-style workloads that only need header-level fields, use
+// [HeaderOnly] — it returns after parsing the header and skips the
+// instance body, making its cost proportional to the header size rather
+// than the full file.
+//
 // Returns (nil, result) with Error-severity diagnostics for malformed input.
 //
 // Info follows the library's standard (T, diag.Result) return pattern.
@@ -103,6 +110,89 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		UnresolvedCount:     len(diags.Unresolved),
 		FileSize:            int64(len(data)),
 		IntegrityStatus:     integrityStatus,
+	}
+
+	return info, sd.collector.Result()
+}
+
+// HeaderInfo contains header metadata extracted from a .ys file without
+// decoding the instance body or verifying the integrity hash. It is the
+// fast, dispatch-friendly counterpart of [SnapshotInfo].
+//
+// HeaderInfo uses exported fields rather than accessor methods, matching
+// the [SnapshotInfo] convention: it is a read-only data transfer object
+// with no invariants to protect.
+type HeaderInfo struct {
+	// Header fields.
+	Version             int
+	Features            []string
+	SchemaName          string
+	SchemaSource        string
+	SchemaHash          string
+	SchemaHashAlgorithm int
+	IntegrityHash       string
+	CreatedAt           string            // RFC 3339 or empty
+	Metadata            map[string]string // user-provided annotations, nil if absent
+
+	// Types array (adjacent to the header in the wire format; read in
+	// the same streaming pass by decodeHeader).
+	Types []string
+
+	// File metadata.
+	FileSize int64 // len(data)
+}
+
+// HeaderOnly reads header metadata from a .ys file without decoding the
+// instance body or verifying the integrity hash.
+//
+// HeaderOnly is the right choice for dispatch-style workloads that scan
+// many .ys files to classify lifecycle state, compare schema hashes, or
+// inspect metadata annotations like CreatedAt. Its cost is proportional
+// to the header size (< 1 KiB for typical .ys files), not the total
+// file size — a property that [Info] cannot offer because it populates
+// instance counts and diagnostic counts by scanning the body.
+//
+// Integrity is not verified. The returned [HeaderInfo.IntegrityHash] is
+// the value stored in the file, not a verification result. Callers that
+// need to confirm the hash matches the document content should use
+// [Verify]. Similarly, schema-hash correctness against a loaded schema
+// is not checked here — HeaderOnly never loads or consults a schema.
+//
+// For anything that needs instance counts, diagnostic counts, or a
+// verified integrity status, use [Info] instead.
+//
+// Returns (nil, result) with Error-severity diagnostics for malformed
+// input. Follows the library's standard (T, diag.Result) return pattern.
+func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
+	if err := ctx.Err(); err != nil {
+		c := diag.NewCollector(0)
+		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, c.Result()
+	}
+
+	sd := newStreamDecoder(data, nil, loadConfig{})
+
+	// Decode header + types only — no instance body, no integrity check.
+	if err := sd.decodeHeader(); err != nil {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+		return nil, sd.collector.Result()
+	}
+	if sd.collector.HasErrors() {
+		return nil, sd.collector.Result()
+	}
+
+	info := &HeaderInfo{
+		Version:             sd.header.Version,
+		Features:            sd.header.Features,
+		SchemaName:          sd.header.SchemaName,
+		SchemaSource:        sd.header.SchemaSource,
+		SchemaHash:          sd.header.SchemaHash,
+		SchemaHashAlgorithm: sd.header.SchemaHashAlgorithm,
+		IntegrityHash:       sd.header.IntegrityHash,
+		CreatedAt:           sd.header.CreatedAt,
+		Metadata:            sd.header.Metadata,
+		Types:               sd.types,
+		FileSize:            int64(len(data)),
 	}
 
 	return info, sd.collector.Result()
