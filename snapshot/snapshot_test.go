@@ -1,12 +1,14 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"math"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -442,6 +444,181 @@ func TestInfo_Basic(t *testing.T) {
 	if info.IntegrityStatus != "ok" {
 		t.Errorf("IntegrityStatus: got %q, want %q", info.IntegrityStatus, "ok")
 	}
+}
+
+func TestHeaderOnly_Basic(t *testing.T) {
+	s := testSchema(t)
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
+	snap := buildSnapshot(t, s, company, person)
+
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap)
+
+	header, result := snapshot.HeaderOnly(ctx, data)
+	require.NoError(t, result.Err(), "HeaderOnly should succeed")
+	require.NotNil(t, header, "HeaderOnly should return a non-nil HeaderInfo")
+
+	assert.Equal(t, 1, header.Version, "Version")
+	assert.Equal(t, "test", header.SchemaName, "SchemaName")
+	assert.NotEmpty(t, header.SchemaHash, "SchemaHash should be populated")
+	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash should be populated (value, not verified)")
+	assert.Equal(t, int64(len(data)), header.FileSize, "FileSize")
+	assert.ElementsMatch(t, []string{"Company", "Person"}, header.Types, "Types should include both types")
+}
+
+func TestHeaderOnly_WithMetadata(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{
+		"pipeline":            "msrb.emma_issues",
+		"extraction_complete": "true",
+	}))
+
+	header, result := snapshot.HeaderOnly(ctx, data)
+	require.NoError(t, result.Err())
+	require.NotNil(t, header.Metadata, "Metadata should be present")
+	assert.Equal(t, "msrb.emma_issues", header.Metadata["pipeline"])
+	assert.Equal(t, "true", header.Metadata["extraction_complete"])
+}
+
+func TestHeaderOnly_WithCreatedAt(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	// Fixed time so we can assert on the serialized form.
+	created, err := time.Parse(time.RFC3339, "2026-04-16T14:30:00Z")
+	require.NoError(t, err)
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithCreatedAt(created))
+
+	header, result := snapshot.HeaderOnly(ctx, data)
+	require.NoError(t, result.Err())
+	assert.Equal(t, "2026-04-16T14:30:00Z", header.CreatedAt, "CreatedAt should round-trip as RFC 3339")
+}
+
+func TestHeaderOnly_CreatedAtOmitted(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap) // No WithCreatedAt — default is empty.
+
+	header, result := snapshot.HeaderOnly(ctx, data)
+	require.NoError(t, result.Err())
+	assert.Empty(t, header.CreatedAt, "CreatedAt should be empty when not set during marshal")
+}
+
+func TestHeaderOnly_ConsistentWithInfo(t *testing.T) {
+	s := testSchema(t)
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
+	snap := buildSnapshot(t, s, company, person)
+
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"key": "val"}))
+
+	info, infoRes := snapshot.Info(ctx, data)
+	require.NoError(t, infoRes.Err())
+	header, headerRes := snapshot.HeaderOnly(ctx, data)
+	require.NoError(t, headerRes.Err())
+
+	// Every field common to both APIs must match byte-for-byte.
+	assert.Equal(t, info.Version, header.Version)
+	assert.Equal(t, info.Features, header.Features)
+	assert.Equal(t, info.SchemaName, header.SchemaName)
+	assert.Equal(t, info.SchemaSource, header.SchemaSource)
+	assert.Equal(t, info.SchemaHash, header.SchemaHash)
+	assert.Equal(t, info.SchemaHashAlgorithm, header.SchemaHashAlgorithm)
+	assert.Equal(t, info.IntegrityHash, header.IntegrityHash)
+	assert.Equal(t, info.CreatedAt, header.CreatedAt)
+	assert.Equal(t, info.Metadata, header.Metadata)
+	assert.Equal(t, info.Types, header.Types)
+	assert.Equal(t, info.FileSize, header.FileSize)
+}
+
+func TestHeaderOnly_IntegrityNotVerified(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap)
+
+	// Sanity-check: Info on clean data succeeds with IntegrityStatus == "ok".
+	info, _ := snapshot.Info(ctx, data)
+	require.Equal(t, "ok", info.IntegrityStatus, "clean data should verify integrity")
+
+	// Corrupt a byte inside the instance body (Acme → Acmf). The header is
+	// unchanged; the integrity hash in the header covers the whole document
+	// so Info must report a mismatch.
+	corrupted := make([]byte, len(data))
+	copy(corrupted, data)
+	corruptIdx := bytes.Index(corrupted, []byte("Acme"))
+	require.Positive(t, corruptIdx, "should find Acme string to corrupt")
+	corrupted[corruptIdx+3] = 'f'
+
+	// Info reports a mismatch — it checks the full document.
+	infoCorrupt, _ := snapshot.Info(ctx, corrupted)
+	assert.Equal(t, "mismatch", infoCorrupt.IntegrityStatus, "Info should detect body corruption")
+
+	// HeaderOnly succeeds — it does not verify integrity. The stored hash is
+	// returned as-is, callers who want verification use Verify.
+	header, headerRes := snapshot.HeaderOnly(ctx, corrupted)
+	require.NoError(t, headerRes.Err(), "HeaderOnly should not error on body corruption")
+	assert.NotEmpty(t, header.IntegrityHash, "HeaderOnly returns the stored hash value")
+	assert.Equal(t, info.IntegrityHash, header.IntegrityHash,
+		"the stored integrity hash is unchanged by body corruption")
+}
+
+func TestHeaderOnly_MalformedJSON(t *testing.T) {
+	_, result := snapshot.HeaderOnly(context.Background(), []byte(`not json`))
+	assert.False(t, result.OK(), "HeaderOnly should error on malformed JSON")
+}
+
+func TestHeaderOnly_EmptyInput(t *testing.T) {
+	_, result := snapshot.HeaderOnly(context.Background(), nil)
+	assert.False(t, result.OK(), "HeaderOnly should error on nil input")
+}
+
+func TestHeaderOnly_MissingHeader(t *testing.T) {
+	_, result := snapshot.HeaderOnly(context.Background(), []byte(`{"types":[]}`))
+	assert.False(t, result.OK(), "HeaderOnly should error when yammm_snapshot header is absent")
+
+	var found bool
+	for issue := range result.Errors() {
+		if issue.Code() == diag.E_SNAPSHOT_MALFORMED {
+			found = true
+		}
+	}
+	assert.True(t, found, "missing header should produce E_SNAPSHOT_MALFORMED")
+}
+
+func TestHeaderOnly_ContextCancellation(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	data, _ := snapshot.Marshal(context.Background(), snap)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately.
+
+	_, result := snapshot.HeaderOnly(ctx, data)
+	assert.False(t, result.OK(), "cancelled context should produce a diagnostic")
+
+	var found bool
+	for issue := range result.BySeverity(diag.Fatal) {
+		if issue.Code() == diag.E_CONTEXT_CANCELLED {
+			found = true
+		}
+	}
+	assert.True(t, found, "cancelled context should produce E_CONTEXT_CANCELLED at Fatal severity")
 }
 
 func TestMarshal_WithIndent(t *testing.T) {

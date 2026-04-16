@@ -23,6 +23,9 @@
 //	// Read metadata only
 //	info, result := snapshot.Info(ctx, data)
 //
+//	// Read header only (dispatch-style workloads)
+//	header, result := snapshot.HeaderOnly(ctx, data)
+//
 // # Functions
 //
 // [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
@@ -37,6 +40,15 @@
 // [Info] reads summary metadata and statistics from a .ys file without loading
 // the schema or materializing instance objects. Returns a [SnapshotInfo] with
 // schema name, hash, instance counts per type, totals, and integrity status.
+// Cost scales with file size (the instance body is scanned to populate counts).
+//
+// [HeaderOnly] reads header metadata from a .ys file without decoding the
+// instance body or verifying the integrity hash. Returns a [HeaderInfo] with
+// the header fields plus the types array. Cost is proportional to the header
+// size, not the total file size — the right choice for dispatch-style
+// workloads that scan many .ys files to classify state or compare schema
+// hashes. When counts, diagnostics, or verified integrity are required, use
+// [Info] instead.
 //
 // # Marshal Options
 //
