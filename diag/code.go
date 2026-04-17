@@ -408,16 +408,18 @@ var (
 
 	// --- v0.3.0 additions ---
 
-	// E_SNAPSHOT_IO indicates a per-file I/O failure encountered while
-	// iterating a directory scan (typically from os.Open or the underlying
-	// file Read). Emitted by snapshot.ScanDir on its per-file path: the
-	// issue lands on ScanEntry.Result so the iterator continues to the
-	// next file rather than aborting, and the underlying os error is
-	// preserved as a detail entry so the operator can recover the concrete
-	// cause. Named E_SNAPSHOT_IO (not E_IO) to match the E_SNAPSHOT_*
-	// convention under CategorySnapshot; the precedent for a per-category
-	// I/O code is E_LOAD_IO_FAILURE under CategorySchema. No new
-	// CategoryIO constant is introduced.
+	// E_SNAPSHOT_IO indicates a filesystem I/O failure encountered during
+	// a directory scan — either a dir-level failure (os.ReadDir on
+	// snapshot.ScanDir / snapshot.ScanDirSlice) or a per-file failure
+	// (os.Open or the underlying file Read on ScanDir's per-file path).
+	// Per-file emissions land on ScanEntry.Result so the iterator
+	// continues to the next file rather than aborting; dir-level
+	// emissions surface on the outer Result returned by ScanDirSlice.
+	// The underlying os error is preserved as a detail entry so the
+	// operator can recover the concrete cause. Named E_SNAPSHOT_IO (not
+	// E_IO) to match the E_SNAPSHOT_* convention under CategorySnapshot;
+	// the precedent for a per-category I/O code is E_LOAD_IO_FAILURE
+	// under CategorySchema. No new CategoryIO constant is introduced.
 	E_SNAPSHOT_IO = NewCode("E_SNAPSHOT_IO", CategorySnapshot)
 
 	// E_UPDATE_METADATA_BODY_OFFSET indicates the header parsed cleanly

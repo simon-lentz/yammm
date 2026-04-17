@@ -483,7 +483,60 @@ The payload is first written to `path + snapshot.TmpSuffix`, `fsync`'d, closed, 
 
 **Durability semantics.** File mode is `0o666` subject to umask, matching `os.Create`; callers needing stricter permissions should `chmod` after `WriteFile` returns. The file is `fsync`'d before rename but the parent directory is NOT `fsync`'d, so on some filesystems the rename may not be durable across a crash — consumers with stronger durability requirements should fork the helper and add parent-directory fsync.
 
-**Crash recovery.** If the process crashes between `fsync` and `rename`, a partial write may remain at `path + snapshot.TmpSuffix`. The `TmpSuffix` constant is exported so downstream primitives and consumer cleanup tools key off a single source of truth rather than hard-coding `.tmp`; the directory-iterator primitive landing alongside this release skips entries with the suffix automatically.
+**Crash recovery.** If the process crashes between `fsync` and `rename`, a partial write may remain at `path + snapshot.TmpSuffix`. The `TmpSuffix` constant is exported so downstream primitives and consumer cleanup tools key off a single source of truth rather than hard-coding `.tmp`; the directory-iterator primitive (`ScanDir`, see [Directory Iteration](#directory-iteration) below) skips entries with the suffix automatically.
+
+### Directory Iteration
+
+For dispatch-style workloads that enumerate every `.ys` file in a directory — retention sweeps, link-engine discovery, operator "what's in this dir" inspection — `snapshot.ScanDir` exposes a lazy iterator over one `ScanEntry` per file, with the header parsed on-demand via `HeaderOnlyRead`:
+
+```go
+type ScanEntry struct {
+    Name   string               // basename, e.g., "CA.ys"
+    Path   string               // full path, filepath.Join(dir, Name)
+    Header *snapshot.HeaderInfo // nil when Result has error-severity issues
+    Result diag.Result          // OK on the happy path; carries errors per-file
+}
+
+// Lazy iterator — headers are parsed on demand; callers can break early
+// without paying the parse cost for remaining files.
+func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error]
+
+// Materializing convenience wrapper.
+func ScanDirSlice(ctx context.Context, dir string) ([]ScanEntry, diag.Result)
+```
+
+Typical call pattern:
+
+```go
+for entry, err := range snapshot.ScanDir(ctx, dir) {
+    if err != nil {
+        return fmt.Errorf("scan: %w", err)
+    }
+    if entry.Result.HasErrors() {
+        log.Warn("skipping", "name", entry.Name, "err", entry.Result.Err())
+        continue
+    }
+    use(entry.Header)
+}
+```
+
+**Error surface, in two categories:**
+
+- The iterator's second yielded value (the `error`) is non-nil ONLY for operation-level failures that end iteration: a dir-open error (`ENOENT`, `EACCES`, `ENOTDIR`, ...) is yielded as a single `(ScanEntry{}, err)` pair wrapping the underlying `os` error; context cancellation observed between files is yielded as `(ScanEntry{}, ctx.Err())`. The zero-value `ScanEntry` signals "no file was reached." Cancellation observed between files takes precedence over any concurrent per-file failure.
+- Per-file failures (corrupt header, per-file `os.Open` / `Read` failure) live on `ScanEntry.Result`; the iterator's error is `nil` for those and iteration continues. Per-file I/O failures surface as a Fatal `E_SNAPSHOT_IO`; corrupt headers surface as an Error-severity `E_SNAPSHOT_MALFORMED` (both inherit from `HeaderOnlyRead`'s diagnostic surface).
+
+**Filtering:**
+
+- Only regular files (not directories) whose basename ends with `.ys` are included. Subdirectories are skipped even when their name ends with `.ys`.
+- Files whose basename ends with `snapshot.TmpSuffix` are skipped — the atomic-write staging files that `WriteFile` may leave behind on crash. Both primitives key off the shared exported constant; the single source of truth keeps them from drifting.
+- Symlinks are followed; broken symlinks yield a per-file Fatal `E_SNAPSHOT_IO` entry with the underlying `os.Open` error surfaced as a detail.
+- Entries are yielded in the order returned by `os.ReadDir`, which sorts by filename.
+
+**`ScanDirSlice` semantics:**
+
+`ScanDirSlice` materializes the full iteration into a slice plus an outer `diag.Result`. The outer Result surfaces operation-level errors only (dir does not exist → Fatal `E_SNAPSHOT_IO`; context cancellation → Fatal `E_CONTEXT_CANCELLED`); per-file errors remain on each `ScanEntry.Result`. Context cancellation returns *partial* results — the returned slice contains entries processed before cancellation, and callers who want fail-fast-on-cancel check `result.HasFatal()` before consuming the slice.
+
+**CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, header, issues}` JSON array. The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
 
 ## Diagnostics
 

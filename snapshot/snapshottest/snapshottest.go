@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -312,4 +313,86 @@ func goldenPath(name string) string {
 	// Get the directory of this source file to find testdata relative to it.
 	_, thisFile, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(thisFile), "..", "testdata", name+".ys")
+}
+
+// State describes the expected [snapshot.ScanDir] outcome for a single
+// .ys file. Used by [ExpectDirState] to assert a directory snapshot in
+// a single call rather than inlining per-file assertions across tests.
+type State struct {
+	// Valid asserts entry.Result.HasErrors() == false AND Header != nil.
+	Valid bool
+	// ErrorCode asserts the entry's first error-severity issue carries
+	// this code. The zero value (diag.Code{}) means "any error code
+	// accepted" — use when the test only cares that the entry failed,
+	// not why. Ignored when Valid is true.
+	ErrorCode diag.Code
+}
+
+// ExpectDirState asserts that [snapshot.ScanDir](ctx, dir) yields
+// entries whose Name-keyed result matches the expected map. Files
+// present in the directory but absent from expected, or expected but
+// absent from the directory, fail the test with a list of differences.
+// Uses context.Background() internally; tests needing cancellation
+// semantics should call ScanDir directly.
+//
+// The helper pairs with the [State] type: each expected file declares
+// whether it should yield a valid header (State{Valid: true}) or fail
+// with a specific diagnostic code (State{Valid: false,
+// ErrorCode: diag.E_SNAPSHOT_MALFORMED}).
+func ExpectDirState(tb testing.TB, dir string, expected map[string]State) {
+	tb.Helper()
+	seen := make(map[string]bool, len(expected))
+	for entry, err := range snapshot.ScanDir(context.Background(), dir) {
+		if err != nil {
+			tb.Fatalf("ExpectDirState: iterator error: %v", err)
+		}
+		seen[entry.Name] = true
+		want, ok := expected[entry.Name]
+		if !ok {
+			tb.Errorf("ExpectDirState: unexpected file %q in dir", entry.Name)
+			continue
+		}
+		assertEntryMatches(tb, entry, want)
+	}
+	for name := range expected {
+		if !seen[name] {
+			tb.Errorf("ExpectDirState: expected file %q not found in dir", name)
+		}
+	}
+}
+
+// assertEntryMatches compares one entry against one expected State.
+func assertEntryMatches(tb testing.TB, entry snapshot.ScanEntry, want State) {
+	tb.Helper()
+	if want.Valid {
+		if entry.Result.HasErrors() {
+			tb.Errorf("%s: expected valid, got errors: %v", entry.Name, entry.Result)
+		}
+		if entry.Header == nil {
+			tb.Errorf("%s: expected Header, got nil", entry.Name)
+		}
+		return
+	}
+	if !entry.Result.HasErrors() {
+		tb.Errorf("%s: expected errors, got OK", entry.Name)
+		return
+	}
+	// Zero-value ErrorCode means "any error accepted".
+	if want.ErrorCode == (diag.Code{}) {
+		return
+	}
+	var first diag.Issue
+	var hasFirst bool
+	for iss := range entry.Result.Errors() {
+		first = iss
+		hasFirst = true
+		break
+	}
+	if !hasFirst {
+		tb.Errorf("%s: expected ErrorCode %v, result carried no errors", entry.Name, want.ErrorCode)
+		return
+	}
+	if first.Code() != want.ErrorCode {
+		tb.Errorf("%s: expected ErrorCode %v, got %v", entry.Name, want.ErrorCode, first.Code())
+	}
 }

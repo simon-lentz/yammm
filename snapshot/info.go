@@ -258,6 +258,9 @@ const MaxHeaderSize = 64 * 1024
 //
 // Returns (nil, result) with Error-severity diagnostics for malformed
 // input. Follows the library's standard (T, diag.Result) return pattern.
+//
+// See also [ScanDir] for directory-wide iteration that uses this
+// primitive per file.
 func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result) {
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)

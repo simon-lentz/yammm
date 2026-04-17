@@ -35,6 +35,13 @@
 //	// Write .ys bytes atomically to disk (tmp+fsync+rename)
 //	if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 //
+//	// Iterate every .ys file in a directory (header-only, lazy)
+//	for entry, err := range snapshot.ScanDir(ctx, dir) {
+//	    if err != nil { /* dir-level or ctx-cancel failure */ }
+//	    if entry.Result.HasErrors() { /* per-file failure */ }
+//	    use(entry.Header)
+//	}
+//
 // # Functions
 //
 // [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
@@ -82,6 +89,16 @@
 // reference [TmpSuffix] rather than hard-coding ".tmp" so the
 // convention stays single-source-of-truth across the snapshot
 // package.
+//
+// [ScanDir] iterates every .ys file in a directory and yields one
+// [ScanEntry] per file, with the header parsed lazily via
+// [HeaderOnlyRead] on demand. The iterator's second yielded value is
+// non-nil only for operation-level failures (dir-open, context
+// cancellation); per-file failures (corrupt header, per-file I/O)
+// surface on [ScanEntry.Result] and iteration continues. Files whose
+// basename ends with [TmpSuffix] are skipped so crash-residual
+// staging files are not confused for complete snapshots.
+// [ScanDirSlice] is the materializing convenience wrapper.
 //
 // # Marshal Options
 //
