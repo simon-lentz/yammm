@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"math"
 	"reflect"
 	"strings"
@@ -619,6 +621,278 @@ func TestHeaderOnly_ContextCancellation(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "cancelled context should produce E_CONTEXT_CANCELLED at Fatal severity")
+}
+
+// HeaderOnlyRead streams header metadata from an io.Reader without
+// materializing the full document. The tests pin each Godoc-advertised
+// contract: reader-vs-bytes parity, the MaxHeaderSize cap and its
+// distinguished error message, slow-reader tolerance via io.Pipe,
+// cancellation at entry, reader-error uniform surfacing, and the
+// baseline malformed-input paths.
+
+func TestHeaderOnlyRead_HappyPath(t *testing.T) {
+	s := testSchema(t)
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
+	snap := buildSnapshot(t, s, company, person)
+
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap)
+
+	header, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
+	require.NoError(t, result.Err(), "HeaderOnlyRead should succeed on well-formed input")
+	require.NotNil(t, header, "HeaderOnlyRead should return a non-nil HeaderInfo")
+
+	assert.Equal(t, 1, header.Version)
+	assert.Equal(t, "test", header.SchemaName)
+	assert.NotEmpty(t, header.SchemaHash)
+	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash is the stored value, not a verification result")
+	assert.ElementsMatch(t, []string{"Company", "Person"}, header.Types)
+	assert.Equal(t, int64(0), header.FileSize, "FileSize is not populated in the reader variant")
+}
+
+func TestHeaderOnlyRead_ParityWithHeaderOnly(t *testing.T) {
+	s := testSchema(t)
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
+	snap := buildSnapshot(t, s, company, person)
+
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"key": "val"}))
+
+	fromBytes, bytesRes := snapshot.HeaderOnly(ctx, data)
+	require.NoError(t, bytesRes.Err())
+	fromReader, readerRes := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
+	require.NoError(t, readerRes.Err())
+
+	// Every HeaderInfo field equal EXCEPT FileSize — the single
+	// documented structural delta between the two entry points.
+	assert.Equal(t, fromBytes.Version, fromReader.Version)
+	assert.Equal(t, fromBytes.Features, fromReader.Features)
+	assert.Equal(t, fromBytes.SchemaName, fromReader.SchemaName)
+	assert.Equal(t, fromBytes.SchemaSource, fromReader.SchemaSource)
+	assert.Equal(t, fromBytes.SchemaHash, fromReader.SchemaHash)
+	assert.Equal(t, fromBytes.SchemaHashAlgorithm, fromReader.SchemaHashAlgorithm)
+	assert.Equal(t, fromBytes.IntegrityHash, fromReader.IntegrityHash)
+	assert.Equal(t, fromBytes.CreatedAt, fromReader.CreatedAt)
+	assert.Equal(t, fromBytes.Metadata, fromReader.Metadata)
+	assert.Equal(t, fromBytes.Types, fromReader.Types)
+
+	assert.Equal(t, int64(len(data)), fromBytes.FileSize)
+	assert.Equal(t, int64(0), fromReader.FileSize)
+}
+
+func TestHeaderOnlyRead_ExceedsMaxHeaderSize(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	ctx := context.Background()
+	// 70 KiB metadata value pushes the header past 64 KiB.
+	huge := strings.Repeat("x", 70*1024)
+	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"huge": huge}))
+
+	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
+	require.True(t, result.HasErrors(), "header exceeding MaxHeaderSize should error")
+
+	var found bool
+	for issue := range result.Errors() {
+		if issue.Code() == diag.E_SNAPSHOT_MALFORMED && strings.Contains(issue.Message(), "exceeded MaxHeaderSize") {
+			found = true
+		}
+	}
+	assert.True(t, found, "over-limit header should surface E_SNAPSHOT_MALFORMED with an 'exceeded MaxHeaderSize' message")
+}
+
+func TestHeaderOnlyRead_MaxHeaderSizeBoundaryMidToken(t *testing.T) {
+	// Pins the distinguished error-message path when MaxHeaderSize
+	// falls inside an unclosed string literal — the failure mode
+	// operators most need help disambiguating from a generic
+	// json-decoder parse error. With a 70 KiB metadata string, the
+	// opening quote lies < 1 KiB into the header and the closing quote
+	// lies past 70 KiB, so the 64 KiB limit is unambiguously mid-token.
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	ctx := context.Background()
+	midTok := strings.Repeat("y", 70*1024)
+	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"mid": midTok}))
+
+	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
+	require.True(t, result.HasErrors(), "mid-token over-limit header should error")
+
+	// The assertion targets the distinguished "exceeded MaxHeaderSize"
+	// message, not the underlying json.Decoder error text, which is
+	// version-sensitive.
+	var found bool
+	for issue := range result.Errors() {
+		if issue.Code() == diag.E_SNAPSHOT_MALFORMED && strings.Contains(issue.Message(), "exceeded MaxHeaderSize") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "mid-token cap should produce the 'exceeded MaxHeaderSize' message, not a generic JSON error")
+}
+
+func TestHeaderOnlyRead_SlowReader(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap)
+
+	// Feed the bytes through io.Pipe in 64-byte chunks with a small
+	// delay between writes. Exercises json.Decoder's partial-read
+	// handling and the limitReader's byte accounting under timing
+	// variance.
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		const chunkSize = 64
+		for off := 0; off < len(data); off += chunkSize {
+			end := min(off+chunkSize, len(data))
+			if _, err := pw.Write(data[off:end]); err != nil {
+				return
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+	}()
+
+	header, result := snapshot.HeaderOnlyRead(ctx, pr)
+	require.NoError(t, result.Err(), "slow reader should not surface an error on well-formed input")
+	require.NotNil(t, header)
+	assert.Equal(t, "test", header.SchemaName)
+	assert.ElementsMatch(t, []string{"Company"}, header.Types)
+}
+
+func TestHeaderOnlyRead_ContextCancellation(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+	data, _ := snapshot.Marshal(context.Background(), snap)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
+	require.True(t, result.HasErrors(), "cancelled context should produce a diagnostic")
+
+	var found bool
+	for issue := range result.BySeverity(diag.Fatal) {
+		if issue.Code() == diag.E_CONTEXT_CANCELLED {
+			found = true
+		}
+	}
+	assert.True(t, found, "cancelled context should produce Fatal E_CONTEXT_CANCELLED")
+}
+
+// errReader always returns the configured error on Read; used to exercise
+// HeaderOnlyRead's reader-error handling paths.
+type errReader struct{ err error }
+
+func (er *errReader) Read(_ []byte) (int, error) { return 0, er.err }
+
+func TestHeaderOnlyRead_ReaderErrors(t *testing.T) {
+	// Every reader-error class should surface as E_SNAPSHOT_MALFORMED
+	// on the returned diag.Result, not as a bare error return. The
+	// library's uniform diagnostic surface is load-bearing for
+	// dispatch callers that want one error shape across on-disk and
+	// in-transit truncation.
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"io.EOF", io.EOF},
+		{"io.ErrUnexpectedEOF", io.ErrUnexpectedEOF},
+		{"arbitrary I/O error", errors.New("synthetic disk failure")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, result := snapshot.HeaderOnlyRead(context.Background(), &errReader{err: tc.err})
+			require.True(t, result.HasErrors(), "reader error should error")
+			var found bool
+			for issue := range result.Errors() {
+				if issue.Code() == diag.E_SNAPSHOT_MALFORMED {
+					found = true
+				}
+			}
+			assert.True(t, found, "%s should surface as E_SNAPSHOT_MALFORMED", tc.name)
+		})
+	}
+}
+
+func TestHeaderOnlyRead_MalformedJSON(t *testing.T) {
+	_, result := snapshot.HeaderOnlyRead(context.Background(), strings.NewReader("not a json snapshot"))
+	assert.True(t, result.HasErrors(), "HeaderOnlyRead should error on malformed JSON")
+}
+
+func TestHeaderOnlyRead_MissingYammmSnapshotKey(t *testing.T) {
+	_, result := snapshot.HeaderOnlyRead(context.Background(), strings.NewReader(`{"types":[]}`))
+	require.True(t, result.HasErrors(), "valid JSON with wrong first key should error")
+
+	var found bool
+	for issue := range result.Errors() {
+		if issue.Code() == diag.E_SNAPSHOT_MALFORMED {
+			found = true
+		}
+	}
+	assert.True(t, found, "missing yammm_snapshot first key should produce E_SNAPSHOT_MALFORMED")
+}
+
+func TestHeaderInfo_SchemaHashMatches(t *testing.T) {
+	s := testSchema(t)
+	realHash := schema.StructuralHash(s)
+	require.NotEmpty(t, realHash, "precondition: schema.StructuralHash should return non-empty")
+
+	// A second schema with a different type set hashes differently.
+	s2, res := schema.NewBuilder().
+		WithName("other").
+		WithSourceID(location.MustNewSourceID("test://other.yammm")).
+		AddType("OnlyType").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		Build()
+	require.NoError(t, res.Err())
+	otherHash := schema.StructuralHash(s2)
+	require.NotEqual(t, realHash, otherHash, "precondition: different schemas should hash differently")
+
+	t.Run("matching_hash_returns_true", func(t *testing.T) {
+		h := &snapshot.HeaderInfo{
+			SchemaHash:          realHash,
+			SchemaHashAlgorithm: schema.StructuralHashVersion,
+		}
+		assert.True(t, h.SchemaHashMatches(s))
+	})
+	t.Run("mismatched_hash_returns_false", func(t *testing.T) {
+		h := &snapshot.HeaderInfo{
+			SchemaHash:          otherHash,
+			SchemaHashAlgorithm: schema.StructuralHashVersion,
+		}
+		assert.False(t, h.SchemaHashMatches(s))
+	})
+	t.Run("nil_receiver_returns_false_without_panic", func(t *testing.T) {
+		var h *snapshot.HeaderInfo
+		assert.False(t, h.SchemaHashMatches(s))
+	})
+	t.Run("nil_schema_returns_false_without_panic", func(t *testing.T) {
+		h := &snapshot.HeaderInfo{SchemaHash: realHash, SchemaHashAlgorithm: schema.StructuralHashVersion}
+		assert.False(t, h.SchemaHashMatches(nil))
+	})
+	t.Run("empty_schema_hash_returns_false", func(t *testing.T) {
+		h := &snapshot.HeaderInfo{SchemaHash: "", SchemaHashAlgorithm: schema.StructuralHashVersion}
+		assert.False(t, h.SchemaHashMatches(s))
+	})
+	t.Run("algorithm_version_mismatch_returns_false", func(t *testing.T) {
+		// Even if the hash string happens to match, a different
+		// algorithm version means the values are not comparable.
+		h := &snapshot.HeaderInfo{
+			SchemaHash:          realHash,
+			SchemaHashAlgorithm: 99, // fictional future algorithm version
+		}
+		assert.False(t, h.SchemaHashMatches(s))
+	})
 }
 
 func TestMarshal_WithIndent(t *testing.T) {

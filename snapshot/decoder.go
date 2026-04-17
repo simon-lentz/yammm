@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -31,9 +32,15 @@ type edgeRef struct {
 	targetKey  string
 }
 
-// streamDecoder is the shared infrastructure for Verify, Load, and Info.
+// streamDecoder is the shared infrastructure for Verify, Load, Info, and
+// HeaderOnlyRead. Byte-based callers set data and leave reader nil;
+// reader-based callers set reader and leave data nil. decodeSections and
+// verifyIntegrity require data and must not be called on a reader-based
+// decoder (HeaderOnlyRead, the sole reader-based caller, only invokes
+// decodeHeader).
 type streamDecoder struct {
-	data      []byte          // raw input bytes for integrity hash verification
+	data      []byte          // raw input bytes; nil for reader-based callers
+	reader    io.Reader       // one-shot reader; non-nil only when data == nil
 	header    headerWire      // decoded header
 	types     []string        // decoded types array
 	collector *diag.Collector // accumulates diagnostics
@@ -41,7 +48,7 @@ type streamDecoder struct {
 	// loadCfg holds deserialization options (e.g., skip integrity check).
 	loadCfg loadConfig
 
-	// schema is the provided schema (nil for Info).
+	// schema is the provided schema (nil for Info and HeaderOnlyRead).
 	schema *schema.Schema
 }
 
@@ -55,10 +62,37 @@ func newStreamDecoder(data []byte, s *schema.Schema, cfg loadConfig) *streamDeco
 	}
 }
 
-// decodeHeader reads and validates the header and types array from the raw data.
+// newStreamDecoderFromReader creates a new streamDecoder backed by an
+// io.Reader. The reader is consumed once by decodeHeader; decodeSections
+// and verifyIntegrity require the full byte slice and must not be called
+// on a reader-based decoder.
+func newStreamDecoderFromReader(r io.Reader, s *schema.Schema, cfg loadConfig) *streamDecoder {
+	return &streamDecoder{
+		reader:    r,
+		collector: diag.NewCollector(0),
+		loadCfg:   cfg,
+		schema:    s,
+	}
+}
+
+// decodeHeader reads and validates the header and types array from the input.
 // Returns error for JSON codec failures; validation issues go into the collector.
+//
+// For byte-based decoders (reader == nil) a fresh bytes.NewReader is created
+// per call so decodeHeader remains idempotent — decodeSections can re-scan
+// from the start without the header reader having consumed prefix bytes.
+// A nil data slice is passed through as bytes.NewReader(nil), which yields
+// io.EOF immediately and surfaces as a malformed-input diagnostic.
+// For reader-based decoders (reader != nil) the single reader is consumed
+// once; calling decodeHeader a second time finds the reader drained.
 func (sd *streamDecoder) decodeHeader() error {
-	dec := json.NewDecoder(bytes.NewReader(sd.data))
+	var input io.Reader
+	if sd.reader != nil {
+		input = sd.reader
+	} else {
+		input = bytes.NewReader(sd.data)
+	}
+	dec := json.NewDecoder(input)
 	dec.UseNumber()
 
 	// Expect top-level object.

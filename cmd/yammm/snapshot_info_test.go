@@ -73,3 +73,52 @@ func TestSnapshotInfo_MalformedFile(t *testing.T) {
 	code := executeCmd(t, "snapshot", "info", tmp)
 	assert.Equal(t, cli.ExitValidation, code)
 }
+
+func TestSnapshotInfo_HeaderOnlyFlag(t *testing.T) {
+	t.Parallel()
+
+	ysPath := createYSFixture(t, t.TempDir())
+
+	cmd := newRootCmd("test")
+	var outBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetArgs([]string{"snapshot", "info", "--header-only", ysPath})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	out := outBuf.String()
+	// Header-only fields are present.
+	assert.Contains(t, out, "Snapshot:")
+	assert.Contains(t, out, "Person")
+	assert.Contains(t, out, "Integrity:")
+	// Instance-count and summary fields are NOT present — the whole
+	// point is that HeaderOnlyRead doesn't compute them.
+	assert.NotContains(t, out, "Total instances:",
+		"header-only output should not include instance counts (they are not computed)")
+	assert.NotContains(t, out, "Summary:",
+		"header-only output should not include the summary section")
+}
+
+func TestSnapshotInfo_HeaderOnlyFlag_JSONFormat(t *testing.T) {
+	t.Parallel()
+
+	ysPath := createYSFixture(t, t.TempDir())
+
+	cmd := newRootCmd("test")
+	var outBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetArgs([]string{"snapshot", "info", "--header-only", "--format", "json", ysPath})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	var header map[string]any
+	require.NoError(t, json.Unmarshal(outBuf.Bytes(), &header))
+	assert.Contains(t, header, "SchemaName")
+	assert.Contains(t, header, "IntegrityHash")
+	assert.Contains(t, header, "Types")
+	// SnapshotInfo-only fields are absent from the HeaderInfo JSON.
+	assert.NotContains(t, header, "TotalInstances")
+	assert.NotContains(t, header, "IntegrityStatus")
+}

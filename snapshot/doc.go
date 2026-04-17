@@ -26,6 +26,12 @@
 //	// Read header only (dispatch-style workloads)
 //	header, result := snapshot.HeaderOnly(ctx, data)
 //
+//	// Read header only from an io.Reader (no pre-materialized bytes)
+//	header, result := snapshot.HeaderOnlyRead(ctx, file)
+//
+//	// Compare the header's schema hash against a loaded schema
+//	if !header.SchemaHashMatches(s) { /* stale-schema path */ }
+//
 // # Functions
 //
 // [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
@@ -49,6 +55,20 @@
 // workloads that scan many .ys files to classify state or compare schema
 // hashes. When counts, diagnostics, or verified integrity are required, use
 // [Info] instead.
+//
+// [HeaderOnlyRead] is the streaming sibling of [HeaderOnly]: it accepts an
+// io.Reader and parses the header without requiring the caller to
+// pre-materialize the full document into memory. Intended for dispatch
+// callers that open each .ys file with os.Open (rather than os.ReadFile)
+// and only need header metadata. Reads at most [MaxHeaderSize] bytes
+// from the reader; larger headers are rejected with a distinguished
+// E_SNAPSHOT_MALFORMED message.
+//
+// [HeaderInfo.SchemaHashMatches] is the nil-safe dispatch-site helper
+// for comparing a header's schema hash against a loaded *schema.Schema.
+// Use it after [HeaderOnly] or [HeaderOnlyRead] when the dispatch
+// decision depends on whether the snapshot was produced under a
+// matching schema version.
 //
 // # Marshal Options
 //

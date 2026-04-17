@@ -356,9 +356,21 @@ result := snapshot.Verify(ctx, data, schema, loadOpts...)
 // Read summary metadata and statistics without full deserialization
 // Memory usage is constant regardless of snapshot size
 info, result := snapshot.Info(ctx, data)
+
+// Read header metadata only, from []byte — skips instance body and
+// integrity check. Cost is proportional to the header size (< 1 KiB
+// typical), not the total file size.
+header, result := snapshot.HeaderOnly(ctx, data)
+
+// Streaming sibling: read header metadata from any io.Reader without
+// materializing the full document into memory. Reads at most
+// snapshot.MaxHeaderSize (64 KiB) bytes from the reader.
+header, result := snapshot.HeaderOnlyRead(ctx, r)
 ```
 
 `Load` does not re-validate instance data — the persisted snapshot is assumed to contain valid data. However, `Load` performs structural validation of the `.ys` format itself and verifies schema compatibility using `schema.StructuralHash`.
+
+`HeaderOnly` and `HeaderOnlyRead` intentionally skip integrity verification — the returned `HeaderInfo.IntegrityHash` is the stored value, not a verification result. Use `Verify` when the document's hash must be confirmed. Neither function consults a schema; dispatch callers use the `HeaderInfo.SchemaHashMatches(s)` helper (see [Snapshot Info](#snapshot-info) below) to compare the stored schema hash against a loaded `*schema.Schema`.
 
 ### Marshal Options
 
@@ -404,6 +416,52 @@ type SnapshotInfo struct {
     IntegrityStatus string // "ok", "mismatch", or "skipped"
 }
 ```
+
+### Header-Only Reads
+
+For dispatch-style workloads that classify many `.ys` files by header metadata alone — lifecycle state, schema-hash comparison, `CreatedAt` inspection — `HeaderOnly` (byte-slice variant) and `HeaderOnlyRead` (streaming io.Reader variant) return a compact `HeaderInfo`:
+
+```go
+type HeaderInfo struct {
+    // Header fields (identical to the SnapshotInfo header block).
+    Version             int
+    Features            []string
+    SchemaName          string
+    SchemaSource        string
+    SchemaHash          string
+    SchemaHashAlgorithm int
+    IntegrityHash       string
+    CreatedAt           string
+    Metadata            map[string]string
+
+    // Types array (adjacent to the header; read in the same streaming pass).
+    Types []string
+
+    // File metadata. Populated by HeaderOnly (len(data)); zero value
+    // from HeaderOnlyRead (not available from an io.Reader).
+    FileSize int64
+}
+```
+
+`HeaderOnlyRead` accepts any `io.Reader` and reads at most `snapshot.MaxHeaderSize = 64 * 1024` bytes. Larger headers are rejected with a Fatal-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. Reader errors (`io.EOF`, `io.ErrUnexpectedEOF`, or arbitrary I/O errors) during the header read surface uniformly as `E_SNAPSHOT_MALFORMED` rather than as a bare error return. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read.
+
+#### SchemaHashMatches — dispatch-site cross-check
+
+Neither `HeaderOnly` nor `HeaderOnlyRead` consults a schema, so neither verifies that the stored schema hash matches the caller's loaded schema. `HeaderInfo.SchemaHashMatches(s *schema.Schema) bool` performs that comparison at the dispatch site:
+
+```go
+header, result := snapshot.HeaderOnlyRead(ctx, r)
+if result.HasErrors() {
+    return result.Err()
+}
+if !header.SchemaHashMatches(s) {
+    // stale-schema path: the .ys was produced under a different
+    // schema version.
+    return errStaleSchema
+}
+```
+
+`SchemaHashMatches` is nil-safe and returns `false` without panicking when the receiver is nil, the schema is nil, the header's `SchemaHash` is empty, the header's `SchemaHashAlgorithm` does not match `schema.StructuralHashVersion`, or `schema.StructuralHash(s)` returns an empty string. Dispatch callers treat `false` as "unknown or incompatible schema, do not proceed" rather than silently continuing.
 
 ## Diagnostics
 
