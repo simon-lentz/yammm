@@ -90,4 +90,23 @@
 //
 // diag imports only stdlib and [github.com/simon-lentz/yammm/location]. It must not import schema, instance,
 // graph, or adapter.
+//
+// # v0.3.0 Diagnostic Code Additions
+//
+// v0.3.0 adds three stable diagnostic codes under [CategorySnapshot],
+// surfaced by the new primitives in the snapshot package. They land in
+// this file ahead of the primitive PRs so every per-item PR has concrete
+// codes to reference at merge time. The W_ prefix on the warning code
+// inaugurates the convention for Warning-severity codes added from
+// v0.3.0 onward; existing Warning-severity codes retain their E_
+// identifiers for backwards compatibility.
+//
+//	Code                              Severity  Emitted by
+//	--------------------------------  --------  -----------------------------------------------------
+//	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (per-file I/O failure on ScanEntry.Result)
+//	E_UPDATE_METADATA_BODY_OFFSET     Fatal     snapshot.UpdateMetadata (body-offset tracker cannot resolve)
+//	W_UPDATE_METADATA_FALLBACK        Warning   snapshot.UpdateMetadataOrReMarshal (fallback to Load+Marshal)
+//
+// See the Godoc on each individual [Code] for the failure-mode
+// contract, detail-field conventions, and consumer recovery guidance.
 package diag

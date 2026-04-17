@@ -405,6 +405,51 @@ var (
 	// not be parsed and fell back to the root path. The original path string is
 	// preserved for round-trip fidelity via Provenance.RawPath().
 	E_SNAPSHOT_PATH_FALLBACK = NewCode("E_SNAPSHOT_PATH_FALLBACK", CategorySnapshot)
+
+	// --- v0.3.0 additions ---
+
+	// E_SNAPSHOT_IO indicates a per-file I/O failure encountered while
+	// iterating a directory scan (typically from os.Open or the underlying
+	// file Read). Emitted by snapshot.ScanDir on its per-file path: the
+	// issue lands on ScanEntry.Result so the iterator continues to the
+	// next file rather than aborting, and the underlying os error is
+	// preserved as a detail entry so the operator can recover the concrete
+	// cause. Named E_SNAPSHOT_IO (not E_IO) to match the E_SNAPSHOT_*
+	// convention under CategorySnapshot; the precedent for a per-category
+	// I/O code is E_LOAD_IO_FAILURE under CategorySchema. No new
+	// CategoryIO constant is introduced.
+	E_SNAPSHOT_IO = NewCode("E_SNAPSHOT_IO", CategorySnapshot)
+
+	// E_UPDATE_METADATA_BODY_OFFSET indicates the header parsed cleanly
+	// but snapshot.UpdateMetadata's body-boundary offset tracker could
+	// not resolve a valid byte range for the reused body. The input does
+	// not match the shape snapshot.Marshal produces; byte-identical
+	// recovery via UpdateMetadata is not possible. Consumers using the
+	// primitive UpdateMetadata directly fall back to Load + Marshal;
+	// consumers using snapshot.UpdateMetadataOrReMarshal get that
+	// fallback automatically with a paired W_UPDATE_METADATA_FALLBACK
+	// warning on the returned Result.
+	E_UPDATE_METADATA_BODY_OFFSET = NewCode("E_UPDATE_METADATA_BODY_OFFSET", CategorySnapshot)
+
+	// W_UPDATE_METADATA_FALLBACK (Warning) indicates that
+	// snapshot.UpdateMetadataOrReMarshal fell back from the UpdateMetadata
+	// fast path to Load + Marshal because the input triggered a
+	// recoverable Fatal code (E_SNAPSHOT_MALFORMED,
+	// E_UPDATE_METADATA_BODY_OFFSET, or another non-cancellation Fatal
+	// issue). The output bytes are byte-identical to what Marshal would
+	// produce; the warning surfaces the path transition so operators can
+	// observe fallback frequency and triage persistent cases. Details
+	// include a "triggering_codes" entry listing the original Fatal
+	// code(s) that caused the fallback.
+	//
+	// Uses the W_ prefix, inaugurating the convention for
+	// Warning-severity codes added from v0.3.0 onward; existing
+	// Warning-severity codes (E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM,
+	// E_SNAPSHOT_PATH_FALLBACK) retain their E_ identifiers for
+	// backwards compatibility — severity is carried on the Issue, not
+	// the Code, so the prefix is a naming convention rather than a
+	// type-enforced property.
+	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK", CategorySnapshot)
 )
 
 // AllCodes returns all registered diagnostic codes in registration order.
