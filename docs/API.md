@@ -366,6 +366,10 @@ header, result := snapshot.HeaderOnly(ctx, data)
 // materializing the full document into memory. Reads at most
 // snapshot.MaxHeaderSize (64 KiB) bytes from the reader.
 header, result := snapshot.HeaderOnlyRead(ctx, r)
+
+// Write .ys bytes atomically to disk — tmp+fsync+rename. Consumers
+// needing crash-safe persistence should use this instead of os.WriteFile.
+if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 ```
 
 `Load` does not re-validate instance data — the persisted snapshot is assumed to contain valid data. However, `Load` performs structural validation of the `.ys` format itself and verifies schema compatibility using `schema.StructuralHash`.
@@ -462,6 +466,24 @@ if !header.SchemaHashMatches(s) {
 ```
 
 `SchemaHashMatches` is nil-safe and returns `false` without panicking when the receiver is nil, the schema is nil, the header's `SchemaHash` is empty, the header's `SchemaHashAlgorithm` does not match `schema.StructuralHashVersion`, or `schema.StructuralHash(s)` returns an empty string. Dispatch callers treat `false` as "unknown or incompatible schema, do not proceed" rather than silently continuing.
+
+### Atomic Writing
+
+`snapshot.WriteFile` persists bytes to a path using the `tmp+fsync+rename` protocol — the standard crash-safe write primitive every yammm consumer needs when turning `Marshal` output into a durable `.ys` file:
+
+```go
+func WriteFile(path string, data []byte) error
+
+const TmpSuffix = ".tmp"
+```
+
+The payload is first written to `path + snapshot.TmpSuffix`, `fsync`'d, closed, and then renamed into place. The rename is the atomic commit point: either the new file takes over (rename succeeded) or the previous file is left untouched (any earlier step failed). On any intermediate failure, `WriteFile` removes the staging file and returns an error wrapped with the failing step (`create temp`, `write temp`, `sync temp`, `close temp`, or `rename temp to final`).
+
+`WriteFile` does not validate that `data` is a valid `.ys` document — it is a general-purpose atomic-write primitive, and callers are responsible for the payload (typically the output of `Marshal`).
+
+**Durability semantics.** File mode is `0o666` subject to umask, matching `os.Create`; callers needing stricter permissions should `chmod` after `WriteFile` returns. The file is `fsync`'d before rename but the parent directory is NOT `fsync`'d, so on some filesystems the rename may not be durable across a crash — consumers with stronger durability requirements should fork the helper and add parent-directory fsync.
+
+**Crash recovery.** If the process crashes between `fsync` and `rename`, a partial write may remain at `path + snapshot.TmpSuffix`. The `TmpSuffix` constant is exported so downstream primitives and consumer cleanup tools key off a single source of truth rather than hard-coding `.tmp`; the directory-iterator primitive landing alongside this release skips entries with the suffix automatically.
 
 ## Diagnostics
 

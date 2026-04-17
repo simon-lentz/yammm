@@ -32,6 +32,9 @@
 //	// Compare the header's schema hash against a loaded schema
 //	if !header.SchemaHashMatches(s) { /* stale-schema path */ }
 //
+//	// Write .ys bytes atomically to disk (tmp+fsync+rename)
+//	if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
+//
 // # Functions
 //
 // [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
@@ -69,6 +72,16 @@
 // Use it after [HeaderOnly] or [HeaderOnlyRead] when the dispatch
 // decision depends on whether the snapshot was produced under a
 // matching schema version.
+//
+// [WriteFile] writes bytes to a path atomically using the
+// tmp+fsync+rename pattern. The staging file at path+[TmpSuffix] is
+// fsync'd before rename; on any error during the write, WriteFile
+// attempts to clean up the staging file and returns a wrapped error.
+// A crash between fsync and rename leaves the staging file behind as
+// a partial write; consumer-side cleanup (e.g., directory sweeps)
+// reference [TmpSuffix] rather than hard-coding ".tmp" so the
+// convention stays single-source-of-truth across the snapshot
+// package.
 //
 // # Marshal Options
 //
