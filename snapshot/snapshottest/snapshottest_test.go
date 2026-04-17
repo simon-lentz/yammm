@@ -165,3 +165,78 @@ func TestExpectDirState_UnexpectedFile(t *testing.T) {
 	assert.Contains(t, rec.errors[0], "surprise.ys")
 	assert.Contains(t, rec.errors[0], "unexpected")
 }
+
+// makeSnapshotBytesWithMeta produces a marshaled .ys with the given
+// metadata using the minimal snapshottest-local schema. Used by the
+// ExpectMetadataPreserved coverage tests below.
+func makeSnapshotBytesWithMeta(t *testing.T, meta map[string]string) []byte {
+	t.Helper()
+	s := minimalSchema(t)
+	typ, ok := s.Type("Doc")
+	require.True(t, ok)
+	inst := instance.NewValidInstance(
+		"Doc", typ.ID(),
+		immutable.WrapKey([]any{"d1"}),
+		immutable.WrapProperties(map[string]any{"id": "d1"}),
+		nil, nil, nil,
+	)
+	g := graph.New(s)
+	g.Add(context.Background(), inst)
+	snap := g.Snapshot()
+	data, res := snapshot.Marshal(context.Background(), snap, snapshot.WithMetadata(meta))
+	require.NoError(t, res.Err())
+	return data
+}
+
+func TestExpectMetadataPreserved_HappyPath(t *testing.T) {
+	before := makeSnapshotBytesWithMeta(t, map[string]string{
+		"phase":       "extract",
+		"pipeline_id": "abc",
+	})
+	// "after" has phase changed but pipeline_id retained.
+	afterData, res := snapshot.UpdateMetadata(context.Background(), before,
+		map[string]string{"phase": "link", "pipeline_id": "abc"})
+	require.NoError(t, res.Err())
+
+	rec := &recordingTB{TB: t}
+	snapshottest.ExpectMetadataPreserved(rec, before, afterData, "pipeline_id")
+	assert.Empty(t, rec.errors, "preserved key should not fail")
+}
+
+func TestExpectMetadataPreserved_Divergence(t *testing.T) {
+	before := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "extract"})
+	afterData, res := snapshot.UpdateMetadata(context.Background(), before,
+		map[string]string{"phase": "link"})
+	require.NoError(t, res.Err())
+
+	rec := &recordingTB{TB: t}
+	snapshottest.ExpectMetadataPreserved(rec, before, afterData, "phase")
+	require.NotEmpty(t, rec.errors, "divergent key must fail")
+	assert.Contains(t, rec.errors[0], "phase")
+	assert.Contains(t, rec.errors[0], "diverged")
+}
+
+func TestExpectMetadataPreserved_MissingInBefore(t *testing.T) {
+	before := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "extract"})
+	afterData := before // no change
+
+	rec := &recordingTB{TB: t}
+	snapshottest.ExpectMetadataPreserved(rec, before, afterData, "never_existed")
+	require.NotEmpty(t, rec.errors, "missing-in-before is a test-setup error")
+	assert.Contains(t, rec.errors[0], "never_existed")
+	assert.Contains(t, rec.errors[0], "test-setup error")
+}
+
+func TestExpectMetadataPreserved_InvalidBeforeFails(t *testing.T) {
+	rec := &recordingTB{TB: t}
+	after := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "link"})
+	snapshottest.ExpectMetadataPreserved(rec, []byte("garbage"), after, "phase")
+	require.True(t, rec.fatalled, "unparsable before should fatal")
+}
+
+func TestExpectMetadataPreserved_InvalidAfterFails(t *testing.T) {
+	rec := &recordingTB{TB: t}
+	before := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "extract"})
+	snapshottest.ExpectMetadataPreserved(rec, before, []byte("garbage"), "phase")
+	require.True(t, rec.fatalled, "unparsable after should fatal")
+}

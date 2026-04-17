@@ -219,17 +219,25 @@ func buildDocument(
 
 	// Build the header JSON with version and schema_hash_algorithm as
 	// literal constants, matching the headerWire field order exactly.
-	var headerJSON []byte
-	if indent != "" {
-		headerJSON = buildHeaderIndented(hdr, indent)
-	} else {
-		headerJSON = buildHeaderCompact(hdr)
-	}
+	headerJSON := buildHeaderBytes(hdr, indent)
 
 	if indent != "" {
 		return assembleIndented(headerJSON, typesJSON, instancesJSON, diagJSON, indent)
 	}
 	return assembleCompact(headerJSON, typesJSON, instancesJSON, diagJSON)
+}
+
+// buildHeaderBytes returns the JSON-encoded header object, selecting
+// between compact and indented form based on the indent parameter.
+// Shared between buildDocument (the Marshal path) and UpdateMetadata
+// (the metadata-rewrite fast path); both paths must produce byte-identical
+// headers given the same marshalHeaderWire + indent inputs so the
+// body-byte-range stability contract holds across both primitives.
+func buildHeaderBytes(hdr marshalHeaderWire, indent string) []byte {
+	if indent != "" {
+		return buildHeaderIndented(hdr, indent)
+	}
+	return buildHeaderCompact(hdr)
 }
 
 // buildHeaderCompact produces the header object JSON in compact mode.

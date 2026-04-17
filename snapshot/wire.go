@@ -11,6 +11,40 @@ package snapshot
 //   - New fields may be appended (with omitempty for backward compatibility).
 //   - Removing or reordering fields requires a format version bump.
 //   - The wire struct field ordering test in snapshot_test.go enforces this.
+//
+// TOP-LEVEL KEY ORDER AND BODY-SUFFIX STABILITY CONTRACT.
+//
+// The .ys wire format commits to two complementary structural contracts
+// beyond the per-struct field order above. Both are load-bearing for
+// UpdateMetadata's byte-surgery primitive; relaxing either silently
+// breaks every existing and future metadata-rewrite call site.
+//
+//  1. Field-order contract (established pre-v0.3.0). The top-level
+//     document has exactly four keys in a fixed order:
+//     yammm_snapshot → types → instances → diagnostics. No future Marshal
+//     change may reorder these or insert a new key in between.
+//
+//  2. Body-byte-range stability contract (introduced v0.3.0). The byte
+//     range starting at the ',' immediately following the yammm_snapshot
+//     header value's closing '}' and running through the document's
+//     final '}' is the "body suffix". UpdateMetadata preserves this
+//     suffix verbatim: it rebuilds only the header, recomputes the
+//     integrity hash over new_header + body_suffix, and emits
+//     new_header + body_suffix as the output. Future Marshal changes
+//     that insert a fifth top-level key, shift the header-body
+//     transition, or change the inter-key separator pattern silently
+//     break UpdateMetadata even without relaxing the field-order rule.
+//
+// Both contracts are tested in snapshot/wire_test.go via:
+//   - TestWireFormat_TopLevelKeyOrder (token-level key-order pin)
+//   - TestWireFormat_BodySuffixContract (bodyOffset-capture + shape pin)
+//
+// These tests run across a representative corpus of Marshal outputs
+// under every supported Option combination, so a future Marshal-side
+// change that silently breaks either contract fails at the wire-format
+// test level before reaching the consumers that depend on it.
+// See snapshot/update.go for the UpdateMetadata primitive that consumes
+// these contracts.
 
 const (
 	currentVersion         = 1

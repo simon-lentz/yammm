@@ -538,6 +538,47 @@ for entry, err := range snapshot.ScanDir(ctx, dir) {
 
 **CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, header, issues}` JSON array. The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
 
+### Metadata Updates
+
+For workflows that change header metadata on an existing `.ys` without re-serializing the body — pipeline phase transitions, operator-maintained flags, `force-complete` audit trails — `snapshot.UpdateMetadata` reuses the body bytes verbatim and recomputes only the SHA-256 integrity hash:
+
+```go
+func UpdateMetadata(
+    ctx context.Context,
+    data []byte,
+    newMeta map[string]string,
+    opts ...UpdateOption,
+) ([]byte, diag.Result)
+
+func UpdateMetadataOrReMarshal(
+    ctx context.Context,
+    data []byte,
+    newMeta map[string]string,
+    s *schema.Schema,
+    opts ...UpdateOption,
+) ([]byte, diag.Result)
+
+func WithUpdateCreatedAt(t time.Time) UpdateOption
+```
+
+**When to use which.** `UpdateMetadataOrReMarshal` is the default entry point for most consumers: it runs the fast path and transparently falls back to `Load + Marshal` on any recoverable Fatal (body-offset failure, malformed header, other non-cancellation Fatal), emitting a Warning-severity `W_UPDATE_METADATA_FALLBACK` on the returned `diag.Result` so operators can observe the transition. The primitive `UpdateMetadata` stays exported for consumers who genuinely need the strict fast path — benchmarks isolating the fast-path cost, or workflows where any Load + Marshal round-trip is operationally unacceptable.
+
+**Speedup.** On a 20 MB `.ys` input, the fast path runs ~50× faster than the equivalent `Load + Marshal` round trip on M2-class hardware (~10 ms vs ~570 ms). The lower-bound CI gate is 3×; absolute numbers will vary across hardware but the ratio is the stable invariant. The companion benchmark `BenchmarkUpdateMetadataRatio` reports the measured ratio via `b.ReportMetric("x-speedup")` on every `go test -bench` invocation.
+
+**Preserve-vs-override.** By default `UpdateMetadata` preserves the existing `created_at` byte-for-byte from the input header. Pass `WithUpdateCreatedAt(t)` to override; there is no other way to change `created_at` via the metadata-rewrite path. `metadata` itself is replaced entirely — there is no merge. Callers retrieve the current metadata via `HeaderOnly`, copy it, apply their changes, and pass the result.
+
+**Failure modes.** The primitive returns structured diagnostics with stable codes:
+
+- `E_SNAPSHOT_MALFORMED` — the input header does not parse (truncated JSON, missing required fields, wrong first key). Same code `HeaderOnly` / `HeaderOnlyRead` emit for equivalent conditions.
+- `E_UPDATE_METADATA_BODY_OFFSET` — the header parsed cleanly but the body-boundary tracking resolved to an unexpected byte pattern, indicating the input does not match the shape `Marshal` produces. Byte-identical recovery via the fast path is not possible; `UpdateMetadataOrReMarshal` falls back to `Load + Marshal` automatically.
+- `E_CONTEXT_CANCELLED` — ctx was cancelled at entry. Propagates as cancellation without re-attempting via the slow path.
+
+**Wire-format contracts.** The primitive depends on two contracts documented in `snapshot/wire.go`'s package Godoc: the field-order contract (top-level keys are `{yammm_snapshot, types, instances, diagnostics}` in that order) and the body-byte-range stability contract (the byte range from the `,` after the header value through the document's closing `}` is reused verbatim). Both are pinned by `TestWireFormat_TopLevelKeyOrder` and `TestWireFormat_BodySuffixContract` in `snapshot/wire_test.go`, so a future Marshal-side shape change that would silently break the primitive fails at the wire-format test level.
+
+**CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (3) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic via `snapshot.WriteFile`.
+
+**Test helper.** `snapshot/snapshottest.ExpectMetadataPreserved(tb, before, after, preservedKeys...)` asserts that a named set of metadata keys survived a rewrite unchanged. Intended for tests exercising metadata-rewrite primitives or any workflow that must preserve an invariant key set across a transition.
+
 ## Diagnostics
 
 The `diag` package implements YAMMM's five-level severity model. See [Severity Levels](SPEC.md#severity-levels) and [Diagnostic Codes](SPEC.md#diagnostic-codes) in the language specification for the semantic definitions.

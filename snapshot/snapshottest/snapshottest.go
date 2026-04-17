@@ -361,6 +361,50 @@ func ExpectDirState(tb testing.TB, dir string, expected map[string]State) {
 	}
 }
 
+// ExpectMetadataPreserved asserts that two .ys byte slices agree on the
+// values of the named metadata keys. Intended for tests exercising
+// metadata-rewrite primitives ([snapshot.UpdateMetadata],
+// [snapshot.UpdateMetadataOrReMarshal]) or any workflow that must
+// preserve an invariant set of metadata keys across a rewrite.
+//
+// Fails the test if either input fails to parse as a .ys header, if a
+// named key is absent from before (assertion-setup error), or if any
+// named key's value differs between before and after.
+//
+// Uses context.Background() internally; tests needing cancellation
+// semantics should call [snapshot.HeaderOnly] directly.
+func ExpectMetadataPreserved(tb testing.TB, before, after []byte, preservedKeys ...string) {
+	tb.Helper()
+	ctx := context.Background()
+
+	beforeHdr, beforeRes := snapshot.HeaderOnly(ctx, before)
+	if beforeRes.HasErrors() {
+		tb.Fatalf("ExpectMetadataPreserved: before does not parse: %v", beforeRes)
+		return
+	}
+	afterHdr, afterRes := snapshot.HeaderOnly(ctx, after)
+	if afterRes.HasErrors() {
+		tb.Fatalf("ExpectMetadataPreserved: after does not parse: %v", afterRes)
+		return
+	}
+
+	for _, k := range preservedKeys {
+		bv, bok := beforeHdr.Metadata[k]
+		if !bok {
+			tb.Errorf("ExpectMetadataPreserved: key %q is not in before's metadata (test-setup error)", k)
+			continue
+		}
+		av, aok := afterHdr.Metadata[k]
+		if !aok {
+			tb.Errorf("ExpectMetadataPreserved: key %q preserved in before=%q but absent from after", k, bv)
+			continue
+		}
+		if av != bv {
+			tb.Errorf("ExpectMetadataPreserved: key %q diverged: before=%q, after=%q", k, bv, av)
+		}
+	}
+}
+
 // assertEntryMatches compares one entry against one expected State.
 func assertEntryMatches(tb testing.TB, entry snapshot.ScanEntry, want State) {
 	tb.Helper()

@@ -42,6 +42,13 @@
 //	    use(entry.Header)
 //	}
 //
+//	// Rewrite metadata on an existing .ys without reloading the body
+//	// (fast path — reuses body bytes verbatim)
+//	out, result := snapshot.UpdateMetadata(ctx, data, newMeta)
+//
+//	// Same, with automatic Load+Marshal fallback on non-Marshal-shaped inputs
+//	out, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
+//
 // # Functions
 //
 // [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
@@ -100,6 +107,26 @@
 // staging files are not confused for complete snapshots.
 // [ScanDirSlice] is the materializing convenience wrapper.
 //
+// [UpdateMetadata] rewrites the header of an existing .ys document
+// with a new metadata map, reusing the body bytes verbatim and
+// recomputing only the SHA-256 integrity hash. On a 20 MB input the
+// fast path is ~50× faster than the equivalent Load + Marshal round
+// trip on M2-class hardware; the lower-bound CI gate is 3×. Depends
+// on the field-order and body-suffix stability contracts documented
+// in wire.go; future Marshal-side shape changes must respect those
+// contracts or update this primitive in lockstep.
+//
+// [UpdateMetadataOrReMarshal] is the default consumer entry point:
+// it runs [UpdateMetadata] on the happy path and transparently falls
+// back to [Load] + [Marshal] on recoverable Fatals (body-offset
+// failure, malformed header, or any non-cancellation Fatal), surfacing
+// a Warning-severity [W_UPDATE_METADATA_FALLBACK] on the returned
+// [diag.Result] so operators can observe fallback frequency.
+//
+// [WithUpdateCreatedAt] overrides the created_at header field on
+// [UpdateMetadata] and [UpdateMetadataOrReMarshal]; the default is to
+// preserve the existing value byte-for-byte.
+//
 // # Marshal Options
 //
 // [Marshal] accepts [Option] values:
@@ -107,6 +134,13 @@
 //   - [WithIndent]: pretty-print JSON output with the given indent string
 //   - [WithCreatedAt]: embed a creation timestamp in the snapshot
 //   - [WithMetadata]: embed arbitrary key-value metadata
+//
+// # Update Options
+//
+// [UpdateMetadata] and [UpdateMetadataOrReMarshal] accept [UpdateOption]
+// values:
+//
+//   - [WithUpdateCreatedAt]: override the existing created_at (preserved by default)
 //
 // # Load Options
 //

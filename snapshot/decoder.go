@@ -50,15 +50,26 @@ type streamDecoder struct {
 
 	// schema is the provided schema (nil for Info and HeaderOnlyRead).
 	schema *schema.Schema
+
+	// bodyOffset is the byte offset of the first byte following the
+	// yammm_snapshot header value's closing '}'. Captured by
+	// decodeHeader via json.Decoder.InputOffset immediately after the
+	// header value is decoded, before the types-key loop. In
+	// Marshal-produced output the byte at bodyOffset is ',' (separating
+	// the header from the types key). Consumed by UpdateMetadata to
+	// reuse body bytes verbatim; other callers ignore the field.
+	// -1 until captured.
+	bodyOffset int64
 }
 
 // newStreamDecoder creates a new streamDecoder from raw .ys bytes.
 func newStreamDecoder(data []byte, s *schema.Schema, cfg loadConfig) *streamDecoder {
 	return &streamDecoder{
-		data:      data,
-		collector: diag.NewCollector(0),
-		loadCfg:   cfg,
-		schema:    s,
+		data:       data,
+		collector:  diag.NewCollector(0),
+		loadCfg:    cfg,
+		schema:     s,
+		bodyOffset: -1,
 	}
 }
 
@@ -68,10 +79,11 @@ func newStreamDecoder(data []byte, s *schema.Schema, cfg loadConfig) *streamDeco
 // on a reader-based decoder.
 func newStreamDecoderFromReader(r io.Reader, s *schema.Schema, cfg loadConfig) *streamDecoder {
 	return &streamDecoder{
-		reader:    r,
-		collector: diag.NewCollector(0),
-		loadCfg:   cfg,
-		schema:    s,
+		reader:     r,
+		collector:  diag.NewCollector(0),
+		loadCfg:    cfg,
+		schema:     s,
+		bodyOffset: -1,
 	}
 }
 
@@ -120,6 +132,12 @@ func (sd *streamDecoder) decodeHeader() error {
 	if err := dec.Decode(&sd.header); err != nil {
 		return fmt.Errorf("failed to decode header: %w", err)
 	}
+
+	// Capture the body-suffix byte offset. InputOffset points to the byte
+	// immediately after the header value's closing '}'. In Marshal-produced
+	// output this is ',' (separating yammm_snapshot from the types key).
+	// UpdateMetadata consumes this offset to reuse body bytes verbatim.
+	sd.bodyOffset = dec.InputOffset()
 
 	// Validate version.
 	if sd.header.Version != currentVersion {
