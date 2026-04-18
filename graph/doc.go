@@ -43,6 +43,33 @@
 //	    }
 //	}
 //
+// # Batch Assembly
+//
+// [BatchAssembler] composes a [github.com/simon-lentz/yammm/instance.Validator],
+// a [Graph], and a [Snapshot] into a single call surface for the common
+// pipeline pattern (validate → add → check → snapshot). The assembler
+// encodes the ordering invariant so consumers cannot run Snapshot before
+// Check, and is concurrent-safe by default — multiple goroutines may
+// share one assembler:
+//
+//	ba := graph.NewBatchAssembler(ctx, s,
+//	    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+//	for i, rec := range records {
+//	    if err := ba.Add("TypeName", buildRawInstance(rec)); err != nil {
+//	        return fmt.Errorf("record %d: %w", i, err)
+//	    }
+//	}
+//	res, err := ba.Finalize(ctx)
+//	if err != nil {
+//	    return fmt.Errorf("batch: %w", err)
+//	}
+//	// res.Snapshot is always non-nil; pass to Marshal / WriteFile / etc.
+//
+// CPU-bound consumers that profile validation as the hot path can opt
+// into [WithValidatorPool] for goroutine-parallel validator access; the
+// default mutex-serialized mode is correct for I/O-bound consumers.
+// See [BatchAssembler] for the full thread-safety contract.
+//
 // # Alternative Constructors
 //
 // [RebuildSnapshot] constructs a [Snapshot] from pre-validated parts
@@ -50,6 +77,13 @@
 // deserialization entry point used by the snapshot package.
 //
 // # Key Types
+//
+// [BatchAssembler] composes Validator + Graph + Snapshot for the
+// validate→add→check→snapshot pipeline pattern; constructed via
+// [NewBatchAssembler] and finalized via [BatchAssembler.Finalize], which
+// returns a [FinalizeResult] whose Snapshot field is always non-nil.
+// [ErrAssemblerFinalized] is the sentinel returned from Add / AddValid
+// after Finalize.
 //
 // [Instance] provides immutable access to a graph node's data:
 // [Instance.TypeName], [Instance.PrimaryKey], [Instance.Properties],

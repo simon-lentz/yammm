@@ -250,6 +250,50 @@ for _, typeName := range snap.Types() {
 }
 ```
 
+### Batch Assembly
+
+`graph.BatchAssembler` composes a `Validator` and a `Graph` into a single call surface for the common pipeline pattern: validate → add → check → snapshot. The assembler encodes the ordering invariant (validate before add, check before snapshot) so consumers cannot get the sequence wrong, and is concurrent-safe so multiple goroutines may share one assembler:
+
+```go
+ba := graph.NewBatchAssembler(ctx, s,
+    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+
+for i, rec := range records {
+    if err := ba.Add("TypeName", buildRawInstance(rec)); err != nil {
+        return fmt.Errorf("record %d: %w", i, err)
+    }
+}
+
+res, err := ba.Finalize(ctx)
+if err != nil {
+    // res.Snapshot is still non-nil — the partial snapshot at the
+    // point Check tripped is inspectable for diagnostics.
+    return fmt.Errorf("batch: %w", err)
+}
+qualityCollector.Merge(res.Snapshot.Diagnostics())
+// res.Snapshot ready for snapshot.Marshal / snapshot.WriteFile / etc.
+```
+
+**`FinalizeResult.Snapshot` is always non-nil**, on both success and error paths. The struct exists to encode this contract at the type level; callers read `res.Snapshot` directly without gating on `err == nil`. On the error path `res.Snapshot` is the partial snapshot at the point Graph.Check tripped — operators logging a failed batch see which instances were assembled before the check failure.
+
+**Error shapes.** Both `Add` / `AddValid` and `Finalize` return errors whose cause is a `*diag.ErrorWithContext` (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)). `Add`'s tag is `"<TypeName> (record #N)"` so the offending record is locatable from the error alone; `Finalize`'s tag is the fixed string `"batch_finalize"` so downstream log consumers have a stable filter key. Recover with `errors.As` or `diag.AsResultWithContext`.
+
+**Post-finalize sentinel.** After `Finalize`, subsequent `Add` / `AddValid` calls return `graph.ErrAssemblerFinalized`, matchable via `errors.Is`. Consumers performing retry / cleanup logic key off the sentinel rather than the error string.
+
+**Validator-access modes.** Default mode serializes `ValidateOne` + `Graph.Add` through an internal `sync.Mutex` — appropriate for I/O-bound consumers (rdata's pipelines are the canonical example) where validation is a tiny fraction of per-record wall-clock. CPU-bound consumers profile-flag validation as the hot path opt into pool mode via `graph.WithValidatorPool(n)`, which distributes N pre-constructed validators through an internal buffered channel matching the goroutine-per-CPU-core shape:
+
+```go
+ba := graph.NewBatchAssembler(ctx, s,
+    graph.WithValidatorPool(runtime.NumCPU()))
+// ... concurrent Adds proceed in parallel up to N validators ...
+```
+
+Pool mode preserves every external contract (error shapes, Finalize one-shot semantics, success-count monotonicity) and is a one-option swap with no caller-side ripple. `n <= 0` panics at construction.
+
+**Concurrency contract.** `BatchAssembler` is safe for concurrent use across all methods (`Add`, `AddValid`, `Count`, `Graph`, `Finalize`). The library coordinates Add lifecycle against Finalize via an internal `sync.RWMutex` so every Add that returns nil is guaranteed to be in the finalized snapshot, and any Add that arrives after Finalize takes its lock returns `ErrAssemblerFinalized`. No external mutex required at call sites — the worker-pool pattern (one assembler shared across N scraper goroutines, coordinator goroutine calls Finalize at end-of-batch) is supported directly.
+
+**Test fixtures.** `snapshot/snapshottest.BuildTestSnapshot(t, s, records...)` is the test-helper convenience wrapper around `BatchAssembler` for happy-path snapshot construction; pass `[]Record{{TypeName, Raw}, ...}` and the helper handles validate + add + finalize, fataling on any failure.
+
 ### Seeding from a Snapshot
 
 A new mutable `Graph` can be seeded from an existing `Snapshot`, enabling incremental graph building on top of persisted or previously-constructed state:
