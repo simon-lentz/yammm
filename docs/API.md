@@ -214,6 +214,67 @@ Instance data is a top-level object keyed by type names whose values are arrays 
 
 `RawInstance.Properties` is `map[string]any`. Go structs with typed fields must be marshaled to JSON and unmarshaled into `map[string]any` before validation. Property names may use any casing; the validator normalizes them.
 
+### Schema-Aware Raw Instance Builder
+
+`instance.BuilderFor(schema, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, cardinality mismatches, and the `EdgeTo`-vs-`EdgeToWith` split all surface from `Build()` with file:line locators captured via `runtime.Callers`. This shifts shape failures out of `ValidateOne`'s domain and eliminates the "Schema declares X (one), so yammm expects a single edge object" class of hand-maintained comments in consumer code:
+
+```go
+b, err := instance.BuilderFor(s, "Person")
+if err != nil {
+    return instance.RawInstance{}, err
+}
+raw, err := b.
+    Property("id", "p1").
+    Property("name", "Alice").
+    EdgeTo("works_at", "c1").                     // "one" association, single PK
+    EdgeTo("knows", "p2").                        // "many" association
+    EdgeTo("part_of", "issuer-1", "issue-99").    // composite PK (variadic)
+    Build()
+```
+
+For associations that declare edge properties, use `EdgeToWith`:
+
+```go
+raw, err := b.
+    Property("id", "e1").
+    EdgeToWith("works_at", []any{"c1"}, map[string]any{
+        "role":  "Engineer",
+        "since": "2020-01-01",
+    }).
+    Build()
+```
+
+For compositions, pass child builders — the parent enforces target-type matching at build time:
+
+```go
+addr, _ := instance.BuilderFor(s, "Address")
+raw, err := b.
+    Property("id", "p1").
+    Composed("addresses", addr.Property("id", "a1").Property("street", "Main St")).
+    Build()
+```
+
+The variadic `Composed(name, children...)` accepts single, multiple-positional, and slice-unpack call shapes interchangeably; all three produce identical output.
+
+#### Methods
+
+| Method | Purpose |
+| ------ | ------- |
+| `BuilderFor(s, typeName)` | Construct a builder bound to a schema type. Errors on nil schema, unknown type, or abstract type. |
+| `Property(name, value)` | Set a property value. Unknown names accumulate as errors surfaced at Build. |
+| `EdgeTo(name, targetKey...)` | Add an edge target on an association without edge properties. Variadic key supports composite PKs. |
+| `EdgeToWith(name, targetKey, props)` | Add an edge target on an association with edge properties. `targetKey` is an explicit `[]any` to avoid absorbing `props` into variadic slots. |
+| `Composed(name, children...)` | Add composed children. Variadic supports single, multiple, or slice-unpack shapes. |
+| `WithProvenance(sourceName, pathStr)` | Attach source location metadata. |
+| `Build()` | Produce the `RawInstance`. Returns the first accumulated error (with a "(and N more)" suffix when more exist). |
+| `MustBuild()` | Panic on error. Test-only; production code should use `Build` and propagate. |
+
+Build errors include the bound type's name, the offending property/relation, and the caller's file:line. `errors.Unwrap` walks into composition-child chains so `errors.As` reaches the primary cause when nesting.
+
+`SchemaBuilder` is NOT concurrent-safe; construct one per goroutine. The bound `*schema.Schema` remains safe to share across many concurrent builders.
+
+The shape portion of `ValidateOne` — property/relation names, cardinality, composition target-type matching — is guaranteed to pass on the output of a successful `Build`. Value-level validation (constraint checks, PK coercion, reference integrity) still runs at `ValidateOne` time.
+
 ## Graph Construction
 
 The `graph` package builds an in-memory graph from validated instances.

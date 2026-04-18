@@ -26,16 +26,26 @@
 //   - [ValidInstance] uses accessor methods because the library constructs it —
 //     it is an immutable output type whose internals are not caller-settable.
 //
-// # Builder
+// # SchemaBuilder
 //
-// [Builder] and [EdgeBuilder] provide fluent construction of [RawInstance]
-// values, useful for tests and non-adapter use cases:
+// [BuilderFor] and [SchemaBuilder] provide fluent, schema-aware construction
+// of [RawInstance] values. Unlike a free-form map literal, SchemaBuilder
+// validates property names, relation names, cardinality, and the
+// EdgeTo-vs-EdgeToWith split at [SchemaBuilder.Build] time with call-site
+// file:line locators — shifting shape errors out of ValidateOne's domain:
 //
-//	raw := instance.NewInstance().
-//	    Prop("id", "p1").
-//	    Prop("name", "Alice").
-//	    Edge("WORKS_AT").Target("c1").Done().
+//	b, err := instance.BuilderFor(s, "Person")
+//	if err != nil {
+//	    return instance.RawInstance{}, err
+//	}
+//	raw, err := b.
+//	    Property("id", "p1").
+//	    Property("name", "Alice").
+//	    EdgeTo("works_at", "c1").
 //	    Build()
+//	if err != nil {
+//	    return instance.RawInstance{}, err
+//	}
 //
 // # Validation Semantics
 //
@@ -64,6 +74,7 @@
 //
 // [Validator] is stateless and safe for concurrent use. Multiple goroutines
 // may call [Validator.Validate] simultaneously with different inputs.
+// [SchemaBuilder] is NOT concurrent-safe; construct one per goroutine.
 //
 // # Dependencies
 //
