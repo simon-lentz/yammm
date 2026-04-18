@@ -86,6 +86,41 @@
 //	)
 //	output := renderer.FormatResult(result)
 //
+// # Contextual Diagnostic Wrap
+//
+// At error boundaries, callers tag a [Result] with a human-readable
+// context label via [Result.WithContext]:
+//
+//	tagged := result.WithContext("schema_load")
+//	if err := tagged.Err(); err != nil {
+//	    return fmt.Errorf("pipeline startup: %w", err)
+//	}
+//
+// [Result.WithContext] returns a [ResultWithContext] (value), the
+// structured-access carrier. Its [ResultWithContext.Err] method returns
+// a [*ErrorWithContext] (pointer) that implements error and participates
+// in Go error chains — callers doing errors.As(err, &re) where re is
+// *[ResultError] continue to work unchanged because
+// [ErrorWithContext.Unwrap] returns the underlying ResultError.
+//
+// Both [ResultWithContext] and [Issue] implement [slog.LogValuer] so the
+// same tagged diagnostic is handed directly to structured logging:
+//
+//	logger.Error("operation failed", slog.Any("diagnostic", tagged))
+//
+// The resulting group carries: "context" (the tag), an optional "code"
+// (the first error-severity issue's code), "counts" (errors and
+// warnings), and "issues" (a slice of per-issue objects matching
+// [Issue.LogValue]'s shape). See those methods' Godoc for the full
+// attribute tree.
+//
+// At the other end of the chain, [AsResultWithContext] recovers a
+// [ResultWithContext] from an arbitrarily-wrapped error. If the chain
+// carries a [*ErrorWithContext], the original tag survives; if it
+// carries only a bare [*ResultError] (from [Result.Err] without a tag),
+// a caller-supplied fallbackTag is synthesized. This unifies error
+// handlers that receive both shapes.
+//
 // # Dependencies
 //
 // diag imports only stdlib and [github.com/simon-lentz/yammm/location]. It must not import schema, instance,

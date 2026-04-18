@@ -684,6 +684,62 @@ output := renderer.FormatIssues(issues)
 
 All renderer options are optional. The zero-config `diag.NewRenderer()` produces plain-text output without excerpts or colors.
 
+### Contextual Diagnostic Wrap
+
+At error boundaries — the places where a diagnostic crosses from the code that produced it to the code that surfaces it — callers attach a human-readable context label to a `diag.Result` via `Result.WithContext(tag)`. The return value carries the tag through error chains and structured logging without every consumer reinventing the wrapper:
+
+```go
+result := schema.Load(ctx, path)
+if result.HasErrors() {
+    tagged := result.WithContext("schema_load")
+    logger.Error("pipeline startup failed", slog.Any("diagnostic", tagged))
+    return fmt.Errorf("startup: %w", tagged.Err())
+}
+```
+
+Two types split the surface along the value-vs-error line that yammm already uses for `Result` and `*ResultError`:
+
+```go
+// Value carrier. Returned by Result.WithContext(tag). Holds the underlying
+// Result and the tag; implements slog.LogValuer. Read the fields directly
+// or call the delegating helpers HasErrors / OK.
+type ResultWithContext struct {
+    Result diag.Result
+    Tag    string
+}
+
+// Error type. Returned by ResultWithContext.Err() when the underlying
+// result is not OK. Implements error and participates in Go error chains:
+// its Unwrap returns *diag.ResultError so existing errors.As consumers
+// keep working unchanged.
+type ErrorWithContext struct {
+    Result diag.Result
+    Tag    string
+}
+```
+
+**Slog shape.** `ResultWithContext.LogValue()` returns a group with these attributes:
+
+- `context` (string) — the tag. Always emitted.
+- `code` (string) — the first error-severity issue's stable code. Omitted when the result has no error-severity issue with a non-zero code.
+- `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error; `warnings` is the Warning count. Always emitted (0/0 on OK).
+- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice; empty when the result is OK. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
+
+`Issue.LogValue()` emits the same per-issue shape and is independently useful when a consumer wants to log a single issue: `logger.Error("problem", slog.Any("issue", issue))`.
+
+**Error-chain recovery.** `diag.AsResultWithContext(err, fallbackTag)` recovers the tag from an arbitrarily-wrapped error. If the chain carries a `*ErrorWithContext`, its original tag survives; if it carries only a bare `*ResultError` (from `Result.Err()` without a tag), the supplied fallbackTag is synthesized so unified error handlers see a uniform shape across both patterns:
+
+```go
+if cr, ok := diag.AsResultWithContext(err, "validation"); ok {
+    for issue := range cr.Result.Issues() {
+        // triage
+    }
+    logger.Error("failed", slog.Any("diagnostic", cr))
+}
+```
+
+The helper walks through `fmt.Errorf("...: %w", err)` and other `Unwrap` chains transparently.
+
 ## JSON Adapter
 
 The `adapter/json` package parses JSON/JSONC into raw instances with optional location tracking.

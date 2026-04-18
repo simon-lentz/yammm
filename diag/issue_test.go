@@ -1,6 +1,7 @@
 package diag
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/simon-lentz/yammm/location"
@@ -480,5 +481,157 @@ func TestIssue_Clone_EmptySlices(t *testing.T) {
 	}
 	if clone.Details() != nil {
 		t.Error("Clone of issue with no details should have nil details")
+	}
+}
+
+// ---- Issue.LogValue ----
+//
+// Paired with ResultWithContext.LogValue but tested here so the per-issue
+// attribute-shape pins live next to the surface they describe. The map
+// helper (issueLogMap) shares the shape; covering the slog form covers
+// both.
+
+func logValueAttrs(t *testing.T, v slog.Value) []slog.Attr {
+	t.Helper()
+	if v.Kind() != slog.KindGroup {
+		t.Fatalf("expected group value, got kind %v", v.Kind())
+	}
+	return v.Group()
+}
+
+func issueLogAttr(t *testing.T, v slog.Value, key string) (slog.Value, bool) {
+	t.Helper()
+	for _, a := range logValueAttrs(t, v) {
+		if a.Key == key {
+			return a.Value, true
+		}
+	}
+	return slog.Value{}, false
+}
+
+func TestIssue_LogValue_MinimalIssue(t *testing.T) {
+	// severity + message + code only; span/path/hint/details omitted.
+	issue := NewIssue(Error, E_SYNTAX, "bare issue").Build()
+	val := issue.LogValue()
+	attrs := logValueAttrs(t, val)
+
+	// Required keys.
+	sv, ok := issueLogAttr(t, val, "severity")
+	if !ok || sv.String() != "error" {
+		t.Errorf("severity = %v (ok=%v), want \"error\"", sv.String(), ok)
+	}
+	mv, ok := issueLogAttr(t, val, "message")
+	if !ok || mv.String() != "bare issue" {
+		t.Errorf("message = %v (ok=%v), want \"bare issue\"", mv.String(), ok)
+	}
+	cv, ok := issueLogAttr(t, val, "code")
+	if !ok || cv.String() != E_SYNTAX.String() {
+		t.Errorf("code = %v (ok=%v)", cv.String(), ok)
+	}
+
+	// Omitted keys.
+	for _, key := range []string{"path", "location", "hint", "details"} {
+		if _, found := issueLogAttr(t, val, key); found {
+			t.Errorf("attribute %q present on minimal issue, want omitted", key)
+		}
+	}
+
+	if len(attrs) != 3 {
+		t.Errorf("attr count = %d, want 3 (severity, message, code)", len(attrs))
+	}
+}
+
+func TestIssue_LogValue_FullIssue(t *testing.T) {
+	source := location.MustNewSourceID("test://schema.yammm")
+	issue := NewIssue(Error, E_TYPE_COLLISION, "full issue").
+		WithSpan(location.Point(source, 7, 3)).
+		WithPath("data.json", "$.Widget[0].name").
+		WithHint("rename it").
+		WithDetails(
+			Detail{Key: DetailKeyTypeName, Value: "Widget"},
+			Detail{Key: DetailKeyPropertyName, Value: "name"},
+		).
+		Build()
+	val := issue.LogValue()
+
+	if sv, _ := issueLogAttr(t, val, "severity"); sv.String() != "error" {
+		t.Errorf("severity = %q, want error", sv.String())
+	}
+	if mv, _ := issueLogAttr(t, val, "message"); mv.String() != "full issue" {
+		t.Errorf("message = %q", mv.String())
+	}
+	if cv, _ := issueLogAttr(t, val, "code"); cv.String() != E_TYPE_COLLISION.String() {
+		t.Errorf("code = %q", cv.String())
+	}
+	if pv, _ := issueLogAttr(t, val, "path"); pv.String() != "$.Widget[0].name" {
+		t.Errorf("path = %q", pv.String())
+	}
+	if hv, _ := issueLogAttr(t, val, "hint"); hv.String() != "rename it" {
+		t.Errorf("hint = %q", hv.String())
+	}
+
+	loc, ok := issueLogAttr(t, val, "location")
+	if !ok || loc.Kind() != slog.KindGroup {
+		t.Fatalf("location group missing or wrong kind: %v", loc.Kind())
+	}
+	srcVal, _ := issueLogAttr(t, loc, "source")
+	if srcVal.String() != source.String() {
+		t.Errorf("location.source = %q, want %q", srcVal.String(), source.String())
+	}
+	lineVal, _ := issueLogAttr(t, loc, "line")
+	if lineVal.Int64() != 7 {
+		t.Errorf("location.line = %d, want 7", lineVal.Int64())
+	}
+	colVal, _ := issueLogAttr(t, loc, "column")
+	if colVal.Int64() != 3 {
+		t.Errorf("location.column = %d, want 3", colVal.Int64())
+	}
+
+	det, ok := issueLogAttr(t, val, "details")
+	if !ok || det.Kind() != slog.KindGroup {
+		t.Fatalf("details group missing or wrong kind: %v", det.Kind())
+	}
+	typeVal, _ := issueLogAttr(t, det, DetailKeyTypeName)
+	if typeVal.String() != "Widget" {
+		t.Errorf("details.type = %q, want Widget", typeVal.String())
+	}
+	propVal, _ := issueLogAttr(t, det, DetailKeyPropertyName)
+	if propVal.String() != "name" {
+		t.Errorf("details.property = %q, want name", propVal.String())
+	}
+}
+
+func TestIssue_LogValue_OmitsEmptyFields(t *testing.T) {
+	// Instance-only issue (path but no span): assert path is present,
+	// location is absent. Hint left empty.
+	issue := NewIssue(Warning, E_TYPE_COLLISION, "instance-only").
+		WithPath("source", "$.items[0]").
+		Build()
+	val := issue.LogValue()
+	if _, ok := issueLogAttr(t, val, "path"); !ok {
+		t.Error("instance-only issue missing path attribute")
+	}
+	if _, ok := issueLogAttr(t, val, "location"); ok {
+		t.Error("instance-only issue emitted location group, want omitted")
+	}
+	if _, ok := issueLogAttr(t, val, "hint"); ok {
+		t.Error("issue without hint emitted hint attribute, want omitted")
+	}
+	if _, ok := issueLogAttr(t, val, "details"); ok {
+		t.Error("issue without details emitted details group, want omitted")
+	}
+}
+
+func TestIssue_LogValue_SchemaOnly_OmitsPath(t *testing.T) {
+	source := location.MustNewSourceID("test://schema.yammm")
+	issue := NewIssue(Error, E_TYPE_COLLISION, "schema-only").
+		WithSpan(location.Point(source, 1, 1)).
+		Build()
+	val := issue.LogValue()
+	if _, ok := issueLogAttr(t, val, "location"); !ok {
+		t.Error("schema-only issue missing location group")
+	}
+	if _, ok := issueLogAttr(t, val, "path"); ok {
+		t.Error("schema-only issue emitted path attribute, want omitted")
 	}
 }
