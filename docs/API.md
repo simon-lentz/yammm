@@ -61,6 +61,33 @@ if !result.OK() {
 // Use s
 ```
 
+### Shared Registry Semantics
+
+Passing the same `*Registry` to multiple `Load` calls in one process is safe and efficient (since v0.3.0). The behavior has two coordinated parts:
+
+1. **`Registry.Register` is idempotent for exact-match.** Registering the same `SourceID` twice with an identical `StructuralHash` is a no-op — the first pointer remains stored and type-index entries are not re-indexed. Divergent content under the same `SourceID` still returns `*RegistryError{Kind: DuplicateSourceID}`; the error message carries both structural hashes so the mismatch is diagnosable.
+2. **`loadImport` short-circuits cross-`Load` via the shared `Registry`.** When an import's `SourceID` is already present in the shared registry, the loader reuses the existing `*Schema` pointer and skips the read, parse, compile, and re-register pipeline entirely. This is where cross-pipeline schema caching pays off.
+
+```go
+reg := schema.NewRegistry()
+
+// First Load registers msrb_emma as a transitive import of linkage_emma.
+sA, _ := schema.Load(ctx, "linkage_emma.yammm",
+    schema.WithRegistry(reg), schema.WithModuleRoot(moduleRoot))
+
+// Second Load re-uses msrb_emma from the registry — no re-parse.
+sB, _ := schema.Load(ctx, "wyrth_campaigns.yammm",
+    schema.WithRegistry(reg), schema.WithModuleRoot(moduleRoot))
+
+// reg.Len() == 3: [msrb_emma (shared), linkage_emma, wyrth_campaigns]
+```
+
+**Top-level asymmetry.** The cross-`Load` short-circuit fires only for *imports*. The top-level schema returned by each `Load` call is always a fresh compile. Calling `Load(A, WithRegistry(reg))` twice produces two distinct `*Schema` pointers; `reg.LookupBySourceID(AID)` continues to return the first call's pointer (the idempotent `Register` does not overwrite).
+
+**SourceID discipline.** Cross-`Load` sharing only fires when imports resolve to the same `SourceID`. `SourceID`s for file-backed schemas derive from the canonical absolute path, so `WithModuleRoot` values that resolve to different canonical paths for the same file yield different `SourceID`s and do not share. For `LoadString`, the synthetic `string://<sourceName>` scheme means two `LoadString` calls sharing a Registry must use distinct `sourceName` values unless they are intentionally re-registering byte-identical content.
+
+**Default behavior unchanged.** When `WithRegistry` is absent, each `Load` constructs its own `Registry` — safe for any usage pattern. The defensive `WithRegistry(schema.NewRegistry())` pattern some consumers carry is still valid post-v0.3.0; it is simply no longer necessary.
+
 ## Building Schemas Programmatically
 
 The `schema` package provides a fluent builder API for constructing schemas without parsing `.yammm` files.

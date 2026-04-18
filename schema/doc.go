@@ -91,6 +91,27 @@
 //	reg.Register(baseSchema)
 //	s, result := schema.Load(ctx, "derived.yammm", schema.WithRegistry(reg))
 //
+// # Shared-Registry Semantics
+//
+// Passing the same *Registry to multiple Load calls in one process is safe
+// and efficient (since v0.3.0). Two coordinated behaviors make shared-Registry
+// usage first-class:
+//
+//   - [Registry.Register] is idempotent for exact-match: registering the same
+//     SourceID twice with identical [StructuralHash] is a no-op. Divergent
+//     content under the same SourceID still errors loudly with both hashes
+//     reported in the diagnostic message.
+//   - loadImport short-circuits cross-Load via the shared Registry: when an
+//     import's SourceID is already registered, the loader reuses the existing
+//     *Schema pointer and skips the parse, compile, and re-register pipeline.
+//     This is where cross-pipeline schema-caching actually pays off — the
+//     idempotence contract alone only makes the final re-register a no-op
+//     after an unnecessary parse has already happened.
+//
+// The default Load behavior (fresh Registry per call when WithRegistry is
+// absent) is unchanged. See [WithRegistry] for the top-level-reparse
+// asymmetry note and the SourceID-discipline caveat.
+//
 // # Structural Hash
 //
 // [StructuralHash] computes a deterministic SHA-256 hash of a schema's

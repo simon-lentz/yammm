@@ -887,6 +887,38 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 		return false, nil
 	}
 
+	// Cross-Load short-circuit (PR-7): derive the candidate SourceIDs without
+	// reading the import file, then check the within-Load cache and the
+	// shared Registry. If either holds the schema, reuse the existing pointer
+	// and skip the read + parse + compile + register pipeline entirely.
+	// ensureRootLoader canonicalizes l.moduleRoot into l.rootLoader.rootPath
+	// without touching the import file itself; any error is absorbed here
+	// and re-surfaced uniformly by readImportFile on the fall-through path.
+	_ = l.ensureRootLoader() //nolint:errcheck // readImportFile re-runs ensureRootLoader and surfaces the error uniformly
+	for _, cand := range l.candidateImportSourceIDs(relativePath) {
+		l.mu.Lock()
+		if loadedSchema, ok := l.loadedSchemas[cand]; ok {
+			l.resolvedImports[imp.Alias] = resolvedImport{
+				sourceID: cand,
+				schema:   loadedSchema,
+				decl:     imp,
+			}
+			l.mu.Unlock()
+			return true, nil
+		}
+		if existing, ok := l.registry.LookupBySourceID(cand); ok {
+			l.loadedSchemas[cand] = existing
+			l.resolvedImports[imp.Alias] = resolvedImport{
+				sourceID: cand,
+				schema:   existing,
+				decl:     imp,
+			}
+			l.mu.Unlock()
+			return true, nil
+		}
+		l.mu.Unlock()
+	}
+
 	// Read the import using rootLoader (sandboxed) or in-memory sources
 	content, importSourceID, err := l.readImportFile(relativePath, imp)
 	if err != nil {
@@ -905,13 +937,26 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 		return false, nil
 	}
 
-	// Check if already loaded
+	// Post-read within-Load belt-and-braces check. The pre-read candidate
+	// SourceIDs above cover the typical path-resolution cases, but retaining
+	// this check preserves the existing within-Load cache invariant (and
+	// survives any future path-resolution edge case that the candidate
+	// derivation above doesn't anticipate).
 	l.mu.Lock()
 	if loadedSchema, ok := l.loadedSchemas[importSourceID]; ok {
-		// Store the resolved import information even for already-loaded schemas
 		l.resolvedImports[imp.Alias] = resolvedImport{
 			sourceID: importSourceID,
 			schema:   loadedSchema,
+			decl:     imp,
+		}
+		l.mu.Unlock()
+		return true, nil
+	}
+	if existing, ok := l.registry.LookupBySourceID(importSourceID); ok {
+		l.loadedSchemas[importSourceID] = existing
+		l.resolvedImports[imp.Alias] = resolvedImport{
+			sourceID: importSourceID,
+			schema:   existing,
 			decl:     imp,
 		}
 		l.mu.Unlock()
@@ -988,6 +1033,64 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 	}
 
 	return importPath, nil
+}
+
+// candidateImportSourceIDs returns the SourceIDs readImportFile could produce
+// for the given relative path, without performing any file I/O. Used by the
+// cross-Load short-circuit in loadImport to detect already-registered imports
+// before paying the read cost.
+//
+// The returned list mirrors readImportFile's candidate order (with-.yammm
+// first, then without) across the two code paths readImportFile exercises:
+// the in-memory source-content lookup uses l.moduleRoot verbatim, while
+// rootLoader.readFile uses the canonicalized rootPath. Both forms are
+// emitted so a Registry populated by either path will hit on the short-
+// circuit. Paths that fail canonicalization are silently dropped; they
+// would fail again in readImportFile with a uniform diagnostic.
+func (l *loader) candidateImportSourceIDs(relativePath string) []location.SourceID {
+	candidates := []string{relativePath}
+	if !strings.HasSuffix(relativePath, ".yammm") {
+		candidates = []string{relativePath + ".yammm", relativePath}
+	}
+
+	ids := make([]location.SourceID, 0, 4)
+	seen := make(map[location.SourceID]struct{}, 4)
+	appendUnique := func(id location.SourceID) {
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	// Mirror readImportFile's in-memory lookup: raw l.moduleRoot + candidate.
+	for _, candidate := range candidates {
+		var absPath string
+		if l.moduleRoot != "" {
+			absPath = filepath.Join(l.moduleRoot, candidate)
+		} else {
+			absPath = candidate
+		}
+		if id, err := location.SourceIDFromAbsolutePath(absPath); err == nil {
+			appendUnique(id)
+		}
+	}
+
+	// Mirror rootLoader.readFile's path computation: canonical rootPath +
+	// filepath.Clean(candidate). rootLoader canonicalizes the module root
+	// once via makeCanonicalPath (symlink-resolved); candidate SourceIDs
+	// derived here must use that same canonical root to match the SourceIDs
+	// previously registered via rootLoader.readFile.
+	if l.rootLoader != nil {
+		for _, candidate := range candidates {
+			absPath := filepath.Join(l.rootLoader.rootPath, filepath.Clean(candidate))
+			if id, err := location.SourceIDFromAbsolutePath(absPath); err == nil {
+				appendUnique(id)
+			}
+		}
+	}
+
+	return ids
 }
 
 // readImportFile reads an import file using sandboxed access via rootLoader.

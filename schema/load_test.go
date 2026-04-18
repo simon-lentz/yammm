@@ -1616,3 +1616,215 @@ type Order {
 	}
 	assert.True(t, found, "expected E_UNKNOWN_PROPERTY for nonexistent on LineItem")
 }
+
+// --- Shared-Registry cross-Load tests (PR-7) ---
+
+// writeSharedRegistryFixtures sets up a tempdir with:
+//   - common.yammm — a leaf schema shared as a transitive import
+//   - root_a.yammm, root_b.yammm — two independent roots both importing common
+//
+// Returns the tempdir path. Fixtures live only for the test's duration via t.TempDir().
+func writeSharedRegistryFixtures(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "common.yammm"),
+		[]byte(`schema "common" type BaseCommon { id String }`),
+		0o600,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "root_a.yammm"),
+		[]byte(`schema "root_a"
+import "./common" as c
+type HolderA { ref c.BaseCommon }`),
+		0o600,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "root_b.yammm"),
+		[]byte(`schema "root_b"
+import "./common" as c
+type HolderB { ref c.BaseCommon }`),
+		0o600,
+	))
+
+	return dir
+}
+
+// resolveImportSchema returns the resolved *Schema for the import with the
+// given alias on s. Fails the test if no such import is present. Reusable
+// helper — kept general rather than hard-coding the "c" alias so future
+// shared-Registry tests with different alias conventions can use it.
+//
+//nolint:unparam // kept general for future callers
+func resolveImportSchema(t *testing.T, s *schema.Schema, alias string) *schema.Schema {
+	t.Helper()
+	imp, ok := s.ImportByAlias(alias)
+	require.True(t, ok, "import alias %q not found on schema %q", alias, s.Name())
+	resolved := imp.Schema()
+	require.NotNil(t, resolved, "import %q on schema %q has no resolved schema", alias, s.Name())
+	return resolved
+}
+
+func TestLoad_SharedRegistry_NonOverlapping(t *testing.T) {
+	// Two independent schemas with no shared imports, one shared Registry.
+	// Both Load calls must succeed; registry must end with exactly 2 schemas.
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "alpha.yammm"),
+		[]byte(`schema "alpha" type Alpha { id String }`),
+		0o600,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "beta.yammm"),
+		[]byte(`schema "beta" type Beta { id String }`),
+		0o600,
+	))
+
+	ctx := t.Context()
+	reg := schema.NewRegistry()
+
+	sA, resA := schema.Load(ctx, filepath.Join(dir, "alpha.yammm"),
+		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
+	require.NotNil(t, sA)
+	require.False(t, resA.HasErrors(), "errors: %v", resA.Messages())
+
+	sB, resB := schema.Load(ctx, filepath.Join(dir, "beta.yammm"),
+		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
+	require.NotNil(t, sB)
+	require.False(t, resB.HasErrors(), "errors: %v", resB.Messages())
+
+	assert.Equal(t, 2, reg.Len(), "non-overlapping loads: registry holds exactly both roots")
+}
+
+func TestLoad_SharedRegistry_OverlappingImports(t *testing.T) {
+	// The core cross-Load short-circuit test. Two roots both importing
+	// common.yammm against a shared Registry: each root registers once,
+	// common.yammm registers once, reg.Len() == 3.
+	dir := writeSharedRegistryFixtures(t)
+
+	ctx := t.Context()
+	reg := schema.NewRegistry()
+
+	sA, resA := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
+		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
+	require.NotNil(t, sA)
+	require.False(t, resA.HasErrors(), "errors: %v", resA.Messages())
+
+	sB, resB := schema.Load(ctx, filepath.Join(dir, "root_b.yammm"),
+		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
+	require.NotNil(t, sB)
+	require.False(t, resB.HasErrors(), "errors: %v", resB.Messages())
+
+	assert.Equal(t, 3, reg.Len(), "expected registry: [common, root_a, root_b]")
+
+	// The common-schema pointer must be identical across both root schemas.
+	// This is the direct observation of the cross-Load short-circuit: both
+	// Loads resolved the import to the same *Schema pointer.
+	commonFromA := resolveImportSchema(t, sA, "c")
+	commonFromB := resolveImportSchema(t, sB, "c")
+	assert.Same(t, commonFromA, commonFromB,
+		"cross-Load short-circuit must resolve overlapping imports to the same *Schema pointer")
+
+	// And the registry's stored pointer must match both.
+	regCommon, ok := reg.LookupBySourceID(commonFromA.SourceID())
+	require.True(t, ok, "common schema must be in the registry")
+	assert.Same(t, commonFromA, regCommon,
+		"registry-stored pointer must match the pointer resolved through Import.Schema()")
+}
+
+func TestLoad_SharedRegistry_ObservesCrossLoadShortCircuit(t *testing.T) {
+	// Stronger observation: delete the common-schema source file after the
+	// first Load. The second Load must still succeed — which is only possible
+	// if the cross-Load short-circuit fired before the parse path (which
+	// would have tried to read the deleted file).
+	dir := writeSharedRegistryFixtures(t)
+
+	ctx := t.Context()
+	reg := schema.NewRegistry()
+
+	sA, resA := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
+		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
+	require.NotNil(t, sA)
+	require.False(t, resA.HasErrors(), "first load unexpectedly failed: %v", resA.Messages())
+
+	// Remove the shared import source. A naive second Load that re-parses
+	// the transitive import would fail with a file-not-found style error.
+	require.NoError(t, os.Remove(filepath.Join(dir, "common.yammm")))
+
+	sB, resB := schema.Load(ctx, filepath.Join(dir, "root_b.yammm"),
+		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
+	require.NotNil(t, sB,
+		"second Load must succeed via the cross-Load short-circuit; common.yammm was deleted")
+	require.False(t, resB.HasErrors(),
+		"no parse of common.yammm should occur on the second Load — errors: %v",
+		resB.Messages())
+
+	// Sanity: the second Load's resolved common pointer must equal the first's.
+	assert.Same(t,
+		resolveImportSchema(t, sA, "c"),
+		resolveImportSchema(t, sB, "c"),
+		"cross-Load short-circuit must reuse the first Load's common *Schema")
+}
+
+func TestLoad_DefaultFreshRegistryPerCall(t *testing.T) {
+	// Pin the default: when WithRegistry is absent, each Load constructs its
+	// own Registry, so two independent Loads do not share state. Guards against
+	// an accidental future change that would flip the default to shared.
+	dir := writeSharedRegistryFixtures(t)
+	ctx := t.Context()
+
+	sA, resA := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
+		schema.WithModuleRoot(dir))
+	require.NotNil(t, sA)
+	require.False(t, resA.HasErrors())
+
+	sB, resB := schema.Load(ctx, filepath.Join(dir, "root_b.yammm"),
+		schema.WithModuleRoot(dir))
+	require.NotNil(t, sB)
+	require.False(t, resB.HasErrors())
+
+	// Each Load materialized its own common-schema instance (no Registry was
+	// shared). Different pointers prove the per-Load default is intact.
+	assert.NotSame(t,
+		resolveImportSchema(t, sA, "c"),
+		resolveImportSchema(t, sB, "c"),
+		"fresh-Registry default: independent Loads must produce independent *Schema pointers for shared imports")
+}
+
+func TestLoad_SharedRegistry_TopLevelReparse(t *testing.T) {
+	// Document the intentional top-level asymmetry. Load(A) twice against the
+	// same Registry returns two distinct *Schema pointers, but the registry
+	// retains the first pointer. Pins this so future refactors don't quietly
+	// flip the short-circuit onto the top-level parse path (which is out of
+	// scope for PR-7 per the spec).
+	dir := t.TempDir()
+	aPath := filepath.Join(dir, "a.yammm")
+	require.NoError(t, os.WriteFile(aPath,
+		[]byte(`schema "root" type Root { id String }`), 0o600))
+
+	ctx := t.Context()
+	reg := schema.NewRegistry()
+
+	s1, res1 := schema.Load(ctx, aPath,
+		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
+	require.NotNil(t, s1)
+	require.False(t, res1.HasErrors())
+
+	s2, res2 := schema.Load(ctx, aPath,
+		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
+	require.NotNil(t, s2)
+	require.False(t, res2.HasErrors(),
+		"second Load must succeed — Register hits the idempotence path, not the error path: %v",
+		res2.Messages())
+
+	assert.NotSame(t, s1, s2,
+		"top-level asymmetry: Load returns a freshly-compiled schema per call even under shared Registry")
+
+	// The registry retained the first pointer (idempotent Register is a no-op).
+	regStored, ok := reg.LookupBySourceID(s1.SourceID())
+	require.True(t, ok)
+	assert.Same(t, s1, regStored,
+		"registry must retain the first Load's pointer; idempotent Register must not overwrite")
+}

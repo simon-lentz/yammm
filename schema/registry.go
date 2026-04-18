@@ -2,6 +2,7 @@ package schema
 
 import (
 	"cmp"
+	"fmt"
 	"maps"
 	"slices"
 	"sync"
@@ -23,6 +24,13 @@ type Registry struct {
 	schemas  map[location.SourceID]*Schema
 	byName   map[string]*Schema
 	byTypeID map[TypeID]*Type
+	// hashes caches StructuralHash results for registered schemas keyed by
+	// SourceID. Populated lazily on the idempotence path (first duplicate-
+	// SourceID Register call); never populated for schemas that have not
+	// triggered an idempotence check. Keeps the fresh-register path free
+	// of hash-cost while the steady-state idempotence-check path pays one
+	// StructuralHash on the incoming schema only.
+	hashes map[location.SourceID]string
 }
 
 // NewRegistry creates an empty Registry.
@@ -31,12 +39,34 @@ func NewRegistry() *Registry {
 		schemas:  make(map[location.SourceID]*Schema),
 		byName:   make(map[string]*Schema),
 		byTypeID: make(map[TypeID]*Type),
+		hashes:   make(map[location.SourceID]string),
 	}
 }
 
 // Register adds a schema to the registry.
-// Returns an error if the schema has a zero SourceID, empty name, or if a schema
-// with the same SourceID or name is already registered.
+//
+// Idempotence: when a schema with the same SourceID is already registered AND
+// its StructuralHash matches the incoming schema's hash, Register returns nil
+// without mutating the registry. This makes the common case — the same .yammm
+// file parsed twice in one process (e.g., a shared Registry used across
+// multiple Load calls whose schemas share transitive imports) — a safe no-op.
+// Re-indexing of the existing schema's types is skipped: pointer identity of
+// types returned by LookupType is preserved across idempotent re-registration.
+//
+// A SourceID match with content divergence still returns a
+// *RegistryError{Kind: DuplicateSourceID}. The error message preserves the
+// "schema already registered with source ID: <id>" prefix and appends the
+// existing and incoming structural hashes so divergent registrations fail
+// loudly and diagnosably.
+//
+// New SourceIDs register normally. Zero SourceID, empty schema name, and
+// duplicate name (different SourceID, same name) continue to return their
+// respective RegistryError kinds; idempotence does not weaken these checks.
+//
+// Thread-safety: unchanged. Register acquires the registry's write lock for
+// the duration of the check-and-register sequence. StructuralHash is computed
+// on the duplicate-SourceID path only and runs under the lock; the happy
+// path (fresh SourceID) pays no hash cost.
 func (r *Registry) Register(s *Schema) error {
 	if s == nil {
 		return nil
@@ -61,11 +91,28 @@ func (r *Registry) Register(s *Schema) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Check for duplicate SourceID
-	if _, ok := r.schemas[s.sourceID]; ok {
+	// Idempotence on duplicate SourceID: same content is a no-op;
+	// divergent content still errors with a full hash-diff diagnostic.
+	// existing is a non-nil map value; s is non-nil per the top-of-function
+	// guard — StructuralHash is safe on both. The existing hash is cached
+	// on first use; steady-state re-registrations pay only the incoming
+	// schema's hash.
+	if existing, ok := r.schemas[s.sourceID]; ok {
+		existingHash, cached := r.hashes[s.sourceID]
+		if !cached {
+			existingHash = StructuralHash(existing)
+			r.hashes[s.sourceID] = existingHash
+		}
+		incomingHash := StructuralHash(s)
+		if existingHash == incomingHash {
+			return nil
+		}
 		return &RegistryError{
-			Kind:    DuplicateSourceID,
-			Message: "schema already registered with source ID: " + s.sourceID.String(),
+			Kind: DuplicateSourceID,
+			Message: fmt.Sprintf(
+				"schema already registered with source ID: %s (content divergence: existing=%s, incoming=%s)",
+				s.sourceID.String(), existingHash, incomingHash,
+			),
 		}
 	}
 
@@ -154,11 +201,13 @@ func (r *Registry) Clone() *Registry {
 		schemas:  make(map[location.SourceID]*Schema, len(r.schemas)),
 		byName:   make(map[string]*Schema, len(r.byName)),
 		byTypeID: make(map[TypeID]*Type, len(r.byTypeID)),
+		hashes:   make(map[location.SourceID]string, len(r.hashes)),
 	}
 
 	maps.Copy(clone.schemas, r.schemas)
 	maps.Copy(clone.byName, r.byName)
 	maps.Copy(clone.byTypeID, r.byTypeID)
+	maps.Copy(clone.hashes, r.hashes)
 
 	return clone
 }

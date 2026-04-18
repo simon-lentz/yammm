@@ -34,8 +34,31 @@ func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 }
 
 // WithRegistry provides a schema registry for cross-schema type resolution.
-// Schemas loaded via imports will be registered automatically.
-// If nil, a new registry is created for the load operation.
+// Schemas loaded via imports will be registered automatically. If nil, a
+// fresh Registry is created for the Load operation (the default, safe for
+// any usage pattern).
+//
+// Shared-Registry semantics (post-v0.3.0). Passing the same *Registry to
+// multiple Load calls is safe and efficient:
+//
+//   - Overlapping transitive imports short-circuit via the registry cache:
+//     when loadImport encounters a SourceID already registered in r, the
+//     existing *Schema pointer is reused and the import is NOT re-parsed.
+//     This is where cross-Load schema caching pays off.
+//   - Same-content re-registration is a no-op (see Registry.Register for
+//     the idempotence contract); divergent-content re-registration still
+//     errors with a full hash-diff diagnostic.
+//   - The root schema returned by each Load call is always a fresh compile.
+//     registry.LookupBySourceID(rootID) returns the first Load's pointer on
+//     repeat calls; only imports benefit from the cache. This asymmetry is
+//     intentional.
+//   - Cross-Load sharing only fires when imports resolve to the same
+//     SourceID. SourceIDs derive from the canonical absolute path, so
+//     WithModuleRoot values resolving to different canonical paths for the
+//     same file yield different SourceIDs and do not share. For LoadString,
+//     the synthetic "string://<sourceName>" SourceID scheme means two
+//     LoadString calls sharing a Registry must use distinct sourceName
+//     values unless re-registering byte-identical content.
 func WithRegistry(r *Registry) LoadOption {
 	return func(c *loadConfig) {
 		c.registry = r
