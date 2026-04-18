@@ -160,6 +160,33 @@
 //
 // The conventional file extension is .ys (yammm snapshot).
 //
+// # Wire Format Versions
+//
+// The .ys wire format uses a version field in the header for forward
+// evolution. yammm v0.3.0 introduced the v1 → v2 bump paired with
+// [graph.UnresolvedEdge.Properties] — the new persisted "properties"
+// field on unresolved-edge wire entries cannot be `omitempty`-safe
+// alone (a pre-v0.3.0 reader would silently drop the field), so the
+// version bump pairs with the existing unknown-version-rejection path
+// to force older readers to error cleanly instead.
+//
+// [MinReadableVersion] names the lowest version this package accepts on
+// read paths; the accept range is the closed interval
+// [[MinReadableVersion], currentVersion] and the current version is 2
+// at yammm v0.3.0. Documents outside the range surface Fatal
+// [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] with the observed version and
+// the supported range named in the message.
+//
+// Asymmetric-reader semantics. A v2 reader (yammm v0.3.0+) accepts
+// both v1 and v2 documents. v1 documents simply lack the new
+// "properties" field on unresolved-edge wires; the load path populates
+// the in-memory Properties as empty, which is lossless since v1 never
+// carried the data. A v1 reader (yammm v0.2.x) rejects v2 documents
+// via the unknown-version path — operators running an older binary
+// against a v0.3.0-written .ys see a structured diagnostic rather
+// than a silently-incomplete document. See docs/VERSIONING.md for
+// the full pre-1.0 / post-1.0 wire-format policy.
+//
 // # Thread Safety
 //
 // All functions are stateless and safe for concurrent use.

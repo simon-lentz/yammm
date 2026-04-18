@@ -28,6 +28,10 @@ type corpusEntry struct {
 // The corpus spans: empty vs populated snapshot × {compact, indent2sp,
 // indent-tab} × various CreatedAt / Metadata / indent combinations.
 // Small enough to iterate per-test without noticeable runtime impact.
+//
+// PR-6 adds a third snapshot shape — "unresolved_with_props" — so the
+// wire-format contracts are pinned against documents that carry the
+// new unresolvedWire.Properties field populated.
 func marshalCorpus(t *testing.T) []corpusEntry {
 	t.Helper()
 	s := testSchema(t)
@@ -35,6 +39,15 @@ func marshalCorpus(t *testing.T) []corpusEntry {
 	populatedSnap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}),
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"title": "Acme"}),
+	)
+	// A snapshot with a cross-batch unresolved edge carrying properties.
+	// Exercises the v2 unresolvedWire.Properties field against every
+	// Option combination the wire-format tests iterate.
+	unresolvedWithPropsSnap := buildSnapshot(t, s,
+		mustValidInstanceWithEdgeProps(t, s, "Person",
+			[]any{"p1"}, map[string]any{"name": "Alice"},
+			"EMPLOYER", []any{"missing"},
+			map[string]any{"role": "Engineer", "since": int64(2020)}),
 	)
 
 	fixedTime := time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC)
@@ -63,6 +76,7 @@ func marshalCorpus(t *testing.T) []corpusEntry {
 	}{
 		{"empty", emptySnap},
 		{"populated", populatedSnap},
+		{"unresolved_with_props", unresolvedWithPropsSnap},
 	} {
 		for _, v := range optionVariants {
 			data, res := snapshot.Marshal(ctx, snapPair.snap, v.opts...)

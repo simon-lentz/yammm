@@ -107,6 +107,25 @@ func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk [
 	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), nil, nil, nil)
 }
 
+// mustValidInstanceWithEdgeProps mirrors the graph-package helper of the same
+// name (graph/testhelpers_test.go:391) but is available to snapshot tests.
+// Builds a ValidInstance with a single edge that carries schema-declared edge
+// properties. Used by PR-6's unresolved-edge-properties round-trip tests.
+func mustValidInstanceWithEdgeProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKey []any, edgeProps map[string]any) *instance.ValidInstance { //nolint:unparam // test helper kept general
+	t.Helper()
+	typ, ok := s.Type(typeName)
+	if !ok {
+		t.Fatalf("type %q not found", typeName)
+	}
+	targets := []instance.ValidEdgeTarget{
+		instance.NewValidEdgeTarget(immutable.WrapKey(targetKey), immutable.WrapProperties(edgeProps)),
+	}
+	edges := map[string]*instance.ValidEdgeData{
+		relName: instance.NewValidEdgeData(targets),
+	}
+	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), edges, nil, nil)
+}
+
 func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	t.Helper()
 	g := graph.New(s)
@@ -436,8 +455,8 @@ func TestInfo_Basic(t *testing.T) {
 		t.Fatal("Info returned nil")
 	}
 
-	if info.Version != 1 {
-		t.Errorf("Version: got %d, want 1", info.Version)
+	if info.Version != 2 {
+		t.Errorf("Version: got %d, want 2", info.Version)
 	}
 	if info.SchemaName != "test" {
 		t.Errorf("SchemaName: got %q, want %q", info.SchemaName, "test")
@@ -466,7 +485,7 @@ func TestHeaderOnly_Basic(t *testing.T) {
 	require.NoError(t, result.Err(), "HeaderOnly should succeed")
 	require.NotNil(t, header, "HeaderOnly should return a non-nil HeaderInfo")
 
-	assert.Equal(t, 1, header.Version, "Version")
+	assert.Equal(t, 2, header.Version, "Version")
 	assert.Equal(t, "test", header.SchemaName, "SchemaName")
 	assert.NotEmpty(t, header.SchemaHash, "SchemaHash should be populated")
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash should be populated (value, not verified)")
@@ -648,7 +667,7 @@ func TestHeaderOnlyRead_HappyPath(t *testing.T) {
 	require.NoError(t, result.Err(), "HeaderOnlyRead should succeed on well-formed input")
 	require.NotNil(t, header, "HeaderOnlyRead should return a non-nil HeaderInfo")
 
-	assert.Equal(t, 1, header.Version)
+	assert.Equal(t, 2, header.Version)
 	assert.Equal(t, "test", header.SchemaName)
 	assert.NotEmpty(t, header.SchemaHash)
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash is the stored value, not a verification result")
@@ -1077,6 +1096,154 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 
 	if len(loaded.Unresolved()) != len(snap.Unresolved()) {
 		t.Errorf("unresolved count: got %d, want %d", len(loaded.Unresolved()), len(snap.Unresolved()))
+	}
+}
+
+// TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip pins the §6 fidelity
+// fix: edge properties declared on a forward reference to an absent target
+// must survive Marshal → Load intact. Pre-PR-6 behavior silently dropped
+// these at graph.go:825-827 and at the unresolvedWire layer; this test
+// regresses on both failure modes.
+func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
+	s := testSchema(t)
+	// Person with EMPLOYER edge to non-existent Company c99, carrying
+	// property values. Although the DSL builder used by testSchema does
+	// not declare edge-property types on EMPLOYER, the in-memory
+	// ValidEdgeTarget construction accepts arbitrary property maps —
+	// mirroring graph/testhelpers_test.go's existing pattern at
+	// TestGraph_Edge_Properties. The round-trip path is what's under
+	// test, not schema-level type validation.
+	person := mustValidInstanceWithEdgeProps(t, s, "Person",
+		[]any{"p1"}, map[string]any{"id": "p1", "name": "Alice"},
+		"EMPLOYER", []any{"c99"},
+		map[string]any{"role": "Engineer", "since": int64(2020)})
+
+	snap := buildSnapshot(t, s, person)
+	if len(snap.Unresolved()) != 1 {
+		t.Fatalf("expected 1 unresolved edge, got %d", len(snap.Unresolved()))
+	}
+
+	ctx := context.Background()
+	data, result := snapshot.Marshal(ctx, snap)
+	require.NoError(t, result.Err(), "Marshal")
+	loaded, result := snapshot.Load(ctx, data, s)
+	require.NoError(t, result.Err(), "Load")
+
+	require.Len(t, loaded.Unresolved(), 1)
+	u := loaded.Unresolved()[0]
+	require.Equal(t, "target_missing", u.Reason)
+
+	role, ok := u.Property("role")
+	require.True(t, ok, "Property(role) should round-trip")
+	roleStr, _ := role.String()
+	require.Equal(t, "Engineer", roleStr)
+
+	since, ok := u.Property("since")
+	require.True(t, ok, "Property(since) should round-trip")
+	sinceInt, _ := since.Int()
+	require.Equal(t, int64(2020), sinceInt)
+
+	// snapshottest.CompareSnapshots asserts the full per-field diff,
+	// including the Properties field PR-6 added. Independent gate.
+	snapshottest.AssertRoundTrip(t, snap, s)
+}
+
+// TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties pins wire-format
+// parity: an edge with identical property shape survives round-trip
+// regardless of whether it resolves (target present) or stays unresolved
+// (target absent). This is the high-level invariant the §6 golden-bytes
+// parity test exists to pin at the serialization-bytes layer.
+func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
+	s := testSchema(t)
+
+	resolvedCompany := mustValidInstance(t, s, "Company",
+		[]any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+
+	edgeProps := map[string]any{"role": "Engineer", "since": int64(2020)}
+
+	// personA's EMPLOYER target exists (resolves); personB's does not.
+	personA := mustValidInstanceWithEdgeProps(t, s, "Person",
+		[]any{"pA"}, map[string]any{"id": "pA", "name": "Alice"},
+		"EMPLOYER", []any{"c1"}, edgeProps)
+	personB := mustValidInstanceWithEdgeProps(t, s, "Person",
+		[]any{"pB"}, map[string]any{"id": "pB", "name": "Bob"},
+		"EMPLOYER", []any{"missing"}, edgeProps)
+
+	snap := buildSnapshot(t, s, resolvedCompany, personA, personB)
+	require.Len(t, snap.Edges(), 1, "expected one resolved edge")
+	require.Len(t, snap.Unresolved(), 1, "expected one unresolved edge")
+
+	ctx := context.Background()
+	data, mres := snapshot.Marshal(ctx, snap)
+	require.NoError(t, mres.Err())
+	loaded, lres := snapshot.Load(ctx, data, s)
+	require.NoError(t, lres.Err())
+
+	// Both the resolved and unresolved entries survive with identical
+	// property content (per-key comparison using the .Clone() map form).
+	resolvedProps := loaded.Edges()[0].Properties().Clone()
+	unresolvedProps := loaded.Unresolved()[0].Properties().Clone()
+	require.Equal(t, edgeProps, resolvedProps,
+		"resolved edge properties must survive round-trip")
+	require.Equal(t, edgeProps, unresolvedProps,
+		"unresolved edge properties must survive round-trip and match the resolved shape")
+}
+
+// TestLoad_V1Compatibility pins the "v2 reader accepts v1 files losslessly"
+// half of the asymmetric-bump contract. A hand-crafted v1 document (no
+// "properties" field on unresolvedWire entries) loads cleanly through the
+// v0.3.0 decoder; the resulting UnresolvedEdge has empty Properties —
+// equivalent to the v1 in-memory semantics.
+//
+// Integrity is not the point of this test (we are constructing a v1 doc by
+// hand rather than recomputing its SHA-256), so WithSkipIntegrityCheck
+// keeps the test focused on version-acceptance semantics.
+func TestLoad_V1Compatibility(t *testing.T) {
+	s := testSchema(t)
+	// Minimal v1-style document. The unresolved-edge entry has NO
+	// "properties" field (the v1 shape). The schema_hash matches
+	// testSchema's StructuralHash so schema-compatibility passes; the
+	// integrity_hash is a placeholder under WithSkipIntegrityCheck.
+	// types[] lists only Person because no Company instances are present
+	// (matches Marshal's type-emission behavior).
+	schemaHash := schema.StructuralHash(s)
+	doc := fmt.Sprintf(`{"yammm_snapshot":{"version":1,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":["Person"],"instances":{"Person":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]},"diagnostics":{"duplicates":[],"unresolved":[{"source_type":"Person","source_key":["p1"],"relation":"EMPLOYER","target_type":"Company","target_key":["c99"],"required":true,"reason":"target_missing"}]}}`, schemaHash)
+
+	ctx := context.Background()
+	loaded, result := snapshot.Load(ctx, []byte(doc), s, snapshot.WithSkipIntegrityCheck())
+	require.NoError(t, result.Err(), "v2 reader must accept v1 documents cleanly: %v", result)
+
+	require.Len(t, loaded.Unresolved(), 1)
+	u := loaded.Unresolved()[0]
+	require.Equal(t, 0, u.Properties().Len(),
+		"v1 document has no properties field on unresolved wire; v2 reader loads as empty Properties")
+}
+
+// TestLoad_UnsupportedVersion pins the rejection path for versions outside
+// the accept range on either side (v0, v3, v99). Each surfaces the
+// E_SNAPSHOT_UNSUPPORTED_VERSION code with the observed version and the
+// supported range named in the message.
+func TestLoad_UnsupportedVersion(t *testing.T) {
+	s := testSchema(t)
+	schemaHash := schema.StructuralHash(s)
+	for _, v := range []int{0, 3, 99} {
+		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
+			doc := fmt.Sprintf(`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":[],"instances":{},"diagnostics":{"duplicates":[],"unresolved":[]}}`, v, schemaHash)
+
+			_, result := snapshot.Load(context.Background(), []byte(doc), s,
+				snapshot.WithSkipIntegrityCheck())
+			require.True(t, result.HasErrors(), "version %d must be rejected", v)
+
+			found := false
+			for issue := range result.Errors() {
+				if issue.Code() == diag.E_SNAPSHOT_UNSUPPORTED_VERSION {
+					found = true
+					require.Contains(t, issue.Message(), "[1, 2]",
+						"reject message names the accept range")
+				}
+			}
+			require.True(t, found, "expected E_SNAPSHOT_UNSUPPORTED_VERSION")
+		})
 	}
 }
 

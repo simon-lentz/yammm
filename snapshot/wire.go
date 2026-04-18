@@ -46,8 +46,29 @@ package snapshot
 // See snapshot/update.go for the UpdateMetadata primitive that consumes
 // these contracts.
 
+// MinReadableVersion is the lowest .ys wire-format version this package
+// accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead).
+//
+// The accept range is the closed interval [MinReadableVersion, currentVersion].
+// Documents whose version field falls outside the range are rejected with a
+// Fatal [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] issue. The exported constant
+// lets consumers inspect the accept range without depending on the
+// unexported currentVersion.
+//
+// Asymmetric-reader semantics. yammm v0.3.0 bumped the wire format from
+// v1 to v2 alongside the addition of edge-property persistence on
+// unresolved edges (see [graph.UnresolvedEdge.Properties]). v2 readers
+// (yammm v0.3.0+) accept v1 documents losslessly — a v1 document simply
+// has no properties field on unresolved-edge wires, and the load path
+// populates the in-memory Properties as empty. v1 readers (yammm v0.2.x
+// and earlier) reject v2 documents cleanly via the existing
+// unknown-version rejection path rather than silently dropping edge
+// properties on cross-batch unresolved edges. See docs/VERSIONING.md
+// for the full pre-1.0 / post-1.0 wire-format policy.
+const MinReadableVersion = 1
+
 const (
-	currentVersion         = 1
+	currentVersion         = 2
 	currentHashAlgoVersion = 1
 )
 
@@ -130,12 +151,22 @@ type dupWire struct {
 }
 
 // unresolvedWire is the wire representation of an unresolved edge record.
+//
+// Properties is a v2 field (wire-format version 2+, landed in yammm v0.3.0).
+// v1 documents — produced by yammm v0.2.x — have no properties field on
+// unresolved-edge entries; v2 readers parse those documents losslessly,
+// populating the in-memory [graph.UnresolvedEdge] with empty Properties.
+// The `omitempty` tag keeps the field out of the wire for "absent" and
+// "empty" unresolved-edge reasons (which never had a target to attach
+// properties to) and for "target_missing" edges whose schema-declared
+// relationship carries no edge properties.
 type unresolvedWire struct {
-	SourceType string `json:"source_type"`
-	SourceKey  []any  `json:"source_key"`
-	Relation   string `json:"relation"`
-	TargetType string `json:"target_type"`
-	TargetKey  []any  `json:"target_key"`
-	Required   bool   `json:"required"`
-	Reason     string `json:"reason"`
+	SourceType string         `json:"source_type"`
+	SourceKey  []any          `json:"source_key"`
+	Relation   string         `json:"relation"`
+	TargetType string         `json:"target_type"`
+	TargetKey  []any          `json:"target_key"`
+	Required   bool           `json:"required"`
+	Reason     string         `json:"reason"`
+	Properties map[string]any `json:"properties,omitempty"`
 }

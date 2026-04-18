@@ -1,0 +1,31 @@
+{
+  "edges": [
+    {
+      "label": "multi_scalar",
+      "target_key": "missing-A",
+      "properties": {
+        "kind": "primary",
+        "source": "heuristic",
+        "weight": 0.75
+      }
+    },
+    {
+      "label": "nested_map",
+      "target_key": "missing-B",
+      "properties": {
+        "metadata": {
+          "imported_at": "2026-04-01",
+          "source_system": "legacy"
+        }
+      }
+    },
+    {
+      "label": "escape_sensitive",
+      "target_key": "missing-C",
+      "properties": {
+        "locale": "café",
+        "tag": "primary: <alpha>"
+      }
+    }
+  ]
+}

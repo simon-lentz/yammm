@@ -58,6 +58,15 @@
 // [Edge] represents a resolved association between two instances:
 // [Edge.Relation], [Edge.Source], [Edge.Target], [Edge.Properties].
 //
+// [UnresolvedEdge] records an association whose target was not found at
+// graph-construction time (absent, empty, or target_missing). Edge
+// properties declared on the forward reference survive Marshal/Load
+// symmetric with [Edge.Properties] and are accessed via
+// [UnresolvedEdge.Property] and [UnresolvedEdge.Properties]. The .ys
+// wire format carries these through the version-2 "properties" field
+// on unresolved-edge wire entries; see the snapshot package for
+// format-version semantics.
+//
 // # Graph Options
 //
 // [graph.New] accepts [Option] values:

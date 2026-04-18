@@ -140,11 +140,8 @@ func (sd *streamDecoder) decodeHeader() error {
 	sd.bodyOffset = dec.InputOffset()
 
 	// Validate version.
-	if sd.header.Version != currentVersion {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNSUPPORTED_VERSION,
-			fmt.Sprintf("unsupported snapshot format version %d (supported: %d)", sd.header.Version, currentVersion)).
-			WithDetail(diag.DetailKeyVersion, strconv.Itoa(sd.header.Version)).
-			Build())
+	if iss, ok := acceptVersion(sd.header.Version, MinReadableVersion, currentVersion); !ok {
+		sd.collector.Collect(iss)
 		return nil
 	}
 

@@ -99,11 +99,16 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 			Reason:     u.Reason,
 		}
 		// TargetKey: null for "absent"/"empty", parsed array for "target_missing".
+		// Properties: populated only for "target_missing" — "absent" and
+		// "empty" describe a missing-or-empty target reference that never
+		// had a target to attach properties to. omitempty on the wire
+		// keeps those entries compact (no empty {} emitted).
 		switch u.Reason {
 		case "absent", "empty":
 			uw.TargetKey = nil
 		default:
 			uw.TargetKey = parseTargetKey(u.TargetKey)
+			uw.Properties = u.Properties().Clone()
 		}
 		unresolvedWires = append(unresolvedWires, uw)
 	}

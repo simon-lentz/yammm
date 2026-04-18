@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -110,7 +109,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			jsonField:    jsonField,
 			targetType:   unres.TargetType,
 			targetKey:    unres.TargetKey,
-			properties:   immutable.Properties{},
+			properties:   unres.Properties(),
 			isRequired:   unres.Required,
 			reasonDetail: reasonDetail,
 		})

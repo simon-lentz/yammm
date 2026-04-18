@@ -62,6 +62,12 @@ type DuplicateParts struct {
 }
 
 // UnresolvedParts holds the data for a single unresolved edge record.
+//
+// Properties carries the edge property values declared on the forward
+// reference. Populated only when Reason is "target_missing"; empty
+// otherwise. Loaded from the .ys wire-format v2 "properties" field on
+// unresolved-edge entries; for v1 documents this is always empty
+// (v1 never carried the field).
 type UnresolvedParts struct {
 	SourceType string
 	SourceKey  immutable.Key
@@ -70,6 +76,7 @@ type UnresolvedParts struct {
 	TargetKey  immutable.Key
 	Required   bool
 	Reason     string
+	Properties immutable.Properties
 }
 
 // RebuildSnapshot constructs a Snapshot from pre-resolved parts.
@@ -173,7 +180,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		}
 
 		unresolvedEdges = append(unresolvedEdges,
-			newUnresolvedEdge(source, up.Relation, up.TargetType, up.TargetKey.String(), up.Required, up.Reason))
+			newUnresolvedEdge(source, up.Relation, up.TargetType, up.TargetKey.String(), up.Required, up.Reason, up.Properties))
 	}
 
 	if collector.HasErrors() {

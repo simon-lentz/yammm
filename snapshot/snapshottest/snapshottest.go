@@ -232,6 +232,9 @@ func CompareSnapshots(a, b *graph.Snapshot) error {
 				au.Reason != bu.Reason {
 				diffs = append(diffs, fmt.Sprintf("Unresolved[%d]: differ", i))
 			}
+			if !mapsEqualAny(au.Properties().Clone(), bu.Properties().Clone()) {
+				diffs = append(diffs, fmt.Sprintf("Unresolved[%d]: Properties differ", i))
+			}
 		}
 	}
 

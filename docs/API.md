@@ -250,6 +250,8 @@ snap, result := graph.RebuildSnapshot(schema, parts)
 
 The `SnapshotParts` struct holds fully-resolved instances, edges, duplicates, and unresolved records using value types (`InstanceParts`, `EdgeParts`, `DuplicateParts`, `UnresolvedParts`). Pointer-based cross-references are resolved internally.
 
+`UnresolvedParts.Properties` carries DSL-declared edge property values from the forward reference and is populated only when `Reason` is `"target_missing"` — `"absent"` and `"empty"` describe a missing/empty reference that never had a target. For documents in `.ys` wire-format version 1 (produced before yammm v0.3.0) the field is always empty; v2 documents persist the values through Marshal/Load symmetric with resolved `Edge.Properties`. See the snapshot package's [Wire Format Versions](#wire-format-versions) subsection for the v1 → v2 bump rationale.
+
 Most users should construct snapshots via `Graph.Add` + `Graph.Snapshot`. `RebuildSnapshot` exists for the `snapshot.Load` deserialization path and testing.
 
 ### Snapshot Methods
@@ -335,7 +337,7 @@ The `.ys` format is JSON-based and preserves full structural fidelity: instances
 
 The format includes:
 
-- A **version** field for format evolution
+- A **version** field for format evolution (current value: `2` at yammm v0.3.0; see [Wire Format Versions](#wire-format-versions))
 - A **schema structural hash** for compatibility verification (see [Schema Identity](#schema-identity))
 - An **integrity hash** (SHA-256 over the document body) for corruption detection
 - A **features array** for forward compatibility
@@ -578,6 +580,16 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 **CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (3) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic via `snapshot.WriteFile`.
 
 **Test helper.** `snapshot/snapshottest.ExpectMetadataPreserved(tb, before, after, preservedKeys...)` asserts that a named set of metadata keys survived a rewrite unchanged. Intended for tests exercising metadata-rewrite primitives or any workflow that must preserve an invariant key set across a transition.
+
+### Wire Format Versions
+
+The `.ys` wire format uses an integer version field in the header for forward evolution. yammm v0.3.0 introduced the v1 → v2 bump paired with [`UnresolvedEdge.Properties`](#graph) — the new persisted `"properties"` field on unresolved-edge wire entries cannot be `omitempty`-safe alone (a pre-v0.3.0 reader would silently drop the field), so the version bump pairs with the existing unknown-version-rejection path to force older readers to error cleanly instead.
+
+`snapshot.MinReadableVersion` (exported constant, value `1`) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `2` at yammm v0.3.0) is the version emitted on every write. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Fatal `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported range named in the message.
+
+**Asymmetric-reader semantics.** A v2 reader (yammm v0.3.0+) accepts both v1 and v2 documents. v1 documents simply lack the new `"properties"` field on unresolved-edge wires; the load path populates the in-memory `UnresolvedEdge.Properties` as empty, which is lossless since v1 never carried the data. A v1 reader (yammm v0.2.x and earlier) rejects v2 documents via the unknown-version path — operators running an older binary against a v0.3.0-written `.ys` see a structured diagnostic rather than a silently-incomplete document.
+
+See [`docs/VERSIONING.md`](VERSIONING.md) for the full pre-1.0 / post-1.0 wire-format policy.
 
 ## Diagnostics
 
