@@ -810,6 +810,42 @@ All write methods return query structs (`NodeQuery`, `BatchNodeQuery`, `EdgeQuer
 | `WithNodeChunkSize` | `UNWIND` batch size for node queries (default: 5000) |
 | `WithEdgeChunkSize` | `UNWIND` batch size for edge queries (default: 5000) |
 
+### Cypher Builders
+
+The four exported builders produce the Cypher templates the `Adapter` write surface uses internally. They are pure functions — no execution, no driver dependency — and are exposed for advanced consumers (e.g. link engines, custom migration tooling) that want the template without the surrounding parameter-and-chunk plumbing that `BatchNodeQueries` / `BatchEdgeQueries` provide.
+
+```go
+// Node merge templates
+func BuildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string
+func BuildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string
+
+// Relationship merge templates (always end with RETURN count(*) AS matched_rows)
+func BuildRelationshipMergeQuery(
+    fromLabel string, fromKeyNames []string,
+    relType string,
+    toLabel string, toKeyNames []string,
+    hasProps bool,
+) string
+func BuildBatchRelationshipMergeQuery(
+    fromLabel string, fromKeyNames []string,
+    relType string,
+    toLabel string, toKeyNames []string,
+    hasProps bool,
+) string
+```
+
+The node builders' trailing `KeyMutability` parameter (`MutableKeys` or `ImmutableKeys`) selects the SET-clause shape. `MutableKeys` emits a single `SET n += $props`; `ImmutableKeys` emits the `ON CREATE SET n += $props` / `ON MATCH SET n += $update_props` split, and requires the caller to supply `$update_props` in the parameter map. The enum is complementary to `WithImmutableKeys`: the enum selects the template shape (per-call), while `WithImmutableKeys` at the `Adapter` layer carries the property-name filter that feeds `$update_props` at write time.
+
+Both relationship builders always end with `RETURN count(*) AS matched_rows`. The returned column reflects this call's (or this chunk's) MERGE match count only — 0 when the MERGE is a structural no-op (silent-failure condition), 1 (or the row count) when the relationship exists after the call. Consumers issuing multiple calls or chunks are responsible for summing `matched_rows` across results to detect silent no-ops. Node builders stay `RETURN`-free — constraint violations on nodes surface as driver errors, not silent zero-matches, so there is no analogous guard to emit.
+
+| Type / Constant | Description |
+| --------------- | ----------- |
+| `KeyMutability` | Enum selecting the node-builder SET-clause shape. Complementary to `WithImmutableKeys`. |
+| `MutableKeys` | Single `SET` clause; primary-key and property values are rewritten on MATCH. |
+| `ImmutableKeys` | `ON CREATE SET` / `ON MATCH SET` split; caller must supply `$update_props`. |
+
+For routine use, prefer `Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` — they call the same builders internally and handle parameter construction, chunking, and schema-aware property coercion.
+
 ### Schema Inference
 
 ```go

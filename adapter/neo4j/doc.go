@@ -61,6 +61,30 @@
 // Single-instance queries ([Adapter.NodeQueryFor], [Adapter.EdgeQueryFor])
 // complement the batch entry points for streaming pipelines.
 //
+// # Cypher Builders
+//
+// The four exported builders produce the Cypher templates the write
+// surface uses internally, exposed for advanced consumers (e.g.,
+// rdata's link engine) that want the template without the surrounding
+// param-and-chunk plumbing:
+//
+//   - [BuildNodeMergeQuery] / [BuildBatchNodeMergeQuery] — node MERGE
+//     templates; the trailing [KeyMutability] parameter ([MutableKeys]
+//     or [ImmutableKeys]) selects between a single `SET` clause and
+//     the `ON CREATE SET` / `ON MATCH SET` split.
+//   - [BuildRelationshipMergeQuery] / [BuildBatchRelationshipMergeQuery]
+//     — relationship MERGE templates. Both variants always end with
+//     `RETURN count(*) AS matched_rows` so consumers implementing
+//     silent-failure detection have a stable column to sum across
+//     calls (per-call for the single variant, per-chunk for the batch
+//     variant; cross-call / cross-chunk aggregation is the consumer's).
+//     Node builders stay RETURN-free — constraint violations on nodes
+//     surface as driver errors, not silent zero-matches.
+//
+// All four are pure functions — no execution, no driver dependency, no
+// side effects. Callers pair the returned string with their own
+// parameter map and feed both to a driver session at the call site.
+//
 // # Introspection
 //
 // The package generates Cypher queries for inspecting a live Neo4j database:
