@@ -298,7 +298,8 @@ info, result := snapshot.Info(ctx, data)
 - **Loaded schemas** (`*schema.Schema`) are immutable and safe for concurrent use
 - **Validated instances** (`*instance.ValidInstance`) are immutable
 - **Graph snapshots** (`*graph.Snapshot`) are immutable
-- **The `Graph` type** (`*graph.Graph`) is NOT thread-safe -- add instances from a single goroutine, then call `Snapshot()` to get an immutable view
+- **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddComposed` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns an immutable snapshot
+- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe by default with opt-in `WithValidatorPool(n)` for CPU-bound consumers. See `docs/API.md` § Batch Assembly
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---

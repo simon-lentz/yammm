@@ -824,7 +824,7 @@ func (g *Graph) Snapshot() *Snapshot {
 			}
 			unresolved = append(unresolved, newUnresolvedEdge(
 				clonedSource, pend.relation, pend.targetType, pend.targetKey,
-				pend.isRequired, reason))
+				pend.isRequired, reason, pend.properties))
 		}
 	}
 	slices.SortFunc(unresolved, func(a, b *UnresolvedEdge) int {

@@ -18,12 +18,16 @@ import (
 // relative to the diag/ package directory.
 const diagnosticsRefPath = "../claude-plugin/skills/yammm/references/diagnostics.md"
 
-// codePattern matches E_* diagnostic code identifiers in markdown content.
-// The final [A-Z0-9] ensures wildcard references like "E_IMPORT_*" are not matched.
-var codePattern = regexp.MustCompile(`E_[A-Z][A-Z0-9_]*[A-Z0-9]`)
+// codePattern matches E_* and W_* diagnostic code identifiers in markdown
+// content. The E_ prefix covers error-severity and sentinel codes (the
+// historical default); the W_ prefix covers warning-severity codes added
+// from v0.3.0 onward. The final [A-Z0-9] ensures wildcard references like
+// "E_IMPORT_*" or "W_FOO_*" are not matched.
+var codePattern = regexp.MustCompile(`[EW]_[A-Z][A-Z0-9_]*[A-Z0-9]`)
 
-// TestDocumentedCodesExist verifies that every E_* diagnostic code mentioned
-// in the plugin's references/diagnostics.md exists in the diag code registry.
+// TestDocumentedCodesExist verifies that every E_* / W_* diagnostic code
+// mentioned in the plugin's references/diagnostics.md exists in the diag
+// code registry.
 //
 // This is a documentation drift guard: if a code is renamed or removed from
 // the diag package but the reference file still mentions it, this test fails.

@@ -164,7 +164,6 @@ Internal                 : internal/* (no compatibility guarantees)
 | `schema/expr` | Expression AST types for invariants |
 | `instance` | Instance validation and constraint checking |
 | `graph` | Instance graph construction and integrity checking |
-| `graph/walk` | Visitor-pattern graph traversal |
 | `snapshot` | Graph persistence: marshal, load, verify, and inspect `.ys` files |
 | `diag` | Structured diagnostics with stable error codes |
 | `location` | Source positions, spans, and canonical paths |

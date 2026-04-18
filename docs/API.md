@@ -61,6 +61,33 @@ if !result.OK() {
 // Use s
 ```
 
+### Shared Registry Semantics
+
+Passing the same `*Registry` to multiple `Load` calls in one process is safe and efficient (since v0.3.0). The behavior has two coordinated parts:
+
+1. **`Registry.Register` is idempotent for exact-match.** Registering the same `SourceID` twice with an identical `StructuralHash` is a no-op — the first pointer remains stored and type-index entries are not re-indexed. Divergent content under the same `SourceID` still returns `*RegistryError{Kind: DuplicateSourceID}`; the error message carries both structural hashes so the mismatch is diagnosable.
+2. **`loadImport` short-circuits cross-`Load` via the shared `Registry`.** When an import's `SourceID` is already present in the shared registry, the loader reuses the existing `*Schema` pointer and skips the read, parse, compile, and re-register pipeline entirely. This is where cross-pipeline schema caching pays off.
+
+```go
+reg := schema.NewRegistry()
+
+// First Load registers msrb_emma as a transitive import of linkage_emma.
+sA, _ := schema.Load(ctx, "linkage_emma.yammm",
+    schema.WithRegistry(reg), schema.WithModuleRoot(moduleRoot))
+
+// Second Load re-uses msrb_emma from the registry — no re-parse.
+sB, _ := schema.Load(ctx, "wyrth_campaigns.yammm",
+    schema.WithRegistry(reg), schema.WithModuleRoot(moduleRoot))
+
+// reg.Len() == 3: [msrb_emma (shared), linkage_emma, wyrth_campaigns]
+```
+
+**Top-level asymmetry.** The cross-`Load` short-circuit fires only for *imports*. The top-level schema returned by each `Load` call is always a fresh compile. Calling `Load(A, WithRegistry(reg))` twice produces two distinct `*Schema` pointers; `reg.LookupBySourceID(AID)` continues to return the first call's pointer (the idempotent `Register` does not overwrite).
+
+**SourceID discipline.** Cross-`Load` sharing only fires when imports resolve to the same `SourceID`. `SourceID`s for file-backed schemas derive from the canonical absolute path, so `WithModuleRoot` values that resolve to different canonical paths for the same file yield different `SourceID`s and do not share. For `LoadString`, the synthetic `string://<sourceName>` scheme means two `LoadString` calls sharing a Registry must use distinct `sourceName` values unless they are intentionally re-registering byte-identical content.
+
+**Default behavior unchanged.** When `WithRegistry` is absent, each `Load` constructs its own `Registry` — safe for any usage pattern. The defensive `WithRegistry(schema.NewRegistry())` pattern some consumers carry is still valid post-v0.3.0; it is simply no longer necessary.
+
 ## Building Schemas Programmatically
 
 The `schema` package provides a fluent builder API for constructing schemas without parsing `.yammm` files.
@@ -187,6 +214,67 @@ Instance data is a top-level object keyed by type names whose values are arrays 
 
 `RawInstance.Properties` is `map[string]any`. Go structs with typed fields must be marshaled to JSON and unmarshaled into `map[string]any` before validation. Property names may use any casing; the validator normalizes them.
 
+### Schema-Aware Raw Instance Builder
+
+`instance.BuilderFor(schema, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, cardinality mismatches, and the `EdgeTo`-vs-`EdgeToWith` split all surface from `Build()` with file:line locators captured via `runtime.Callers`. This shifts shape failures out of `ValidateOne`'s domain and eliminates the "Schema declares X (one), so yammm expects a single edge object" class of hand-maintained comments in consumer code:
+
+```go
+b, err := instance.BuilderFor(s, "Person")
+if err != nil {
+    return instance.RawInstance{}, err
+}
+raw, err := b.
+    Property("id", "p1").
+    Property("name", "Alice").
+    EdgeTo("works_at", "c1").                     // "one" association, single PK
+    EdgeTo("knows", "p2").                        // "many" association
+    EdgeTo("part_of", "issuer-1", "issue-99").    // composite PK (variadic)
+    Build()
+```
+
+For associations that declare edge properties, use `EdgeToWith`:
+
+```go
+raw, err := b.
+    Property("id", "e1").
+    EdgeToWith("works_at", []any{"c1"}, map[string]any{
+        "role":  "Engineer",
+        "since": "2020-01-01",
+    }).
+    Build()
+```
+
+For compositions, pass child builders — the parent enforces target-type matching at build time:
+
+```go
+addr, _ := instance.BuilderFor(s, "Address")
+raw, err := b.
+    Property("id", "p1").
+    Composed("addresses", addr.Property("id", "a1").Property("street", "Main St")).
+    Build()
+```
+
+The variadic `Composed(name, children...)` accepts single, multiple-positional, and slice-unpack call shapes interchangeably; all three produce identical output.
+
+#### Methods
+
+| Method | Purpose |
+| ------ | ------- |
+| `BuilderFor(s, typeName)` | Construct a builder bound to a schema type. Errors on nil schema, unknown type, or abstract type. |
+| `Property(name, value)` | Set a property value. Unknown names accumulate as errors surfaced at Build. |
+| `EdgeTo(name, targetKey...)` | Add an edge target on an association without edge properties. Variadic key supports composite PKs. |
+| `EdgeToWith(name, targetKey, props)` | Add an edge target on an association with edge properties. `targetKey` is an explicit `[]any` to avoid absorbing `props` into variadic slots. |
+| `Composed(name, children...)` | Add composed children. Variadic supports single, multiple, or slice-unpack shapes. |
+| `WithProvenance(sourceName, pathStr)` | Attach source location metadata. |
+| `Build()` | Produce the `RawInstance`. Returns the first accumulated error (with a "(and N more)" suffix when more exist). |
+| `MustBuild()` | Panic on error. Test-only; production code should use `Build` and propagate. |
+
+Build errors include the bound type's name, the offending property/relation, and the caller's file:line. `errors.Unwrap` walks into composition-child chains so `errors.As` reaches the primary cause when nesting.
+
+`SchemaBuilder` is NOT concurrent-safe; construct one per goroutine. The bound `*schema.Schema` remains safe to share across many concurrent builders.
+
+The shape portion of `ValidateOne` — property/relation names, cardinality, composition target-type matching — is guaranteed to pass on the output of a successful `Build`. Value-level validation (constraint checks, PK coercion, reference integrity) still runs at `ValidateOne` time.
+
 ## Graph Construction
 
 The `graph` package builds an in-memory graph from validated instances.
@@ -223,6 +311,50 @@ for _, typeName := range snap.Types() {
 }
 ```
 
+### Batch Assembly
+
+`graph.BatchAssembler` composes a `Validator` and a `Graph` into a single call surface for the common pipeline pattern: validate → add → check → snapshot. The assembler encodes the ordering invariant (validate before add, check before snapshot) so consumers cannot get the sequence wrong, and is concurrent-safe so multiple goroutines may share one assembler:
+
+```go
+ba := graph.NewBatchAssembler(ctx, s,
+    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+
+for i, rec := range records {
+    if err := ba.Add("TypeName", buildRawInstance(rec)); err != nil {
+        return fmt.Errorf("record %d: %w", i, err)
+    }
+}
+
+res, err := ba.Finalize(ctx)
+if err != nil {
+    // res.Snapshot is still non-nil — the partial snapshot at the
+    // point Check tripped is inspectable for diagnostics.
+    return fmt.Errorf("batch: %w", err)
+}
+qualityCollector.Merge(res.Snapshot.Diagnostics())
+// res.Snapshot ready for snapshot.Marshal / snapshot.WriteFile / etc.
+```
+
+**`FinalizeResult.Snapshot` is always non-nil**, on both success and error paths. The struct exists to encode this contract at the type level; callers read `res.Snapshot` directly without gating on `err == nil`. On the error path `res.Snapshot` is the partial snapshot at the point Graph.Check tripped — operators logging a failed batch see which instances were assembled before the check failure.
+
+**Error shapes.** Both `Add` / `AddValid` and `Finalize` return errors whose cause is a `*diag.ErrorWithContext` (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)). `Add`'s tag is `"<TypeName> (record #N)"` so the offending record is locatable from the error alone; `Finalize`'s tag is the fixed string `"batch_finalize"` so downstream log consumers have a stable filter key. Recover with `errors.As` or `diag.AsResultWithContext`.
+
+**Post-finalize sentinel.** After `Finalize`, subsequent `Add` / `AddValid` calls return `graph.ErrAssemblerFinalized`, matchable via `errors.Is`. Consumers performing retry / cleanup logic key off the sentinel rather than the error string.
+
+**Validator-access modes.** Default mode serializes `ValidateOne` + `Graph.Add` through an internal `sync.Mutex` — appropriate for I/O-bound consumers (rdata's pipelines are the canonical example) where validation is a tiny fraction of per-record wall-clock. CPU-bound consumers profile-flag validation as the hot path opt into pool mode via `graph.WithValidatorPool(n)`, which distributes N pre-constructed validators through an internal buffered channel matching the goroutine-per-CPU-core shape:
+
+```go
+ba := graph.NewBatchAssembler(ctx, s,
+    graph.WithValidatorPool(runtime.NumCPU()))
+// ... concurrent Adds proceed in parallel up to N validators ...
+```
+
+Pool mode preserves every external contract (error shapes, Finalize one-shot semantics, success-count monotonicity) and is a one-option swap with no caller-side ripple. `n <= 0` panics at construction.
+
+**Concurrency contract.** `BatchAssembler` is safe for concurrent use across all methods (`Add`, `AddValid`, `Count`, `Graph`, `Finalize`). The library coordinates Add lifecycle against Finalize via an internal `sync.RWMutex` so every Add that returns nil is guaranteed to be in the finalized snapshot, and any Add that arrives after Finalize takes its lock returns `ErrAssemblerFinalized`. No external mutex required at call sites — the worker-pool pattern (one assembler shared across N scraper goroutines, coordinator goroutine calls Finalize at end-of-batch) is supported directly.
+
+**Test fixtures.** `snapshot/snapshottest.BuildTestSnapshot(t, s, records...)` is the test-helper convenience wrapper around `BatchAssembler` for happy-path snapshot construction; pass `[]Record{{TypeName, Raw}, ...}` and the helper handles validate + add + finalize, fataling on any failure.
+
 ### Seeding from a Snapshot
 
 A new mutable `Graph` can be seeded from an existing `Snapshot`, enabling incremental graph building on top of persisted or previously-constructed state:
@@ -249,6 +381,8 @@ snap, result := graph.RebuildSnapshot(schema, parts)
 ```
 
 The `SnapshotParts` struct holds fully-resolved instances, edges, duplicates, and unresolved records using value types (`InstanceParts`, `EdgeParts`, `DuplicateParts`, `UnresolvedParts`). Pointer-based cross-references are resolved internally.
+
+`UnresolvedParts.Properties` carries DSL-declared edge property values from the forward reference and is populated only when `Reason` is `"target_missing"` — `"absent"` and `"empty"` describe a missing/empty reference that never had a target. For documents in `.ys` wire-format version 1 (produced before yammm v0.3.0) the field is always empty; v2 documents persist the values through Marshal/Load symmetric with resolved `Edge.Properties`. See the snapshot package's [Wire Format Versions](#wire-format-versions) subsection for the v1 → v2 bump rationale.
 
 Most users should construct snapshots via `Graph.Add` + `Graph.Snapshot`. `RebuildSnapshot` exists for the `snapshot.Load` deserialization path and testing.
 
@@ -288,29 +422,6 @@ The `Snapshot` type provides read-only access to graph state:
 
 The `Instances()` map has non-deterministic iteration order per Go semantics. For deterministic iteration, use `AllInstances()` (iterator) or `Types()` + `InstancesOf()` (slice-based).
 
-### Graph Traversal
-
-The `graph/walk` package provides a visitor-pattern traversal over a `Snapshot`:
-
-```go
-err := walk.Walk(ctx, snap, visitor, walk.WithLogger(logger))
-```
-
-Traversal is deterministic: types are visited lexicographically, instances by primary key, properties alphabetically, edges in sorted order, and compositions by relation name. The walker returns on the first error from a visitor method or on context cancellation.
-
-Implement the `walk.Visitor` interface (or embed `walk.BaseVisitor` for no-op defaults):
-
-```go
-type Visitor interface {
-    EnterInstance(inst *graph.Instance) error
-    ExitInstance(inst *graph.Instance) error
-    VisitProperty(inst *graph.Instance, name string, value immutable.Value) error
-    VisitEdge(edge *graph.Edge) error
-    EnterComposition(inst *graph.Instance, relationName string) error
-    ExitComposition(inst *graph.Instance, relationName string) error
-}
-```
-
 ## Schema Identity
 
 The `schema` package provides a content-based hashing function for structural compatibility checks:
@@ -335,7 +446,7 @@ The `.ys` format is JSON-based and preserves full structural fidelity: instances
 
 The format includes:
 
-- A **version** field for format evolution
+- A **version** field for format evolution (current value: `2` at yammm v0.3.0; see [Wire Format Versions](#wire-format-versions))
 - A **schema structural hash** for compatibility verification (see [Schema Identity](#schema-identity))
 - An **integrity hash** (SHA-256 over the document body) for corruption detection
 - A **features array** for forward compatibility
@@ -356,9 +467,25 @@ result := snapshot.Verify(ctx, data, schema, loadOpts...)
 // Read summary metadata and statistics without full deserialization
 // Memory usage is constant regardless of snapshot size
 info, result := snapshot.Info(ctx, data)
+
+// Read header metadata only, from []byte — skips instance body and
+// integrity check. Cost is proportional to the header size (< 1 KiB
+// typical), not the total file size.
+header, result := snapshot.HeaderOnly(ctx, data)
+
+// Streaming sibling: read header metadata from any io.Reader without
+// materializing the full document into memory. Reads at most
+// snapshot.MaxHeaderSize (64 KiB) bytes from the reader.
+header, result := snapshot.HeaderOnlyRead(ctx, r)
+
+// Write .ys bytes atomically to disk — tmp+fsync+rename. Consumers
+// needing crash-safe persistence should use this instead of os.WriteFile.
+if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 ```
 
 `Load` does not re-validate instance data — the persisted snapshot is assumed to contain valid data. However, `Load` performs structural validation of the `.ys` format itself and verifies schema compatibility using `schema.StructuralHash`.
+
+`HeaderOnly` and `HeaderOnlyRead` intentionally skip integrity verification — the returned `HeaderInfo.IntegrityHash` is the stored value, not a verification result. Use `Verify` when the document's hash must be confirmed. Neither function consults a schema; dispatch callers use the `HeaderInfo.SchemaHashMatches(s)` helper (see [Snapshot Info](#snapshot-info) below) to compare the stored schema hash against a loaded `*schema.Schema`.
 
 ### Marshal Options
 
@@ -404,6 +531,174 @@ type SnapshotInfo struct {
     IntegrityStatus string // "ok", "mismatch", or "skipped"
 }
 ```
+
+### Header-Only Reads
+
+For dispatch-style workloads that classify many `.ys` files by header metadata alone — lifecycle state, schema-hash comparison, `CreatedAt` inspection — `HeaderOnly` (byte-slice variant) and `HeaderOnlyRead` (streaming io.Reader variant) return a compact `HeaderInfo`:
+
+```go
+type HeaderInfo struct {
+    // Header fields (identical to the SnapshotInfo header block).
+    Version             int
+    Features            []string
+    SchemaName          string
+    SchemaSource        string
+    SchemaHash          string
+    SchemaHashAlgorithm int
+    IntegrityHash       string
+    CreatedAt           string
+    Metadata            map[string]string
+
+    // Types array (adjacent to the header; read in the same streaming pass).
+    Types []string
+
+    // File metadata. Populated by HeaderOnly (len(data)); zero value
+    // from HeaderOnlyRead (not available from an io.Reader).
+    FileSize int64
+}
+```
+
+`HeaderOnlyRead` accepts any `io.Reader` and reads at most `snapshot.MaxHeaderSize = 64 * 1024` bytes. Larger headers are rejected with a Fatal-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. Reader errors (`io.EOF`, `io.ErrUnexpectedEOF`, or arbitrary I/O errors) during the header read surface uniformly as `E_SNAPSHOT_MALFORMED` rather than as a bare error return. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read.
+
+#### SchemaHashMatches — dispatch-site cross-check
+
+Neither `HeaderOnly` nor `HeaderOnlyRead` consults a schema, so neither verifies that the stored schema hash matches the caller's loaded schema. `HeaderInfo.SchemaHashMatches(s *schema.Schema) bool` performs that comparison at the dispatch site:
+
+```go
+header, result := snapshot.HeaderOnlyRead(ctx, r)
+if result.HasErrors() {
+    return result.Err()
+}
+if !header.SchemaHashMatches(s) {
+    // stale-schema path: the .ys was produced under a different
+    // schema version.
+    return errStaleSchema
+}
+```
+
+`SchemaHashMatches` is nil-safe and returns `false` without panicking when the receiver is nil, the schema is nil, the header's `SchemaHash` is empty, the header's `SchemaHashAlgorithm` does not match `schema.StructuralHashVersion`, or `schema.StructuralHash(s)` returns an empty string. Dispatch callers treat `false` as "unknown or incompatible schema, do not proceed" rather than silently continuing.
+
+### Atomic Writing
+
+`snapshot.WriteFile` persists bytes to a path using the `tmp+fsync+rename` protocol — the standard crash-safe write primitive every yammm consumer needs when turning `Marshal` output into a durable `.ys` file:
+
+```go
+func WriteFile(path string, data []byte) error
+
+const TmpSuffix = ".tmp"
+```
+
+The payload is first written to `path + snapshot.TmpSuffix`, `fsync`'d, closed, and then renamed into place. The rename is the atomic commit point: either the new file takes over (rename succeeded) or the previous file is left untouched (any earlier step failed). On any intermediate failure, `WriteFile` removes the staging file and returns an error wrapped with the failing step (`create temp`, `write temp`, `sync temp`, `close temp`, or `rename temp to final`).
+
+`WriteFile` does not validate that `data` is a valid `.ys` document — it is a general-purpose atomic-write primitive, and callers are responsible for the payload (typically the output of `Marshal`).
+
+**Durability semantics.** File mode is `0o666` subject to umask, matching `os.Create`; callers needing stricter permissions should `chmod` after `WriteFile` returns. The file is `fsync`'d before rename but the parent directory is NOT `fsync`'d, so on some filesystems the rename may not be durable across a crash — consumers with stronger durability requirements should fork the helper and add parent-directory fsync.
+
+**Crash recovery.** If the process crashes between `fsync` and `rename`, a partial write may remain at `path + snapshot.TmpSuffix`. The `TmpSuffix` constant is exported so downstream primitives and consumer cleanup tools key off a single source of truth rather than hard-coding `.tmp`; the directory-iterator primitive (`ScanDir`, see [Directory Iteration](#directory-iteration) below) skips entries with the suffix automatically.
+
+### Directory Iteration
+
+For dispatch-style workloads that enumerate every `.ys` file in a directory — retention sweeps, link-engine discovery, operator "what's in this dir" inspection — `snapshot.ScanDir` exposes a lazy iterator over one `ScanEntry` per file, with the header parsed on-demand via `HeaderOnlyRead`:
+
+```go
+type ScanEntry struct {
+    Name   string               // basename, e.g., "CA.ys"
+    Path   string               // full path, filepath.Join(dir, Name)
+    Header *snapshot.HeaderInfo // nil when Result has error-severity issues
+    Result diag.Result          // OK on the happy path; carries errors per-file
+}
+
+// Lazy iterator — headers are parsed on demand; callers can break early
+// without paying the parse cost for remaining files.
+func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error]
+
+// Materializing convenience wrapper.
+func ScanDirSlice(ctx context.Context, dir string) ([]ScanEntry, diag.Result)
+```
+
+Typical call pattern:
+
+```go
+for entry, err := range snapshot.ScanDir(ctx, dir) {
+    if err != nil {
+        return fmt.Errorf("scan: %w", err)
+    }
+    if entry.Result.HasErrors() {
+        log.Warn("skipping", "name", entry.Name, "err", entry.Result.Err())
+        continue
+    }
+    use(entry.Header)
+}
+```
+
+**Error surface, in two categories:**
+
+- The iterator's second yielded value (the `error`) is non-nil ONLY for operation-level failures that end iteration: a dir-open error (`ENOENT`, `EACCES`, `ENOTDIR`, ...) is yielded as a single `(ScanEntry{}, err)` pair wrapping the underlying `os` error; context cancellation observed between files is yielded as `(ScanEntry{}, ctx.Err())`. The zero-value `ScanEntry` signals "no file was reached." Cancellation observed between files takes precedence over any concurrent per-file failure.
+- Per-file failures (corrupt header, per-file `os.Open` / `Read` failure) live on `ScanEntry.Result`; the iterator's error is `nil` for those and iteration continues. Per-file I/O failures surface as a Fatal `E_SNAPSHOT_IO`; corrupt headers surface as an Error-severity `E_SNAPSHOT_MALFORMED` (both inherit from `HeaderOnlyRead`'s diagnostic surface).
+
+**Filtering:**
+
+- Only regular files (not directories) whose basename ends with `.ys` are included. Subdirectories are skipped even when their name ends with `.ys`.
+- Files whose basename ends with `snapshot.TmpSuffix` are skipped — the atomic-write staging files that `WriteFile` may leave behind on crash. Both primitives key off the shared exported constant; the single source of truth keeps them from drifting.
+- Symlinks are followed; broken symlinks yield a per-file Fatal `E_SNAPSHOT_IO` entry with the underlying `os.Open` error surfaced as a detail.
+- Entries are yielded in the order returned by `os.ReadDir`, which sorts by filename.
+
+**`ScanDirSlice` semantics:**
+
+`ScanDirSlice` materializes the full iteration into a slice plus an outer `diag.Result`. The outer Result surfaces operation-level errors only (dir does not exist → Fatal `E_SNAPSHOT_IO`; context cancellation → Fatal `E_CONTEXT_CANCELLED`); per-file errors remain on each `ScanEntry.Result`. Context cancellation returns *partial* results — the returned slice contains entries processed before cancellation, and callers who want fail-fast-on-cancel check `result.HasFatal()` before consuming the slice.
+
+**CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, header, issues}` JSON array. The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
+
+### Metadata Updates
+
+For workflows that change header metadata on an existing `.ys` without re-serializing the body — pipeline phase transitions, operator-maintained flags, `force-complete` audit trails — `snapshot.UpdateMetadata` reuses the body bytes verbatim and recomputes only the SHA-256 integrity hash:
+
+```go
+func UpdateMetadata(
+    ctx context.Context,
+    data []byte,
+    newMeta map[string]string,
+    opts ...UpdateOption,
+) ([]byte, diag.Result)
+
+func UpdateMetadataOrReMarshal(
+    ctx context.Context,
+    data []byte,
+    newMeta map[string]string,
+    s *schema.Schema,
+    opts ...UpdateOption,
+) ([]byte, diag.Result)
+
+func WithUpdateCreatedAt(t time.Time) UpdateOption
+```
+
+**When to use which.** `UpdateMetadataOrReMarshal` is the default entry point for most consumers: it runs the fast path and transparently falls back to `Load + Marshal` on any recoverable Fatal (body-offset failure, malformed header, other non-cancellation Fatal), emitting a Warning-severity `W_UPDATE_METADATA_FALLBACK` on the returned `diag.Result` so operators can observe the transition. The primitive `UpdateMetadata` stays exported for consumers who genuinely need the strict fast path — benchmarks isolating the fast-path cost, or workflows where any Load + Marshal round-trip is operationally unacceptable.
+
+**Speedup.** On a 20 MB `.ys` input, the fast path runs ~50× faster than the equivalent `Load + Marshal` round trip on M2-class hardware (~10 ms vs ~570 ms). The lower-bound CI gate is 3×; absolute numbers will vary across hardware but the ratio is the stable invariant. The companion benchmark `BenchmarkUpdateMetadataRatio` reports the measured ratio via `b.ReportMetric("x-speedup")` on every `go test -bench` invocation.
+
+**Preserve-vs-override.** By default `UpdateMetadata` preserves the existing `created_at` byte-for-byte from the input header. Pass `WithUpdateCreatedAt(t)` to override; there is no other way to change `created_at` via the metadata-rewrite path. `metadata` itself is replaced entirely — there is no merge. Callers retrieve the current metadata via `HeaderOnly`, copy it, apply their changes, and pass the result.
+
+**Failure modes.** The primitive returns structured diagnostics with stable codes:
+
+- `E_SNAPSHOT_MALFORMED` — the input header does not parse (truncated JSON, missing required fields, wrong first key). Same code `HeaderOnly` / `HeaderOnlyRead` emit for equivalent conditions.
+- `E_UPDATE_METADATA_BODY_OFFSET` — the header parsed cleanly but the body-boundary tracking resolved to an unexpected byte pattern, indicating the input does not match the shape `Marshal` produces. Byte-identical recovery via the fast path is not possible; `UpdateMetadataOrReMarshal` falls back to `Load + Marshal` automatically.
+- `E_CONTEXT_CANCELLED` — ctx was cancelled at entry. Propagates as cancellation without re-attempting via the slow path.
+
+**Wire-format contracts.** The primitive depends on two contracts documented in `snapshot/wire.go`'s package Godoc: the field-order contract (top-level keys are `{yammm_snapshot, types, instances, diagnostics}` in that order) and the body-byte-range stability contract (the byte range from the `,` after the header value through the document's closing `}` is reused verbatim). Both are pinned by `TestWireFormat_TopLevelKeyOrder` and `TestWireFormat_BodySuffixContract` in `snapshot/wire_test.go`, so a future Marshal-side shape change that would silently break the primitive fails at the wire-format test level.
+
+**CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (3) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic via `snapshot.WriteFile`.
+
+**Test helper.** `snapshot/snapshottest.ExpectMetadataPreserved(tb, before, after, preservedKeys...)` asserts that a named set of metadata keys survived a rewrite unchanged. Intended for tests exercising metadata-rewrite primitives or any workflow that must preserve an invariant key set across a transition.
+
+### Wire Format Versions
+
+The `.ys` wire format uses an integer version field in the header for forward evolution. yammm v0.3.0 introduced the v1 → v2 bump paired with [`UnresolvedEdge.Properties`](#graph) — the new persisted `"properties"` field on unresolved-edge wire entries cannot be `omitempty`-safe alone (a pre-v0.3.0 reader would silently drop the field), so the version bump pairs with the existing unknown-version-rejection path to force older readers to error cleanly instead.
+
+`snapshot.MinReadableVersion` (exported constant, value `1`) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `2` at yammm v0.3.0) is the version emitted on every write. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Fatal `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported range named in the message.
+
+**Asymmetric-reader semantics.** A v2 reader (yammm v0.3.0+) accepts both v1 and v2 documents. v1 documents simply lack the new `"properties"` field on unresolved-edge wires; the load path populates the in-memory `UnresolvedEdge.Properties` as empty, which is lossless since v1 never carried the data. A v1 reader (yammm v0.2.x and earlier) rejects v2 documents via the unknown-version path — operators running an older binary against a v0.3.0-written `.ys` see a structured diagnostic rather than a silently-incomplete document.
+
+See [`docs/VERSIONING.md`](VERSIONING.md) for the full pre-1.0 / post-1.0 wire-format policy.
 
 ## Diagnostics
 
@@ -470,6 +765,62 @@ output := renderer.FormatIssues(issues)
 ```
 
 All renderer options are optional. The zero-config `diag.NewRenderer()` produces plain-text output without excerpts or colors.
+
+### Contextual Diagnostic Wrap
+
+At error boundaries — the places where a diagnostic crosses from the code that produced it to the code that surfaces it — callers attach a human-readable context label to a `diag.Result` via `Result.WithContext(tag)`. The return value carries the tag through error chains and structured logging without every consumer reinventing the wrapper:
+
+```go
+result := schema.Load(ctx, path)
+if result.HasErrors() {
+    tagged := result.WithContext("schema_load")
+    logger.Error("pipeline startup failed", slog.Any("diagnostic", tagged))
+    return fmt.Errorf("startup: %w", tagged.Err())
+}
+```
+
+Two types split the surface along the value-vs-error line that yammm already uses for `Result` and `*ResultError`:
+
+```go
+// Value carrier. Returned by Result.WithContext(tag). Holds the underlying
+// Result and the tag; implements slog.LogValuer. Read the fields directly
+// or call the delegating helpers HasErrors / OK.
+type ResultWithContext struct {
+    Result diag.Result
+    Tag    string
+}
+
+// Error type. Returned by ResultWithContext.Err() when the underlying
+// result is not OK. Implements error and participates in Go error chains:
+// its Unwrap returns *diag.ResultError so existing errors.As consumers
+// keep working unchanged.
+type ErrorWithContext struct {
+    Result diag.Result
+    Tag    string
+}
+```
+
+**Slog shape.** `ResultWithContext.LogValue()` returns a group with these attributes:
+
+- `context` (string) — the tag. Always emitted.
+- `code` (string) — the first error-severity issue's stable code. Omitted when the result has no error-severity issue with a non-zero code.
+- `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error; `warnings` is the Warning count. Always emitted (0/0 on OK).
+- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice; empty when the result is OK. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
+
+`Issue.LogValue()` emits the same per-issue shape and is independently useful when a consumer wants to log a single issue: `logger.Error("problem", slog.Any("issue", issue))`.
+
+**Error-chain recovery.** `diag.AsResultWithContext(err, fallbackTag)` recovers the tag from an arbitrarily-wrapped error. If the chain carries a `*ErrorWithContext`, its original tag survives; if it carries only a bare `*ResultError` (from `Result.Err()` without a tag), the supplied fallbackTag is synthesized so unified error handlers see a uniform shape across both patterns:
+
+```go
+if cr, ok := diag.AsResultWithContext(err, "validation"); ok {
+    for issue := range cr.Result.Issues() {
+        // triage
+    }
+    logger.Error("failed", slog.Any("diagnostic", cr))
+}
+```
+
+The helper walks through `fmt.Errorf("...: %w", err)` and other `Unwrap` chains transparently.
 
 ## JSON Adapter
 
@@ -635,6 +986,42 @@ All write methods return query structs (`NodeQuery`, `BatchNodeQuery`, `EdgeQuer
 | `WithImmutableKeys` | Properties only set on creation, not updated |
 | `WithNodeChunkSize` | `UNWIND` batch size for node queries (default: 5000) |
 | `WithEdgeChunkSize` | `UNWIND` batch size for edge queries (default: 5000) |
+
+### Cypher Builders
+
+The four exported builders produce the Cypher templates the `Adapter` write surface uses internally. They are pure functions — no execution, no driver dependency — and are exposed for advanced consumers (e.g. link engines, custom migration tooling) that want the template without the surrounding parameter-and-chunk plumbing that `BatchNodeQueries` / `BatchEdgeQueries` provide.
+
+```go
+// Node merge templates
+func BuildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string
+func BuildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string
+
+// Relationship merge templates (always end with RETURN count(*) AS matched_rows)
+func BuildRelationshipMergeQuery(
+    fromLabel string, fromKeyNames []string,
+    relType string,
+    toLabel string, toKeyNames []string,
+    hasProps bool,
+) string
+func BuildBatchRelationshipMergeQuery(
+    fromLabel string, fromKeyNames []string,
+    relType string,
+    toLabel string, toKeyNames []string,
+    hasProps bool,
+) string
+```
+
+The node builders' trailing `KeyMutability` parameter (`MutableKeys` or `ImmutableKeys`) selects the SET-clause shape. `MutableKeys` emits a single `SET n += $props`; `ImmutableKeys` emits the `ON CREATE SET n += $props` / `ON MATCH SET n += $update_props` split, and requires the caller to supply `$update_props` in the parameter map. The enum is complementary to `WithImmutableKeys`: the enum selects the template shape (per-call), while `WithImmutableKeys` at the `Adapter` layer carries the property-name filter that feeds `$update_props` at write time.
+
+Both relationship builders always end with `RETURN count(*) AS matched_rows`. The returned column reflects this call's (or this chunk's) MERGE match count only — 0 when the MERGE is a structural no-op (silent-failure condition), 1 (or the row count) when the relationship exists after the call. Consumers issuing multiple calls or chunks are responsible for summing `matched_rows` across results to detect silent no-ops. Node builders stay `RETURN`-free — constraint violations on nodes surface as driver errors, not silent zero-matches, so there is no analogous guard to emit.
+
+| Type / Constant | Description |
+| --------------- | ----------- |
+| `KeyMutability` | Enum selecting the node-builder SET-clause shape. Complementary to `WithImmutableKeys`. |
+| `MutableKeys` | Single `SET` clause; primary-key and property values are rewritten on MATCH. |
+| `ImmutableKeys` | `ON CREATE SET` / `ON MATCH SET` split; caller must supply `$update_props`. |
+
+For routine use, prefer `Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` — they call the same builders internally and handle parameter construction, chunking, and schema-aware property coercion.
 
 ### Schema Inference
 

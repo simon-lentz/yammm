@@ -325,17 +325,23 @@ func TestContractValidationCodesExist(t *testing.T) {
 }
 
 // TestAllCodes_MatchesDefinedCodes uses AST parsing to verify that every
-// exported E_* variable in code.go is auto-registered via NewCode() and
-// appears in AllCodes() exactly once.
+// exported E_* or W_* variable in code.go is auto-registered via NewCode()
+// and appears in AllCodes() exactly once.
+//
+// The E_ prefix covers error-severity and sentinel codes (the historical
+// default); the W_ prefix covers warning-severity codes added from v0.3.0
+// onward. Severity is carried on the Issue, not the Code, so the prefix
+// is a naming convention rather than a type-enforced property — the
+// registry itself does not distinguish between the two.
 func TestAllCodes_MatchesDefinedCodes(t *testing.T) {
-	// Parse code.go to find all exported E_* variable declarations
+	// Parse code.go to find all exported E_* / W_* variable declarations
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "code.go", nil, 0)
 	if err != nil {
 		t.Fatalf("failed to parse code.go: %v", err)
 	}
 
-	// Collect all E_* variable names from AST
+	// Collect all E_* / W_* variable names from AST
 	definedCodes := make(map[string]bool)
 	ast.Inspect(f, func(n ast.Node) bool {
 		genDecl, ok := n.(*ast.GenDecl)
@@ -349,7 +355,10 @@ func TestAllCodes_MatchesDefinedCodes(t *testing.T) {
 				continue
 			}
 			for _, name := range valueSpec.Names {
-				if strings.HasPrefix(name.Name, "E_") && name.IsExported() {
+				if !name.IsExported() {
+					continue
+				}
+				if strings.HasPrefix(name.Name, "E_") || strings.HasPrefix(name.Name, "W_") {
 					definedCodes[name.Name] = true
 				}
 			}
@@ -358,7 +367,7 @@ func TestAllCodes_MatchesDefinedCodes(t *testing.T) {
 	})
 
 	if len(definedCodes) == 0 {
-		t.Fatal("no E_* variables found in code.go")
+		t.Fatal("no E_* or W_* variables found in code.go")
 	}
 
 	// Build map from registry (via AllCodes)
@@ -374,12 +383,12 @@ func TestAllCodes_MatchesDefinedCodes(t *testing.T) {
 	// Check for codes in definitions but not in registry
 	for name := range definedCodes {
 		if !registeredMap[name] {
-			t.Errorf("E_* variable %s defined in code.go but missing from AllCodes()", name)
+			t.Errorf("diagnostic code variable %s defined in code.go but missing from AllCodes()", name)
 		}
 	}
 
 	// Log counts for visibility
-	t.Logf("found %d E_* definitions in code.go, %d total registered codes", len(definedCodes), len(registeredMap))
+	t.Logf("found %d E_*/W_* definitions in code.go, %d total registered codes", len(definedCodes), len(registeredMap))
 }
 
 // TestNewCodeDuplicatePanics verifies that registering a code with a

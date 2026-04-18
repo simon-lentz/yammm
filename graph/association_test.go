@@ -551,6 +551,72 @@ func TestGraph_Edge_Properties(t *testing.T) {
 	}
 }
 
+// TestGraph_UnresolvedEdge_Properties pins the pendingEdge.properties →
+// UnresolvedEdge.properties thread-through in Graph.Snapshot. Without this
+// test, a regression in the conversion at graph.go:825-827 would surface
+// only at the full snapshot round-trip layer rather than the graph
+// in-memory layer. Parallel in shape to TestGraph_Edge_Properties above.
+func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
+	s := testSchemaWithAssociation(t)
+	g := New(s)
+	ctx := t.Context()
+
+	// Add Person with a forward reference to a Company that is NEVER added —
+	// the edge remains unresolved when Snapshot() is called.
+	person := mustValidInstanceWithEdgeProps(t, s, "Person",
+		[]any{"alice"}, map[string]any{"name": "Alice"},
+		"employer", []any{"missing-acme"},
+		map[string]any{"role": "Engineer", "since": int64(2020)})
+
+	g.Add(ctx, person)
+
+	snap := g.Snapshot()
+	if len(snap.Edges()) != 0 {
+		t.Fatalf("expected 0 resolved edges, got %d", len(snap.Edges()))
+	}
+	unres := snap.Unresolved()
+	if len(unres) != 1 {
+		t.Fatalf("expected 1 unresolved edge, got %d", len(unres))
+	}
+
+	u := unres[0]
+	if u.Reason != "target_missing" {
+		t.Errorf("Reason: got %q, want %q", u.Reason, "target_missing")
+	}
+
+	role, ok := u.Property("role")
+	if !ok {
+		t.Error("unresolved edge should have 'role' property")
+	} else if roleStr, _ := role.String(); roleStr != "Engineer" {
+		t.Errorf("Property(role): got %q, want %q", roleStr, "Engineer")
+	}
+
+	since, ok := u.Property("since")
+	if !ok {
+		t.Error("unresolved edge should have 'since' property")
+	} else if sinceInt, _ := since.Int(); sinceInt != 2020 {
+		t.Errorf("Property(since): got %d, want 2020", sinceInt)
+	}
+
+	// Properties() accessor returns the full set.
+	props := u.Properties()
+	if props.Len() != 2 {
+		t.Errorf("Properties().Len(): got %d, want 2", props.Len())
+	}
+}
+
+// TestUnresolvedEdge_NilReceiver pins the nil-safety contract on the
+// Property / Properties accessors — parallel to Edge's nil-safety.
+func TestUnresolvedEdge_NilReceiver(t *testing.T) {
+	var u *UnresolvedEdge
+	if _, ok := u.Property("role"); ok {
+		t.Error("nil receiver Property should return (_, false)")
+	}
+	if u.Properties().Len() != 0 {
+		t.Error("nil receiver Properties should return empty")
+	}
+}
+
 // Multiple Forward References Tests - verify all edges are tracked and resolved
 
 func TestGraph_Check_MultipleUnresolved_SameTarget(t *testing.T) {

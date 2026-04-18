@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
@@ -144,11 +143,13 @@ func (a *Adapter) NodeQueryFor(
 	params["props"] = props
 
 	hasImmutable := len(cfg.immutableKeys) > 0
+	km := MutableKeys
 	if hasImmutable {
+		km = ImmutableKeys
 		params["update_props"] = removeKeys(props, cfg.immutableKeys)
 	}
 
-	stmt := buildNodeMergeQuery(shape.Label, shape.PrimaryKeys, hasImmutable)
+	stmt := BuildNodeMergeQuery(shape.Label, shape.PrimaryKeys, km)
 	return &NodeQuery{Statement: stmt, Params: params}, nil
 }
 
@@ -169,6 +170,10 @@ func (a *Adapter) BatchNodeQueries(
 	}
 
 	hasImmutable := len(cfg.immutableKeys) > 0
+	km := MutableKeys
+	if hasImmutable {
+		km = ImmutableKeys
+	}
 	var queries []*BatchNodeQuery
 
 	for _, typeName := range result.Types() {
@@ -204,7 +209,7 @@ func (a *Adapter) BatchNodeQueries(
 			rows = append(rows, row)
 		}
 
-		stmt := buildBatchNodeMergeQuery(nodeShape.Label, nodeShape.PrimaryKeys, hasImmutable)
+		stmt := BuildBatchNodeMergeQuery(nodeShape.Label, nodeShape.PrimaryKeys, km)
 		for _, chunk := range chunkSlice(rows, cfg.nodeChunkSize) {
 			queries = append(queries, &BatchNodeQuery{
 				Statement: stmt,
@@ -260,7 +265,7 @@ func (a *Adapter) EdgeQueryFor(
 		params["rel_props"] = edge.Properties().Clone()
 	}
 
-	stmt := buildRelationshipMergeQuery(
+	stmt := BuildRelationshipMergeQuery(
 		srcShape.Label, srcShape.PrimaryKeys,
 		edge.Relation(),
 		tgtShape.Label, tgtShape.PrimaryKeys,
@@ -340,7 +345,7 @@ func (a *Adapter) EdgeQueriesFor(
 				params["rel_props"] = target.Properties().Clone()
 			}
 
-			stmt := buildRelationshipMergeQuery(
+			stmt := BuildRelationshipMergeQuery(
 				srcShape.Label, srcShape.PrimaryKeys,
 				relationName,
 				tgtShape.Label, tgtShape.PrimaryKeys,
@@ -449,7 +454,7 @@ func (a *Adapter) BatchEdgeQueries(
 			rows = append(rows, row)
 		}
 
-		stmt := buildBatchRelationshipMergeQuery(
+		stmt := BuildBatchRelationshipMergeQuery(
 			srcShape.Label, srcShape.PrimaryKeys,
 			sig.relType,
 			tgtShape.Label, tgtShape.PrimaryKeys,
@@ -773,128 +778,4 @@ func groupEdgesBySignature(edges []*graph.Edge) map[edgeSignature][]*graph.Edge 
 		groups[sig] = append(groups[sig], edge)
 	}
 	return groups
-}
-
-// --- Cypher query builders ---
-
-// buildNodeMergeQuery produces a single-node MERGE query.
-func buildNodeMergeQuery(label string, keyNames []string, hasImmutableKeys bool) string {
-	var b strings.Builder
-	b.WriteString("MERGE (n:")
-	b.WriteString(label)
-	b.WriteString(" {")
-	for i, name := range keyNames {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s: $key_%s", name, name)
-	}
-	b.WriteString("})")
-
-	if hasImmutableKeys {
-		b.WriteString("\nON CREATE SET n += $props")
-		b.WriteString("\nON MATCH SET n += $update_props")
-	} else {
-		b.WriteString("\nSET n += $props")
-	}
-	return b.String()
-}
-
-// buildBatchNodeMergeQuery produces an UNWIND-based batch node MERGE query.
-func buildBatchNodeMergeQuery(label string, keyNames []string, hasImmutableKeys bool) string {
-	var b strings.Builder
-	b.WriteString("UNWIND $rows AS row\n")
-	b.WriteString("MERGE (n:")
-	b.WriteString(label)
-	b.WriteString(" {")
-	for i, name := range keyNames {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s: row.%s", name, name)
-	}
-	b.WriteString("})")
-
-	if hasImmutableKeys {
-		b.WriteString("\nON CREATE SET n += row.props")
-		b.WriteString("\nON MATCH SET n += row.update_props")
-	} else {
-		b.WriteString("\nSET n += row.props")
-	}
-	return b.String()
-}
-
-// buildRelationshipMergeQuery produces a single relationship MERGE query.
-func buildRelationshipMergeQuery(
-	fromLabel string, fromKeyNames []string,
-	relType string,
-	toLabel string, toKeyNames []string,
-	hasProps bool,
-) string {
-	var b strings.Builder
-
-	b.WriteString("MATCH (from:")
-	b.WriteString(fromLabel)
-	b.WriteString(" {")
-	for i, name := range fromKeyNames {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s: $from_key_%s", name, name)
-	}
-	b.WriteString("})\n")
-
-	b.WriteString("MATCH (to:")
-	b.WriteString(toLabel)
-	b.WriteString(" {")
-	for i, name := range toKeyNames {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s: $to_key_%s", name, name)
-	}
-	fmt.Fprintf(&b, "})\nMERGE (from)-[r:%s]->(to)", relType)
-
-	if hasProps {
-		b.WriteString("\nSET r += $rel_props")
-	}
-	return b.String()
-}
-
-// buildBatchRelationshipMergeQuery produces an UNWIND-based batch relationship MERGE query.
-func buildBatchRelationshipMergeQuery(
-	fromLabel string, fromKeyNames []string,
-	relType string,
-	toLabel string, toKeyNames []string,
-	hasProps bool,
-) string {
-	var b strings.Builder
-
-	b.WriteString("UNWIND $rows AS row\n")
-	b.WriteString("MATCH (from:")
-	b.WriteString(fromLabel)
-	b.WriteString(" {")
-	for i, name := range fromKeyNames {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s: row.from_%s", name, name)
-	}
-	b.WriteString("})\n")
-
-	b.WriteString("MATCH (to:")
-	b.WriteString(toLabel)
-	b.WriteString(" {")
-	for i, name := range toKeyNames {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s: row.to_%s", name, name)
-	}
-	fmt.Fprintf(&b, "})\nMERGE (from)-[r:%s]->(to)", relType)
-
-	if hasProps {
-		b.WriteString("\nSET r += row.rel_props")
-	}
-	return b.String()
 }

@@ -26,6 +26,29 @@
 //	// Read header only (dispatch-style workloads)
 //	header, result := snapshot.HeaderOnly(ctx, data)
 //
+//	// Read header only from an io.Reader (no pre-materialized bytes)
+//	header, result := snapshot.HeaderOnlyRead(ctx, file)
+//
+//	// Compare the header's schema hash against a loaded schema
+//	if !header.SchemaHashMatches(s) { /* stale-schema path */ }
+//
+//	// Write .ys bytes atomically to disk (tmp+fsync+rename)
+//	if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
+//
+//	// Iterate every .ys file in a directory (header-only, lazy)
+//	for entry, err := range snapshot.ScanDir(ctx, dir) {
+//	    if err != nil { /* dir-level or ctx-cancel failure */ }
+//	    if entry.Result.HasErrors() { /* per-file failure */ }
+//	    use(entry.Header)
+//	}
+//
+//	// Rewrite metadata on an existing .ys without reloading the body
+//	// (fast path — reuses body bytes verbatim)
+//	out, result := snapshot.UpdateMetadata(ctx, data, newMeta)
+//
+//	// Same, with automatic Load+Marshal fallback on non-Marshal-shaped inputs
+//	out, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
+//
 // # Functions
 //
 // [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
@@ -50,6 +73,60 @@
 // hashes. When counts, diagnostics, or verified integrity are required, use
 // [Info] instead.
 //
+// [HeaderOnlyRead] is the streaming sibling of [HeaderOnly]: it accepts an
+// io.Reader and parses the header without requiring the caller to
+// pre-materialize the full document into memory. Intended for dispatch
+// callers that open each .ys file with os.Open (rather than os.ReadFile)
+// and only need header metadata. Reads at most [MaxHeaderSize] bytes
+// from the reader; larger headers are rejected with a distinguished
+// E_SNAPSHOT_MALFORMED message.
+//
+// [HeaderInfo.SchemaHashMatches] is the nil-safe dispatch-site helper
+// for comparing a header's schema hash against a loaded *schema.Schema.
+// Use it after [HeaderOnly] or [HeaderOnlyRead] when the dispatch
+// decision depends on whether the snapshot was produced under a
+// matching schema version.
+//
+// [WriteFile] writes bytes to a path atomically using the
+// tmp+fsync+rename pattern. The staging file at path+[TmpSuffix] is
+// fsync'd before rename; on any error during the write, WriteFile
+// attempts to clean up the staging file and returns a wrapped error.
+// A crash between fsync and rename leaves the staging file behind as
+// a partial write; consumer-side cleanup (e.g., directory sweeps)
+// reference [TmpSuffix] rather than hard-coding ".tmp" so the
+// convention stays single-source-of-truth across the snapshot
+// package.
+//
+// [ScanDir] iterates every .ys file in a directory and yields one
+// [ScanEntry] per file, with the header parsed lazily via
+// [HeaderOnlyRead] on demand. The iterator's second yielded value is
+// non-nil only for operation-level failures (dir-open, context
+// cancellation); per-file failures (corrupt header, per-file I/O)
+// surface on [ScanEntry.Result] and iteration continues. Files whose
+// basename ends with [TmpSuffix] are skipped so crash-residual
+// staging files are not confused for complete snapshots.
+// [ScanDirSlice] is the materializing convenience wrapper.
+//
+// [UpdateMetadata] rewrites the header of an existing .ys document
+// with a new metadata map, reusing the body bytes verbatim and
+// recomputing only the SHA-256 integrity hash. On a 20 MB input the
+// fast path is ~50× faster than the equivalent Load + Marshal round
+// trip on M2-class hardware; the lower-bound CI gate is 3×. Depends
+// on the field-order and body-suffix stability contracts documented
+// in wire.go; future Marshal-side shape changes must respect those
+// contracts or update this primitive in lockstep.
+//
+// [UpdateMetadataOrReMarshal] is the default consumer entry point:
+// it runs [UpdateMetadata] on the happy path and transparently falls
+// back to [Load] + [Marshal] on recoverable Fatals (body-offset
+// failure, malformed header, or any non-cancellation Fatal), surfacing
+// a Warning-severity [W_UPDATE_METADATA_FALLBACK] on the returned
+// [diag.Result] so operators can observe fallback frequency.
+//
+// [WithUpdateCreatedAt] overrides the created_at header field on
+// [UpdateMetadata] and [UpdateMetadataOrReMarshal]; the default is to
+// preserve the existing value byte-for-byte.
+//
 // # Marshal Options
 //
 // [Marshal] accepts [Option] values:
@@ -57,6 +134,13 @@
 //   - [WithIndent]: pretty-print JSON output with the given indent string
 //   - [WithCreatedAt]: embed a creation timestamp in the snapshot
 //   - [WithMetadata]: embed arbitrary key-value metadata
+//
+// # Update Options
+//
+// [UpdateMetadata] and [UpdateMetadataOrReMarshal] accept [UpdateOption]
+// values:
+//
+//   - [WithUpdateCreatedAt]: override the existing created_at (preserved by default)
 //
 // # Load Options
 //
@@ -75,6 +159,33 @@
 // # File Extension
 //
 // The conventional file extension is .ys (yammm snapshot).
+//
+// # Wire Format Versions
+//
+// The .ys wire format uses a version field in the header for forward
+// evolution. yammm v0.3.0 introduced the v1 → v2 bump paired with
+// [graph.UnresolvedEdge.Properties] — the new persisted "properties"
+// field on unresolved-edge wire entries cannot be `omitempty`-safe
+// alone (a pre-v0.3.0 reader would silently drop the field), so the
+// version bump pairs with the existing unknown-version-rejection path
+// to force older readers to error cleanly instead.
+//
+// [MinReadableVersion] names the lowest version this package accepts on
+// read paths; the accept range is the closed interval
+// [[MinReadableVersion], currentVersion] and the current version is 2
+// at yammm v0.3.0. Documents outside the range surface Fatal
+// [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] with the observed version and
+// the supported range named in the message.
+//
+// Asymmetric-reader semantics. A v2 reader (yammm v0.3.0+) accepts
+// both v1 and v2 documents. v1 documents simply lack the new
+// "properties" field on unresolved-edge wires; the load path populates
+// the in-memory Properties as empty, which is lossless since v1 never
+// carried the data. A v1 reader (yammm v0.2.x) rejects v2 documents
+// via the unknown-version path — operators running an older binary
+// against a v0.3.0-written .ys see a structured diagnostic rather
+// than a silently-incomplete document. See docs/VERSIONING.md for
+// the full pre-1.0 / post-1.0 wire-format policy.
 //
 // # Thread Safety
 //

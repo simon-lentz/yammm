@@ -172,6 +172,9 @@ Each issue contains:
 | `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content |
 | `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized (Warning) |
 | `E_SNAPSHOT_PATH_FALLBACK` | Provenance path could not be parsed (Warning) |
+| `E_SNAPSHOT_IO` | Per-file I/O failure during `snapshot.ScanDir` iteration (v0.3+) |
+| `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
+| `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
 
 ### Adapter
 

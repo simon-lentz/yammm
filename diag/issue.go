@@ -1,6 +1,10 @@
 package diag
 
-import "github.com/simon-lentz/yammm/location"
+import (
+	"log/slog"
+
+	"github.com/simon-lentz/yammm/location"
+)
 
 // Issue represents a single diagnostic issue.
 //
@@ -185,4 +189,104 @@ func (i Issue) Clone() Issue {
 		copy(clone.details, i.details)
 	}
 	return clone
+}
+
+// LogValue implements [slog.LogValuer] for structured logging.
+//
+// Returns a GroupValue with the following attributes:
+//
+//   - "severity" (string): one of "fatal", "error", "warning", "info",
+//     "hint" — matches [Severity.String] and is part of the wire-format
+//     stability guarantee. Always emitted.
+//   - "message" (string): the human-readable description. Always emitted.
+//   - "code" (string): the stable [Code] identifier. Omitted when
+//     [Code.IsZero] is true.
+//   - "path" (string): the canonical instance path. Omitted when empty.
+//   - "location" (group): {source, line, column} derived from the issue's
+//     span. Omitted when [HasSpan] is false.
+//   - "hint" (string): the optional remediation hint. Omitted when empty.
+//   - "details" (group): the issue's [Detail] key-value pairs emitted as
+//     sub-attributes. Omitted when no details are present.
+//
+// Issue is passed through slog infrastructure as-is:
+//
+//	logger.LogAttrs(ctx, slog.LevelError, "validation failed",
+//	    slog.Any("issue", issue))
+//
+// For the issues-slice shape surfaced by [ResultWithContext.LogValue],
+// each entry is materialized via [issueLogMap] (not [LogValue]) so that
+// [slog.JSONHandler] and other encoding/json-based handlers render a
+// JSON array of objects; slog does not recurse through [slog.LogValuer]
+// within slice elements.
+func (i Issue) LogValue() slog.Value {
+	attrs := make([]slog.Attr, 0, 7)
+	attrs = append(attrs,
+		slog.String("severity", i.severity.String()),
+		slog.String("message", i.message),
+	)
+	if !i.code.IsZero() {
+		attrs = append(attrs, slog.String("code", i.code.String()))
+	}
+	if i.path != "" {
+		attrs = append(attrs, slog.String("path", i.path))
+	}
+	if i.HasSpan() {
+		attrs = append(attrs, slog.Group("location",
+			slog.String("source", i.span.Source.String()),
+			slog.Int("line", i.span.Start.Line),
+			slog.Int("column", i.span.Start.Column),
+		))
+	}
+	if i.hint != "" {
+		attrs = append(attrs, slog.String("hint", i.hint))
+	}
+	if len(i.details) > 0 {
+		detailAttrs := make([]any, 0, len(i.details))
+		for _, d := range i.details {
+			detailAttrs = append(detailAttrs, slog.String(d.Key, d.Value))
+		}
+		attrs = append(attrs, slog.Group("details", detailAttrs...))
+	}
+	return slog.GroupValue(attrs...)
+}
+
+// issueLogMap is the map-shaped sibling of [Issue.LogValue].
+//
+// The two produce the same structural shape; the map form is used by
+// [ResultWithContext.LogValue] to populate the "issues" slice because
+// slog handlers do not recurse through [slog.LogValuer] within slice
+// elements — passing []slog.Value would make handlers that route
+// through encoding/json (notably [slog.JSONHandler]) emit empty objects
+// since slog.Value has no json.Marshaler. A []map[string]any renders
+// correctly under those handlers while preserving the per-issue shape
+// the LogValue Godoc documents.
+func issueLogMap(i Issue) map[string]any {
+	m := map[string]any{
+		"severity": i.severity.String(),
+		"message":  i.message,
+	}
+	if !i.code.IsZero() {
+		m["code"] = i.code.String()
+	}
+	if i.path != "" {
+		m["path"] = i.path
+	}
+	if i.HasSpan() {
+		m["location"] = map[string]any{
+			"source": i.span.Source.String(),
+			"line":   i.span.Start.Line,
+			"column": i.span.Start.Column,
+		}
+	}
+	if i.hint != "" {
+		m["hint"] = i.hint
+	}
+	if len(i.details) > 0 {
+		details := make(map[string]any, len(i.details))
+		for _, d := range i.details {
+			details[d.Key] = d.Value
+		}
+		m["details"] = details
+	}
+	return m
 }

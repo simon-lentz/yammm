@@ -97,7 +97,6 @@ On session start, checks for `yammm`, `yammm-lsp`, and `jq`. Reports missing too
 | `type-system.md` | Constraint types, aliases, abstract/part, inheritance |
 | `patterns.md` | Common modeling patterns with examples |
 | `api-pipeline.md` | Go API: load, validate, graph, snapshot |
-| `graph-traversal.md` | graph/walk API: Visitor, callbacks, ordering |
 | `adapters.md` | JSON/CSV/Neo4j adapter usage |
 | `diagnostics.md` | Error codes and troubleshooting |
 | `cli.md` | CLI commands and workflows |

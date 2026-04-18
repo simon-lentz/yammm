@@ -2,6 +2,7 @@ package graph
 
 import (
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/immutable"
 )
 
 // Duplicate records a duplicate primary key detected during graph construction.
@@ -86,6 +87,44 @@ type UnresolvedEdge struct {
 	//   - "absent": the association field is missing from the instance data
 	//   - "empty": the association array is present but empty
 	Reason string
+
+	// properties carries the DSL-declared edge property values from the
+	// forward reference. Populated only for Reason "target_missing" —
+	// "absent" and "empty" describe a missing/empty target reference
+	// that never had a target to attach properties to, so properties
+	// is the zero-value immutable.Properties there.
+	//
+	// Accessed via [UnresolvedEdge.Property] and [UnresolvedEdge.Properties].
+	// Survives Marshal/Load round-trips in .ys wire format v2 and later
+	// (v1 documents produced before v0.3.0 have no properties field;
+	// v2 readers load them as empty Properties, which is lossless —
+	// v1 never carried the data).
+	properties immutable.Properties
+}
+
+// Property returns the value for the given edge property name and true if it exists.
+// Returns (zero Value, false) if the property does not exist or the receiver is nil.
+//
+// Edge properties on unresolved edges are declared on the forward reference
+// via the yammm DSL; they survive Marshal/Load in .ys wire format v2 and
+// later. Symmetric with [Edge.Property] for resolved edges.
+func (u *UnresolvedEdge) Property(name string) (immutable.Value, bool) {
+	if u == nil {
+		return immutable.Value{}, false
+	}
+	return u.properties.Get(name)
+}
+
+// Properties returns all edge property values.
+//
+// Returns an empty Properties if the edge has no properties or the receiver
+// is nil. The returned Properties is immutable. Symmetric with [Edge.Properties]
+// for resolved edges.
+func (u *UnresolvedEdge) Properties() immutable.Properties {
+	if u == nil {
+		return immutable.Properties{}
+	}
+	return u.properties
 }
 
 // newDuplicate creates a Duplicate record.
@@ -98,7 +137,7 @@ func newDuplicate(instance, conflict *Instance, diagnostic diag.Issue) *Duplicat
 }
 
 // newUnresolvedEdge creates an UnresolvedEdge record.
-func newUnresolvedEdge(source *Instance, relation, targetType, targetKey string, required bool, reason string) *UnresolvedEdge {
+func newUnresolvedEdge(source *Instance, relation, targetType, targetKey string, required bool, reason string, properties immutable.Properties) *UnresolvedEdge {
 	return &UnresolvedEdge{
 		Source:     source,
 		Relation:   relation,
@@ -106,5 +145,6 @@ func newUnresolvedEdge(source *Instance, relation, targetType, targetKey string,
 		TargetKey:  targetKey,
 		Required:   required,
 		Reason:     reason,
+		properties: properties,
 	}
 }

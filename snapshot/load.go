@@ -114,6 +114,7 @@ func Load(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption
 			TargetType: uw.TargetType,
 			Required:   uw.Required,
 			Reason:     uw.Reason,
+			Properties: immutable.WrapProperties(normalizeMap(uw.Properties)),
 		}
 		if uw.TargetKey != nil {
 			up.TargetKey = immutable.WrapKey(normalizeSlice(uw.TargetKey))
