@@ -47,6 +47,19 @@ import (
 // (accumulated errors remain; new mutations may or may not be recorded
 // cleanly). Do NOT reuse a builder after a failed Build; construct a fresh
 // one via BuilderFor.
+//
+// # Performance
+//
+// Each builder method (Property, EdgeTo, EdgeToWith, Composed) captures the
+// caller's file:line via a runtime.Callers + runtime.CallersFrames pair so
+// Build-time shape errors can name the offending call site. Measured per-
+// method overhead is ~400–800 ns per call on M2-class hardware; at the
+// typical I/O-bound pipeline scale (low-thousands records per batch,
+// 3–4 builder-method calls per record) the aggregate per-batch overhead
+// is ~1–10 ms — genuinely noise against pipeline wall-clock. At a 100k+
+// records-per-batch ceiling aggregate overhead reaches ~100–400 ms, still
+// well below validation cost but no longer negligible. See
+// [BenchmarkSchemaBuilder_CallerCapture] for the in-tree pin.
 type SchemaBuilder struct {
 	schema       *schema.Schema
 	typeName     string // user-provided (may be qualified)

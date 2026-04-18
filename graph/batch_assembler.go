@@ -64,12 +64,15 @@ var ErrAssemblerFinalized = errors.New("graph: BatchAssembler.Add called after F
 //     relative to per-record wall-clock.
 //
 // Finalize is orthogonal to the validator-access mode: it sets a
-// finalized flag, waits for every in-flight Add to commit (via an
-// internal sync.WaitGroup), then runs Check + Snapshot. Concurrent
-// Add calls that arrive during Finalize either complete before
-// Finalize observes them (if they had already incremented the
-// in-flight counter and committed to Graph.Add) or fail with
-// [ErrAssemblerFinalized] (the one-shot-consumed contract).
+// finalized flag, then acquires an internal sync.RWMutex write lock —
+// which by Go's RWMutex semantics waits for every outstanding Add's
+// RLock to release before granting. Once the write lock is held, no
+// in-flight Add can be in progress, and Finalize runs Check + Snapshot.
+// Concurrent Add calls that arrive during Finalize either complete
+// before Finalize observes them (if they had already acquired their
+// RLock and committed to Graph.Add) or fail with [ErrAssemblerFinalized]
+// (the one-shot-consumed contract). See the lifecycleMu field comment
+// for why RWMutex replaced the earlier sync.WaitGroup design.
 //
 // The concurrent-safety contract specifically supports the worker-pool
 // pattern where one assembler is shared across N scraper goroutines,

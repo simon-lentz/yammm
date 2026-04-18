@@ -422,29 +422,6 @@ The `Snapshot` type provides read-only access to graph state:
 
 The `Instances()` map has non-deterministic iteration order per Go semantics. For deterministic iteration, use `AllInstances()` (iterator) or `Types()` + `InstancesOf()` (slice-based).
 
-### Graph Traversal
-
-The `graph/walk` package provides a visitor-pattern traversal over a `Snapshot`:
-
-```go
-err := walk.Walk(ctx, snap, visitor, walk.WithLogger(logger))
-```
-
-Traversal is deterministic: types are visited lexicographically, instances by primary key, properties alphabetically, edges in sorted order, and compositions by relation name. The walker returns on the first error from a visitor method or on context cancellation.
-
-Implement the `walk.Visitor` interface (or embed `walk.BaseVisitor` for no-op defaults):
-
-```go
-type Visitor interface {
-    EnterInstance(inst *graph.Instance) error
-    ExitInstance(inst *graph.Instance) error
-    VisitProperty(inst *graph.Instance, name string, value immutable.Value) error
-    VisitEdge(edge *graph.Edge) error
-    EnterComposition(inst *graph.Instance, relationName string) error
-    ExitComposition(inst *graph.Instance, relationName string) error
-}
-```
-
 ## Schema Identity
 
 The `schema` package provides a content-based hashing function for structural compatibility checks:

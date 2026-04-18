@@ -465,6 +465,35 @@ func TestAsResultWithContext_Wrapped_ResultError(t *testing.T) {
 	}
 }
 
+// TestAsResultWithContext_ErrorsJoin pins the tree-chain walk: errors.Join
+// builds a multi-child error whose Unwrap() returns []error, and errors.As
+// is required to visit every sibling. Both join-operand positions are
+// exercised so a future refactor that accidentally short-circuits on the
+// first non-matching branch is caught.
+func TestAsResultWithContext_ErrorsJoin(t *testing.T) {
+	t.Parallel()
+	orig := testResultWithError(t, testCodeError).WithContext("validation").Err()
+	other := errors.New("unrelated sibling")
+
+	joined := errors.Join(orig, other)
+	got, ok := diag.AsResultWithContext(joined, "fallback")
+	if !ok {
+		t.Fatal("AsResultWithContext returned false for errors.Join(ctx, other)")
+	}
+	if got.Tag != "validation" {
+		t.Errorf("recovered tag = %q, want %q", got.Tag, "validation")
+	}
+
+	joinedRev := errors.Join(other, orig)
+	gotRev, okRev := diag.AsResultWithContext(joinedRev, "fallback")
+	if !okRev {
+		t.Fatal("AsResultWithContext returned false for errors.Join(other, ctx)")
+	}
+	if gotRev.Tag != "validation" {
+		t.Errorf("recovered tag (reversed order) = %q, want %q", gotRev.Tag, "validation")
+	}
+}
+
 func TestAsResultWithContext_NotFound(t *testing.T) {
 	t.Parallel()
 	got, ok := diag.AsResultWithContext(errors.New("generic error"), "fallback")

@@ -2,7 +2,7 @@
 //
 // YAMMM (Yet Another Meta-Meta Model) is a library for defining schemas in a
 // small DSL (.yammm files) and validating Go data against them at runtime.
-// It provides post-validation services including graph traversal and
+// It provides post-validation services including snapshot persistence and
 // integrity checking.
 //
 // # Package Structure
@@ -15,7 +15,6 @@
 //   - [github.com/simon-lentz/yammm/schema/expr]: Expression AST types for invariants
 //   - [github.com/simon-lentz/yammm/instance]: Instance validation and constraint checking
 //   - [github.com/simon-lentz/yammm/graph]: Instance graph construction and integrity checking
-//   - [github.com/simon-lentz/yammm/graph/walk]: Visitor-pattern graph traversal
 //   - [github.com/simon-lentz/yammm/adapter/json]: JSON parsing and serialization
 //   - [github.com/simon-lentz/yammm/adapter/neo4j]: Neo4j constraint generation and Cypher query building
 //

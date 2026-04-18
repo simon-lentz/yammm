@@ -9,9 +9,9 @@ import (
 )
 
 // BenchmarkSchemaBuilder_CallerCapture pins the per-builder-method call cost
-// so the Godoc's "~200–500 ns per builder-method call on M2-class hardware"
-// claim (schema_builder.go's SchemaBuilder type, call-site-capture paragraph)
-// is quantified rather than asserted. Runs a single Property call in a tight
+// so the Godoc's "~400–800 ns per builder-method call on M2-class hardware"
+// claim (schema_builder.go's SchemaBuilder type, Performance section) is
+// quantified rather than asserted. Runs a single Property call in a tight
 // b.N loop; each iteration exercises runtime.Callers + runtime.CallersFrames
 // plus the property-map write.
 //
@@ -33,8 +33,9 @@ func BenchmarkSchemaBuilder_CallerCapture(b *testing.B) {
 
 // BenchmarkSchemaBuilder_FullCycle measures the per-record aggregate cost of
 // a typical builder usage: construction, ~3 property calls, ~1 edge call,
-// Build. Useful for cross-checking the Godoc's "aggregate per-state overhead
-// ~1–10 ms for low-thousands-record batches" framing.
+// Build. Useful for cross-checking the Godoc's "aggregate per-batch overhead
+// ~1–10 ms for low-thousands-record batches" framing (schema_builder.go's
+// SchemaBuilder type, Performance section).
 func BenchmarkSchemaBuilder_FullCycle(b *testing.B) {
 	s := benchSchema(b)
 	b.ResetTimer()

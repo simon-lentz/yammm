@@ -52,7 +52,6 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 - **"I want feedback on my schema"** -- Use `/yammm:review-schema`
 - **"I want to write a new schema from scratch"** -- Use `/yammm:author-schema`
 - **"I need to install the toolchain"** -- Run `/yammm:setup`
-- **"I want to traverse a graph programmatically"** -- Read `references/graph-traversal.md`
 
 ---
 
@@ -76,7 +75,6 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 | `references/type-system.md` | Constraint types, aliases, abstract/part, inheritance | Type system questions, narrowing rules, PK restrictions |
 | `references/patterns.md` | Common modeling patterns with examples | Looking for schema design patterns |
 | `references/api-pipeline.md` | Go API: load -> validate -> graph -> snapshot | Writing Go code that uses yammm packages |
-| `references/graph-traversal.md` | `graph/walk` API: Visitor, callbacks, ordering | Programmatic graph traversal |
 | `references/adapters.md` | JSON/CSV/Neo4j adapter usage | Exporting or importing data |
 | `references/diagnostics.md` | Error codes, troubleshooting | Understanding or fixing errors |
 | `references/cli.md` | CLI commands and workflows | Using yammm from the terminal |
