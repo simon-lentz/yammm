@@ -211,12 +211,15 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 // section exceeds this bound are rejected rather than consuming unbounded
 // memory during dispatch.
 //
-// 64 KiB accommodates typical .ys headers (< 1 KiB) with substantial
-// margin for large metadata values or many-typed schemas. Callers whose
-// headers legitimately approach this bound should split metadata across
-// multiple documents or use [Info] / [Load] (which do not cap input
-// size) against a pre-materialized byte slice.
-const MaxHeaderSize = 64 * 1024
+// 16 MiB accommodates typical .ys headers (< 1 KiB) with substantial
+// margin for callers that carry large work-set arrays in header metadata —
+// for example rdata's state-batched pipelines, which persist target_keys /
+// processed_keys / failed_keys per batch and whose densest states produce
+// headers in the 100 KiB–1 MiB range. Callers whose headers legitimately
+// exceed even this bound should split metadata across multiple documents
+// or use [Info] / [Load] (which do not cap input size) against a
+// pre-materialized byte slice.
+const MaxHeaderSize = 16 * 1024 * 1024
 
 // HeaderOnlyRead reads header metadata from a .ys stream without
 // materializing the instance body. Equivalent to [HeaderOnly] but accepts

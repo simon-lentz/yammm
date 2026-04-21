@@ -712,8 +712,9 @@ func TestHeaderOnlyRead_ExceedsMaxHeaderSize(t *testing.T) {
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
 
 	ctx := context.Background()
-	// 70 KiB metadata value pushes the header past 64 KiB.
-	huge := strings.Repeat("x", 70*1024)
+	// Metadata value sized to overflow MaxHeaderSize with slack so the
+	// test tracks the constant as it evolves.
+	huge := strings.Repeat("x", snapshot.MaxHeaderSize+10*1024)
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"huge": huge}))
 
 	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
@@ -732,15 +733,16 @@ func TestHeaderOnlyRead_MaxHeaderSizeBoundaryMidToken(t *testing.T) {
 	// Pins the distinguished error-message path when MaxHeaderSize
 	// falls inside an unclosed string literal — the failure mode
 	// operators most need help disambiguating from a generic
-	// json-decoder parse error. With a 70 KiB metadata string, the
-	// opening quote lies < 1 KiB into the header and the closing quote
-	// lies past 70 KiB, so the 64 KiB limit is unambiguously mid-token.
+	// json-decoder parse error. Metadata value is sized past
+	// MaxHeaderSize so the opening quote lies < 1 KiB into the header
+	// and the closing quote lies past the cap, making the limit
+	// unambiguously mid-token.
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
 
 	ctx := context.Background()
-	midTok := strings.Repeat("y", 70*1024)
+	midTok := strings.Repeat("y", snapshot.MaxHeaderSize+10*1024)
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"mid": midTok}))
 
 	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
