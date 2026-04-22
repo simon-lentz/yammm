@@ -654,6 +654,49 @@ func TestPropertyCoercion_TemporalScalar(t *testing.T) {
 	}
 }
 
+func TestPropertyCoercion_FloatScalar(t *testing.T) {
+	// JSON round-trip turns float64(42.0) into "42" which decodes as
+	// int64(42). propsToParamMap must repair the int64 back to float64
+	// before handing to the Neo4j driver — Neo4j FLOAT type constraints
+	// reject integer values. The repair mirrors the temporal-string
+	// coercion exercised above.
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "basic.yammm")
+	a := New()
+
+	shape, result := a.ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{
+			"id": "e1", "name": "test", "count": int64(1), "active": true,
+			"created_at": "2024-01-01T00:00:00Z",
+			"score":      int64(42),
+		}},
+	})
+
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows := queries[0].Params["rows"].([]map[string]any)
+	props := rows[0]["props"].(map[string]any)
+
+	sc, ok := props["score"]
+	if !ok {
+		t.Fatal("score missing from props")
+	}
+	if _, isFloat := sc.(float64); !isFloat {
+		t.Errorf("score should be float64 after int→Float coercion, got %T (%v)", sc, sc)
+	}
+	if f, _ := sc.(float64); f != 42.0 {
+		t.Errorf("score value preserved incorrectly: want 42.0, got %v", f)
+	}
+}
+
 func TestCoerceTemporalScalar_Unit(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")

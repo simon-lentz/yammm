@@ -712,8 +712,9 @@ func TestHeaderOnlyRead_ExceedsMaxHeaderSize(t *testing.T) {
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
 
 	ctx := context.Background()
-	// 70 KiB metadata value pushes the header past 64 KiB.
-	huge := strings.Repeat("x", 70*1024)
+	// Metadata value sized to overflow MaxHeaderSize with slack so the
+	// test tracks the constant as it evolves.
+	huge := strings.Repeat("x", snapshot.MaxHeaderSize+10*1024)
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"huge": huge}))
 
 	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
@@ -732,15 +733,16 @@ func TestHeaderOnlyRead_MaxHeaderSizeBoundaryMidToken(t *testing.T) {
 	// Pins the distinguished error-message path when MaxHeaderSize
 	// falls inside an unclosed string literal — the failure mode
 	// operators most need help disambiguating from a generic
-	// json-decoder parse error. With a 70 KiB metadata string, the
-	// opening quote lies < 1 KiB into the header and the closing quote
-	// lies past 70 KiB, so the 64 KiB limit is unambiguously mid-token.
+	// json-decoder parse error. Metadata value is sized past
+	// MaxHeaderSize so the opening quote lies < 1 KiB into the header
+	// and the closing quote lies past the cap, making the limit
+	// unambiguously mid-token.
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
 
 	ctx := context.Background()
-	midTok := strings.Repeat("y", 70*1024)
+	midTok := strings.Repeat("y", snapshot.MaxHeaderSize+10*1024)
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"mid": midTok}))
 
 	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
@@ -757,6 +759,63 @@ func TestHeaderOnlyRead_MaxHeaderSizeBoundaryMidToken(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "mid-token cap should produce the 'exceeded MaxHeaderSize' message, not a generic JSON error")
+}
+
+// assertLoadTruncationClean builds a snapshot whose marshaled bytes strictly
+// exceed offset, truncates to offset, calls snapshot.Load, and asserts that
+// Load returns a nil snapshot plus a diag.Result carrying
+// diag.E_SNAPSHOT_MALFORMED — no panic, no partial struct, no silent success.
+func assertLoadTruncationClean(t *testing.T, offset int) {
+	t.Helper()
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	ctx := context.Background()
+	// Size metadata so the marshaled output strictly exceeds offset. 10 KiB
+	// of slack absorbs the surrounding header / schema-hash / type-list
+	// bytes without tracking their exact size.
+	huge := strings.Repeat("x", offset+10*1024)
+	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"huge": huge}))
+	require.Greater(t, len(data), offset, "fixture must exceed truncation offset")
+
+	truncated := data[:offset]
+	loaded, result := snapshot.Load(ctx, truncated, s)
+
+	assert.Nil(t, loaded, "truncated Load must not return a partial struct")
+	require.True(t, result.HasErrors(), "truncated Load must surface errors")
+
+	var found bool
+	for issue := range result.Errors() {
+		if issue.Code() == diag.E_SNAPSHOT_MALFORMED {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "truncated Load must surface E_SNAPSHOT_MALFORMED")
+}
+
+func TestLoad_TruncatedHeader_32KiB(t *testing.T) {
+	// 32 KiB falls below the pre-bump 64 KiB MaxHeaderSize cap. A header
+	// truncated here must surface E_SNAPSHOT_MALFORMED cleanly rather
+	// than tripping the cap's own error path, which is a distinct branch.
+	assertLoadTruncationClean(t, 32*1024)
+}
+
+func TestLoad_TruncatedHeader_1MiB(t *testing.T) {
+	// Mid-range of the 16 MiB cap. Exercises the truncation path on a
+	// realistic state-batched header size.
+	assertLoadTruncationClean(t, 1*1024*1024)
+}
+
+func TestLoad_TruncatedHeader_15MiB(t *testing.T) {
+	// Near-ceiling of the 16 MiB cap. Confirms the expanded header
+	// budget still produces a structured error on truncation rather
+	// than a silent partial decode.
+	if testing.Short() {
+		t.Skip("skipping 15 MiB fixture in -short mode")
+	}
+	assertLoadTruncationClean(t, 15*1024*1024)
 }
 
 func TestHeaderOnlyRead_SlowReader(t *testing.T) {
