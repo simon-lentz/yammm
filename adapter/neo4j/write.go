@@ -477,6 +477,10 @@ func (a *Adapter) BatchEdgeQueries(
 // to native temporal types, using schema constraint metadata. Without this coercion,
 // Neo4j TYPE constraints (IS :: DATE, IS :: ZONED DATETIME) reject string values.
 // Date strings are coerced to dbtype.Date; Timestamp strings to time.Time.
+// Whole-number Float values that JSON-round-tripped as int64 are coerced back
+// to float64 so the Neo4j driver sends native FLOAT that satisfies IS :: FLOAT
+// type constraints; without this, a float64(1860000.0) serialized to "1860000"
+// and decoded as int64(1860000) reaches Neo4j as INTEGER and is rejected.
 func propsToParamMap(props immutable.Properties, schemaType *schema.Type) map[string]any {
 	raw := props.Clone()
 	if schemaType == nil {
@@ -502,6 +506,27 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) map[st
 				continue
 			}
 			raw[key] = coerceTemporalScalar(s, prop.Constraint())
+			continue
+		}
+		// Coerce int-valued Float properties back to float64. JSON
+		// serialization of float64(N.0) emits "N" which decodes as int64(N);
+		// Neo4j FLOAT type constraints reject that. This mirrors the
+		// temporal string coercion above, generalising the "repair JSON
+		// round-trip before handing to the driver" pattern.
+		prop, found := schemaType.Property(key)
+		if !found {
+			continue
+		}
+		if schema.ResolveAlias(prop.Constraint()).Kind() != schema.KindFloat {
+			continue
+		}
+		switch v := val.(type) {
+		case int64:
+			raw[key] = float64(v)
+		case int:
+			raw[key] = float64(v)
+		case int32:
+			raw[key] = float64(v)
 		}
 	}
 	return raw
