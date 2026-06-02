@@ -532,7 +532,8 @@ func (v *Validator) buildPropertyMapping(typ *schema.Type, props map[string]any,
 
 			// emit debug log when normalization occurs
 			if v.cfg.logger != nil {
-				v.cfg.logger.Debug("property name normalized",
+				v.cfg.logger.Debug(
+					"property name normalized",
 					slog.String(diag.DetailKeyTypeName, typ.Name()),
 					slog.String("input", inputName),
 					slog.String("resolved", schemaName),

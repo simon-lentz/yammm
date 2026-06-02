@@ -127,7 +127,8 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 
 	// Operation boundary logging - must come before context check so
 	// cancellations are traced (consistency with walk package pattern)
-	op := trace.Begin(ctx, g.config.logger, "yammm.graph.add",
+	op := trace.Begin(
+		ctx, g.config.logger, "yammm.graph.add",
 		slog.String("type", inst.TypeName()),
 		slog.String("pk", inst.PrimaryKey().String()),
 	)
@@ -220,7 +221,8 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 			g.duplicates = append(g.duplicates, dup)
 			opCollector.Collect(dup.Diagnostic)
 			g.collector.Collect(dup.Diagnostic)
-			trace.Warn(ctx, g.config.logger, "duplicate primary key",
+			trace.Warn(
+				ctx, g.config.logger, "duplicate primary key",
 				slog.String("type", typeName),
 				slog.String("pk", pkString),
 			)
@@ -257,7 +259,8 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 				// Create resolved edge
 				edge := newEdge(relationName, graphInst, targetInst, target.Properties())
 				g.edges = append(g.edges, edge)
-				trace.Debug(ctx, g.config.logger, "edge resolved",
+				trace.Debug(
+					ctx, g.config.logger, "edge resolved",
 					slog.String("relation", relationName),
 					slog.String("source_type", typeName),
 					slog.String("source_pk", pkString),
@@ -277,7 +280,8 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 					isRequired:   isRequired,
 					reasonDetail: "", // will be "target_missing" in Check
 				})
-				trace.Debug(ctx, g.config.logger, "forward reference created",
+				trace.Debug(
+					ctx, g.config.logger, "forward reference created",
 					slog.String("relation", relationName),
 					slog.String("source_type", typeName),
 					slog.String("source_pk", pkString),
@@ -335,7 +339,8 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 			g.edges = append(g.edges, edge)
 		}
 		if len(pendingList) > 0 {
-			trace.Debug(ctx, g.config.logger, "pending edges resolved",
+			trace.Debug(
+				ctx, g.config.logger, "pending edges resolved",
 				slog.String("target_type", typeName),
 				slog.String("target_pk", pkString),
 				slog.Int("count", len(pendingList)),
@@ -407,7 +412,8 @@ func (g *Graph) AddComposed(
 
 	// Operation boundary logging - must come before context check so
 	// cancellations are traced (consistency with walk package pattern)
-	op := trace.Begin(ctx, g.config.logger, "yammm.graph.add_composed",
+	op := trace.Begin(
+		ctx, g.config.logger, "yammm.graph.add_composed",
 		slog.String("parent_type", parentType),
 		slog.String("parent_pk", parentKey),
 		slog.String("relation", relationName),
@@ -529,7 +535,8 @@ func (g *Graph) AddComposed(
 
 			opCollector.Collect(issue)
 			g.collector.Collect(issue)
-			trace.Warn(ctx, g.config.logger, "duplicate composed child",
+			trace.Warn(
+				ctx, g.config.logger, "duplicate composed child",
 				slog.String("parent_type", parentType),
 				slog.String("parent_pk", parentKey),
 				slog.String("relation", relationName),
@@ -562,7 +569,8 @@ func (g *Graph) AddComposed(
 
 				opCollector.Collect(issue)
 				g.collector.Collect(issue)
-				trace.Warn(ctx, g.config.logger, "duplicate composed child",
+				trace.Warn(
+					ctx, g.config.logger, "duplicate composed child",
 					slog.String("parent_type", parentType),
 					slog.String("parent_pk", parentKey),
 					slog.String("relation", relationName),
@@ -673,7 +681,8 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 			issue := builder.Build()
 			opCollector.Collect(issue)
 
-			trace.Warn(ctx, g.config.logger, "unresolved required association",
+			trace.Warn(
+				ctx, g.config.logger, "unresolved required association",
 				slog.String("source_type", pend.source.TypeName()),
 				slog.String("source_pk", pend.source.PrimaryKey().String()),
 				slog.String("relation", pend.relation),
@@ -684,7 +693,8 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 	}
 
 	if unresolvedCount > 0 {
-		trace.Debug(ctx, g.config.logger, "check completed with unresolved",
+		trace.Debug(
+			ctx, g.config.logger, "check completed with unresolved",
 			slog.Int("unresolved_count", unresolvedCount),
 		)
 	}
@@ -824,7 +834,8 @@ func (g *Graph) Snapshot() *Snapshot {
 			}
 			unresolved = append(unresolved, newUnresolvedEdge(
 				clonedSource, pend.relation, pend.targetType, pend.targetKey,
-				pend.isRequired, reason, pend.properties))
+				pend.isRequired, reason, pend.properties,
+			))
 		}
 	}
 	slices.SortFunc(unresolved, func(a, b *UnresolvedEdge) int {

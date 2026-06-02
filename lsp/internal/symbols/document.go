@@ -23,7 +23,8 @@ type SnapshotView struct {
 // Returns nil when no symbols are available.
 func DocumentSymbolsFor(snap SnapshotView, docURI string, docSourceID location.SourceID, docVersion int, enc lsputil.PositionEncoding, logger *slog.Logger) []protocol.DocumentSymbol {
 	if snap.EntryVersion != docVersion {
-		logger.Debug("serving stale snapshot for documentSymbol",
+		logger.Debug(
+			"serving stale snapshot for documentSymbol",
 			"uri", docURI,
 			"snapshot_version", snap.EntryVersion,
 			"doc_version", docVersion,

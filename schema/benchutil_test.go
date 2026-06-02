@@ -76,7 +76,8 @@ func buildLargeBenchSchema(tb testing.TB) *schema.Schema {
 		// of declaration order.
 		if i < associationCount {
 			dst := fmt.Sprintf("Type%03d", (i*associationStride)%typeCount)
-			tb2.WithRelation(fmt.Sprintf("assoc%03d", i),
+			tb2.WithRelation(
+				fmt.Sprintf("assoc%03d", i),
 				schema.LocalTypeRef(dst, location.Span{}),
 				true, // optional
 				true, // many

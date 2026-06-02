@@ -220,7 +220,8 @@ func (i Issue) Clone() Issue {
 // within slice elements.
 func (i Issue) LogValue() slog.Value {
 	attrs := make([]slog.Attr, 0, 7)
-	attrs = append(attrs,
+	attrs = append(
+		attrs,
 		slog.String("severity", i.severity.String()),
 		slog.String("message", i.message),
 	)
@@ -231,7 +232,8 @@ func (i Issue) LogValue() slog.Value {
 		attrs = append(attrs, slog.String("path", i.path))
 	}
 	if i.HasSpan() {
-		attrs = append(attrs, slog.Group("location",
+		attrs = append(attrs, slog.Group(
+			"location",
 			slog.String("source", i.span.Source.String()),
 			slog.Int("line", i.span.Start.Line),
 			slog.Int("column", i.span.Start.Column),

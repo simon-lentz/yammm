@@ -36,14 +36,16 @@ func marshalCorpus(t *testing.T) []corpusEntry {
 	t.Helper()
 	s := testSchema(t)
 	emptySnap := buildSnapshot(t, s)
-	populatedSnap := buildSnapshot(t, s,
+	populatedSnap := buildSnapshot(
+		t, s,
 		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}),
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"title": "Acme"}),
 	)
 	// A snapshot with a cross-batch unresolved edge carrying properties.
 	// Exercises the v2 unresolvedWire.Properties field against every
 	// Option combination the wire-format tests iterate.
-	unresolvedWithPropsSnap := buildSnapshot(t, s,
+	unresolvedWithPropsSnap := buildSnapshot(
+		t, s,
 		mustValidInstanceWithEdgeProps(t, s, "Person",
 			[]any{"p1"}, map[string]any{"name": "Alice"},
 			"EMPLOYER", []any{"missing"},

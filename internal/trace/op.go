@@ -115,7 +115,8 @@ func (o *Op) End(err error, attrs ...slog.Attr) {
 	if reqID, ok := RequestIDFrom(o.ctx); ok {
 		logAttrs = append(logAttrs, slog.String("request_id", reqID))
 	}
-	logAttrs = append(logAttrs,
+	logAttrs = append(
+		logAttrs,
 		slog.Int64("elapsed_ms", elapsed.Milliseconds()),
 		slog.Duration("duration", elapsed),
 	)

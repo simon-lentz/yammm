@@ -111,7 +111,8 @@ func (c ResultWithContext) LogValue() slog.Value {
 	}
 
 	counts := c.Result.SeverityCounts()
-	attrs = append(attrs, slog.Group("counts",
+	attrs = append(attrs, slog.Group(
+		"counts",
 		slog.Int("errors", counts.Fatal+counts.Errors),
 		slog.Int("warnings", counts.Warnings),
 	))

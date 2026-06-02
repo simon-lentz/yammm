@@ -92,7 +92,8 @@ func TestStructuralHashVersion(t *testing.T) {
 }
 
 func TestStructuralHash_NilPanics(t *testing.T) {
-	assert.PanicsWithValue(t,
+	assert.PanicsWithValue(
+		t,
 		"schema: StructuralHash called on nil *Schema",
 		func() { schema.StructuralHash(nil) },
 	)
@@ -477,7 +478,8 @@ func TestStructuralHash_ComprehensiveSchema(t *testing.T) {
 
 	emailDT := schema.TestNewDataType("Email", schema.StringMinLen(1), zeroSpan, "")
 
-	s := buildMinimalSchema("hr",
+	s := buildMinimalSchema(
+		"hr",
 		[]*schema.Type{personType, companyType, addressType},
 		[]*schema.DataType{emailDT},
 	)

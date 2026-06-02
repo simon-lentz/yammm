@@ -28,7 +28,8 @@ func AtPosition(
 		return nil, nil
 	}
 	if snapshot.EntryVersion != doc.Version {
-		logger.Debug("serving stale snapshot for hover",
+		logger.Debug(
+			"serving stale snapshot for hover",
 			"uri", doc.URI,
 			"snapshot_version", snapshot.EntryVersion,
 			"doc_version", doc.Version,

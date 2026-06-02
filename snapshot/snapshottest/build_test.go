@@ -60,7 +60,8 @@ func requiredEmployerSchema(t *testing.T) *schema.Schema {
 func TestBuildTestSnapshot_HappyPath(t *testing.T) {
 	s := buildTestSchema(t)
 
-	snap := snapshottest.BuildTestSnapshot(t, s,
+	snap := snapshottest.BuildTestSnapshot(
+		t, s,
 		snapshottest.Record{
 			TypeName: "Company",
 			Raw:      instance.RawInstance{Properties: map[string]any{"id": "acme", "name": "ACME"}},
@@ -105,7 +106,8 @@ func TestBuildTestSnapshot_FinalizeFailure_Fatal(t *testing.T) {
 	// Check fires E_UNRESOLVED_REQUIRED, Finalize returns
 	// *ErrorWithContext tagged "batch_finalize", BuildTestSnapshot
 	// fatals.
-	snapshottest.BuildTestSnapshot(rec, s,
+	snapshottest.BuildTestSnapshot(
+		rec, s,
 		snapshottest.Record{
 			TypeName: "Person",
 			Raw: instance.RawInstance{Properties: map[string]any{

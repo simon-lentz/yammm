@@ -46,7 +46,8 @@ type Record struct {
 func BuildTestSnapshot(tb testing.TB, s *schema.Schema, records ...Record) *graph.Snapshot {
 	tb.Helper()
 	ctx := context.Background()
-	ba := graph.NewBatchAssembler(ctx, s,
+	ba := graph.NewBatchAssembler(
+		ctx, s,
 		graph.WithValidatorOptions(instance.RecommendedOptions()...),
 	)
 	for i, rec := range records {

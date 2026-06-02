@@ -259,7 +259,8 @@ func (s *Server) withMiddleware(method string, h jrpc2.Handler) jrpc2.Handler {
 		} else if elapsed > slowRequestThreshold {
 			level = slog.LevelWarn
 		}
-		s.logger.Log(ctx, level, "request completed",
+		s.logger.Log(
+			ctx, level, "request completed",
 			slog.String("method", method),
 			slog.Duration("elapsed", elapsed),
 			slog.Any("error", err),
@@ -270,7 +271,8 @@ func (s *Server) withMiddleware(method string, h jrpc2.Handler) jrpc2.Handler {
 
 // initialize handles the initialize request.
 func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams) (any, error) {
-	s.logger.Info("initialize request received",
+	s.logger.Info(
+		"initialize request received",
 		slog.String("client_name", clientName(params)),
 		slog.String("root_uri", rootURI(params)),
 	)

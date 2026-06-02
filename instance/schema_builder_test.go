@@ -499,7 +499,8 @@ func TestSchemaBuilder_Composed_Happy(t *testing.T) {
 	raw, err := p.
 		Property("id", "alice").
 		Property("name", "Alice").
-		Composed("addresses",
+		Composed(
+			"addresses",
 			a1.Property("id", "a1").Property("street", "Main St"),
 			a2.Property("id", "a2").Property("street", "Oak Ave"),
 		).
@@ -623,7 +624,8 @@ func TestSchemaBuilder_Composed_OneCardinalityTwoVariadic(t *testing.T) {
 	_, err = p.
 		Property("id", "p1").
 		Property("name", "Alice").
-		Composed("primary_note",
+		Composed(
+			"primary_note",
 			n1.Property("body", "first"),
 			n2.Property("body", "second"),
 		).

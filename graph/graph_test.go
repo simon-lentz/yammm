@@ -659,12 +659,14 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"name": "Alice"}),
-		nil, nil, nil)
+		nil, nil, nil,
+	)
 	acme := instance.NewValidInstance(
 		"Company", companyType.ID(),
 		immutable.WrapKey([]any{"acme"}),
 		immutable.WrapProperties(map[string]any{"name": "Acme"}),
-		nil, nil, nil)
+		nil, nil, nil,
+	)
 
 	if r := g.Add(ctx, alice); !r.OK() {
 		t.Fatal(r.String())
@@ -678,12 +680,14 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 		"Company", companyType.ID(),
 		immutable.WrapKey([]any{"acme"}),
 		immutable.WrapProperties(map[string]any{"name": "Acme Dup"}),
-		nil, nil, nil)
+		nil, nil, nil,
+	)
 	aliceDup := instance.NewValidInstance(
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"name": "Alice Dup"}),
-		nil, nil, nil)
+		nil, nil, nil,
+	)
 
 	g.Add(ctx, acmeDup)
 	g.Add(ctx, aliceDup)
@@ -773,7 +777,8 @@ func TestGraph_LargeGraph_Performance(t *testing.T) {
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{pk}),
 			immutable.WrapProperties(map[string]any{"name": pk}),
-			nil, nil, nil)
+			nil, nil, nil,
+		)
 
 		if r := g.Add(ctx, inst); !r.OK() {
 			t.Fatalf("Add %s failed: %s", pk, r.String())
@@ -826,7 +831,8 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{key}),
 			immutable.WrapProperties(map[string]any{"name": key}),
-			nil, nil, nil)
+			nil, nil, nil,
+		)
 
 		result := g.Add(ctx, inst)
 		if err := result.Err(); err != nil {
@@ -874,7 +880,8 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{key}),
 			immutable.WrapProperties(map[string]any{"name": key}),
-			nil, nil, nil)
+			nil, nil, nil,
+		)
 
 		result := g.Add(ctx, inst)
 		if err := result.Err(); err != nil {
@@ -904,7 +911,8 @@ func TestGraph_CompositeKey_Large(t *testing.T) {
 				"Record", recordType.ID(),
 				immutable.WrapKey([]any{region, fmt.Sprintf("id-%d", i)}),
 				immutable.WrapProperties(map[string]any{"value": fmt.Sprintf("%s-%d", region, i)}),
-				nil, nil, nil)
+				nil, nil, nil,
+			)
 
 			result := g.Add(ctx, inst)
 			if err := result.Err(); err != nil {
@@ -947,7 +955,8 @@ func TestGraph_EmptyProperties(t *testing.T) {
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"minimal"}),
 		immutable.WrapProperties(map[string]any{}), // No additional properties
-		nil, nil, nil)
+		nil, nil, nil,
+	)
 
 	result := g.Add(ctx, inst)
 	if err := result.Err(); err != nil {
@@ -1380,7 +1389,8 @@ func TestResult_Instances(t *testing.T) {
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{fmt.Sprintf("person-%d", i)}),
 			immutable.WrapProperties(map[string]any{"name": fmt.Sprintf("Name %d", i)}),
-			nil, nil, nil)
+			nil, nil, nil,
+		)
 		if r := g.Add(ctx, inst); !r.OK() {
 			t.Fatalf("Add failed: %s", r.String())
 		}
@@ -1415,7 +1425,8 @@ func TestResult_DiagnosticsAndFlags(t *testing.T) {
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"test-person"}),
 		immutable.WrapProperties(map[string]any{"name": "Test"}),
-		nil, nil, nil)
+		nil, nil, nil,
+	)
 	result := g.Add(ctx, inst)
 
 	// Test OK and HasErrors on the add result

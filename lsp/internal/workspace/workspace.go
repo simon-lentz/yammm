@@ -177,7 +177,8 @@ func (w *Workspace) AddRoot(uri string) {
 
 	path, err := lsputil.URIToPath(uri)
 	if err != nil {
-		w.logger.Warn("failed to parse workspace root URI",
+		w.logger.Warn(
+			"failed to parse workspace root URI",
 			slog.String("uri", uri),
 			slog.Any("error", err),
 		)
@@ -205,7 +206,8 @@ func (w *Workspace) RemoveRoot(uri string) {
 
 	path, err := lsputil.URIToPath(uri)
 	if err != nil {
-		w.logger.Warn("failed to parse workspace root URI for removal",
+		w.logger.Warn(
+			"failed to parse workspace root URI for removal",
 			slog.String("uri", uri),
 			slog.Any("error", err),
 		)
@@ -249,7 +251,8 @@ func (w *Workspace) PositionEncoding() lsputil.PositionEncoding {
 func (w *Workspace) documentOpened(uri string, version int, text string) {
 	path, err := lsputil.URIToPath(uri)
 	if err != nil {
-		w.logger.Warn("failed to parse document URI",
+		w.logger.Warn(
+			"failed to parse document URI",
 			slog.String("uri", uri),
 			slog.Any("error", err),
 		)
@@ -266,7 +269,8 @@ func (w *Workspace) documentOpened(uri string, version int, text string) {
 
 	sourceID, err := location.SourceIDFromAbsolutePath(canonicalPath)
 	if err != nil {
-		w.logger.Warn("failed to create source ID",
+		w.logger.Warn(
+			"failed to create source ID",
 			slog.String("path", canonicalPath),
 			slog.Any("error", err),
 		)
@@ -353,7 +357,8 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 
 	path, err := lsputil.URIToPath(uri)
 	if err != nil {
-		w.logger.Warn("failed to parse document URI for analysis",
+		w.logger.Warn(
+			"failed to parse document URI for analysis",
 			slog.String("uri", uri),
 			slog.Any("error", fmt.Errorf("%w: %w", lsperr.ErrInvalidURI, err)),
 		)
@@ -370,7 +375,8 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 	snapshot, err := w.sched.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot, w.PositionEncoding())
 
 	if analyzeCtx.Err() != nil {
-		w.logger.Debug("analysis cancelled",
+		w.logger.Debug(
+			"analysis cancelled",
 			slog.String("uri", uri),
 			slog.Any("error", analyzeCtx.Err()),
 		)
@@ -383,7 +389,8 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 	w.mu.RUnlock()
 
 	if isStale {
-		w.logger.Debug("skipping stale analysis results",
+		w.logger.Debug(
+			"skipping stale analysis results",
 			slog.String("uri", uri),
 			slog.Int("entry_version", entryVersion),
 		)
@@ -391,7 +398,8 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 	}
 
 	if err != nil {
-		w.logger.Error("analysis failed",
+		w.logger.Error(
+			"analysis failed",
 			slog.String("uri", uri),
 			slog.Any("error", err),
 		)

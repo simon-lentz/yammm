@@ -46,7 +46,8 @@ var BuiltinTypes = []string{
 // The line and char parameters are LSP-encoding coordinates.
 func Complete(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char int, enc lsputil.PositionEncoding, logger *slog.Logger) []protocol.CompletionItem {
 	if snapshot != nil && snapshot.EntryVersion != doc.Version {
-		logger.Debug("serving stale snapshot for completion",
+		logger.Debug(
+			"serving stale snapshot for completion",
 			"uri", doc.URI,
 			"snapshot_version", snapshot.EntryVersion,
 			"doc_version", doc.Version,
