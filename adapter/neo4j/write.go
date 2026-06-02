@@ -134,7 +134,10 @@ func (a *Adapter) NodeQueryFor(
 		return nil, fmt.Errorf("type %q: %w", inst.TypeName(), err)
 	}
 
-	props := propsToParamMap(inst.Properties(), schemaType)
+	props, err := propsToParamMap(inst.Properties(), schemaType)
+	if err != nil {
+		return nil, fmt.Errorf("type %q: %w", inst.TypeName(), err)
+	}
 
 	params := make(map[string]any)
 	for k, v := range keyProps {
@@ -199,7 +202,10 @@ func (a *Adapter) BatchNodeQueries(
 				return nil, fmt.Errorf("type %q: %w", typeName, err)
 			}
 
-			props := propsToParamMap(inst.Properties(), schemaType)
+			props, err := propsToParamMap(inst.Properties(), schemaType)
+			if err != nil {
+				return nil, fmt.Errorf("type %q: %w", typeName, err)
+			}
 			row := make(map[string]any, len(keyProps)+2)
 			maps.Copy(row, keyProps)
 			row["props"] = props
@@ -222,6 +228,13 @@ func (a *Adapter) BatchNodeQueries(
 }
 
 // EdgeQueryFor generates a single relationship MERGE query for a graph edge.
+//
+// Edge properties are passed through uncoerced: EdgeQueryFor takes a resolved
+// [*graph.Edge] with no schema handle, so unlike the schema-aware
+// [Adapter.EdgeQueriesFor] and [Adapter.BatchEdgeQueries] it cannot map typed
+// relationship properties (Timestamp/Date/Float) to driver-native types. No
+// current schema declares typed relationship properties, so this is latent;
+// thread a [*schema.Relation] through this signature when one first does.
 //
 //nolint:revive // opts reserved for future edge-level write options
 func (a *Adapter) EdgeQueryFor(
@@ -342,7 +355,11 @@ func (a *Adapter) EdgeQueriesFor(
 
 			hasProps := target.HasProperties()
 			if hasProps {
-				params["rel_props"] = target.Properties().Clone()
+				relProps, err := coerceRelProps(target.Properties().Clone(), rel)
+				if err != nil {
+					return nil, fmt.Errorf("target %q (relation %q): %w", targetTypeName, relationName, err)
+				}
+				params["rel_props"] = relProps
 			}
 
 			stmt := BuildRelationshipMergeQuery(
@@ -417,6 +434,15 @@ func (a *Adapter) BatchEdgeQueries(
 			return nil, fmt.Errorf("no shape for target type %q", sig.targetType)
 		}
 
+		// Resolve the schema relation for this signature group so typed edge
+		// properties (Timestamp/Date/Float) coerce to driver-native types.
+		// Nil when the source type or relation is not found — coerceRelProps
+		// then passes properties through unchanged.
+		var rel *schema.Relation
+		if srcType, ok := result.Schema().Type(sig.sourceType); ok {
+			rel, _ = srcType.Relation(sig.relType)
+		}
+
 		// Detect if any edge in this group has properties.
 		hasProps := false
 		for _, edge := range sigEdges {
@@ -446,7 +472,11 @@ func (a *Adapter) BatchEdgeQueries(
 			}
 			if hasProps {
 				if edge.HasProperties() {
-					row["rel_props"] = edge.Properties().Clone()
+					relProps, err := coerceRelProps(edge.Properties().Clone(), rel)
+					if err != nil {
+						return nil, fmt.Errorf("relation %q: %w", sig.relType, err)
+					}
+					row["rel_props"] = relProps
 				} else {
 					row["rel_props"] = map[string]any{}
 				}
@@ -472,102 +502,57 @@ func (a *Adapter) BatchEdgeQueries(
 	return queries, nil
 }
 
-// propsToParamMap converts instance properties to a Neo4j-driver-compatible map.
-// Coerces []any slices to concrete typed slices, and scalar Date/Timestamp strings
-// to native temporal types, using schema constraint metadata. Without this coercion,
-// Neo4j TYPE constraints (IS :: DATE, IS :: ZONED DATETIME) reject string values.
-// Date strings are coerced to dbtype.Date; Timestamp strings to time.Time.
-// Whole-number Float values that JSON-round-tripped as int64 are coerced back
-// to float64 so the Neo4j driver sends native FLOAT that satisfies IS :: FLOAT
-// type constraints; without this, a float64(1860000.0) serialized to "1860000"
-// and decoded as int64(1860000) reaches Neo4j as INTEGER and is rejected.
-func propsToParamMap(props immutable.Properties, schemaType *schema.Type) map[string]any {
+// propsToParamMap converts instance properties to a Neo4j-driver-compatible
+// map, routing every scalar through [Coerce] and every []any slice through
+// [coerceSlice] against the property's schema constraint. This repairs the
+// JSON round-trip — a whole-number Float decoded as int64, and Date/Timestamp
+// values carried as strings — so the driver receives native types that satisfy
+// Neo4j TYPE constraints (IS :: FLOAT, IS :: DATE, IS :: ZONED DATETIME).
+// Returns an error, naming the offending property, if a value cannot be coerced
+// to its declared kind (e.g. an unparseable Timestamp/Date string).
+func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[string]any, error) {
 	raw := props.Clone()
 	if schemaType == nil {
-		return raw
+		return raw, nil
 	}
 
 	for key, val := range raw {
 		if val == nil {
 			continue
 		}
-		if slice, ok := val.([]any); ok {
-			prop, found := schemaType.Property(key)
-			if found {
-				raw[key] = coerceSlice(slice, prop.Constraint())
-			}
-			continue
-		}
-		// Coerce scalar Date/Timestamp strings to time.Time so the Neo4j
-		// driver sends native temporal types that satisfy TYPE constraints.
-		if s, ok := val.(string); ok {
-			prop, found := schemaType.Property(key)
-			if !found {
-				continue
-			}
-			raw[key] = coerceTemporalScalar(s, prop.Constraint())
-			continue
-		}
-		// Coerce int-valued Float properties back to float64. JSON
-		// serialization of float64(N.0) emits "N" which decodes as int64(N);
-		// Neo4j FLOAT type constraints reject that. This mirrors the
-		// temporal string coercion above, generalising the "repair JSON
-		// round-trip before handing to the driver" pattern.
 		prop, found := schemaType.Property(key)
 		if !found {
 			continue
 		}
-		if schema.ResolveAlias(prop.Constraint()).Kind() != schema.KindFloat {
+		if slice, ok := val.([]any); ok {
+			cv, err := coerceSlice(slice, prop.Constraint())
+			if err != nil {
+				return nil, fmt.Errorf("property %q: %w", key, err)
+			}
+			raw[key] = cv
 			continue
 		}
-		switch v := val.(type) {
-		case int64:
-			raw[key] = float64(v)
-		case int:
-			raw[key] = float64(v)
-		case int32:
-			raw[key] = float64(v)
+		cv, err := Coerce(schema.ResolveAlias(prop.Constraint()).Kind(), val)
+		if err != nil {
+			return nil, fmt.Errorf("property %q: %w", key, err)
 		}
+		raw[key] = cv
 	}
-	return raw
+	return raw, nil
 }
 
-// coerceTemporalScalar converts a string value to a Neo4j-driver-compatible
-// temporal type based on the schema constraint:
-//   - KindDate → dbtype.Date (Neo4j DATE)
-//   - KindTimestamp → time.Time (Neo4j ZONED DATETIME)
-//
-// Returns the original string if parsing fails or the constraint is not temporal.
-func coerceTemporalScalar(s string, c schema.Constraint) any {
-	c = schema.ResolveAlias(c)
-	switch c.Kind() {
-	case schema.KindDate:
-		t, err := time.Parse("2006-01-02", s)
-		if err != nil {
-			return s
-		}
-		return dbtype.Date(t)
-	case schema.KindTimestamp:
-		t, err := time.Parse(time.RFC3339, s)
-		if err != nil {
-			// Try RFC3339Nano for sub-second precision
-			t, err = time.Parse(time.RFC3339Nano, s)
-			if err != nil {
-				return s
-			}
-		}
-		return t
-	default:
-		return s
-	}
-}
-
-// coerceSlice converts []any to a concrete typed slice using schema constraint metadata.
-func coerceSlice(raw []any, c schema.Constraint) any {
+// coerceSlice converts a []any to a concrete typed slice using the list
+// constraint's element kind. Per-element value conversion delegates to
+// [Coerce] so the Float int-repair and temporal-parse rules live in one place;
+// coerceSlice owns only the slice typing. Returns an error if an element fails
+// coercion (e.g. an unparseable temporal string). An element that is simply not
+// the expected Go type falls back to the raw slice, preserving the prior
+// best-effort behavior for type mismatches.
+func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	c = schema.ResolveAlias(c)
 	lc, ok := c.(schema.ListConstraint)
 	if !ok {
-		return raw
+		return raw, nil
 	}
 	elem := schema.ResolveAlias(lc.Element())
 	switch elem.Kind() {
@@ -576,126 +561,100 @@ func coerceSlice(raw []any, c schema.Constraint) any {
 		for i, v := range raw {
 			s, ok := v.(string)
 			if !ok {
-				return raw
+				return raw, nil
 			}
 			out[i] = s
 		}
-		return out
+		return out, nil
 	case schema.KindInteger:
 		out := make([]int64, len(raw))
 		for i, v := range raw {
 			n, ok := v.(int64)
 			if !ok {
-				return raw
+				return raw, nil
 			}
 			out[i] = n
 		}
-		return out
+		return out, nil
 	case schema.KindFloat:
 		out := make([]float64, len(raw))
 		for i, v := range raw {
-			f, ok := v.(float64)
+			cv, err := Coerce(schema.KindFloat, v)
+			if err != nil {
+				return nil, err
+			}
+			f, ok := cv.(float64)
 			if !ok {
-				return raw
+				return raw, nil
 			}
 			out[i] = f
 		}
-		return out
+		return out, nil
 	case schema.KindBoolean:
 		out := make([]bool, len(raw))
 		for i, v := range raw {
 			b, ok := v.(bool)
 			if !ok {
-				return raw
+				return raw, nil
 			}
 			out[i] = b
 		}
-		return out
+		return out, nil
 	case schema.KindDate:
-		if len(raw) == 0 {
-			return raw
-		}
-		switch raw[0].(type) {
-		case time.Time:
-			out := make([]dbtype.Date, len(raw))
-			for i, v := range raw {
-				t, ok := v.(time.Time)
-				if !ok {
-					return raw
-				}
-				out[i] = dbtype.Date(t)
+		out := make([]dbtype.Date, len(raw))
+		for i, v := range raw {
+			cv, err := Coerce(schema.KindDate, v)
+			if err != nil {
+				return nil, err
 			}
-			return out
-		case string:
-			out := make([]dbtype.Date, len(raw))
-			for i, v := range raw {
-				s, ok := v.(string)
-				if !ok {
-					return raw
-				}
-				t, err := time.Parse("2006-01-02", s)
-				if err != nil {
-					return coerceToStringSlice(raw)
-				}
-				out[i] = dbtype.Date(t)
+			d, ok := cv.(dbtype.Date)
+			if !ok {
+				return raw, nil
 			}
-			return out
-		default:
-			return raw
+			out[i] = d
 		}
+		return out, nil
 	case schema.KindTimestamp:
-		if len(raw) == 0 {
-			return raw
-		}
-		switch raw[0].(type) {
-		case time.Time:
-			out := make([]time.Time, len(raw))
-			for i, v := range raw {
-				t, ok := v.(time.Time)
-				if !ok {
-					return raw
-				}
-				out[i] = t
+		out := make([]time.Time, len(raw))
+		for i, v := range raw {
+			cv, err := Coerce(schema.KindTimestamp, v)
+			if err != nil {
+				return nil, err
 			}
-			return out
-		case string:
-			out := make([]time.Time, len(raw))
-			for i, v := range raw {
-				s, ok := v.(string)
-				if !ok {
-					return raw
-				}
-				t, err := time.Parse(time.RFC3339, s)
-				if err != nil {
-					t, err = time.Parse(time.RFC3339Nano, s)
-					if err != nil {
-						return coerceToStringSlice(raw)
-					}
-				}
-				out[i] = t
+			tt, ok := cv.(time.Time)
+			if !ok {
+				return raw, nil
 			}
-			return out
-		default:
-			return raw
+			out[i] = tt
 		}
+		return out, nil
 	default:
-		return raw
+		return raw, nil
 	}
 }
 
-// coerceToStringSlice converts []any to []string, returning the original
-// slice if any element is not a string. Used as a fallback when temporal
-// parsing fails for list elements.
-func coerceToStringSlice(raw []any) any {
-	out := make([]string, len(raw))
-	for i, v := range raw {
-		s, ok := v.(string)
-		if !ok {
-			return raw
-		}
-		out[i] = s
+// coerceRelProps coerces a relationship property map against the relation's
+// declared property constraints, so typed edge properties (e.g. a Timestamp or
+// Float on an association) reach the driver as native types. Properties not
+// declared on rel pass through unchanged; a nil relation, or one with no
+// declared properties, returns props untouched. Mutates and returns props,
+// which callers pass as a fresh clone.
+func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any, error) {
+	if rel == nil || !rel.HasProperties() {
+		return props, nil
 	}
-	return out
+	for k, v := range props {
+		p, ok := rel.Property(k)
+		if !ok || v == nil {
+			continue
+		}
+		cv, err := Coerce(schema.ResolveAlias(p.Constraint()).Kind(), v)
+		if err != nil {
+			return nil, fmt.Errorf("relation %q property %q: %w", rel.Name(), k, err)
+		}
+		props[k] = cv
+	}
+	return props, nil
 }
 
 // extractKeyProps extracts named primary key properties from immutable properties.

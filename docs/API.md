@@ -1023,6 +1023,33 @@ Both relationship builders always end with `RETURN count(*) AS matched_rows`. Th
 
 For routine use, prefer `Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` — they call the same builders internally and handle parameter construction, chunking, and schema-aware property coercion.
 
+### Property Coercion
+
+The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` and the single-item `NodeQueryFor` / `EdgeQueriesFor`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The coercion chokepoint is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply the same rules:
+
+```go
+// Coerce a single value to the driver-native type the kind requires.
+func Coerce(kind schema.ConstraintKind, raw any) (any, error)
+
+// ParamTypes maps a Cypher parameter name to the kind its value must inhabit.
+// Nested params use "outer.inner" dot-notation (e.g. "rows.principal_amount").
+type ParamTypes map[string]schema.ConstraintKind
+
+// CoerceParams coerces every value in a parameter map against its declared
+// kind, walking one level of nested map[string]any and []map[string]any.
+// Returns the first coercion error, naming the offending key.
+func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error)
+
+// ParamTypesForType derives a ParamTypes from a schema type's properties. Pass
+// prefix "" for top-level params, or an outer name (e.g. "rows") for a nested
+// param map — keys are dot-joined to match CoerceParams.
+func ParamTypesForType(t *schema.Type, prefix string) ParamTypes
+```
+
+Coercion rules: `Float` ← `int` / `int32` / `int64`; `Timestamp` ← RFC3339 / RFC3339Nano string → `time.Time`; `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date`; every other kind passes through. A nil value passes through; an unparseable `Timestamp` / `Date` string, or a kind the chokepoint does not handle, returns an error rather than letting a bad value reach the driver (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+
+**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties (e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path). Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion.
+
 ### Schema Inference
 
 ```go
