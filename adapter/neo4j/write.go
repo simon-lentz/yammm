@@ -534,12 +534,19 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 }
 
 // coerceSlice converts a []any to a concrete typed slice using the list
-// constraint's element kind. Per-element value conversion delegates to
-// [Coerce] so the Float int-repair and temporal-parse rules live in one place;
-// coerceSlice owns only the slice typing. Returns an error if an element fails
-// coercion (e.g. an unparseable temporal string). An element that is simply not
-// the expected Go type falls back to the raw slice, preserving the prior
-// best-effort behavior for type mismatches.
+// constraint's element kind, so a List<T> property reaches the driver as the
+// homogeneous Go slice Neo4j requires ([]string, []float64, []dbtype.Date, ...).
+// Per-element value conversion delegates to [Coerce] so the Float int-repair and
+// temporal-parse rules live in one place; coerceSlice owns only the slice typing.
+//
+// An element that is neither the element type nor coercible to it — a non-numeric
+// in a List<Float>, an unparseable or wrong-typed value in a List<Date> — is an
+// error naming the element index: a heterogeneous []any cannot satisfy a List<T>
+// column, so failing here beats shipping a slice the driver rejects. On the
+// validated node path this never fires (instance validation already enforced each
+// element's type); it guards the direct-Cypher path, where the param map is
+// hand-built. A non-List constraint, or an element kind with no concrete driver
+// slice type, returns the slice unchanged — there is no element typing to apply.
 func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	c = schema.ResolveAlias(c)
 	lc, ok := c.(schema.ListConstraint)
@@ -553,7 +560,7 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 		for i, v := range raw {
 			s, ok := v.(string)
 			if !ok {
-				return raw, nil
+				return nil, fmt.Errorf("list element %d: cannot use %T as a %s element (want string)", i, v, elem.Kind())
 			}
 			out[i] = s
 		}
@@ -563,7 +570,7 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 		for i, v := range raw {
 			n, ok := v.(int64)
 			if !ok {
-				return raw, nil
+				return nil, fmt.Errorf("list element %d: cannot use %T as an Integer element (want int64)", i, v)
 			}
 			out[i] = n
 		}
@@ -571,13 +578,13 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	case schema.KindFloat:
 		out := make([]float64, len(raw))
 		for i, v := range raw {
-			cv, err := Coerce(schema.KindFloat, v)
+			cv, err := Coerce(elem, v)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("list element %d: %w", i, err)
 			}
 			f, ok := cv.(float64)
 			if !ok {
-				return raw, nil
+				return nil, fmt.Errorf("list element %d: cannot use %T as a Float element (want a numeric type)", i, v)
 			}
 			out[i] = f
 		}
@@ -587,7 +594,7 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 		for i, v := range raw {
 			b, ok := v.(bool)
 			if !ok {
-				return raw, nil
+				return nil, fmt.Errorf("list element %d: cannot use %T as a Boolean element (want bool)", i, v)
 			}
 			out[i] = b
 		}
@@ -595,13 +602,13 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	case schema.KindDate:
 		out := make([]dbtype.Date, len(raw))
 		for i, v := range raw {
-			cv, err := Coerce(schema.KindDate, v)
+			cv, err := Coerce(elem, v)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("list element %d: %w", i, err)
 			}
 			d, ok := cv.(dbtype.Date)
 			if !ok {
-				return raw, nil
+				return nil, fmt.Errorf("list element %d: cannot use %T as a Date element (want a YYYY-MM-DD string or time.Time)", i, v)
 			}
 			out[i] = d
 		}
@@ -609,13 +616,13 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	case schema.KindTimestamp:
 		out := make([]time.Time, len(raw))
 		for i, v := range raw {
-			cv, err := Coerce(schema.KindTimestamp, v)
+			cv, err := Coerce(elem, v)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("list element %d: %w", i, err)
 			}
 			tt, ok := cv.(time.Time)
 			if !ok {
-				return raw, nil
+				return nil, fmt.Errorf("list element %d: cannot use %T as a Timestamp element (want an RFC3339 string or time.Time)", i, v)
 			}
 			out[i] = tt
 		}

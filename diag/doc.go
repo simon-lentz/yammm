@@ -11,7 +11,10 @@
 //   - Structured data, string-last presentation: Location is stored as data
 //     ([location.Span], instance path strings), never embedded in message strings.
 //   - Immutable results: [Result] stores issues in unexported fields and exposes
-//     accessor methods that return defensive copies.
+//     them only through iterators ([Result.Issues], [Result.Errors],
+//     [Result.Warnings]); callers wanting a mutable slice take an explicit copy
+//     via slices.Collect. The [Issue] accessors that return reference types
+//     ([Issue.Related], [Issue.Details]) return defensive copies.
 //   - Stable error codes: [Code] values are stable identifiers that tools can
 //     match on, even when message text changes. The Code type uses an unexported
 //     struct to enforce a closed set of valid codes.

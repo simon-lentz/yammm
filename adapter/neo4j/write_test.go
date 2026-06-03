@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // Compile-time interface assertions.
@@ -1347,5 +1348,32 @@ func TestExtractKeyFromImmutableKey_NoKeys(t *testing.T) {
 	_, err := extractKeyFromImmutableKey(key, nil)
 	if err == nil {
 		t.Fatal("expected error for no keys")
+	}
+}
+
+func TestCoerceSlice_TypeMismatchErrors(t *testing.T) {
+	t.Parallel()
+	// A list element whose Go type cannot be coerced to the element type cannot
+	// build a homogeneous typed slice; coerceSlice must error (naming the
+	// element) rather than silently returning the raw []any to the driver.
+	cases := []struct {
+		name string
+		c    schema.Constraint
+		raw  []any
+	}{
+		{"String", schema.NewListConstraint(schema.NewStringConstraint()), []any{"a", int64(2)}},
+		{"Integer", schema.NewListConstraint(schema.NewIntegerConstraint()), []any{int64(1), "x"}},
+		{"Float", schema.NewListConstraint(schema.NewFloatConstraint()), []any{float64(1), "x"}},
+		{"Boolean", schema.NewListConstraint(schema.NewBooleanConstraint()), []any{true, "x"}},
+		{"Date", schema.NewListConstraint(schema.NewDateConstraint()), []any{"2024-01-01", int64(5)}},
+		{"Timestamp", schema.NewListConstraint(schema.NewTimestampConstraint()), []any{"2024-01-01T00:00:00Z", int64(5)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := coerceSlice(tc.raw, tc.c); err == nil {
+				t.Errorf("List<%s> with a wrong-type element: want error, got nil", tc.name)
+			}
+		})
 	}
 }

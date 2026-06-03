@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -9,7 +10,7 @@ import (
 )
 
 func TestCoerce_FloatIntRepair(t *testing.T) {
-	got, err := Coerce(schema.KindFloat, int64(1860000))
+	got, err := Coerce(schema.NewFloatConstraint(), int64(1860000))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -19,7 +20,7 @@ func TestCoerce_FloatIntRepair(t *testing.T) {
 }
 
 func TestCoerce_TimestampParse(t *testing.T) {
-	got, err := Coerce(schema.KindTimestamp, "2024-01-01T00:00:00Z")
+	got, err := Coerce(schema.NewTimestampConstraint(), "2024-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -29,7 +30,7 @@ func TestCoerce_TimestampParse(t *testing.T) {
 }
 
 func TestCoerce_DateParse(t *testing.T) {
-	got, err := Coerce(schema.KindDate, "2024-06-15")
+	got, err := Coerce(schema.NewDateConstraint(), "2024-06-15")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -39,7 +40,7 @@ func TestCoerce_DateParse(t *testing.T) {
 }
 
 func TestCoerce_DateFromTime(t *testing.T) {
-	got, err := Coerce(schema.KindDate, time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC))
+	got, err := Coerce(schema.NewDateConstraint(), time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,48 +50,50 @@ func TestCoerce_DateFromTime(t *testing.T) {
 }
 
 func TestCoerce_TimestampParseFailureErrors(t *testing.T) {
-	if _, err := Coerce(schema.KindTimestamp, "not-a-timestamp"); err == nil {
+	if _, err := Coerce(schema.NewTimestampConstraint(), "not-a-timestamp"); err == nil {
 		t.Fatal("want error on unparseable timestamp string, got nil")
 	}
 }
 
 func TestCoerce_DateParseFailureErrors(t *testing.T) {
-	if _, err := Coerce(schema.KindDate, "06/15/2024"); err == nil {
+	if _, err := Coerce(schema.NewDateConstraint(), "06/15/2024"); err == nil {
 		t.Fatal("want error on unparseable date string, got nil")
 	}
 }
 
 func TestCoerce_PassThroughString(t *testing.T) {
-	got, err := Coerce(schema.KindString, "hello")
+	got, err := Coerce(schema.NewStringConstraint(), "hello")
 	if err != nil || got != "hello" {
 		t.Fatalf("string pass-through: got %#v, err %v", got, err)
 	}
 }
 
 func TestCoerce_NilPassThrough(t *testing.T) {
-	got, err := Coerce(schema.KindTimestamp, nil)
+	got, err := Coerce(schema.NewTimestampConstraint(), nil)
 	if err != nil || got != nil {
 		t.Fatalf("nil pass-through: got %#v, err %v", got, err)
 	}
 }
 
-func TestCoerce_UnhandledKindErrors(t *testing.T) {
-	// A ConstraintKind past the enumerated set must error rather than
-	// silently passing a value through to the driver.
-	if _, err := Coerce(schema.ConstraintKind(255), "x"); err == nil {
-		t.Fatal("want error on an unhandled ConstraintKind, got nil")
+func TestCoerce_NilConstraintPassThrough(t *testing.T) {
+	t.Parallel()
+	// A nil constraint means "no type to coerce against": pass the value through,
+	// matching coerceValue. A bad/unhandled kind is unreachable — schema.Constraint
+	// is a sealed interface, so every value carries a valid kind, and the
+	// exhaustiveness lint guards the switch.
+	got, err := Coerce(nil, "x")
+	if err != nil || got != "x" {
+		t.Fatalf("nil constraint should pass through: got %#v, err %v", got, err)
 	}
 }
 
 func TestCoerceParams_FloatRepairAndUnknownKey(t *testing.T) {
 	params := map[string]any{
 		"principal": int64(1860000),
-		"as_str":    "passthrough",
 		"untouched": int64(7),
 	}
 	types := ParamTypes{
 		"principal": schema.NewFloatConstraint(),
-		"as_str":    schema.NewFloatConstraint(), // string under Float falls through unchanged
 		"missing":   schema.NewFloatConstraint(), // names a key params doesn't carry: no-op
 	}
 	out, err := CoerceParams(params, types)
@@ -99,9 +102,6 @@ func TestCoerceParams_FloatRepairAndUnknownKey(t *testing.T) {
 	}
 	if f, ok := out["principal"].(float64); !ok || f != 1860000.0 {
 		t.Fatalf("principal: got %#v (%T), want float64(1860000)", out["principal"], out["principal"])
-	}
-	if out["as_str"] != "passthrough" {
-		t.Fatalf("string under KindFloat should pass through, got %#v", out["as_str"])
 	}
 	if out["untouched"] != int64(7) {
 		t.Fatalf("untyped key should pass through unchanged, got %#v", out["untouched"])
@@ -165,15 +165,19 @@ func TestCoerceParams_BadTemporalErrors(t *testing.T) {
 	}
 }
 
-func TestCoerceParams_NilTypesIsZeroCost(t *testing.T) {
+func TestCoerceParams_NilOrEmptyTypesPassThrough(t *testing.T) {
+	t.Parallel()
+	// With no constraints to apply, every value passes through unchanged — but
+	// the result is still a fresh, independent map (see
+	// TestCoerceParams_ReturnsIndependentMap), not the input aliased.
 	params := map[string]any{"x": int64(1), "y": "hi"}
 	out, err := CoerceParams(params, nil)
-	if err != nil || len(out) != 2 {
-		t.Fatalf("nil types should pass through unchanged: out=%v err=%v", out, err)
+	if err != nil || len(out) != 2 || out["x"] != int64(1) || out["y"] != "hi" {
+		t.Fatalf("nil types should pass values through unchanged: out=%v err=%v", out, err)
 	}
 	out2, err := CoerceParams(params, ParamTypes{})
-	if err != nil || len(out2) != 2 {
-		t.Fatalf("empty types should pass through unchanged: out=%v err=%v", out2, err)
+	if err != nil || len(out2) != 2 || out2["x"] != int64(1) || out2["y"] != "hi" {
+		t.Fatalf("empty types should pass values through unchanged: out=%v err=%v", out2, err)
 	}
 }
 
@@ -373,5 +377,234 @@ func TestCoerceParams_ListElementError(t *testing.T) {
 	}}
 	if _, err := CoerceParams(params, ParamTypesForType(st, "rows")); err == nil {
 		t.Fatal("want error for an unparseable List<Date> element, got nil")
+	}
+}
+
+func TestCoerce_FloatFromAllNumericTypes(t *testing.T) {
+	t.Parallel()
+	// Every Go integer width and float32 must repair to float64, so a Float
+	// property never reaches the driver as a non-float numeric (Neo4j rejects an
+	// integer value against an IS :: FLOAT constraint).
+	cases := []struct {
+		name string
+		in   any
+	}{
+		{"int", int(5)},
+		{"int8", int8(5)},
+		{"int16", int16(5)},
+		{"int32", int32(5)},
+		{"int64", int64(5)},
+		{"uint", uint(5)},
+		{"uint8", uint8(5)},
+		{"uint16", uint16(5)},
+		{"uint32", uint32(5)},
+		{"uint64", uint64(5)},
+		{"float32", float32(5)},
+		{"float64", float64(5)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Coerce(schema.NewFloatConstraint(), tc.in)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			f, ok := got.(float64)
+			if !ok {
+				t.Fatalf("%s: got %T, want float64", tc.name, got)
+			}
+			if f != 5.0 {
+				t.Errorf("%s: got %v, want 5.0", tc.name, f)
+			}
+		})
+	}
+}
+
+func TestCoerceParams_ListElementTypeMismatchErrors(t *testing.T) {
+	t.Parallel()
+	// A direct-Cypher List<Float> param carrying a non-numeric element cannot be
+	// built into a []float64; CoerceParams must error rather than hand the driver
+	// a heterogeneous []any it will reject.
+	params := map[string]any{"scores": []any{float64(1), "oops"}}
+	types := ParamTypes{"scores": schema.NewListConstraint(schema.NewFloatConstraint())}
+	if _, err := CoerceParams(params, types); err == nil {
+		t.Fatal("want error for a wrong-type List<Float> element, got nil")
+	}
+}
+
+func TestCoerceParams_ReturnsIndependentMap(t *testing.T) {
+	t.Parallel()
+	// The returned map's top level must be independent of the input on every
+	// path, so a caller mutating the result cannot corrupt its own input.
+	t.Run("NoCoercionPath", func(t *testing.T) {
+		t.Parallel()
+		in := map[string]any{"a": int64(1)}
+		out, err := CoerceParams(in, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out["a"] = int64(999)
+		if in["a"] != int64(1) {
+			t.Errorf("input mutated through returned map: in[a] = %v, want 1", in["a"])
+		}
+	})
+	t.Run("ActiveCoercionPath", func(t *testing.T) {
+		t.Parallel()
+		in := map[string]any{"a": int64(1), "b": "x"}
+		out, err := CoerceParams(in, ParamTypes{"a": schema.NewFloatConstraint()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out["b"] = "mutated"
+		if in["b"] != "x" {
+			t.Errorf("input mutated through returned map: in[b] = %v, want x", in["b"])
+		}
+	})
+}
+
+func TestCoerceParams_DeterministicError(t *testing.T) {
+	t.Parallel()
+	// With more than one failing key, the reported error must be stable across
+	// runs (keys processed in sorted order), not a function of map iteration
+	// order — so a coercion failure is reproducible and testable.
+	types := ParamTypes{
+		"a_date": schema.NewDateConstraint(),
+		"z_date": schema.NewDateConstraint(),
+	}
+	params := map[string]any{"a_date": "not-a-date", "z_date": "also-bad"}
+
+	var first string
+	for i := range 64 {
+		_, err := CoerceParams(params, types)
+		if err == nil {
+			t.Fatal("want a coercion error, got nil")
+		}
+		if i == 0 {
+			first = err.Error()
+			continue
+		}
+		if err.Error() != first {
+			t.Fatalf("non-deterministic error: run %d = %q, first = %q", i, err.Error(), first)
+		}
+	}
+	if !strings.Contains(first, "a_date") {
+		t.Errorf("error should name the lexicographically-first bad key (a_date): %q", first)
+	}
+}
+
+func TestCoerce_StrictRejectsUnrepairableInput(t *testing.T) {
+	t.Parallel()
+	// The transforming kinds (Float/Date/Timestamp) error on an input they can
+	// neither pass through as already-driver-native nor repair, rather than
+	// silently handing a wrong-typed value to the driver — matching the list path.
+	cases := []struct {
+		name       string
+		constraint schema.Constraint
+		in         any
+	}{
+		{"Float/string", schema.NewFloatConstraint(), "1.5"},
+		{"Float/bool", schema.NewFloatConstraint(), true},
+		{"Timestamp/int", schema.NewTimestampConstraint(), int64(123)},
+		{"Timestamp/bool", schema.NewTimestampConstraint(), true},
+		{"Date/int", schema.NewDateConstraint(), int64(123)},
+		{"Date/bool", schema.NewDateConstraint(), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := Coerce(tc.constraint, tc.in); err == nil {
+				t.Errorf("Coerce(%v, %#v): want error, got nil", tc.constraint, tc.in)
+			}
+		})
+	}
+}
+
+func TestCoerce_IdempotentOnCanonicalTypes(t *testing.T) {
+	t.Parallel()
+	// An already-driver-native value for a transforming kind passes through
+	// unchanged: coercion is idempotent and never rejects a correct value.
+	ts := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	d := dbtype.Date(time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC))
+
+	if got, err := Coerce(schema.NewFloatConstraint(), float64(3.14)); err != nil || got != float64(3.14) {
+		t.Errorf("Float float64: got %#v err %v, want 3.14", got, err)
+	}
+	if got, err := Coerce(schema.NewTimestampConstraint(), ts); err != nil {
+		t.Errorf("Timestamp time.Time: unexpected err %v", err)
+	} else if gt, ok := got.(time.Time); !ok || !gt.Equal(ts) {
+		t.Errorf("Timestamp time.Time: got %#v, want passthrough of %v", got, ts)
+	}
+	if got, err := Coerce(schema.NewDateConstraint(), d); err != nil {
+		t.Errorf("Date dbtype.Date: unexpected err %v", err)
+	} else if gd, ok := got.(dbtype.Date); !ok || !time.Time(gd).Equal(time.Time(d)) {
+		t.Errorf("Date dbtype.Date: got %#v, want passthrough of %v", got, d)
+	}
+}
+
+func TestCoerceParams_StrictRejectsWrongScalarType(t *testing.T) {
+	t.Parallel()
+	// The direct-Cypher boundary: a scalar param whose Go type the kind can
+	// neither pass through nor repair now errors rather than reaching the driver
+	// wrong-typed.
+	if _, err := CoerceParams(
+		map[string]any{"principal": "not-a-number"},
+		ParamTypes{"principal": schema.NewFloatConstraint()},
+	); err == nil {
+		t.Fatal("want error for a string under Float, got nil")
+	}
+	if _, err := CoerceParams(
+		map[string]any{"observed_at": int64(123)},
+		ParamTypes{"observed_at": schema.NewTimestampConstraint()},
+	); err == nil {
+		t.Fatal("want error for an int under Timestamp, got nil")
+	}
+}
+
+func TestCoerceParams_TimestampCustomFormat(t *testing.T) {
+	t.Parallel()
+	// A Timestamp declared with a custom Go layout (Timestamp["…"]) is honored
+	// end-to-end on the direct-Cypher path: a value valid under that layout but
+	// not RFC3339 coerces to time.Time rather than erroring.
+	out, err := CoerceParams(
+		map[string]any{"logged_at": "2024-01-01 12:30:00"},
+		ParamTypes{"logged_at": schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")},
+	)
+	if err != nil {
+		t.Fatalf("custom-format Timestamp param should coerce: %v", err)
+	}
+	if _, ok := out["logged_at"].(time.Time); !ok {
+		t.Fatalf("logged_at: got %T, want time.Time", out["logged_at"])
+	}
+}
+
+func TestCoerceParams_TimestampListCustomFormat(t *testing.T) {
+	t.Parallel()
+	// The custom layout reaches list elements too (List<Timestamp["…"]>).
+	out, err := CoerceParams(
+		map[string]any{"times": []any{"2024-01-01 12:30:00", "2024-06-15 08:00:00"}},
+		ParamTypes{"times": schema.NewListConstraint(schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05"))},
+	)
+	if err != nil {
+		t.Fatalf("custom-format Timestamp list param should coerce: %v", err)
+	}
+	if _, ok := out["times"].([]time.Time); !ok {
+		t.Fatalf("times: got %T, want []time.Time", out["times"])
+	}
+}
+
+func TestCoerce_TimestampCustomFormatDirect(t *testing.T) {
+	t.Parallel()
+	c := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")
+	got, err := Coerce(c, "2024-01-01 12:30:00")
+	if err != nil {
+		t.Fatalf("custom-format timestamp should parse: %v", err)
+	}
+	if _, ok := got.(time.Time); !ok {
+		t.Fatalf("got %T, want time.Time", got)
+	}
+	// The declared layout is exclusive (matching validation): a non-matching
+	// string — even a valid RFC3339 one — errors.
+	if _, err := Coerce(c, "2024-01-01T12:30:00Z"); err == nil {
+		t.Error("RFC3339 string under a custom layout should error")
 	}
 }

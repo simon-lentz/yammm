@@ -2,6 +2,8 @@ package neo4j
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
@@ -9,73 +11,133 @@ import (
 )
 
 // Coerce converts a single raw value to the Neo4j-driver-native type the given
-// schema kind requires, so the value satisfies Neo4j TYPE constraints:
+// schema constraint requires, so the value satisfies Neo4j TYPE constraints:
 //
-//   - KindFloat: int/int32/int64 -> float64. Repairs the JSON round-trip where
-//     a whole-number Float decodes as int64 and Neo4j rejects it against an
-//     IS :: FLOAT constraint.
-//   - KindTimestamp: an RFC3339 / RFC3339Nano string -> time.Time (Neo4j ZONED
-//     DATETIME). A non-empty string that parses as neither is a coercion
-//     failure and returns an error.
-//   - KindDate: a "2006-01-02" string OR a time.Time -> dbtype.Date (Neo4j DATE).
-//     A non-empty string that does not parse is a coercion failure and returns
-//     an error. Mapping a time.Time to dbtype.Date (rather than passing it
-//     through) keeps a Date-constrained value from reaching Neo4j as ZONED
-//     DATETIME and unifies this scalar path with the list path ([coerceSlice])
-//     on one rule.
-//   - Every other kind is already driver-native and passes through unchanged.
+//   - Float: any Go signed/unsigned integer width or float32 -> float64; a
+//     float64 passes through. Repairs the JSON round-trip where a whole-number
+//     Float decodes as int64 and Neo4j rejects it against an IS :: FLOAT
+//     constraint. A non-numeric value is a coercion failure and returns an error.
+//   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
+//     constraint's custom Go layout when it declares one (Timestamp["…"]) and
+//     against RFC3339 / RFC3339Nano otherwise; a time.Time passes through. A
+//     string that does not parse, or any non-string non-time.Time value, is a
+//     coercion failure and returns an error.
+//   - Date: a "2006-01-02" string OR a time.Time -> dbtype.Date (Neo4j DATE); a
+//     dbtype.Date passes through. A string that does not parse, or any other
+//     non-temporal value, is a coercion failure and returns an error. Mapping a
+//     time.Time to dbtype.Date keeps a Date-constrained value from reaching Neo4j
+//     as ZONED DATETIME and unifies this scalar path with the list path
+//     ([coerceSlice]) on one rule.
+//   - Every other (non-transforming) kind is already driver-native and passes
+//     through unchanged.
 //
-// Coerce operates on scalar values; a List/collection value is element-coerced
-// by [CoerceParams] (or the adapter write path), which has the element type
-// Coerce's kind-only signature lacks. Calling Coerce with a collection kind
-// returns the value unchanged.
+// The three transforming kinds above are strict: they error on a value they can
+// neither pass through as already-native nor repair, rather than handing a
+// wrong-typed value to the driver. This matches the list path ([coerceSlice]),
+// which must build a homogeneous typed slice and errors on a wrong-typed element.
+// The non-transforming kinds stay lenient — a correct value of those kinds is
+// already driver-native, so there is nothing to repair or reject, and instance
+// validation is their type authority. On the validated node path a transforming
+// kind only ever receives the types its strict set accepts (Float: float64, or
+// int64 after a snapshot round-trip; Timestamp: string or time.Time; Date:
+// string), so strictness can only newly fire on a hand-built direct-Cypher param.
 //
-// A nil value always passes through. An unhandled kind returns an error so a
-// schema kind added after this switch was written surfaces in tests/CI rather
-// than as a silent driver-side PROPERTY_TYPE rejection in production; the
-// //exhaustive:enforce directive turns that omission into a build failure.
-func Coerce(kind schema.ConstraintKind, raw any) (any, error) {
+// Coerce takes the full [schema.Constraint] (not just its kind) so a Timestamp's
+// custom layout is honored; the constraint's alias chain is resolved internally.
+// It operates on scalar values — a List/collection value is element-coerced by
+// [CoerceParams] or the adapter write path, which route each element's constraint
+// back through Coerce. Calling Coerce with a collection constraint returns the
+// value unchanged.
+//
+// A nil value, or a nil constraint ("no type to coerce against"), passes through
+// unchanged. An unhandled kind returns an error so a schema kind added after this
+// switch was written surfaces in tests/CI rather than as a silent driver-side
+// PROPERTY_TYPE rejection in production; the //exhaustive:enforce directive turns
+// that omission into a build failure.
+func Coerce(constraint schema.Constraint, raw any) (any, error) {
 	if raw == nil {
 		//nolint:nilnil // a nil value coerces to nil with no error: nil is a valid absent property, not a failure
 		return nil, nil
 	}
+	if constraint == nil {
+		// No constraint to coerce against: pass through, matching coerceValue's
+		// nil-constraint handling. A typed coercion needs a type.
+		return raw, nil
+	}
+	resolved := schema.ResolveAlias(constraint)
+	kind := resolved.Kind()
 	//exhaustive:enforce
 	switch kind {
 	case schema.KindFloat:
 		switch v := raw.(type) {
-		case int64:
-			return float64(v), nil
 		case int:
+			return float64(v), nil
+		case int8:
+			return float64(v), nil
+		case int16:
 			return float64(v), nil
 		case int32:
 			return float64(v), nil
+		case int64:
+			return float64(v), nil
+		case uint:
+			return float64(v), nil
+		case uint8:
+			return float64(v), nil
+		case uint16:
+			return float64(v), nil
+		case uint32:
+			return float64(v), nil
+		case uint64:
+			return float64(v), nil
+		case float32:
+			return float64(v), nil
+		case float64:
+			return v, nil
 		default:
-			return raw, nil
+			return raw, fmt.Errorf("coerce %s: cannot convert %T to float64", kind, raw)
 		}
 	case schema.KindTimestamp:
-		s, ok := raw.(string)
-		if !ok {
-			return raw, nil // already time.Time or otherwise driver-native
+		format := ""
+		if tc, ok := resolved.(schema.TimestampConstraint); ok {
+			format = tc.Format()
 		}
-		if t, err := time.Parse(time.RFC3339, s); err == nil {
-			return t, nil
+		switch v := raw.(type) {
+		case time.Time:
+			return v, nil // already Neo4j ZONED DATETIME native
+		case string:
+			if format != "" {
+				// A Timestamp["layout"] constraint: the declared Go layout is
+				// exclusive, matching schema validation (checkTimestamp).
+				if t, err := time.Parse(format, v); err == nil {
+					return t, nil
+				}
+				return raw, fmt.Errorf("coerce %s: cannot parse %q against format %q", kind, v, format)
+			}
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				return t, nil
+			}
+			if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+				return t, nil
+			}
+			return raw, fmt.Errorf("coerce %s: cannot parse %q as an RFC3339 timestamp", kind, v)
+		default:
+			return raw, fmt.Errorf("coerce %s: cannot convert %T to a timestamp (want a string or time.Time)", kind, raw)
 		}
-		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-			return t, nil
-		}
-		return raw, fmt.Errorf("coerce %s: cannot parse %q as an RFC3339 timestamp", kind, s)
 	case schema.KindDate:
-		if t, ok := raw.(time.Time); ok {
-			return dbtype.Date(t), nil
+		switch v := raw.(type) {
+		case dbtype.Date:
+			return v, nil // already Neo4j DATE native
+		case time.Time:
+			return dbtype.Date(v), nil
+		case string:
+			if t, err := time.Parse(time.DateOnly, v); err == nil {
+				return dbtype.Date(t), nil
+			}
+			return raw, fmt.Errorf("coerce %s: cannot parse %q as a YYYY-MM-DD date", kind, v)
+		default:
+			return raw, fmt.Errorf("coerce %s: cannot convert %T to a date (want a YYYY-MM-DD string, time.Time, or dbtype.Date)", kind, raw)
 		}
-		s, ok := raw.(string)
-		if !ok {
-			return raw, nil
-		}
-		if t, err := time.Parse(time.DateOnly, s); err == nil {
-			return dbtype.Date(t), nil
-		}
-		return raw, fmt.Errorf("coerce %s: cannot parse %q as a YYYY-MM-DD date", kind, s)
 	case schema.KindString, schema.KindInteger, schema.KindBoolean,
 		schema.KindUUID, schema.KindEnum, schema.KindPattern,
 		schema.KindVector, schema.KindList, schema.KindAlias:
@@ -103,7 +165,7 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 	if slice, ok := raw.([]any); ok {
 		return coerceSlice(slice, constraint)
 	}
-	return Coerce(schema.ResolveAlias(constraint).Kind(), raw)
+	return Coerce(constraint, raw)
 }
 
 // ParamTypes maps a Cypher parameter name to the schema constraint its value
@@ -118,12 +180,18 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 // [ParamTypesForType], or hand-list constraints via the schema constructors.
 type ParamTypes map[string]schema.Constraint
 
-// CoerceParams returns a copy of params with each value coerced against the
-// constraint declared for its key in types. Keys absent from types pass
-// through. Returns params unchanged when types or params is empty so zero-cost
-// calls stay free. Walks one level of nested map[string]any and
-// []map[string]any using the "outer.inner" convention. Returns the first
-// coercion error encountered, naming the offending key.
+// CoerceParams returns a new map with each value coerced against the constraint
+// declared for its key in types. Keys absent from types pass through. The
+// returned top-level map is always independent of params: params is never
+// mutated, and mutating the result's top-level keys cannot affect the input
+// (values that pass through uncoerced may still share backing storage, as on the
+// adapter write path). An empty params map is returned as-is — there is nothing
+// to copy. Walks one level of nested map[string]any and []map[string]any using
+// the "outer.inner" convention.
+//
+// Keys are processed in sorted order, so when several values fail coercion the
+// returned error names the same (lexicographically first) offending key on every
+// run — failures are reproducible rather than dependent on map iteration order.
 //
 // Scalar values route through [Coerce]; []any list values are element-coerced
 // against the List element type (a List<Float> of int64s reaches the driver as
@@ -135,12 +203,12 @@ type ParamTypes map[string]schema.Constraint
 // properties but does not pass through the adapter write path's coercion
 // (e.g. an enrichment MERGE built by hand).
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error) {
-	if len(types) == 0 || len(params) == 0 {
+	if len(params) == 0 {
 		return params, nil
 	}
 	out := make(map[string]any, len(params))
-	for k, v := range params {
-		cv, err := coerceParam(k, v, types)
+	for _, k := range slices.Sorted(maps.Keys(params)) {
+		cv, err := coerceParam(k, params[k], types)
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +255,8 @@ func coerceParam(key string, value any, types ParamTypes) (any, error) {
 // values, pass through unchanged.
 func coerceNested(outer string, m map[string]any, types ParamTypes) (map[string]any, error) {
 	out := make(map[string]any, len(m))
-	for k, v := range m {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		v := m[k]
 		dotKey := outer + "." + k
 		if constraint, ok := types[dotKey]; ok && v != nil {
 			cv, err := coerceValue(constraint, v)

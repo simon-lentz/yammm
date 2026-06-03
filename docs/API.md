@@ -1010,9 +1010,12 @@ For routine use, prefer `Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` 
 The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` and the single-item `NodeQueryFor` / `EdgeQueriesFor`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The coercion chokepoint is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply the same rules:
 
 ```go
-// Coerce a single SCALAR value to the driver-native type the kind requires.
-// Collection values are handled by CoerceParams, which carries the element type.
-func Coerce(kind schema.ConstraintKind, raw any) (any, error)
+// Coerce a single SCALAR value to the driver-native type the constraint requires
+// (e.g. a Timestamp["layout"] is parsed against its custom layout). Takes the
+// full Constraint, not just its Kind, so the custom layout is available; the
+// alias chain is resolved internally. Collection values are handled by
+// CoerceParams, which element-coerces against the constraint.
+func Coerce(constraint schema.Constraint, raw any) (any, error)
 
 // ParamTypes maps a Cypher parameter name to the schema constraint its value
 // must satisfy. Nested params use "outer.inner" dot-notation (e.g.
@@ -1033,7 +1036,9 @@ func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, erro
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes
 ```
 
-Coercion rules: `Float` ← `int` / `int32` / `int64`; `Timestamp` ← RFC3339 / RFC3339Nano string → `time.Time`; `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date`; every other scalar kind passes through. `List<T>` values are coerced element-wise into the concrete typed slice (`List<Float>` of `int64`s → `[]float64`, `List<Date>` of strings → `[]dbtype.Date`, and so on). A nil value passes through; an unparseable `Timestamp` / `Date` string — scalar or list element — or a kind the chokepoint does not handle, returns an error rather than letting a bad value reach the driver (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+Coercion rules: `Float` ← any Go integer width (`int`, `int8`…`int64`, `uint`…`uint64`) or `float32` → `float64` (a `float64` passes through); `Timestamp` ← a string parsed against the constraint's custom Go layout when it declares one (`Timestamp["…"]`) or RFC3339 / RFC3339Nano otherwise → `time.Time` (a `time.Time` passes through); `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date` (a `dbtype.Date` passes through); every other scalar kind passes through unchanged. `List<T>` values are coerced element-wise into the concrete typed slice (`List<Float>` of `int64`s → `[]float64`, `List<Date>` of strings → `[]dbtype.Date`, and so on); a `List<Timestamp["…"]>` honors the element's custom layout too.
+
+The three transforming kinds (`Float`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value always passes through; an unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
 **When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one — it derives the element types lists need.
 
