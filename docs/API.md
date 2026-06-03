@@ -1010,16 +1010,21 @@ For routine use, prefer `Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` 
 The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` and the single-item `NodeQueryFor` / `EdgeQueriesFor`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The coercion chokepoint is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply the same rules:
 
 ```go
-// Coerce a single value to the driver-native type the kind requires.
+// Coerce a single SCALAR value to the driver-native type the kind requires.
+// Collection values are handled by CoerceParams, which carries the element type.
 func Coerce(kind schema.ConstraintKind, raw any) (any, error)
 
-// ParamTypes maps a Cypher parameter name to the kind its value must inhabit.
-// Nested params use "outer.inner" dot-notation (e.g. "rows.principal_amount").
-type ParamTypes map[string]schema.ConstraintKind
+// ParamTypes maps a Cypher parameter name to the schema constraint its value
+// must satisfy. Nested params use "outer.inner" dot-notation (e.g.
+// "rows.principal_amount"). The value is the full Constraint, not just its
+// Kind, so List properties can be element-coerced (the element type a bare
+// Kind would discard).
+type ParamTypes map[string]schema.Constraint
 
 // CoerceParams coerces every value in a parameter map against its declared
-// kind, walking one level of nested map[string]any and []map[string]any.
-// Returns the first coercion error, naming the offending key.
+// constraint, walking one level of nested map[string]any and []map[string]any.
+// Scalars route through Coerce; []any lists are element-coerced against the
+// List element type. Returns the first coercion error, naming the offending key.
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error)
 
 // ParamTypesForType derives a ParamTypes from a schema type's properties. Pass
@@ -1028,9 +1033,9 @@ func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, erro
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes
 ```
 
-Coercion rules: `Float` ← `int` / `int32` / `int64`; `Timestamp` ← RFC3339 / RFC3339Nano string → `time.Time`; `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date`; every other kind passes through. A nil value passes through; an unparseable `Timestamp` / `Date` string, or a kind the chokepoint does not handle, returns an error rather than letting a bad value reach the driver (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+Coercion rules: `Float` ← `int` / `int32` / `int64`; `Timestamp` ← RFC3339 / RFC3339Nano string → `time.Time`; `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date`; every other scalar kind passes through. `List<T>` values are coerced element-wise into the concrete typed slice (`List<Float>` of `int64`s → `[]float64`, `List<Date>` of strings → `[]dbtype.Date`, and so on). A nil value passes through; an unparseable `Timestamp` / `Date` string — scalar or list element — or a kind the chokepoint does not handle, returns an error rather than letting a bad value reach the driver (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
-**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties (e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path). Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion.
+**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one — it derives the element types lists need.
 
 ### Schema Inference
 

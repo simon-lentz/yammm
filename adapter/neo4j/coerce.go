@@ -25,6 +25,11 @@ import (
 //     on one rule.
 //   - Every other kind is already driver-native and passes through unchanged.
 //
+// Coerce operates on scalar values; a List/collection value is element-coerced
+// by [CoerceParams] (or the adapter write path), which has the element type
+// Coerce's kind-only signature lacks. Calling Coerce with a collection kind
+// returns the value unchanged.
+//
 // A nil value always passes through. An unhandled kind returns an error so a
 // schema kind added after this switch was written surfaces in tests/CI rather
 // than as a silent driver-side PROPERTY_TYPE rejection in production; the
@@ -82,23 +87,53 @@ func Coerce(kind schema.ConstraintKind, raw any) (any, error) {
 	}
 }
 
-// ParamTypes maps a Cypher parameter name to the schema kind its value must
-// inhabit. Nested params are addressed with "outer.inner" dot-notation
-// (e.g. ParamTypes{"rows.principal_amount": schema.KindFloat} tags
+// coerceValue coerces a single value against a schema constraint — the one
+// per-value rule shared by every coercion path. A []any is element-coerced via
+// [coerceSlice] (which needs the List element type the constraint carries);
+// every other value routes through the scalar [Coerce] chokepoint. A nil
+// constraint passes the value through unchanged.
+//
+// Routing both the adapter write path ([propsToParamMap], [coerceRelProps]) and
+// the direct-Cypher param path ([CoerceParams]) through this function keeps
+// list-element coercion from being silently skipped on any one path.
+func coerceValue(constraint schema.Constraint, raw any) (any, error) {
+	if constraint == nil {
+		return raw, nil
+	}
+	if slice, ok := raw.([]any); ok {
+		return coerceSlice(slice, constraint)
+	}
+	return Coerce(schema.ResolveAlias(constraint).Kind(), raw)
+}
+
+// ParamTypes maps a Cypher parameter name to the schema constraint its value
+// must satisfy. Nested params are addressed with "outer.inner" dot-notation
+// (e.g. ParamTypes{"rows.principal_amount": schema.NewFloatConstraint()} tags
 // principal_amount inside each row of a $rows []map[string]any). Unknown keys
 // are a no-op.
-type ParamTypes map[string]schema.ConstraintKind
+//
+// The value is the full [schema.Constraint], not just its
+// [schema.ConstraintKind]: element coercion of List properties needs the
+// element type, which a bare kind discards. Derive one from a schema type with
+// [ParamTypesForType], or hand-list constraints via the schema constructors.
+type ParamTypes map[string]schema.Constraint
 
-// CoerceParams returns a copy of params with each value coerced via [Coerce]
-// against the kind declared for its key in types. Keys absent from types pass
+// CoerceParams returns a copy of params with each value coerced against the
+// constraint declared for its key in types. Keys absent from types pass
 // through. Returns params unchanged when types or params is empty so zero-cost
 // calls stay free. Walks one level of nested map[string]any and
 // []map[string]any using the "outer.inner" convention. Returns the first
 // coercion error encountered, naming the offending key.
 //
+// Scalar values route through [Coerce]; []any list values are element-coerced
+// against the List element type (a List<Float> of int64s reaches the driver as
+// []float64, a List<Date> of strings as []dbtype.Date) — the same rule the
+// adapter write path applies, so a direct-Cypher boundary cannot silently skip
+// list coercion.
+//
 // Call this at any direct-Cypher parameter boundary that writes schema-typed
-// Timestamp / Date / Float properties but does not pass through the snapshot
-// write path's coercion (e.g. an enrichment MERGE built by hand).
+// properties but does not pass through the adapter write path's coercion
+// (e.g. an enrichment MERGE built by hand).
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error) {
 	if len(types) == 0 || len(params) == 0 {
 		return params, nil
@@ -115,9 +150,9 @@ func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, erro
 }
 
 // coerceParam coerces a single top-level (key, value) pair. Nested maps and
-// row slices are walked one level via the "outer.inner" convention; a plain
-// []any list passes through (its elements are coerced on the snapshot write
-// path, not here).
+// row slices are walked one level via the "outer.inner" convention; every other
+// value — scalar or []any list — is coerced against its declared constraint via
+// [coerceValue].
 func coerceParam(key string, value any, types ParamTypes) (any, error) {
 	switch v := value.(type) {
 	case nil:
@@ -135,11 +170,9 @@ func coerceParam(key string, value any, types ParamTypes) (any, error) {
 			out[i] = cr
 		}
 		return out, nil
-	case []any:
-		return v, nil
 	default:
-		if kind, ok := types[key]; ok {
-			cv, err := Coerce(kind, value)
+		if constraint, ok := types[key]; ok {
+			cv, err := coerceValue(constraint, value)
 			if err != nil {
 				return nil, fmt.Errorf("param %q: %w", key, err)
 			}
@@ -156,8 +189,8 @@ func coerceNested(outer string, m map[string]any, types ParamTypes) (map[string]
 	out := make(map[string]any, len(m))
 	for k, v := range m {
 		dotKey := outer + "." + k
-		if kind, ok := types[dotKey]; ok && v != nil {
-			cv, err := Coerce(kind, v)
+		if constraint, ok := types[dotKey]; ok && v != nil {
+			cv, err := coerceValue(constraint, v)
 			if err != nil {
 				return nil, fmt.Errorf("param %q: %w", dotKey, err)
 			}
@@ -175,7 +208,7 @@ func coerceNested(outer string, m map[string]any, types ParamTypes) (map[string]
 // key is joined to its property name with the same "outer.inner" dot-notation
 // CoerceParams uses, so ParamTypesForType(t, "rows") yields keys like
 // "rows.principal_amount" that coerceNested looks up. Lets callers avoid
-// hand-listing each property's kind.
+// hand-listing each property's constraint.
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
 	pt := make(ParamTypes)
 	for p := range t.Properties() {
@@ -183,7 +216,7 @@ func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
 		if prefix != "" {
 			key = prefix + "." + p.Name()
 		}
-		pt[key] = schema.ResolveAlias(p.Constraint()).Kind()
+		pt[key] = p.Constraint()
 	}
 	return pt
 }

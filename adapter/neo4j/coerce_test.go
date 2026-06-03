@@ -89,9 +89,9 @@ func TestCoerceParams_FloatRepairAndUnknownKey(t *testing.T) {
 		"untouched": int64(7),
 	}
 	types := ParamTypes{
-		"principal": schema.KindFloat,
-		"as_str":    schema.KindFloat, // string under Float falls through unchanged
-		"missing":   schema.KindFloat, // names a key params doesn't carry: no-op
+		"principal": schema.NewFloatConstraint(),
+		"as_str":    schema.NewFloatConstraint(), // string under Float falls through unchanged
+		"missing":   schema.NewFloatConstraint(), // names a key params doesn't carry: no-op
 	}
 	out, err := CoerceParams(params, types)
 	if err != nil {
@@ -121,11 +121,11 @@ func TestCoerceParams_TemporalGood(t *testing.T) {
 		"label":   "unrelated",
 	}
 	types := ParamTypes{
-		"ts":      schema.KindTimestamp,
-		"ts_nano": schema.KindTimestamp,
-		"native":  schema.KindTimestamp,
-		"date":    schema.KindDate,
-		"label":   schema.KindString,
+		"ts":      schema.NewTimestampConstraint(),
+		"ts_nano": schema.NewTimestampConstraint(),
+		"native":  schema.NewTimestampConstraint(),
+		"date":    schema.NewDateConstraint(),
+		"label":   schema.NewStringConstraint(),
 	}
 	out, err := CoerceParams(params, types)
 	if err != nil {
@@ -153,13 +153,13 @@ func TestCoerceParams_BadTemporalErrors(t *testing.T) {
 	// param boundary surfaces it (rdata's mirror passed these through).
 	if _, err := CoerceParams(
 		map[string]any{"ts": "not-a-timestamp"},
-		ParamTypes{"ts": schema.KindTimestamp},
+		ParamTypes{"ts": schema.NewTimestampConstraint()},
 	); err == nil {
 		t.Fatal("want error for unparseable Timestamp param, got nil")
 	}
 	if _, err := CoerceParams(
 		map[string]any{"d": "2026/04/22"},
-		ParamTypes{"d": schema.KindDate},
+		ParamTypes{"d": schema.NewDateConstraint()},
 	); err == nil {
 		t.Fatal("want error for unparseable Date param, got nil")
 	}
@@ -179,8 +179,8 @@ func TestCoerceParams_NilTypesIsZeroCost(t *testing.T) {
 
 func TestCoerceParams_NestedRowsAndError(t *testing.T) {
 	types := ParamTypes{
-		"rows.principal_amount": schema.KindFloat,
-		"rows.closing_date":     schema.KindDate,
+		"rows.principal_amount": schema.NewFloatConstraint(),
+		"rows.closing_date":     schema.NewDateConstraint(),
 	}
 	params := map[string]any{"rows": []map[string]any{
 		{"id": "a", "principal_amount": int64(5), "closing_date": "2026-04-22"},
@@ -215,8 +215,8 @@ func TestCoerceParams_NestedMap(t *testing.T) {
 		},
 	}
 	types := ParamTypes{
-		"updates.closing_date": schema.KindDate,
-		"updates.principal":    schema.KindFloat,
+		"updates.closing_date": schema.NewDateConstraint(),
+		"updates.principal":    schema.NewFloatConstraint(),
 	}
 	out, err := CoerceParams(params, types)
 	if err != nil {
@@ -236,7 +236,7 @@ func TestCoerceParams_NestedMap(t *testing.T) {
 
 func TestCoerceParams_NilValuePassThrough(t *testing.T) {
 	params := map[string]any{"deactivated_at": nil, "run_id": "runA"}
-	types := ParamTypes{"deactivated_at": schema.KindTimestamp}
+	types := ParamTypes{"deactivated_at": schema.NewTimestampConstraint()}
 	out, err := CoerceParams(params, types)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -249,17 +249,27 @@ func TestCoerceParams_NilValuePassThrough(t *testing.T) {
 	}
 }
 
-func TestCoerceParams_TopLevelListPassThrough(t *testing.T) {
-	// A top-level []any param passes through untouched; element coercion for
-	// List properties happens in the snapshot write path, not at this boundary.
-	params := map[string]any{"tags": []any{"x", "y"}}
-	out, err := CoerceParams(params, ParamTypes{"tags": schema.KindList})
+func TestCoerceParams_TopLevelListCoerced(t *testing.T) {
+	t.Parallel()
+	// A top-level []any list param is element-coerced against its List element
+	// type, exactly like a nested one — no boundary silently passes lists through.
+	params := map[string]any{
+		"scores": []any{int64(1), int64(2)}, // List<Float>
+		"labels": []any{"x", "y"},           // List<String>
+	}
+	types := ParamTypes{
+		"scores": schema.NewListConstraint(schema.NewFloatConstraint()),
+		"labels": schema.NewListConstraint(schema.NewStringConstraint()),
+	}
+	out, err := CoerceParams(params, types)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got, ok := out["tags"].([]any)
-	if !ok || len(got) != 2 || got[0] != "x" {
-		t.Fatalf("tags []any should pass through unchanged, got %#v", out["tags"])
+	if _, ok := out["scores"].([]float64); !ok {
+		t.Fatalf("top-level List<Float> not element-coerced: scores is %T, want []float64", out["scores"])
+	}
+	if _, ok := out["labels"].([]string); !ok {
+		t.Fatalf("top-level List<String> not normalized: labels is %T, want []string", out["labels"])
 	}
 }
 
@@ -270,21 +280,22 @@ func TestParamTypesForType(t *testing.T) {
 		t.Fatal("Entity type not found in basic.yammm")
 	}
 
-	// Prefix "" → bare property-name keys.
+	// Prefix "" → bare property-name keys. The stored value is the full
+	// constraint; assert against its resolved kind.
 	flat := ParamTypesForType(st, "")
-	if flat["score"] != schema.KindFloat {
+	if schema.ResolveAlias(flat["score"]).Kind() != schema.KindFloat {
 		t.Errorf("score: got %v, want KindFloat", flat["score"])
 	}
-	if flat["created_at"] != schema.KindTimestamp {
+	if schema.ResolveAlias(flat["created_at"]).Kind() != schema.KindTimestamp {
 		t.Errorf("created_at: got %v, want KindTimestamp", flat["created_at"])
 	}
-	if flat["birth_date"] != schema.KindDate {
+	if schema.ResolveAlias(flat["birth_date"]).Kind() != schema.KindDate {
 		t.Errorf("birth_date: got %v, want KindDate", flat["birth_date"])
 	}
 
 	// Non-empty prefix → dot-joined keys matching CoerceParams/coerceNested.
 	nested := ParamTypesForType(st, "rows")
-	if nested["rows.score"] != schema.KindFloat {
+	if schema.ResolveAlias(nested["rows.score"]).Kind() != schema.KindFloat {
 		t.Errorf("rows.score: got %v, want KindFloat", nested["rows.score"])
 	}
 	if _, present := nested["score"]; present {
@@ -303,5 +314,64 @@ func TestParamTypesForType(t *testing.T) {
 	if _, isFloat := out["rows"].([]map[string]any)[0]["score"].(float64); !isFloat {
 		t.Fatalf("end-to-end: rows[0].score not coerced to float64: %T",
 			out["rows"].([]map[string]any)[0]["score"])
+	}
+}
+
+func TestCoerceParams_ListElementCoercion(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "list_properties.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity type not found in list_properties.yammm")
+	}
+
+	// A direct-Cypher UNWIND $rows write of node properties. List values arrive
+	// as []any with un-coerced elements (int64 for Float, strings for
+	// Date/Timestamp) — exactly what a JSON decode or a hand-built param map
+	// produces. CoerceParams must element-coerce them, not pass them through.
+	params := map[string]any{"rows": []map[string]any{
+		{
+			"id":     "e1",
+			"ratios": []any{int64(1), int64(2)},         // List<Float>
+			"dates":  []any{"2024-01-01", "2024-06-15"}, // List<Date>
+			"times":  []any{"2024-01-01T00:00:00Z"},     // List<Timestamp>
+			"tags":   []any{"x", "y"},                   // List<String>
+		},
+	}}
+
+	out, err := CoerceParams(params, ParamTypesForType(st, "rows"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	row := out["rows"].([]map[string]any)[0]
+
+	if _, ok := row["ratios"].([]float64); !ok {
+		t.Errorf("List<Float> param not element-coerced: ratios is %T, want []float64", row["ratios"])
+	}
+	if _, ok := row["dates"].([]dbtype.Date); !ok {
+		t.Errorf("List<Date> param not element-coerced: dates is %T, want []dbtype.Date", row["dates"])
+	}
+	if _, ok := row["times"].([]time.Time); !ok {
+		t.Errorf("List<Timestamp> param not element-coerced: times is %T, want []time.Time", row["times"])
+	}
+	if _, ok := row["tags"].([]string); !ok {
+		t.Errorf("List<String> param not normalized: tags is %T, want []string", row["tags"])
+	}
+}
+
+func TestCoerceParams_ListElementError(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "list_properties.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity type not found in list_properties.yammm")
+	}
+	// An unparseable element in a List<Date> param must surface as an error,
+	// not reach the driver as a raw string.
+	params := map[string]any{"rows": []map[string]any{
+		{"id": "e1", "dates": []any{"not-a-date"}},
+	}}
+	if _, err := CoerceParams(params, ParamTypesForType(st, "rows")); err == nil {
+		t.Fatal("want error for an unparseable List<Date> element, got nil")
 	}
 }

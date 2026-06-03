@@ -524,15 +524,7 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 		if !found {
 			continue
 		}
-		if slice, ok := val.([]any); ok {
-			cv, err := coerceSlice(slice, prop.Constraint())
-			if err != nil {
-				return nil, fmt.Errorf("property %q: %w", key, err)
-			}
-			raw[key] = cv
-			continue
-		}
-		cv, err := Coerce(schema.ResolveAlias(prop.Constraint()).Kind(), val)
+		cv, err := coerceValue(prop.Constraint(), val)
 		if err != nil {
 			return nil, fmt.Errorf("property %q: %w", key, err)
 		}
@@ -635,10 +627,18 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 
 // coerceRelProps coerces a relationship property map against the relation's
 // declared property constraints, so typed edge properties (e.g. a Timestamp or
-// Float on an association) reach the driver as native types. Properties not
-// declared on rel pass through unchanged; a nil relation, or one with no
-// declared properties, returns props untouched. Mutates and returns props,
-// which callers pass as a fresh clone.
+// Float on an association) reach the driver as native types. Each value routes
+// through [coerceValue], the same chokepoint the node path uses.
+//
+// Edge properties are scalar by language rule: List and Vector types on a
+// relationship are rejected at schema-load (diag.E_LIST_ON_EDGE /
+// diag.E_INVALID_CONSTRAINT, both alias-aware), so the list arm of coerceValue
+// is unreachable here. It is shared anyway rather than special-casing a
+// scalar-only path, so this stays correct if that rule ever changes.
+//
+// Properties not declared on rel pass through unchanged; a nil relation, or one
+// with no declared properties, returns props untouched. Mutates and returns
+// props, which callers pass as a fresh clone.
 func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any, error) {
 	if rel == nil || !rel.HasProperties() {
 		return props, nil
@@ -648,7 +648,7 @@ func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 		if !ok || v == nil {
 			continue
 		}
-		cv, err := Coerce(schema.ResolveAlias(p.Constraint()).Kind(), v)
+		cv, err := coerceValue(p.Constraint(), v)
 		if err != nil {
 			return nil, fmt.Errorf("relation %q property %q: %w", rel.Name(), k, err)
 		}

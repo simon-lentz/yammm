@@ -34,11 +34,10 @@ func buildTinyBenchSchema(tb testing.TB) *schema.Schema {
 	return s
 }
 
-// buildLargeBenchSchema returns a synthetic wide schema sized to match the
-// complexity-ceiling target called out in api_enhancements.md §7's benchmark
-// subsection: 120 types with 5 properties each (600 properties total) plus
-// 60 associations distributed across the first 60 types (one each, pointing
-// to type (i+7)%120).
+// buildLargeBenchSchema returns a synthetic wide schema at a representative
+// complexity ceiling for the StructuralHash benchmarks: 120 types with 5
+// properties each (600 properties total) plus 60 associations distributed
+// across the first 60 types (one each, pointing to type (i+7)%120).
 //
 // The schema has a deterministic shape: types are named Type000..Type119,
 // properties are named pN_M where N is the type index and M is the property
