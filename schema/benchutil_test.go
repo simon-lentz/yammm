@@ -26,7 +26,7 @@ func buildTinyBenchSchema(tb testing.TB) *schema.Schema {
 		Done().
 		Build()
 	if result.HasErrors() {
-		tb.Fatalf("buildTinyBenchSchema: %v", result.Messages())
+		tb.Fatalf("buildTinyBenchSchema: %v", result)
 	}
 	if s == nil {
 		tb.Fatal("buildTinyBenchSchema: nil schema")
@@ -88,7 +88,7 @@ func buildLargeBenchSchema(tb testing.TB) *schema.Schema {
 
 	s, result := b.Build()
 	if result.HasErrors() {
-		tb.Fatalf("buildLargeBenchSchema: %v", result.Messages())
+		tb.Fatalf("buildLargeBenchSchema: %v", result)
 	}
 	if s == nil {
 		tb.Fatal("buildLargeBenchSchema: nil schema")

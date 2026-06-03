@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -90,7 +91,7 @@ func TestValidateInvariant_UnknownProperty(t *testing.T) {
 	require.Nil(t, s, "schema should fail to compile")
 	require.True(t, collector.HasErrors())
 
-	issues := collector.Result().IssuesSlice()
+	issues := slices.Collect(collector.Result().Issues())
 	require.NotEmpty(t, issues)
 
 	found := false
@@ -243,7 +244,7 @@ func TestValidateInvariant_LambdaUnknownProperty(t *testing.T) {
 	require.True(t, collector.HasErrors())
 
 	found := false
-	for _, issue := range collector.Result().IssuesSlice() {
+	for _, issue := range slices.Collect(collector.Result().Issues()) {
 		if issue.Code() == diag.E_UNKNOWN_PROPERTY {
 			found = true
 			assert.Contains(t, issue.Message(), "nonexistent")
@@ -341,7 +342,7 @@ func TestValidateInvariant_SelfDotUnknownProperty(t *testing.T) {
 	require.True(t, collector.HasErrors())
 
 	found := false
-	for _, issue := range collector.Result().IssuesSlice() {
+	for _, issue := range slices.Collect(collector.Result().Issues()) {
 		if issue.Code() == diag.E_UNKNOWN_PROPERTY {
 			found = true
 			assert.Contains(t, issue.Message(), "fake_prop")
@@ -643,7 +644,7 @@ func TestValidateInvariant_ReduceUnknownProperty(t *testing.T) {
 	require.True(t, collector.HasErrors())
 
 	found := false
-	for _, issue := range collector.Result().IssuesSlice() {
+	for _, issue := range slices.Collect(collector.Result().Issues()) {
 		if issue.Code() == diag.E_UNKNOWN_PROPERTY {
 			found = true
 			assert.Contains(t, issue.Message(), "fake_field")

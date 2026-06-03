@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -1362,7 +1363,7 @@ func TestComplete_Import_DuplicateSourceID(t *testing.T) {
 	assert.True(t, collector.HasErrors())
 
 	// Verify E_DUPLICATE_IMPORT is emitted with correct details
-	issues := collector.Result().IssuesSlice()
+	issues := slices.Collect(collector.Result().Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, diag.E_DUPLICATE_IMPORT, issues[0].Code())
 	assert.Contains(t, issues[0].Message(), "imported multiple times")
@@ -1651,7 +1652,7 @@ func TestComplete_PartType_CannotDeclareAssociation(t *testing.T) {
 	assert.True(t, collector.HasErrors(), "part type declaring association should error")
 
 	// Verify correct error code
-	issues := collector.Result().IssuesSlice()
+	issues := slices.Collect(collector.Result().Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 	assert.Equal(t, diag.E_INVALID_ASSOCIATION_TARGET, issues[0].Code())
 	assert.Contains(t, issues[0].Message(), "part type")
@@ -1689,7 +1690,7 @@ func TestComplete_Association_CannotTargetPartType(t *testing.T) {
 	assert.True(t, collector.HasErrors(), "association targeting part type should error")
 
 	// Verify correct error code
-	issues := collector.Result().IssuesSlice()
+	issues := slices.Collect(collector.Result().Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 	assert.Equal(t, diag.E_INVALID_ASSOCIATION_TARGET, issues[0].Code())
 	assert.Contains(t, issues[0].Message(), "cannot target part type")
@@ -1847,7 +1848,7 @@ func TestNarrowing_WideningRejected(t *testing.T) {
 	assert.Nil(t, s, "widening should cause schema completion to fail")
 	assert.True(t, collector.HasErrors(), "widening should produce E_PROPERTY_CONFLICT")
 
-	issues := collector.Result().IssuesSlice()
+	issues := slices.Collect(collector.Result().Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 	assert.Equal(t, diag.E_PROPERTY_CONFLICT, issues[0].Code())
 }
@@ -1894,7 +1895,7 @@ func TestNarrowing_RequiredToOptionalRejected(t *testing.T) {
 	assert.Nil(t, s, "required->optional widening should cause schema completion to fail")
 	assert.True(t, collector.HasErrors(), "required->optional should produce E_PROPERTY_CONFLICT")
 
-	issues := collector.Result().IssuesSlice()
+	issues := slices.Collect(collector.Result().Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 	assert.Equal(t, diag.E_PROPERTY_CONFLICT, issues[0].Code())
 }

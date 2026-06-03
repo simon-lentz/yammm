@@ -188,10 +188,10 @@ func TestBatchAssembler_HappyPath_Default(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Test 2: Add error wraps as *diag.ErrorWithContext with type+index tag.
+// Test 2: Add error wraps as *diag.ContextualError with type+index tag.
 // -----------------------------------------------------------------------------
 
-func TestBatchAssembler_AddError_WrapsAsErrorWithContext(t *testing.T) {
+func TestBatchAssembler_AddError_WrapsAsContextualError(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	ctx := t.Context()
 
@@ -203,9 +203,9 @@ func TestBatchAssembler_AddError_WrapsAsErrorWithContext(t *testing.T) {
 		t.Fatal("expected error for invalid Person, got nil")
 	}
 
-	var ewc *diag.ErrorWithContext
+	var ewc *diag.ContextualError
 	if !errors.As(err, &ewc) {
-		t.Fatalf("error is not *diag.ErrorWithContext: %T (%v)", err, err)
+		t.Fatalf("error is not *diag.ContextualError: %T (%v)", err, err)
 	}
 	wantTag := "Person (record #1)"
 	if ewc.Tag != wantTag {
@@ -245,9 +245,9 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 		t.Fatal("res.Snapshot is nil on Finalize error path; contract violated")
 	}
 
-	var ewc *diag.ErrorWithContext
+	var ewc *diag.ContextualError
 	if !errors.As(err, &ewc) {
-		t.Fatalf("error is not *diag.ErrorWithContext: %T", err)
+		t.Fatalf("error is not *diag.ContextualError: %T", err)
 	}
 	if ewc.Tag != "batch_finalize" {
 		t.Errorf("Tag: got %q, want \"batch_finalize\"", ewc.Tag)

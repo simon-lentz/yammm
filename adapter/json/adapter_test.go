@@ -2,6 +2,7 @@ package json
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -537,7 +538,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 		_, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 
 		require.False(t, diags.OK())
-		issues := diags.IssuesSlice()
+		issues := slices.Collect(diags.Issues())
 		require.NotEmpty(t, issues)
 
 		// Issue should have span when tracking is enabled
@@ -554,7 +555,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
-		issues := diags.IssuesSlice()
+		issues := slices.Collect(diags.Issues())
 		require.NotEmpty(t, issues)
 
 		// Should have span from location tracking
@@ -571,7 +572,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
-		issues := diags.IssuesSlice()
+		issues := slices.Collect(diags.Issues())
 		require.NotEmpty(t, issues)
 
 		issue := issues[0]
@@ -587,7 +588,7 @@ func TestParseErrors_WithLocationTracking(t *testing.T) {
 		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
-		issues := diags.IssuesSlice()
+		issues := slices.Collect(diags.Issues())
 		require.NotEmpty(t, issues)
 
 		issue := issues[0]
@@ -752,7 +753,7 @@ func TestParseArray_ErrorDetails_WithoutTracking(t *testing.T) {
 		_, diags := adapter.ParseArray(context.Background(), source, data)
 
 		require.False(t, diags.OK())
-		issues := diags.IssuesSlice()
+		issues := slices.Collect(diags.Issues())
 		require.NotEmpty(t, issues)
 
 		// Verify the issue has expected details but no span (no tracking)
@@ -932,7 +933,7 @@ func TestNullRejection(t *testing.T) {
 		_, diags := adapter.ParseOne(context.Background(), source, "Person", data)
 
 		require.False(t, diags.OK(), "null root should be rejected")
-		issues := diags.IssuesSlice()
+		issues := slices.Collect(diags.Issues())
 		require.NotEmpty(t, issues)
 		assert.Contains(t, issues[0].Message(), "expected object")
 	})
@@ -986,7 +987,7 @@ func TestTrailingContent(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				_, diags := adapter.ParseObject(context.Background(), source, []byte(tt.input))
 				require.False(t, diags.OK(), "trailing content should be rejected")
-				issues := diags.IssuesSlice()
+				issues := slices.Collect(diags.Issues())
 				require.NotEmpty(t, issues)
 				assert.Contains(t, issues[len(issues)-1].Message(), "unexpected content")
 			})

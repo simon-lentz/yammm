@@ -84,7 +84,7 @@ func TestBuildTestSnapshot_AddFailure_Fatal(t *testing.T) {
 
 	rec := &recordingTB{TB: t}
 	// Bad Person: missing required `id` property — ValidateOne fires
-	// E_MISSING_REQUIRED, BatchAssembler.Add returns *ErrorWithContext,
+	// E_MISSING_REQUIRED, BatchAssembler.Add returns *ContextualError,
 	// BuildTestSnapshot fatals.
 	bad := snapshottest.Record{
 		TypeName: "Person",
@@ -104,7 +104,7 @@ func TestBuildTestSnapshot_FinalizeFailure_Fatal(t *testing.T) {
 	rec := &recordingTB{TB: t}
 	// Person with employer reference to a Company that won't be added —
 	// Check fires E_UNRESOLVED_REQUIRED, Finalize returns
-	// *ErrorWithContext tagged "batch_finalize", BuildTestSnapshot
+	// *ContextualError tagged "batch_finalize", BuildTestSnapshot
 	// fatals.
 	snapshottest.BuildTestSnapshot(
 		rec, s,

@@ -285,7 +285,7 @@ func NewBatchAssembler(ctx context.Context, s *schema.Schema, opts ...BatchAssem
 //
 // Returns an error annotated with typeName and the current call index
 // if validation or add fails; the returned error's cause is a
-// [*diag.ErrorWithContext] suitable for errors.As extraction.
+// [*diag.ContextualError] suitable for errors.As extraction.
 //
 // Returns [ErrAssemblerFinalized] (matchable via errors.Is) when called
 // after [BatchAssembler.Finalize].
@@ -419,13 +419,13 @@ func (ba *BatchAssembler) AddValid(valid *instance.ValidInstance) error {
 	return nil
 }
 
-// wrapAddError formats an Add / AddValid failure as a *diag.ErrorWithContext
+// wrapAddError formats an Add / AddValid failure as a *diag.ContextualError
 // tagged with the type name and the 1-indexed call number, so the offending
 // record is locatable from the error alone.
 func (ba *BatchAssembler) wrapAddError(typeName string, attemptN int64, res diag.Result) error {
 	tag := fmt.Sprintf("%s (record #%d)", typeName, attemptN)
-	//nolint:wrapcheck // returning *diag.ErrorWithContext directly is the documented contract; consumers errors.As against it
-	return res.WithContext(tag).Err()
+	//nolint:wrapcheck // returning *diag.ContextualError directly is the documented contract; consumers errors.As against it
+	return res.WithContext(tag)
 }
 
 // Finalize runs Graph.Check, takes a Snapshot, and returns both via
@@ -440,7 +440,7 @@ func (ba *BatchAssembler) wrapAddError(typeName string, attemptN int64, res diag
 //   - On failure (error-severity diagnostics from Graph.Check): returns
 //     (FinalizeResult{Snapshot: snap}, err) where res.Snapshot is
 //     always non-nil (the partial snapshot at the point of failure)
-//     and err is a [*diag.ErrorWithContext] tagged "batch_finalize"
+//     and err is a [*diag.ContextualError] tagged "batch_finalize"
 //     whose Result matches res.Snapshot.Diagnostics() for the
 //     error-severity issues from Check.
 //
@@ -492,8 +492,8 @@ func (ba *BatchAssembler) Finalize(ctx context.Context) (FinalizeResult, error) 
 	res := FinalizeResult{Snapshot: snap} // always non-nil
 
 	if checkRes.HasErrors() {
-		//nolint:wrapcheck // returning *diag.ErrorWithContext directly is the documented contract; consumers errors.As against it
-		return res, checkRes.WithContext("batch_finalize").Err()
+		//nolint:wrapcheck // returning *diag.ContextualError directly is the documented contract; consumers errors.As against it
+		return res, checkRes.WithContext("batch_finalize")
 	}
 	return res, nil
 }

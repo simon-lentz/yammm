@@ -2,6 +2,7 @@ package diag
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -152,38 +153,6 @@ func TestResult_Issues_EarlyBreak(t *testing.T) {
 	}
 }
 
-func TestResult_IssuesSlice_DeepCopy(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "original").
-			WithDetails(Detail{Key: DetailKeyTypeName, Value: "original"}).
-			Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	slice := r.IssuesSlice()
-
-	// Modify returned slice's details (via the clone)
-	details := slice[0].Details()
-	details[0].Value = "modified"
-
-	// Original should be unchanged
-	for issue := range r.Issues() {
-		issueDetails := issue.Details()
-		if issueDetails[0].Value == "modified" {
-			t.Error("IssuesSlice returned reference, not deep copy")
-		}
-	}
-}
-
-func TestResult_IssuesSlice_NilForEmpty(t *testing.T) {
-	r := OK()
-
-	if slice := r.IssuesSlice(); slice != nil {
-		t.Error("IssuesSlice() should be nil for empty result")
-	}
-}
-
 func TestResult_Errors(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Fatal, E_LIMIT_REACHED, "fatal").Build(),
@@ -203,33 +172,6 @@ func TestResult_Errors(t *testing.T) {
 
 	if count != 2 {
 		t.Errorf("Errors() yielded %d; want 2", count)
-	}
-}
-
-func TestResult_ErrorsSlice(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Fatal, E_LIMIT_REACHED, "fatal").Build(),
-		NewIssue(Error, E_SYNTAX, "error").Build(),
-		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	slice := r.ErrorsSlice()
-	if len(slice) != 2 {
-		t.Fatalf("ErrorsSlice() len = %d; want 2", len(slice))
-	}
-}
-
-func TestResult_ErrorsSlice_NilForEmpty(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	if slice := r.ErrorsSlice(); slice != nil {
-		t.Error("ErrorsSlice() should be nil when no errors")
 	}
 }
 
@@ -255,20 +197,6 @@ func TestResult_Warnings(t *testing.T) {
 	}
 }
 
-func TestResult_WarningsSlice(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Warning, E_INVALID_NAME, "warning1").Build(),
-		NewIssue(Warning, E_RESERVED_PREFIX, "warning2").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	slice := r.WarningsSlice()
-	if len(slice) != 2 {
-		t.Fatalf("WarningsSlice() len = %d; want 2", len(slice))
-	}
-}
-
 func TestResult_BySeverity(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Fatal, E_LIMIT_REACHED, "fatal").Build(),
@@ -291,25 +219,6 @@ func TestResult_BySeverity(t *testing.T) {
 		if count != 1 {
 			t.Errorf("BySeverity(%s) yielded %d; want 1", sev, count)
 		}
-	}
-}
-
-func TestResult_BySeveritySlice(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "error1").Build(),
-		NewIssue(Error, E_TYPE_COLLISION, "error2").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	slice := r.BySeveritySlice(Error)
-	if len(slice) != 2 {
-		t.Fatalf("BySeveritySlice(Error) len = %d; want 2", len(slice))
-	}
-
-	// Warning slice should be nil
-	if slice := r.BySeveritySlice(Warning); slice != nil {
-		t.Error("BySeveritySlice(Warning) should be nil when no warnings")
 	}
 }
 
@@ -350,74 +259,6 @@ func TestResult_IssuesAtLeastAsSevereAs(t *testing.T) {
 					tt.threshold, count, tt.wantCount)
 			}
 		})
-	}
-}
-
-func TestResult_IssuesAtLeastAsSevereAsSlice(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "error").Build(),
-		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
-		NewIssue(Info, E_INTERNAL, "info").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	slice := r.IssuesAtLeastAsSevereAsSlice(Warning)
-	if len(slice) != 2 {
-		t.Fatalf("IssuesAtLeastAsSevereAsSlice(Warning) len = %d; want 2", len(slice))
-	}
-
-	// Fatal threshold with no fatal issues
-	if slice := r.IssuesAtLeastAsSevereAsSlice(Fatal); slice != nil {
-		t.Errorf("IssuesAtLeastAsSevereAsSlice(Fatal) = %v; want nil", slice)
-	}
-}
-
-func TestResult_Messages(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Fatal, E_LIMIT_REACHED, "fatal message").Build(),
-		NewIssue(Error, E_SYNTAX, "error message").Build(),
-		NewIssue(Warning, E_INVALID_NAME, "warning message").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	messages := r.Messages()
-	if len(messages) != 2 {
-		t.Fatalf("Messages() len = %d; want 2", len(messages))
-	}
-	if messages[0] != "fatal message" {
-		t.Errorf("Messages()[0] = %q; want %q", messages[0], "fatal message")
-	}
-	if messages[1] != "error message" {
-		t.Errorf("Messages()[1] = %q; want %q", messages[1], "error message")
-	}
-}
-
-func TestResult_Messages_NilForEmpty(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	if messages := r.Messages(); messages != nil {
-		t.Error("Messages() should be nil when no errors")
-	}
-}
-
-func TestResult_MessagesAtOrAbove(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "error").Build(),
-		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
-		NewIssue(Info, E_INTERNAL, "info").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	messages := r.MessagesAtOrAbove(Warning)
-	if len(messages) != 2 {
-		t.Fatalf("MessagesAtOrAbove(Warning) len = %d; want 2", len(messages))
 	}
 }
 
@@ -475,28 +316,28 @@ func TestResult_Immutability(t *testing.T) {
 		t.Error("OK() should return OK result")
 	}
 
-	// Verify returned slices are independent
+	// Verify collected slices are independent (each slices.Collect allocates).
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "test").Build(),
 	}
 	r = newResult(issues, 0, false, 0)
 
-	slice1 := r.IssuesSlice()
-	slice2 := r.IssuesSlice()
+	slice1 := slices.Collect(r.Issues())
+	slice2 := slices.Collect(r.Issues())
 
 	if len(slice1) == 0 {
-		t.Fatal("IssuesSlice returned empty")
+		t.Fatal("Issues() yielded nothing")
 	}
 
 	// The slices should be independent
 	if &slice1[0] == &slice2[0] {
-		t.Error("IssuesSlice returned same backing array")
+		t.Error("slices.Collect returned same backing array")
 	}
 }
 
 // TestResult_IssuesAtLeastAsSevereAs_InvalidThreshold verifies that
-// IssuesAtLeastAsSevereAs and IssuesAtLeastAsSevereAsSlice behave consistently
-// when given an invalid severity threshold (> Hint).
+// IssuesAtLeastAsSevereAs yields all issues when given an invalid severity
+// threshold (> Hint).
 func TestResult_IssuesAtLeastAsSevereAs_InvalidThreshold(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "error").Build(),
@@ -508,30 +349,15 @@ func TestResult_IssuesAtLeastAsSevereAs_InvalidThreshold(t *testing.T) {
 	// Invalid threshold (Severity(255) is > Hint)
 	invalidThreshold := Severity(255)
 
-	// Count via iterator
 	iteratorCount := 0
 	for range r.IssuesAtLeastAsSevereAs(invalidThreshold) {
 		iteratorCount++
 	}
 
-	// Count via slice
-	slice := r.IssuesAtLeastAsSevereAsSlice(invalidThreshold)
-	sliceCount := len(slice)
-
-	// Both should return all issues (any valid severity is "at least as severe"
-	// as an invalid threshold because severity uses lower numeric values for
-	// higher severity)
+	// All issues are "at least as severe" as an invalid threshold because
+	// severity uses lower numeric values for higher severity.
 	if iteratorCount != len(issues) {
 		t.Errorf("iterator count = %d; want %d (all issues)", iteratorCount, len(issues))
-	}
-	if sliceCount != len(issues) {
-		t.Errorf("slice count = %d; want %d (all issues)", sliceCount, len(issues))
-	}
-
-	// Iterator and slice should match
-	if iteratorCount != sliceCount {
-		t.Errorf("iterator count (%d) != slice count (%d); should be consistent",
-			iteratorCount, sliceCount)
 	}
 }
 

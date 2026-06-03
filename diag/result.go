@@ -152,8 +152,8 @@ func (r Result) SeverityCounts() SeverityCounts {
 
 // Issues returns an iterator over all issues without copying.
 //
-// The yielded issues must not be mutated. Use [IssuesSlice] if you need
-// a mutable slice.
+// The yielded issues must not be mutated. Collect a mutable copy with
+// slices.Collect(r.Issues()) if needed.
 func (r Result) Issues() iter.Seq[Issue] {
 	return func(yield func(Issue) bool) {
 		for _, issue := range r.issues {
@@ -164,23 +164,7 @@ func (r Result) Issues() iter.Seq[Issue] {
 	}
 }
 
-// IssuesSlice returns a deep copy of all issues.
-//
-// Prefer [Issues] for read-only iteration to avoid allocation.
-func (r Result) IssuesSlice() []Issue {
-	if len(r.issues) == 0 {
-		return nil
-	}
-	result := make([]Issue, len(r.issues))
-	for i, issue := range r.issues {
-		result[i] = issue.Clone()
-	}
-	return result
-}
-
 // Errors returns an iterator over Fatal and Error issues.
-//
-// Use [ErrorsSlice] if you need a slice.
 func (r Result) Errors() iter.Seq[Issue] {
 	return func(yield func(Issue) bool) {
 		for _, issue := range r.issues {
@@ -193,23 +177,7 @@ func (r Result) Errors() iter.Seq[Issue] {
 	}
 }
 
-// ErrorsSlice returns only Fatal and Error issues (deep copy).
-func (r Result) ErrorsSlice() []Issue {
-	if r.fatalCount+r.errorCount == 0 {
-		return nil
-	}
-	result := make([]Issue, 0, r.fatalCount+r.errorCount)
-	for _, issue := range r.issues {
-		if issue.Severity().IsFailure() {
-			result = append(result, issue.Clone())
-		}
-	}
-	return result
-}
-
 // Warnings returns an iterator over Warning issues.
-//
-// Use [WarningsSlice] if you need a slice.
 func (r Result) Warnings() iter.Seq[Issue] {
 	return func(yield func(Issue) bool) {
 		for _, issue := range r.issues {
@@ -222,23 +190,7 @@ func (r Result) Warnings() iter.Seq[Issue] {
 	}
 }
 
-// WarningsSlice returns only Warning issues (deep copy).
-func (r Result) WarningsSlice() []Issue {
-	if r.warningCount == 0 {
-		return nil
-	}
-	result := make([]Issue, 0, r.warningCount)
-	for _, issue := range r.issues {
-		if issue.Severity() == Warning {
-			result = append(result, issue.Clone())
-		}
-	}
-	return result
-}
-
 // BySeverity returns an iterator over issues at exactly the given severity.
-//
-// Use [BySeveritySlice] if you need a slice.
 func (r Result) BySeverity(severity Severity) iter.Seq[Issue] {
 	return func(yield func(Issue) bool) {
 		for _, issue := range r.issues {
@@ -251,45 +203,11 @@ func (r Result) BySeverity(severity Severity) iter.Seq[Issue] {
 	}
 }
 
-// BySeveritySlice returns issues at exactly the given severity (deep copy).
-func (r Result) BySeveritySlice(severity Severity) []Issue {
-	count := r.countBySeverity(severity)
-	if count == 0 {
-		return nil
-	}
-	result := make([]Issue, 0, count)
-	for _, issue := range r.issues {
-		if issue.Severity() == severity {
-			result = append(result, issue.Clone())
-		}
-	}
-	return result
-}
-
-func (r Result) countBySeverity(severity Severity) int {
-	switch severity {
-	case Fatal:
-		return r.fatalCount
-	case Error:
-		return r.errorCount
-	case Warning:
-		return r.warningCount
-	case Info:
-		return r.infoCount
-	case Hint:
-		return r.hintCount
-	default:
-		return 0
-	}
-}
-
 // IssuesAtLeastAsSevereAs returns an iterator over issues at least as severe
 // as the threshold.
 //
 // This uses the same semantics as [Severity.IsAtLeastAsSevereAs].
 // Example: IssuesAtLeastAsSevereAs(Warning) yields Fatal, Error, and Warning issues.
-//
-// Use [IssuesAtLeastAsSevereAsSlice] if you need a slice.
 func (r Result) IssuesAtLeastAsSevereAs(threshold Severity) iter.Seq[Issue] {
 	return func(yield func(Issue) bool) {
 		for _, issue := range r.issues {
@@ -300,79 +218,6 @@ func (r Result) IssuesAtLeastAsSevereAs(threshold Severity) iter.Seq[Issue] {
 			}
 		}
 	}
-}
-
-// IssuesAtLeastAsSevereAsSlice returns issues at least as severe as the
-// threshold (deep copy).
-//
-// See [IssuesAtLeastAsSevereAs] for semantics.
-func (r Result) IssuesAtLeastAsSevereAsSlice(threshold Severity) []Issue {
-	var count int
-	switch {
-	case threshold > Hint:
-		// Invalid threshold: all valid severities (0-4) are "at least as severe"
-		// because severity uses lower numeric values for higher severity.
-		// This matches the iterator's behavior via IsAtLeastAsSevereAs.
-		count = len(r.issues)
-	case threshold == Fatal:
-		count = r.fatalCount
-	case threshold == Error:
-		count = r.fatalCount + r.errorCount
-	case threshold == Warning:
-		count = r.fatalCount + r.errorCount + r.warningCount
-	case threshold == Info:
-		count = r.fatalCount + r.errorCount + r.warningCount + r.infoCount
-	case threshold == Hint:
-		count = len(r.issues)
-	}
-
-	if count == 0 {
-		return nil
-	}
-
-	result := make([]Issue, 0, count)
-	for _, issue := range r.issues {
-		if issue.Severity().IsAtLeastAsSevereAs(threshold) {
-			result = append(result, issue.Clone())
-		}
-	}
-	return result
-}
-
-// Messages returns message strings from Fatal and Error issues.
-//
-// This is a convenience helper, not a collection accessor; no iterator variant.
-func (r Result) Messages() []string {
-	if r.fatalCount+r.errorCount == 0 {
-		return nil
-	}
-	result := make([]string, 0, r.fatalCount+r.errorCount)
-	for _, issue := range r.issues {
-		if issue.Severity().IsFailure() {
-			result = append(result, issue.Message())
-		}
-	}
-	return result
-}
-
-// MessagesAtOrAbove returns message strings from issues at or above the
-// specified severity threshold.
-//
-// "Above" means more severe, not higher numeric value (severity ordering:
-// Fatal < Error < Warning < Info < Hint).
-//
-// Example: MessagesAtOrAbove(Warning) returns Fatal, Error, and Warning messages.
-//
-// This is a convenience helper for log/error output; for iteration over Issue
-// values, use [IssuesAtLeastAsSevereAs] or [Issues] with filtering.
-func (r Result) MessagesAtOrAbove(threshold Severity) []string {
-	var result []string
-	for _, issue := range r.issues {
-		if issue.Severity().IsAtLeastAsSevereAs(threshold) {
-			result = append(result, issue.Message())
-		}
-	}
-	return result
 }
 
 // ResultError is an error wrapping a failed [Result].

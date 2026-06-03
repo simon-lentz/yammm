@@ -73,6 +73,22 @@ The v0.3.0 release is the first to explicitly apply this policy. v0.3.0 carries:
 
 All three changes are documented inline in the v0.3.0 release notes with pointers back to this document's relevant policy sections.
 
+## v0.4.0 under this policy
+
+v0.4.0 bundles two independent, separately-reviewable streams, co-tagged once both land:
+
+- **Additive coercion surface (`adapter/neo4j`)** — new exported `Coerce`, `CoerceParams`, `ParamTypes`, and `ParamTypesForType`, with the node and edge property paths routed through the single chokepoint internally. Strictly additive (new exported symbols + internal rewire); code written against `v0.3.x` compiles and runs unchanged. Justified under the pre-1.0 "additive API changes" rule.
+- **Breaking `diag` surface tightening** — three classes of change:
+  - *Seven removals* — `Result.IssuesSlice`, `ErrorsSlice`, `WarningsSlice`, `BySeveritySlice`, `IssuesAtLeastAsSevereAsSlice`, `Messages`, and `MessagesAtOrAbove` (each replaced by the corresponding iterator with `slices.Collect`, or `Result.String()` / `Renderer` for message formatting).
+  - *One signature change* — `Result.WithContext(tag)` now returns `error` (nil when OK) rather than a `ResultWithContext` value.
+  - *Type fold + rename* — `ResultWithContext` and `ErrorWithContext` collapse into a single `*ContextualError`, and `AsResultWithContext` becomes `AsContextualError` (returning `(*ContextualError, bool)`). Consequence in `graph`: `BatchAssembler.Add` / `AddValid` / `Finalize` now return `*diag.ContextualError` (was `*diag.ErrorWithContext`).
+
+  One addition rides the same release: `diag.Collect(issues ...Issue) Result`.
+
+  Justified under the **amended pre-1.0 rule (a)** (broadened 2026-06-02): there are zero external uncoordinated callers — every in-repo user (the two `graph` call sites and the ~115 test call sites across six packages that used the removed accessors) was updated in-tree, and the sole external consumer (rdata) pins `v0.3.1` with its migration tracked as a downstream backlog item, so tagging `v0.4.0` cannot break its build. Per conditions (b) and (c), the release notes enumerate every removed, renamed, and signature-changed symbol.
+
+The `.ys` wire format is unchanged at v0.4.0 (header `version` stays `2`). Both streams are documented inline in the v0.4.0 release notes with pointers back to this document's relevant policy sections.
+
 ## Revision history
 
 - **2026-04-17** — Initial document, added as part of v0.3.0 release prep.

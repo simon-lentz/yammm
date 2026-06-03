@@ -337,7 +337,7 @@ qualityCollector.Merge(res.Snapshot.Diagnostics())
 
 **`FinalizeResult.Snapshot` is always non-nil**, on both success and error paths. The struct exists to encode this contract at the type level; callers read `res.Snapshot` directly without gating on `err == nil`. On the error path `res.Snapshot` is the partial snapshot at the point Graph.Check tripped — operators logging a failed batch see which instances were assembled before the check failure.
 
-**Error shapes.** Both `Add` / `AddValid` and `Finalize` return errors whose cause is a `*diag.ErrorWithContext` (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)). `Add`'s tag is `"<TypeName> (record #N)"` so the offending record is locatable from the error alone; `Finalize`'s tag is the fixed string `"batch_finalize"` so downstream log consumers have a stable filter key. Recover with `errors.As` or `diag.AsResultWithContext`.
+**Error shapes.** Both `Add` / `AddValid` and `Finalize` return errors whose cause is a `*diag.ContextualError` (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)). `Add`'s tag is `"<TypeName> (record #N)"` so the offending record is locatable from the error alone; `Finalize`'s tag is the fixed string `"batch_finalize"` so downstream log consumers have a stable filter key. Recover with `errors.As` or `diag.AsContextualError`.
 
 **Post-finalize sentinel.** After `Finalize`, subsequent `Add` / `AddValid` calls return `graph.ErrAssemblerFinalized`, matchable via `errors.Is`. Consumers performing retry / cleanup logic key off the sentinel rather than the error string.
 
@@ -706,6 +706,8 @@ The `diag` package implements YAMMM's five-level severity model. See [Severity L
 
 ### Result Methods
 
+A `Result` is produced by a `Collector` or, for the terminal one-shot case, by `diag.Collect(issues...)`. The issue iterators return `iter.Seq[Issue]`; collect a `[]Issue` with `slices.Collect(result.Errors())` when you need one.
+
 ```go
 // Status checks
 result.OK()             // No fatal or error issues
@@ -716,27 +718,18 @@ result.HasInfo()        // Has info issues
 result.HasHints()       // Has hint issues
 result.LimitReached()   // Issue collection limit was reached
 
-// Issue access (returns iter.Seq[Issue])
+// Issue access (returns iter.Seq[Issue]; use slices.Collect for a []Issue)
 result.Issues()                          // All collected issues
 result.Errors()                          // Fatal and error issues
 result.Warnings()                        // Warning issues
 result.BySeverity(diag.Warning)          // Issues at a specific severity
 result.IssuesAtLeastAsSevereAs(diag.Warning) // Issues at or above a threshold
 
-// Slice variants (returns []Issue)
-result.IssuesSlice()
-result.ErrorsSlice()
-result.WarningsSlice()
-result.BySeveritySlice(diag.Warning)          // Issues at exactly the given severity
-result.IssuesAtLeastAsSevereAsSlice(diag.Warning) // Issues at or above a threshold
-
 // Metadata
 result.Len()              // Total issue count
 result.Limit()            // Configured collection limit
 result.DroppedCount()     // Issues dropped after limit
 result.SeverityCounts()   // Counts by severity level
-result.Messages()         // Fatal and error issue messages as strings
-result.MessagesAtOrAbove(diag.Warning)        // Messages at or above a severity threshold
 
 // Conversion
 result.Err()              // Returns error if !OK(), nil otherwise
@@ -768,55 +761,44 @@ All renderer options are optional. The zero-config `diag.NewRenderer()` produces
 
 ### Contextual Diagnostic Wrap
 
-At error boundaries — the places where a diagnostic crosses from the code that produced it to the code that surfaces it — callers attach a human-readable context label to a `diag.Result` via `Result.WithContext(tag)`. The return value carries the tag through error chains and structured logging without every consumer reinventing the wrapper:
+At error boundaries — the places where a diagnostic crosses from the code that produced it to the code that surfaces it — callers attach a human-readable context label to a `diag.Result` via `Result.WithContext(tag)`, which returns an `error` directly: `nil` when the result is OK, a `*diag.ContextualError` otherwise.
 
 ```go
-result := schema.Load(ctx, path)
-if result.HasErrors() {
-    tagged := result.WithContext("schema_load")
-    logger.Error("pipeline startup failed", slog.Any("diagnostic", tagged))
-    return fmt.Errorf("startup: %w", tagged.Err())
+if err := result.WithContext("schema_load"); err != nil {
+    logger.Error("pipeline startup failed", slog.Any("diagnostic", err))
+    return fmt.Errorf("startup: %w", err)
 }
 ```
 
-Two types split the surface along the value-vs-error line that yammm already uses for `Result` and `*ResultError`:
+A single type carries the tag through error chains and structured logging:
 
 ```go
-// Value carrier. Returned by Result.WithContext(tag). Holds the underlying
-// Result and the tag; implements slog.LogValuer. Read the fields directly
-// or call the delegating helpers HasErrors / OK.
-type ResultWithContext struct {
-    Result diag.Result
-    Tag    string
-}
-
-// Error type. Returned by ResultWithContext.Err() when the underlying
-// result is not OK. Implements error and participates in Go error chains:
-// its Unwrap returns *diag.ResultError so existing errors.As consumers
-// keep working unchanged.
-type ErrorWithContext struct {
+// Returned (as a non-nil error) by Result.WithContext(tag) when the result is
+// not OK. Implements error and slog.LogValuer; its Unwrap returns
+// *diag.ResultError so existing errors.As consumers keep working unchanged.
+type ContextualError struct {
     Result diag.Result
     Tag    string
 }
 ```
 
-**Slog shape.** `ResultWithContext.LogValue()` returns a group with these attributes:
+**Slog shape.** `(*ContextualError).LogValue()` returns a group with these attributes:
 
 - `context` (string) — the tag. Always emitted.
 - `code` (string) — the first error-severity issue's stable code. Omitted when the result has no error-severity issue with a non-zero code.
-- `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error; `warnings` is the Warning count. Always emitted (0/0 on OK).
-- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice; empty when the result is OK. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
+- `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error; `warnings` is the Warning count. Always emitted.
+- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
 
 `Issue.LogValue()` emits the same per-issue shape and is independently useful when a consumer wants to log a single issue: `logger.Error("problem", slog.Any("issue", issue))`.
 
-**Error-chain recovery.** `diag.AsResultWithContext(err, fallbackTag)` recovers the tag from an arbitrarily-wrapped error. If the chain carries a `*ErrorWithContext`, its original tag survives; if it carries only a bare `*ResultError` (from `Result.Err()` without a tag), the supplied fallbackTag is synthesized so unified error handlers see a uniform shape across both patterns:
+**Error-chain recovery.** `diag.AsContextualError(err, fallbackTag)` recovers a `*ContextualError` from an arbitrarily-wrapped error. If the chain carries a `*ContextualError`, its original tag survives; if it carries only a bare `*ResultError` (from `Result.Err()` without a tag), the supplied fallbackTag is synthesized so unified error handlers see a uniform shape across both patterns:
 
 ```go
-if cr, ok := diag.AsResultWithContext(err, "validation"); ok {
-    for issue := range cr.Result.Issues() {
+if ce, ok := diag.AsContextualError(err, "validation"); ok {
+    for issue := range ce.Result.Issues() {
         // triage
     }
-    logger.Error("failed", slog.Any("diagnostic", cr))
+    logger.Error("failed", slog.Any("diagnostic", ce))
 }
 ```
 

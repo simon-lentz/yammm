@@ -3,6 +3,7 @@ package instance_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -372,7 +373,7 @@ func TestValidator_Validate_ContextCancellation(t *testing.T) {
 
 	require.True(t, result.HasFatal())
 	// Verify context cancellation diagnostic code
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, diag.E_CONTEXT_CANCELLED, issues[0].Code())
 }
@@ -546,7 +547,7 @@ func TestValidator_ValidateForComposition_ParentTypeNotFound(t *testing.T) {
 
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 	assert.Equal(t, instance.ErrTypeNotFound, issues[0].Code())
 	assert.Contains(t, result.String(), "not found")
@@ -569,7 +570,7 @@ func TestValidator_ValidateForComposition_RelationNotFound(t *testing.T) {
 
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 	assert.Equal(t, instance.ErrCompositionNotFound, issues[0].Code())
 	assert.Contains(t, result.String(), "not found")
@@ -599,7 +600,7 @@ func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
 	_, result := validator.ValidateForComposition(ctx, "Person", "addresses", raws)
 
 	require.True(t, result.HasFatal())
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, diag.E_CONTEXT_CANCELLED, issues[0].Code())
 }
@@ -619,7 +620,7 @@ func TestValidator_ValidateForComposition_ParentTypeNotFound_EmptyInput(t *testi
 
 	assert.Empty(t, valid)
 	require.False(t, result.OK())
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 	assert.Equal(t, instance.ErrTypeNotFound, issues[0].Code())
 }
@@ -643,7 +644,7 @@ func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *te
 	)
 
 	require.False(t, result.OK())
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 	assert.Equal(t, "test.json", issues[0].SourceName())
 }

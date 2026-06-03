@@ -1075,7 +1075,7 @@ func validateInstance(t *testing.T, v *instance.Validator, typeName string, prop
 	t.Helper()
 	valid, result := v.ValidateOne(context.Background(), typeName, instance.RawInstance{Properties: props})
 	if !result.OK() {
-		t.Fatalf("validate %s: %v", typeName, result.Messages())
+		t.Fatalf("validate %s: %v", typeName, result)
 	}
 	return valid
 }

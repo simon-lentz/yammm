@@ -28,7 +28,7 @@ func TestExtractSymbols_EmptySchema(t *testing.T) {
 
 	ctx := context.Background()
 	s, result := schema.LoadString(ctx, `schema "empty"`, "empty.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
+	require.False(t, result.HasErrors(), "load errors: %v", result)
 
 	syms := symbols.ExtractSymbols(s, nil)
 	assert.Len(t, syms, 1, "should contain only the schema itself")
@@ -48,7 +48,7 @@ type Person {
 }
 `
 	s, result := schema.LoadString(ctx, src, "person.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
+	require.False(t, result.HasErrors(), "load errors: %v", result)
 
 	syms := symbols.ExtractSymbols(s, nil)
 
@@ -82,7 +82,7 @@ func TestBuildSymbolIndex(t *testing.T) {
 
 	ctx := context.Background()
 	s, result := schema.LoadString(ctx, `schema "Index"`, "index.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
+	require.False(t, result.HasErrors(), "load errors: %v", result)
 
 	idx := symbols.BuildSymbolIndex(s, nil)
 	require.NotNil(t, idx, "symbols.BuildSymbolIndex() returned nil")
@@ -111,7 +111,7 @@ type Target {
 }
 `
 	s, result := schema.LoadString(ctx, src, "find.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
+	require.False(t, result.HasErrors(), "load errors: %v", result)
 
 	idx := symbols.BuildSymbolIndex(s, nil)
 
@@ -336,7 +336,7 @@ part type Wheel {
 }
 `
 	s, result := schema.LoadString(ctx, src, "abstract.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
+	require.False(t, result.HasErrors(), "load errors: %v", result)
 
 	syms := symbols.ExtractSymbols(s, nil)
 
@@ -414,7 +414,7 @@ func TestExtractSymbols_WithDataType(t *testing.T) {
 type ShortString = String[1, 50]
 `
 	s, result := schema.LoadString(ctx, src, "datatype.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
+	require.False(t, result.HasErrors(), "load errors: %v", result)
 
 	syms := symbols.ExtractSymbols(s, nil)
 
@@ -456,7 +456,7 @@ type Person {
 }
 `
 	s, result := schema.LoadString(ctx, src, "dtref.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
+	require.False(t, result.HasErrors(), "load errors: %v", result)
 
 	refs := symbols.ExtractReferences(s)
 
@@ -493,7 +493,7 @@ type User {
 	}
 
 	s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", tmpDir)
-	require.False(t, result.HasErrors(), "load errors: %v", result.Messages())
+	require.False(t, result.HasErrors(), "load errors: %v", result)
 
 	refs := symbols.ExtractReferences(s)
 

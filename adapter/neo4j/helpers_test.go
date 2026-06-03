@@ -36,7 +36,7 @@ func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, ins
 		for _, props := range records {
 			valid, valResult := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
 			if !valResult.OK() {
-				t.Fatalf("validate %s failed: %v", typeName, valResult.Messages())
+				t.Fatalf("validate %s failed: %v", typeName, valResult)
 			}
 			addResult := g.Add(ctx, valid)
 			if err := addResult.Err(); err != nil {
