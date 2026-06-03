@@ -608,3 +608,38 @@ func TestCoerce_TimestampCustomFormatDirect(t *testing.T) {
 		t.Error("RFC3339 string under a custom layout should error")
 	}
 }
+
+func TestCoerceParams_VectorElementCoercion(t *testing.T) {
+	t.Parallel()
+	// A Vector value carried as []any{int64...} — the shape a .ys snapshot load
+	// produces (NormalizeValue narrows whole-number JSON to int64), or a
+	// hand-built direct-Cypher param — must element-coerce to []float64, the same
+	// rule the List paths apply. A Vector is float-valued, so reaching the driver
+	// as []any (or a list of int64) would be rejected against its FLOAT-list type.
+	params := map[string]any{"embedding": []any{int64(1), int64(2), int64(3)}}
+	types := ParamTypes{"embedding": schema.NewVectorConstraint(3)}
+	out, err := CoerceParams(params, types)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	vec, ok := out["embedding"].([]float64)
+	if !ok {
+		t.Fatalf("Vector param not element-coerced: embedding is %T, want []float64", out["embedding"])
+	}
+	if len(vec) != 3 || vec[0] != 1 || vec[1] != 2 || vec[2] != 3 {
+		t.Fatalf("Vector elements wrong: %#v", vec)
+	}
+}
+
+func TestCoerceParams_ListValueUnderScalarConstraintErrors(t *testing.T) {
+	t.Parallel()
+	// A []any value declared under a scalar constraint is a shape mismatch: a
+	// scalar param cannot hold a list. Coercion errors rather than silently
+	// handing the driver a []any it will reject — the same fail-fast contract the
+	// element-type checks already enforce, applied to the container shape.
+	params := map[string]any{"score": []any{int64(1), int64(2)}}
+	types := ParamTypes{"score": schema.NewFloatConstraint()}
+	if _, err := CoerceParams(params, types); err == nil {
+		t.Fatal("want error for a list value under a scalar Float constraint, got nil")
+	}
+}

@@ -151,9 +151,18 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 
 // coerceValue coerces a single value against a schema constraint — the one
 // per-value rule shared by every coercion path. A []any is element-coerced via
-// [coerceSlice] (which needs the List element type the constraint carries);
-// every other value routes through the scalar [Coerce] chokepoint. A nil
-// constraint passes the value through unchanged.
+// [coerceSlice] against the constraint's List/Vector element type (and is an
+// error under a scalar constraint — a scalar cannot hold a list). Every other
+// value routes through the scalar [Coerce] chokepoint. A nil constraint passes
+// the value through unchanged.
+//
+// Shape note: a non-[]any value under a List or Vector constraint passes through
+// [Coerce] unchanged (Coerce treats collection kinds as scalar-passthrough). This
+// is deliberate — an already-typed collection value, such as an in-memory Vector
+// carried as []float64, must survive untouched rather than be rejected — and it
+// means the inverse shape mismatch (a genuine scalar mistakenly declared under a
+// collection constraint) is not caught here. Scalar-vs-collection shape is the
+// schema validator's authority; on the direct-Cypher path it is the caller's.
 //
 // Routing both the adapter write path ([propsToParamMap], [coerceRelProps]) and
 // the direct-Cypher param path ([CoerceParams]) through this function keeps

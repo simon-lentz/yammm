@@ -582,6 +582,127 @@ func TestCoerceSlice_TemporalParseFailure(t *testing.T) {
 	})
 }
 
+func TestCoerceSlice_VectorElements(t *testing.T) {
+	t.Parallel()
+	// A Vector property carried as []any (the shape a .ys snapshot load produces,
+	// with whole numbers narrowed to int64 by NormalizeValue) must reach the
+	// driver as []float64, not []any. A Vector is float-valued by definition, so
+	// it coerces elementwise exactly like a List<Float>.
+	s := loadSchema(t, "basic.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+	prop, ok := st.Property("embedding") // Vector[3]
+	if !ok {
+		t.Fatal("embedding property not found")
+	}
+	raw := []any{int64(1), int64(2), 3.5}
+	result, err := coerceSlice(raw, prop.Constraint())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out, ok := result.([]float64)
+	if !ok {
+		t.Fatalf("expected []float64 for a Vector, got %T", result)
+	}
+	if len(out) != 3 || out[0] != 1 || out[1] != 2 || out[2] != 3.5 {
+		t.Fatalf("vector elements not coerced to float64: %#v", out)
+	}
+}
+
+func TestCoerceSlice_ListValueUnderScalarConstraintErrors(t *testing.T) {
+	t.Parallel()
+	// A []any value under a scalar (non-List, non-Vector) constraint is a shape
+	// mismatch — a scalar property cannot hold a list. coerceSlice fails fast
+	// rather than returning the raw []any for the driver to reject.
+	s := loadSchema(t, "basic.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+	prop, ok := st.Property("score") // scalar Float
+	if !ok {
+		t.Fatal("score property not found")
+	}
+	if _, err := coerceSlice([]any{int64(1), int64(2)}, prop.Constraint()); err == nil {
+		t.Error("expected an error for a []any under a scalar constraint, got nil")
+	}
+}
+
+func TestPropsToParamMap_DeterministicError(t *testing.T) {
+	t.Parallel()
+	// When multiple node properties fail coercion — reachable when a .ys snapshot
+	// is loaded under a schema whose constraints its values no longer satisfy —
+	// the error names the lexicographically-first failing property on every run,
+	// matching CoerceParams, so a coercion failure is reproducible rather than
+	// dependent on map iteration order.
+	s := loadSchema(t, "basic.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+	props := immutable.WrapProperties(map[string]any{
+		"birth_date": "not-a-date",      // Date → coercion error
+		"created_at": "not-a-timestamp", // Timestamp → coercion error
+	})
+	var first string
+	for i := range 64 {
+		_, err := propsToParamMap(props, st)
+		if err == nil {
+			t.Fatal("want a coercion error, got nil")
+		}
+		if i == 0 {
+			first = err.Error()
+			continue
+		}
+		if err.Error() != first {
+			t.Fatalf("non-deterministic error: run %d = %q, first = %q", i, err.Error(), first)
+		}
+	}
+	if !strings.Contains(first, "birth_date") {
+		t.Errorf("error should name the lexicographically-first bad property (birth_date): %q", first)
+	}
+}
+
+func TestCoerceRelProps_DeterministicError(t *testing.T) {
+	t.Parallel()
+	// Edge-property counterpart of TestPropsToParamMap_DeterministicError: with
+	// multiple typed rel-props failing, the reported error is the
+	// lexicographically-first key on every run.
+	s := loadSchema(t, "edge_typed_props.yammm")
+	src, ok := s.Type("Source")
+	if !ok {
+		t.Fatal("Source not found")
+	}
+	rel, ok := src.Relation("LINKED_AT")
+	if !ok {
+		t.Fatal("LINKED_AT relation not found")
+	}
+	var first string
+	for i := range 64 {
+		// coerceRelProps mutates props in place, so build a fresh map per run.
+		props := map[string]any{
+			"observed_at": "not-a-timestamp", // Timestamp → coercion error
+			"weight":      "not-a-number",    // Float → coercion error (strict)
+		}
+		_, err := coerceRelProps(props, rel)
+		if err == nil {
+			t.Fatal("want a coercion error, got nil")
+		}
+		if i == 0 {
+			first = err.Error()
+			continue
+		}
+		if err.Error() != first {
+			t.Fatalf("non-deterministic error: run %d = %q, first = %q", i, err.Error(), first)
+		}
+	}
+	if !strings.Contains(first, "observed_at") {
+		t.Errorf("error should name the lexicographically-first bad rel-prop (observed_at): %q", first)
+	}
+}
+
 func TestPropertyCoercion_Scalars(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "basic.yammm")

@@ -66,3 +66,16 @@ func TestCollect_PanicsOnZeroIssue(t *testing.T) {
 	}()
 	Collect(Issue{})
 }
+
+func TestCollect_PanicsOnInvalidIssue(t *testing.T) {
+	t.Parallel()
+	// Collect validates each issue exactly like Collector.Collect: a non-zero but
+	// invalid Issue (here a code with no message or severity, as a direct struct
+	// literal produces) panics, catching construction that bypassed the builder.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Collect(invalid Issue) did not panic; want panic matching Collector.Collect")
+		}
+	}()
+	Collect(Issue{code: E_SYNTAX})
+}

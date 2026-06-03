@@ -509,14 +509,20 @@ func (a *Adapter) BatchEdgeQueries(
 // values carried as strings — so the driver receives native types that satisfy
 // Neo4j TYPE constraints (IS :: FLOAT, IS :: DATE, IS :: ZONED DATETIME).
 // Returns an error, naming the offending property, if a value cannot be coerced
-// to its declared kind (e.g. an unparseable Timestamp/Date string).
+// to its declared kind (e.g. an unparseable Timestamp/Date string). Properties
+// are processed in sorted key order, so when several fail the error names the
+// lexicographically-first failing property on every run — matching [CoerceParams],
+// the failure is reproducible rather than map-iteration-order dependent. The
+// output map is independent of key order (maps are unordered); only error
+// selection is affected.
 func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[string]any, error) {
 	raw := props.Clone()
 	if schemaType == nil {
 		return raw, nil
 	}
 
-	for key, val := range raw {
+	for _, key := range slices.Sorted(maps.Keys(raw)) {
+		val := raw[key]
 		if val == nil {
 			continue
 		}
@@ -533,11 +539,15 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 	return raw, nil
 }
 
-// coerceSlice converts a []any to a concrete typed slice using the list
-// constraint's element kind, so a List<T> property reaches the driver as the
+// coerceSlice converts a []any to a concrete typed slice using the constraint's
+// element kind, so a List<T> or Vector property reaches the driver as the
 // homogeneous Go slice Neo4j requires ([]string, []float64, []dbtype.Date, ...).
-// Per-element value conversion delegates to [Coerce] so the Float int-repair and
-// temporal-parse rules live in one place; coerceSlice owns only the slice typing.
+// A Vector is float-valued by definition (matching the eval package's checkVector
+// / coerceVector), so it coerces elementwise exactly as a List<Float> would; this
+// is what repairs a snapshot-loaded vector, which arrives as []any with whole
+// numbers narrowed to int64 by NormalizeValue. Per-element value conversion
+// delegates to [Coerce] so the Float int-repair and temporal-parse rules live in
+// one place; coerceSlice owns only the slice typing.
 //
 // An element that is neither the element type nor coercible to it — a non-numeric
 // in a List<Float>, an unparseable or wrong-typed value in a List<Date> — is an
@@ -545,15 +555,22 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // column, so failing here beats shipping a slice the driver rejects. On the
 // validated node path this never fires (instance validation already enforced each
 // element's type); it guards the direct-Cypher path, where the param map is
-// hand-built. A non-List constraint, or an element kind with no concrete driver
-// slice type, returns the slice unchanged — there is no element typing to apply.
+// hand-built. A []any value under a scalar (non-List, non-Vector) constraint is a
+// shape mismatch — a scalar property cannot hold a list — and is an error too. An
+// element kind with no concrete driver slice type (e.g. a nested List) returns the
+// slice unchanged.
 func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	c = schema.ResolveAlias(c)
-	lc, ok := c.(schema.ListConstraint)
-	if !ok {
-		return raw, nil
+	var elem schema.Constraint
+	switch cc := c.(type) {
+	case schema.ListConstraint:
+		elem = schema.ResolveAlias(cc.Element())
+	case schema.VectorConstraint:
+		// A Vector's elements are floats; coerce them as a List<Float>'s.
+		elem = schema.NewFloatConstraint()
+	default:
+		return nil, fmt.Errorf("cannot coerce a list value against a scalar %s constraint", c.Kind())
 	}
-	elem := schema.ResolveAlias(lc.Element())
 	switch elem.Kind() {
 	case schema.KindString, schema.KindUUID, schema.KindEnum, schema.KindPattern:
 		out := make([]string, len(raw))
@@ -644,13 +661,16 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 // scalar-only path, so this stays correct if that rule ever changes.
 //
 // Properties not declared on rel pass through unchanged; a nil relation, or one
-// with no declared properties, returns props untouched. Mutates and returns
-// props, which callers pass as a fresh clone.
+// with no declared properties, returns props untouched. Properties are processed
+// in sorted key order, so a coercion error names the lexicographically-first
+// failing property on every run (matching [CoerceParams] and [propsToParamMap]).
+// Mutates and returns props, which callers pass as a fresh clone.
 func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any, error) {
 	if rel == nil || !rel.HasProperties() {
 		return props, nil
 	}
-	for k, v := range props {
+	for _, k := range slices.Sorted(maps.Keys(props)) {
+		v := props[k]
 		p, ok := rel.Property(k)
 		if !ok || v == nil {
 			continue
