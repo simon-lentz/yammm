@@ -65,6 +65,29 @@ func ToLowerCamel(s string) string {
 	return joinCamelTokens(splitIdentifier(s), true)
 }
 
+// ToUpperCamelInitialisms is [ToUpperCamel] with caller-supplied initialism
+// awareness: a name segment whose lower-case form is a key in initialisms is
+// upper-cased wholesale — e.g. with {"id": true, "url": true}, "user_id" ->
+// "UserID" and "base_url" -> "BaseURL". Acronym runs already upper-case in the
+// input are preserved as before.
+//
+// The caller owns the initialism set; this package holds no vocabulary of its
+// own, so domain-specific acronyms stay with the consumer. A nil or empty set
+// makes this equivalent to [ToUpperCamel].
+//
+// It reuses the same tokenizer as [ToUpperCamel]; a matching word token is
+// promoted to an acronym before joining, so no join logic is duplicated.
+func ToUpperCamelInitialisms(s string, initialisms map[string]bool) string {
+	tokens := splitIdentifier(s)
+	for i := range tokens {
+		t := &tokens[i]
+		if !t.isNumber && !t.isAcronym && initialisms[strings.ToLower(t.text)] {
+			t.isAcronym = true
+		}
+	}
+	return joinCamelTokens(tokens, false)
+}
+
 type token struct {
 	text      string
 	isNumber  bool

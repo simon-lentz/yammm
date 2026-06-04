@@ -176,6 +176,35 @@ func TestToUpperCamel(t *testing.T) {
 	}
 }
 
+// TestToUpperCamelInitialisms tests caller-supplied initialism-aware UpperCamel
+// conversion: only segments present in the supplied set are upper-cased wholesale.
+func TestToUpperCamelInitialisms(t *testing.T) {
+	inits := map[string]bool{"id": true, "url": true, "http": true, "json": true}
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "plain word", input: "color", want: "Color"},
+		{name: "snake non-initialism", input: "first_name", want: "FirstName"},
+		{name: "initialism alone", input: "id", want: "ID"},
+		{name: "trailing initialism", input: "user_id", want: "UserID"},
+		{name: "trailing initialism url", input: "base_url", want: "BaseURL"},
+		{name: "leading initialism", input: "http_server", want: "HTTPServer"},
+		{name: "embedded initialism", input: "json_payload", want: "JSONPayload"},
+		{name: "word outside supplied set", input: "api_key", want: "ApiKey"},
+		{name: "non-initialism word", input: "name", want: "Name"},
+		{name: "empty", input: "", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ident.ToUpperCamelInitialisms(tt.input, inits)
+			assert.Equal(t, tt.want, got, "ToUpperCamelInitialisms(%q)", tt.input)
+		})
+	}
+}
+
 // TestToLowerCamel tests the ToLowerCamel function.
 func TestToLowerCamel(t *testing.T) {
 	tests := []struct {
