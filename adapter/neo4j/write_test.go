@@ -208,8 +208,8 @@ func TestEdgeQueryFor_Basic(t *testing.T) {
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
-		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test Issue", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+		"Publisher": {{"publisher_id": "iss1", "name": "Test Publisher"}},
+		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test Book", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
 	edges := graphResult.Edges()
@@ -244,8 +244,8 @@ func TestEdgeQueryFor_NoProperties(t *testing.T) {
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
-		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test Issue", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+		"Publisher": {{"publisher_id": "iss1", "name": "Test Publisher"}},
+		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test Book", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
 	edges := graphResult.Edges()
@@ -280,13 +280,13 @@ func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Issuer": {
-			{"issuer_id": "iss1", "name": "Issuer 1"},
-			{"issuer_id": "iss2", "name": "Issuer 2"},
+		"Publisher": {
+			{"publisher_id": "iss1", "name": "Publisher 1"},
+			{"publisher_id": "iss2", "name": "Publisher 2"},
 		},
-		"Issue": {
-			{"issuer_id": "iss1", "issue_id": "i1", "title": "Issue 1", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}},
-			{"issuer_id": "iss2", "issue_id": "i2", "title": "Issue 2", "in_issuer": map[string]any{"_target_issuer_id": "iss2"}},
+		"Book": {
+			{"publisher_id": "iss1", "book_id": "i1", "title": "Book 1", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}},
+			{"publisher_id": "iss2", "book_id": "i2", "title": "Book 2", "by_publisher": map[string]any{"_target_publisher_id": "iss2"}},
 		},
 	})
 
@@ -295,8 +295,8 @@ func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// All edges have the same signature (Issue->IN_ISSUER->Issuer), so 1 query.
-	// (Plus the reverse ISSUES edges from Issuer->Issue.)
+	// All edges have the same signature (Book->BY_PUBLISHER->Publisher), so 1 query.
+	// (Plus the reverse PUBLISHES edges from Publisher->Book.)
 	if len(queries) == 0 {
 		t.Fatal("expected at least one batch edge query")
 	}
@@ -323,20 +323,20 @@ func TestBatchEdgeQueries_Chunking(t *testing.T) {
 	}
 
 	// Create enough edges to trigger chunking.
-	var issuers []map[string]any
+	var publishers []map[string]any
 	var issues []map[string]any
 	for i := range 5 {
-		issuerID := fmt.Sprintf("iss%d", i)
-		issuers = append(issuers, map[string]any{"issuer_id": issuerID, "name": fmt.Sprintf("I%d", i)})
+		publisherID := fmt.Sprintf("iss%d", i)
+		publishers = append(publishers, map[string]any{"publisher_id": publisherID, "name": fmt.Sprintf("I%d", i)})
 		issues = append(issues, map[string]any{
-			"issuer_id": issuerID, "issue_id": fmt.Sprintf("i%d", i),
-			"title": fmt.Sprintf("T%d", i), "in_issuer": map[string]any{"_target_issuer_id": issuerID},
+			"publisher_id": publisherID, "book_id": fmt.Sprintf("i%d", i),
+			"title": fmt.Sprintf("T%d", i), "by_publisher": map[string]any{"_target_publisher_id": publisherID},
 		})
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Issuer": issuers,
-		"Issue":  issues,
+		"Publisher": publishers,
+		"Book":      issues,
 	})
 
 	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, shape, WithEdgeChunkSize(2))
@@ -929,8 +929,8 @@ func TestEdgeQueryFor_MissingSourceShape(t *testing.T) {
 	a := New()
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Issuer": {{"issuer_id": "iss1", "name": "Test"}},
-		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+		"Publisher": {{"publisher_id": "iss1", "name": "Test"}},
+		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
 	edges := graphResult.Edges()
@@ -957,8 +957,8 @@ func TestBatchEdgeQueries_MissingShape(t *testing.T) {
 	a := New()
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Issuer": {{"issuer_id": "iss1", "name": "Test"}},
-		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+		"Publisher": {{"publisher_id": "iss1", "name": "Test"}},
+		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
 	emptyShapes := &GraphShape{Types: map[string]NodeShape{}}
@@ -1170,8 +1170,8 @@ func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
 	}
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Issuer": {{"issuer_id": "iss1", "name": "Test"}},
-		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+		"Publisher": {{"publisher_id": "iss1", "name": "Test"}},
+		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
 	edges := graphResult.Edges()
@@ -1212,15 +1212,15 @@ func TestEdgeQueriesFor_Basic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create an Issue that references an Issuer via IN_ISSUER.
-	valid := validateInstance(t, v, "Issue", map[string]any{
-		"issuer_id": "iss1",
-		"issue_id":  "issue1",
-		"title":     "Test Issue",
-		"in_issuer": map[string]any{"_target_issuer_id": "iss1"},
+	// Create an Book that references an Publisher via BY_PUBLISHER.
+	valid := validateInstance(t, v, "Book", map[string]any{
+		"publisher_id": "iss1",
+		"book_id":      "book1",
+		"title":        "Test Book",
+		"by_publisher": map[string]any{"_target_publisher_id": "iss1"},
 	})
 
-	st, _ := s.Type("Issue")
+	st, _ := s.Type("Book")
 	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
 	if err != nil {
 		t.Fatal(err)
@@ -1231,21 +1231,21 @@ func TestEdgeQueriesFor_Basic(t *testing.T) {
 	}
 
 	q := queries[0]
-	if !strings.Contains(q.Statement, "MERGE (from)-[r:IN_ISSUER]->(to)") {
+	if !strings.Contains(q.Statement, "MERGE (from)-[r:BY_PUBLISHER]->(to)") {
 		t.Errorf("unexpected statement: %s", q.Statement)
 	}
-	if !strings.Contains(q.Statement, "MATCH (from:write_test__Issue") {
+	if !strings.Contains(q.Statement, "MATCH (from:write_test__Book") {
 		t.Errorf("missing source MATCH: %s", q.Statement)
 	}
-	if !strings.Contains(q.Statement, "MATCH (to:write_test__Issuer") {
+	if !strings.Contains(q.Statement, "MATCH (to:write_test__Publisher") {
 		t.Errorf("missing target MATCH: %s", q.Statement)
 	}
 	// Source keys use from_key_ prefix.
-	if q.Params["from_key_issuer_id"] != "iss1" || q.Params["from_key_issue_id"] != "issue1" {
+	if q.Params["from_key_publisher_id"] != "iss1" || q.Params["from_key_book_id"] != "book1" {
 		t.Errorf("unexpected source key params: %v", q.Params)
 	}
 	// Target key uses to_key_ prefix.
-	if q.Params["to_key_issuer_id"] != "iss1" {
+	if q.Params["to_key_publisher_id"] != "iss1" {
 		t.Errorf("unexpected target key params: %v", q.Params)
 	}
 }
@@ -1260,17 +1260,17 @@ func TestEdgeQueriesFor_MultiTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Issuer with ISSUES pointing to multiple Issues.
-	valid := validateInstance(t, v, "Issuer", map[string]any{
-		"issuer_id": "iss1",
-		"name":      "Test Issuer",
-		"issues": []any{
-			map[string]any{"_target_issuer_id": "iss1", "_target_issue_id": "issue1"},
-			map[string]any{"_target_issuer_id": "iss1", "_target_issue_id": "issue2"},
+	// Publisher with PUBLISHES pointing to multiple Books.
+	valid := validateInstance(t, v, "Publisher", map[string]any{
+		"publisher_id": "iss1",
+		"name":         "Test Publisher",
+		"publishes": []any{
+			map[string]any{"_target_publisher_id": "iss1", "_target_book_id": "book1"},
+			map[string]any{"_target_publisher_id": "iss1", "_target_book_id": "book2"},
 		},
 	})
 
-	st, _ := s.Type("Issuer")
+	st, _ := s.Type("Publisher")
 	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
 	if err != nil {
 		t.Fatal(err)
@@ -1280,7 +1280,7 @@ func TestEdgeQueriesFor_MultiTarget(t *testing.T) {
 		t.Fatalf("got %d queries; want 2", len(queries))
 	}
 	for _, q := range queries {
-		if !strings.Contains(q.Statement, "MERGE (from)-[r:ISSUES]->(to)") {
+		if !strings.Contains(q.Statement, "MERGE (from)-[r:PUBLISHES]->(to)") {
 			t.Errorf("unexpected statement: %s", q.Statement)
 		}
 	}
@@ -1362,25 +1362,25 @@ func TestEdgeQueriesFor_MissingTargetShape(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
 	a := New()
 
-	valid := validateInstance(t, v, "Issue", map[string]any{
-		"issuer_id": "iss1",
-		"issue_id":  "issue1",
-		"title":     "Test",
-		"in_issuer": map[string]any{"_target_issuer_id": "iss1"},
+	valid := validateInstance(t, v, "Book", map[string]any{
+		"publisher_id": "iss1",
+		"book_id":      "book1",
+		"title":        "Test",
+		"by_publisher": map[string]any{"_target_publisher_id": "iss1"},
 	})
 
-	// Provide shapes with only Issue (no Issuer shape).
+	// Provide shapes with only Book (no Publisher shape).
 	incompleteShapes := &GraphShape{
 		Types: map[string]NodeShape{
-			"Issue": {
-				Type:        "Issue",
-				Label:       "write_test__Issue",
-				PrimaryKeys: []string{"issuer_id", "issue_id"},
+			"Book": {
+				Type:        "Book",
+				Label:       "write_test__Book",
+				PrimaryKeys: []string{"publisher_id", "book_id"},
 			},
 		},
 	}
 
-	st, _ := s.Type("Issue")
+	st, _ := s.Type("Book")
 	_, err := a.EdgeQueriesFor(context.Background(), valid, st, incompleteShapes)
 	if err == nil {
 		t.Fatal("expected error for missing target shape")

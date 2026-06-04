@@ -150,7 +150,7 @@ func TestCoerceParams_TemporalGood(t *testing.T) {
 
 func TestCoerceParams_BadTemporalErrors(t *testing.T) {
 	// yammm's Coerce returns an error on an unparseable Timestamp/Date; the
-	// param boundary surfaces it (rdata's mirror passed these through).
+	// param boundary surfaces it (a naive passthrough would let these through).
 	if _, err := CoerceParams(
 		map[string]any{"ts": "not-a-timestamp"},
 		ParamTypes{"ts": schema.NewTimestampConstraint()},
@@ -183,28 +183,28 @@ func TestCoerceParams_NilOrEmptyTypesPassThrough(t *testing.T) {
 
 func TestCoerceParams_NestedRowsAndError(t *testing.T) {
 	types := ParamTypes{
-		"rows.principal_amount": schema.NewFloatConstraint(),
-		"rows.closing_date":     schema.NewDateConstraint(),
+		"rows.unit_price":   schema.NewFloatConstraint(),
+		"rows.release_date": schema.NewDateConstraint(),
 	}
 	params := map[string]any{"rows": []map[string]any{
-		{"id": "a", "principal_amount": int64(5), "closing_date": "2026-04-22"},
+		{"id": "a", "unit_price": int64(5), "release_date": "2026-04-22"},
 	}}
 	out, err := CoerceParams(params, types)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	row := out["rows"].([]map[string]any)[0]
-	if _, ok := row["principal_amount"].(float64); !ok {
-		t.Fatalf("principal_amount not coerced to float64: %T", row["principal_amount"])
+	if _, ok := row["unit_price"].(float64); !ok {
+		t.Fatalf("unit_price not coerced to float64: %T", row["unit_price"])
 	}
-	if _, ok := row["closing_date"].(dbtype.Date); !ok {
-		t.Fatalf("closing_date not coerced to dbtype.Date: %T", row["closing_date"])
+	if _, ok := row["release_date"].(dbtype.Date); !ok {
+		t.Fatalf("release_date not coerced to dbtype.Date: %T", row["release_date"])
 	}
 	if row["id"] != "a" {
 		t.Fatalf("untyped row field should pass through, got %#v", row["id"])
 	}
 
-	bad := map[string]any{"rows": []map[string]any{{"closing_date": "nope"}}}
+	bad := map[string]any{"rows": []map[string]any{{"release_date": "nope"}}}
 	if _, err := CoerceParams(bad, types); err == nil {
 		t.Fatal("want error when a row value fails coercion, got nil")
 	}
@@ -213,13 +213,13 @@ func TestCoerceParams_NestedRowsAndError(t *testing.T) {
 func TestCoerceParams_NestedMap(t *testing.T) {
 	params := map[string]any{
 		"updates": map[string]any{
-			"closing_date": "2026-04-22",
+			"release_date": "2026-04-22",
 			"principal":    int64(1860000),
 			"passthrough":  "unchanged",
 		},
 	}
 	types := ParamTypes{
-		"updates.closing_date": schema.NewDateConstraint(),
+		"updates.release_date": schema.NewDateConstraint(),
 		"updates.principal":    schema.NewFloatConstraint(),
 	}
 	out, err := CoerceParams(params, types)
@@ -227,8 +227,8 @@ func TestCoerceParams_NestedMap(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	updates := out["updates"].(map[string]any)
-	if _, ok := updates["closing_date"].(dbtype.Date); !ok {
-		t.Fatalf("updates.closing_date: want dbtype.Date, got %T", updates["closing_date"])
+	if _, ok := updates["release_date"].(dbtype.Date); !ok {
+		t.Fatalf("updates.release_date: want dbtype.Date, got %T", updates["release_date"])
 	}
 	if _, ok := updates["principal"].(float64); !ok {
 		t.Fatalf("updates.principal: want float64, got %T", updates["principal"])

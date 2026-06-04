@@ -53,15 +53,15 @@ func TestHandleHover_WithUnit(t *testing.T) {
 }
 
 // TestHandleHover_CrossSchemaQualifiedRef verifies that hovering on a qualified
-// type reference (states.GeoState) resolves through the import to the imported
+// type reference (region.Region) resolves through the import to the imported
 // type and renders its hover documentation.
 func TestHandleHover_CrossSchemaQualifiedRef(t *testing.T) {
 	t.Parallel()
 
 	snapshot, doc, _ := buildCrossSchemaSnapshot(t)
 
-	// Entry line 4: "type Linkage extends states.GeoState {"
-	// Character 28 is on 'G' of 'GeoState' in the qualified reference.
+	// Entry line 4: "type Listing extends region.Region {"
+	// Character 28 is on 'R' of 'Region' in the qualified reference.
 	h := handleHover(&fakeResolver{
 		unit: &workspace.Unit{
 			Snapshot:  snapshot,
@@ -81,6 +81,6 @@ func TestHandleHover_CrossSchemaQualifiedRef(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result, "hover should resolve cross-schema qualified type reference")
-	assert.Contains(t, result.Contents.Value, "GeoState",
+	assert.Contains(t, result.Contents.Value, "Region",
 		"hover content should mention the imported type name")
 }

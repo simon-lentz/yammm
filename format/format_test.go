@@ -731,9 +731,9 @@ func TestAlignColumns_RelationshipNamePadding(t *testing.T) {
 func TestAlignColumns_AliasNamePadding(t *testing.T) {
 	t.Parallel()
 
-	input := "type Email = Pattern[\"^.+@.+$\"]\ntype StateFP = String[2, 2]\n"
-	// Email(5), StateFP(7) -> max 7
-	expected := "type Email   = Pattern[\"^.+@.+$\"]\ntype StateFP = String[2, 2]\n"
+	input := "type Email = Pattern[\"^.+@.+$\"]\ntype Country = String[2, 2]\n"
+	// Email(5), Country(7) -> max 7
+	expected := "type Email   = Pattern[\"^.+@.+$\"]\ntype Country = String[2, 2]\n"
 
 	result := AlignColumns(input)
 	assert.Equal(t, expected, result, "AlignColumns()")
@@ -813,7 +813,7 @@ func TestAlignColumns_Idempotent(t *testing.T) {
 	inputs := []string{
 		"\tname String required\n\tage Integer\n\tscore Float\n",
 		"\t--> REL (_:many) Target\n\t--> REL2 (_:one) Target\n",
-		"type Email = Pattern[\"^.+@.+$\"]\ntype StateFP = String[2, 2]\n",
+		"type Email = Pattern[\"^.+@.+$\"]\ntype Country = String[2, 2]\n",
 		"\tname String // the name\n\tage Integer // age\n",
 	}
 
@@ -1023,13 +1023,13 @@ func TestWrapLongLines_ShortDatatypeAliasUnchanged(t *testing.T) {
 func TestWrapLongLines_LongDatatypeAliasWraps(t *testing.T) {
 	t.Parallel()
 
-	input := "type DeactivatedReason = Enum[\"removed_from_source\", \"matured\", \"merged\", \"manual\", \"superseded\", \"error_corrected\"]\n"
+	input := "type RetirementReason = Enum[\"deprecated_entry\", \"replaced\", \"merged\", \"manual\", \"consolidated\", \"corrected\"]\n"
 	require.Greater(t, DisplayWidth(strings.TrimSuffix(input, "\n")), LineWidthThreshold, "test input should exceed threshold")
 
 	result := WrapLongLines(input)
 
 	assert.Contains(t, result, "= Enum[\n", "expected Enum[ on first line")
-	assert.Contains(t, result, "\t\"removed_from_source\",\n", "expected values indented")
+	assert.Contains(t, result, "\t\"deprecated_entry\",\n", "expected values indented")
 }
 
 func TestWrapLongLines_DatatypeAliasCollapses(t *testing.T) {
@@ -1054,7 +1054,7 @@ func TestWrapLongLines_ShortInvariantUnchanged(t *testing.T) {
 func TestWrapLongLines_LongInvariantWrapsAtOr(t *testing.T) {
 	t.Parallel()
 
-	input := "\t! \"geo_check\" (geo_type == \"state\" && Len(geoid) == 2) || (geo_type == \"county\" && Len(geoid) == 5) || (geo_type == \"place\" && Len(geoid) == 7)\n"
+	input := "\t! \"size_check\" (kind == \"small\" && Len(code) == 2) || (kind == \"medium\" && Len(code) == 5) || (kind == \"large\" && Len(code) == 7)\n"
 	require.Greater(t, DisplayWidth(strings.TrimSuffix(input, "\n")), LineWidthThreshold, "test input should exceed threshold")
 
 	result := WrapLongLines(input)
@@ -1062,7 +1062,7 @@ func TestWrapLongLines_LongInvariantWrapsAtOr(t *testing.T) {
 	// First line should be just the prefix
 	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
 	require.GreaterOrEqual(t, len(lines), 2, "expected multiple lines")
-	assert.Equal(t, "! \"geo_check\"", strings.TrimSpace(lines[0]), "first line should be just the prefix")
+	assert.Equal(t, "! \"size_check\"", strings.TrimSpace(lines[0]), "first line should be just the prefix")
 	// Operator should be at end of line
 	assert.True(t, strings.HasSuffix(strings.TrimSpace(lines[1]), "||"), "operator should be at end of line, got: %q", lines[1])
 }
@@ -1203,9 +1203,9 @@ func TestWrapLongLines_Idempotent(t *testing.T) {
 		// Long extends
 		"type ComplexEntity extends Auditable, Trackable, Validatable, Serializable, Cacheable, Observable, Publishable {\n",
 		// Long alias
-		"type DeactivatedReason = Enum[\"removed_from_source\", \"matured\", \"merged\", \"manual\", \"superseded\", \"error_corrected\"]\n",
+		"type RetirementReason = Enum[\"deprecated_entry\", \"replaced\", \"merged\", \"manual\", \"consolidated\", \"corrected\"]\n",
 		// Long invariant
-		"\t! \"geo_check\" (geo_type == \"state\" && Len(geoid) == 2) || (geo_type == \"county\" && Len(geoid) == 5) || (geo_type == \"place\" && Len(geoid) == 7)\n",
+		"\t! \"size_check\" (kind == \"small\" && Len(code) == 2) || (kind == \"medium\" && Len(code) == 5) || (kind == \"large\" && Len(code) == 7)\n",
 		// Multiline Enum (collapsible)
 		"\tstatus Enum[\n\t\t\"a\",\n\t\t\"b\",\n\t] required\n",
 		// Multiline extends (collapsible)

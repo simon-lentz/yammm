@@ -20,7 +20,7 @@ type RemoteConstraint struct {
 //
 // Parse from database output via [ParseRemoteRelationships].
 type RemoteRelationship struct {
-	RelationType string   // e.g., "WORKS_AT", "IN_STATE"
+	RelationType string   // e.g., "WORKS_AT", "IN_REGION"
 	SourceLabels []string // Labels on source nodes
 	TargetLabels []string // Labels on target nodes
 }

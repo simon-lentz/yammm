@@ -55,7 +55,7 @@ func TestDepGraph_CascadeTrigger_ThreeLevelDAG(t *testing.T) {
 	dg := newTestDepGraph()
 	log := testLogger()
 
-	// Simulate rdata's 3-level DAG:
+	// Simulate a 3-level import DAG:
 	// foundation.yammm is imported by 7 downstream entries.
 	foundation := "/schemas/foundation.yammm"
 	foundationURI := lsputil.PathToURI(foundation)

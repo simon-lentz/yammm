@@ -67,7 +67,7 @@ After the `v1.0.0` release, yammm commits to the stricter semver contract that c
 
 The v0.3.0 release is the first to explicitly apply this policy. v0.3.0 carries:
 
-- **Two subtractive API removals** — `instance.Builder` (plus companion `EdgeBuilder`, `NewInstance`) and the `graph/walk` package. Justified under pre-1.0's "removal with documented no-consumers" rule. Release notes enumerate both; both removals verified against yammm itself (including the CLI binary at `cmd/yammm/`), the `lsp/` subpackage, and the known downstream consumer (rdata) as of 2026-04-17.
+- **Two subtractive API removals** — `instance.Builder` (plus companion `EdgeBuilder`, `NewInstance`) and the `graph/walk` package. Justified under pre-1.0's "removal with documented no-consumers" rule. Release notes enumerate both; both removals verified against yammm itself (including the CLI binary at `cmd/yammm/`), the `lsp/` subpackage, and the known downstream consumer as of 2026-04-17.
 - **One behavior tightening** — `schema.Registry.Register` becomes idempotent for exact `(SourceID, StructuralHash)` re-registration, paired with a loader-side cross-`Load` short-circuit. Justified under the "correctness-preserving tightening" rule. Release notes document both the contract and the paired loader change.
 - **One wire-format version bump** — `.ys` v1 → v2 for §6's `UnresolvedEdge.Properties` addition. Required because the field is non-`omitempty`-safe at v1 readers; the bump is paired with the existing unknown-version-rejection path so v0.2.x binaries error cleanly on v0.3.0-written documents rather than round-tripping corrupted data. Release notes document both the bump and the asymmetric-reader semantics (v2 accepts v1 losslessly; v1 rejects v2 cleanly).
 
@@ -85,11 +85,11 @@ v0.4.0 bundles two independent, separately-reviewable streams, co-tagged once bo
 
   One addition rides the same release: `diag.Collect(issues ...Issue) Result`.
 
-  Justified under the **amended pre-1.0 rule (a)** (broadened 2026-06-02): there are zero external uncoordinated callers — every in-repo user (the two `graph` call sites and the ~115 test call sites across six packages that used the removed accessors) was updated in-tree, and the sole external consumer (rdata) pins `v0.3.1` with its migration tracked as a downstream backlog item, so tagging `v0.4.0` cannot break its build. Per conditions (b) and (c), the release notes enumerate every removed, renamed, and signature-changed symbol.
+  Justified under the **amended pre-1.0 rule (a)** (broadened 2026-06-02): there are zero external uncoordinated callers — every in-repo user (the two `graph` call sites and the ~115 test call sites across six packages that used the removed accessors) was updated in-tree, and the sole external consumer pins `v0.3.1` with its migration tracked as a downstream backlog item, so tagging `v0.4.0` cannot break its build. Per conditions (b) and (c), the release notes enumerate every removed, renamed, and signature-changed symbol.
 
 The `.ys` wire format is unchanged at v0.4.0 (header `version` stays `2`). Both streams are documented inline in the v0.4.0 release notes with pointers back to this document's relevant policy sections.
 
 ## Revision history
 
 - **2026-04-17** — Initial document, added as part of v0.3.0 release prep.
-- **2026-06-02** — Broadened the pre-1.0 minor-release rule from "removal of exported symbols" to also cover breaking signature, name, and type changes, and added a version-pinned-consumer carve-out to condition (a): a breaking change is permitted when the only external references live in a consumer pinned to an older yammm release whose migration is tracked downstream. Motivated by the v0.4.0 `diag` surface tightening, whose sole external consumer (rdata) pins `v0.3.1` and migrates on its own schedule.
+- **2026-06-02** — Broadened the pre-1.0 minor-release rule from "removal of exported symbols" to also cover breaking signature, name, and type changes, and added a version-pinned-consumer carve-out to condition (a): a breaking change is permitted when the only external references live in a consumer pinned to an older yammm release whose migration is tracked downstream. Motivated by the v0.4.0 `diag` surface tightening, whose sole external consumer pins `v0.3.1` and migrates on its own schedule.

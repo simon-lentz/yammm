@@ -71,8 +71,8 @@ type SchemaBuilder struct {
 	errors       []*buildError
 
 	// relByFieldName is a lazy-built secondary index that maps FieldName()
-	// (lower_snake form, e.g. "in_county") to its relation. Built on first
-	// miss against typ.Relation (which indexes by DSL name, e.g. "IN_COUNTY")
+	// (lower_snake form, e.g. "in_district") to its relation. Built on first
+	// miss against typ.Relation (which indexes by DSL name, e.g. "IN_DISTRICT")
 	// so callers using either form resolve without needing to know which
 	// the schema author used.
 	relByFieldName map[string]*schema.Relation
@@ -173,12 +173,12 @@ func (b *SchemaBuilder) Property(name string, value any) *SchemaBuilder {
 // associations that do NOT declare edge properties. Variadic targetKey
 // supports single-component and composite primary keys:
 //
-//	b.EdgeTo("in_state", stateFP)              // single-component PK
-//	b.EdgeTo("part_of", issuerID, issueID)     // composite PK
+//	b.EdgeTo("in_region", regionCode)              // single-component PK
+//	b.EdgeTo("part_of", publisherID, bookID)     // composite PK
 //	b.EdgeTo("part_of", prebuiltKey...)        // pre-built slice
 //
-// name accepts either the schema's DSL form (e.g. "IN_STATE") or the
-// lower_snake FieldName form (e.g. "in_state"); both resolve to the same
+// name accepts either the schema's DSL form (e.g. "IN_REGION") or the
+// lower_snake FieldName form (e.g. "in_region"); both resolve to the same
 // relation.
 //
 // For "many"-cardinality relations, call EdgeTo multiple times — once per
@@ -201,10 +201,10 @@ func (b *SchemaBuilder) EdgeTo(name string, targetKey ...any) *SchemaBuilder {
 // unambiguous at the call site — no accidental absorption of the map into
 // a variadic key slot.
 //
-//	b.EdgeToWith("overlaps_county", []any{countyGEOID}, map[string]any{
+//	b.EdgeToWith("overlaps_district", []any{districtGEOID}, map[string]any{
 //	    "overlap_pct": 85.3,
 //	})
-//	b.EdgeToWith("part_of_weighted", []any{issuerID, issueID}, map[string]any{
+//	b.EdgeToWith("part_of_weighted", []any{publisherID, bookID}, map[string]any{
 //	    "weight": 0.5,
 //	})
 //
@@ -657,7 +657,7 @@ func (b *SchemaBuilder) firstErrorWithCount() error {
 }
 
 // resolveRelation looks up a relation by name, accepting either the DSL form
-// (e.g. "IN_COUNTY") or the FieldName form (e.g. "in_county"). Returns the
+// (e.g. "IN_DISTRICT") or the FieldName form (e.g. "in_district"). Returns the
 // resolved *schema.Relation and true on success; zero value and false on
 // miss.
 func (b *SchemaBuilder) resolveRelation(name string) (*schema.Relation, bool) {

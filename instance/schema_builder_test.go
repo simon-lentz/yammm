@@ -44,8 +44,8 @@ func personSchema(t *testing.T) *schema.Schema {
 		WithPrimaryKey("vin", schema.NewStringConstraint()).
 		Done().
 		AddType("Part").
-		WithPrimaryKey("issuer_id", schema.NewStringConstraint()).
-		WithPrimaryKey("issue_id", schema.NewStringConstraint()).
+		WithPrimaryKey("publisher_id", schema.NewStringConstraint()).
+		WithPrimaryKey("book_id", schema.NewStringConstraint()).
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
@@ -238,12 +238,12 @@ func TestSchemaBuilder_EdgeTo_CompositePK(t *testing.T) {
 	raw, err := b.
 		Property("id", "p1").
 		Property("name", "Alice").
-		EdgeTo("has_part", "issuer-1", "issue-99").
+		EdgeTo("has_part", "publisher-1", "book-99").
 		Build()
 	require.NoError(t, err)
 	edge, _ := raw.Properties["has_part"].(map[string]any)
-	assert.Equal(t, "issuer-1", edge["_target_issuer_id"])
-	assert.Equal(t, "issue-99", edge["_target_issue_id"])
+	assert.Equal(t, "publisher-1", edge["_target_publisher_id"])
+	assert.Equal(t, "book-99", edge["_target_book_id"])
 }
 
 func TestSchemaBuilder_EdgeTo_PreBuiltSliceUnpack(t *testing.T) {
@@ -251,7 +251,7 @@ func TestSchemaBuilder_EdgeTo_PreBuiltSliceUnpack(t *testing.T) {
 	b, err := instance.BuilderFor(s, "Person")
 	require.NoError(t, err)
 
-	key := []any{"issuer-1", "issue-99"}
+	key := []any{"publisher-1", "book-99"}
 	raw, err := b.
 		Property("id", "p1").
 		Property("name", "Alice").
@@ -259,8 +259,8 @@ func TestSchemaBuilder_EdgeTo_PreBuiltSliceUnpack(t *testing.T) {
 		Build()
 	require.NoError(t, err)
 	edge, _ := raw.Properties["has_part"].(map[string]any)
-	assert.Equal(t, "issuer-1", edge["_target_issuer_id"])
-	assert.Equal(t, "issue-99", edge["_target_issue_id"])
+	assert.Equal(t, "publisher-1", edge["_target_publisher_id"])
+	assert.Equal(t, "book-99", edge["_target_book_id"])
 }
 
 func TestSchemaBuilder_EdgeTo_ZeroTargetKey(t *testing.T) {

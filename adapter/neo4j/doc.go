@@ -15,7 +15,7 @@
 // connection, session, or transaction packages — no code in this package
 // opens a connection or executes queries against a database. Consumers
 // supply their own driver and choose how to apply the generated output
-// (directly, via neo4j-migrations, via rdata's Apply(), etc.).
+// (directly, via neo4j-migrations, via a consumer's apply step, etc.).
 //
 // This mirrors the JSON adapter principle: adapter/json does not import
 // HTTP libraries — it produces bytes. adapter/neo4j does not import the
@@ -65,7 +65,7 @@
 //
 // The four exported builders produce the Cypher templates the write
 // surface uses internally, exposed for advanced consumers (e.g.,
-// rdata's link engine) that want the template without the surrounding
+// a link engine) that want the template without the surrounding
 // param-and-chunk plumbing:
 //
 //   - [BuildNodeMergeQuery] / [BuildBatchNodeMergeQuery] — node MERGE

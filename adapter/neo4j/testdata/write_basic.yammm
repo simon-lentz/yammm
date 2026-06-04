@@ -1,17 +1,17 @@
 schema "write_test"
 
-type Issuer {
-    issuer_id   String primary
+type Publisher {
+    publisher_id   String primary
     name        String required
     state       String
-    --> ISSUES (_:many) Issue
+    --> PUBLISHES (_:many) Book
 }
 
-type Issue {
-    issuer_id String primary
-    issue_id  String primary
+type Book {
+    publisher_id String primary
+    book_id  String primary
     title     String required
     amount    Float
     tags      List<String>
-    --> IN_ISSUER (_:one) Issuer
+    --> BY_PUBLISHER (_:one) Publisher
 }

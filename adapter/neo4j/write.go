@@ -47,7 +47,7 @@ type EdgeQuery struct {
 type BatchEdgeQuery struct {
 	Statement    string         // Cypher UNWIND $rows AS row MATCH ... MERGE ... SET statement
 	Params       map[string]any // Contains "rows" key with []map[string]any value
-	RelationType string         // Neo4j relationship type (e.g., "IN_STATE")
+	RelationType string         // Neo4j relationship type (e.g., "IN_REGION")
 }
 
 // WriteOption configures write query generation.

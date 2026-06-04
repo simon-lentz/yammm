@@ -117,8 +117,8 @@ func TestAdapter_FullPipeline_WithWrite(t *testing.T) {
 
 	// Build graph with instances.
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
-		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test Issue", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+		"Publisher": {{"publisher_id": "iss1", "name": "Test Publisher"}},
+		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test Book", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
 	// Generate batch node queries.
@@ -384,8 +384,8 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Issuer": {{"issuer_id": "iss1", "name": "Test Issuer"}},
-		"Issue":  {{"issuer_id": "iss1", "issue_id": "i1", "title": "Test Issue", "in_issuer": map[string]any{"_target_issuer_id": "iss1"}}},
+		"Publisher": {{"publisher_id": "iss1", "name": "Test Publisher"}},
+		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test Book", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
 	var wg sync.WaitGroup

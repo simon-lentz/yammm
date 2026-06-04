@@ -13,7 +13,7 @@ import (
 // raw instance shape, suitable for validator + graph batch assembly.
 //
 // Records compose the same shape as the (typeName, raw) pairs every
-// rdata pipeline's loop hand-writes, so test fixtures can mirror the
+// an ETL pipeline's loop hand-writes, so test fixtures can mirror the
 // production call shape directly.
 type Record struct {
 	// TypeName is the canonical instance tag form
@@ -32,7 +32,7 @@ type Record struct {
 // when the test needs to exercise diagnostic-laden inputs.
 //
 // Uses [instance.RecommendedOptions] for validator configuration,
-// matching the manual-loop pattern across rdata pipelines so test
+// matching the manual-loop pattern across ETL pipelines so test
 // fixtures and production code share the same validation strictness
 // (case-sensitive property names, no unknown fields).
 //

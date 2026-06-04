@@ -349,7 +349,7 @@ func TestContextualError_LogValue_AttributeGolden(t *testing.T) {
 
 func TestContextualError_StructuredOutput_TextHandler(t *testing.T) {
 	t.Parallel()
-	// Mirrors rdata's integration shape so adopters can compare output on a
+	// Mirrors a typical consumer's integration shape so adopters can compare output on a
 	// known-good reference.
 	ce := ctxErr(testResultWithError(t, testCodeError), "schema_load")
 	var buf bytes.Buffer

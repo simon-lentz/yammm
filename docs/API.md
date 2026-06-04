@@ -71,15 +71,15 @@ Passing the same `*Registry` to multiple `Load` calls in one process is safe and
 ```go
 reg := schema.NewRegistry()
 
-// First Load registers msrb_emma as a transitive import of linkage_emma.
-sA, _ := schema.Load(ctx, "linkage_emma.yammm",
+// First Load registers book_catalog as a transitive import of catalog_geo.
+sA, _ := schema.Load(ctx, "catalog_geo.yammm",
     schema.WithRegistry(reg), schema.WithModuleRoot(moduleRoot))
 
-// Second Load re-uses msrb_emma from the registry — no re-parse.
-sB, _ := schema.Load(ctx, "wyrth_campaigns.yammm",
+// Second Load re-uses book_catalog from the registry — no re-parse.
+sB, _ := schema.Load(ctx, "store_promotions.yammm",
     schema.WithRegistry(reg), schema.WithModuleRoot(moduleRoot))
 
-// reg.Len() == 3: [msrb_emma (shared), linkage_emma, wyrth_campaigns]
+// reg.Len() == 3: [book_catalog (shared), catalog_geo, store_promotions]
 ```
 
 **Top-level asymmetry.** The cross-`Load` short-circuit fires only for *imports*. The top-level schema returned by each `Load` call is always a fresh compile. Calling `Load(A, WithRegistry(reg))` twice produces two distinct `*Schema` pointers; `reg.LookupBySourceID(AID)` continues to return the first call's pointer (the idempotent `Register` does not overwrite).
@@ -228,7 +228,7 @@ raw, err := b.
     Property("name", "Alice").
     EdgeTo("works_at", "c1").                     // "one" association, single PK
     EdgeTo("knows", "p2").                        // "many" association
-    EdgeTo("part_of", "issuer-1", "issue-99").    // composite PK (variadic)
+    EdgeTo("part_of", "publisher-1", "book-99").  // composite PK (variadic)
     Build()
 ```
 
@@ -341,7 +341,7 @@ qualityCollector.Merge(res.Snapshot.Diagnostics())
 
 **Post-finalize sentinel.** After `Finalize`, subsequent `Add` / `AddValid` calls return `graph.ErrAssemblerFinalized`, matchable via `errors.Is`. Consumers performing retry / cleanup logic key off the sentinel rather than the error string.
 
-**Validator-access modes.** Default mode serializes `ValidateOne` + `Graph.Add` through an internal `sync.Mutex` — appropriate for I/O-bound consumers (rdata's pipelines are the canonical example) where validation is a tiny fraction of per-record wall-clock. CPU-bound consumers profile-flag validation as the hot path opt into pool mode via `graph.WithValidatorPool(n)`, which distributes N pre-constructed validators through an internal buffered channel matching the goroutine-per-CPU-core shape:
+**Validator-access modes.** Default mode serializes `ValidateOne` + `Graph.Add` through an internal `sync.Mutex` — appropriate for I/O-bound consumers (streaming ETL pipelines are the canonical example) where validation is a tiny fraction of per-record wall-clock. CPU-bound consumers profile-flag validation as the hot path opt into pool mode via `graph.WithValidatorPool(n)`, which distributes N pre-constructed validators through an internal buffered channel matching the goroutine-per-CPU-core shape:
 
 ```go
 ba := graph.NewBatchAssembler(ctx, s,
@@ -1019,7 +1019,7 @@ func Coerce(constraint schema.Constraint, raw any) (any, error)
 
 // ParamTypes maps a Cypher parameter name to the schema constraint its value
 // must satisfy. Nested params use "outer.inner" dot-notation (e.g.
-// "rows.principal_amount"). The value is the full Constraint, not just its
+// "rows.unit_price"). The value is the full Constraint, not just its
 // Kind, so List properties can be element-coerced (the element type a bare
 // Kind would discard).
 type ParamTypes map[string]schema.Constraint

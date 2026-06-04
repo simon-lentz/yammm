@@ -18,8 +18,8 @@ func TestSanitizeIdentifier(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"msrb_emma", "msrb_emma"},
-		{"census-tiger", "census_tiger"},
+		{"book_catalog", "book_catalog"},
+		{"geo-regions", "geo_regions"},
 		{"foo.bar", "foo_bar"},
 		{"foo/bar", "foo_bar"},
 		{"foo\\bar", "foo_bar"},
@@ -52,9 +52,9 @@ func TestValidateIdentifier_Valid(t *testing.T) {
 	t.Parallel()
 
 	valid := []string{
-		"issuer_id",
-		"Issuer",
-		"msrb_emma__Issuer",
+		"publisher_id",
+		"Publisher",
+		"book_catalog__Publisher",
 		"_private",
 		"A",
 		"x123",
@@ -157,12 +157,12 @@ func TestLabel_Default(t *testing.T) {
 		typ    string
 		want   string
 	}{
-		{"msrb_emma", "Issuer", "msrb_emma__Issuer"},
-		{"census_tiger", "County", "census_tiger__County"},
+		{"book_catalog", "Publisher", "book_catalog__Publisher"},
+		{"geo_regions", "District", "geo_regions__District"},
 		{"", "Person", "Person"},
-		{"msrb_emma", "", ""},
-		{"wyrth_campaigns", "Campaign", "wyrth_campaigns__Campaign"},
-		{"linkage_emma", "IssuerGeoLink", "linkage_emma__IssuerGeoLink"},
+		{"book_catalog", "", ""},
+		{"store_promotions", "Promotion", "store_promotions__Promotion"},
+		{"catalog_geo", "PublisherRegionLink", "catalog_geo__PublisherRegionLink"},
 	}
 
 	for _, tt := range tests {
@@ -180,8 +180,8 @@ func TestLabel_CustomSeparator(t *testing.T) {
 	t.Parallel()
 
 	a := New(WithLabelSeparator("_"))
-	got := a.Label(context.Background(), "msrb_emma", "Issuer")
-	want := "msrb_emma_Issuer"
+	got := a.Label(context.Background(), "book_catalog", "Publisher")
+	want := "book_catalog_Publisher"
 	if got != want {
 		t.Errorf("Label with custom separator = %q; want %q", got, want)
 	}
@@ -191,8 +191,8 @@ func TestLabel_WithPrefix(t *testing.T) {
 	t.Parallel()
 
 	a := New(WithLabelPrefix("app_"))
-	got := a.Label(context.Background(), "msrb_emma", "Issuer")
-	want := "app_msrb_emma__Issuer"
+	got := a.Label(context.Background(), "book_catalog", "Publisher")
+	want := "app_book_catalog__Publisher"
 	if got != want {
 		t.Errorf("Label with prefix = %q; want %q", got, want)
 	}
@@ -208,7 +208,7 @@ func TestLabel_SanitizesComponents(t *testing.T) {
 		typ    string
 		want   string
 	}{
-		{"census-tiger", "County", "census_tiger__County"},
+		{"geo-regions", "District", "geo_regions__District"},
 		{"my.schema", "Foo", "my_schema__Foo"},
 		{"path/to", "Bar", "path_to__Bar"},
 	}

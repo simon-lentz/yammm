@@ -173,8 +173,8 @@ func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 
 // buildCrossSchemaSnapshot creates a snapshot with cross-schema imports using
 // the real analyzer. It writes two schema files to a temp dir:
-//   - foundation.yammm: defines a GeoState type with properties
-//   - entry.yammm: imports foundation as "states" and extends states.GeoState
+//   - foundation.yammm: defines a Region type with properties
+//   - entry.yammm: imports foundation as "region" and extends region.Region
 //
 // Returns the snapshot (with resolved imports and symbol indices), docSnapshot
 // for the entry file, and the canonicalized temp dir.
@@ -186,8 +186,8 @@ func buildCrossSchemaSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snaps
 	tmpDir, err := filepath.EvalSymlinks(tmpDir)
 	require.NoError(t, err)
 
-	foundationContent := "schema \"foundation\"\n\ntype GeoState {\n\tfips_code String\n\tname String\n}\n"
-	entryContent := "schema \"entry\"\n\nimport \"./foundation\" as states\n\ntype Linkage extends states.GeoState {\n\textra String\n}\n"
+	foundationContent := "schema \"foundation\"\n\ntype Region {\n\tarea_code String\n\tname String\n}\n"
+	entryContent := "schema \"entry\"\n\nimport \"./foundation\" as region\n\ntype Listing extends region.Region {\n\textra String\n}\n"
 
 	foundationPath := filepath.Join(tmpDir, "foundation.yammm")
 	entryPath := filepath.Join(tmpDir, "entry.yammm")

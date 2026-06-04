@@ -38,8 +38,8 @@
 //
 // # Foreign Keys
 //
-// FK columns appear as regular properties (e.g., "in_issuer" or
-// "_target_issuer_id"). The instance validator handles edge resolution
+// FK columns appear as regular properties (e.g., "by_publisher" or
+// "_target_publisher_id"). The instance validator handles edge resolution
 // from the raw property map, identical to the JSON adapter path.
 //
 // During snapshot serialization ([Adapter.MarshalSnapshot], [Adapter.WriteSnapshot]),

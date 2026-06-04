@@ -54,7 +54,7 @@ func New(opts ...Option) *Adapter {
 }
 
 // WithLabelSeparator sets the separator between schema name and type name in labels.
-// Default: "__" (double underscore), producing labels like "msrb_emma__Issuer".
+// Default: "__" (double underscore), producing labels like "book_catalog__Publisher".
 func WithLabelSeparator(sep string) Option {
 	return func(c *adapterConfig) {
 		c.labelSeparator = sep
@@ -62,7 +62,7 @@ func WithLabelSeparator(sep string) Option {
 }
 
 // WithLabelPrefix adds a global prefix to all generated labels.
-// Default: "" (no prefix). Example: WithLabelPrefix("app_") produces "app_msrb_emma__Issuer".
+// Default: "" (no prefix). Example: WithLabelPrefix("app_") produces "app_book_catalog__Publisher".
 //
 // The prefix is only applied when a schema name is provided to [Adapter.Label].
 // When schemaName is empty (legacy/unscoped usage), the label is the sanitized
@@ -89,7 +89,7 @@ func WithScalarTypeConstraints(enabled bool) Option {
 // WithRequiredOnlyTypeConstraints restricts scalar and list type constraints
 // to required properties only. Optional properties are skipped.
 //
-// This reduces constraint volume significantly. For msrb_emma (~83 properties,
+// This reduces constraint volume significantly. For book_catalog (~83 properties,
 // ~24 required), this cuts TYPE constraints from ~83 to ~24 -- a 3.5x reduction.
 //
 // Rationale: optional properties are often absent from nodes entirely, and
@@ -119,7 +119,7 @@ func WithNodeKeyConstraints(enabled bool) Option {
 
 // WithNamedConstraints controls whether generated constraints include explicit names.
 // Named constraints use a deterministic convention: {label}_{property}_{kind}
-// (e.g., "msrb_emma__Issuer_issuer_id_unique").
+// (e.g., "book_catalog__Publisher_publisher_id_unique").
 //
 // Named constraints are recommended for production use because:
 //   - Anonymous constraint names are opaque hashes that differ across environments.

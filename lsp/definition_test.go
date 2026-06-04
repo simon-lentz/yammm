@@ -63,7 +63,7 @@ func TestHandleDefinition_WithUnit(t *testing.T) {
 }
 
 // TestHandleDefinition_CrossSchemaImport verifies that go-to-definition on a
-// qualified type reference (states.GeoState) navigates to the type definition
+// qualified type reference (region.Region) navigates to the type definition
 // in the imported schema file.
 func TestHandleDefinition_CrossSchemaImport(t *testing.T) {
 	t.Parallel()
@@ -75,8 +75,8 @@ func TestHandleDefinition_CrossSchemaImport(t *testing.T) {
 	require.NoError(t, err)
 	foundationURI := lsputil.PathToURI(foundationPath)
 
-	// Entry line 4: "type Linkage extends states.GeoState {"
-	// Character 28 is on 'G' of 'GeoState'.
+	// Entry line 4: "type Listing extends region.Region {"
+	// Character 28 is on 'R' of 'Region'.
 	h := handleDefinition(&fakeResolver{
 		unit: &workspace.Unit{
 			Snapshot:  snapshot,

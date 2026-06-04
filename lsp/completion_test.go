@@ -55,15 +55,15 @@ func TestHandleCompletion_WithUnit(t *testing.T) {
 }
 
 // TestHandleCompletion_CrossSchemaImports verifies that completion at an extends
-// position offers qualified type names from imported schemas (e.g., states.GeoState).
+// position offers qualified type names from imported schemas (e.g., region.Region).
 func TestHandleCompletion_CrossSchemaImports(t *testing.T) {
 	t.Parallel()
 
 	snapshot, doc, _ := buildCrossSchemaSnapshot(t)
 
-	// Entry line 4: "type Linkage extends states.GeoState {"
+	// Entry line 4: "type Listing extends region.Region {"
 	// Character 21 is right after "extends " where qualified type completions
-	// should be offered. DetectContext sees "type Linkage extends" → Extends context.
+	// should be offered. DetectContext sees "type Listing extends" → Extends context.
 	h := handleCompletion(&fakeResolver{
 		unit: &workspace.Unit{
 			Snapshot:  snapshot,
@@ -86,9 +86,9 @@ func TestHandleCompletion_CrossSchemaImports(t *testing.T) {
 
 	// Search for a qualified type name from the import.
 	hasQualifiedType := slices.ContainsFunc(result, func(item protocol.CompletionItem) bool {
-		return item.Label == "states.GeoState"
+		return item.Label == "region.Region"
 	})
 	assert.True(t, hasQualifiedType,
-		"completion should offer 'states.GeoState' from imported schema; got labels: %v",
+		"completion should offer 'region.Region' from imported schema; got labels: %v",
 		completionLabels(result))
 }

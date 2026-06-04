@@ -140,7 +140,7 @@ func TestBuildBatchNodeMergeQuery_ImmutableKeys_Golden(t *testing.T) {
 // RETURN count(*) AS matched_rows suffix pins — the per-call / per-chunk-value
 // contract documented on the relationship builders. A future implementation
 // change that accidentally drops the RETURN, renames the column, or promotes
-// it to an aggregation-expression would silently break rdata's link-engine
+// it to an aggregation-expression would silently break a link-engine
 // silent-failure safety net; these pins catch it at the builder-test level.
 // Parallel pins on the node builders preserve the "nodes stay RETURN-free"
 // design intent.

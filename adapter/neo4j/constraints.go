@@ -24,7 +24,7 @@ const (
 type Constraint struct {
 	Name       string         // Deterministic constraint name (empty if WithNamedConstraints(false))
 	Kind       ConstraintKind // Constraint category
-	Label      string         // Fully qualified Neo4j label (e.g., "msrb_emma__Issuer")
+	Label      string         // Fully qualified Neo4j label (e.g., "book_catalog__Publisher")
 	Properties []string       // Property names involved in the constraint
 	TypeExpr   string         // Neo4j type expression (e.g., "STRING", "LIST<STRING NOT NULL>")
 	Statement  string         // Complete CREATE CONSTRAINT IF NOT EXISTS ... Cypher statement

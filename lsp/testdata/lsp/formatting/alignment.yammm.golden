@@ -1,31 +1,31 @@
 schema "alignment"
 
-type StateFP  = String[2, 2]
-type CountyFP = String[3, 3]
-type GeoID    = String[1, 15]
+type RegionCode   = String[2, 2]
+type DistrictCode = String[3, 3]
+type RegionID     = String[1, 15]
 
-type GeoState {
-	geoid      String primary
-	name       String required
-	state_fp   StateFP required // FIPS code
-	land_area  Float            // sq meters
-	water_area Float
+type Region {
+	region_id   String primary
+	name        String required
+	region_code RegionCode required // area code
+	land_area   Float               // sq meters
+	water_area  Float
 }
 
-type GeoCounty {
-	geoid             String primary
-	name              String required
-	state_fp          StateFP required
-	county_fp         CountyFP required                           // county FIPS
-	functional_status Enum["A", "B", "C", "F", "N", "S"] required
+type District {
+	region_id     String primary
+	name          String required
+	region_code   RegionCode required
+	district_code DistrictCode required                       // district code
+	grade         Enum["A", "B", "C", "D", "E", "F"] required
 
-	--> IN_STATE        (one) GeoState
-	*-> HAS_SUBDIVISION (many) GeoSubdivision
-	--> ADJACENT_TO     (_:many) GeoCounty    // adjacency
+	--> IN_REGION       (one) Region
+	*-> HAS_SUBDISTRICT (many) Subdistrict
+	--> ADJACENT_TO     (_:many) District  // adjacency
 }
 
-part type GeoSubdivision {
-	geoid             String primary
-	name              String required
-	functional_status String
+part type Subdistrict {
+	region_id String primary
+	name      String required
+	grade     String
 }

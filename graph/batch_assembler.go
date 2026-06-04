@@ -47,7 +47,7 @@ var ErrAssemblerFinalized = errors.New("graph: BatchAssembler.Add called after F
 //     ValidateOne, Graph.Add, and the success-counter increment as one
 //     atomic step. Appropriate for I/O-bound workloads where validation
 //     is a tiny fraction of per-record wall-clock — the default;
-//     suitable for rdata's pipelines and similar scrape-or-fetch-
+//     suitable for streaming ETL pipelines and similar scrape-or-fetch-
 //     dominated consumers.
 //
 //   - Pool mode (opt-in via [WithValidatorPool]). N pre-constructed
@@ -201,7 +201,7 @@ func WithGraphOptions(opts ...Option) BatchAssemblerOption {
 // freed.
 //
 // Use this for CPU-bound workloads where validation cost is material
-// relative to per-record wall-clock. For I/O-bound consumers (rdata's
+// relative to per-record wall-clock. For I/O-bound consumers (streaming ETL
 // pipelines are the canonical example), the default mutex-serialized
 // path is preferable: validation is a tiny fraction of per-record
 // wall-clock, and passing this option adds memory overhead (n

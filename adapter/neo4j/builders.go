@@ -90,7 +90,7 @@ func BuildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutabilit
 //
 // The generated query always ends with `RETURN count(*) AS matched_rows`.
 // Consumers implementing silent-failure detection on generated MERGEs
-// (e.g., the rdata link-engine safety net) sum the column across calls;
+// (e.g., a link-engine safety net) sum the column across calls;
 // consumers that don't care ignore it. Making the clause always-on keeps
 // the signature free of a trailing `hasReturnCount` bool and the emitted
 // output free of a flag-controlled shape branch.

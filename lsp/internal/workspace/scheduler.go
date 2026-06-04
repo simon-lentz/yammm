@@ -13,7 +13,7 @@ import (
 const DefaultDebounceDelay = 150 * time.Millisecond
 
 // maxConcurrentAnalysis bounds the number of concurrent analysis goroutines.
-// In the rdata workspace, editing a foundation schema can trigger 7+ dependent
+// In a large workspace, editing a foundation schema can trigger 7+ dependent
 // re-analyses. This semaphore prevents unbounded goroutine growth.
 const maxConcurrentAnalysis = 4
 

@@ -213,7 +213,7 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 //
 // 16 MiB accommodates typical .ys headers (< 1 KiB) with substantial
 // margin for callers that carry large work-set arrays in header metadata —
-// for example rdata's state-batched pipelines, which persist target_keys /
+// for example a consumer's state-batched pipelines, which persist target_keys /
 // processed_keys / failed_keys per batch and whose densest states produce
 // headers in the 100 KiB–1 MiB range. Callers whose headers legitimately
 // exceed even this bound should split metadata across multiple documents
@@ -308,7 +308,7 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 // structural hash of s under the same algorithm version. This is the
 // documented cross-check dispatch callers perform after [HeaderOnly] or
 // [HeaderOnlyRead] to detect snapshots produced under a different schema
-// version — e.g., rdata's stale-schema path.
+// version — e.g., a consumer's stale-schema path.
 //
 // The comparison is a cheap string equality against
 // schema.StructuralHash(s); the helper exists so the cross-check is a

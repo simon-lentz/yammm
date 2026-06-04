@@ -122,8 +122,8 @@ func CypherReservedKeywords() map[string]bool {
 //
 // Examples:
 //
-//	Label("msrb_emma", "Issuer")       -> "msrb_emma__Issuer"
-//	Label("census_tiger", "County")    -> "census_tiger__County"
+//	Label("book_catalog", "Publisher")       -> "book_catalog__Publisher"
+//	Label("geo_regions", "District")    -> "geo_regions__District"
 //	Label("", "Person")                -> "Person"
 //
 //nolint:revive // ctx reserved for future use

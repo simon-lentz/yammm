@@ -109,7 +109,7 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //
 // Metadata-key convention (non-enforced): yammm treats keys as opaque
 // strings. Consumers using structured metadata should namespace their
-// keys (e.g., rdata.pipeline_completed) to avoid collisions with
+// keys (e.g., myapp.pipeline_completed) to avoid collisions with
 // other metadata consumers who share a .ys file.
 func UpdateMetadata(
 	ctx context.Context,

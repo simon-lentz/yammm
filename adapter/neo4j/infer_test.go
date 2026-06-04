@@ -10,9 +10,9 @@ import (
 
 func TestParseLabel_Default(t *testing.T) {
 	t.Parallel()
-	sn, tn := parseLabel("msrb_emma__Issuer", "__")
-	assert.Equal(t, "msrb_emma", sn)
-	assert.Equal(t, "Issuer", tn)
+	sn, tn := parseLabel("book_catalog__Publisher", "__")
+	assert.Equal(t, "book_catalog", sn)
+	assert.Equal(t, "Publisher", tn)
 }
 
 func TestParseLabel_NoSeparator(t *testing.T) {
@@ -107,18 +107,18 @@ func TestInferSchema_CrossSchemaRelationships(t *testing.T) {
 	a := New()
 
 	constraints := []RemoteConstraint{
-		{Name: "c1", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"msrb__Issuer"}, Properties: []string{"id"}},
+		{Name: "c1", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"catalog__Publisher"}, Properties: []string{"id"}},
 	}
 
 	relationships := []RemoteRelationship{
-		{RelationType: "IN_STATE", SourceLabels: []string{"msrb__Issuer"}, TargetLabels: []string{"census__State"}},
+		{RelationType: "IN_REGION", SourceLabels: []string{"catalog__Publisher"}, TargetLabels: []string{"geo__Region"}},
 	}
 
-	output, err := a.InferSchema(constraints, relationships, "msrb")
+	output, err := a.InferSchema(constraints, relationships, "catalog")
 	require.NoError(t, err)
 
-	assert.Contains(t, output, `import "census"`)
-	assert.Contains(t, output, "--> IN_STATE census.State")
+	assert.Contains(t, output, `import "geo"`)
+	assert.Contains(t, output, "--> IN_REGION geo.Region")
 	assert.Contains(t, output, "cross-schema")
 }
 

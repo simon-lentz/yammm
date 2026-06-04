@@ -11,13 +11,13 @@ func TestParseRemoteConstraints_Uniqueness(t *testing.T) {
 	t.Parallel()
 	records := []map[string]any{
 		{
-			"name":            "msrb_emma__Issuer_issuer_id_unique",
+			"name":            "book_catalog__Publisher_publisher_id_unique",
 			"type":            "UNIQUENESS",
 			"entityType":      "NODE",
-			"labelsOrTypes":   []any{"msrb_emma__Issuer"},
-			"properties":      []any{"issuer_id"},
+			"labelsOrTypes":   []any{"book_catalog__Publisher"},
+			"properties":      []any{"publisher_id"},
 			"propertyType":    nil,
-			"createStatement": "CREATE CONSTRAINT msrb_emma__Issuer_issuer_id_unique IF NOT EXISTS FOR (n:msrb_emma__Issuer) REQUIRE n.issuer_id IS UNIQUE",
+			"createStatement": "CREATE CONSTRAINT book_catalog__Publisher_publisher_id_unique IF NOT EXISTS FOR (n:book_catalog__Publisher) REQUIRE n.publisher_id IS UNIQUE",
 		},
 	}
 
@@ -26,11 +26,11 @@ func TestParseRemoteConstraints_Uniqueness(t *testing.T) {
 	require.Len(t, constraints, 1)
 
 	c := constraints[0]
-	assert.Equal(t, "msrb_emma__Issuer_issuer_id_unique", c.Name)
+	assert.Equal(t, "book_catalog__Publisher_publisher_id_unique", c.Name)
 	assert.Equal(t, "UNIQUENESS", c.Type)
 	assert.Equal(t, "NODE", c.EntityType)
-	assert.Equal(t, []string{"msrb_emma__Issuer"}, c.LabelsOrTypes)
-	assert.Equal(t, []string{"issuer_id"}, c.Properties)
+	assert.Equal(t, []string{"book_catalog__Publisher"}, c.LabelsOrTypes)
+	assert.Equal(t, []string{"publisher_id"}, c.Properties)
 	assert.Empty(t, c.PropertyType)
 }
 
@@ -38,10 +38,10 @@ func TestParseRemoteConstraints_TypeConstraint(t *testing.T) {
 	t.Parallel()
 	records := []map[string]any{
 		{
-			"name":            "msrb_emma__Issuer_name_type",
+			"name":            "book_catalog__Publisher_name_type",
 			"type":            "NODE_PROPERTY_TYPE",
 			"entityType":      "NODE",
-			"labelsOrTypes":   []any{"msrb_emma__Issuer"},
+			"labelsOrTypes":   []any{"book_catalog__Publisher"},
 			"properties":      []any{"name"},
 			"propertyType":    "STRING",
 			"createStatement": "CREATE CONSTRAINT ...",
@@ -107,10 +107,10 @@ func TestParseRemoteIndexes_Basic(t *testing.T) {
 	t.Parallel()
 	records := []map[string]any{
 		{
-			"name":          "idx_issuer_name",
+			"name":          "idx_publisher_name",
 			"type":          "RANGE",
 			"entityType":    "NODE",
-			"labelsOrTypes": []any{"msrb_emma__Issuer"},
+			"labelsOrTypes": []any{"book_catalog__Publisher"},
 			"properties":    []any{"name"},
 		},
 	}
@@ -118,7 +118,7 @@ func TestParseRemoteIndexes_Basic(t *testing.T) {
 	indexes, err := ParseRemoteIndexes(records)
 	require.NoError(t, err)
 	require.Len(t, indexes, 1)
-	assert.Equal(t, "idx_issuer_name", indexes[0].Name)
+	assert.Equal(t, "idx_publisher_name", indexes[0].Name)
 	assert.Equal(t, "RANGE", indexes[0].Type)
 }
 
@@ -127,13 +127,13 @@ func TestParseRemoteRelationships_Basic(t *testing.T) {
 	records := []map[string]any{
 		{
 			"relType":   "ISSUED_BY",
-			"srcLabels": []any{"msrb_emma__Issue"},
-			"tgtLabels": []any{"msrb_emma__Issuer"},
+			"srcLabels": []any{"book_catalog__Book"},
+			"tgtLabels": []any{"book_catalog__Publisher"},
 		},
 		{
-			"relType":   "IN_STATE",
-			"srcLabels": []any{"msrb_emma__Issuer"},
-			"tgtLabels": []any{"census_tiger__State"},
+			"relType":   "IN_REGION",
+			"srcLabels": []any{"book_catalog__Publisher"},
+			"tgtLabels": []any{"geo_regions__Region"},
 		},
 	}
 
@@ -141,8 +141,8 @@ func TestParseRemoteRelationships_Basic(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rels, 2)
 	assert.Equal(t, "ISSUED_BY", rels[0].RelationType)
-	assert.Equal(t, []string{"msrb_emma__Issue"}, rels[0].SourceLabels)
-	assert.Equal(t, []string{"msrb_emma__Issuer"}, rels[0].TargetLabels)
+	assert.Equal(t, []string{"book_catalog__Book"}, rels[0].SourceLabels)
+	assert.Equal(t, []string{"book_catalog__Publisher"}, rels[0].TargetLabels)
 }
 
 func TestIntrospectConstraintsQuery(t *testing.T) {
@@ -152,9 +152,9 @@ func TestIntrospectConstraintsQuery(t *testing.T) {
 
 func TestIntrospectRelationshipsQuery_WithPrefix(t *testing.T) {
 	t.Parallel()
-	query, params := IntrospectRelationshipsQuery("msrb_emma__")
+	query, params := IntrospectRelationshipsQuery("book_catalog__")
 	assert.Contains(t, query, "STARTS WITH $prefix")
-	assert.Equal(t, "msrb_emma__", params["prefix"])
+	assert.Equal(t, "book_catalog__", params["prefix"])
 }
 
 func TestIntrospectRelationshipsQuery_NoPrefix(t *testing.T) {
@@ -167,17 +167,17 @@ func TestIntrospectRelationshipsQuery_NoPrefix(t *testing.T) {
 func TestIntrospectRelationshipsQueryFor_WithSchema(t *testing.T) {
 	t.Parallel()
 	a := New()
-	query, params := a.IntrospectRelationshipsQueryFor("msrb_emma")
+	query, params := a.IntrospectRelationshipsQueryFor("book_catalog")
 	assert.Contains(t, query, "STARTS WITH $prefix")
-	assert.Equal(t, "msrb_emma__", params["prefix"])
+	assert.Equal(t, "book_catalog__", params["prefix"])
 }
 
 func TestIntrospectRelationshipsQueryFor_WithPrefix(t *testing.T) {
 	t.Parallel()
 	a := New(WithLabelPrefix("app_"))
-	query, params := a.IntrospectRelationshipsQueryFor("msrb_emma")
+	query, params := a.IntrospectRelationshipsQueryFor("book_catalog")
 	assert.Contains(t, query, "STARTS WITH $prefix")
-	assert.Equal(t, "app_msrb_emma__", params["prefix"])
+	assert.Equal(t, "app_book_catalog__", params["prefix"])
 }
 
 func TestIntrospectRelationshipsQueryFor_EmptyFilter(t *testing.T) {

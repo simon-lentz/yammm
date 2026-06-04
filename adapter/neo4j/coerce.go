@@ -180,8 +180,8 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 
 // ParamTypes maps a Cypher parameter name to the schema constraint its value
 // must satisfy. Nested params are addressed with "outer.inner" dot-notation
-// (e.g. ParamTypes{"rows.principal_amount": schema.NewFloatConstraint()} tags
-// principal_amount inside each row of a $rows []map[string]any). Unknown keys
+// (e.g. ParamTypes{"rows.unit_price": schema.NewFloatConstraint()} tags
+// unit_price inside each row of a $rows []map[string]any). Unknown keys
 // are a no-op.
 //
 // The value is the full [schema.Constraint], not just its
@@ -286,7 +286,7 @@ func coerceNested(outer string, m map[string]any, types ParamTypes) (map[string]
 // nested param map pass the outer param name (e.g. "rows" / "updates"); each
 // key is joined to its property name with the same "outer.inner" dot-notation
 // CoerceParams uses, so ParamTypesForType(t, "rows") yields keys like
-// "rows.principal_amount" that coerceNested looks up. Lets callers avoid
+// "rows.unit_price" that coerceNested looks up. Lets callers avoid
 // hand-listing each property's constraint.
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
 	pt := make(ParamTypes)

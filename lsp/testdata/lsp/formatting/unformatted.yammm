@@ -7,8 +7,8 @@ schema "formatting"
 import "./other" as other
 
 
-type StateFP = String[2, 2]
-type CountyFP = String[3,3]
+type RegionCode = String[2, 2]
+type DistrictCode = String[3,3]
 
 type Person   {
     name String  required
@@ -23,7 +23,7 @@ type   Address{
     street String  required  // street address
     city   String required
     zip String
-    state_fp StateFP required
-    --> IN_STATE (one) other.GeoState
-    --> NEAR_COUNTY (_:many) other.GeoCounty // nearby
+    region_code RegionCode required
+    --> IN_REGION (one) other.Region
+    --> NEAR_DISTRICT (_:many) other.District // nearby
 }

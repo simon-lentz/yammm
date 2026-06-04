@@ -500,14 +500,14 @@ func TestHeaderOnly_WithMetadata(t *testing.T) {
 
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{
-		"pipeline":            "msrb.emma_issues",
+		"pipeline":            "catalog.book_ingest",
 		"extraction_complete": "true",
 	}))
 
 	header, result := snapshot.HeaderOnly(ctx, data)
 	require.NoError(t, result.Err())
 	require.NotNil(t, header.Metadata, "Metadata should be present")
-	assert.Equal(t, "msrb.emma_issues", header.Metadata["pipeline"])
+	assert.Equal(t, "catalog.book_ingest", header.Metadata["pipeline"])
 	assert.Equal(t, "true", header.Metadata["extraction_complete"])
 }
 
@@ -1615,7 +1615,7 @@ func TestWriteFile_EmptyData(t *testing.T) {
 
 func TestWriteFile_ConcurrentDistinctPaths(t *testing.T) {
 	// The realistic consumer shape: N goroutines write to N distinct
-	// paths concurrently. This is the case rdata exercises — one .ys
+	// paths concurrently. This is the common consumer case — one .ys
 	// per batch, one goroutine per batch, no shared path. Pins that
 	// the primitive is safe for concurrent use when callers coordinate
 	// destinations (via RunID-suffixed paths, per-batch keys, etc.)
@@ -1651,7 +1651,7 @@ func TestWriteFile_ConcurrentDistinctPaths(t *testing.T) {
 
 func TestWriteFile_ConcurrentSamePath(t *testing.T) {
 	// N goroutines race to WriteFile to the SAME path. This primitive
-	// is not designed for multi-writer coordination — rdata's state
+	// is not designed for multi-writer coordination — a consumer's state
 	// machine ensures one writer per path via its lockfile protocol —
 	// but the filesystem-level race is well-defined: exactly one
 	// rename wins, the rest see ENOENT because the tmp was renamed
