@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"time"
 
@@ -545,9 +546,11 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // A Vector is float-valued by definition (matching the eval package's checkVector
 // / coerceVector), so it coerces elementwise exactly as a List<Float> would; this
 // is what repairs a snapshot-loaded vector, which arrives as []any with whole
-// numbers narrowed to int64 by NormalizeValue. Per-element value conversion
-// delegates to [Coerce] so the Float int-repair and temporal-parse rules live in
-// one place; coerceSlice owns only the slice typing.
+// numbers narrowed to int64 by NormalizeValue. Per-element conversion delegates
+// to [Coerce] (the Float width-repair and Date/Timestamp parse rules) or, for
+// Integer elements, to [repairInt64] (every Go int/uint width -> int64, mirroring
+// Coerce's Float repair), so the repair rules live in one place; coerceSlice owns
+// only the slice typing.
 //
 // An element that is neither the element type nor coercible to it — a non-numeric
 // in a List<Float>, an unparseable or wrong-typed value in a List<Date> — is an
@@ -556,9 +559,11 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // validated node path this never fires (instance validation already enforced each
 // element's type); it guards the direct-Cypher path, where the param map is
 // hand-built. A []any value under a scalar (non-List, non-Vector) constraint is a
-// shape mismatch — a scalar property cannot hold a list — and is an error too. An
-// element kind with no concrete driver slice type (e.g. a nested List) returns the
-// slice unchanged.
+// shape mismatch — a scalar property cannot hold a list — and is an error too. A
+// nested-collection element kind (a List or Vector element, e.g. List<Vector>) has
+// no concrete driver slice type at this level and returns the []any unchanged. The
+// element switch is exhaustiveness-guarded, so a newly-added ConstraintKind fails
+// the build here rather than silently passing a []any to the driver.
 func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	c = schema.ResolveAlias(c)
 	var elem schema.Constraint
@@ -571,6 +576,7 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	default:
 		return nil, fmt.Errorf("cannot coerce a list value against a scalar %s constraint", c.Kind())
 	}
+	//exhaustive:enforce
 	switch elem.Kind() {
 	case schema.KindString, schema.KindUUID, schema.KindEnum, schema.KindPattern:
 		out := make([]string, len(raw))
@@ -585,9 +591,9 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	case schema.KindInteger:
 		out := make([]int64, len(raw))
 		for i, v := range raw {
-			n, ok := v.(int64)
+			n, ok := repairInt64(v)
 			if !ok {
-				return nil, fmt.Errorf("list element %d: cannot use %T as an Integer element (want int64)", i, v)
+				return nil, fmt.Errorf("list element %d: cannot use %T as an Integer element (want an integer type)", i, v)
 			}
 			out[i] = n
 		}
@@ -644,8 +650,58 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 			out[i] = tt
 		}
 		return out, nil
-	default:
+	case schema.KindVector, schema.KindList, schema.KindAlias:
+		// A nested-collection element (List<Vector>, List<List<…>>) has no concrete
+		// driver slice type at this level, so the []any passes through unchanged.
+		// KindAlias is unreachable here (elem is alias-resolved above) but is listed
+		// to satisfy the exhaustiveness guard.
 		return raw, nil
+	default:
+		// Unreachable: schema.Constraint is sealed, so elem.Kind() is always one of
+		// the cases above. The //exhaustive:enforce directive fails the build if a
+		// new ConstraintKind is added without a case, rather than letting a []any
+		// reach the driver un-coerced.
+		return nil, fmt.Errorf("coerceSlice: unhandled element kind %v", elem.Kind())
+	}
+}
+
+// repairInt64 widens any Go signed or unsigned integer to int64, so a List<Integer>
+// hand-built with narrower (or unsigned) ints reaches the driver as []int64 — the
+// same width repair [Coerce] applies for Float. It reports false for a non-integer
+// value, or a uint/uint64 that exceeds the int64 range (matching the validator's
+// coerceInteger overflow guard). A float is intentionally not an integer here: a
+// fractional value under an Integer constraint is a type error worth surfacing, not
+// one to silently truncate.
+func repairInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), true
+	case int8:
+		return int64(n), true
+	case int16:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	case uint:
+		if uint64(n) > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(n), true
+	case uint8:
+		return int64(n), true
+	case uint16:
+		return int64(n), true
+	case uint32:
+		return int64(n), true
+	case uint64:
+		if n > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(n), true
+	default:
+		return 0, false
 	}
 }
 

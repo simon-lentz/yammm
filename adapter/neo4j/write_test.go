@@ -1498,3 +1498,42 @@ func TestCoerceSlice_TypeMismatchErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCoerceSlice_IntegerWidthRepair(t *testing.T) {
+	t.Parallel()
+	// A List<Integer> hand-built with narrower or unsigned int widths must widen to
+	// []int64 — the same width repair coerceSlice applies for Float — rather than
+	// erroring on a non-int64 element (the prior strict int64-only behavior).
+	raw := []any{
+		int(1), int8(2), int16(3), int32(4), int64(5),
+		uint(6), uint8(7), uint16(8), uint32(9), uint64(10),
+	}
+	got, err := coerceSlice(raw, schema.NewListConstraint(schema.NewIntegerConstraint()))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out, ok := got.([]int64)
+	if !ok {
+		t.Fatalf("got %T, want []int64", got)
+	}
+	want := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	if len(out) != len(want) {
+		t.Fatalf("len = %d, want %d", len(out), len(want))
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Errorf("out[%d] = %d, want %d", i, out[i], want[i])
+		}
+	}
+}
+
+func TestCoerceSlice_IntegerOverflowErrors(t *testing.T) {
+	t.Parallel()
+	// A uint64 beyond the int64 range cannot be represented; coerceSlice errors
+	// rather than wrapping to a negative int64 (matching the validator's guard).
+	// 9223372036854775808 == math.MaxInt64 + 1.
+	raw := []any{uint64(9223372036854775808)}
+	if _, err := coerceSlice(raw, schema.NewListConstraint(schema.NewIntegerConstraint())); err == nil {
+		t.Fatal("want error for a uint64 exceeding int64 max, got nil")
+	}
+}

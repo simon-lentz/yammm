@@ -50,10 +50,11 @@ import (
 // value unchanged.
 //
 // A nil value, or a nil constraint ("no type to coerce against"), passes through
-// unchanged. An unhandled kind returns an error so a schema kind added after this
-// switch was written surfaces in tests/CI rather than as a silent driver-side
-// PROPERTY_TYPE rejection in production; the //exhaustive:enforce directive turns
-// that omission into a build failure.
+// unchanged. The default arm is unreachable in practice — schema.Constraint is
+// sealed, so every value carries one of the kinds above — but a kind added to the
+// enum after this switch was written surfaces as a build failure via the
+// //exhaustive:enforce directive, rather than as a silent driver-side
+// PROPERTY_TYPE rejection in production.
 func Coerce(constraint schema.Constraint, raw any) (any, error) {
 	if raw == nil {
 		//nolint:nilnil // a nil value coerces to nil with no error: nil is a valid absent property, not a failure

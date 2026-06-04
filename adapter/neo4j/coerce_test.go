@@ -380,6 +380,26 @@ func TestCoerceParams_ListElementError(t *testing.T) {
 	}
 }
 
+func TestCoerceParams_IntegerListWidthRepair(t *testing.T) {
+	t.Parallel()
+	// The direct-Cypher boundary: a List<Integer> param built with mixed or narrow
+	// int widths element-coerces to []int64 rather than erroring — symmetric with
+	// the List<Float> width repair, closing the Integer-vs-Float list asymmetry.
+	params := map[string]any{"counts": []any{int(1), int32(2), uint16(3)}}
+	types := ParamTypes{"counts": schema.NewListConstraint(schema.NewIntegerConstraint())}
+	out, err := CoerceParams(params, types)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, ok := out["counts"].([]int64)
+	if !ok {
+		t.Fatalf("counts: got %T, want []int64", out["counts"])
+	}
+	if len(got) != 3 || got[0] != 1 || got[1] != 2 || got[2] != 3 {
+		t.Fatalf("counts elements wrong: %#v", got)
+	}
+}
+
 func TestCoerce_FloatFromAllNumericTypes(t *testing.T) {
 	t.Parallel()
 	// Every Go integer width and float32 must repair to float64, so a Float

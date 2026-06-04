@@ -228,7 +228,7 @@ func TestContextualError_LogValue_Counts_OK(t *testing.T) {
 	}
 }
 
-func TestContextualError_LogValue_IssuesSliceShape(t *testing.T) {
+func TestContextualError_LogValue_IssuesArrayShape(t *testing.T) {
 	t.Parallel()
 	// Emit via JSONHandler and decode so we can assert the shape downstream
 	// consumers will actually see.
@@ -263,7 +263,7 @@ func TestContextualError_LogValue_IssuesSliceShape(t *testing.T) {
 	// Confirm there is no positional attribute "issue_0" at top level.
 	for key := range diagEntry {
 		if strings.HasPrefix(key, "issue_") {
-			t.Errorf("diagnostic has positional attribute %q; want slice-only shape", key)
+			t.Errorf("diagnostic has positional attribute %q; want array-only shape", key)
 		}
 	}
 }
