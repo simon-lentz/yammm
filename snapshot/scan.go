@@ -134,7 +134,8 @@ func scanFile(ctx context.Context, name, path string) ScanEntry {
 			diag.NewIssue(diag.Fatal, diag.E_SNAPSHOT_IO,
 				fmt.Sprintf("open %q: %v", path, err)).
 				WithDetail("path", path).
-				Build())
+				Build(),
+		)
 		return ScanEntry{Name: name, Path: path, Result: c.Result()}
 	}
 	defer f.Close()

@@ -207,7 +207,8 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 // The ctx parameter supports cancellation; if cancelled, Analyze returns
 // early with a partial or nil snapshot.
 func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, posEncoding lsputil.PositionEncoding, opts ...schema.LoadOption) (*Snapshot, error) {
-	a.logger.Debug("starting analysis",
+	a.logger.Debug(
+		"starting analysis",
 		slog.String("entry", entryPath),
 		slog.String("module_root", moduleRoot),
 		slog.Int("overlay_count", len(overlays)),
@@ -220,14 +221,16 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	for path, content := range overlays {
 		id, err := location.SourceIDFromAbsolutePath(path)
 		if err != nil {
-			a.logger.Warn("failed to create source ID",
+			a.logger.Warn(
+				"failed to create source ID",
 				slog.String("path", path),
 				slog.Any("error", err),
 			)
 			continue
 		}
 		if err := sourceRegistry.Register(id, content); err != nil {
-			a.logger.Warn("failed to register source",
+			a.logger.Warn(
+				"failed to register source",
 				slog.String("path", path),
 				slog.Any("error", err),
 			)
@@ -255,7 +258,8 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 
 	entrySourceID, idErr := location.SourceIDFromAbsolutePath(entryPath)
 	if idErr != nil {
-		a.logger.Warn("failed to create entry source ID",
+		a.logger.Warn(
+			"failed to create entry source ID",
 			slog.String("path", entryPath),
 			slog.String("error", idErr.Error()),
 		)
@@ -272,7 +276,8 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	}
 
 	if diagResult.HasFatal() {
-		a.logger.Warn("load failed with fatal diagnostics",
+		a.logger.Warn(
+			"load failed with fatal diagnostics",
 			slog.String("entry", entryPath),
 		)
 		// Return partial snapshot with diagnostics
@@ -294,7 +299,8 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 		slices.Sort(snapshot.ImportedPaths) // Ensure deterministic order for logs and tests
 	}
 
-	a.logger.Debug("analysis complete",
+	a.logger.Debug(
+		"analysis complete",
 		slog.String("entry", entryPath),
 		slog.Bool("ok", diagResult.OK()),
 		slog.Int("issues", diagResult.Len()),

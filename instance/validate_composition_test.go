@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -362,7 +363,7 @@ func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 	assert.Contains(t, result.String(), "null is not a valid composition value")
 
 	// Verify error code is E_EDGE_SHAPE_MISMATCH
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
 
@@ -412,7 +413,7 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid composition value")
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
 }
@@ -445,7 +446,7 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrUnresolvedRequiredComposition, issues[0].Code())
 
@@ -499,7 +500,7 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrUnresolvedRequiredComposition, issues[0].Code())
 

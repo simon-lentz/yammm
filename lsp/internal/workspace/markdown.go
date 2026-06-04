@@ -41,7 +41,8 @@ func (w *Workspace) markdownDocumentChanged(uri string, version int, text string
 	}
 
 	if version != 0 && md.Version != 0 && version <= md.Version {
-		w.logger.Debug("ignoring stale markdown document change",
+		w.logger.Debug(
+			"ignoring stale markdown document change",
 			slog.String("uri", uri),
 			slog.Int("incoming_version", version),
 			slog.Int("current_version", md.Version),
@@ -129,7 +130,8 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 	// Assign virtual SourceIDs
 	path, err := lsputil.URIToPath(uri)
 	if err != nil {
-		w.logger.Warn("failed to parse markdown URI",
+		w.logger.Warn(
+			"failed to parse markdown URI",
 			slog.String("uri", uri),
 			slog.Any("error", fmt.Errorf("%w: %w", lsperr.ErrInvalidURI, err)),
 		)
@@ -174,7 +176,8 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 
 	// Post-analysis cancellation check
 	if analyzeCtx.Err() != nil {
-		w.logger.Debug("markdown analysis cancelled",
+		w.logger.Debug(
+			"markdown analysis cancelled",
 			slog.String("uri", uri),
 			slog.Any("error", analyzeCtx.Err()),
 		)

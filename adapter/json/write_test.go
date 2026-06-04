@@ -385,7 +385,8 @@ func TestMarshalObject_WithEdge(t *testing.T) {
 	g.Add(ctx, company)
 
 	// Add person with edge to company
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
+	person := mustValidInstanceWithEdge(
+		t, s, "Person", []any{"p1"},
 		map[string]any{
 			"id":   "p1",
 			"name": "Alice",
@@ -440,7 +441,8 @@ func TestMarshalObject_WithManyEdges(t *testing.T) {
 	g.Add(ctx, c2)
 
 	// Add person with multiple employers
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
+	person := mustValidInstanceWithEdge(
+		t, s, "Person", []any{"p1"},
 		map[string]any{
 			"id":   "p1",
 			"name": "Alice",
@@ -698,7 +700,8 @@ func TestMarshalObject_ManyAssociationSingleTarget(t *testing.T) {
 	g.Add(ctx, company)
 
 	// Add person with single employer (but relation is many)
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
+	person := mustValidInstanceWithEdge(
+		t, s, "Person", []any{"p1"},
 		map[string]any{
 			"id":   "p1",
 			"name": "Alice",
@@ -808,7 +811,8 @@ func TestMarshalObject_LowerSnakeFieldNames(t *testing.T) {
 	g.Add(ctx, proxy)
 
 	// Add service with HTTPProxy relation
-	service := mustValidInstanceWithEdge(t, s, "Service", []any{"svc1"},
+	service := mustValidInstanceWithEdge(
+		t, s, "Service", []any{"svc1"},
 		map[string]any{
 			"id":   "svc1",
 			"name": "API Gateway",
@@ -890,7 +894,8 @@ func TestMarshalObject_WithDiagnostics_Unresolved(t *testing.T) {
 	g := graph.New(s)
 
 	// Add person with edge to non-existent company
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
+	person := mustValidInstanceWithEdge(
+		t, s, "Person", []any{"p1"},
 		map[string]any{
 			"id":   "p1",
 			"name": "Alice",

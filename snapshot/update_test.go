@@ -30,7 +30,8 @@ import (
 func makeSnapshotBytes(ctx context.Context, t *testing.T, opts ...snapshot.Option) []byte {
 	t.Helper()
 	s := testSchema(t)
-	snap := buildSnapshot(t, s,
+	snap := buildSnapshot(
+		t, s,
 		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}),
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"title": "Acme"}),
 	)
@@ -401,7 +402,8 @@ func TestUpdateMetadata_CrossMarshalParityProperty(t *testing.T) {
 		snap *graph.Snapshot
 	}{
 		{"empty", buildSnapshot(t, s)},
-		{"populated", buildSnapshot(t, s,
+		{"populated", buildSnapshot(
+			t, s,
 			mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}),
 			mustValidInstance(t, s, "Person", []any{"p2"}, map[string]any{"name": "Bob"}),
 			mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"title": "Acme"}),

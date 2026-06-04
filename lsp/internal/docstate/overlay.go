@@ -64,7 +64,8 @@ func (d *Overlay) ChangeDocument(uri string, version int, text string, logger *s
 	// Ignore stale updates (version <= current) unless version is 0 (unknown).
 	// This prevents out-of-order updates from overwriting newer content.
 	if version != 0 && doc.Version != 0 && version <= doc.Version {
-		logger.Debug("ignoring stale document change",
+		logger.Debug(
+			"ignoring stale document change",
 			slog.String("uri", uri),
 			slog.Int("incoming_version", version),
 			slog.Int("current_version", doc.Version),

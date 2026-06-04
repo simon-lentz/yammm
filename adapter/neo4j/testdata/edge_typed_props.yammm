@@ -1,0 +1,13 @@
+schema "edge_typed_props_test"
+
+type Target {
+    target_id String primary
+}
+
+type Source {
+    source_id String primary
+    --> LINKED_AT (_:one) Target {
+        observed_at Timestamp
+        weight Float
+    }
+}

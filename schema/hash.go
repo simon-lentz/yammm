@@ -139,7 +139,6 @@ func hashType(h hash.Hash, typ *Type) {
 func hashConstraint(h hash.Hash, c Constraint) {
 	c = ResolveAlias(c)
 
-	//nolint:exhaustive // default panic covers future kinds
 	switch cc := c.(type) {
 	case StringConstraint:
 		writeTag(h, "c:string")

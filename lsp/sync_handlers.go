@@ -14,7 +14,8 @@ import (
 func handleDidOpen(ws DocumentManager, logger *slog.Logger) jrpc2.Handler {
 	return handler.New(func(_ context.Context, params *protocol.DidOpenTextDocumentParams) error {
 		uri := params.TextDocument.URI
-		logger.Debug("textDocument/didOpen",
+		logger.Debug(
+			"textDocument/didOpen",
 			slog.String("uri", uri),
 			slog.Int("version", int(params.TextDocument.Version)),
 		)
@@ -29,7 +30,8 @@ func handleDidOpen(ws DocumentManager, logger *slog.Logger) jrpc2.Handler {
 func handleDidChange(ws DocumentManager, logger *slog.Logger) jrpc2.Handler {
 	return handler.New(func(_ context.Context, params *protocol.DidChangeTextDocumentParams) error {
 		uri := params.TextDocument.URI
-		logger.Debug("textDocument/didChange",
+		logger.Debug(
+			"textDocument/didChange",
 			slog.String("uri", uri),
 			slog.Int("version", int(params.TextDocument.Version)),
 		)
@@ -55,7 +57,8 @@ func handleDidClose(ws DocumentManager, _ *slog.Logger) jrpc2.Handler {
 func handleDidChangeWatchedFiles(ws DocumentManager, logger *slog.Logger) jrpc2.Handler {
 	return handler.New(func(_ context.Context, params *protocol.DidChangeWatchedFilesParams) error {
 		for _, change := range params.Changes {
-			logger.Debug("watched file changed",
+			logger.Debug(
+				"watched file changed",
 				slog.String("uri", change.URI),
 				slog.Int("type", int(change.Type)),
 			)

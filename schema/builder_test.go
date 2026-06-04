@@ -2,6 +2,7 @@ package schema_test
 
 import (
 	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -217,7 +218,7 @@ func TestBuilder_AddImportRequiresSourceID(t *testing.T) {
 	require.Nil(t, s, "schema should be nil when errors exist")
 	assert.True(t, result.HasErrors())
 	// Verify diagnostic contains the message
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.NotEmpty(t, issues)
 	assert.Contains(t, issues[0].Message(), "requires WithSourceID")
 }
@@ -251,7 +252,7 @@ func TestBuilder_AddImportWithSourceID(t *testing.T) {
 		Done().
 		Build()
 
-	require.False(t, result.HasErrors(), "result: %v", result.Messages())
+	require.False(t, result.HasErrors(), "result: %v", result)
 	require.NotNil(t, s)
 	_ = result
 }
@@ -341,7 +342,7 @@ func TestBuilder_EmptyNameFails(t *testing.T) {
 	require.Nil(t, s, "schema should be nil when name is missing")
 	assert.True(t, result.HasErrors())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.NotEmpty(t, issues)
 	assert.Contains(t, issues[0].Message(), "schema name is required")
 }
@@ -358,7 +359,7 @@ func TestBuilder_EmptyTypeNameFails(t *testing.T) {
 	require.Nil(t, s, "schema should be nil when type name is empty")
 	assert.True(t, result.HasErrors())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.NotEmpty(t, issues)
 	assert.Contains(t, issues[0].Message(), "type name cannot be empty")
 }
@@ -375,7 +376,7 @@ func TestBuilder_NilConstraintFails(t *testing.T) {
 	require.Nil(t, s, "schema should be nil when constraint is nil")
 	assert.True(t, result.HasErrors())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.NotEmpty(t, issues)
 	assert.Contains(t, issues[0].Message(), "nil constraint")
 }
@@ -392,7 +393,7 @@ func TestBuilder_EmptyPropertyNameFails(t *testing.T) {
 	require.Nil(t, s, "schema should be nil when property name is empty")
 	assert.True(t, result.HasErrors())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.NotEmpty(t, issues)
 	assert.Contains(t, issues[0].Message(), "property name cannot be empty")
 }
@@ -413,7 +414,7 @@ func TestBuilder_EmptyRelationNameFails(t *testing.T) {
 	require.Nil(t, s, "schema should be nil when relation name is empty")
 	assert.True(t, result.HasErrors())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.NotEmpty(t, issues)
 	assert.Contains(t, issues[0].Message(), "relation name cannot be empty")
 }
@@ -464,7 +465,7 @@ func TestBuilder_CrossSchemaInheritance(t *testing.T) {
 		Done().
 		Build()
 
-	require.False(t, derivedResult.HasErrors(), "derivedResult: %v", derivedResult.Messages())
+	require.False(t, derivedResult.HasErrors(), "derivedResult: %v", derivedResult)
 	require.NotNil(t, derivedSchema)
 
 	// Verify Person type exists
@@ -645,7 +646,7 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 		Done().
 		Build()
 
-	require.False(t, derivedResult.HasErrors(), "derivedResult: %v", derivedResult.Messages())
+	require.False(t, derivedResult.HasErrors(), "derivedResult: %v", derivedResult)
 	require.NotNil(t, derivedSchema)
 
 	// Verify relation target is resolved
@@ -734,7 +735,7 @@ func TestBuilder_WithInvariant_EmptyNameFails(t *testing.T) {
 	require.Nil(t, s)
 	assert.True(t, result.HasErrors())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.NotEmpty(t, issues)
 	assert.Contains(t, issues[0].Message(), "invariant name cannot be empty")
 }
@@ -753,7 +754,7 @@ func TestBuilder_WithInvariant_NilExpression(t *testing.T) {
 	assert.True(t, result.HasErrors())
 
 	// Verify we get E_INVALID_INVARIANT
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, diag.E_INVALID_INVARIANT, issues[0].Code())
 	assert.Contains(t, issues[0].Message(), "nil expression")
@@ -826,7 +827,7 @@ func TestBuilder_SyntheticSourceID_WithImportResolver(t *testing.T) {
 		Done().
 		Build()
 
-	require.False(t, result.HasErrors(), "result: %v", result.Messages())
+	require.False(t, result.HasErrors(), "result: %v", result)
 	require.NotNil(t, s)
 
 	// Verify the import was resolved
@@ -914,7 +915,7 @@ func TestBuilder_SyntheticSourceID_SchemaNameFallback(t *testing.T) {
 		Done().
 		Build()
 
-	require.False(t, result.HasErrors(), "result: %v", result.Messages())
+	require.False(t, result.HasErrors(), "result: %v", result)
 	require.NotNil(t, s)
 
 	// Verify the import was resolved
@@ -1020,7 +1021,7 @@ func TestBuilder_FileBackedSourceID_RelativeImport(t *testing.T) {
 		Done().
 		Build()
 
-	require.False(t, mainResult.HasErrors(), "result: %v", mainResult.Messages())
+	require.False(t, mainResult.HasErrors(), "result: %v", mainResult)
 	require.NotNil(t, mainSchema)
 
 	// Verify the import was resolved
@@ -1099,7 +1100,7 @@ func TestBuilder_FileBackedSourceID_ParentDirImport(t *testing.T) {
 		Done().
 		Build()
 
-	require.False(t, mainResult.HasErrors(), "result: %v", mainResult.Messages())
+	require.False(t, mainResult.HasErrors(), "result: %v", mainResult)
 	require.NotNil(t, mainSchema)
 }
 

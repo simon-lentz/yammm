@@ -188,10 +188,10 @@ func TestBatchAssembler_HappyPath_Default(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Test 2: Add error wraps as *diag.ErrorWithContext with type+index tag.
+// Test 2: Add error wraps as *diag.ContextualError with type+index tag.
 // -----------------------------------------------------------------------------
 
-func TestBatchAssembler_AddError_WrapsAsErrorWithContext(t *testing.T) {
+func TestBatchAssembler_AddError_WrapsAsContextualError(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	ctx := t.Context()
 
@@ -203,16 +203,16 @@ func TestBatchAssembler_AddError_WrapsAsErrorWithContext(t *testing.T) {
 		t.Fatal("expected error for invalid Person, got nil")
 	}
 
-	var ewc *diag.ErrorWithContext
-	if !errors.As(err, &ewc) {
-		t.Fatalf("error is not *diag.ErrorWithContext: %T (%v)", err, err)
+	var ce *diag.ContextualError
+	if !errors.As(err, &ce) {
+		t.Fatalf("error is not *diag.ContextualError: %T (%v)", err, err)
 	}
 	wantTag := "Person (record #1)"
-	if ewc.Tag != wantTag {
-		t.Errorf("Tag: got %q, want %q", ewc.Tag, wantTag)
+	if ce.Tag != wantTag {
+		t.Errorf("Tag: got %q, want %q", ce.Tag, wantTag)
 	}
-	if !ewc.Result.HasErrors() {
-		t.Errorf("expected result.HasErrors() true; result: %s", ewc.Result.String())
+	if !ce.Result.HasErrors() {
+		t.Errorf("expected result.HasErrors() true; result: %s", ce.Result.String())
 	}
 	// successes counter must NOT increment on failed Add.
 	if got := ba.Count(); got != 0 {
@@ -245,12 +245,12 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 		t.Fatal("res.Snapshot is nil on Finalize error path; contract violated")
 	}
 
-	var ewc *diag.ErrorWithContext
-	if !errors.As(err, &ewc) {
-		t.Fatalf("error is not *diag.ErrorWithContext: %T", err)
+	var ce *diag.ContextualError
+	if !errors.As(err, &ce) {
+		t.Fatalf("error is not *diag.ContextualError: %T", err)
 	}
-	if ewc.Tag != "batch_finalize" {
-		t.Errorf("Tag: got %q, want \"batch_finalize\"", ewc.Tag)
+	if ce.Tag != "batch_finalize" {
+		t.Errorf("Tag: got %q, want \"batch_finalize\"", ce.Tag)
 	}
 
 	// The returned Result should contain the unresolved-required diagnostic
@@ -258,17 +258,17 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 	// issues from Add (none here) — the two surfaces are not byte-identical
 	// because Check returns a fresh result that does NOT merge into the
 	// snapshot's collector (see graph/doc.go's "Diagnostics Lifecycle"
-	// section). The contract under test: ewc.Result must contain at least
+	// section). The contract under test: ce.Result must contain at least
 	// one E_UNRESOLVED_REQUIRED issue.
 	foundUnresolved := false
-	for issue := range ewc.Result.Errors() {
+	for issue := range ce.Result.Errors() {
 		if issue.Code() == diag.E_UNRESOLVED_REQUIRED {
 			foundUnresolved = true
 			break
 		}
 	}
 	if !foundUnresolved {
-		t.Errorf("expected E_UNRESOLVED_REQUIRED in error result; got: %s", ewc.Result.String())
+		t.Errorf("expected E_UNRESOLVED_REQUIRED in error result; got: %s", ce.Result.String())
 	}
 	// The Person is still inspectable in the partial snapshot.
 	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != 1 {
@@ -464,9 +464,11 @@ func TestBatchAssembler_Concurrent_Default(t *testing.T) {
 // This is the LOAD-BEARING regression test for INV-1: every Add that returns
 // nil must occur before Finalize's snapshot. A naive design where Finalize
 // drains the validator pool would violate this in pool mode (the validator
-// is returned to the pool before Graph.Add runs). The WaitGroup-based
-// implementation uses ba.inflight to serialize Finalize against in-flight
-// Add commits.
+// is returned to the pool before Graph.Add runs). The implementation
+// serializes Finalize against in-flight Adds with a sync.RWMutex: each Add
+// holds the read lock for its full duration and Finalize takes the write
+// lock, which blocks until every outstanding Add has released — so no Add
+// that returned nil can be missing from the snapshot.
 // -----------------------------------------------------------------------------
 
 func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {

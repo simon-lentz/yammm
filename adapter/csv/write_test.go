@@ -23,7 +23,7 @@ func validateInstances(t *testing.T, s *schema.Schema, typeName string, records 
 	for _, props := range records {
 		valid, result := v.ValidateOne(context.Background(), typeName, instance.RawInstance{Properties: props})
 		if !result.OK() {
-			t.Fatalf("validate %s: %v", typeName, result.Messages())
+			t.Fatalf("validate %s: %v", typeName, result)
 		}
 		valids = append(valids, valid)
 	}
@@ -38,7 +38,7 @@ func buildSnapshot(t *testing.T, s *schema.Schema, instances map[string][]map[st
 		for _, props := range records {
 			valid, result := v.ValidateOne(context.Background(), typeName, instance.RawInstance{Properties: props})
 			if !result.OK() {
-				t.Fatalf("validate %s: %v", typeName, result.Messages())
+				t.Fatalf("validate %s: %v", typeName, result)
 			}
 			addResult := g.Add(context.Background(), valid)
 			if err := addResult.Err(); err != nil {

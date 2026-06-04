@@ -473,7 +473,10 @@ func TestCoerceSlice_TimeTimeElements(t *testing.T) {
 	t2 := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
 	raw := []any{t1, t2}
 
-	result := coerceSlice(raw, prop.Constraint())
+	result, err := coerceSlice(raw, prop.Constraint())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	out, ok := result.([]time.Time)
 	if !ok {
 		t.Fatalf("expected []time.Time, got %T", result)
@@ -499,7 +502,10 @@ func TestCoerceSlice_DateStringElements(t *testing.T) {
 	}
 
 	raw := []any{"2024-01-01", "2024-06-15"}
-	result := coerceSlice(raw, prop.Constraint())
+	result, err := coerceSlice(raw, prop.Constraint())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	out, ok := result.([]dbtype.Date)
 	if !ok {
 		t.Fatalf("expected []dbtype.Date, got %T", result)
@@ -530,7 +536,10 @@ func TestCoerceSlice_TimestampStringElements(t *testing.T) {
 	}
 
 	raw := []any{"2024-01-01T00:00:00Z", "2024-06-15T12:30:00Z"}
-	result := coerceSlice(raw, prop.Constraint())
+	result, err := coerceSlice(raw, prop.Constraint())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	out, ok := result.([]time.Time)
 	if !ok {
 		t.Fatalf("expected []time.Time, got %T", result)
@@ -555,9 +564,8 @@ func TestCoerceSlice_TemporalParseFailure(t *testing.T) {
 			t.Fatal("dates property not found")
 		}
 		raw := []any{"not-a-date", "also-not"}
-		result := coerceSlice(raw, prop.Constraint())
-		if _, ok := result.([]string); !ok {
-			t.Errorf("expected []string fallback, got %T", result)
+		if _, err := coerceSlice(raw, prop.Constraint()); err == nil {
+			t.Error("expected an error on unparseable Date elements, got nil")
 		}
 	})
 
@@ -568,11 +576,131 @@ func TestCoerceSlice_TemporalParseFailure(t *testing.T) {
 			t.Fatal("times property not found")
 		}
 		raw := []any{"not-a-timestamp", "also-not"}
-		result := coerceSlice(raw, prop.Constraint())
-		if _, ok := result.([]string); !ok {
-			t.Errorf("expected []string fallback, got %T", result)
+		if _, err := coerceSlice(raw, prop.Constraint()); err == nil {
+			t.Error("expected an error on unparseable Timestamp elements, got nil")
 		}
 	})
+}
+
+func TestCoerceSlice_VectorElements(t *testing.T) {
+	t.Parallel()
+	// A Vector property carried as []any (the shape a .ys snapshot load produces,
+	// with whole numbers narrowed to int64 by NormalizeValue) must reach the
+	// driver as []float64, not []any. A Vector is float-valued by definition, so
+	// it coerces elementwise exactly like a List<Float>.
+	s := loadSchema(t, "basic.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+	prop, ok := st.Property("embedding") // Vector[3]
+	if !ok {
+		t.Fatal("embedding property not found")
+	}
+	raw := []any{int64(1), int64(2), 3.5}
+	result, err := coerceSlice(raw, prop.Constraint())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out, ok := result.([]float64)
+	if !ok {
+		t.Fatalf("expected []float64 for a Vector, got %T", result)
+	}
+	if len(out) != 3 || out[0] != 1 || out[1] != 2 || out[2] != 3.5 {
+		t.Fatalf("vector elements not coerced to float64: %#v", out)
+	}
+}
+
+func TestCoerceSlice_ListValueUnderScalarConstraintErrors(t *testing.T) {
+	t.Parallel()
+	// A []any value under a scalar (non-List, non-Vector) constraint is a shape
+	// mismatch — a scalar property cannot hold a list. coerceSlice fails fast
+	// rather than returning the raw []any for the driver to reject.
+	s := loadSchema(t, "basic.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+	prop, ok := st.Property("score") // scalar Float
+	if !ok {
+		t.Fatal("score property not found")
+	}
+	if _, err := coerceSlice([]any{int64(1), int64(2)}, prop.Constraint()); err == nil {
+		t.Error("expected an error for a []any under a scalar constraint, got nil")
+	}
+}
+
+func TestPropsToParamMap_DeterministicError(t *testing.T) {
+	t.Parallel()
+	// When multiple node properties fail coercion — reachable when a .ys snapshot
+	// is loaded under a schema whose constraints its values no longer satisfy —
+	// the error names the lexicographically-first failing property on every run,
+	// matching CoerceParams, so a coercion failure is reproducible rather than
+	// dependent on map iteration order.
+	s := loadSchema(t, "basic.yammm")
+	st, ok := s.Type("Entity")
+	if !ok {
+		t.Fatal("Entity not found")
+	}
+	props := immutable.WrapProperties(map[string]any{
+		"birth_date": "not-a-date",      // Date → coercion error
+		"created_at": "not-a-timestamp", // Timestamp → coercion error
+	})
+	var first string
+	for i := range 64 {
+		_, err := propsToParamMap(props, st)
+		if err == nil {
+			t.Fatal("want a coercion error, got nil")
+		}
+		if i == 0 {
+			first = err.Error()
+			continue
+		}
+		if err.Error() != first {
+			t.Fatalf("non-deterministic error: run %d = %q, first = %q", i, err.Error(), first)
+		}
+	}
+	if !strings.Contains(first, "birth_date") {
+		t.Errorf("error should name the lexicographically-first bad property (birth_date): %q", first)
+	}
+}
+
+func TestCoerceRelProps_DeterministicError(t *testing.T) {
+	t.Parallel()
+	// Edge-property counterpart of TestPropsToParamMap_DeterministicError: with
+	// multiple typed rel-props failing, the reported error is the
+	// lexicographically-first key on every run.
+	s := loadSchema(t, "edge_typed_props.yammm")
+	src, ok := s.Type("Source")
+	if !ok {
+		t.Fatal("Source not found")
+	}
+	rel, ok := src.Relation("LINKED_AT")
+	if !ok {
+		t.Fatal("LINKED_AT relation not found")
+	}
+	var first string
+	for i := range 64 {
+		// coerceRelProps mutates props in place, so build a fresh map per run.
+		props := map[string]any{
+			"observed_at": "not-a-timestamp", // Timestamp → coercion error
+			"weight":      "not-a-number",    // Float → coercion error (strict)
+		}
+		_, err := coerceRelProps(props, rel)
+		if err == nil {
+			t.Fatal("want a coercion error, got nil")
+		}
+		if i == 0 {
+			first = err.Error()
+			continue
+		}
+		if err.Error() != first {
+			t.Fatalf("non-deterministic error: run %d = %q, first = %q", i, err.Error(), first)
+		}
+	}
+	if !strings.Contains(first, "observed_at") {
+		t.Errorf("error should name the lexicographically-first bad rel-prop (observed_at): %q", first)
+	}
 }
 
 func TestPropertyCoercion_Scalars(t *testing.T) {
@@ -697,7 +825,7 @@ func TestPropertyCoercion_FloatScalar(t *testing.T) {
 	}
 }
 
-func TestCoerceTemporalScalar_Unit(t *testing.T) {
+func TestPropsToParamMap_TemporalErrorPropagates(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")
 	st, ok := s.Type("Entity")
@@ -705,77 +833,22 @@ func TestCoerceTemporalScalar_Unit(t *testing.T) {
 		t.Fatal("Entity not found")
 	}
 
-	t.Run("Date", func(t *testing.T) {
-		t.Parallel()
-		prop, ok := st.Property("birth_date")
-		if !ok {
-			t.Fatal("birth_date property not found")
-		}
-		result := coerceTemporalScalar("2024-06-15", prop.Constraint())
-		if _, isDate := result.(dbtype.Date); !isDate {
-			t.Errorf("expected dbtype.Date, got %T", result)
-		}
+	// A value that bypassed validation (e.g. injected at a direct param
+	// boundary) and is not a parseable Timestamp must surface as an error from
+	// propsToParamMap rather than silently reaching the driver.
+	props := immutable.WrapProperties(map[string]any{
+		"id":         "e1",
+		"created_at": "not-a-timestamp",
 	})
+	if _, err := propsToParamMap(props, st); err == nil {
+		t.Fatal("want error from propsToParamMap on an unparseable Timestamp, got nil")
+	}
 
-	t.Run("Timestamp_RFC3339", func(t *testing.T) {
-		t.Parallel()
-		prop, ok := st.Property("created_at")
-		if !ok {
-			t.Fatal("created_at property not found")
-		}
-		result := coerceTemporalScalar("2024-01-01T00:00:00Z", prop.Constraint())
-		if _, isTime := result.(time.Time); !isTime {
-			t.Errorf("expected time.Time, got %T", result)
-		}
-	})
-
-	t.Run("Timestamp_RFC3339Nano", func(t *testing.T) {
-		t.Parallel()
-		prop, ok := st.Property("created_at")
-		if !ok {
-			t.Fatal("created_at property not found")
-		}
-		result := coerceTemporalScalar("2024-01-01T00:00:00.123456789Z", prop.Constraint())
-		tt, isTime := result.(time.Time)
-		if !isTime {
-			t.Fatalf("expected time.Time, got %T", result)
-		}
-		if tt.Nanosecond() != 123456789 {
-			t.Errorf("nanosecond = %d; want 123456789", tt.Nanosecond())
-		}
-	})
-
-	t.Run("UnparseableDate", func(t *testing.T) {
-		t.Parallel()
-		prop, ok := st.Property("birth_date")
-		if !ok {
-			t.Fatal("birth_date property not found")
-		}
-		result := coerceTemporalScalar("not-a-date", prop.Constraint())
-		if s, ok := result.(string); !ok || s != "not-a-date" {
-			t.Errorf("expected original string, got %T %v", result, result)
-		}
-	})
-
-	t.Run("UnparseableTimestamp", func(t *testing.T) {
-		t.Parallel()
-		prop, ok := st.Property("created_at")
-		if !ok {
-			t.Fatal("created_at property not found")
-		}
-		result := coerceTemporalScalar("not-a-timestamp", prop.Constraint())
-		if s, ok := result.(string); !ok || s != "not-a-timestamp" {
-			t.Errorf("expected original string, got %T %v", result, result)
-		}
-	})
-
-	t.Run("NonTemporalConstraint", func(t *testing.T) {
-		t.Parallel()
-		result := coerceTemporalScalar("hello", schema.NewStringConstraint())
-		if s, ok := result.(string); !ok || s != "hello" {
-			t.Errorf("expected original string, got %T %v", result, result)
-		}
-	})
+	// A nil schema type short-circuits with no coercion and no error.
+	clean, err := propsToParamMap(immutable.WrapProperties(map[string]any{"x": "y"}), nil)
+	if err != nil || clean["x"] != "y" {
+		t.Fatalf("nil schemaType should pass through unchanged: clean=%v err=%v", clean, err)
+	}
 }
 
 func TestNodeQueryFor_MissingKey(t *testing.T) {
@@ -960,6 +1033,132 @@ func TestBatchEdgeQueries_MixedProperties(t *testing.T) {
 	}
 }
 
+func TestCoerceRelProps(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "edge_typed_props.yammm")
+	st, ok := s.Type("Source")
+	if !ok {
+		t.Fatal("Source type not found")
+	}
+	rels := st.AssociationsSlice()
+	if len(rels) != 1 {
+		t.Fatalf("want 1 association on Source, got %d", len(rels))
+	}
+	rel := rels[0]
+
+	out, err := coerceRelProps(map[string]any{
+		"observed_at": "2024-01-01T00:00:00Z",
+		"weight":      int64(5),
+		"undeclared":  "passthrough",
+	}, rel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, isTime := out["observed_at"].(time.Time); !isTime {
+		t.Errorf("observed_at should be time.Time, got %T", out["observed_at"])
+	}
+	if _, isFloat := out["weight"].(float64); !isFloat {
+		t.Errorf("weight should be float64, got %T", out["weight"])
+	}
+	if out["undeclared"] != "passthrough" {
+		t.Errorf("undeclared property should pass through, got %#v", out["undeclared"])
+	}
+
+	// A bad temporal string on a typed edge property surfaces an error.
+	if _, err := coerceRelProps(map[string]any{"observed_at": "not-a-timestamp"}, rel); err == nil {
+		t.Error("want error on unparseable Timestamp edge property, got nil")
+	}
+
+	// A nil relation passes through unchanged.
+	clean, err := coerceRelProps(map[string]any{"x": "y"}, nil)
+	if err != nil || clean["x"] != "y" {
+		t.Fatalf("nil relation should pass through: clean=%v err=%v", clean, err)
+	}
+}
+
+func TestEdgeQueriesFor_CoercesTypedRelProps(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "edge_typed_props.yammm")
+	a := New()
+
+	shapes, result := a.ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	valid := validateInstance(t, v, "Source", map[string]any{
+		"source_id": "s1",
+		"linked_at": map[string]any{
+			"_target_target_id": "t1",
+			"observed_at":       "2024-01-01T00:00:00Z",
+			"weight":            int64(5),
+		},
+	})
+
+	st, _ := s.Type("Source")
+	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 1 {
+		t.Fatalf("got %d queries; want 1", len(queries))
+	}
+	relProps, ok := queries[0].Params["rel_props"].(map[string]any)
+	if !ok {
+		t.Fatalf("rel_props missing or wrong type: %T", queries[0].Params["rel_props"])
+	}
+	if _, isTime := relProps["observed_at"].(time.Time); !isTime {
+		t.Errorf("observed_at should be coerced to time.Time, got %T", relProps["observed_at"])
+	}
+	if _, isFloat := relProps["weight"].(float64); !isFloat {
+		t.Errorf("weight should be coerced to float64, got %T", relProps["weight"])
+	}
+}
+
+func TestBatchEdgeQueries_CoercesTypedRelProps(t *testing.T) {
+	t.Parallel()
+	s, v := loadSchemaAndValidator(t, "edge_typed_props.yammm")
+	a := New()
+
+	shapes, result := a.ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Target": {{"target_id": "t1"}},
+		"Source": {{
+			"source_id": "s1",
+			"linked_at": map[string]any{
+				"_target_target_id": "t1",
+				"observed_at":       "2024-01-01T00:00:00Z",
+			},
+		}},
+	})
+
+	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, shapes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var linked *BatchEdgeQuery
+	for _, q := range queries {
+		if q.RelationType == "LINKED_AT" {
+			linked = q
+		}
+	}
+	if linked == nil {
+		t.Fatal("expected a LINKED_AT batch edge query")
+	}
+	rows := linked.Params["rows"].([]map[string]any)
+	relProps, ok := rows[0]["rel_props"].(map[string]any)
+	if !ok {
+		t.Fatalf("rel_props missing or wrong type: %T", rows[0]["rel_props"])
+	}
+	if _, isTime := relProps["observed_at"].(time.Time); !isTime {
+		t.Errorf("observed_at should be coerced to time.Time, got %T", relProps["observed_at"])
+	}
+}
+
 func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
@@ -998,7 +1197,7 @@ func validateInstance(t *testing.T, v *instance.Validator, typeName string, prop
 	t.Helper()
 	valid, result := v.ValidateOne(context.Background(), typeName, instance.RawInstance{Properties: props})
 	if !result.OK() {
-		t.Fatalf("validate %s: %v", typeName, result.Messages())
+		t.Fatalf("validate %s: %v", typeName, result)
 	}
 	return valid
 }
@@ -1270,5 +1469,71 @@ func TestExtractKeyFromImmutableKey_NoKeys(t *testing.T) {
 	_, err := extractKeyFromImmutableKey(key, nil)
 	if err == nil {
 		t.Fatal("expected error for no keys")
+	}
+}
+
+func TestCoerceSlice_TypeMismatchErrors(t *testing.T) {
+	t.Parallel()
+	// A list element whose Go type cannot be coerced to the element type cannot
+	// build a homogeneous typed slice; coerceSlice must error (naming the
+	// element) rather than silently returning the raw []any to the driver.
+	cases := []struct {
+		name string
+		c    schema.Constraint
+		raw  []any
+	}{
+		{"String", schema.NewListConstraint(schema.NewStringConstraint()), []any{"a", int64(2)}},
+		{"Integer", schema.NewListConstraint(schema.NewIntegerConstraint()), []any{int64(1), "x"}},
+		{"Float", schema.NewListConstraint(schema.NewFloatConstraint()), []any{float64(1), "x"}},
+		{"Boolean", schema.NewListConstraint(schema.NewBooleanConstraint()), []any{true, "x"}},
+		{"Date", schema.NewListConstraint(schema.NewDateConstraint()), []any{"2024-01-01", int64(5)}},
+		{"Timestamp", schema.NewListConstraint(schema.NewTimestampConstraint()), []any{"2024-01-01T00:00:00Z", int64(5)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := coerceSlice(tc.raw, tc.c); err == nil {
+				t.Errorf("List<%s> with a wrong-type element: want error, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestCoerceSlice_IntegerWidthRepair(t *testing.T) {
+	t.Parallel()
+	// A List<Integer> hand-built with narrower or unsigned int widths must widen to
+	// []int64 — the same width repair coerceSlice applies for Float — rather than
+	// erroring on a non-int64 element (the prior strict int64-only behavior).
+	raw := []any{
+		int(1), int8(2), int16(3), int32(4), int64(5),
+		uint(6), uint8(7), uint16(8), uint32(9), uint64(10),
+	}
+	got, err := coerceSlice(raw, schema.NewListConstraint(schema.NewIntegerConstraint()))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out, ok := got.([]int64)
+	if !ok {
+		t.Fatalf("got %T, want []int64", got)
+	}
+	want := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	if len(out) != len(want) {
+		t.Fatalf("len = %d, want %d", len(out), len(want))
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Errorf("out[%d] = %d, want %d", i, out[i], want[i])
+		}
+	}
+}
+
+func TestCoerceSlice_IntegerOverflowErrors(t *testing.T) {
+	t.Parallel()
+	// A uint64 beyond the int64 range cannot be represented; coerceSlice errors
+	// rather than wrapping to a negative int64 (matching the validator's guard).
+	// 9223372036854775808 == math.MaxInt64 + 1.
+	raw := []any{uint64(9223372036854775808)}
+	if _, err := coerceSlice(raw, schema.NewListConstraint(schema.NewIntegerConstraint())); err == nil {
+		t.Fatal("want error for a uint64 exceeding int64 max, got nil")
 	}
 }

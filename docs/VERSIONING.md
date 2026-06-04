@@ -18,7 +18,7 @@ yammm is currently pre-1.0. Under Go module semver conventions, `0.X.Y` releases
 ### Minor releases (`v0.X.0 → v0.X+1.0`) may include:
 
 - **Additive API changes** — new exported symbols, new option types, new methods on existing types, new struct fields added at the end of a struct (subject to the type's own versioning contract, if any). Consumers written against the prior release continue to compile and run unchanged.
-- **Subtractive API changes** — removal of exported symbols, provided (a) a grep across the known consumer set returns zero external Go references, (b) the removal is explicitly documented in the release notes, and (c) the release-notes entry enumerates the removed symbols for downstream auditing.
+- **Subtractive and breaking API changes** — removal of exported symbols, and breaking changes to an exported symbol's signature, name, or type (e.g. changing a method's return type, renaming an exported function, or collapsing two carrier types into one), provided (a) a grep across the known consumer set returns **either** zero external Go references **or** external references confined to a consumer that pins an older yammm release and whose migration is tracked as a downstream backlog item — in which case the semver pin carries the coordination, so tagging the breaking release cannot break that consumer's build and the migration lands on the consumer's own schedule; (b) the change is explicitly documented in the release notes; and (c) the release-notes entry enumerates every removed, renamed, or signature-changed symbol for downstream auditing.
 - **Behavior tightenings** — changes where the only observable difference is that a previously-erroring call becomes a no-op for input that was already semantically equivalent to the stored state, or similar correctness-preserving narrowings (e.g., §7's `Registry.Register` becoming idempotent for exact-`SourceID` + exact-`StructuralHash` re-registration in v0.3.0). Documented in the release notes with the specific contract change.
 - **Wire-format additions** — new optional fields added under the `omitempty` + header `features`-signal convention, provided the new field's absence in an older reader does not cause silent data loss. A v0.X reader consuming a v0.X+1-produced document skips the unknown field; a v0.X+1 reader consuming a v0.X-produced document reads missing fields as their zero value.
 
@@ -73,6 +73,23 @@ The v0.3.0 release is the first to explicitly apply this policy. v0.3.0 carries:
 
 All three changes are documented inline in the v0.3.0 release notes with pointers back to this document's relevant policy sections.
 
+## v0.4.0 under this policy
+
+v0.4.0 bundles two independent, separately-reviewable streams, co-tagged once both land:
+
+- **Additive coercion surface (`adapter/neo4j`)** — new exported `Coerce`, `CoerceParams`, `ParamTypes`, and `ParamTypesForType`, with the node and edge property paths routed through the single chokepoint internally. Strictly additive (new exported symbols + internal rewire); code written against `v0.3.x` compiles and runs unchanged. Justified under the pre-1.0 "additive API changes" rule.
+- **Breaking `diag` surface tightening** — three classes of change:
+  - *Seven removals* — `Result.IssuesSlice`, `ErrorsSlice`, `WarningsSlice`, `BySeveritySlice`, `IssuesAtLeastAsSevereAsSlice`, `Messages`, and `MessagesAtOrAbove` (each replaced by the corresponding iterator with `slices.Collect`, or `Result.String()` / `Renderer` for message formatting).
+  - *One signature change* — `Result.WithContext(tag)` now returns `error` (nil when OK) rather than a `ResultWithContext` value.
+  - *Type fold + rename* — `ResultWithContext` and `ErrorWithContext` collapse into a single `*ContextualError`, and `AsResultWithContext` becomes `AsContextualError` (returning `(*ContextualError, bool)`). Consequence in `graph`: `BatchAssembler.Add` / `AddValid` / `Finalize` now return `*diag.ContextualError` (was `*diag.ErrorWithContext`).
+
+  One addition rides the same release: `diag.Collect(issues ...Issue) Result`.
+
+  Justified under the **amended pre-1.0 rule (a)** (broadened 2026-06-02): there are zero external uncoordinated callers — every in-repo user (the two `graph` call sites and the ~115 test call sites across six packages that used the removed accessors) was updated in-tree, and the sole external consumer (rdata) pins `v0.3.1` with its migration tracked as a downstream backlog item, so tagging `v0.4.0` cannot break its build. Per conditions (b) and (c), the release notes enumerate every removed, renamed, and signature-changed symbol.
+
+The `.ys` wire format is unchanged at v0.4.0 (header `version` stays `2`). Both streams are documented inline in the v0.4.0 release notes with pointers back to this document's relevant policy sections.
+
 ## Revision history
 
 - **2026-04-17** — Initial document, added as part of v0.3.0 release prep.
+- **2026-06-02** — Broadened the pre-1.0 minor-release rule from "removal of exported symbols" to also cover breaking signature, name, and type changes, and added a version-pinned-consumer carve-out to condition (a): a breaking change is permitted when the only external references live in a consumer pinned to an older yammm release whose migration is tracked downstream. Motivated by the v0.4.0 `diag` surface tightening, whose sole external consumer (rdata) pins `v0.3.1` and migrates on its own schedule.

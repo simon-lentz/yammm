@@ -51,73 +51,51 @@ func testResultMixed(tb testing.TB) diag.Result {
 	return c.Result()
 }
 
-func TestResult_WithContext_ReturnsValue(t *testing.T) {
+// ctxErr constructs a *ContextualError directly so the LogValue shape can be
+// pinned independent of WithContext's nil-on-OK behavior.
+func ctxErr(res diag.Result, tag string) *diag.ContextualError {
+	return &diag.ContextualError{Result: res, Tag: tag}
+}
+
+// --- WithContext ---
+
+func TestResult_WithContext_ReturnsContextualError(t *testing.T) {
 	t.Parallel()
 	res := testResultWithError(t, testCodeError)
-	cr := res.WithContext("schema_load")
-	if cr.Tag != "schema_load" {
-		t.Errorf("Tag = %q, want %q", cr.Tag, "schema_load")
-	}
-	if cr.Result.Len() != res.Len() {
-		t.Errorf("Result.Len() = %d, want %d", cr.Result.Len(), res.Len())
-	}
-}
-
-func TestResultWithContext_Err_OK(t *testing.T) {
-	t.Parallel()
-	cr := testResultOK().WithContext("noop")
-	if err := cr.Err(); err != nil {
-		t.Errorf("Err() on OK result = %v, want nil", err)
-	}
-	if !cr.OK() {
-		t.Error("OK() on OK result = false, want true")
-	}
-	if cr.HasErrors() {
-		t.Error("HasErrors() on OK result = true, want false")
-	}
-}
-
-func TestResultWithContext_Err_WithErrors(t *testing.T) {
-	t.Parallel()
-	cr := testResultWithError(t, testCodeError).WithContext("validation")
-	err := cr.Err()
+	err := res.WithContext("schema_load")
 	if err == nil {
-		t.Fatal("Err() on failing result = nil, want non-nil")
+		t.Fatal("WithContext on failing result = nil, want *ContextualError")
 	}
-
-	var ewc *diag.ErrorWithContext
-	if !errors.As(err, &ewc) {
-		t.Fatalf("errors.As(&ErrorWithContext) = false, want true; err = %v", err)
+	var ce *diag.ContextualError
+	if !errors.As(err, &ce) {
+		t.Fatalf("errors.As(&ContextualError) = false; err = %v", err)
 	}
-	if ewc.Tag != "validation" {
-		t.Errorf("recovered Tag = %q, want %q", ewc.Tag, "validation")
+	if ce.Tag != "schema_load" {
+		t.Errorf("Tag = %q, want %q", ce.Tag, "schema_load")
 	}
-	if cr.OK() {
-		t.Error("OK() on failing result = true, want false")
-	}
-	if !cr.HasErrors() {
-		t.Error("HasErrors() on failing result = false, want true")
+	if ce.Result.Len() != res.Len() {
+		t.Errorf("Result.Len() = %d, want %d", ce.Result.Len(), res.Len())
 	}
 }
 
-func TestResultWithContext_WarningsOnly(t *testing.T) {
+func TestResult_WithContext_OK(t *testing.T) {
 	t.Parallel()
-	cr := testResultWithWarning(t).WithContext("preflight")
-	if err := cr.Err(); err != nil {
-		t.Errorf("Err() on warnings-only result = %v, want nil", err)
-	}
-	if !cr.OK() {
-		t.Error("OK() on warnings-only result = false, want true")
-	}
-	if cr.HasErrors() {
-		t.Error("HasErrors() on warnings-only result = true, want false")
+	if err := testResultOK().WithContext("noop"); err != nil {
+		t.Errorf("WithContext on OK result = %v, want nil", err)
 	}
 }
 
-func TestErrorWithContext_Error_Format(t *testing.T) {
+func TestResult_WithContext_WarningsOnly(t *testing.T) {
 	t.Parallel()
-	cr := testResultWithError(t, testCodeError).WithContext("schema_load")
-	err := cr.Err()
+	// Warnings-only is OK (no Fatal/Error), so WithContext returns nil.
+	if err := testResultWithWarning(t).WithContext("preflight"); err != nil {
+		t.Errorf("WithContext on warnings-only result = %v, want nil", err)
+	}
+}
+
+func TestContextualError_Error_Format(t *testing.T) {
+	t.Parallel()
+	err := testResultWithError(t, testCodeError).WithContext("schema_load")
 	msg := err.Error()
 	if !strings.HasPrefix(msg, "schema_load: ") {
 		t.Errorf("Error() prefix = %q, want prefix %q", msg, "schema_load: ")
@@ -127,46 +105,45 @@ func TestErrorWithContext_Error_Format(t *testing.T) {
 	}
 }
 
-func TestErrorWithContext_Unwrap_ChainsToResultError(t *testing.T) {
+func TestContextualError_Unwrap_ChainsToResultError(t *testing.T) {
 	t.Parallel()
 	res := testResultWithError(t, testCodeDuplicatePK)
-	err := res.WithContext("validation").Err()
+	err := res.WithContext("validation")
 
 	var re *diag.ResultError
 	if !errors.As(err, &re) {
-		t.Fatalf("errors.As(&ResultError) via Unwrap = false, want true; err = %v", err)
+		t.Fatalf("errors.As(&ResultError) via Unwrap = false; err = %v", err)
 	}
 	if re.Result.Len() != res.Len() {
 		t.Errorf("recovered Result.Len() = %d, want %d", re.Result.Len(), res.Len())
 	}
-	// Confirm direct Unwrap also reaches the same value.
-	unwrapped := errors.Unwrap(err)
-	if unwrapped == nil {
-		t.Fatal("errors.Unwrap(ErrorWithContext) = nil, want non-nil")
+	if errors.Unwrap(err) == nil {
+		t.Fatal("errors.Unwrap(*ContextualError) = nil, want non-nil")
 	}
 }
 
-func TestErrorWithContext_NilSafe(t *testing.T) {
+func TestContextualError_NilSafe(t *testing.T) {
 	t.Parallel()
-	var e *diag.ErrorWithContext
+	var e *diag.ContextualError
 	msg := e.Error()
-	if msg == "" {
-		t.Error("nil *ErrorWithContext.Error() = \"\", want stable fallback string")
-	}
-	if !strings.Contains(msg, "nil") {
-		t.Errorf("nil *ErrorWithContext.Error() = %q, want mention of nil", msg)
+	if msg == "" || !strings.Contains(msg, "nil") {
+		t.Errorf("nil *ContextualError.Error() = %q, want a stable string mentioning nil", msg)
 	}
 	if got := e.Unwrap(); got != nil {
-		t.Errorf("nil *ErrorWithContext.Unwrap() = %v, want nil", got)
+		t.Errorf("nil *ContextualError.Unwrap() = %v, want nil", got)
+	}
+	if k := e.LogValue().Kind(); k != slog.KindGroup {
+		t.Errorf("nil *ContextualError.LogValue().Kind() = %v, want Group", k)
 	}
 }
 
 // --- LogValue shape ---
+// LogValue is exercised on a directly-constructed *ContextualError so its shape
+// contract is pinned independent of WithContext's nil-on-OK behavior.
 
-func TestResultWithContext_LogValue_ContextAttrAlwaysPresent(t *testing.T) {
+func TestContextualError_LogValue_ContextAttrAlwaysPresent(t *testing.T) {
 	t.Parallel()
-	cr := testResultWithError(t, testCodeError).WithContext("validation")
-	val := cr.LogValue()
+	val := ctxErr(testResultWithError(t, testCodeError), "validation").LogValue()
 	if val.Kind() != slog.KindGroup {
 		t.Fatalf("LogValue().Kind() = %v, want Group", val.Kind())
 	}
@@ -179,10 +156,9 @@ func TestResultWithContext_LogValue_ContextAttrAlwaysPresent(t *testing.T) {
 	}
 }
 
-func TestResultWithContext_LogValue_TopLevelCode_WhenError(t *testing.T) {
+func TestContextualError_LogValue_TopLevelCode_WhenError(t *testing.T) {
 	t.Parallel()
-	cr := testResultWithError(t, testCodeDuplicatePK).WithContext("validation")
-	val := cr.LogValue()
+	val := ctxErr(testResultWithError(t, testCodeDuplicatePK), "validation").LogValue()
 	codeVal, ok := lookupAttr(val, "code")
 	if !ok {
 		t.Fatal("LogValue() missing top-level code attribute")
@@ -192,28 +168,25 @@ func TestResultWithContext_LogValue_TopLevelCode_WhenError(t *testing.T) {
 	}
 }
 
-func TestResultWithContext_LogValue_TopLevelCode_OmittedOnWarningsOnly(t *testing.T) {
+func TestContextualError_LogValue_TopLevelCode_OmittedOnWarningsOnly(t *testing.T) {
 	t.Parallel()
-	cr := testResultWithWarning(t).WithContext("preflight")
-	val := cr.LogValue()
+	val := ctxErr(testResultWithWarning(t), "preflight").LogValue()
 	if _, ok := lookupAttr(val, "code"); ok {
 		t.Error("LogValue() emitted top-level code on warnings-only result; want omitted")
 	}
 }
 
-func TestResultWithContext_LogValue_TopLevelCode_OmittedOnOK(t *testing.T) {
+func TestContextualError_LogValue_TopLevelCode_OmittedOnOK(t *testing.T) {
 	t.Parallel()
-	cr := testResultOK().WithContext("noop")
-	val := cr.LogValue()
+	val := ctxErr(testResultOK(), "noop").LogValue()
 	if _, ok := lookupAttr(val, "code"); ok {
 		t.Error("LogValue() emitted top-level code on OK result; want omitted")
 	}
 }
 
-func TestResultWithContext_LogValue_Counts_MixedSeverity(t *testing.T) {
+func TestContextualError_LogValue_Counts_MixedSeverity(t *testing.T) {
 	t.Parallel()
-	cr := testResultMixed(t).WithContext("audit")
-	val := cr.LogValue()
+	val := ctxErr(testResultMixed(t), "audit").LogValue()
 	countsVal, ok := lookupAttr(val, "counts")
 	if !ok {
 		t.Fatal("LogValue() missing counts group")
@@ -238,10 +211,9 @@ func TestResultWithContext_LogValue_Counts_MixedSeverity(t *testing.T) {
 	}
 }
 
-func TestResultWithContext_LogValue_Counts_OK(t *testing.T) {
+func TestContextualError_LogValue_Counts_OK(t *testing.T) {
 	t.Parallel()
-	cr := testResultOK().WithContext("noop")
-	val := cr.LogValue()
+	val := ctxErr(testResultOK(), "noop").LogValue()
 	countsVal, ok := lookupAttr(val, "counts")
 	if !ok {
 		t.Fatal("LogValue() missing counts group on OK result")
@@ -256,16 +228,16 @@ func TestResultWithContext_LogValue_Counts_OK(t *testing.T) {
 	}
 }
 
-func TestResultWithContext_LogValue_IssuesSliceShape(t *testing.T) {
+func TestContextualError_LogValue_IssuesArrayShape(t *testing.T) {
 	t.Parallel()
-	// Emit via JSONHandler and decode so we can assert the shape
-	// downstream consumers will actually see.
-	cr := testResultMixed(t).WithContext("audit")
+	// Emit via JSONHandler and decode so we can assert the shape downstream
+	// consumers will actually see.
+	ce := ctxErr(testResultMixed(t), "audit")
 
 	var buf bytes.Buffer
 	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	logger := slog.New(handler)
-	logger.Error("op failed", slog.Any("diagnostic", cr))
+	logger.Error("op failed", slog.Any("diagnostic", ce))
 
 	var out map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
@@ -291,12 +263,12 @@ func TestResultWithContext_LogValue_IssuesSliceShape(t *testing.T) {
 	// Confirm there is no positional attribute "issue_0" at top level.
 	for key := range diagEntry {
 		if strings.HasPrefix(key, "issue_") {
-			t.Errorf("diagnostic has positional attribute %q; want slice-only shape", key)
+			t.Errorf("diagnostic has positional attribute %q; want array-only shape", key)
 		}
 	}
 }
 
-func TestResultWithContext_LogValue_AttributeGolden(t *testing.T) {
+func TestContextualError_LogValue_AttributeGolden(t *testing.T) {
 	t.Parallel()
 	// Build a full-shape issue: span, path, code, hint, details.
 	source := location.MustNewSourceID("test://schema.yammm")
@@ -312,11 +284,11 @@ func TestResultWithContext_LogValue_AttributeGolden(t *testing.T) {
 		Build()
 	c := diag.NewCollector(0)
 	c.Collect(issue)
-	cr := c.Result().WithContext("schema_load")
+	ce := ctxErr(c.Result(), "schema_load")
 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	logger.Error("fail", slog.Any("diagnostic", cr))
+	logger.Error("fail", slog.Any("diagnostic", ce))
 
 	var out map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
@@ -375,14 +347,14 @@ func TestResultWithContext_LogValue_AttributeGolden(t *testing.T) {
 	}
 }
 
-func TestResultWithContext_StructuredOutput_TextHandler(t *testing.T) {
+func TestContextualError_StructuredOutput_TextHandler(t *testing.T) {
 	t.Parallel()
-	// Mirrors rdata's integration shape so Phase 1a adopters can compare
-	// output on a known-good reference.
-	cr := testResultWithError(t, testCodeError).WithContext("schema_load")
+	// Mirrors rdata's integration shape so adopters can compare output on a
+	// known-good reference.
+	ce := ctxErr(testResultWithError(t, testCodeError), "schema_load")
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	logger.Error("op failed", slog.Any("diagnostic", cr))
+	logger.Error("op failed", slog.Any("diagnostic", ce))
 	out := buf.String()
 	if !strings.Contains(out, "schema_load") {
 		t.Errorf("structured text-handler log missing context: %s", out)
@@ -392,14 +364,14 @@ func TestResultWithContext_StructuredOutput_TextHandler(t *testing.T) {
 	}
 }
 
-// --- AsResultWithContext ---
+// --- AsContextualError ---
 
-func TestAsResultWithContext_Direct(t *testing.T) {
+func TestAsContextualError_Direct(t *testing.T) {
 	t.Parallel()
-	orig := testResultWithError(t, testCodeError).WithContext("validation").Err()
-	got, ok := diag.AsResultWithContext(orig, "fallback")
+	orig := testResultWithError(t, testCodeError).WithContext("validation")
+	got, ok := diag.AsContextualError(orig, "fallback")
 	if !ok {
-		t.Fatal("AsResultWithContext returned false for *ErrorWithContext")
+		t.Fatal("AsContextualError returned false for *ContextualError")
 	}
 	if got.Tag != "validation" {
 		t.Errorf("recovered tag = %q, want %q (fallback must not override)", got.Tag, "validation")
@@ -409,40 +381,40 @@ func TestAsResultWithContext_Direct(t *testing.T) {
 	}
 }
 
-func TestAsResultWithContext_Wrapped(t *testing.T) {
+func TestAsContextualError_Wrapped(t *testing.T) {
 	t.Parallel()
-	orig := testResultWithError(t, testCodeError).WithContext("schema_load").Err()
+	orig := testResultWithError(t, testCodeError).WithContext("schema_load")
 	wrapped := fmt.Errorf("pipeline failed: %w", orig)
-	got, ok := diag.AsResultWithContext(wrapped, "fallback")
+	got, ok := diag.AsContextualError(wrapped, "fallback")
 	if !ok {
-		t.Fatal("AsResultWithContext returned false for wrapped *ErrorWithContext")
+		t.Fatal("AsContextualError returned false for wrapped *ContextualError")
 	}
 	if got.Tag != "schema_load" {
 		t.Errorf("recovered tag = %q, want %q", got.Tag, "schema_load")
 	}
 }
 
-func TestAsResultWithContext_Wrapped_DoubleWrap(t *testing.T) {
+func TestAsContextualError_Wrapped_DoubleWrap(t *testing.T) {
 	t.Parallel()
-	orig := testResultWithError(t, testCodeError).WithContext("inner").Err()
+	orig := testResultWithError(t, testCodeError).WithContext("inner")
 	w1 := fmt.Errorf("middle: %w", orig)
 	w2 := fmt.Errorf("outer: %w", w1)
-	got, ok := diag.AsResultWithContext(w2, "fallback")
+	got, ok := diag.AsContextualError(w2, "fallback")
 	if !ok {
-		t.Fatal("AsResultWithContext returned false for double-wrapped")
+		t.Fatal("AsContextualError returned false for double-wrapped")
 	}
 	if got.Tag != "inner" {
 		t.Errorf("recovered tag through double wrap = %q, want %q", got.Tag, "inner")
 	}
 }
 
-func TestAsResultWithContext_ResultError_SynthesizesFallback(t *testing.T) {
+func TestAsContextualError_ResultError_SynthesizesFallback(t *testing.T) {
 	t.Parallel()
-	// Bare *ResultError, not wrapped in ErrorWithContext.
+	// Bare *ResultError, not wrapped in a *ContextualError.
 	err := testResultWithError(t, testCodeError).Err()
-	got, ok := diag.AsResultWithContext(err, "validation")
+	got, ok := diag.AsContextualError(err, "validation")
 	if !ok {
-		t.Fatal("AsResultWithContext returned false for *ResultError")
+		t.Fatal("AsContextualError returned false for *ResultError")
 	}
 	if got.Tag != "validation" {
 		t.Errorf("synthesized tag = %q, want %q (fallbackTag)", got.Tag, "validation")
@@ -452,67 +424,67 @@ func TestAsResultWithContext_ResultError_SynthesizesFallback(t *testing.T) {
 	}
 }
 
-func TestAsResultWithContext_Wrapped_ResultError(t *testing.T) {
+func TestAsContextualError_Wrapped_ResultError(t *testing.T) {
 	t.Parallel()
 	inner := testResultWithError(t, testCodeError).Err()
 	wrapped := fmt.Errorf("op: %w", inner)
-	got, ok := diag.AsResultWithContext(wrapped, "synth")
+	got, ok := diag.AsContextualError(wrapped, "synth")
 	if !ok {
-		t.Fatal("AsResultWithContext returned false for wrapped *ResultError")
+		t.Fatal("AsContextualError returned false for wrapped *ResultError")
 	}
 	if got.Tag != "synth" {
 		t.Errorf("synthesized tag on wrapped = %q, want synth", got.Tag)
 	}
 }
 
-// TestAsResultWithContext_ErrorsJoin pins the tree-chain walk: errors.Join
-// builds a multi-child error whose Unwrap() returns []error, and errors.As
-// is required to visit every sibling. Both join-operand positions are
-// exercised so a future refactor that accidentally short-circuits on the
-// first non-matching branch is caught.
-func TestAsResultWithContext_ErrorsJoin(t *testing.T) {
+// TestAsContextualError_ErrorsJoin pins the tree-chain walk: errors.Join builds
+// a multi-child error whose Unwrap() returns []error, and errors.As is required
+// to visit every sibling. Both join-operand positions are exercised so a future
+// refactor that accidentally short-circuits on the first non-matching branch is
+// caught.
+func TestAsContextualError_ErrorsJoin(t *testing.T) {
 	t.Parallel()
-	orig := testResultWithError(t, testCodeError).WithContext("validation").Err()
+	orig := testResultWithError(t, testCodeError).WithContext("validation")
 	other := errors.New("unrelated sibling")
 
 	joined := errors.Join(orig, other)
-	got, ok := diag.AsResultWithContext(joined, "fallback")
+	got, ok := diag.AsContextualError(joined, "fallback")
 	if !ok {
-		t.Fatal("AsResultWithContext returned false for errors.Join(ctx, other)")
+		t.Fatal("AsContextualError returned false for errors.Join(ctx, other)")
 	}
 	if got.Tag != "validation" {
 		t.Errorf("recovered tag = %q, want %q", got.Tag, "validation")
 	}
 
 	joinedRev := errors.Join(other, orig)
-	gotRev, okRev := diag.AsResultWithContext(joinedRev, "fallback")
+	gotRev, okRev := diag.AsContextualError(joinedRev, "fallback")
 	if !okRev {
-		t.Fatal("AsResultWithContext returned false for errors.Join(other, ctx)")
+		t.Fatal("AsContextualError returned false for errors.Join(other, ctx)")
 	}
 	if gotRev.Tag != "validation" {
 		t.Errorf("recovered tag (reversed order) = %q, want %q", gotRev.Tag, "validation")
 	}
 }
 
-func TestAsResultWithContext_NotFound(t *testing.T) {
+func TestAsContextualError_NotFound(t *testing.T) {
 	t.Parallel()
-	got, ok := diag.AsResultWithContext(errors.New("generic error"), "fallback")
+	got, ok := diag.AsContextualError(errors.New("generic error"), "fallback")
 	if ok {
-		t.Error("AsResultWithContext returned true for unrelated error")
+		t.Error("AsContextualError returned true for unrelated error")
 	}
-	if got.Tag != "" {
-		t.Errorf("recovered tag on not-found = %q, want empty", got.Tag)
+	if got != nil {
+		t.Errorf("recovered = %v, want nil", got)
 	}
 }
 
-func TestAsResultWithContext_Nil(t *testing.T) {
+func TestAsContextualError_Nil(t *testing.T) {
 	t.Parallel()
-	got, ok := diag.AsResultWithContext(nil, "fallback")
+	got, ok := diag.AsContextualError(nil, "fallback")
 	if ok {
-		t.Error("AsResultWithContext(nil) returned true, want false")
+		t.Error("AsContextualError(nil) returned true, want false")
 	}
-	if got.Tag != "" {
-		t.Errorf("AsResultWithContext(nil) tag = %q, want empty", got.Tag)
+	if got != nil {
+		t.Errorf("AsContextualError(nil) = %v, want nil", got)
 	}
 }
 

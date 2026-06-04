@@ -44,7 +44,7 @@ linters:
     - revive # configurable style linter
     # - gochecknoinits # ban init() functions
     # - gochecknoglobals # ban globals
-    # - exhaustive # enum-style switch exhaustiveness
+    - exhaustive # enum-style switch exhaustiveness (scoped to //exhaustive:enforce)
   disable:
     - lll # long lines
     - funlen # function length
@@ -122,6 +122,14 @@ linters:
         linters:
           - revive
   settings:
+    exhaustive:
+      # Only switches annotated with //exhaustive:enforce are checked, so
+      # enabling this linter does not churn the many intentional partial
+      # switches across the codebase. A default case does NOT satisfy
+      # exhaustiveness (default-signifies-exhaustive stays at its false
+      # default), so a schema.ConstraintKind added after an annotated switch
+      # fails CI rather than slipping through as a silent driver rejection.
+      explicit-exhaustive-switch: true
     nolintlint:
       require-specific: true # //nolint:<linter>
       require-explanation: true # //nolint:<linter> // because ...

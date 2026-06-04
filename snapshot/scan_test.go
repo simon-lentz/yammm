@@ -470,7 +470,8 @@ func TestScanDir_SharedTmpSuffixConstantContract(t *testing.T) {
 	dir := t.TempDir()
 	seedValidYS(t, filepath.Join(dir, "foo.ys"))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "foo.ys"+snapshot.TmpSuffix), []byte("stale"), 0o600))
+		filepath.Join(dir, "foo.ys"+snapshot.TmpSuffix), []byte("stale"), 0o600,
+	))
 
 	entries, err := collectScanDir(context.Background(), dir)
 	require.NoError(t, err)

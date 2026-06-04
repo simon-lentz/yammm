@@ -19,7 +19,8 @@ import (
 func createYSFixtureWithMetadata(t *testing.T, tmpDir string) string {
 	t.Helper()
 	ysPath := filepath.Join(tmpDir, "test.ys")
-	code := executeCmd(t, "snapshot", "save",
+	code := executeCmd(
+		t, "snapshot", "save",
 		"testdata/valid.yammm", "testdata/data.json",
 		"-o", ysPath,
 		"-m", "phase=extract",
@@ -46,7 +47,8 @@ func TestSnapshotUpdateMetadata_MultipleSet(t *testing.T) {
 	t.Parallel()
 	ysPath := createYSFixtureWithMetadata(t, t.TempDir())
 
-	code := executeCmd(t, "snapshot", "update-metadata",
+	code := executeCmd(
+		t, "snapshot", "update-metadata",
 		"-s", "phase=link",
 		"-s", "pipeline_completed=true",
 		ysPath,
@@ -80,7 +82,8 @@ func TestSnapshotUpdateMetadata_SetAndUnset(t *testing.T) {
 	t.Parallel()
 	ysPath := createYSFixtureWithMetadata(t, t.TempDir())
 
-	code := executeCmd(t, "snapshot", "update-metadata",
+	code := executeCmd(
+		t, "snapshot", "update-metadata",
 		"-s", "phase=link",
 		"--unset", "does_not_exist", // tolerated no-op
 		ysPath,

@@ -337,7 +337,7 @@ qualityCollector.Merge(res.Snapshot.Diagnostics())
 
 **`FinalizeResult.Snapshot` is always non-nil**, on both success and error paths. The struct exists to encode this contract at the type level; callers read `res.Snapshot` directly without gating on `err == nil`. On the error path `res.Snapshot` is the partial snapshot at the point Graph.Check tripped — operators logging a failed batch see which instances were assembled before the check failure.
 
-**Error shapes.** Both `Add` / `AddValid` and `Finalize` return errors whose cause is a `*diag.ErrorWithContext` (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)). `Add`'s tag is `"<TypeName> (record #N)"` so the offending record is locatable from the error alone; `Finalize`'s tag is the fixed string `"batch_finalize"` so downstream log consumers have a stable filter key. Recover with `errors.As` or `diag.AsResultWithContext`.
+**Error shapes.** Both `Add` / `AddValid` and `Finalize` return errors whose cause is a `*diag.ContextualError` (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)). `Add`'s tag is `"<TypeName> (record #N)"` so the offending record is locatable from the error alone; `Finalize`'s tag is the fixed string `"batch_finalize"` so downstream log consumers have a stable filter key. Recover with `errors.As` or `diag.AsContextualError`.
 
 **Post-finalize sentinel.** After `Finalize`, subsequent `Add` / `AddValid` calls return `graph.ErrAssemblerFinalized`, matchable via `errors.Is`. Consumers performing retry / cleanup logic key off the sentinel rather than the error string.
 
@@ -446,7 +446,7 @@ The `.ys` format is JSON-based and preserves full structural fidelity: instances
 
 The format includes:
 
-- A **version** field for format evolution (current value: `2` at yammm v0.3.0; see [Wire Format Versions](#wire-format-versions))
+- A **version** field for format evolution (current value: `2`, unchanged since yammm v0.3.0; see [Wire Format Versions](#wire-format-versions))
 - A **schema structural hash** for compatibility verification (see [Schema Identity](#schema-identity))
 - An **integrity hash** (SHA-256 over the document body) for corruption detection
 - A **features array** for forward compatibility
@@ -694,7 +694,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 The `.ys` wire format uses an integer version field in the header for forward evolution. yammm v0.3.0 introduced the v1 → v2 bump paired with [`UnresolvedEdge.Properties`](#graph) — the new persisted `"properties"` field on unresolved-edge wire entries cannot be `omitempty`-safe alone (a pre-v0.3.0 reader would silently drop the field), so the version bump pairs with the existing unknown-version-rejection path to force older readers to error cleanly instead.
 
-`snapshot.MinReadableVersion` (exported constant, value `1`) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `2` at yammm v0.3.0) is the version emitted on every write. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Fatal `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported range named in the message.
+`snapshot.MinReadableVersion` (exported constant, value `1`) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `2`, unchanged since yammm v0.3.0) is the version emitted on every write. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Fatal `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported range named in the message.
 
 **Asymmetric-reader semantics.** A v2 reader (yammm v0.3.0+) accepts both v1 and v2 documents. v1 documents simply lack the new `"properties"` field on unresolved-edge wires; the load path populates the in-memory `UnresolvedEdge.Properties` as empty, which is lossless since v1 never carried the data. A v1 reader (yammm v0.2.x and earlier) rejects v2 documents via the unknown-version path — operators running an older binary against a v0.3.0-written `.ys` see a structured diagnostic rather than a silently-incomplete document.
 
@@ -706,6 +706,8 @@ The `diag` package implements YAMMM's five-level severity model. See [Severity L
 
 ### Result Methods
 
+A `Result` is produced by a `Collector` or, for the terminal one-shot case, by `diag.Collect(issues...)`. The issue iterators return `iter.Seq[Issue]`; collect a `[]Issue` with `slices.Collect(result.Errors())` when you need one.
+
 ```go
 // Status checks
 result.OK()             // No fatal or error issues
@@ -716,27 +718,18 @@ result.HasInfo()        // Has info issues
 result.HasHints()       // Has hint issues
 result.LimitReached()   // Issue collection limit was reached
 
-// Issue access (returns iter.Seq[Issue])
+// Issue access (returns iter.Seq[Issue]; use slices.Collect for a []Issue)
 result.Issues()                          // All collected issues
 result.Errors()                          // Fatal and error issues
 result.Warnings()                        // Warning issues
 result.BySeverity(diag.Warning)          // Issues at a specific severity
 result.IssuesAtLeastAsSevereAs(diag.Warning) // Issues at or above a threshold
 
-// Slice variants (returns []Issue)
-result.IssuesSlice()
-result.ErrorsSlice()
-result.WarningsSlice()
-result.BySeveritySlice(diag.Warning)          // Issues at exactly the given severity
-result.IssuesAtLeastAsSevereAsSlice(diag.Warning) // Issues at or above a threshold
-
 // Metadata
 result.Len()              // Total issue count
 result.Limit()            // Configured collection limit
 result.DroppedCount()     // Issues dropped after limit
 result.SeverityCounts()   // Counts by severity level
-result.Messages()         // Fatal and error issue messages as strings
-result.MessagesAtOrAbove(diag.Warning)        // Messages at or above a severity threshold
 
 // Conversion
 result.Err()              // Returns error if !OK(), nil otherwise
@@ -768,55 +761,44 @@ All renderer options are optional. The zero-config `diag.NewRenderer()` produces
 
 ### Contextual Diagnostic Wrap
 
-At error boundaries — the places where a diagnostic crosses from the code that produced it to the code that surfaces it — callers attach a human-readable context label to a `diag.Result` via `Result.WithContext(tag)`. The return value carries the tag through error chains and structured logging without every consumer reinventing the wrapper:
+At error boundaries — the places where a diagnostic crosses from the code that produced it to the code that surfaces it — callers attach a human-readable context label to a `diag.Result` via `Result.WithContext(tag)`, which returns an `error` directly: `nil` when the result is OK, a `*diag.ContextualError` otherwise.
 
 ```go
-result := schema.Load(ctx, path)
-if result.HasErrors() {
-    tagged := result.WithContext("schema_load")
-    logger.Error("pipeline startup failed", slog.Any("diagnostic", tagged))
-    return fmt.Errorf("startup: %w", tagged.Err())
+if err := result.WithContext("schema_load"); err != nil {
+    logger.Error("pipeline startup failed", slog.Any("diagnostic", err))
+    return fmt.Errorf("startup: %w", err)
 }
 ```
 
-Two types split the surface along the value-vs-error line that yammm already uses for `Result` and `*ResultError`:
+A single type carries the tag through error chains and structured logging:
 
 ```go
-// Value carrier. Returned by Result.WithContext(tag). Holds the underlying
-// Result and the tag; implements slog.LogValuer. Read the fields directly
-// or call the delegating helpers HasErrors / OK.
-type ResultWithContext struct {
-    Result diag.Result
-    Tag    string
-}
-
-// Error type. Returned by ResultWithContext.Err() when the underlying
-// result is not OK. Implements error and participates in Go error chains:
-// its Unwrap returns *diag.ResultError so existing errors.As consumers
-// keep working unchanged.
-type ErrorWithContext struct {
+// Returned (as a non-nil error) by Result.WithContext(tag) when the result is
+// not OK. Implements error and slog.LogValuer; its Unwrap returns
+// *diag.ResultError so existing errors.As consumers keep working unchanged.
+type ContextualError struct {
     Result diag.Result
     Tag    string
 }
 ```
 
-**Slog shape.** `ResultWithContext.LogValue()` returns a group with these attributes:
+**Slog shape.** `(*ContextualError).LogValue()` returns a group with these attributes:
 
 - `context` (string) — the tag. Always emitted.
 - `code` (string) — the first error-severity issue's stable code. Omitted when the result has no error-severity issue with a non-zero code.
-- `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error; `warnings` is the Warning count. Always emitted (0/0 on OK).
-- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice; empty when the result is OK. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
+- `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error; `warnings` is the Warning count. Always emitted.
+- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
 
 `Issue.LogValue()` emits the same per-issue shape and is independently useful when a consumer wants to log a single issue: `logger.Error("problem", slog.Any("issue", issue))`.
 
-**Error-chain recovery.** `diag.AsResultWithContext(err, fallbackTag)` recovers the tag from an arbitrarily-wrapped error. If the chain carries a `*ErrorWithContext`, its original tag survives; if it carries only a bare `*ResultError` (from `Result.Err()` without a tag), the supplied fallbackTag is synthesized so unified error handlers see a uniform shape across both patterns:
+**Error-chain recovery.** `diag.AsContextualError(err, fallbackTag)` recovers a `*ContextualError` from an arbitrarily-wrapped error. If the chain carries a `*ContextualError`, its original tag survives; if it carries only a bare `*ResultError` (from `Result.Err()` without a tag), the supplied fallbackTag is synthesized so unified error handlers see a uniform shape across both patterns:
 
 ```go
-if cr, ok := diag.AsResultWithContext(err, "validation"); ok {
-    for issue := range cr.Result.Issues() {
+if ce, ok := diag.AsContextualError(err, "validation"); ok {
+    for issue := range ce.Result.Issues() {
         // triage
     }
-    logger.Error("failed", slog.Any("diagnostic", cr))
+    logger.Error("failed", slog.Any("diagnostic", ce))
 }
 ```
 
@@ -1022,6 +1004,43 @@ Both relationship builders always end with `RETURN count(*) AS matched_rows`. Th
 | `ImmutableKeys` | `ON CREATE SET` / `ON MATCH SET` split; caller must supply `$update_props`. |
 
 For routine use, prefer `Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` — they call the same builders internally and handle parameter construction, chunking, and schema-aware property coercion.
+
+### Property Coercion
+
+The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` and the single-item `NodeQueryFor` / `EdgeQueriesFor`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The coercion chokepoint is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply the same rules:
+
+```go
+// Coerce a single SCALAR value to the driver-native type the constraint requires
+// (e.g. a Timestamp["layout"] is parsed against its custom layout). Takes the
+// full Constraint, not just its Kind, so the custom layout is available; the
+// alias chain is resolved internally. Collection values are handled by
+// CoerceParams, which element-coerces against the constraint.
+func Coerce(constraint schema.Constraint, raw any) (any, error)
+
+// ParamTypes maps a Cypher parameter name to the schema constraint its value
+// must satisfy. Nested params use "outer.inner" dot-notation (e.g.
+// "rows.principal_amount"). The value is the full Constraint, not just its
+// Kind, so List properties can be element-coerced (the element type a bare
+// Kind would discard).
+type ParamTypes map[string]schema.Constraint
+
+// CoerceParams coerces every value in a parameter map against its declared
+// constraint, walking one level of nested map[string]any and []map[string]any.
+// Scalars route through Coerce; []any lists are element-coerced against the
+// List element type. Returns the first coercion error, naming the offending key.
+func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error)
+
+// ParamTypesForType derives a ParamTypes from a schema type's properties. Pass
+// prefix "" for top-level params, or an outer name (e.g. "rows") for a nested
+// param map — keys are dot-joined to match CoerceParams.
+func ParamTypesForType(t *schema.Type, prefix string) ParamTypes
+```
+
+Coercion rules: `Float` ← any Go integer width (`int`, `int8`…`int64`, `uint`…`uint64`) or `float32` → `float64` (a `float64` passes through); `Timestamp` ← a string parsed against the constraint's custom Go layout when it declares one (`Timestamp["…"]`) or RFC3339 / RFC3339Nano otherwise → `time.Time` (a `time.Time` passes through); `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date` (a `dbtype.Date` passes through); every other scalar kind passes through unchanged. `List<T>` values are coerced element-wise into the concrete typed slice (`List<Float>` of `int64`s → `[]float64`, `List<Date>` of strings → `[]dbtype.Date`, and so on); a `List<Timestamp["…"]>` honors the element's custom layout too.
+
+The three transforming kinds (`Float`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value always passes through; an unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+
+**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one — it derives the element types lists need.
 
 ### Schema Inference
 

@@ -60,7 +60,8 @@ func requiredEmployerSchema(t *testing.T) *schema.Schema {
 func TestBuildTestSnapshot_HappyPath(t *testing.T) {
 	s := buildTestSchema(t)
 
-	snap := snapshottest.BuildTestSnapshot(t, s,
+	snap := snapshottest.BuildTestSnapshot(
+		t, s,
 		snapshottest.Record{
 			TypeName: "Company",
 			Raw:      instance.RawInstance{Properties: map[string]any{"id": "acme", "name": "ACME"}},
@@ -83,7 +84,7 @@ func TestBuildTestSnapshot_AddFailure_Fatal(t *testing.T) {
 
 	rec := &recordingTB{TB: t}
 	// Bad Person: missing required `id` property — ValidateOne fires
-	// E_MISSING_REQUIRED, BatchAssembler.Add returns *ErrorWithContext,
+	// E_MISSING_REQUIRED, BatchAssembler.Add returns *ContextualError,
 	// BuildTestSnapshot fatals.
 	bad := snapshottest.Record{
 		TypeName: "Person",
@@ -103,9 +104,10 @@ func TestBuildTestSnapshot_FinalizeFailure_Fatal(t *testing.T) {
 	rec := &recordingTB{TB: t}
 	// Person with employer reference to a Company that won't be added —
 	// Check fires E_UNRESOLVED_REQUIRED, Finalize returns
-	// *ErrorWithContext tagged "batch_finalize", BuildTestSnapshot
+	// *ContextualError tagged "batch_finalize", BuildTestSnapshot
 	// fatals.
-	snapshottest.BuildTestSnapshot(rec, s,
+	snapshottest.BuildTestSnapshot(
+		rec, s,
 		snapshottest.Record{
 			TypeName: "Person",
 			Raw: instance.RawInstance{Properties: map[string]any{

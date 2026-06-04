@@ -58,7 +58,8 @@ func (dg *depGraph) updateDependencies(entryURI string, importedPaths []string, 
 		dg.importsByEntry[entryURI] = importedURIs
 	}
 
-	logger.Debug("updated dependencies",
+	logger.Debug(
+		"updated dependencies",
 		slog.String("entry", entryURI),
 		slog.Int("imports", len(importedURIs)),
 	)

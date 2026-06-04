@@ -83,7 +83,8 @@ func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 	op := sexpr.Op()
 	children := sexpr.Children()
 
-	trace.Debug(context.Background(), e.cfg.logger, "evaluating s-expression",
+	trace.Debug(
+		context.Background(), e.cfg.logger, "evaluating s-expression",
 		slog.String("op", op),
 	)
 

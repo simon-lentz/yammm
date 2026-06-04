@@ -24,7 +24,8 @@ func AtPosition(
 		return nil
 	}
 	if snapshot.EntryVersion != doc.Version {
-		logger.Debug("serving stale snapshot for definition",
+		logger.Debug(
+			"serving stale snapshot for definition",
 			"uri", doc.URI,
 			"snapshot_version", snapshot.EntryVersion,
 			"doc_version", doc.Version,
@@ -52,7 +53,8 @@ func AtPosition(
 	if ref != nil {
 		loc := ResolveReference(snapshot, ref, doc.SourceID, enc, mapURI)
 		if loc == nil {
-			logger.Debug("could not resolve reference",
+			logger.Debug(
+				"could not resolve reference",
 				"target", ref.TargetName,
 				"qualifier", ref.Qualifier,
 			)
@@ -65,7 +67,8 @@ func AtPosition(
 		return ResolveSymbol(snapshot, sym, enc, mapURI)
 	}
 
-	logger.Debug("no symbol or reference at position",
+	logger.Debug(
+		"no symbol or reference at position",
 		"uri", doc.URI,
 		"position", internalPos,
 	)

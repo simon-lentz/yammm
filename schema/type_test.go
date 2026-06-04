@@ -771,7 +771,7 @@ func TestType_CanonicalPropertyMap_Immutability(t *testing.T) {
 		Done().
 		Build()
 
-	require.False(t, result.HasErrors(), "unexpected build errors: %v", result.Messages())
+	require.False(t, result.HasErrors(), "unexpected build errors: %v", result)
 	require.NotNil(t, s)
 
 	person, ok := s.Type("Person")

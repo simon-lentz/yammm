@@ -40,13 +40,11 @@ type Record struct {
 // batches are supported in a single call. The returned [graph.Snapshot]
 // is independent of the assembler and safe to pass to [snapshot.Marshal]
 // / [snapshot.Verify] / [graph.Snapshot]'s own accessors.
-//
-// Released as part of the v0.3.0 testing-discipline commitment for §9
-// (graph.BatchAssembler) — see the api_enhancements.md plan.
 func BuildTestSnapshot(tb testing.TB, s *schema.Schema, records ...Record) *graph.Snapshot {
 	tb.Helper()
 	ctx := context.Background()
-	ba := graph.NewBatchAssembler(ctx, s,
+	ba := graph.NewBatchAssembler(
+		ctx, s,
 		graph.WithValidatorOptions(instance.RecommendedOptions()...),
 	)
 	for i, rec := range records {

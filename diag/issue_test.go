@@ -486,7 +486,7 @@ func TestIssue_Clone_EmptySlices(t *testing.T) {
 
 // ---- Issue.LogValue ----
 //
-// Paired with ResultWithContext.LogValue but tested here so the per-issue
+// Paired with ContextualError.LogValue but tested here so the per-issue
 // attribute-shape pins live next to the surface they describe. The map
 // helper (issueLogMap) shares the shape; covering the slog form covers
 // both.

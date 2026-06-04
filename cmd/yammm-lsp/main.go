@@ -105,7 +105,8 @@ func run(stdout io.Writer, args []string) error {
 		return fmt.Errorf("validate config: %w", err)
 	}
 
-	logger.Info("yammm-lsp started",
+	logger.Info(
+		"yammm-lsp started",
 		slog.String("version", cfg.Version),
 		slog.Int("pid", os.Getpid()),
 		slog.String("go_version", runtime.Version()),

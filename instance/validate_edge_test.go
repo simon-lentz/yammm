@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -681,7 +682,7 @@ func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 	assert.Contains(t, result.String(), "null is not a valid edge value")
 
 	// Verify error code is E_EDGE_SHAPE_MISMATCH
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
 
@@ -729,7 +730,7 @@ func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid edge value")
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
 }
@@ -761,7 +762,7 @@ func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid edge value")
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
 
@@ -800,7 +801,7 @@ func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 
 	// Find the E_MISSING_FK_TARGET issue
@@ -859,7 +860,7 @@ func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.GreaterOrEqual(t, len(issues), 1)
 
 	// Find the E_PARTIAL_COMPOSITE_FK issue
@@ -923,7 +924,7 @@ func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1, "should have exactly one issue")
 	assert.Equal(t, instance.ErrTypeMismatch, issues[0].Code(),
 		"should be E_TYPE_MISMATCH, not E_MISSING_FK_TARGET")
@@ -977,7 +978,7 @@ func TestValidateEdges_CompositeFK_OneNullOneValid(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	// Should have exactly one E_TYPE_MISMATCH for the null field
 	// Should NOT have E_PARTIAL_COMPOSITE_FK (both keys present)
 	require.Len(t, issues, 1, "should have exactly one issue")
@@ -1017,7 +1018,7 @@ func TestValidateEdges_CompositeFK_OneNullOneMissing(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	// Should have:
 	// 1. E_TYPE_MISMATCH for the null field
 	// 2. E_PARTIAL_COMPOSITE_FK (present=1, expected=2)
@@ -1074,7 +1075,7 @@ func TestValidateEdges_CompositeFK_OneNullOneInvalidType(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	// Should have two E_TYPE_MISMATCH issues, one for each invalid field
 	// Should NOT have E_PARTIAL_COMPOSITE_FK (both keys present)
 	require.Len(t, issues, 2, "should have two type mismatch issues")
@@ -1117,7 +1118,7 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := result.IssuesSlice()
+	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 2, "should have two issues")
 
 	var hasPartialFK, hasTypeMismatch bool
