@@ -89,7 +89,18 @@ v0.4.0 bundles two independent, separately-reviewable streams, co-tagged once bo
 
 The `.ys` wire format is unchanged at v0.4.0 (header `version` stays `2`). Both streams are documented inline in the v0.4.0 release notes with pointers back to this document's relevant policy sections.
 
+## v0.5.0 under this policy
+
+v0.5.0 is an additive feature release: it introduces Go source generation and hardens internal dispatch. No existing API or wire-format commitment changes, so code written against `v0.4.x` compiles and runs unchanged.
+
+- **Additive API surface (`adapter/gogen`)** — a new leaf adapter package exporting `Marshal(s *schema.Schema, opts ...Option) ([]byte, error)`, the `Option` type, and the `WithPackageName` / `WithInitialisms` options. It generates Go source from a schema (one struct per type, named Enum/DataType types, owner-qualified `EDGE_` association structs, a `Graph` aggregate, and an embedded `SerializedModel`) and is schema-in, bytes-out — it imports the Primary API and is never imported back, consistent with the documented adapter-layer discipline. Strictly additive. Justified under the pre-1.0 "additive API changes" rule.
+- **Additive CLI surface** — a new `yammm gen --to go <schema.yammm>` command (`cmd/yammm`), sibling to `export`, with `--package`, `--output`, and `--initialisms` flags. The CLI binary is outside the two formally-versioned surfaces (Go API + `.ys` wire format); the addition is backward-compatible (no existing command changes), noted here for completeness.
+- **Internal hardening (no API impact)** — the `//exhaustive:enforce` rollout to the seven remaining `schema.ConstraintKind` dispatch switches (so a newly-added kind fails CI rather than reaching a backend un-handled), and the new `internal/ident.ToUpperCamelInitialisms` mechanism that `adapter/gogen` reuses. Both are internal — `internal/*` carries no compatibility guarantee — and change no exported behavior.
+
+The `.ys` wire format is unchanged at v0.5.0 (header `version` stays `2`); `adapter/gogen` neither reads nor writes `.ys` (its embedded `SerializedModel` is verbatim `.yammm` source, re-loadable via `schema.LoadString` / `LoadSourcesWithEntry`). The shape of gogen's generated Go output (struct layout, `EDGE_` / `Graph` naming, `SerializedModel` form) is pinned by the package's golden corpus but is **not** yet a formally versioned surface under this policy; if a downstream consumer comes to depend on that shape, a future revision can promote it to a committed surface. The additive surface is documented inline in the v0.5.0 release notes with pointers back to this document's relevant policy sections.
+
 ## Revision history
 
 - **2026-04-17** — Initial document, added as part of v0.3.0 release prep.
 - **2026-06-02** — Broadened the pre-1.0 minor-release rule from "removal of exported symbols" to also cover breaking signature, name, and type changes, and added a version-pinned-consumer carve-out to condition (a): a breaking change is permitted when the only external references live in a consumer pinned to an older yammm release whose migration is tracked downstream. Motivated by the v0.4.0 `diag` surface tightening, whose sole external consumer pins `v0.3.1` and migrates on its own schedule.
+- **2026-06-05** — Added the "v0.5.0 under this policy" section for the additive `adapter/gogen` Go-source-generation surface and the `yammm gen` CLI command (plus the internal `ConstraintKind` exhaustiveness rollout and `internal/ident` initialisms mechanism). No existing API or wire-format commitment changed.

@@ -167,6 +167,19 @@ func (g *generator) registerEdges() error {
 				if !ok {
 					return fmt.Errorf("gogen: association %q target %q unresolved", rel.Name(), rel.Target().String())
 				}
+				// An association's EDGE_ struct identifies its target node by the target's
+				// primary keys (the Where block). A target with no primary key (own or
+				// inherited) would yield an empty Where block — an edge that cannot address
+				// its target, so the generated struct could not round-trip the graph. A
+				// PK-less type is rejected at neither schema-load nor per-node instance
+				// validation, so gogen refuses it here rather than emit unfaithful Go.
+				if len(target.PrimaryKeysSlice()) == 0 {
+					return fmt.Errorf(
+						"gogen: association %q on type %q targets type %q, which has no primary key; "+
+							"gogen cannot generate an EDGE_ struct that identifies its target",
+						rel.Name(), t.Name(), target.Name(),
+					)
+				}
 				targetName, ok := g.names.goType(target.ID())
 				if !ok {
 					return fmt.Errorf("gogen: association %q target type %q has no Go name", rel.Name(), target.Name())
@@ -269,11 +282,13 @@ func (g *generator) emitEdgeStructs() error {
 	for _, e := range g.edges {
 		fmt.Fprintf(g.buf, "type %s struct {\n", g.edgeNames[e.rel])
 
-		used := map[string]int{} // edge struct's field namespace
+		used := map[string]int{}      // edge struct's field namespace
+		jsonKeys := map[string]bool{} // edge struct's JSON wire keys (property names, verbatim)
 		for _, p := range e.rel.PropertiesSlice() {
 			if err := g.emitField(nil, p, used); err != nil { // nil owner: edge props are scalar
 				return err
 			}
+			jsonKeys[p.Name()] = true
 		}
 
 		// Where block: target PK fields rendered faithfully — a PK whose type is a
@@ -282,7 +297,20 @@ func (g *generator) emitEdgeStructs() error {
 		// required and limited to String/UUID/Date/Timestamp (or DataTypes thereof), so
 		// goFieldType yields the named DataType or the primitive — never a pointer,
 		// list, or inline enum.
-		fmt.Fprintf(g.buf, "%s struct {\n", goField("Where", used, g.initialisms))
+		//
+		// The block's wire key is "where" unless an edge property already claims it (a
+		// property literally named "where"): two fields sharing a JSON key make
+		// encoding/json drop BOTH at marshal time, and go/types does not flag duplicate
+		// struct tags. On a clash the key falls back to the block's unique Go field name
+		// (always upper-case-leading, so it cannot re-collide with a property's
+		// lower-case-leading wire key) — mirroring emitGraph's lossy-collision strategy.
+		// The edge property's own "where" key is canonical and never altered.
+		whereField := goField("Where", used, g.initialisms)
+		whereKey := "where"
+		if jsonKeys[whereKey] {
+			whereKey = whereField
+		}
+		fmt.Fprintf(g.buf, "%s struct {\n", whereField)
 		whereUsed := map[string]int{}
 		for _, pk := range e.target.PrimaryKeysSlice() {
 			typ, err := g.goFieldType(e.target, pk)
@@ -294,7 +322,7 @@ func (g *generator) emitEdgeStructs() error {
 			}
 			fmt.Fprintf(g.buf, "%s %s %s\n", goField(pk.Name(), whereUsed, g.initialisms), typ, jsonTag(pk.Name(), false))
 		}
-		g.buf.WriteString("} `json:\"where\"`\n}\n\n")
+		fmt.Fprintf(g.buf, "} %s\n}\n\n", jsonTag(whereKey, false))
 	}
 	return nil
 }
@@ -304,8 +332,10 @@ func (g *generator) emitEdgeStructs() error {
 // sources -> a map keyed by MODULE-ROOT-RELATIVE source path (via sourceKey) plus
 // SerializedModelEntry, re-loadable via LoadSourcesWithEntry with moduleRoot ".".
 // Relative keys (never absolute SourceID strings) keep the .go output reproducible
-// across checkouts/CI. The keys and entry MUST match verifyRoundTrip (both go
-// through sourceKey against g.schema.SourceID()).
+// across checkouts/CI. This MUST stay paired with verifyRoundTrip: the single- vs
+// multi-source dispatch, the keys, and the entry are all derived the same way (every
+// key routes through sourceKey against g.schema.SourceID()), so a change to the shape
+// here needs the mirror change there.
 func (g *generator) emitSerializedModel() error {
 	srcs := g.schema.Sources()
 	ids := srcs.SourceIDs()

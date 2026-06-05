@@ -1216,13 +1216,13 @@ A named DataType is rendered faithfully in every position — scalar field, list
 ### Structural Output
 
 - **Struct per type** (including abstract and part types). Schema doc-comments carry through verbatim.
-- **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — owner-qualified, so they are unique by construction — carrying the association's own properties plus a `Where` block of the target type's primary keys.
+- **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — owner-qualified, so they are unique by construction — carrying the association's own properties plus a `Where` block of the target type's primary keys. (An association whose target type has no primary key is rejected: its `Where` block would be empty, leaving the edge unable to identify a target node.)
 - **`Graph` aggregate** — one slice field per concrete type, keyed by the singular snake_case form of the type name.
 - **`SerializedModel`** — the verbatim `.yammm` source(s): a string `var` for a single file, or a `map[string]string` keyed by module-root-relative path (plus a `SerializedModelEntry` const) for a schema with imports. A `SchemaHash` const carries the structural hash. The embedded model is **guaranteed re-loadable**: `Marshal` re-loads it at generation time and confirms the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
 
 ### Imports
 
-gogen supports every yammm-valid schema, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded `SerializedModel` keys are module-root-relative, so generated output is byte-reproducible across checkouts and CI runners.
+gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded `SerializedModel` keys are module-root-relative, so generated output is byte-reproducible across checkouts and CI runners.
 
 ### Validation
 

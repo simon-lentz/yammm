@@ -1,0 +1,12 @@
+schema "geo"
+
+type Place {
+	id String primary
+}
+
+type Event {
+	id String primary
+	--> HELD_AT (one) Place {
+		where String required
+	}
+}

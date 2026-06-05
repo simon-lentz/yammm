@@ -191,6 +191,46 @@ func TestMarshal_DiamondImport(t *testing.T) {
 	}
 }
 
+// TestMarshal_EdgeWhereKeyCollision pins the fix for an edge property named "where"
+// colliding with the synthesized Where block's JSON key. Two struct fields sharing a
+// JSON key make encoding/json drop BOTH at marshal time, and go/types does not catch
+// duplicate struct tags — so the block's wire key must fall back to its unique Go field
+// name (the lossy-collision strategy emitGraph uses), while the edge property's own
+// "where" key stays canonical.
+func TestMarshal_EdgeWhereKeyCollision(t *testing.T) {
+	s := loadSchema(t, "edge_where_collision")
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := bytes.Count(got, []byte("`json:\"where\"`")); n != 1 {
+		t.Errorf("want exactly one `json:\"where\"` (the edge property); got %d:\n%s", n, got)
+	}
+	if !bytes.Contains(got, []byte("`json:\"Where2\"`")) {
+		t.Errorf("Where block did not fall back to a unique wire key on collision:\n%s", got)
+	}
+}
+
+// TestMarshal_AssociationTargetNoPrimaryKey pins that gogen refuses an association whose
+// target type has no primary key: its EDGE_ Where block would be empty (no way to identify
+// the target node), so the generated edge could not round-trip the graph. A PK-less type is
+// accepted at both schema-load and per-node instance validation, so gogen is the layer that
+// must reject it — consistent with its error-don't-emit-broken-Go contract.
+func TestMarshal_AssociationTargetNoPrimaryKey(t *testing.T) {
+	src := "schema \"geo\"\n\ntype Tag {\n\tlabel String required\n}\n\ntype Doc {\n\tid String primary\n\t--> TAGGED (many) Tag\n}\n"
+	s, res := schema.LoadString(context.Background(), src, "pkless.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load (expected to succeed — the loader does not require a primary key): %v", res.Err())
+	}
+	_, err := gogen.Marshal(s)
+	if err == nil {
+		t.Fatal("expected an error: association targets a type with no primary key")
+	}
+	if !strings.Contains(err.Error(), "no primary key") {
+		t.Errorf("expected a 'no primary key' error, got: %v", err)
+	}
+}
+
 // TestMarshal_Initialisms exercises the WithInitialisms injection end-to-end: jwt is NOT
 // in gogen's default golint set, so by default jwt_token -> JwtToken; injecting "JWT"
 // upper-cases it wholesale to JWTToken. This is the consumer-vocabulary path that keeps
@@ -240,7 +280,7 @@ func TestMarshal_TypeChecks(t *testing.T) {
 }
 
 func TestMarshal_Golden(t *testing.T) {
-	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "full"}
+	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "full"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			s := loadSchema(t, name)
