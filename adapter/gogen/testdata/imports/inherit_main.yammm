@@ -1,0 +1,7 @@
+schema "geo"
+
+import "inherit_common.yammm" as common
+
+type City extends common.Located {
+	name String primary
+}

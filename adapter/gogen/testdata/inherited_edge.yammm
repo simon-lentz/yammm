@@ -1,0 +1,14 @@
+schema "geo"
+
+type Org {
+	id UUID primary
+}
+
+abstract type Member {
+	id UUID primary
+	--> BELONGS_TO (one) Org
+}
+
+type Person extends Member {
+	name String required
+}

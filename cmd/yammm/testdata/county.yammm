@@ -1,0 +1,6 @@
+schema "geo"
+
+type County {
+	fips String primary
+	name String required
+}

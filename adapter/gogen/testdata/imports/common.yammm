@@ -1,0 +1,8 @@
+schema "common"
+
+type RegionCode = String [5, 5]
+
+type Region {
+	code RegionCode primary
+	name String required
+}

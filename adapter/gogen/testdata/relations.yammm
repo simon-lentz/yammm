@@ -1,0 +1,18 @@
+schema "geo"
+
+type State {
+	code String primary
+	name String required
+}
+
+part type District {
+	id UUID primary
+}
+
+type County {
+	fips String primary
+	--> IN_STATE (one) State {
+		since Integer required
+	}
+	*-> HAS_DISTRICT (many) District
+}

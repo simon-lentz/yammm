@@ -1,0 +1,9 @@
+schema "geo"
+
+type ABCDef {
+	id String primary
+}
+
+type AbcDef {
+	id String primary
+}
