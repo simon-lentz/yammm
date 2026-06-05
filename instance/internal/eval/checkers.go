@@ -80,6 +80,7 @@ func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 		return nil
 	}
 
+	//exhaustive:enforce
 	switch c.Kind() {
 	case schema.KindString:
 		return checkString(val, c)
@@ -150,6 +151,7 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 		return nil, nil //nolint:nilnil // This is the expected behavior
 	}
 
+	//exhaustive:enforce
 	switch c.Kind() {
 	case schema.KindInteger:
 		return ch.coerceInteger(val)
@@ -170,8 +172,12 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 			return nil, fmt.Errorf("unresolved alias constraint: %s", alias.DataTypeName())
 		}
 		return ch.CoerceValue(val, resolved)
+	case schema.KindString, schema.KindBoolean, schema.KindTimestamp,
+		schema.KindDate, schema.KindUUID, schema.KindEnum, schema.KindPattern:
+		// Already canonical: no coercion needed.
+		return val, nil
 	default:
-		// String, Boolean, Timestamp, Date, UUID, Enum, Pattern - already canonical
+		// Defensive: schema.Constraint is sealed, so every kind is handled above.
 		return val, nil
 	}
 }

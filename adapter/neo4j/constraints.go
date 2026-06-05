@@ -431,6 +431,7 @@ func constraintName(label string, properties []string, kind ConstraintKind) stri
 // Returns ("", false) for constraints that cannot be expressed as Neo4j scalar types.
 func neo4jScalarType(c schema.Constraint) (string, bool) {
 	c = schema.ResolveAlias(c)
+	//exhaustive:enforce
 	switch c.Kind() {
 	case schema.KindString:
 		return "STRING", true
@@ -454,6 +455,10 @@ func neo4jScalarType(c schema.Constraint) (string, bool) {
 		return "LIST<FLOAT NOT NULL>", true
 	case schema.KindList:
 		return "", false
+	case schema.KindAlias:
+		// Unreachable in a completed schema: c is alias-resolved above. Listed to
+		// satisfy the exhaustiveness guard; a List/Alias is not a Neo4j scalar type.
+		return "", false
 	default:
 		return "", false
 	}
@@ -463,6 +468,7 @@ func neo4jScalarType(c schema.Constraint) (string, bool) {
 // Returns the element type name used inside LIST<...> syntax (e.g., "STRING NOT NULL").
 func neo4jListElementType(c schema.Constraint) (string, error) {
 	c = schema.ResolveAlias(c)
+	//exhaustive:enforce
 	switch c.Kind() {
 	case schema.KindString, schema.KindUUID, schema.KindEnum, schema.KindPattern:
 		return "STRING NOT NULL", nil
