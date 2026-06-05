@@ -1,0 +1,8 @@
+schema "left"
+
+import "diamond_base.yammm" as base
+
+type Left {
+	id String primary
+	--> TO_SHARED (one) base.Shared
+}

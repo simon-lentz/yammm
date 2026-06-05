@@ -19,7 +19,7 @@ type Person struct {
 type EDGE_Member_belongs_to_Org struct {
 	Where struct {
 		ID string `json:"id"`
-	} `json:"Where"`
+	} `json:"where"`
 }
 
 type Graph struct {

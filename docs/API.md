@@ -1164,6 +1164,78 @@ CSV values are strings. The adapter uses schema constraint metadata to coerce va
 
 CSV is a flat format. Compositions are not supported in parsing and are silently omitted during serialization. Foreign key columns are included in headers but require `instance.ValidInstance` values (not `graph.Instance`) to populate edge data.
 
+## Go Source Generation
+
+The `adapter/gogen` package generates Go source from a schema: one struct per type, named Enum/DataType types, `EDGE_` association structs, a `Graph` aggregate, and an embedded `SerializedModel`. Unlike the data adapters above, gogen has no instance-data path — it is schema-in, bytes-out. Generated output is stdlib-only (it imports at most `time`).
+
+### Generation
+
+```go
+func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
+```
+
+```go
+data, err := gogen.Marshal(s, gogen.WithPackageName("model"))
+```
+
+`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSources`/`LoadSourcesWithEntry`. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded `SerializedModel` and its round-trip self-check require the source.
+
+### Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithPackageName` | Override the generated package name (default: derived from the schema name) |
+| `WithInitialisms` | Extra acronyms (e.g. `"GUID"`, `"JWT"`) upper-cased wholesale in exported Go identifiers; merged with the default golint set, matched case-insensitively |
+
+`WithInitialisms` is how a downstream generator injects its own domain vocabulary, so domain acronyms live at the call site and never in yammm. gogen's default set is the canonical golint `commonInitialisms` list (`id`→`ID`, `url`→`URL`, `json`→`JSON`, …).
+
+### Type Mapping
+
+| Constraint kind | Go type | Named type emitted? |
+| --------------- | ------- | ------------------- |
+| `String` / `UUID` / `Pattern` | `string` | — |
+| `Integer` | `int64` | — |
+| `Float` | `float64` | — |
+| `Boolean` | `bool` | — |
+| `Timestamp` / `Date` | `time.Time` | — |
+| `Vector` | `[]float64` | — |
+| `List<T>` | `[]<elem>` | element via the same mapper |
+| `Enum` (inline) | `string` underlying | **yes** — `type <Type><Field> string` + value consts |
+| DataType (`type X = …`) | the underlying's Go type | **yes** — `type X <underlying>` (an Enum DataType also emits value consts) |
+
+A named DataType is rendered faithfully in every position — scalar field, list element (`List<FipsCode>` → `[]FipsCode`), edge property, and edge `Where`-block primary key — never degraded to its primitive.
+
+### Field and Relation Rules
+
+- **Optional scalar** → pointer + `,omitempty` (`*string`, `*int64`, `*time.Time`); driven by `Property.IsOptional`.
+- **Optional `List`/`Vector`** → the slice stays nilable (no extra pointer) + `,omitempty`.
+- **Relation** → reference type always: `*<T>` (single) or `[]*<T>` (many). `,omitempty` is driven by `Relation.IsOptional`, so required relations (`(one)`, `(one:many)`) emit no `omitempty`.
+- **JSON tags** preserve the original yammm name in snake_case; Go field names are the mapped CamelCase identifiers.
+- **Inheritance is flattened** — each struct carries its own and inherited properties and relations as direct fields (own-first ordering); no Go embedding.
+
+### Structural Output
+
+- **Struct per type** (including abstract and part types). Schema doc-comments carry through verbatim.
+- **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — owner-qualified, so they are unique by construction — carrying the association's own properties plus a `Where` block of the target type's primary keys.
+- **`Graph` aggregate** — one slice field per concrete type, keyed by the singular snake_case form of the type name.
+- **`SerializedModel`** — the verbatim `.yammm` source(s): a string `var` for a single file, or a `map[string]string` keyed by module-root-relative path (plus a `SerializedModelEntry` const) for a schema with imports. A `SchemaHash` const carries the structural hash. The embedded model is **guaranteed re-loadable**: `Marshal` re-loads it at generation time and confirms the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
+
+### Imports
+
+gogen supports every yammm-valid schema, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded `SerializedModel` keys are module-root-relative, so generated output is byte-reproducible across checkouts and CI runners.
+
+### Validation
+
+Generated source is run through `go/format` and then type-checked with `go/types` before return, so duplicate declarations, unused imports, and undefined references surface as generation errors rather than broken Go. The type-check uses a hermetic stub importer for `time`, so `Marshal` needs no Go toolchain, GOROOT, or build cache at runtime.
+
+### CLI
+
+```text
+yammm gen --to go <schema.yammm> [--package <name>] [--output <path>] [--initialisms GUID,JWT]
+```
+
+The `gen` command loads the schema (resolving imports), generates Go, and writes it to stdout or the `--output` path.
+
 ## Formatting
 
 The `format` package provides canonical formatting for `.yammm` schema files:

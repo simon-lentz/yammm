@@ -16,7 +16,7 @@ type Region struct {
 type EDGE_County_in_region_Region struct {
 	Where struct {
 		Code RegionCode `json:"code"`
-	} `json:"Where"`
+	} `json:"where"`
 }
 
 type Graph struct {

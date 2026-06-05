@@ -294,7 +294,7 @@ func (g *generator) emitEdgeStructs() error {
 			}
 			fmt.Fprintf(g.buf, "%s %s %s\n", goField(pk.Name(), whereUsed, g.initialisms), typ, jsonTag(pk.Name(), false))
 		}
-		g.buf.WriteString("} `json:\"Where\"`\n}\n\n")
+		g.buf.WriteString("} `json:\"where\"`\n}\n\n")
 	}
 	return nil
 }
