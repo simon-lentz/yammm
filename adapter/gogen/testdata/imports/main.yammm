@@ -1,0 +1,8 @@
+schema "geo"
+
+import "common.yammm" as common
+
+type County {
+	fips String primary
+	--> IN_REGION (one) common.Region
+}

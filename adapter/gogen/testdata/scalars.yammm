@@ -1,0 +1,12 @@
+schema "geo"
+
+/* County is a US county node. */
+type County {
+	fips String primary
+	name String required
+	/* population is the resident count at the last census. */
+	population Integer required
+	area_sq_km Float
+	founded Date required
+	updated_at Timestamp
+}

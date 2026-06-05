@@ -1,0 +1,14 @@
+schema "geo"
+
+abstract type GeoEntity {
+	id UUID primary
+}
+
+type State {
+	code String primary
+}
+
+type County {
+	fips String primary
+	--> IN_STATE (one) State
+}

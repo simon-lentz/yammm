@@ -1,0 +1,5 @@
+schema "marker"
+
+type Marker {
+	id UUID primary
+}

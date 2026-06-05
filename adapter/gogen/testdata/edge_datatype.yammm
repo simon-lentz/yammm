@@ -1,0 +1,16 @@
+schema "geo"
+
+type StateCode = String [2, 2]
+
+type State {
+	code StateCode primary
+	name String required
+}
+
+type County {
+	fips String primary
+	zips List <StateCode>
+	--> IN_STATE (one) State {
+		since Integer required
+	}
+}

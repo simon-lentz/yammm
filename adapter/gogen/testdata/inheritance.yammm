@@ -1,0 +1,10 @@
+schema "geo"
+
+abstract type GeoEntity {
+	id UUID primary
+	name String required
+}
+
+type County extends GeoEntity {
+	fips String required
+}

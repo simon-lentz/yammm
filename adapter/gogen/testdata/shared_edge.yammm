@@ -1,0 +1,15 @@
+schema "geo"
+
+type User {
+	id UUID primary
+}
+
+type Post {
+	id UUID primary
+	--> CREATED_BY (one) User
+}
+
+type Comment {
+	id UUID primary
+	--> CREATED_BY (one) User
+}

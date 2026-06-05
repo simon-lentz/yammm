@@ -1,0 +1,12 @@
+schema "common"
+
+type RegionCode = String [5, 5]
+
+part type Marker {
+	id UUID primary
+}
+
+abstract type Located {
+	region RegionCode required
+	*-> HAS_MARKER (many) Marker
+}

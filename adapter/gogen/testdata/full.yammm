@@ -1,0 +1,31 @@
+schema "full"
+
+type FipsCode = String [5, 5]
+type Tier = Enum ["gold", "silver"]
+
+abstract type Auditable {
+	created_at Timestamp required
+	updated_at Timestamp
+}
+
+part type Detail {
+	note String
+}
+
+type State {
+	code String primary
+	name String required
+}
+
+type County extends Auditable {
+	fips FipsCode primary
+	tier Tier required
+	status Enum ["active", "merged"] required
+	population Integer required
+	centroid Vector [2]
+	aliases List <FipsCode>
+	--> IN_STATE (one) State {
+		since Integer required
+	}
+	*-> HAS_DETAIL (many) Detail
+}

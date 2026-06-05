@@ -1,0 +1,205 @@
+package gogen_test
+
+import (
+	"bytes"
+	"context"
+	"flag"
+	"go/ast"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/simon-lentz/yammm/adapter/gogen"
+	"github.com/simon-lentz/yammm/schema"
+)
+
+var update = flag.Bool("update", false, "update golden files")
+
+// checkGolden compares got against testdata/<name>.go.golden, updating it under -update.
+func checkGolden(t *testing.T, name string, got []byte) {
+	t.Helper()
+	golden := filepath.Join("testdata", name+".go.golden")
+	if *update {
+		if err := os.WriteFile(golden, got, 0o644); err != nil { //nolint:gosec // golden test fixture, not sensitive
+			t.Fatalf("write golden: %v", err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden (run with -update to create): %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("output mismatch for %s.\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
+	}
+}
+
+func TestSerializedModel(t *testing.T) {
+	s := loadSchema(t, "scalars")
+	// Marshal succeeding already proves the round-trip self-check passed
+	// (verifyRoundTrip runs inside Marshal); these assertions pin the shape.
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, []byte("var SerializedModel =")) {
+		t.Error("missing SerializedModel")
+	}
+	if !bytes.Contains(got, []byte(schema.StructuralHash(s))) {
+		t.Error("SchemaHash does not match schema.StructuralHash")
+	}
+}
+
+// TestMarshal_NotSourceBacked pins the precondition: a Builder-built schema retains
+// no source content (nil Sources()), so Marshal must reject it gracefully rather than
+// emit a SerializedModel it cannot honor — and never panic on the nil Sources().
+func TestMarshal_NotSourceBacked(t *testing.T) {
+	s, res := schema.NewBuilder().
+		WithName("geo").
+		AddType("County").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("build: %v", res.Err())
+	}
+	if _, err := gogen.Marshal(s); err == nil {
+		t.Fatal("expected an error for a non-source-backed (Builder) schema")
+	} else if !strings.Contains(err.Error(), "not source-backed") {
+		t.Errorf("expected a 'not source-backed' error, got: %v", err)
+	}
+}
+
+// TestMarshal_Imports exercises a real imported (multi-source) schema end-to-end:
+// closure flatten, cross-schema reference + naming, the faithful cross-schema
+// Where-block PK, and the module-root-relative multi-source SerializedModel. A
+// successful Marshal also proves the multi-source round-trip self-check passed.
+func TestMarshal_Imports(t *testing.T) {
+	s := loadSchema(t, "imports/main")
+	if s.ImportCount() == 0 {
+		t.Fatal("expected imports/main to declare an import")
+	}
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"type Region struct",
+		"type County struct",
+		"type EDGE_County_in_region_Region struct",
+		"Code RegionCode", // faithful cross-schema Where-block PK (not Code string)
+		"var SerializedModel = map[string]string{",
+		`"common.yammm":`,
+		`"main.yammm":`,
+		`const SerializedModelEntry = "main.yammm"`,
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+	// No absolute generation-machine path may leak into the embedded keys/entry —
+	// the keys must be module-root-relative so the .go output is reproducible.
+	absDir, _ := filepath.Abs(filepath.Join("testdata", "imports"))
+	if bytes.Contains(got, []byte(absDir)) {
+		t.Errorf("absolute path %q leaked into output (keys must be module-root-relative)", absDir)
+	}
+}
+
+// TestMarshal_CrossSchemaInheritance is the regression for declaring-schema
+// resolution of inherited members: City extends an IMPORTED abstract type, so its
+// inherited DataType property (region -> RegionCode, not string) and inherited
+// composition (HAS_MARKER -> []*Marker, not a generation error) must resolve against
+// the parent's schema (common), not the inheritor's.
+func TestMarshal_CrossSchemaInheritance(t *testing.T) {
+	s := loadSchema(t, "imports/inherit_main")
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"type City struct",
+		"type Located struct",
+		"type Marker struct",
+		"Region", "RegionCode", // inherited DataType property kept its named type
+		"HasMarker", "[]*Marker", // inherited composition resolved
+		`json:"region"`,
+		`json:"has_marker,omitempty"`,
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+	// The bug this guards against would degrade region to string; assert the named
+	// type survived (the byte-exact golden pins the exact layout).
+	if bytes.Contains(got, []byte("Region    string")) {
+		t.Error("inherited DataType property degraded to string (cross-schema resolution failed)")
+	}
+}
+
+// TestMarshal_TypeChecks is defense beyond the writer's internal go/types pass: it
+// type-checks the comprehensive output against the REAL time package via
+// importer.Default() (the test always runs with a Go toolchain present), complementing
+// Marshal's hermetic timeImporter stub by confirming the output type-checks against the
+// actual time, not only the stub's opaque Time.
+func TestMarshal_TypeChecks(t *testing.T) {
+	s := loadSchema(t, "full")
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "gen.go", got, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("generated source does not parse: %v\n%s", err, got)
+	}
+	conf := types.Config{Importer: importer.Default()}
+	if _, err := conf.Check(f.Name.Name, fset, []*ast.File{f}, nil); err != nil {
+		t.Fatalf("generated source does not type-check: %v\n%s", err, got)
+	}
+}
+
+func TestMarshal_Golden(t *testing.T) {
+	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "graph", "graph_collision", "imports/main", "imports/inherit_main", "full"}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := loadSchema(t, name)
+			got, err := gogen.Marshal(s)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			checkGolden(t, name, got)
+		})
+	}
+}
+
+// loadSchema loads a testdata schema, failing on any diagnostic error.
+func loadSchema(t *testing.T, name string) *schema.Schema {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", name+".yammm"))
+	if err != nil {
+		t.Fatalf("abs path: %v", err)
+	}
+	s, res := schema.Load(context.Background(), path)
+	if res.HasErrors() {
+		t.Fatalf("load %s: %v", name, res.Err())
+	}
+	return s
+}
+
+func TestMarshal_Header(t *testing.T) {
+	s := loadSchema(t, "marker")
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("// Code generated by yammm. DO NOT EDIT.")) {
+		t.Errorf("missing generated header:\n%s", got)
+	}
+	if !bytes.Contains(got, []byte("package marker")) {
+		t.Errorf("missing package decl:\n%s", got)
+	}
+}
