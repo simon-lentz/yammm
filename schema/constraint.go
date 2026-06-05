@@ -28,6 +28,7 @@ const (
 
 // String returns the name of the constraint kind.
 func (k ConstraintKind) String() string {
+	//exhaustive:enforce
 	switch k {
 	case KindString:
 		return "String"

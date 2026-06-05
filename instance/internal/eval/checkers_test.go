@@ -1516,3 +1516,35 @@ func TestCoerceValue_List(t *testing.T) {
 		assert.Contains(t, err.Error(), "element [0]")
 	})
 }
+
+// TestCoerceValue_CanonicalPassthrough pins the canonical-passthrough decision that
+// CoerceValue's exhaustiveness guard does not check: the already-canonical kinds
+// (String, Boolean, Timestamp, Date, UUID, Enum, Pattern) must return the value
+// unchanged with no error. A future kind added to the explicit canonical group is
+// thereby forced to be a genuine passthrough, not merely listed.
+func TestCoerceValue_CanonicalPassthrough(t *testing.T) {
+	t.Parallel()
+	checker := eval.NewChecker(value.Registry{})
+
+	cases := []struct {
+		name string
+		c    schema.Constraint
+		val  any
+	}{
+		{"String", schema.NewStringConstraint(), "x"},
+		{"Boolean", schema.NewBooleanConstraint(), true},
+		{"Timestamp", schema.NewTimestampConstraint(), "2020-01-01T00:00:00Z"},
+		{"Date", schema.NewDateConstraint(), "2020-01-01"},
+		{"UUID", schema.NewUUIDConstraint(), "u"},
+		{"Enum", schema.NewEnumConstraint([]string{"a"}), "a"},
+		{"Pattern", schema.NewPatternConstraint(nil), "p"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := checker.CoerceValue(tc.val, tc.c)
+			require.NoError(t, err)
+			assert.Equal(t, tc.val, got, "canonical kind must pass through unchanged")
+		})
+	}
+}

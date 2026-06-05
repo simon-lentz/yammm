@@ -25,6 +25,7 @@ func (a *Adapter) coerceStringValue(raw string, c schema.Constraint) (any, error
 	// Unwrap alias chains.
 	c = schema.ResolveAlias(c)
 
+	//exhaustive:enforce
 	switch c.Kind() {
 	case schema.KindString, schema.KindUUID, schema.KindEnum, schema.KindPattern:
 		return raw, nil
@@ -73,6 +74,11 @@ func (a *Adapter) coerceStringValue(raw string, c schema.Constraint) (any, error
 			return raw, nil
 		}
 		return a.parseListValue(raw, lc)
+
+	case schema.KindAlias:
+		// Unreachable in a completed schema: c is alias-resolved above. Listed to
+		// satisfy the exhaustiveness guard; matches the pass-through default.
+		return raw, nil
 
 	default:
 		// KindAlias should be unwrapped above; unknown kinds pass through.

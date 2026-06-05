@@ -734,9 +734,13 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 		}
 		constraint = alias.Resolved()
 	}
+	//exhaustive:enforce
 	switch constraint.Kind() {
 	case KindString, KindUUID, KindDate, KindTimestamp:
 		return true
+	case KindInteger, KindFloat, KindBoolean, KindEnum,
+		KindPattern, KindVector, KindList, KindAlias:
+		return false
 	default:
 		return false
 	}
