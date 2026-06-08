@@ -763,10 +763,10 @@ func (c *completer) validatePrimaryKeys() {
 		if t.IsAbstract() || t.IsPart() || t.HasPrimaryKey() {
 			continue
 		}
-		// Skip a type whose declared supertype did not resolve (a deferred cross-schema
-		// reference when the registry lacks the import, or an unknown type already
-		// reported elsewhere): its primary key may be inherited from a parent not yet
-		// visible, and the unresolved reference already carries its own diagnostic.
+		// Skip a type whose supertype chain has an unresolved link (a deferred
+		// cross-schema reference when the registry lacks the import, or an unknown type
+		// already reported elsewhere): its primary key may be inherited from an ancestor
+		// not yet visible, and the unresolved reference already carries its own diagnostic.
 		if c.hasUnresolvedSupertype(t) {
 			continue
 		}
@@ -776,13 +776,33 @@ func (c *completer) validatePrimaryKeys() {
 	}
 }
 
-// hasUnresolvedSupertype reports whether any of t's declared `extends` references fails
-// to resolve at this point in completion (a deferred cross-schema reference when the
-// registry lacks the import, or an unknown type already reported elsewhere).
+// hasUnresolvedSupertype reports whether t, or any type in its declared-inheritance
+// closure, names an `extends` supertype that does not resolve at this point in
+// completion — a deferred cross-schema reference when the registry lacks the import, or
+// an unknown type already reported elsewhere. The walk is transitive, not just over t's
+// direct supertypes: a primary key may be inherited through a local parent that itself
+// extends an unresolved root, so the presence check must skip the whole chain, not only
+// types that declare the unresolved reference directly. Recursion follows local
+// supertypes only — a resolved cross-schema supertype is already linearized and its
+// members merged, so it is a leaf here. Inheritance cycles are rejected earlier
+// (detectCycles), so visited bounds the walk rather than guarding correctness.
 func (c *completer) hasUnresolvedSupertype(t *Type) bool {
-	for ref := range t.Inherits() {
-		if c.resolveTypeRef(ref) == nil {
-			return true
+	visited := map[string]bool{t.Name(): true}
+	queue := []*Type{t}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for ref := range cur.Inherits() {
+			super := c.resolveTypeRef(ref)
+			if super == nil {
+				return true
+			}
+			// Recurse only into local supertypes; a resolved cross-schema supertype is
+			// a fully-merged leaf. A qualified ref that resolved cannot be local.
+			if ref.Qualifier() == "" && !visited[ref.Name()] {
+				visited[ref.Name()] = true
+				queue = append(queue, super)
+			}
 		}
 	}
 	return false

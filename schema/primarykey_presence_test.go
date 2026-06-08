@@ -97,3 +97,44 @@ func TestCompletion_PrimaryKeyDeferredCrossSchemaSupertype_NotFlagged(t *testing
 		t.Errorf("unexpected E_NO_PRIMARY_KEY for a concrete type whose supertype is a deferred cross-schema reference; got: %v", collector.Result().Err())
 	}
 }
+
+// TestCompletion_PrimaryKeyDeferredTransitiveSupertype_NotFlagged pins that the deferral
+// guard reaches the FULL inheritance chain, not only direct supertypes. Leaf's own
+// supertype is the LOCAL Mid (which resolves), but Mid in turn extends an unresolved
+// cross-schema supertype (registry absent), so Leaf's primary key may be inherited from
+// the not-yet-visible root. A direct-only guard would resolve Leaf's supertype, see no
+// inherited key, and emit a false-positive E_NO_PRIMARY_KEY; the transitive walk skips
+// Leaf because the deferral lives one level up.
+func TestCompletion_PrimaryKeyDeferredTransitiveSupertype_NotFlagged(t *testing.T) {
+	model := &schema.TestModel{
+		Name: "main",
+		Imports: []*schema.TestImportDecl{
+			{Path: "base", Alias: "base"},
+		},
+		Types: []*schema.TestTypeDecl{
+			{
+				// Extends an unresolved cross-schema supertype: deferred under a nil
+				// registry, so its key (if any) is not yet visible.
+				Name: "Mid",
+				Inherits: []*schema.TestASTTypeRef{
+					{Qualifier: "base", Name: "Entity"},
+				},
+			},
+			{
+				// Sole supertype is the LOCAL Mid (resolves), so the deferral is one
+				// level up — Leaf's key may come transitively from base.Entity.
+				Name: "Leaf",
+				Inherits: []*schema.TestASTTypeRef{
+					{Qualifier: "", Name: "Mid"},
+				},
+			},
+		},
+	}
+
+	collector := diag.NewCollector(0)
+	schema.TestCompleteModel(model, sourceID(t, "deferred_transitive_pk.yammm"), collector, nil, nil)
+
+	if hasCode(collector.Result(), diag.E_NO_PRIMARY_KEY) {
+		t.Errorf("unexpected E_NO_PRIMARY_KEY for a concrete type whose key is deferred through a transitive cross-schema supertype; got: %v", collector.Result().Err())
+	}
+}

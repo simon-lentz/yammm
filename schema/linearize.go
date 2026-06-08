@@ -159,12 +159,13 @@ func (c *completer) completeTypes() bool {
 			resolved := c.resolveTypeRef(ref)
 			if resolved == nil {
 				// Defer a qualified ref only when no registry is present to resolve it
-				// (single-file analysis, e.g. the LSP before imports are loaded). With a
-				// registry — which every Load/LoadString/LoadSources path supplies — a
-				// qualified supertype that still does not resolve is a genuine error (an
-				// undefined alias, or a type absent from the imported schema), mirroring
-				// validateRelationTarget; silently dropping it would strip the child of
-				// every inherited member with no diagnostic.
+				// (a schema.Builder schema built without WithRegistry, or a direct
+				// completeModel caller). With a registry — which every
+				// Load/LoadString/LoadSources path supplies, including the LSP via
+				// LoadSourcesWithEntry — a qualified supertype that still does not resolve
+				// is a genuine error (an undefined alias, or a type absent from the
+				// imported schema), mirroring validateRelationTarget; silently dropping it
+				// would strip the child of every inherited member with no diagnostic.
 				if ref.Qualifier() != "" && c.registry == nil {
 					return
 				}
