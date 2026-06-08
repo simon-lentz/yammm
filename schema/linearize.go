@@ -158,13 +158,19 @@ func (c *completer) completeTypes() bool {
 		linearize = func(ref TypeRef) {
 			resolved := c.resolveTypeRef(ref)
 			if resolved == nil {
-				// Only emit error for local refs; cross-schema refs are deferred
-				// when registry is nil (they will be validated when registry is available).
-				if ref.Qualifier() == "" {
-					c.errorf(t.Span(), diag.E_UNKNOWN_TYPE,
-						"unknown type %q in extends clause of type %q", ref.Name(), t.Name())
-					ok = false
+				// Defer a qualified ref only when no registry is present to resolve it
+				// (single-file analysis, e.g. the LSP before imports are loaded). With a
+				// registry — which every Load/LoadString/LoadSources path supplies — a
+				// qualified supertype that still does not resolve is a genuine error (an
+				// undefined alias, or a type absent from the imported schema), mirroring
+				// validateRelationTarget; silently dropping it would strip the child of
+				// every inherited member with no diagnostic.
+				if ref.Qualifier() != "" && c.registry == nil {
+					return
 				}
+				c.errorf(t.Span(), diag.E_UNKNOWN_TYPE,
+					"unknown type %q in extends clause of type %q", ref.String(), t.Name())
+				ok = false
 				return
 			}
 

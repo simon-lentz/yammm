@@ -203,7 +203,8 @@ func TestComplete_CaseCollision(t *testing.T) {
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
-	assert.True(t, collector.HasErrors())
+	assert.True(t, hasCode(collector.Result(), diag.E_CASE_COLLISION),
+		"expected E_CASE_COLLISION for an inherited case-insensitive property collision")
 }
 
 func TestComplete_ReservedPrefix(t *testing.T) {
@@ -228,7 +229,8 @@ func TestComplete_ReservedPrefix(t *testing.T) {
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
-	assert.True(t, collector.HasErrors())
+	assert.True(t, hasCode(collector.Result(), diag.E_RESERVED_PREFIX),
+		"expected E_RESERVED_PREFIX for a property name using the reserved prefix")
 }
 
 func TestComplete_InvalidImportAlias(t *testing.T) {
@@ -932,7 +934,8 @@ func TestComplete_RelationNormalizationCollision_Associations(t *testing.T) {
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
-	assert.True(t, collector.HasErrors())
+	assert.True(t, hasCode(collector.Result(), diag.E_RELATION_NORMALIZATION_COLLISION),
+		"expected E_RELATION_NORMALIZATION_COLLISION for two associations normalizing to one field name")
 }
 
 func TestComplete_RelationNormalizationCollision_AssociationAndComposition(t *testing.T) {
@@ -966,7 +969,8 @@ func TestComplete_RelationNormalizationCollision_AssociationAndComposition(t *te
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
-	assert.True(t, collector.HasErrors())
+	assert.True(t, hasCode(collector.Result(), diag.E_RELATION_NORMALIZATION_COLLISION),
+		"expected E_RELATION_NORMALIZATION_COLLISION for an association and composition normalizing to one field name")
 }
 
 func TestComplete_PropertyRelationCollision_Association(t *testing.T) {
@@ -996,7 +1000,8 @@ func TestComplete_PropertyRelationCollision_Association(t *testing.T) {
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
-	assert.True(t, collector.HasErrors())
+	assert.True(t, hasCode(collector.Result(), diag.E_PROPERTY_RELATION_COLLISION),
+		"expected E_PROPERTY_RELATION_COLLISION for an association field colliding with a property")
 }
 
 func TestComplete_PropertyRelationCollision_Composition(t *testing.T) {
@@ -1026,7 +1031,8 @@ func TestComplete_PropertyRelationCollision_Composition(t *testing.T) {
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
-	assert.True(t, collector.HasErrors())
+	assert.True(t, hasCode(collector.Result(), diag.E_PROPERTY_RELATION_COLLISION),
+		"expected E_PROPERTY_RELATION_COLLISION for a composition field colliding with a property")
 }
 
 func TestComplete_Association_ValidTarget(t *testing.T) {
@@ -1160,7 +1166,8 @@ func TestComplete_AssociationTarget_UnknownType(t *testing.T) {
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
-	assert.True(t, collector.HasErrors())
+	assert.True(t, hasCode(collector.Result(), diag.E_UNKNOWN_TYPE),
+		"expected E_UNKNOWN_TYPE for an association targeting an unknown type")
 }
 
 func TestComplete_AssociationTarget_CrossSchema_DeferredWithoutRegistry(t *testing.T) {
@@ -1352,7 +1359,8 @@ func TestComplete_RelationInheritance_ConflictingDifferentOptional(t *testing.T)
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	assert.Nil(t, s)
-	assert.True(t, collector.HasErrors())
+	assert.True(t, hasCode(collector.Result(), diag.E_RELATION_COLLISION),
+		"expected E_RELATION_COLLISION for conflicting inherited relations")
 }
 
 func TestComplete_Import_InvalidAlias_StartsWithNumber(t *testing.T) {
