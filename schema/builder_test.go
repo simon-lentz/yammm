@@ -17,7 +17,7 @@ func TestBuilder_SimpleType(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		WithProperty("age", schema.NewIntegerConstraint()).
 		Done().
 		Build()
@@ -39,10 +39,10 @@ func TestBuilder_MultipleTypes(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("multi").
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		AddType("Company").
-		WithProperty("title", schema.NewStringConstraint()).
+		WithPrimaryKey("title", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -60,7 +60,7 @@ func TestBuilder_OptionalProperty(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		WithOptionalProperty("nickname", schema.NewStringConstraint()).
 		Done().
 		Build()
@@ -108,11 +108,11 @@ func TestBuilder_Relation(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), false, false).
 		Done().
 		AddType("Company").
-		WithProperty("title", schema.NewStringConstraint()).
+		WithPrimaryKey("title", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -133,7 +133,7 @@ func TestBuilder_AbstractType(t *testing.T) {
 		WithName("test").
 		AddType("Base").
 		AsAbstract().
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		AddType("Person").
 		Extends(schema.NewTypeRef("", "Base", location.Span{})).
@@ -176,6 +176,7 @@ func TestBuilder_DataType(t *testing.T) {
 		WithName("test").
 		AddDataType("Email", schema.NewPatternConstraint([]*regexp.Regexp{emailPattern})).
 		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("email", schema.NewAliasConstraint("Email", nil)).
 		Done().
 		Build()
@@ -195,7 +196,7 @@ func TestBuilder_WithSourceID(t *testing.T) {
 		WithName("test").
 		WithSourceID(srcID).
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -229,7 +230,7 @@ func TestBuilder_AddImportWithSourceID(t *testing.T) {
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 	require.NotNil(t, importedSchema)
@@ -248,7 +249,7 @@ func TestBuilder_AddImportWithSourceID(t *testing.T) {
 		WithRegistry(registry).
 		AddImport("common", "common"). // path="common" matches schema name
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -263,7 +264,7 @@ func TestBuilder_Documentation(t *testing.T) {
 		WithDocumentation("This is the test schema.").
 		AddType("Person").
 		WithTypeDocumentation("A person entity.").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -281,7 +282,7 @@ func TestBuilder_Composition(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Car").
-		WithProperty("model", schema.NewStringConstraint()).
+		WithPrimaryKey("model", schema.NewStringConstraint()).
 		WithComposition("wheels", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
 		Done().
 		AddType("Wheel").
@@ -312,7 +313,7 @@ func TestBuilder_ConstraintTypes(t *testing.T) {
 		WithProperty("num", schema.IntegerBetween(0, 1000)).
 		WithProperty("flt", schema.FloatBetween(0.0, 1.0)).
 		WithProperty("flag", schema.NewBooleanConstraint()).
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		WithProperty("created", schema.NewTimestampConstraint()).
 		WithProperty("born", schema.NewDateConstraint()).
 		WithProperty("status", schema.NewEnumConstraint([]string{"active", "inactive"})).
@@ -425,7 +426,7 @@ func TestBuilder_WithIssueLimit(t *testing.T) {
 		WithName("test").
 		WithIssueLimit(5). // Set custom limit
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -440,7 +441,7 @@ func TestBuilder_CrossSchemaInheritance(t *testing.T) {
 		WithSourceID(location.MustNewSourceID("test://base.yammm")).
 		AddType("Entity").
 		AsAbstract().
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		WithProperty("created", schema.NewTimestampConstraint()).
 		Done().
 		Build()
@@ -495,7 +496,7 @@ func TestBuilder_DefaultSourceIDIsZero(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -534,7 +535,7 @@ func TestBuilder_SyntheticSourceIDValidation_AcceptsSchemePrefix(t *testing.T) {
 		WithName("test").
 		WithSourceID(location.NewSourceID("test://unit/person.yammm")). // Valid!
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -553,7 +554,7 @@ func TestBuilder_FileBackedSourceIDSkipsValidation(t *testing.T) {
 		WithName("test").
 		WithSourceID(fileID).
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -622,7 +623,7 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 		WithName("base").
 		WithSourceID(location.MustNewSourceID("test://base.yammm")).
 		AddType("Organization").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -641,7 +642,7 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 		WithRegistry(registry).
 		AddImport("base", "base").
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		WithRelation("employer", schema.NewTypeRef("base", "Organization", location.Span{}), true, false).
 		Done().
 		Build()
@@ -679,6 +680,7 @@ func TestBuilder_WithInvariant(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("age", schema.NewIntegerConstraint()).
 		WithInvariant("age must be positive", ageExpr, "Validates that age is greater than zero").
 		Done().
@@ -705,6 +707,7 @@ func TestBuilder_WithInvariant_Multiple(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("age", schema.NewIntegerConstraint()).
 		WithInvariant("age must be positive", posAge, "").
 		WithInvariant("age must be reasonable", maxAge, "").
@@ -794,7 +797,7 @@ func TestBuilder_SyntheticSourceID_WithImportResolver(t *testing.T) {
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 
@@ -843,7 +846,7 @@ func TestBuilder_SyntheticSourceID_RelativePathWithoutResolver_Fails(t *testing.
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 
@@ -890,7 +893,7 @@ func TestBuilder_SyntheticSourceID_SchemaNameFallback(t *testing.T) {
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 
@@ -933,7 +936,7 @@ func TestBuilder_DuplicateImportByResolvedSourceID(t *testing.T) {
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 	require.NotNil(t, commonSchema)
@@ -998,7 +1001,7 @@ func TestBuilder_FileBackedSourceID_RelativeImport(t *testing.T) {
 		WithName("helper").
 		WithSourceID(helperID).
 		AddType("Base").
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 	require.NotNil(t, helperSchema)
@@ -1077,7 +1080,7 @@ func TestBuilder_FileBackedSourceID_ParentDirImport(t *testing.T) {
 		WithName("helper").
 		WithSourceID(helperID).
 		AddType("Base").
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 	require.NotNil(t, helperSchema)
@@ -1171,7 +1174,7 @@ func TestBuilder_DuplicateImportByAlias(t *testing.T) {
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 	require.NotNil(t, commonSchema)
@@ -1181,7 +1184,7 @@ func TestBuilder_DuplicateImportByAlias(t *testing.T) {
 		WithName("other").
 		WithSourceID(location.MustNewSourceID("test://other.yammm")).
 		AddType("Thing").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 	require.NotNil(t, other)
@@ -1225,7 +1228,7 @@ func TestBuilder_ReservedKeywordAlias(t *testing.T) {
 		WithName("common").
 		WithSourceID(location.MustNewSourceID("test://common.yammm")).
 		AddType("Base").
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 	require.NotNil(t, commonSchema)

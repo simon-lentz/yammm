@@ -766,6 +766,7 @@ func TestType_CanonicalPropertyMap_Immutability(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("firstName", schema.NewStringConstraint()).
 		WithProperty("lastName", schema.NewStringConstraint()).
 		Done().

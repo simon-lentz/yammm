@@ -66,7 +66,7 @@ type Product {
 }
 ```
 
-Instantiable types. Every concrete type must have exactly one `primary` field.
+Instantiable types. Every concrete type must have at least one `primary` field; multiple `primary` fields form a composite key.
 
 ### Abstract Types
 
@@ -77,7 +77,7 @@ abstract type Auditable {
 }
 ```
 
-Cannot be instantiated. Define shared structure inherited by concrete types via `extends`. Abstract types do not declare `primary` fields.
+Cannot be instantiated. Define shared structure inherited by concrete types via `extends`. An abstract type may declare a `primary` field, which its concrete subtypes inherit; it is not itself required to have one.
 
 ### Part Types
 

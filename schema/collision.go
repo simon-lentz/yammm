@@ -200,7 +200,7 @@ func (c *completer) validateRelationTargets() bool {
 }
 
 // validateAssociationTargets checks that part types don't declare associations
-// and that associations don't target part types.
+// and that associations target a concrete type (not a part or abstract type).
 func (c *completer) validateAssociationTargets() bool {
 	ok := true
 
@@ -214,12 +214,26 @@ func (c *completer) validateAssociationTargets() bool {
 			}
 		}
 
-		// Associations cannot target part types
+		// Associations must target a concrete type. An edge resolves against the
+		// declared target's exact TypeID, and neither a part (composition-only) nor
+		// an abstract (non-instantiable) type ever has an instance under that
+		// TypeID, so such an edge could never resolve in a graph.
 		for _, r := range t.AssociationsSlice() {
 			target := c.resolveTypeRef(r.Target())
-			if target != nil && target.IsPart() {
+			if target == nil {
+				// Deferred cross-schema ref (registry absent); re-validated on a
+				// full registry-backed load, as in validateCompositionTarget.
+				continue
+			}
+			switch {
+			case target.IsPart():
 				c.errorf(r.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
 					"association %q in type %q cannot target part type %q",
+					r.Name(), t.Name(), target.Name())
+				ok = false
+			case target.IsAbstract():
+				c.errorf(r.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
+					"association %q in type %q cannot target abstract type %q (associations must reference a concrete type)",
 					r.Name(), t.Name(), target.Name())
 				ok = false
 			}

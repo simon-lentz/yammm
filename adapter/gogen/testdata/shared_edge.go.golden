@@ -18,13 +18,13 @@ type Comment struct {
 type EDGE_Post_created_by_User struct {
 	Where struct {
 		ID string `json:"id"`
-	} `json:"Where"`
+	} `json:"where"`
 }
 
 type EDGE_Comment_created_by_User struct {
 	Where struct {
 		ID string `json:"id"`
-	} `json:"Where"`
+	} `json:"where"`
 }
 
 type Graph struct {

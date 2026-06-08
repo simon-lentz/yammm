@@ -222,7 +222,7 @@ func TestIntegration_DefinitionWithoutOpen(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	partsContent := "schema \"parts\"\n\ntype Wheel {\n\tdiameter Integer\n}\n"
+	partsContent := "schema \"parts\"\n\ntype Wheel {\n\tid String primary\n\tdiameter Integer\n}\n"
 	partsPath := filepath.Join(tmpDir, "parts.yammm")
 	err := os.WriteFile(partsPath, []byte(partsContent), 0o600)
 	require.NoError(t, err, "failed to write parts file")
@@ -249,7 +249,7 @@ func TestIntegration_OverlayOverridesDisk(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	diskContent := "schema \"test\"\n\ntype Person {\n\tdiskField String\n}\n"
+	diskContent := "schema \"test\"\n\ntype Person {\n\tdiskField String primary\n}\n"
 	filePath := filepath.Join(tmpDir, "main.yammm")
 	err := os.WriteFile(filePath, []byte(diskContent), 0o600)
 	require.NoError(t, err, "failed to write file")
@@ -260,7 +260,7 @@ func TestIntegration_OverlayOverridesDisk(t *testing.T) {
 	err = h.Initialize()
 	require.NoError(t, err, "Initialize failed")
 
-	overlayContent := "schema \"test\"\n\ntype Person {\n\toverlayField String\n}\n"
+	overlayContent := "schema \"test\"\n\ntype Person {\n\toverlayField String primary\n}\n"
 	err = h.OpenDocument("main.yammm", overlayContent)
 	require.NoError(t, err, "OpenDocument failed")
 
@@ -281,7 +281,7 @@ func TestIntegration_DiskFallbackForUnopened(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	partsContent := "schema \"parts\"\n\ntype Wheel {\n\tdiameter Integer\n}\n"
+	partsContent := "schema \"parts\"\n\ntype Wheel {\n\tid String primary\n\tdiameter Integer\n}\n"
 	partsPath := filepath.Join(tmpDir, "parts.yammm")
 	err := os.WriteFile(partsPath, []byte(partsContent), 0o600)
 	require.NoError(t, err, "failed to write parts file")
@@ -323,7 +323,7 @@ func TestIntegration_OpenedImportOverridesDisk(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	partsContentDisk := "schema \"parts\"\n\ntype DiskWheel {\n\tdiskDiameter Integer\n}\n"
+	partsContentDisk := "schema \"parts\"\n\ntype DiskWheel {\n\tid String primary\n\tdiskDiameter Integer\n}\n"
 	partsPath := filepath.Join(tmpDir, "parts.yammm")
 	err := os.WriteFile(partsPath, []byte(partsContentDisk), 0o600)
 	require.NoError(t, err, "failed to write parts file")
@@ -334,7 +334,7 @@ func TestIntegration_OpenedImportOverridesDisk(t *testing.T) {
 	err = h.Initialize()
 	require.NoError(t, err, "Initialize failed")
 
-	partsContentOverlay := "schema \"parts\"\n\ntype OverlayWheel {\n\toverlayDiameter Integer\n}\n"
+	partsContentOverlay := "schema \"parts\"\n\ntype OverlayWheel {\n\tid String primary\n\toverlayDiameter Integer\n}\n"
 	err = h.OpenDocument("parts.yammm", partsContentOverlay)
 	require.NoError(t, err, "OpenDocument parts failed")
 
@@ -355,7 +355,7 @@ func TestIntegration_MultiRootInitialize(t *testing.T) {
 	err := os.WriteFile(file1, []byte(content1), 0o600)
 	require.NoError(t, err, "failed to write file1")
 
-	content2 := "schema \"lib\"\n\ntype Common {\n\tcreatedAt Timestamp required\n}\n"
+	content2 := "schema \"lib\"\n\ntype Common {\n\tcreatedAt Timestamp primary\n}\n"
 	file2 := filepath.Join(root2, "lib.yammm")
 	err = os.WriteFile(file2, []byte(content2), 0o600)
 	require.NoError(t, err, "failed to write file2")
@@ -544,8 +544,8 @@ func TestFormatting_UTF8PositionEncoding(t *testing.T) {
 func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 	t.Parallel()
 
-	unformatted := "schema \"日本語\"\n\ntype   Person{\n    name String  required // 名前\n    tag String\n}\n// 最後 😀\n"
-	expected := "schema \"日本語\"\n\ntype Person {\n\tname String required // 名前\n\ttag  String\n}\n// 最後 😀\n"
+	unformatted := "schema \"日本語\"\n\ntype   Person{\n    name String  primary // 名前\n    tag String\n}\n// 最後 😀\n"
+	expected := "schema \"日本語\"\n\ntype Person {\n\tname String primary // 名前\n\ttag  String\n}\n// 最後 😀\n"
 
 	tests := []struct {
 		name     string
@@ -682,7 +682,7 @@ func TestTemporal_DebouncePipeline(t *testing.T) {
 	defer h.Close()
 	server.Workspace().SetDebounceDelayForTest(testDebounceDelay)
 
-	contentA := "schema \"test\"\n\ntype Alpha {\n\tname String\n}\n"
+	contentA := "schema \"test\"\n\ntype Alpha {\n\tname String primary\n}\n"
 	require.NoError(t, h.OpenDocument("test.yammm", contentA))
 	h.Sync()
 
@@ -690,7 +690,7 @@ func TestTemporal_DebouncePipeline(t *testing.T) {
 	require.NoError(t, err)
 	testutil.AssertDocumentSymbolExists(t, symbols, "Alpha")
 
-	contentB := "schema \"test\"\n\ntype Beta {\n\tage Integer\n}\n"
+	contentB := "schema \"test\"\n\ntype Beta {\n\tid String primary\n\tage Integer\n}\n"
 	require.NoError(t, h.ChangeDocument("test.yammm", contentB, 2))
 
 	require.True(t, server.Workspace().WaitForAnalysis(analysisTimeout),
@@ -715,10 +715,10 @@ func TestTemporal_RapidEditsSettle(t *testing.T) {
 
 	for i := range 9 {
 		require.NoError(t, h.ChangeDocument("test.yammm",
-			fmt.Sprintf("schema \"test\"\n\ntype Intermediate%d {\n\tf String\n}\n", i), i+2))
+			fmt.Sprintf("schema \"test\"\n\ntype Intermediate%d {\n\tf String primary\n}\n", i), i+2))
 	}
 
-	finalContent := "schema \"test\"\n\ntype Final {\n\tname String\n}\n"
+	finalContent := "schema \"test\"\n\ntype Final {\n\tname String primary\n}\n"
 	require.NoError(t, h.ChangeDocument("test.yammm", finalContent, 11))
 
 	require.Eventually(t, func() bool {
@@ -740,7 +740,7 @@ func TestTemporal_CloseCancelsPendingAnalysis(t *testing.T) {
 	defer h.Close()
 
 	require.NoError(t, h.OpenDocument("test.yammm",
-		"schema \"test\"\n\ntype Alpha {\n\tname String\n}\n"))
+		"schema \"test\"\n\ntype Alpha {\n\tname String primary\n}\n"))
 	h.Sync()
 
 	uri := testutil.PathToURI(filepath.Join(tmpDir, "test.yammm"))

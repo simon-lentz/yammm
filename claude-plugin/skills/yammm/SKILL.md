@@ -104,7 +104,7 @@ Before/after transformation examples: see `examples/` directory.
 - [ ] `yammm validate` clean on all modified `.yammm` files
 - [ ] `yammm fmt` applied (deterministic formatting)
 - [ ] `yammm check` passes if instance data is available
-- [ ] Every concrete type has exactly one `primary` field
+- [ ] Every concrete type has at least one `primary` field (one or more -- composite keys allowed)
 - [ ] Imported types use qualified references (`alias.TypeName`)
 - [ ] Optional fields guarded with nil checks in invariants
 - [ ] Constraint bounds explicit where the domain is known (no bare `String` for bounded fields)

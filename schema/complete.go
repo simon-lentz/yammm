@@ -115,6 +115,11 @@ func (c *completer) complete() *Schema {
 		return nil
 	}
 
+	// Phase 5b: Concrete types must declare or inherit a primary key. Collected
+	// (not aborted here) so collision/relation/invariant diagnostics still surface
+	// in the same pass; the final HasErrors gate below ends completion.
+	c.validatePrimaryKeys()
+
 	// Phase 6: Detect collisions
 	if !c.detectCollisions() {
 		return nil
@@ -744,6 +749,63 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 	default:
 		return false
 	}
+}
+
+// validatePrimaryKeys enforces that every concrete (non-abstract, non-part) type
+// declares or inherits at least one primary key. A node needs identity to be added to
+// a graph (see Graph.Add / E_GRAPH_MISSING_PK) or referenced by an association;
+// enforcing it at load fails fast for every consumer (gogen, the neo4j adapter, the
+// LSP), not only graph construction. Abstract types (not instantiable) and part types
+// (embedded, no independent identity — PK-less parts are a supported composition
+// feature) are exempt. Errors are collected; the caller's final error gate aborts.
+func (c *completer) validatePrimaryKeys() {
+	for _, t := range c.schema.TypesSlice() {
+		if t.IsAbstract() || t.IsPart() || t.HasPrimaryKey() {
+			continue
+		}
+		// Skip a type whose supertype chain has an unresolved link (a deferred
+		// cross-schema reference when the registry lacks the import, or an unknown type
+		// already reported elsewhere): its primary key may be inherited from an ancestor
+		// not yet visible, and the unresolved reference already carries its own diagnostic.
+		if c.hasUnresolvedSupertype(t) {
+			continue
+		}
+		c.errorf(t.Span(), diag.E_NO_PRIMARY_KEY,
+			"concrete type %q has no primary key; declare a 'primary' property or inherit one from a parent type",
+			t.Name())
+	}
+}
+
+// hasUnresolvedSupertype reports whether t, or any type in its declared-inheritance
+// closure, names an `extends` supertype that does not resolve at this point in
+// completion — a deferred cross-schema reference when the registry lacks the import, or
+// an unknown type already reported elsewhere. The walk is transitive, not just over t's
+// direct supertypes: a primary key may be inherited through a local parent that itself
+// extends an unresolved root, so the presence check must skip the whole chain, not only
+// types that declare the unresolved reference directly. Recursion follows local
+// supertypes only — a resolved cross-schema supertype is already linearized and its
+// members merged, so it is a leaf here. Inheritance cycles are rejected earlier
+// (detectCycles), so visited bounds the walk rather than guarding correctness.
+func (c *completer) hasUnresolvedSupertype(t *Type) bool {
+	visited := map[string]bool{t.Name(): true}
+	queue := []*Type{t}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for ref := range cur.Inherits() {
+			super := c.resolveTypeRef(ref)
+			if super == nil {
+				return true
+			}
+			// Recurse only into local supertypes; a resolved cross-schema supertype is
+			// a fully-merged leaf. A qualified ref that resolved cannot be local.
+			if ref.Qualifier() == "" && !visited[ref.Name()] {
+				visited[ref.Name()] = true
+				queue = append(queue, super)
+			}
+		}
+	}
+	return false
 }
 
 // errorf reports an error at the given span.

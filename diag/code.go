@@ -212,6 +212,12 @@ var (
 	// Only String, UUID, Date, and Timestamp are permitted as primary key types.
 	E_INVALID_PRIMARY_KEY_TYPE = NewCode("E_INVALID_PRIMARY_KEY_TYPE", CategorySchema)
 
+	// E_NO_PRIMARY_KEY indicates a concrete (non-abstract, non-part) type that
+	// declares or inherits no primary key. A node needs identity to be added to a
+	// graph or referenced by an association, so such a type is rejected at load
+	// rather than at graph-construction time.
+	E_NO_PRIMARY_KEY = NewCode("E_NO_PRIMARY_KEY", CategorySchema)
+
 	// E_LOAD_IO_FAILURE indicates an I/O error during schema loading.
 	// Covers file read failures, path resolution errors, and other filesystem issues.
 	E_LOAD_IO_FAILURE = NewCode("E_LOAD_IO_FAILURE", CategorySchema)

@@ -31,7 +31,7 @@ func ParseOutputFormat(s string) (OutputFormat, error) {
 
 // IsTTY reports whether the given file descriptor is a terminal.
 func IsTTY(fd uintptr) bool {
-	return term.IsTerminal(int(fd)) //nolint:gosec // fd is from os.File.Fd(); overflow is not possible on real platforms
+	return term.IsTerminal(int(fd))
 }
 
 // NewRenderer creates a diag.Renderer configured for CLI output.

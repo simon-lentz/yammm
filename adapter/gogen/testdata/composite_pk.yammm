@@ -1,0 +1,12 @@
+schema "composite"
+
+type Region {
+	country String primary
+	code String primary
+	name String required
+}
+
+type Sensor {
+	id String primary
+	--> LOCATED_IN (one) Region
+}

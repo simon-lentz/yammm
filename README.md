@@ -16,6 +16,7 @@ YAMMM (Yet Another Meta-Meta Model) is a Go library for defining schemas in a sm
 - **Graph persistence**: Save, load, verify, and inspect graph snapshots (`.ys` format)
 - **Structured diagnostics**: Stable error codes with source location tracking
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
+- **Go code generation**: Generate Go structs from schemas with `yammm gen --to go`
 - **CLI tool**: `yammm` binary for snapshot management, data export, and validation
 
 ## Installation
@@ -150,7 +151,7 @@ The module is organized into layers with strict dependency ordering:
 ```text
 Primary API (stable)     : schema, instance, graph, snapshot
 Foundation (stable)      : location, diag, immutable, format
-Adapter                  : adapter/json, adapter/csv, adapter/neo4j
+Adapter                  : adapter/json, adapter/csv, adapter/neo4j, adapter/gogen
 LSP                      : lsp (Language Server Protocol server)
 CLI                      : cmd/yammm, cmd/yammm-lsp
 Internal                 : internal/* (no compatibility guarantees)
@@ -172,6 +173,7 @@ Internal                 : internal/* (no compatibility guarantees)
 | `adapter/json` | JSON/JSONC parsing with location tracking |
 | `adapter/csv` | CSV data parsing and writing |
 | `adapter/neo4j` | Neo4j constraint generation and Cypher query building |
+| `adapter/gogen` | Go source generation from a schema (structs, enums, `EDGE_` structs, `Graph`) |
 | `lsp` | Language Server Protocol server for `.yammm` files |
 
 ### Entry Point Pattern
@@ -299,6 +301,7 @@ yammm snapshot save <schema> <data...> --into <file.ys> # merge into existing
 yammm snapshot info <file.ys>                           # metadata + stats
 yammm snapshot verify <schema> <file.ys>                # schema compat check
 yammm export <schema> <data...> -o <file>               # CSV/JSON export
+yammm gen --to go <schema>                              # generate Go structs
 ```
 
 ## IDE Support

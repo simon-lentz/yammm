@@ -115,12 +115,12 @@ func TestOverlayPrecedenceOverDisk(t *testing.T) {
 
 	// Create a file on disk with "DiskVersion"
 	diskPath := filepath.Join(tmpDir, "main.yammm")
-	diskContent := `schema "DiskVersion" type DiskType { id String }`
+	diskContent := `schema "DiskVersion" type DiskType { id String primary }`
 	err := os.WriteFile(diskPath, []byte(diskContent), 0o600)
 	require.NoError(t, err, "failed to write disk file")
 
 	// Create overlay with different content "OverlayVersion"
-	overlayContent := `schema "OverlayVersion" type OverlayType { name String }`
+	overlayContent := `schema "OverlayVersion" type OverlayType { name String primary }`
 	overlays := map[string][]byte{
 		diskPath: []byte(overlayContent),
 	}
@@ -165,7 +165,7 @@ func TestOverlayWithSymlinkPath_StillOverridesDisk(t *testing.T) {
 	require.NoError(t, os.MkdirAll(realDir, 0o750), "failed to create real dir")
 
 	realPath := filepath.Join(realDir, "main.yammm")
-	diskContent := `schema "DiskVersion" type DiskType { id String }`
+	diskContent := `schema "DiskVersion" type DiskType { id String primary }`
 	require.NoError(t, os.WriteFile(realPath, []byte(diskContent), 0o600), "failed to write disk file")
 
 	// Create symlink: link -> real
@@ -185,7 +185,7 @@ func TestOverlayWithSymlinkPath_StillOverridesDisk(t *testing.T) {
 	}
 
 	// Create overlay with different content using the SYMLINK path (non-canonical)
-	overlayContent := `schema "OverlayVersion" type OverlayType { name String }`
+	overlayContent := `schema "OverlayVersion" type OverlayType { name String primary }`
 	overlays := map[string][]byte{
 		symlinkPath: []byte(overlayContent),
 	}
@@ -279,7 +279,7 @@ func TestSources_DiskFallback(t *testing.T) {
 
 	// Create imported file on disk with a type
 	utilsPath := filepath.Join(tmpDir, "utils.yammm")
-	utilsContent := `schema "utils" type Helper { value String }`
+	utilsContent := `schema "utils" type Helper { value String primary }`
 	err := os.WriteFile(utilsPath, []byte(utilsContent), 0o600)
 	require.NoError(t, err, "failed to write utils file")
 
@@ -398,7 +398,7 @@ func TestAnalyzer_MultiOpenDocs_CorrectEntrySelection(t *testing.T) {
 	aPath := filepath.Join(tmpDir, "a_types.yammm")
 	aContent := `schema "ATypes"
 type TypeA {
-    id String
+    id String primary
 }`
 	err := os.WriteFile(aPath, []byte(aContent), 0o600)
 	require.NoError(t, err, "failed to write a_types.yammm")
@@ -408,7 +408,7 @@ type TypeA {
 	bContent := `schema "BMain"
 import "./a_types" as types
 type TypeB {
-    name String
+    name String primary
 }`
 	err = os.WriteFile(bPath, []byte(bContent), 0o600)
 	require.NoError(t, err, "failed to write b_main.yammm")

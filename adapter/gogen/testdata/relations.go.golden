@@ -20,7 +20,7 @@ type EDGE_County_in_state_State struct {
 	Since int64 `json:"since"`
 	Where struct {
 		Code string `json:"code"`
-	} `json:"Where"`
+	} `json:"where"`
 }
 
 type Graph struct {

@@ -670,7 +670,7 @@ func TestTokenStream_MultibyteParseable(t *testing.T) {
 	input := `schema "CJKテスト"
 
 type JapaneseUser {
-	name String required
+	name String primary
 }
 `
 

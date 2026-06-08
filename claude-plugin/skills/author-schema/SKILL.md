@@ -31,13 +31,13 @@ If `$ARGUMENTS` provides a description, use it as the starting point for step 1.
 
 ## Design Guidance
 
-- **Primary keys**: Every concrete (non-abstract, non-part) type must have exactly one `primary` field. Only `String`, `UUID`, `Date`, and `Timestamp` are allowed as primary key types.
+- **Primary keys**: Every concrete (non-abstract, non-part) type must have at least one `primary` field; multiple `primary` fields form a composite key. Only `String`, `UUID`, `Date`, and `Timestamp` are allowed as primary key types.
 - **Required fields**: Mark fields `required` when a null value is never valid. Leave fields unmarked (optional) when absence is a legitimate state.
 - **Constraint bounds**: Use bounded types to enforce data integrity. `String[1, 255]` is better than bare `String`. Use `_` for unbounded sides.
 - **Type aliases**: Define `type Email = Pattern["..."]` to reduce repetition and improve readability.
 - **Abstract types**: Use `abstract type` for shared field sets (e.g., audit fields). Concrete types extend them with `extends`.
 - **Part types and compositions**: Declare `part type` for entities that have no independent existence. Reference them only via `*->`. Part types cannot have `primary` fields or associations.
-- **Associations**: Use `-->` for relationships between independent types. Edge properties cannot use `Vector` or `List` types.
+- **Associations**: Use `-->` for relationships between independent types. An association must target a concrete type (not abstract or part) — its edge is resolved by the target's primary key, which only concrete instances have. Edge properties cannot use `Vector` or `List` types.
 - **Lists**: Use `List<ElementType>` for ordered multi-value fields. Add length bounds when the domain has known limits.
 - **Invariants**: Add `! "error_id" expression` for business rules. Use capitalized built-in functions: `Len`, `All`, `Any`, `Contains`, etc.
 - **Using `primary required` together is a parse error** -- `primary` already implies required.

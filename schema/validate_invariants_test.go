@@ -24,8 +24,9 @@ func TestValidateInvariant_ValidProperty(t *testing.T) {
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
 					{
-						Name:       "name",
-						Constraint: schema.NewStringConstraint(),
+						Name:         "name",
+						Constraint:   schema.NewStringConstraint(),
+						IsPrimaryKey: true,
 					},
 				},
 				Invariants: []*schema.TestInvariantDecl{
@@ -266,8 +267,9 @@ func TestValidateInvariant_SelfDotProperty(t *testing.T) {
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
 					{
-						Name:       "name",
-						Constraint: schema.NewStringConstraint(),
+						Name:         "name",
+						Constraint:   schema.NewStringConstraint(),
+						IsPrimaryKey: true,
 					},
 				},
 				Invariants: []*schema.TestInvariantDecl{
@@ -415,8 +417,9 @@ func TestValidateInvariant_CaseInsensitive(t *testing.T) {
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
 					{
-						Name:       "name",
-						Constraint: schema.NewStringConstraint(),
+						Name:         "name",
+						Constraint:   schema.NewStringConstraint(),
+						IsPrimaryKey: true,
 					},
 				},
 				Invariants: []*schema.TestInvariantDecl{
@@ -669,8 +672,9 @@ func TestValidateInvariant_ThenBuiltin(t *testing.T) {
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
 					{
-						Name:       "name",
-						Constraint: schema.NewStringConstraint(),
+						Name:         "name",
+						Constraint:   schema.NewStringConstraint(),
+						IsPrimaryKey: true,
 					},
 				},
 				Invariants: []*schema.TestInvariantDecl{

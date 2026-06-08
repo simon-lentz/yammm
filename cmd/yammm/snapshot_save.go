@@ -219,7 +219,7 @@ func atomicWrite(data []byte, path string) (retErr error) {
 		return fmt.Errorf("close temp file: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil { //nolint:gosec // tmpPath is from os.CreateTemp, not user input
+	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("rename temp file: %w", err)
 	}
 	return nil

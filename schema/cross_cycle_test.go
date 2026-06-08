@@ -28,7 +28,7 @@ func TestDetectCrossSchemaInheritanceCycles_SingleSchema_NoCycle(t *testing.T) {
 		WithName("test").
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("Person").
-		WithProperty("name", schema.NewStringConstraint()).
+		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
 
@@ -49,7 +49,7 @@ func TestDetectCrossSchemaInheritanceCycles_LocalInheritance_NoCycle(t *testing.
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("Entity").
 		AsAbstract().
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		AddType("Person").
 		Extends(schema.LocalTypeRef("Entity", location.Span{})).
@@ -74,7 +74,7 @@ func TestDetectCrossSchemaInheritanceCycles_CrossSchema_NoCycle(t *testing.T) {
 		WithSourceID(location.MustNewSourceID("test://base.yammm")).
 		AddType("Entity").
 		AsAbstract().
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
 
@@ -111,7 +111,7 @@ func TestDetectCrossSchemaInheritanceCycles_Diamond_NoCycle(t *testing.T) {
 		WithSourceID(location.MustNewSourceID("test://test.yammm")).
 		AddType("A").
 		AsAbstract().
-		WithProperty("id", schema.NewUUIDConstraint()).
+		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		AddType("B").
 		AsAbstract().

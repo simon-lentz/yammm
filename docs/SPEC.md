@@ -586,6 +586,8 @@ type Car {
 }
 ```
 
+Every concrete (instantiable) type must declare or inherit at least one primary property. A type with no primary key has no identity — it cannot be added to a graph or referenced by an association — so it is rejected at load with `E_NO_PRIMARY_KEY`. Abstract types (never instantiated) and part types (identified through their parent composition) are exempt. A type may declare more than one primary property; together they form a composite key.
+
 **Required properties** must be present in all instances:
 
 ```yammm
@@ -949,6 +951,11 @@ type Car {
     --> OWNER (one:many) Person       // required, many owners
 }
 ```
+
+The target must be a concrete type (not abstract or a `part` type). An association
+edge is resolved by the target's identity, and neither an abstract type (never
+instantiated) nor a part type (reachable only through composition) can be the
+referenced node.
 
 ### Compositions
 
@@ -1481,6 +1488,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_INVALID_INVARIANT` — invariant expression error
 - `E_INVALID_NAME` — invalid identifier format
 - `E_INVALID_PRIMARY_KEY_TYPE` — disallowed type for primary key
+- `E_NO_PRIMARY_KEY` — concrete type declares or inherits no primary key
 - `E_LIST_ON_EDGE` — List type used in relationship property
 - `E_PROPERTY_CONFLICT` — conflicting inherited properties
 - `E_UPSTREAM_FAIL` — imported schema failed to compile

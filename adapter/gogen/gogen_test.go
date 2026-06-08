@@ -109,6 +109,34 @@ func TestMarshal_Imports(t *testing.T) {
 	}
 }
 
+// TestMarshal_CompositePKWhereBlock pins gogen's composite-primary-key edge handling:
+// an association targeting a type with multiple `primary` fields (Region: country +
+// code) renders an EDGE_ Where block with one field per key component, so the generated
+// edge can address its target by the full composite key. Where blocks are emitted after
+// the node structs, so slicing from the EDGE_ struct excludes Region's own country/code
+// fields — the assertion can only be satisfied by the Where block itself.
+func TestMarshal_CompositePKWhereBlock(t *testing.T) {
+	s := loadSchema(t, "composite_pk")
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	src := string(got)
+	start := strings.Index(src, "type EDGE_Sensor_located_in_Region struct {")
+	if start < 0 {
+		t.Fatalf("missing EDGE_Sensor_located_in_Region struct:\n%s", src)
+	}
+	edge := src[start:]
+	if end := strings.Index(edge, "\n}\n"); end >= 0 {
+		edge = edge[:end]
+	}
+	for _, want := range []string{`json:"country"`, `json:"code"`} {
+		if !strings.Contains(edge, want) {
+			t.Errorf("composite-PK EDGE_ Where block missing %q:\n%s", want, edge)
+		}
+	}
+}
+
 // TestMarshal_CrossSchemaInheritance is the regression for declaring-schema
 // resolution of inherited members: City extends an IMPORTED abstract type, so its
 // inherited DataType property (region -> RegionCode, not string) and inherited
@@ -140,6 +168,103 @@ func TestMarshal_CrossSchemaInheritance(t *testing.T) {
 	}
 }
 
+// TestMarshal_CrossSchemaCollision pins the cross-schema name-collision QUALIFICATION
+// SUCCESS path (the complement of the hard-error path in names_test.go): two schemas in
+// the closure both declare a type Region, so neither can take the bare Go name "Region"
+// — the name table schema-qualifies them (GeoRegion / CommonRegion), and the qualified
+// name flows through to the EDGE_ target and the Graph aggregate.
+func TestMarshal_CrossSchemaCollision(t *testing.T) {
+	s := loadSchema(t, "imports/collision_main")
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"type GeoRegion struct",                          // entry-schema Region, qualified
+		"type CommonRegion struct",                       // imported Region, qualified
+		"type EDGE_County_in_region_CommonRegion struct", // edge target uses the qualified name
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+	// Neither Region may keep the bare, ambiguous Go name.
+	if bytes.Contains(got, []byte("type Region struct")) {
+		t.Error("a colliding Region kept the bare Go name; expected schema-qualification")
+	}
+}
+
+// TestMarshal_DiamondImport pins the closure dedup-by-SourceID: the entry imports left
+// and right, both of which import the same base schema. The shared base type must be
+// emitted EXACTLY ONCE (a double-walk would duplicate the declaration and fail the
+// writer's go/types pass), and SerializedModel must carry all four sources.
+func TestMarshal_DiamondImport(t *testing.T) {
+	s := loadSchema(t, "imports/diamond_main")
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := bytes.Count(got, []byte("type Shared struct")); n != 1 {
+		t.Errorf("diamond-shared base emitted %d times, want exactly 1", n)
+	}
+	for _, want := range []string{
+		`"diamond_base.yammm":`,
+		`"diamond_left.yammm":`,
+		`"diamond_right.yammm":`,
+		`const SerializedModelEntry = "diamond_main.yammm"`,
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+}
+
+// TestMarshal_EdgeWhereKeyCollision pins the fix for an edge property named "where"
+// colliding with the synthesized Where block's JSON key. Two struct fields sharing a
+// JSON key make encoding/json drop BOTH at marshal time, and go/types does not catch
+// duplicate struct tags — so the block's wire key must fall back to its unique Go field
+// name (the lossy-collision strategy emitGraph uses), while the edge property's own
+// "where" key stays canonical.
+func TestMarshal_EdgeWhereKeyCollision(t *testing.T) {
+	s := loadSchema(t, "edge_where_collision")
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := bytes.Count(got, []byte("`json:\"where\"`")); n != 1 {
+		t.Errorf("want exactly one `json:\"where\"` (the edge property); got %d:\n%s", n, got)
+	}
+	if !bytes.Contains(got, []byte("`json:\"Where2\"`")) {
+		t.Errorf("Where block did not fall back to a unique wire key on collision:\n%s", got)
+	}
+}
+
+// TestMarshal_Initialisms exercises the WithInitialisms injection end-to-end: jwt is NOT
+// in gogen's default golint set, so by default jwt_token -> JwtToken; injecting "JWT"
+// upper-cases it wholesale to JWTToken. This is the consumer-vocabulary path that keeps
+// domain acronyms at the call site, never in yammm.
+func TestMarshal_Initialisms(t *testing.T) {
+	s := loadSchema(t, "initialisms")
+
+	def, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(def, []byte("JwtToken string")) {
+		t.Errorf("default set: expected JwtToken, got:\n%s", def)
+	}
+
+	got, err := gogen.Marshal(s, gogen.WithInitialisms("JWT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, []byte("JWTToken string")) {
+		t.Errorf("WithInitialisms(JWT): expected JWTToken, got:\n%s", got)
+	}
+	// The golden is the WithInitialisms output, so it locks the injected-acronym shape.
+	checkGolden(t, "initialisms", got)
+}
+
 // TestMarshal_TypeChecks is defense beyond the writer's internal go/types pass: it
 // type-checks the comprehensive output against the REAL time package via
 // importer.Default() (the test always runs with a Go toolchain present), complementing
@@ -163,7 +288,7 @@ func TestMarshal_TypeChecks(t *testing.T) {
 }
 
 func TestMarshal_Golden(t *testing.T) {
-	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "graph", "graph_collision", "imports/main", "imports/inherit_main", "full"}
+	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "full"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			s := loadSchema(t, name)

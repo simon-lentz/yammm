@@ -68,7 +68,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string) error {
 		w := cmd.OutOrStdout()
 		if outputFormat == cli.FormatJSON {
 			enc, _ := json.MarshalIndent(header, "", "  ")
-			fmt.Fprintln(w, string(enc)) //nolint:gosec // CLI output of parsed header metadata to stdout — no XSS sink.
+			fmt.Fprintln(w, string(enc))
 			return nil
 		}
 		printHeaderInfo(w, header)
@@ -143,13 +143,7 @@ func printSnapshotInfo(w interface{ Write([]byte) (int, error) }, info *snapshot
 	fmt.Fprintf(w, "  File size:       %d bytes\n", info.FileSize)
 }
 
-// printHeaderInfo writes a human-readable header summary to w. gosec's
-// taint tracker reports G705 (XSS via taint analysis) for the fmt.Fprintf
-// calls because HeaderOnlyRead's io.Reader source flows into header field
-// values; CLI stdout is not an XSS sink, so the warnings are false
-// positives in this context.
-//
-//nolint:gosec // CLI output of parsed header metadata to stdout — no XSS sink.
+// printHeaderInfo writes a human-readable header summary to w.
 func printHeaderInfo(w interface{ Write([]byte) (int, error) }, header *snapshot.HeaderInfo) {
 	fmt.Fprintf(w, "Snapshot: %s\n", header.SchemaName)
 	fmt.Fprintf(w, "  Version:    %d\n", header.Version)

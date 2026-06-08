@@ -121,6 +121,22 @@ linters:
       - path: "location/path/.*"
         linters:
           - revive
+      # gosec G115 (integer overflow) fires on the uintptr->int file-descriptor
+      # conversion that x/term.IsTerminal requires; fd values are 0/1/2 so it
+      # cannot overflow. Scoped to this file so G115 stays active on the
+      # integer-coercion paths that genuinely benefit from it.
+      - path: "cmd/yammm/internal/cli/output\\.go"
+        text: "G115"
+        linters:
+          - gosec
+      # gosec G101 (hardcoded credentials) substring-matches identifier names
+      # such as "token"/"secret"; test fixtures legitimately use them (e.g. the
+      # tokenText field holding a lexer token's source span). Scope the
+      # suppression to test files so G101 still guards shipped code.
+      - path: '(.+)_test\.go'
+        text: "G101"
+        linters:
+          - gosec
   settings:
     exhaustive:
       # Only switches annotated with //exhaustive:enforce are checked, so
@@ -130,6 +146,15 @@ linters:
       # default), so a schema.ConstraintKind added after an annotated switch
       # fails CI rather than slipping through as a silent driver rejection.
       explicit-exhaustive-switch: true
+    gosec:
+      # Disable the experimental taint-analysis rules. They model web-application
+      # threats (XSS, path traversal from attacker-controlled input) that do not
+      # apply here: this is a CLI + library whose output goes to stdout/terminal
+      # and whose file paths are the invoking user's own arguments, not untrusted
+      # network input.
+      excludes:
+        - G703 # path traversal via taint analysis
+        - G705 # XSS via taint analysis
     nolintlint:
       require-specific: true # //nolint:<linter>
       require-explanation: true # //nolint:<linter> // because ...

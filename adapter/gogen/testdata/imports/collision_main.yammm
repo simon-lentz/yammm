@@ -1,0 +1,12 @@
+schema "geo"
+
+import "collision_common.yammm" as common
+
+type Region {
+	id String primary
+}
+
+type County {
+	fips String primary
+	--> IN_REGION (one) common.Region
+}
