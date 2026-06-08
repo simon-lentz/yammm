@@ -1,7 +1,8 @@
 // Package adapter provides format-specific adapters for parsing, serializing,
-// and exporting [instance.RawInstance] and [instance.ValidInstance] values.
-// Each adapter subpackage handles a specific data format (JSON, Neo4j, etc.)
-// and may have its own external dependencies.
+// and exporting [instance.RawInstance] and [instance.ValidInstance] values, plus a
+// schema-to-Go code generator. Each adapter subpackage targets a specific output —
+// a data format (JSON, CSV, Neo4j Cypher) or generated Go source — and may have its
+// own external dependencies.
 //
 // # Architectural Boundary
 //
@@ -19,9 +20,9 @@
 //   - Extensibility signal: Users see adapter/json and understand they can
 //     create adapter/myformat using the same pattern.
 //
-// # Dual-Mode Surface
+// # Operational Modes
 //
-// Adapters support two operational modes:
+// The data adapters support two operational modes:
 //
 //   - Graph mode: operates on [graph.Snapshot] for batch operations after
 //     building a complete in-memory graph. Used by batch query generators
@@ -35,22 +36,32 @@
 // Parse methods return [instance.RawInstance]. Write methods accept either
 // [instance.ValidInstance] (streaming) or [graph.Snapshot] (batch).
 //
+// The gogen adapter belongs to neither mode: it is schema-in, bytes-out. It
+// consumes a completed schema and emits Go source, with no instance-data path and
+// no dependency on instance or graph.
+//
 // # Dependency Direction
 //
 // Adapters depend on library packages; library packages never depend on adapters:
 //
 //	adapter/csv    ──imports──▶  instance, diag, location, graph, immutable, schema
+//	adapter/gogen  ──imports──▶  schema, location, internal/ident
 //	adapter/json   ──imports──▶  instance, diag, location, location/path, graph, immutable, schema
 //	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag
 //
 // # Layering Discipline
 //
-// The adapter package does not import internal/* packages. This maintains a
-// clean separation between core library internals and the adapter layer.
+// The data adapters (csv, json, neo4j) import no internal/* packages, keeping a
+// clean separation between core library internals and the adapter layer. The gogen
+// adapter is the sole exception: it imports internal/ident to reuse the canonical
+// identifier-casing transform the library applies elsewhere (e.g. JSON field
+// names), so generated Go identifiers stay consistent with the rest of yammm
+// instead of duplicating that logic.
 //
 // # Subpackages
 //
 //   - [csv]: CSV/TSV adapter with schema-driven type coercion
+//   - [gogen]: Go source generator (structs, enums, EDGE_ associations, a Graph aggregate, and an embedded SerializedModel) from a schema and its import closure
 //   - [json]: JSON adapter with optional location tracking and JSONC support
 //   - [neo4j]: Neo4j 5 constraint generation, label mapping, and write query generation
 package adapter
