@@ -184,7 +184,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: Semantic failure (structured issues)
 - `result.OK()`: Success (may have warnings)
 
-Pure transformations (serialization, query generation) return `(T, error)`.
+Pure adapter transformations (JSON/CSV serialization, Cypher and Go source generation) return `(T, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 
@@ -212,6 +212,7 @@ type Person {
 }
 
 type Car {
+    vin String primary
     owner_name String required
     mechanic_name List<String>
 
@@ -228,6 +229,7 @@ part type Wheel {
 }
 
 type Car {
+    vin String primary
     *-> WHEELS (one:many) Wheel         // required, at least one
 }
 ```
@@ -238,6 +240,7 @@ Invariants are constraint expressions evaluated at validation time:
 
 ```yammm
 type Person {
+    id UUID primary
     name String required
     startDate Date required
     endDate Date
@@ -273,6 +276,7 @@ schema "Main"
 import "./common" as common
 
 type Product {
+    id UUID primary
     color common.Color required
 }
 ```
@@ -296,12 +300,17 @@ Diagnostic codes are stable identifiers for programmatic matching (e.g., `E_TYPE
 The `yammm` binary ([`cmd/yammm/`](cmd/yammm/)) provides commands for working with schemas and data:
 
 ```bash
-yammm snapshot save <schema> <data...> -o <file.ys>     # build graph, persist
-yammm snapshot save <schema> <data...> --into <file.ys> # merge into existing
-yammm snapshot info <file.ys>                           # metadata + stats
-yammm snapshot verify <schema> <file.ys>                # schema compat check
-yammm export <schema> <data...> -o <file>               # CSV/JSON export
-yammm gen --to go <schema>                              # generate Go structs
+yammm validate <schema>                                  # validate a schema, report diagnostics
+yammm fmt <schema> [-w]                                  # canonical formatting (stdout; -w rewrites in place)
+yammm check <schema> <data>                              # validate JSON/CSV data against a schema
+yammm gen --to go <schema>                               # generate Go source from a schema
+yammm export <schema> <data> --to <json|csv|cypher>      # export a validated graph
+yammm snapshot save <schema> <data...> -o <file.ys>      # build graph, persist
+yammm snapshot save <schema> <data...> --into <file.ys>  # merge into an existing snapshot
+yammm snapshot info <file.ys>                            # metadata + stats
+yammm snapshot verify <schema> <file.ys>                 # schema-compatibility check
+yammm neo4j constraints <schema>                         # generate Neo4j constraint statements
+yammm neo4j introspect                                   # inspect a live database's schema
 ```
 
 ## IDE Support
