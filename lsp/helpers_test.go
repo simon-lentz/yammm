@@ -124,12 +124,12 @@ func testLogger() *slog.Logger {
 //	0: schema "test"
 //	1: (empty)
 //	2: type Person {
-//	3:     name String
+//	3:     name String primary
 //	4: }
 func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 	t.Helper()
 
-	const content = "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
+	const content = "schema \"test\"\n\ntype Person {\n\tname String primary\n}\n"
 
 	reg := source.NewRegistry()
 	s, result := schema.LoadString(t.Context(), content, "test.yammm", schema.WithSourceRegistry(reg))
@@ -186,7 +186,7 @@ func buildCrossSchemaSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snaps
 	tmpDir, err := filepath.EvalSymlinks(tmpDir)
 	require.NoError(t, err)
 
-	foundationContent := "schema \"foundation\"\n\ntype Region {\n\tarea_code String\n\tname String\n}\n"
+	foundationContent := "schema \"foundation\"\n\ntype Region {\n\tarea_code String primary\n\tname String\n}\n"
 	entryContent := "schema \"entry\"\n\nimport \"./foundation\" as region\n\ntype Listing extends region.Region {\n\textra String\n}\n"
 
 	foundationPath := filepath.Join(tmpDir, "foundation.yammm")

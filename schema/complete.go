@@ -115,6 +115,11 @@ func (c *completer) complete() *Schema {
 		return nil
 	}
 
+	// Phase 5b: Concrete types must declare or inherit a primary key. Collected
+	// (not aborted here) so collision/relation/invariant diagnostics still surface
+	// in the same pass; the final HasErrors gate below ends completion.
+	c.validatePrimaryKeys()
+
 	// Phase 6: Detect collisions
 	if !c.detectCollisions() {
 		return nil
@@ -744,6 +749,43 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 	default:
 		return false
 	}
+}
+
+// validatePrimaryKeys enforces that every concrete (non-abstract, non-part) type
+// declares or inherits at least one primary key. A node needs identity to be added to
+// a graph (see Graph.Add / E_GRAPH_MISSING_PK) or referenced by an association;
+// enforcing it at load fails fast for every consumer (gogen, the neo4j adapter, the
+// LSP), not only graph construction. Abstract types (not instantiable) and part types
+// (embedded, no independent identity — PK-less parts are a supported composition
+// feature) are exempt. Errors are collected; the caller's final error gate aborts.
+func (c *completer) validatePrimaryKeys() {
+	for _, t := range c.schema.TypesSlice() {
+		if t.IsAbstract() || t.IsPart() || t.HasPrimaryKey() {
+			continue
+		}
+		// Skip a type whose declared supertype did not resolve (a deferred cross-schema
+		// reference when the registry lacks the import, or an unknown type already
+		// reported elsewhere): its primary key may be inherited from a parent not yet
+		// visible, and the unresolved reference already carries its own diagnostic.
+		if c.hasUnresolvedSupertype(t) {
+			continue
+		}
+		c.errorf(t.Span(), diag.E_NO_PRIMARY_KEY,
+			"concrete type %q has no primary key; declare a 'primary' property or inherit one from a parent type",
+			t.Name())
+	}
+}
+
+// hasUnresolvedSupertype reports whether any of t's declared `extends` references fails
+// to resolve at this point in completion (a deferred cross-schema reference when the
+// registry lacks the import, or an unknown type already reported elsewhere).
+func (c *completer) hasUnresolvedSupertype(t *Type) bool {
+	for ref := range t.Inherits() {
+		if c.resolveTypeRef(ref) == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // errorf reports an error at the given span.

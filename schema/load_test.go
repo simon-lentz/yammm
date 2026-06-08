@@ -19,7 +19,7 @@ import (
 
 func TestString_SimpleSchema(t *testing.T) {
 	// Note: YAMMM grammar uses `name Type` syntax, not `name: Type`
-	source := `schema "test" type Person { name String }`
+	source := `schema "test" type Person { name String primary }`
 	ctx := t.Context()
 
 	s, result := schema.LoadString(ctx, source, "test.yammm")
@@ -123,6 +123,7 @@ type Name = String[1, 100]
 type Email = Pattern["^[^@]+@[^@]+$"]
 
 type Person {
+	id String primary
 	fullName Name required
 	email Email required
 }`
@@ -160,7 +161,7 @@ type Person {
 
 func TestSources_SimpleSchema(t *testing.T) {
 	sources := map[string][]byte{
-		"main.yammm": []byte(`schema "main" type Person { name String }`),
+		"main.yammm": []byte(`schema "main" type Person { name String primary }`),
 	}
 	ctx := t.Context()
 
@@ -195,8 +196,8 @@ func TestSourcesWithEntry_ExplicitEntry(t *testing.T) {
 	// Create two schemas where "beta.yammm" would be selected lexicographically
 	// but we explicitly select "gamma.yammm" as entry
 	sources := map[string][]byte{
-		"beta.yammm":  []byte(`schema "beta" type BetaType { id String }`),
-		"gamma.yammm": []byte(`schema "gamma" type GammaType { name String }`),
+		"beta.yammm":  []byte(`schema "beta" type BetaType { id String primary }`),
+		"gamma.yammm": []byte(`schema "gamma" type GammaType { name String primary }`),
 	}
 	ctx := t.Context()
 
@@ -214,8 +215,8 @@ func TestSourcesWithEntry_ExplicitEntry(t *testing.T) {
 
 func TestSourcesWithEntry_FallbackToLexicographic(t *testing.T) {
 	sources := map[string][]byte{
-		"beta.yammm":  []byte(`schema "beta" type BetaType { id String }`),
-		"alpha.yammm": []byte(`schema "alpha" type AlphaType { name String }`),
+		"beta.yammm":  []byte(`schema "beta" type BetaType { id String primary }`),
+		"alpha.yammm": []byte(`schema "alpha" type AlphaType { name String primary }`),
 	}
 	ctx := t.Context()
 
@@ -278,7 +279,7 @@ func TestLoad_RealFile(t *testing.T) {
 	// Create a temporary directory and file
 	tmpDir := t.TempDir()
 	schemaPath := filepath.Join(tmpDir, "test.yammm")
-	content := `schema "test" type User { id String }`
+	content := `schema "test" type User { id String primary }`
 	err := os.WriteFile(schemaPath, []byte(content), 0o600)
 	require.NoError(t, err)
 
@@ -300,7 +301,7 @@ func TestLoad_WithImport(t *testing.T) {
 
 	// Create common.yammm
 	commonPath := filepath.Join(tmpDir, "common.yammm")
-	commonContent := `schema "common" type Base { id String }`
+	commonContent := `schema "common" type Base { id String primary }`
 	err := os.WriteFile(commonPath, []byte(commonContent), 0o600)
 	require.NoError(t, err)
 
@@ -374,7 +375,7 @@ func TestLoad_DuplicateImport(t *testing.T) {
 }
 
 func TestWithRegistry(t *testing.T) {
-	source := `schema "test" type Person { name String }`
+	source := `schema "test" type Person { name String primary }`
 	ctx := t.Context()
 	registry := schema.NewRegistry()
 
@@ -391,7 +392,7 @@ func TestWithRegistry(t *testing.T) {
 
 func TestWithIssueLimit(t *testing.T) {
 	// Test that issue limit option is respected
-	source := `schema "test" type Person { name String }`
+	source := `schema "test" type Person { name String primary }`
 	ctx := t.Context()
 
 	// Test with issue limit (should still work for valid schema)
@@ -466,7 +467,7 @@ func TestLoad_SymlinkCanonicalization(t *testing.T) {
 
 	// Create a schema file in subdir
 	schemaPath := filepath.Join(subDir, "test.yammm")
-	content := `schema "test" type Person { name String }`
+	content := `schema "test" type Person { name String primary }`
 	require.NoError(t, os.WriteFile(schemaPath, []byte(content), 0o600))
 
 	// Create a symlink to the schema
@@ -495,6 +496,7 @@ func TestString_InvariantExpression(t *testing.T) {
 	source := `schema "test"
 
 type Item {
+	id String primary
 	quantity Integer
 	! "Quantity must be non-negative" quantity >= 0
 }`
@@ -521,9 +523,10 @@ type Item {
 func TestString_RelationTargetIDResolved(t *testing.T) {
 	source := `schema "test"
 
-type Target { id String }
+type Target { id String primary }
 
 type Owner {
+	id String primary
 	--> rel Target
 }`
 	ctx := t.Context()
@@ -551,6 +554,7 @@ func TestString_CompositionTargetIDResolved(t *testing.T) {
 part type Component { id String }
 
 type Container {
+	id String primary
 	*-> parts Component
 }`
 	ctx := t.Context()
@@ -577,14 +581,14 @@ func TestLoad_CrossSchemaRelationTargetID(t *testing.T) {
 
 	// Create target.yammm
 	targetPath := filepath.Join(tmpDir, "target.yammm")
-	targetContent := `schema "target" type Entity { id String }`
+	targetContent := `schema "target" type Entity { id String primary }`
 	require.NoError(t, os.WriteFile(targetPath, []byte(targetContent), 0o600))
 
 	// Create main.yammm with a relation to the imported type
 	mainPath := filepath.Join(tmpDir, "main.yammm")
 	mainContent := `schema "main"
 import "./target" as t
-type Owner { --> rel t.Entity }`
+type Owner { id String primary --> rel t.Entity }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
@@ -624,7 +628,7 @@ func TestLoad_CrossSchemaCompositionTargetID(t *testing.T) {
 	mainPath := filepath.Join(tmpDir, "main.yammm")
 	mainContent := `schema "main"
 import "./component" as c
-type Container { *-> widgets c.Widget }`
+type Container { id String primary *-> widgets c.Widget }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
@@ -698,7 +702,7 @@ type Person {
 	fixedSources := map[string][]byte{
 		"main.yammm": []byte(`schema "main"
 type Person {
-	name String
+	name String primary
 }`),
 	}
 
@@ -716,7 +720,7 @@ func TestLoad_CrossSchemaInheritance_AllProperties(t *testing.T) {
 	basePath := filepath.Join(tmpDir, "base.yammm")
 	baseContent := `schema "base"
 type Base {
-	id String
+	id String primary
 	name String
 }`
 	require.NoError(t, os.WriteFile(basePath, []byte(baseContent), 0o600))
@@ -798,7 +802,7 @@ type Person {
 }`),
 		"helper.yammm": []byte(`schema "helper"
 type Base {
-	id Uuid
+	id UUID primary
 }`),
 	}
 
@@ -814,12 +818,12 @@ func TestLoad_MultiImportSameLevel(t *testing.T) {
 
 	// Create b.yammm
 	bPath := filepath.Join(tmpDir, "b.yammm")
-	bContent := `schema "b" type Entity { id String }`
+	bContent := `schema "b" type Entity { id String primary }`
 	require.NoError(t, os.WriteFile(bPath, []byte(bContent), 0o600))
 
 	// Create c.yammm
 	cPath := filepath.Join(tmpDir, "c.yammm")
-	cContent := `schema "c" type Other { name String }`
+	cContent := `schema "c" type Other { name String primary }`
 	require.NoError(t, os.WriteFile(cPath, []byte(cContent), 0o600))
 
 	// Create a.yammm that imports both
@@ -828,6 +832,7 @@ func TestLoad_MultiImportSameLevel(t *testing.T) {
 import "./b" as b
 import "./c" as c
 type Connector {
+	id String primary
 	--> toB b.Entity
 	--> toC c.Other
 }`
@@ -875,7 +880,7 @@ func TestLoad_NestedImports(t *testing.T) {
 
 	// Create d.yammm (deepest)
 	dPath := filepath.Join(tmpDir, "d.yammm")
-	dContent := `schema "d" type Deep { id String }`
+	dContent := `schema "d" type Deep { id String primary }`
 	require.NoError(t, os.WriteFile(dPath, []byte(dContent), 0o600))
 
 	// Create b.yammm that imports d
@@ -929,7 +934,7 @@ func TestLoad_DiamondImportPattern(t *testing.T) {
 
 	// Create d.yammm (common dependency)
 	dPath := filepath.Join(tmpDir, "d.yammm")
-	dContent := `schema "d" type Shared { id String }`
+	dContent := `schema "d" type Shared { id String primary }`
 	require.NoError(t, os.WriteFile(dPath, []byte(dContent), 0o600))
 
 	// Create b.yammm that imports d
@@ -952,6 +957,7 @@ type CType extends d.Shared { cProp String }`
 import "./b" as b
 import "./c" as c
 type AType {
+	id String primary
 	--> toB b.BType
 	--> toC c.CType
 }`
@@ -1071,7 +1077,7 @@ func TestLoad_BoundaryPath_AtRoot(t *testing.T) {
 
 	// Create helper.yammm at the root level
 	helperPath := filepath.Join(tmpDir, "helper.yammm")
-	require.NoError(t, os.WriteFile(helperPath, []byte(`schema "helper" type Base { id String }`), 0o600))
+	require.NoError(t, os.WriteFile(helperPath, []byte(`schema "helper" type Base { id String primary }`), 0o600))
 
 	// Create main.yammm also at root level, importing helper
 	mainPath := filepath.Join(tmpDir, "main.yammm")
@@ -1148,7 +1154,7 @@ func TestLoad_DotDotInMiddleOfPath(t *testing.T) {
 
 	// Create helper.yammm at root level
 	helperPath := filepath.Join(tmpDir, "helper.yammm")
-	require.NoError(t, os.WriteFile(helperPath, []byte(`schema "helper" type Base { id String }`), 0o600))
+	require.NoError(t, os.WriteFile(helperPath, []byte(`schema "helper" type Base { id String primary }`), 0o600))
 
 	// Create main.yammm in subdir that imports ../helper
 	mainPath := filepath.Join(subdir, "main.yammm")
@@ -1239,20 +1245,20 @@ func TestLoad_TransitiveImportsChain(t *testing.T) {
 
 	// Create C (base)
 	cPath := filepath.Join(moduleRoot, "c.yammm")
-	require.NoError(t, os.WriteFile(cPath, []byte(`schema "c" type BaseType { name String }`), 0o600))
+	require.NoError(t, os.WriteFile(cPath, []byte(`schema "c" type BaseType { name String primary }`), 0o600))
 
 	// Create B (imports C)
 	bPath := filepath.Join(moduleRoot, "b.yammm")
 	bContent := `schema "b"
 import "./c" as c
-type Middle { base c.BaseType }`
+type Middle { id String primary base c.BaseType }`
 	require.NoError(t, os.WriteFile(bPath, []byte(bContent), 0o600))
 
 	// Create A (imports B)
 	aPath := filepath.Join(moduleRoot, "a.yammm")
 	aContent := `schema "a"
 import "./b" as b
-type Top { middle b.Middle }`
+type Top { id String primary middle b.Middle }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
 	ctx := t.Context()
@@ -1372,7 +1378,7 @@ func TestLoad_WithLogger(t *testing.T) {
 	moduleRoot := t.TempDir()
 
 	mainPath := filepath.Join(moduleRoot, "main.yammm")
-	mainContent := `schema "main" type Person { name String }`
+	mainContent := `schema "main" type Person { name String primary }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	var buf bytes.Buffer
@@ -1393,13 +1399,13 @@ func TestLoad_MultipleImports(t *testing.T) {
 
 	// Create three helper schemas
 	helper1Path := filepath.Join(moduleRoot, "helper1.yammm")
-	require.NoError(t, os.WriteFile(helper1Path, []byte(`schema "helper1" type Type1 { name String }`), 0o600))
+	require.NoError(t, os.WriteFile(helper1Path, []byte(`schema "helper1" type Type1 { name String primary }`), 0o600))
 
 	helper2Path := filepath.Join(moduleRoot, "helper2.yammm")
-	require.NoError(t, os.WriteFile(helper2Path, []byte(`schema "helper2" type Type2 { value Integer }`), 0o600))
+	require.NoError(t, os.WriteFile(helper2Path, []byte(`schema "helper2" type Type2 { id String primary value Integer }`), 0o600))
 
 	helper3Path := filepath.Join(moduleRoot, "helper3.yammm")
-	require.NoError(t, os.WriteFile(helper3Path, []byte(`schema "helper3" type Type3 { flag Boolean }`), 0o600))
+	require.NoError(t, os.WriteFile(helper3Path, []byte(`schema "helper3" type Type3 { id String primary flag Boolean }`), 0o600))
 
 	// Main imports all three
 	mainPath := filepath.Join(moduleRoot, "main.yammm")
@@ -1408,6 +1414,7 @@ import "./helper1" as h1
 import "./helper2" as h2
 import "./helper3" as h3
 type Combined {
+	id String primary
 	ref1 h1.Type1
 	ref2 h2.Type2
 	ref3 h3.Type3
@@ -1453,7 +1460,7 @@ func TestLoad_WithSchemaRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	schemaPath := filepath.Join(tmpDir, "test.yammm")
-	content := `schema "test" type Test { name String }`
+	content := `schema "test" type Test { name String primary }`
 	require.NoError(t, os.WriteFile(schemaPath, []byte(content), 0o600))
 
 	// Create a registry
@@ -1478,19 +1485,19 @@ func TestLoad_DiamondImport(t *testing.T) {
 
 	// D is the base
 	dPath := filepath.Join(moduleRoot, "d.yammm")
-	require.NoError(t, os.WriteFile(dPath, []byte(`schema "d" type BaseD { name String }`), 0o600))
+	require.NoError(t, os.WriteFile(dPath, []byte(`schema "d" type BaseD { name String primary }`), 0o600))
 
 	// B imports D
 	bPath := filepath.Join(moduleRoot, "b.yammm")
 	require.NoError(t, os.WriteFile(bPath, []byte(`schema "b"
 import "./d" as d
-type TypeB { ref d.BaseD }`), 0o600))
+type TypeB { id String primary ref d.BaseD }`), 0o600))
 
 	// C imports D
 	cPath := filepath.Join(moduleRoot, "c.yammm")
 	require.NoError(t, os.WriteFile(cPath, []byte(`schema "c"
 import "./d" as d
-type TypeC { ref d.BaseD }`), 0o600))
+type TypeC { id String primary ref d.BaseD }`), 0o600))
 
 	// A imports B and C
 	aPath := filepath.Join(moduleRoot, "a.yammm")
@@ -1498,6 +1505,7 @@ type TypeC { ref d.BaseD }`), 0o600))
 import "./b" as b
 import "./c" as c
 type TypeA {
+	id String primary
 	refB b.TypeB
 	refC c.TypeC
 }`), 0o600))
@@ -1552,7 +1560,7 @@ func TestString_InvariantValidProperty(t *testing.T) {
 	source := `schema "test"
 
 type Person {
-	name String
+	name String primary
 	age Integer
 
 	! "name_not_empty" name != ""
@@ -1631,21 +1639,21 @@ func writeSharedRegistryFixtures(t *testing.T) string {
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "common.yammm"),
-		[]byte(`schema "common" type BaseCommon { id String }`),
+		[]byte(`schema "common" type BaseCommon { id String primary }`),
 		0o600,
 	))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "root_a.yammm"),
 		[]byte(`schema "root_a"
 import "./common" as c
-type HolderA { ref c.BaseCommon }`),
+type HolderA { id String primary ref c.BaseCommon }`),
 		0o600,
 	))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "root_b.yammm"),
 		[]byte(`schema "root_b"
 import "./common" as c
-type HolderB { ref c.BaseCommon }`),
+type HolderB { id String primary ref c.BaseCommon }`),
 		0o600,
 	))
 
@@ -1674,12 +1682,12 @@ func TestLoad_SharedRegistry_NonOverlapping(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "alpha.yammm"),
-		[]byte(`schema "alpha" type Alpha { id String }`),
+		[]byte(`schema "alpha" type Alpha { id String primary }`),
 		0o600,
 	))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "beta.yammm"),
-		[]byte(`schema "beta" type Beta { id String }`),
+		[]byte(`schema "beta" type Beta { id String primary }`),
 		0o600,
 	))
 
@@ -1803,7 +1811,7 @@ func TestLoad_SharedRegistry_TopLevelReparse(t *testing.T) {
 	dir := t.TempDir()
 	aPath := filepath.Join(dir, "a.yammm")
 	require.NoError(t, os.WriteFile(aPath,
-		[]byte(`schema "root" type Root { id String }`), 0o600))
+		[]byte(`schema "root" type Root { id String primary }`), 0o600))
 
 	ctx := t.Context()
 	reg := schema.NewRegistry()

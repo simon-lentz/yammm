@@ -167,19 +167,10 @@ func (g *generator) registerEdges() error {
 				if !ok {
 					return fmt.Errorf("gogen: association %q target %q unresolved", rel.Name(), rel.Target().String())
 				}
-				// An association's EDGE_ struct identifies its target node by the target's
-				// primary keys (the Where block). A target with no primary key (own or
-				// inherited) would yield an empty Where block — an edge that cannot address
-				// its target, so the generated struct could not round-trip the graph. A
-				// PK-less type is rejected at neither schema-load nor per-node instance
-				// validation, so gogen refuses it here rather than emit unfaithful Go.
-				if len(target.PrimaryKeysSlice()) == 0 {
-					return fmt.Errorf(
-						"gogen: association %q on type %q targets type %q, which has no primary key; "+
-							"gogen cannot generate an EDGE_ struct that identifies its target",
-						rel.Name(), t.Name(), target.Name(),
-					)
-				}
+				// The target is guaranteed to have a primary key: schema completion rejects
+				// both a PK-less concrete type and an association whose target has no primary
+				// key (diag.E_NO_PRIMARY_KEY), so an association never resolves to a PK-less
+				// target here — the EDGE_ Where block always has at least one field.
 				targetName, ok := g.names.goType(target.ID())
 				if !ok {
 					return fmt.Errorf("gogen: association %q target type %q has no Go name", rel.Name(), target.Name())

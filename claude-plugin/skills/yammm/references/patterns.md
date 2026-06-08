@@ -90,17 +90,15 @@ type Product {
 }
 ```
 
-### Composite Key via Invariant
+### Composite Primary Key
 
-Yammm supports a single `primary` field per type. For composite uniqueness, use multiple required fields:
+A type may declare multiple `primary` fields; together they form the composite key:
 
 ```yammm-snippet
 type Enrollment {
-    id UUID primary
-    student_id String required
-    course_id String required
-
-    ! "composite_populated" student_id -> Len > 0 && course_id -> Len > 0
+    student_id String primary
+    course_id String primary
+    enrolled_at Timestamp required
 }
 ```
 

@@ -109,6 +109,34 @@ func TestMarshal_Imports(t *testing.T) {
 	}
 }
 
+// TestMarshal_CompositePKWhereBlock pins gogen's composite-primary-key edge handling:
+// an association targeting a type with multiple `primary` fields (Region: country +
+// code) renders an EDGE_ Where block with one field per key component, so the generated
+// edge can address its target by the full composite key. Where blocks are emitted after
+// the node structs, so slicing from the EDGE_ struct excludes Region's own country/code
+// fields — the assertion can only be satisfied by the Where block itself.
+func TestMarshal_CompositePKWhereBlock(t *testing.T) {
+	s := loadSchema(t, "composite_pk")
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	src := string(got)
+	start := strings.Index(src, "type EDGE_Sensor_located_in_Region struct {")
+	if start < 0 {
+		t.Fatalf("missing EDGE_Sensor_located_in_Region struct:\n%s", src)
+	}
+	edge := src[start:]
+	if end := strings.Index(edge, "\n}\n"); end >= 0 {
+		edge = edge[:end]
+	}
+	for _, want := range []string{`json:"country"`, `json:"code"`} {
+		if !strings.Contains(edge, want) {
+			t.Errorf("composite-PK EDGE_ Where block missing %q:\n%s", want, edge)
+		}
+	}
+}
+
 // TestMarshal_CrossSchemaInheritance is the regression for declaring-schema
 // resolution of inherited members: City extends an IMPORTED abstract type, so its
 // inherited DataType property (region -> RegionCode, not string) and inherited
@@ -211,26 +239,6 @@ func TestMarshal_EdgeWhereKeyCollision(t *testing.T) {
 	}
 }
 
-// TestMarshal_AssociationTargetNoPrimaryKey pins that gogen refuses an association whose
-// target type has no primary key: its EDGE_ Where block would be empty (no way to identify
-// the target node), so the generated edge could not round-trip the graph. A PK-less type is
-// accepted at both schema-load and per-node instance validation, so gogen is the layer that
-// must reject it — consistent with its error-don't-emit-broken-Go contract.
-func TestMarshal_AssociationTargetNoPrimaryKey(t *testing.T) {
-	src := "schema \"geo\"\n\ntype Tag {\n\tlabel String required\n}\n\ntype Doc {\n\tid String primary\n\t--> TAGGED (many) Tag\n}\n"
-	s, res := schema.LoadString(context.Background(), src, "pkless.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load (expected to succeed — the loader does not require a primary key): %v", res.Err())
-	}
-	_, err := gogen.Marshal(s)
-	if err == nil {
-		t.Fatal("expected an error: association targets a type with no primary key")
-	}
-	if !strings.Contains(err.Error(), "no primary key") {
-		t.Errorf("expected a 'no primary key' error, got: %v", err)
-	}
-}
-
 // TestMarshal_Initialisms exercises the WithInitialisms injection end-to-end: jwt is NOT
 // in gogen's default golint set, so by default jwt_token -> JwtToken; injecting "JWT"
 // upper-cases it wholesale to JWTToken. This is the consumer-vocabulary path that keeps
@@ -280,7 +288,7 @@ func TestMarshal_TypeChecks(t *testing.T) {
 }
 
 func TestMarshal_Golden(t *testing.T) {
-	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "full"}
+	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "full"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			s := loadSchema(t, name)

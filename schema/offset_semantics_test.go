@@ -297,7 +297,7 @@ func TestLexerTokenOffsetsAreRuneBased(t *testing.T) {
 			byteStart:     7,
 			byteStop:      12, // same for ASCII
 		},
-		{ //nolint:gosec // G101 false positive: test data for offset arithmetic, not credentials
+		{
 			name:          "Japanese schema name",
 			input:         `schema "日本語"`,
 			tokenText:     `"日本語"`,

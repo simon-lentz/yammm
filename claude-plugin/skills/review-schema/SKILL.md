@@ -37,8 +37,8 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 
 ### 2. Primary Keys
 
-- Every concrete type (not abstract, not part) has exactly one field marked `primary`.
-- Abstract types do not declare `primary` fields (the concrete child supplies the key).
+- Every concrete type (not abstract, not part) has at least one field marked `primary` (multiple `primary` fields form a composite key).
+- Abstract types are not required to declare a `primary` field; when they do, concrete subtypes inherit it (otherwise each concrete subtype supplies its own key).
 - Part types do not declare `primary` fields (they are identified by their parent composition).
 - Primary key types are restricted to `String`, `UUID`, `Date`, and `Timestamp`. `Integer`, `Float`, `Boolean`, `Enum`, `Pattern`, `Vector`, and `List` are rejected. DataType aliases are resolved before checking.
 
@@ -80,6 +80,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 
 - Part types are declared with `part type`, not plain `type`.
 - Part types are only referenced as targets of composition edges (`*->`), never associations (`-->`).
+- Associations (`-->`) target a concrete type only -- never an abstract type (which has no instances to reference) and never a part type.
 - Part types do not declare `primary` fields.
 - Part types cannot declare associations (`-->`).
 

@@ -218,7 +218,8 @@ abstract type Auditable {
 - Can define properties, associations, compositions, and invariants
 - Can extend other abstract types
 - Multiple types can extend the same abstract type
-- Abstract types do not declare `primary` fields
+- An abstract type may declare a `primary` field (inherited by its concrete subtypes), but is not required to
+- Cannot be the target of an association (`-->`) -- associations must reference a concrete type
 
 ---
 
@@ -249,7 +250,7 @@ part type Address {
 | Modifier | Keyword | Instantiable | Association Target | Composition Target |
 |----------|---------|--------------|-------------------|-------------------|
 | Concrete | `type` | Yes | Yes | No |
-| Abstract | `abstract type` | No | Yes (via subtypes) | No |
+| Abstract | `abstract type` | No | No | No |
 | Part | `part type` | No (standalone) | No | Yes |
 
 ---

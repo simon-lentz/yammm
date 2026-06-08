@@ -114,6 +114,7 @@ Each issue contains:
 | `E_INVALID_SYNTHETIC_ID` | Synthetic SourceID has invalid format |
 | `E_LIST_ON_EDGE` | List type used in relationship property |
 | `E_INVALID_PRIMARY_KEY_TYPE` | Type not allowed as primary key |
+| `E_NO_PRIMARY_KEY` | Concrete type, or association target, has no primary key |
 | `E_LOAD_IO_FAILURE` | I/O error during schema loading |
 
 ### Instance Validation
