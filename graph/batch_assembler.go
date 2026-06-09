@@ -237,7 +237,20 @@ func WithValidatorPool(n int) BatchAssemblerOption {
 	}
 }
 
+// applyBatchAssemblerOptions folds opts into a batchAssemblerConfig.
+func applyBatchAssemblerOptions(opts []BatchAssemblerOption) batchAssemblerConfig {
+	cfg := batchAssemblerConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
+}
+
 // NewBatchAssembler constructs an assembler bound to schema s.
+//
+// The assembler's underlying graph starts empty. To resume assembly on
+// top of a previously-persisted snapshot, use
+// [NewBatchAssemblerFromSnapshot].
 //
 // The supplied ctx is captured and used for the assembler's internal
 // ValidateOne and Graph.Add calls. Cancelling ctx cancels in-flight
@@ -255,15 +268,78 @@ func NewBatchAssembler(ctx context.Context, s *schema.Schema, opts ...BatchAssem
 		panic("graph.NewBatchAssembler: nil context")
 	}
 
-	cfg := batchAssemblerConfig{}
-	for _, opt := range opts {
-		opt(&cfg)
+	cfg := applyBatchAssemblerOptions(opts)
+	return newBatchAssembler(ctx, s, New(s, cfg.graphOpts...), cfg)
+}
+
+// NewBatchAssemblerFromSnapshot constructs an assembler bound to schema s
+// whose underlying graph starts pre-populated from snap, rather than
+// empty as with [NewBatchAssembler]. It is the assembler-level
+// counterpart to [NewFromSnapshot], for resume consumers: persist a
+// batch, load the resulting snapshot on a later run, seed a new
+// assembler from it, and Add only the records still outstanding.
+//
+// Seeding follows [NewFromSnapshot] semantics. All instances, resolved
+// edges, duplicate records, and unresolved edge records are imported,
+// and subsequent Add / AddValid calls interact with the imported state
+// exactly as if it had been assembled in this batch:
+//
+//   - A new instance may resolve an unresolved edge imported from snap,
+//     and new forward references resolve against seeded instances.
+//   - A new instance whose (type, primary key) collides with a seeded
+//     instance is rejected as a duplicate (E_DUPLICATE_PK).
+//   - Finalize's Check covers seeded and new state alike: a required
+//     association imported from snap and still unresolved at Finalize
+//     fails the batch with E_UNRESOLVED_REQUIRED.
+//
+// Two accounting consequences of seeding:
+//
+//   - [BatchAssembler.Count] counts only records added through this
+//     assembler; seeded instances are not counted.
+//   - Construction diagnostics are not carried over from snap — the
+//     finalized snapshot's Diagnostics() reflects only this assembler's
+//     Add / AddValid calls. Snapshots loaded from .ys files carry no
+//     construction diagnostics in the first place (diagnostics are
+//     transient by design); the structural records — Duplicates and
+//     Unresolved — are what persist and import.
+//
+// snap must originate from s: taken from a [Graph] bound to s, or
+// loaded via [github.com/simon-lentz/yammm/snapshot.Load] against s,
+// which verifies structural compatibility. Seeding from a snapshot
+// built against a different schema is not detected — types unknown to
+// s are silently skipped during import.
+//
+// Every other contract matches [NewBatchAssembler]: the captured ctx,
+// the Add / AddValid / Finalize lifecycle and finalize barrier, both
+// validator-access modes, and the [FinalizeResult] non-nil-Snapshot
+// guarantee.
+//
+// Panics if s, snap, or ctx is nil (consistent with [NewBatchAssembler]
+// and [NewFromSnapshot]).
+func NewBatchAssemblerFromSnapshot(ctx context.Context, s *schema.Schema, snap *Snapshot, opts ...BatchAssemblerOption) *BatchAssembler {
+	if s == nil {
+		panic("graph.NewBatchAssemblerFromSnapshot: nil schema")
+	}
+	if ctx == nil {
+		panic("graph.NewBatchAssemblerFromSnapshot: nil context")
+	}
+	if snap == nil {
+		panic("graph.NewBatchAssemblerFromSnapshot: nil Snapshot")
 	}
 
+	cfg := applyBatchAssemblerOptions(opts)
+	return newBatchAssembler(ctx, s, NewFromSnapshot(s, snap, cfg.graphOpts...), cfg)
+}
+
+// newBatchAssembler wires the validator-access mode (single shared
+// validator or pre-filled pool) around an already-constructed graph.
+// Both exported constructors funnel here; they differ only in how the
+// graph is built (empty via [New], or seeded via [NewFromSnapshot]).
+func newBatchAssembler(ctx context.Context, s *schema.Schema, g *Graph, cfg batchAssemblerConfig) *BatchAssembler {
 	ba := &BatchAssembler{
 		ctx:    ctx,
 		schema: s,
-		graph:  New(s, cfg.graphOpts...),
+		graph:  g,
 	}
 
 	if cfg.poolSize == 0 {
@@ -502,9 +578,11 @@ func (ba *BatchAssembler) Finalize(ctx context.Context) (FinalizeResult, error) 
 // Useful for progress reporting in long-running batches.
 //
 // Counts successful Add and AddValid calls equally; failed records
-// (validation errors, duplicate PKs, etc.) are not counted. Safe to
-// call concurrently with in-flight Add operations — the returned
-// value is a point-in-time read of an atomic counter.
+// (validation errors, duplicate PKs, etc.) are not counted. Instances
+// seeded at construction by [NewBatchAssemblerFromSnapshot] are not
+// counted either — Count reflects only records added through this
+// assembler. Safe to call concurrently with in-flight Add operations —
+// the returned value is a point-in-time read of an atomic counter.
 func (ba *BatchAssembler) Count() int {
 	return int(ba.successes.Load())
 }

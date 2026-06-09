@@ -780,6 +780,402 @@ func TestBatchAssembler_ModeParity(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// Seed-snapshot fixture for the NewBatchAssemblerFromSnapshot tests.
+// -----------------------------------------------------------------------------
+
+// seedRecord pairs a type name with a raw instance for seed-snapshot
+// construction.
+type seedRecord struct {
+	typeName string
+	raw      instance.RawInstance
+}
+
+// buildSeedSnapshot validates and adds each record to a fresh graph and
+// returns its snapshot WITHOUT running Check — the shape of a mid-batch
+// checkpoint, which may legitimately carry unresolved required references
+// that a later resumed batch completes.
+func buildSeedSnapshot(t *testing.T, s *schema.Schema, records ...seedRecord) *graph.Snapshot {
+	t.Helper()
+	ctx := t.Context()
+	g := graph.New(s)
+	v := instance.NewValidator(s)
+	for _, rec := range records {
+		valid, vRes := v.ValidateOne(ctx, rec.typeName, rec.raw)
+		if vRes.HasErrors() {
+			t.Fatalf("seed: validate %q: %s", rec.typeName, vRes.String())
+		}
+		if addRes := g.Add(ctx, valid); addRes.HasErrors() {
+			t.Fatalf("seed: add %q: %s", rec.typeName, addRes.String())
+		}
+	}
+	return g.Snapshot()
+}
+
+// -----------------------------------------------------------------------------
+// Test 15: FromSnapshot constructor panics on nil schema / snapshot / context.
+// -----------------------------------------------------------------------------
+
+func TestNewBatchAssemblerFromSnapshot_NilPanics(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	seed := buildSeedSnapshot(t, s)
+
+	for _, tc := range []struct {
+		name string
+		call func()
+	}{
+		{"nil_schema", func() { graph.NewBatchAssemblerFromSnapshot(t.Context(), nil, seed) }},
+		{"nil_snapshot", func() { graph.NewBatchAssemblerFromSnapshot(t.Context(), s, nil) }},
+		{"nil_context", func() { graph.NewBatchAssemblerFromSnapshot(nil, s, seed) }}, //nolint:staticcheck // testing nil context panic
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("expected panic for %s, got nil", tc.name)
+				}
+			}()
+			tc.call()
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Test 16: Resume shape — new Adds land on top of the seeded state, resolve
+// against seeded instances, and leave the source snapshot untouched.
+// -----------------------------------------------------------------------------
+
+func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ctx := t.Context()
+
+	seed := buildSeedSnapshot(
+		t, s,
+		seedRecord{"Company", companyRaw("acme", "ACME")},
+		seedRecord{"Person", personRaw("alice", "Alice")},
+	)
+
+	ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
+	// bob's employer reference resolves against the SEEDED acme.
+	if err := ba.Add("Person", personRawWithEmployer("bob", "Bob", "acme")); err != nil {
+		t.Fatalf("Add(bob): %v", err)
+	}
+	if got := ba.Count(); got != 1 {
+		t.Errorf("Count(): got %d, want 1 (seeded instances must not be counted)", got)
+	}
+
+	res, err := ba.Finalize(ctx)
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if got := len(res.Snapshot.InstancesOf("Person")); got != 2 {
+		t.Errorf("Person count: got %d, want 2 (seeded alice + new bob)", got)
+	}
+	if got := len(res.Snapshot.InstancesOf("Company")); got != 1 {
+		t.Errorf("Company count: got %d, want 1", got)
+	}
+	edges := res.Snapshot.Edges()
+	if len(edges) != 1 {
+		t.Fatalf("edge count: got %d, want 1", len(edges))
+	}
+	if edges[0].Relation() != "employer" ||
+		edges[0].Source().PrimaryKey().String() != `["bob"]` ||
+		edges[0].Target().PrimaryKey().String() != `["acme"]` {
+		t.Errorf(`edge: got %s %s->%s, want employer ["bob"]->["acme"]`,
+			edges[0].Relation(), edges[0].Source().PrimaryKey().String(), edges[0].Target().PrimaryKey().String())
+	}
+
+	// The source snapshot is independent of the resumed batch.
+	if got := len(seed.InstancesOf("Person")); got != 1 {
+		t.Errorf("seed Person count mutated: got %d, want 1", got)
+	}
+	if got := len(seed.Edges()); got != 0 {
+		t.Errorf("seed edge count mutated: got %d, want 0", got)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Test 17: A new Add through the assembler resolves an unresolved REQUIRED
+// edge imported from the seed, so Finalize succeeds.
+// -----------------------------------------------------------------------------
+
+func TestNewBatchAssemblerFromSnapshot_ResolvesSeededUnresolved(t *testing.T) {
+	s := batchAssemblerRequiredEmployerSchema(t)
+	ctx := t.Context()
+
+	// alice references a Company that is not in the seed: the snapshot
+	// carries a target_missing unresolved REQUIRED edge.
+	seed := buildSeedSnapshot(
+		t, s,
+		seedRecord{"Person", personRawWithEmployer("alice", "Alice", "acme")},
+	)
+	if got := len(seed.Unresolved()); got != 1 {
+		t.Fatalf("seed unresolved: got %d, want 1", got)
+	}
+
+	ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
+	if err := ba.Add("Company", companyRaw("acme", "ACME")); err != nil {
+		t.Fatalf("Add(acme): %v", err)
+	}
+
+	res, err := ba.Finalize(ctx)
+	if err != nil {
+		t.Fatalf("Finalize: %v (the resumed batch supplied the missing target)", err)
+	}
+	if got := len(res.Snapshot.Edges()); got != 1 {
+		t.Errorf("edge count: got %d, want 1 (seeded pending edge resolved by new Add)", got)
+	}
+	if got := len(res.Snapshot.Unresolved()); got != 0 {
+		t.Errorf("unresolved count: got %d, want 0", got)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Test 18: An unresolved REQUIRED edge imported from the seed and never
+// completed fails Finalize — Check covers seeded and new state alike.
+// -----------------------------------------------------------------------------
+
+func TestNewBatchAssemblerFromSnapshot_SeededUnresolvedFailsFinalize(t *testing.T) {
+	s := batchAssemblerRequiredEmployerSchema(t)
+	ctx := t.Context()
+
+	seed := buildSeedSnapshot(
+		t, s,
+		seedRecord{"Person", personRawWithEmployer("alice", "Alice", "missing")},
+	)
+
+	// Add nothing: the imported unresolved REQUIRED edge must fail Check.
+	ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
+	res, err := ba.Finalize(ctx)
+	if err == nil {
+		t.Fatal("expected Finalize error from seeded unresolved required association")
+	}
+	var ce *diag.ContextualError
+	if !errors.As(err, &ce) {
+		t.Fatalf("error is not *diag.ContextualError: %T", err)
+	}
+	if ce.Tag != "batch_finalize" {
+		t.Errorf("Tag: got %q, want \"batch_finalize\"", ce.Tag)
+	}
+	foundUnresolved := false
+	for issue := range ce.Result.Errors() {
+		if issue.Code() == diag.E_UNRESOLVED_REQUIRED {
+			foundUnresolved = true
+			break
+		}
+	}
+	if !foundUnresolved {
+		t.Errorf("expected E_UNRESOLVED_REQUIRED in error result; got: %s", ce.Result.String())
+	}
+	if res.Snapshot == nil {
+		t.Fatal("res.Snapshot is nil on Finalize error path; contract violated")
+	}
+	if got := len(res.Snapshot.Unresolved()); got != 1 {
+		t.Errorf("unresolved count on partial snapshot: got %d, want 1", got)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Test 19: A new Add colliding with a seeded (type, PK) is rejected as a
+// duplicate; the rejection is recorded on the snapshot, not via Finalize.
+// -----------------------------------------------------------------------------
+
+func TestNewBatchAssemblerFromSnapshot_DuplicateAgainstSeeded(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ctx := t.Context()
+
+	seed := buildSeedSnapshot(
+		t, s,
+		seedRecord{"Person", personRaw("alice", "Alice")},
+	)
+
+	ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
+	err := ba.Add("Person", personRaw("alice", "Alice The Second"))
+	if err == nil {
+		t.Fatal("expected duplicate-PK error against seeded instance")
+	}
+	var ce *diag.ContextualError
+	if !errors.As(err, &ce) {
+		t.Fatalf("error is not *diag.ContextualError: %T", err)
+	}
+	// Attempt numbering starts fresh after seeding: this is record #1.
+	if want := "Person (record #1)"; ce.Tag != want {
+		t.Errorf("Tag: got %q, want %q", ce.Tag, want)
+	}
+	foundDup := false
+	for issue := range ce.Result.Errors() {
+		if issue.Code() == diag.E_DUPLICATE_PK {
+			foundDup = true
+			break
+		}
+	}
+	if !foundDup {
+		t.Errorf("expected E_DUPLICATE_PK in error result; got: %s", ce.Result.String())
+	}
+	if got := ba.Count(); got != 0 {
+		t.Errorf("Count() after failed Add: got %d, want 0", got)
+	}
+
+	// Duplicates do not gate Finalize (Check covers unresolved-required
+	// only); the rejection is recorded on the snapshot instead.
+	res, err := ba.Finalize(ctx)
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if got := len(res.Snapshot.InstancesOf("Person")); got != 1 {
+		t.Errorf("Person count: got %d, want 1 (seeded alice only)", got)
+	}
+	if got := len(res.Snapshot.Duplicates()); got != 1 {
+		t.Errorf("Duplicates count: got %d, want 1", got)
+	}
+	// The seed contributed no construction diagnostics; the duplicate from
+	// THIS batch is the only issue on the finalized snapshot.
+	if !res.Snapshot.Diagnostics().HasErrors() {
+		t.Error("expected E_DUPLICATE_PK on finalized snapshot diagnostics")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Test 20: Seeded-assembler output is structurally and byte-identical to the
+// manual NewFromSnapshot + validator loop, in both validator-access modes.
+// -----------------------------------------------------------------------------
+
+func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ctx := t.Context()
+
+	seed := buildSeedSnapshot(
+		t, s,
+		seedRecord{"Company", companyRaw("acme", "ACME")},
+		seedRecord{"Person", personRaw("alice", "Alice")},
+	)
+	// carol's employer is added AFTER her, exercising forward-reference
+	// resolution within the resumed batch on top of the seeded state.
+	resumeRecords := []struct {
+		typeName string
+		raw      instance.RawInstance
+	}{
+		{"Person", personRawWithEmployer("bob", "Bob", "acme")},
+		{"Person", personRawWithEmployer("carol", "Carol", "globex")},
+		{"Company", companyRaw("globex", "Globex")},
+	}
+
+	// Manual path: NewFromSnapshot + validator loop + Check + Snapshot.
+	g := graph.NewFromSnapshot(s, seed)
+	v := instance.NewValidator(s)
+	for _, rec := range resumeRecords {
+		valid, vRes := v.ValidateOne(ctx, rec.typeName, rec.raw)
+		if vRes.HasErrors() {
+			t.Fatalf("manual: validate %q: %s", rec.typeName, vRes.String())
+		}
+		if addRes := g.Add(ctx, valid); addRes.HasErrors() {
+			t.Fatalf("manual: add %q: %s", rec.typeName, addRes.String())
+		}
+	}
+	if cRes := g.Check(ctx); cRes.HasErrors() {
+		t.Fatalf("manual: check: %s", cRes.String())
+	}
+	manualSnap := g.Snapshot()
+	manualBytes, mRes := snapshot.Marshal(ctx, manualSnap)
+	if mRes.HasErrors() {
+		t.Fatalf("manual: marshal: %s", mRes.String())
+	}
+
+	for _, mode := range []struct {
+		name string
+		opts []graph.BatchAssemblerOption
+	}{
+		{"default", nil},
+		{"pool4", []graph.BatchAssemblerOption{graph.WithValidatorPool(4)}},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed, mode.opts...)
+			for _, rec := range resumeRecords {
+				if err := ba.Add(rec.typeName, rec.raw); err != nil {
+					t.Fatalf("Add(%s): %v", rec.typeName, err)
+				}
+			}
+			res, err := ba.Finalize(ctx)
+			if err != nil {
+				t.Fatalf("Finalize: %v", err)
+			}
+			if cmpErr := snapshottest.CompareSnapshots(manualSnap, res.Snapshot); cmpErr != nil {
+				t.Errorf("structural mismatch vs manual path:\n%v", cmpErr)
+			}
+			asmBytes, asmRes := snapshot.Marshal(ctx, res.Snapshot)
+			if asmRes.HasErrors() {
+				t.Fatalf("marshal: %s", asmRes.String())
+			}
+			if string(manualBytes) != string(asmBytes) {
+				t.Errorf("marshal bytes differ from manual path (manual=%d, %s=%d)",
+					len(manualBytes), mode.name, len(asmBytes))
+			}
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Test 21: The persist → load → seed → resume cycle: a second assembler
+// seeded from a Marshal/Load round-tripped snapshot completes the batch.
+// -----------------------------------------------------------------------------
+
+func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ctx := t.Context()
+
+	// Run 1: assemble and persist a first batch.
+	ba1 := graph.NewBatchAssembler(ctx, s)
+	if err := ba1.Add("Company", companyRaw("acme", "ACME")); err != nil {
+		t.Fatalf("run 1: Add(acme): %v", err)
+	}
+	if err := ba1.Add("Person", personRawWithEmployer("alice", "Alice", "acme")); err != nil {
+		t.Fatalf("run 1: Add(alice): %v", err)
+	}
+	res1, err := ba1.Finalize(ctx)
+	if err != nil {
+		t.Fatalf("run 1: Finalize: %v", err)
+	}
+	data, mRes := snapshot.Marshal(ctx, res1.Snapshot)
+	if mRes.HasErrors() {
+		t.Fatalf("run 1: marshal: %s", mRes.String())
+	}
+
+	// Run 2: load the persisted snapshot and resume on top of it.
+	loaded, lRes := snapshot.Load(ctx, data, s)
+	if lRes.HasErrors() {
+		t.Fatalf("run 2: load: %s", lRes.String())
+	}
+	if !loaded.OK() {
+		t.Fatalf("run 2: loaded snapshot diagnostics not OK: %s", loaded.Diagnostics().String())
+	}
+
+	ba2 := graph.NewBatchAssemblerFromSnapshot(ctx, s, loaded)
+	if err := ba2.Add("Person", personRawWithEmployer("bob", "Bob", "acme")); err != nil {
+		t.Fatalf("run 2: Add(bob): %v", err)
+	}
+	if got := ba2.Count(); got != 1 {
+		t.Errorf("run 2: Count(): got %d, want 1", got)
+	}
+	res2, err := ba2.Finalize(ctx)
+	if err != nil {
+		t.Fatalf("run 2: Finalize: %v", err)
+	}
+
+	if got := len(res2.Snapshot.InstancesOf("Person")); got != 2 {
+		t.Errorf("Person count: got %d, want 2", got)
+	}
+	if got := len(res2.Snapshot.InstancesOf("Company")); got != 1 {
+		t.Errorf("Company count: got %d, want 1", got)
+	}
+	if got := len(res2.Snapshot.Edges()); got != 2 {
+		t.Errorf("edge count: got %d, want 2 (alice edge survives the round trip; bob edge resolves against the loaded instance)", got)
+	}
+
+	// The resumed batch's snapshot persists cleanly in turn.
+	if _, mRes2 := snapshot.Marshal(ctx, res2.Snapshot); mRes2.HasErrors() {
+		t.Fatalf("run 2: marshal: %s", mRes2.String())
+	}
+}
+
+// -----------------------------------------------------------------------------
 // helpers
 // -----------------------------------------------------------------------------
 

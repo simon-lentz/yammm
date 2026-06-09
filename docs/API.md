@@ -353,6 +353,22 @@ Pool mode preserves every external contract (error shapes, Finalize one-shot sem
 
 **Concurrency contract.** `BatchAssembler` is safe for concurrent use across all methods (`Add`, `AddValid`, `Count`, `Graph`, `Finalize`). The library coordinates Add lifecycle against Finalize via an internal `sync.RWMutex` so every Add that returns nil is guaranteed to be in the finalized snapshot, and any Add that arrives after Finalize takes its lock returns `ErrAssemblerFinalized`. No external mutex required at call sites — the worker-pool pattern (one assembler shared across N scraper goroutines, coordinator goroutine calls Finalize at end-of-batch) is supported directly.
 
+**Resuming from a prior snapshot.** `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap, opts...)` constructs an assembler whose graph starts pre-populated from an existing `Snapshot` — the same import semantics as `NewFromSnapshot` (see [Seeding from a Snapshot](#seeding-from-a-snapshot)) — instead of `NewBatchAssembler`'s empty graph. Consumers that persist a batch and continue it on a later run seed a new assembler from the loaded snapshot and `Add` only the outstanding records:
+
+```go
+snap, res := snapshot.Load(ctx, data, s) // prior batch's .ys
+if res.HasErrors() { /* handle */ }
+
+ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, snap,
+    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+for _, rec := range outstanding { // e.g. resume-by-set-difference
+    if err := ba.Add("TypeName", rec); err != nil { /* handle */ }
+}
+finRes, err := ba.Finalize(ctx)
+```
+
+New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK`, and `Finalize`'s check covers the union — a required association imported from the seed and still unresolved fails the batch with `E_UNRESOLVED_REQUIRED`. `Count()` reflects only records added through the assembler (seeded instances are not counted), and construction diagnostics are not carried over from the seed (`.ys`-loaded snapshots carry none by design; `Duplicates` and `Unresolved` are the persistent structural records, and both import). The seed snapshot must originate from the same schema — taken from a `Graph` bound to it, or loaded via `snapshot.Load` against it, which verifies structural compatibility. Every other contract — lifecycle, finalize barrier, validator-access modes, `FinalizeResult` — is identical to `NewBatchAssembler`.
+
 **Test fixtures.** `snapshot/snapshottest.BuildTestSnapshot(t, s, records...)` is the test-helper convenience wrapper around `BatchAssembler` for happy-path snapshot construction; pass `[]Record{{TypeName, Raw}, ...}` and the helper handles validate + add + finalize, fataling on any failure.
 
 ### Seeding from a Snapshot
@@ -371,6 +387,8 @@ snap := g.Snapshot()
 ```
 
 `NewFromSnapshot` imports all instances, edges, duplicates, and unresolved records from the source snapshot. Subsequent `Add` calls may resolve previously-unresolved edges if they supply the missing targets.
+
+To run the batch-assembly lifecycle on top of a seeded graph, `graph.NewBatchAssemblerFromSnapshot` constructs a `BatchAssembler` whose graph is seeded the same way — see [Batch Assembly](#batch-assembly).
 
 ### Rebuilding from Parts
 
