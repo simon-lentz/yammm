@@ -70,7 +70,18 @@
 // default mutex-serialized mode is correct for I/O-bound consumers.
 // See [BatchAssembler] for the full thread-safety contract.
 //
+// To resume assembly on top of a previously-persisted snapshot,
+// construct the assembler with [NewBatchAssemblerFromSnapshot]: the
+// underlying graph starts pre-populated via [NewFromSnapshot] semantics,
+// and new Add calls resolve against — and may complete — the seeded
+// state.
+//
 // # Alternative Constructors
+//
+// [NewFromSnapshot] creates a [Graph] pre-populated from a [Snapshot],
+// for incremental building on top of persisted or previously-constructed
+// state; new Add calls resolve against the imported instances.
+// [NewBatchAssemblerFromSnapshot] is its assembler-level counterpart.
 //
 // [RebuildSnapshot] constructs a [Snapshot] from pre-validated parts
 // (types, instances, edges, duplicates, unresolved records). This is the
@@ -80,7 +91,8 @@
 //
 // [BatchAssembler] composes Validator + Graph + Snapshot for the
 // validate→add→check→snapshot pipeline pattern; constructed via
-// [NewBatchAssembler] and finalized via [BatchAssembler.Finalize], which
+// [NewBatchAssembler] (or [NewBatchAssemblerFromSnapshot], seeding from
+// a prior snapshot) and finalized via [BatchAssembler.Finalize], which
 // returns a [FinalizeResult] whose Snapshot field is always non-nil.
 // [ErrAssemblerFinalized] is the sentinel returned from Add / AddValid
 // after Finalize.
