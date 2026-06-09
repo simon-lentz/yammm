@@ -39,8 +39,9 @@ Wire-format version bumps are permitted at minor-version bumps during pre-1.0 (t
 - Bug fixes that preserve the public API and wire format.
 - Documentation-only changes.
 - Internal refactors, test improvements, and dependency updates.
+- **Additive API changes** — new exported symbols whose addition leaves every existing signature and documented behavior unchanged; consumers written against the prior release continue to compile and run unchanged.
 
-Patch releases never introduce new exported symbols, change documented behavior, or touch the wire format.
+Patch releases never introduce breaking changes: no removed or renamed exported symbols, no signature changes, no tightenings of documented behavior, and no wire-format changes. Anything in those categories requires at least a minor release.
 
 ## Post-1.0 policy (future)
 
@@ -104,11 +105,9 @@ The `.ys` wire format is unchanged at v0.5.0 (header `version` stays `2`); `adap
 
 v0.5.1 carries one strictly additive API change and its documentation:
 
-- **Additive API surface (`graph`)** — one new exported constructor, `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap, opts ...BatchAssemblerOption)`, which constructs a `BatchAssembler` whose underlying graph starts pre-populated from an existing `*graph.Snapshot` (the same import semantics as `graph.NewFromSnapshot`) instead of empty. Requested by rdata so its resume pipelines can adopt `BatchAssembler` by seeding from a prior `.ys` snapshot rather than re-adding every previously-extracted instance. No existing signature, option, or documented behavior changes; code written against `v0.5.0` compiles and runs unchanged.
+- **Additive API surface (`graph`)** — one new exported constructor, `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap, opts ...BatchAssemblerOption)`, which constructs a `BatchAssembler` whose underlying graph starts pre-populated from an existing `*graph.Snapshot` (the same import semantics as `graph.NewFromSnapshot`) instead of empty. Requested by rdata so its resume pipelines can adopt `BatchAssembler` by seeding from a prior `.ys` snapshot rather than re-adding every previously-extracted instance. No existing signature, option, or documented behavior changes; code written against `v0.5.0` compiles and runs unchanged. Justified under the pre-1.0 patch-release "additive API changes" rule (amended 2026-06-09: patch releases may carry additive API surface and never introduce breaking changes).
 
 The `.ys` wire format is unchanged at v0.5.1 (header `version` stays `2`).
-
-**Classification note.** Under the letter of the pre-1.0 rules above, a new exported symbol classifies as minor-tier ("patch releases never introduce new exported symbols"). v0.5.1 ships it under a patch tag by explicit maintainer release decision (2026-06-09), given the single-symbol, strictly-additive surface; recorded here so the deviation is deliberate rather than drift.
 
 ## Revision history
 
@@ -116,4 +115,4 @@ The `.ys` wire format is unchanged at v0.5.1 (header `version` stays `2`).
 - **2026-06-02** — Broadened the pre-1.0 minor-release rule from "removal of exported symbols" to also cover breaking signature, name, and type changes, and added a version-pinned-consumer carve-out to condition (a): a breaking change is permitted when the only external references live in a consumer pinned to an older yammm release whose migration is tracked downstream. Motivated by the v0.4.0 `diag` surface tightening, whose sole external consumer pins `v0.3.1` and migrates on its own schedule.
 - **2026-06-05** — Added the "v0.5.0 under this policy" section for the additive `adapter/gogen` Go-source-generation surface and the `yammm gen` CLI command (plus the internal `ConstraintKind` exhaustiveness rollout and `internal/ident` initialisms mechanism). No existing API or wire-format commitment changed.
 - **2026-06-08** — Folded the schema-level primary-key enforcement into v0.5.0, making it a **breaking** release: the schema-loading contract is tightened (concrete types must declare or inherit a `primary` — `E_NO_PRIMARY_KEY`; associations must target concrete types — `E_INVALID_ASSOCIATION_TARGET`; and a concrete type extending an unresolvable qualified supertype is reported — `E_UNKNOWN_TYPE` — instead of silently dropping the inheritance), so schemas valid under `v0.4.x` can be rejected. The Go API symbol surface and the `.ys` wire format remain unchanged. Justified under the amended pre-1.0 rule (a) — the sole external consumer (rdata) pins `v0.3.1` and migrates downstream; the newly-rejected schema shapes are enumerated in the v0.5.0 section. The section's opening "additive feature release" framing was revised accordingly.
-- **2026-06-09** — Added the "v0.5.1 under this policy" section for the additive `graph.NewBatchAssemblerFromSnapshot` snapshot-seeding constructor (rdata-requested). Includes a classification note: a new exported symbol is minor-tier under the written rules, and v0.5.1 ships it as a patch by explicit maintainer release decision.
+- **2026-06-09** — Added the "v0.5.1 under this policy" section for the additive `graph.NewBatchAssemblerFromSnapshot` snapshot-seeding constructor (rdata-requested), and **amended the pre-1.0 patch-release rule**: patch releases may now carry additive API changes (new exported symbols that leave every existing signature and documented behavior unchanged); the invariant is that patch releases never introduce breaking changes (no removals, renames, signature changes, behavior tightenings, or wire-format changes). The rule previously read "patch releases never introduce new exported symbols," which would have classified v0.5.1's single additive constructor as minor-tier; an interim classification note recording that deviation was removed when the amendment landed. The post-1.0 section's "patch releases follow pre-1.0 patch-release rules verbatim" inherits this amendment.
