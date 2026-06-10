@@ -177,16 +177,10 @@ linters:
       - path: "^graph/(duplicate|import|result)_test\\.go$"
         linters:
           - depguard
-      - path: "^immutable/(normalize)_test\\.go$"
-        linters:
-          - depguard
       - path: "^instance/(errors|options|raw|schema_builder|valid|validate_composition|validate_edge|validator)_test\\.go$"
         linters:
           - depguard
       - path: "^instance/internal/eval/(builtins|checkers|evaluator|scope)_test\\.go$"
-        linters:
-          - depguard
-      - path: "^internal/ident/(ident)_test\\.go$"
         linters:
           - depguard
       - path: "^location/(provenance)_test\\.go$"

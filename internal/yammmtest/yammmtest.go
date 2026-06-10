@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -69,6 +70,22 @@ func Diff(tb testing.TB, want, got any, opts ...cmp.Option) {
 	if d := cmp.Diff(want, got, opts...); d != "" {
 		tb.Errorf("mismatch (-want +got):\n%s", d)
 	}
+}
+
+// RunConcurrent runs body from n goroutines, iters times each, and waits
+// for all of them — the scaffold for concurrent-read-safety tests over
+// immutable structures. Assertions belong after it returns (or in
+// thread-safe collectors captured by body).
+func RunConcurrent(n, iters int, body func()) {
+	var wg sync.WaitGroup
+	for range n {
+		wg.Go(func() {
+			for range iters {
+				body()
+			}
+		})
+	}
+	wg.Wait()
 }
 
 // AssertPanics runs fn and reports a test error unless it panicked.

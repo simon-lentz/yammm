@@ -21,17 +21,13 @@ func TestMap_WrapMap(t *testing.T) {
 	if !ok {
 		t.Fatal("expected Get('name') ok to be true")
 	}
-	if s, ok := name.String(); !ok || s != "Alice" {
-		t.Errorf("expected name to be 'Alice', got %v", name.Unwrap())
-	}
+	wantString(t, name, "Alice")
 
 	age, ok := m.Get("age")
 	if !ok {
 		t.Fatal("expected Get('age') ok to be true")
 	}
-	if n, ok := age.Int(); !ok || n != 30 {
-		t.Errorf("expected age to be 30, got %v", age.Unwrap())
-	}
+	wantInt(t, age, 30)
 }
 
 func TestMap_WrapNil(t *testing.T) {
@@ -54,56 +50,63 @@ func TestMap_WrapEmpty(t *testing.T) {
 	}
 }
 
+// TestMap_Keys covers key iteration for a populated map and the zero-value
+// Map[string]{}, whose iteration must yield nothing rather than panic.
 func TestMap_Keys(t *testing.T) {
-	input := map[string]any{
-		"a": 1,
-		"b": 2,
-		"c": 3,
+	tests := []struct {
+		name string
+		m    Map[string]
+		want []string // sorted
+	}{
+		{"populated", WrapMap(map[string]any{"a": 1, "b": 2, "c": 3}), []string{"a", "b", "c"}},
+		{"zero value", Map[string]{}, nil},
 	}
 
-	m := WrapMap(input)
-
-	var keys []string
-	for k := range m.Keys() {
-		keys = append(keys, k)
-	}
-
-	if len(keys) != 3 {
-		t.Errorf("expected 3 keys, got %d", len(keys))
-	}
-
-	slices.Sort(keys)
-	expected := []string{"a", "b", "c"}
-	if !slices.Equal(keys, expected) {
-		t.Errorf("expected keys %v, got %v", expected, keys)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var keys []string
+			for k := range tt.m.Keys() {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			if !slices.Equal(keys, tt.want) {
+				t.Errorf("Keys() = %v, want %v", keys, tt.want)
+			}
+		})
 	}
 }
 
+// TestMap_Range covers pair iteration for a populated map and the zero-value
+// Map[string]{}, whose iteration must yield nothing rather than panic.
 func TestMap_Range(t *testing.T) {
-	input := map[string]any{
-		"a": 1,
-		"b": 2,
+	tests := []struct {
+		name string
+		m    Map[string]
+		want map[string]int64
+	}{
+		{"populated", WrapMap(map[string]any{"a": 1, "b": 2}), map[string]int64{"a": 1, "b": 2}},
+		{"zero value", Map[string]{}, map[string]int64{}},
 	}
 
-	m := WrapMap(input)
-
-	seen := make(map[string]int64)
-	for k, v := range m.Range() {
-		n, ok := v.Int()
-		if !ok {
-			t.Errorf("expected Int() for key %q", k)
-		}
-		seen[k] = n
-	}
-
-	if len(seen) != 2 {
-		t.Errorf("expected 2 entries, got %d", len(seen))
-	}
-	if seen["a"] != 1 {
-		t.Errorf("expected a=1, got %d", seen["a"])
-	}
-	if seen["b"] != 2 {
-		t.Errorf("expected b=2, got %d", seen["b"])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seen := make(map[string]int64)
+			for k, v := range tt.m.Range() {
+				n, ok := v.Int()
+				if !ok {
+					t.Errorf("expected Int() for key %q", k)
+				}
+				seen[k] = n
+			}
+			if len(seen) != len(tt.want) {
+				t.Fatalf("Range() yielded %d entries, want %d", len(seen), len(tt.want))
+			}
+			for k, want := range tt.want {
+				if seen[k] != want {
+					t.Errorf("Range() %s = %d, want %d", k, seen[k], want)
+				}
+			}
+		})
 	}
 }
 
@@ -183,9 +186,7 @@ func TestMap_WrapMap_WithClone_Isolation(t *testing.T) {
 	if !ok {
 		t.Fatal("expected key in nested")
 	}
-	if str, ok := keyVal.String(); !ok || str != "original" {
-		t.Errorf("expected 'original', got %v", keyVal.Unwrap())
-	}
+	wantString(t, keyVal, "original")
 }
 
 func TestMap_IteratorEarlyExit(t *testing.T) {
@@ -259,9 +260,7 @@ func TestMap_NestedMaps(t *testing.T) {
 		t.Fatal("expected value")
 	}
 
-	if s, ok := value.String(); !ok || s != "deep" {
-		t.Errorf("expected 'deep', got %v", value.Unwrap())
-	}
+	wantString(t, value, "deep")
 }
 
 func TestMap_Clone_WithNestedSlice(t *testing.T) {
@@ -299,33 +298,5 @@ func TestMap_Clone_WithNestedSlice(t *testing.T) {
 	}
 	if len(more) != 3 {
 		t.Errorf("expected 3 items in more, got %d", len(more))
-	}
-}
-
-func TestMap_Keys_ZeroValue(t *testing.T) {
-	// Iterating over a zero-value Map[string]{} Keys must not panic.
-	var m Map[string]
-
-	count := 0
-	for range m.Keys() {
-		count++
-	}
-
-	if count != 0 {
-		t.Errorf("expected 0 iterations for zero-value Map[string]{} Keys, got %d", count)
-	}
-}
-
-func TestMap_Range_ZeroValue(t *testing.T) {
-	// Iterating over a zero-value Map[string]{} Range must not panic.
-	var m Map[string]
-
-	count := 0
-	for range m.Range() {
-		count++
-	}
-
-	if count != 0 {
-		t.Errorf("expected 0 iterations for zero-value Map[string]{} Range, got %d", count)
 	}
 }

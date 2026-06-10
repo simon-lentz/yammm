@@ -15,14 +15,10 @@ func TestSlice_WrapSlice(t *testing.T) {
 	}
 
 	elem := s.Get(0)
-	if str, ok := elem.String(); !ok || str != "a" {
-		t.Errorf("expected first element 'a', got %v", elem.Unwrap())
-	}
+	wantString(t, elem, "a")
 
 	elem = s.Get(2)
-	if str, ok := elem.String(); !ok || str != "c" {
-		t.Errorf("expected third element 'c', got %v", elem.Unwrap())
-	}
+	wantString(t, elem, "c")
 }
 
 func TestSlice_WrapNil(t *testing.T) {
@@ -159,9 +155,7 @@ func TestSlice_WrapSlice_WithClone_Isolation(t *testing.T) {
 	if !ok {
 		t.Fatal("expected key in nested")
 	}
-	if str, ok := keyVal.String(); !ok || str != "original" {
-		t.Errorf("expected 'original', got %v", keyVal.Unwrap())
-	}
+	wantString(t, keyVal, "original")
 }
 
 func TestSlice_IteratorEarlyExit(t *testing.T) {
@@ -200,9 +194,7 @@ func TestSlice_NestedSlices(t *testing.T) {
 	}
 
 	elem := firstSlice.Get(0)
-	if n, ok := elem.Int(); !ok || n != 1 {
-		t.Errorf("expected 1, got %v", elem.Unwrap())
-	}
+	wantInt(t, elem, 1)
 }
 
 func TestSlice_MixedTypes(t *testing.T) {
@@ -223,14 +215,10 @@ func TestSlice_MixedTypes(t *testing.T) {
 	}
 
 	// Test string
-	if str, ok := s.Get(0).String(); !ok || str != "string" {
-		t.Error("expected string element")
-	}
+	wantString(t, s.Get(0), "string")
 
 	// Test int
-	if n, ok := s.Get(1).Int(); !ok || n != 42 {
-		t.Error("expected int element")
-	}
+	wantInt(t, s.Get(1), 42)
 
 	// Test float
 	if f, ok := s.Get(2).Float(); !ok || f != 3.14 {
