@@ -1,0 +1,28 @@
+# validate: success on a valid schema, failure on invalid or missing input,
+# and the --format json rendering of failures.
+
+exec yammm validate valid.yammm
+
+! exec yammm validate invalid.yammm
+
+# schema.Load wraps file-not-found into diagnostics, so a missing file is a
+# validation failure, not a usage error.
+! exec yammm validate nonexistent.yammm
+
+# JSON diagnostics format still fails and renders structured output.
+! exec yammm validate --format json invalid.yammm
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}
+-- invalid.yammm --
+schema "test"
+
+type Broken {
+	id UnknownType primary
+}

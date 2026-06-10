@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
-	"flag"
 	"io"
 	"os"
 	"path/filepath"
@@ -109,44 +107,4 @@ func TestSetupLogger_FileAppends(t *testing.T) {
 	content := string(data)
 	assert.Contains(t, content, "existing")
 	assert.Contains(t, content, "appended message")
-}
-
-func TestFlagParsing_Defaults(t *testing.T) {
-	t.Parallel()
-
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	logLevel := fs.String("log-level", "info", "")
-	logFile := fs.String("log-file", "", "")
-	moduleRoot := fs.String("module-root", "", "")
-	showVer := fs.Bool("version", false, "")
-
-	require.NoError(t, fs.Parse([]string{}))
-
-	assert.Equal(t, "info", *logLevel)
-	assert.Empty(t, *logFile)
-	assert.Empty(t, *moduleRoot)
-	assert.False(t, *showVer)
-}
-
-func TestFlagParsing_AllOptions(t *testing.T) {
-	t.Parallel()
-
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	logLevel := fs.String("log-level", "info", "")
-	logFile := fs.String("log-file", "", "")
-	moduleRoot := fs.String("module-root", "", "")
-	showVer := fs.Bool("version", false, "")
-
-	err := fs.Parse([]string{
-		"--log-level", "debug",
-		"--log-file", "/tmp/test.log",
-		"--module-root", "/path/to/root",
-		"--version",
-	})
-	require.True(t, err == nil || errors.Is(err, flag.ErrHelp))
-
-	assert.Equal(t, "debug", *logLevel)
-	assert.Equal(t, "/tmp/test.log", *logFile)
-	assert.Equal(t, "/path/to/root", *moduleRoot)
-	assert.True(t, *showVer)
 }

@@ -1,0 +1,22 @@
+# neo4j constraints: offline Cypher constraint generation.
+
+exec yammm neo4j constraints valid.yammm
+stdout 'CREATE CONSTRAINT'
+stdout 'test__Person'
+
+# Community edition emits only UNIQUE constraints.
+exec yammm neo4j constraints --edition community valid.yammm
+stdout 'UNIQUE'
+! stdout 'IS NOT NULL'
+! stdout 'IS :: STRING'
+
+! exec yammm neo4j constraints --edition bogus valid.yammm
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}

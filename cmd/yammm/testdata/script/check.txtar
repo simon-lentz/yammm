@@ -1,0 +1,40 @@
+# check: validates data files against a schema. JSON auto-detects; CSV needs
+# an explicit --type; failures render diagnostics.
+
+exec yammm check valid.yammm data.json
+
+exec yammm check --type Person valid.yammm data.csv
+
+# CSV without --type is rejected.
+! exec yammm check valid.yammm data.csv
+
+# Missing data file is rejected.
+! exec yammm check valid.yammm nonexistent.json
+
+# Invalid data fails and the JSON diagnostics format emits structured fields
+# on stderr.
+! exec yammm check --format json valid.yammm bad.json
+stderr '"severity"'
+stderr '"error"'
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}
+-- data.json --
+{
+  "Person": [
+    {"id": "alice", "name": "Alice", "age": 30},
+    {"id": "bob", "name": "Bob", "age": 25}
+  ]
+}
+-- data.csv --
+id,name,age
+carol,Carol,28
+dave,Dave,35
+-- bad.json --
+{"Person": [{"id": "x"}]}

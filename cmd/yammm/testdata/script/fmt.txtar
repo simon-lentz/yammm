@@ -1,0 +1,33 @@
+# fmt: canonical formatting to stdout by default, in place with --write.
+
+# Formatting to stdout matches the canonical form exactly.
+exec yammm fmt unformatted.yammm
+cmp stdout formatted_golden.yammm
+
+# --write rewrites the file in place.
+cp unformatted.yammm work.yammm
+exec yammm fmt --write work.yammm
+cmp work.yammm formatted_golden.yammm
+
+# Formatting is idempotent: a second --write changes nothing.
+exec yammm fmt --write work.yammm
+cmp work.yammm formatted_golden.yammm
+
+# Missing input is an error.
+! exec yammm fmt nonexistent.yammm
+
+-- unformatted.yammm --
+schema "test"
+type   Person   {
+id   String   primary
+  name    String    required
+    age     Integer
+}
+-- formatted_golden.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}

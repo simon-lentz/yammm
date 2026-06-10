@@ -1,0 +1,182 @@
+# snapshot save / info / verify / update-metadata: the full .ys lifecycle.
+
+# --- save basics ---
+exec yammm snapshot save valid.yammm data.json -o out.ys
+grep '"yammm_snapshot"' out.ys
+grep '"types"' out.ys
+grep '"instances"' out.ys
+
+# Saves are byte-deterministic without --timestamp.
+exec yammm snapshot save valid.yammm data.json -o out2.ys
+cmp out.ys out2.ys
+
+# --timestamp embeds created_at.
+exec yammm snapshot save valid.yammm data.json -o ts.ys --timestamp
+grep '"created_at"' ts.ys
+
+# --indent produces a readable file that still verifies.
+exec yammm snapshot save valid.yammm data.json -o indented.ys --indent
+grep '"yammm_snapshot"' indented.ys
+exec yammm snapshot verify valid.yammm indented.ys
+
+# Metadata flags land in the header.
+exec yammm snapshot save valid.yammm data.json -o meta.ys -m pipeline=test -m env=ci
+grep '"pipeline":"test"' meta.ys
+grep '"env":"ci"' meta.ys
+
+# Multiple data files merge into one snapshot.
+exec yammm snapshot save valid.yammm data.json extra.json -o multi.ys
+grep '"alice"' multi.ys
+grep '"bob"' multi.ys
+grep '"eve"' multi.ys
+
+# A non-.ys output extension warns on stderr.
+exec yammm snapshot save valid.yammm data.json -o odd.json
+stderr 'warning'
+stderr '\.ys'
+
+# CSV input with --type.
+exec yammm snapshot save valid.yammm data.csv --type Person -o csv.ys
+grep '"yammm_snapshot"' csv.ys
+
+# --- save --into (merge) ---
+exec yammm snapshot save valid.yammm extra.json --into out.ys
+grep '"alice"' out.ys
+grep '"eve"' out.ys
+
+# --into with -o writes the merge elsewhere and leaves the base untouched.
+exec yammm snapshot save valid.yammm data.json -o base.ys
+cp base.ys base_backup.ys
+exec yammm snapshot save valid.yammm extra.json --into base.ys -o merged.ys
+cmp base.ys base_backup.ys
+grep '"eve"' merged.ys
+grep '"alice"' merged.ys
+
+# Merging resolves previously-unresolved forward references.
+exec yammm snapshot save hr.yammm people.json -o hr.ys
+grep '"target_missing"' hr.ys
+exec yammm snapshot save hr.yammm companies.json --into hr.ys
+! grep '"target_missing"' hr.ys
+grep '"Company"' hr.ys
+grep '"c1"' hr.ys
+
+# --- info ---
+exec yammm snapshot info out.ys
+stdout 'Snapshot:'
+stdout 'Person'
+stdout 'Total instances:'
+stdout 'ok'
+
+exec yammm snapshot info --format json out.ys
+stdout '"SchemaName"'
+stdout '"TotalInstances"'
+stdout '"IntegrityStatus"'
+
+# --header-only omits the computed sections.
+exec yammm snapshot info --header-only out.ys
+stdout 'Snapshot:'
+stdout 'Integrity:'
+! stdout 'Total instances:'
+! stdout 'Summary:'
+
+exec yammm snapshot info --header-only --format json out.ys
+stdout '"SchemaName"'
+stdout '"IntegrityHash"'
+! stdout '"TotalInstances"'
+! stdout '"IntegrityStatus"'
+
+# --dir summarizes a directory, tolerating corrupt entries per-file.
+mkdir snaps
+exec yammm snapshot save valid.yammm data.json -o snaps/0.ys
+exec yammm snapshot save valid.yammm data.json -o snaps/1.ys
+exec yammm snapshot info --dir snaps
+stdout 'Directory:'
+stdout '0\.ys'
+stdout '1\.ys'
+stdout 'Summary: 2 ok'
+
+exec yammm snapshot info --dir snaps --format json
+stdout '"name"'
+stdout '"header"'
+
+cp corrupt.txt snaps/corrupt.ys
+exec yammm snapshot info --dir snaps
+stdout 'corrupt\.ys'
+stdout 'malformed'
+stdout 'Summary: 2 ok, 1 malformed'
+
+# --- verify ---
+exec yammm snapshot verify valid.yammm out.ys
+
+# Verifying against the wrong schema names the incompatibility code.
+! exec yammm snapshot verify alt.yammm out.ys
+stderr 'E_SNAPSHOT_INCOMPATIBLE_SCHEMA'
+
+# --- update-metadata ---
+exec yammm snapshot save valid.yammm data.json -o um.ys -m phase=extract
+exec yammm snapshot update-metadata -s phase=link um.ys
+stdout 'updated metadata'
+grep '"phase":"link"' um.ys
+
+exec yammm snapshot update-metadata -s phase=transform -s pipeline_completed=true um.ys
+grep '"phase":"transform"' um.ys
+grep '"pipeline_completed":"true"' um.ys
+
+# --unset removes a key (and tolerates absent keys as a no-op).
+exec yammm snapshot update-metadata --unset phase --unset does_not_exist um.ys
+! grep '"phase"' um.ys
+
+# The rewritten file still passes full integrity verification.
+exec yammm snapshot verify valid.yammm um.ys
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}
+-- alt.yammm --
+schema "alt"
+
+type Widget {
+	id   String primary
+	name String required
+}
+-- data.json --
+{
+  "Person": [
+    {"id": "alice", "name": "Alice", "age": 30},
+    {"id": "bob", "name": "Bob", "age": 25}
+  ]
+}
+-- extra.json --
+{"Person": [{"id": "eve", "name": "Eve", "age": 40}]}
+-- data.csv --
+id,name,age
+carol,Carol,28
+dave,Dave,35
+-- hr.yammm --
+schema "hr"
+
+type Company {
+	id    String primary
+	title String required
+}
+
+type Person {
+	id   String primary
+	name String required
+	--> WORKS_AT Company
+}
+-- people.json --
+{
+	"Person": [{"id": "p1", "name": "Alice", "works_at": {"_target_id": "c1"}}]
+}
+-- companies.json --
+{
+	"Company": [{"id": "c1", "title": "Acme"}]
+}
+-- corrupt.txt --
+not json

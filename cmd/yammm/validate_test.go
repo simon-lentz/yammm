@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
@@ -41,36 +40,39 @@ func executeCmd(t *testing.T, args ...string) int {
 	return cli.ExitOK
 }
 
-func TestValidate_ValidSchema(t *testing.T) {
+// TestExitCodes pins the exact exit-code contract — usage(2) vs
+// validation(1) vs runtime(3) — for every argument-only failure class.
+// testscript can only distinguish success from failure, so this table is
+// the in-process complement to testdata/script/*.txtar: the scripts own
+// output and side-effect behavior, this table owns WHICH code.
+func TestExitCodes(t *testing.T) {
 	t.Parallel()
 
-	code := executeCmd(t, "validate", "testdata/valid.yammm")
-	assert.Equal(t, 0, code)
-}
+	tests := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"validate invalid schema", []string{"validate", "testdata/invalid.yammm"}, cli.ExitValidation},
+		// schema.Load wraps file-not-found into diagnostics → validation.
+		{"validate missing file", []string{"validate", "testdata/nonexistent.yammm"}, cli.ExitValidation},
+		{"check missing data file", []string{"check", "testdata/valid.yammm", "testdata/nonexistent.json"}, cli.ExitUsage},
+		{"check csv without type", []string{"check", "testdata/valid.yammm", "testdata/data.csv"}, cli.ExitUsage},
+		{"gen unsupported target", []string{"gen", "--to", "rust", "testdata/county.yammm"}, cli.ExitUsage},
+		{"snapshot save without output or into", []string{"snapshot", "save", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
+		{"snapshot info without arg or dir", []string{"snapshot", "info"}, cli.ExitUsage},
+		{"snapshot info nonexistent dir", []string{"snapshot", "info", "--dir", "/does/not/exist/yammm-cli-test"}, cli.ExitRuntime},
+		{"update-metadata missing file arg", []string{"snapshot", "update-metadata", "-s", "k=v"}, cli.ExitUsage},
+		{"update-metadata nonexistent file", []string{"snapshot", "update-metadata", "-s", "k=v", "/nonexistent/path.ys"}, cli.ExitRuntime},
+		{"neo4j diff requires uri", []string{"neo4j", "diff", "testdata/valid.yammm"}, cli.ExitUsage},
+		{"neo4j introspect requires uri", []string{"neo4j", "introspect"}, cli.ExitUsage},
+	}
 
-func TestValidate_InvalidSchema(t *testing.T) {
-	t.Parallel()
-
-	code := executeCmd(t, "validate", "testdata/invalid.yammm")
-	assert.Equal(t, cli.ExitValidation, code)
-}
-
-func TestValidate_MissingFile(t *testing.T) {
-	t.Parallel()
-
-	// schema.Load wraps file-not-found into diag.Result, so this is a validation error
-	code := executeCmd(t, "validate", "testdata/nonexistent.yammm")
-	assert.Equal(t, cli.ExitValidation, code)
-}
-
-func TestValidate_JSONFormat(t *testing.T) {
-	t.Parallel()
-
-	cmd := newRootCmd("test")
-	var outBuf bytes.Buffer
-	cmd.SetOut(&outBuf)
-	cmd.SetArgs([]string{"validate", "--format", "json", "testdata/invalid.yammm"})
-
-	err := cmd.Execute()
-	require.Error(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			code := executeCmd(t, tt.args...)
+			assert.Equal(t, tt.want, code)
+		})
+	}
 }

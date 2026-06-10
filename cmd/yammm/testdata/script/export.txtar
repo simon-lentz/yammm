@@ -1,0 +1,48 @@
+# export: graph data out to json, csv, or cypher — from raw data files or
+# from a .ys snapshot (auto-detected).
+
+exec yammm export --to json valid.yammm data.json
+stdout '"Person"'
+stdout '"alice"'
+
+exec yammm export --to cypher valid.yammm data.json
+stdout 'MERGE'
+
+# --output writes the export to a file.
+exec yammm export --to json --output out.json valid.yammm data.json
+grep '"Person"' out.json
+
+exec yammm export --to csv --output out.csv valid.yammm data.json
+grep 'alice' out.csv
+
+# --output-dir writes one CSV per type.
+mkdir csvdir
+exec yammm export --to csv --output-dir csvdir valid.yammm data.json
+grep 'alice' csvdir/Person.csv
+
+# --to is required.
+! exec yammm export valid.yammm data.json
+
+# A .ys snapshot input is auto-detected and exports identically.
+exec yammm snapshot save valid.yammm data.json -o snap.ys
+exec yammm export --to json valid.yammm snap.ys
+stdout '"Person"'
+stdout '"alice"'
+exec yammm export --to cypher valid.yammm snap.ys
+stdout 'MERGE'
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}
+-- data.json --
+{
+  "Person": [
+    {"id": "alice", "name": "Alice", "age": 30},
+    {"id": "bob", "name": "Bob", "age": 25}
+  ]
+}
