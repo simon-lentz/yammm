@@ -1,21 +1,22 @@
-package graph
+package graph_test
 
 import (
 	"context"
 	"testing"
 
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestEdgesFrom_NilSnapshot(t *testing.T) {
-	var snap *Snapshot
+	var snap *graph.Snapshot
 	assert.Nil(t, snap.EdgesFrom(nil))
 }
 
 func TestEdgesFrom_NilInstance(t *testing.T) {
 	s := testSchemaWithAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
 	g.Add(context.Background(), company)
@@ -26,7 +27,7 @@ func TestEdgesFrom_NilInstance(t *testing.T) {
 
 func TestEdgesFrom_NoEdges(t *testing.T) {
 	s := testSchemaWithOptionalAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 
 	person := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
 	g.Add(context.Background(), person)
@@ -40,7 +41,7 @@ func TestEdgesFrom_NoEdges(t *testing.T) {
 
 func TestEdgesFrom_SingleEdge(t *testing.T) {
 	s := testSchemaWithAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "employer", [][]any{{"c1"}})
@@ -60,7 +61,7 @@ func TestEdgesFrom_SingleEdge(t *testing.T) {
 
 func TestEdgesFrom_MultipleEdges(t *testing.T) {
 	s := testSchemaWithManyAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 
 	c1 := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
 	c2 := mustValidInstance(t, s, "Company", []any{"c2"}, map[string]any{"id": "c2", "name": "Beta"})
@@ -84,26 +85,26 @@ func TestEdgesFrom_InstanceFromDifferentSnapshot(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 
 	// Build two separate snapshots
-	g1 := New(s)
+	g1 := graph.New(s)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "employer", [][]any{{"c1"}})
 	g1.Add(context.Background(), company)
 	g1.Add(context.Background(), person)
 	snap1 := g1.Snapshot()
 
-	g2 := New(s)
+	g2 := graph.New(s)
 	g2.Add(context.Background(), company)
 	g2.Add(context.Background(), person)
 	snap2 := g2.Snapshot()
 
-	// Instance from snap1 should not be found in snap2's index (pointer identity)
+	// graph.Instance from snap1 should not be found in snap2's index (pointer identity)
 	personFromSnap1 := snap1.InstancesOf("Person")[0]
 	assert.Nil(t, snap2.EdgesFrom(personFromSnap1))
 }
 
 func TestEdgesFrom_DefensiveCopy(t *testing.T) {
 	s := testSchemaWithAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "employer", [][]any{{"c1"}})

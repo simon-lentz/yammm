@@ -1,27 +1,28 @@
-package graph
+package graph_test
 
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 )
 
-// Ownership Isolation Tests for Graph Package
+// Ownership Isolation Tests for graph.Graph Package
 //
-// These tests verify that the Graph maintains proper ownership semantics
+// These tests verify that the graph.Graph maintains proper ownership semantics
 // for ValidInstance data. Since ValidInstance is immutable by design
 // (via immutable.WrapProperties with WithClone in the validator), these tests verify:
 //
-// 1. Each Snapshot returns independent, deep-copied instances (isolation)
+// 1. Each graph.Snapshot returns independent, deep-copied instances (isolation)
 // 2. Within a single snapshot, references are consistent
 // 3. Composed children added via AddComposed are correctly accessible
-// 4. Instance data is preserved through graph operations
+// 4. graph.Instance data is preserved through graph operations
 
-// TestGraph_SnapshotIsolation verifies that each call to Snapshot() returns
+// TestGraph_SnapshotIsolation verifies that each call to graph.Snapshot() returns
 // an independent, isolated copy of the graph's instances.
 func TestGraph_SnapshotIsolation(t *testing.T) {
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add parent
@@ -36,8 +37,8 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
 
-	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1)
-	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
+	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child1)
+	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
 
 	// Get multiple snapshots
 	snap1 := g.Snapshot()
@@ -94,7 +95,7 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 // AddComposed are correctly accessible with their original data preserved.
 func TestGraph_ComposedChildAccess(t *testing.T) {
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add parent
@@ -112,7 +113,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 		[]any{"c3"}, map[string]any{"name": "Third Child"})
 
 	for _, child := range []*instance.ValidInstance{child1, child2, child3} {
-		result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
+		result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed should succeed: %v", err)
 		}
@@ -159,7 +160,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 		// Find expected name by checking the PK string
 		var expectedName string
 		for key, expected := range expectedNames {
-			if pkStr == FormatKey(key) {
+			if pkStr == graph.FormatKey(key) {
 				expectedName = expected
 				break
 			}
@@ -176,7 +177,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 // This is the core immutability guarantee.
 func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add parent
@@ -190,7 +191,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	// Add composed child AFTER snapshot
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
+	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 
 	// Take second snapshot
 	snap2 := g.Snapshot()
@@ -227,11 +228,11 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 }
 
 // TestGraph_InstanceReferencePreservation verifies that within a single snapshot,
-// the same Instance reference is returned when accessing the same instance multiple times.
+// the same graph.Instance reference is returned when accessing the same instance multiple times.
 // Different snapshots should return independent copies.
 func TestGraph_InstanceReferencePreservation(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add an instance
@@ -277,11 +278,11 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 	}
 }
 
-// TestSnapshot_EdgeInstanceConsistency verifies that Edge.Source() and Edge.Target()
+// TestSnapshot_EdgeInstanceConsistency verifies that graph.Edge.Source() and graph.Edge.Target()
 // are the same pointers as returned by Result.InstanceByKey() within the same snapshot.
 func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	s := testSchemaWithAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add company
@@ -298,11 +299,11 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	snap := g.Snapshot()
 
 	// Get instances via direct lookup
-	company1, ok := snap.InstanceByKey("Company", FormatKey("acme"))
+	company1, ok := snap.InstanceByKey("Company", graph.FormatKey("acme"))
 	if !ok {
 		t.Fatal("Expected to find Company by key")
 	}
-	person1, ok := snap.InstanceByKey("Person", FormatKey("alice"))
+	person1, ok := snap.InstanceByKey("Person", graph.FormatKey("alice"))
 	if !ok {
 		t.Fatal("Expected to find Person by key")
 	}
@@ -315,13 +316,13 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 
 	edge := edges[0]
 
-	// Edge.Source() and Edge.Target() should be the same pointers
+	// graph.Edge.Source() and graph.Edge.Target() should be the same pointers
 	// as Result.InstanceByKey() returns (within same snapshot)
 	if edge.Source() != person1 {
-		t.Error("Edge source should be same pointer as InstanceByKey result")
+		t.Error("graph.Edge source should be same pointer as InstanceByKey result")
 	}
 	if edge.Target() != company1 {
-		t.Error("Edge target should be same pointer as InstanceByKey result")
+		t.Error("graph.Edge target should be same pointer as InstanceByKey result")
 	}
 
 	// Also verify edges from a different snapshot have different pointers

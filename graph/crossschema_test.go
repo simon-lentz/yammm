@@ -1,8 +1,9 @@
-package graph
+package graph_test
 
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
@@ -17,7 +18,7 @@ import (
 func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 	// Unqualified name only matches local types
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add a local User instance (should succeed)
@@ -47,7 +48,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 
 	g.Add(ctx, entity)
 
-	// Snapshot should have User but the Entity add should have triggered diagnostics
+	// graph.Snapshot should have User but the Entity add should have triggered diagnostics
 	// because the type name lookup would fail with unqualified "Entity"
 	snap := g.Snapshot()
 	if len(snap.InstancesOf("User")) != 1 {
@@ -58,7 +59,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 	// "c.Entity" matches imported c.Entity
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add Entity using qualified name "c.Entity"
@@ -85,9 +86,9 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 }
 
 func TestGraph_StrictResolution_UnknownAlias(t *testing.T) {
-	// Instance from completely unknown schema should panic
+	// graph.Instance from completely unknown schema should panic
 	mainSchema, _ := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Create an instance with unknown alias prefix - schema not in import chain
@@ -111,7 +112,7 @@ func TestGraph_StrictResolution_UnknownAlias(t *testing.T) {
 func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 	// Lookup by alias-qualified type name
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add Entity
@@ -129,16 +130,16 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 	snap := g.Snapshot()
 
 	// Lookup by qualified name should work
-	found, ok := snap.InstanceByKey("c.Entity", FormatKey("e1"))
+	found, ok := snap.InstanceByKey("c.Entity", graph.FormatKey("e1"))
 	if !ok {
 		t.Error("InstanceByKey should find c.Entity")
 	}
 	if found.TypeName() != "c.Entity" {
-		t.Errorf("Instance type should be c.Entity, got %s", found.TypeName())
+		t.Errorf("graph.Instance type should be c.Entity, got %s", found.TypeName())
 	}
 
 	// Lookup by unqualified name should NOT work
-	_, ok = snap.InstanceByKey("Entity", FormatKey("e1"))
+	_, ok = snap.InstanceByKey("Entity", graph.FormatKey("e1"))
 	if ok {
 		t.Error("InstanceByKey should not find Entity without qualifier")
 	}
@@ -147,7 +148,7 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 func TestGraph_Types_InstanceTagForm(t *testing.T) {
 	// Types() returns mixed local/qualified names
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add local User
@@ -194,7 +195,7 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 func TestGraph_Edge_CrossSchema(t *testing.T) {
 	// Association from local to imported type
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// First add Entity (target)
@@ -244,13 +245,13 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 
 	edge := edgeList[0]
 	if edge.Source().TypeName() != "User" {
-		t.Errorf("Edge source should be User, got %s", edge.Source().TypeName())
+		t.Errorf("graph.Edge source should be User, got %s", edge.Source().TypeName())
 	}
 	if edge.Target().TypeName() != "c.Entity" {
-		t.Errorf("Edge target should be c.Entity, got %s", edge.Target().TypeName())
+		t.Errorf("graph.Edge target should be c.Entity, got %s", edge.Target().TypeName())
 	}
 	if edge.Relation() != "entity" {
-		t.Errorf("Edge relation should be entity, got %s", edge.Relation())
+		t.Errorf("graph.Edge relation should be entity, got %s", edge.Relation())
 	}
 }
 
@@ -310,7 +311,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 		t.Fatalf("Failed to build schema A: %s", result.String())
 	}
 
-	g := New(schemaA)
+	g := graph.New(schemaA)
 	ctx := t.Context()
 
 	// Add b.Resource

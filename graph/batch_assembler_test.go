@@ -768,10 +768,8 @@ func TestBatchAssembler_ModeParity(t *testing.T) {
 	defaultSnap, defaultBytes := build()
 	poolSnap, poolBytes := build(graph.WithValidatorPool(4))
 
-	// Structural parity via snapshottest.CompareSnapshots.
-	if cmpErr := snapshottest.CompareSnapshots(defaultSnap, poolSnap); cmpErr != nil {
-		t.Errorf("structural mismatch between default and pool modes:\n%v", cmpErr)
-	}
+	// Structural parity.
+	snapshottest.DiffSnapshots(t, defaultSnap, poolSnap)
 	// Wire-level parity via byte-exact Marshal output.
 	if string(defaultBytes) != string(poolBytes) {
 		t.Errorf("byte-level marshal mismatch between modes (default=%d, pool=%d)",
@@ -1097,9 +1095,7 @@ func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T
 			if err != nil {
 				t.Fatalf("Finalize: %v", err)
 			}
-			if cmpErr := snapshottest.CompareSnapshots(manualSnap, res.Snapshot); cmpErr != nil {
-				t.Errorf("structural mismatch vs manual path:\n%v", cmpErr)
-			}
+			snapshottest.DiffSnapshots(t, manualSnap, res.Snapshot)
 			asmBytes, asmRes := snapshot.Marshal(ctx, res.Snapshot)
 			if asmRes.HasErrors() {
 				t.Fatalf("marshal: %s", asmRes.String())

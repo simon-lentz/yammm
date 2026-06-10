@@ -1,15 +1,16 @@
-package graph
+package graph_test
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -58,27 +59,24 @@ func testSchemaWithPKLessType(t *testing.T) *schema.Schema {
 
 func TestNew(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	if g == nil {
-		t.Fatal("New() returned nil")
-	}
-	if g.schema != s {
-		t.Error("Graph schema doesn't match")
+		t.Fatal("graph.New() returned nil")
 	}
 }
 
 func TestNew_PanicOnNilSchema(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("New(nil) should panic")
+			t.Error("graph.New(nil) should panic")
 		}
 	}()
 
-	New(nil)
+	graph.New(nil)
 }
 
 func TestGraph_Add_NilReceiver(t *testing.T) {
-	var g *Graph
+	var g *graph.Graph
 	ctx := t.Context()
 	s := testSchema(t)
 	personType, _ := s.Type("Person")
@@ -91,17 +89,12 @@ func TestGraph_Add_NilReceiver(t *testing.T) {
 		nil, nil, nil,
 	)
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Add on nil Graph should panic")
-		}
-	}()
-	g.Add(ctx, inst)
+	yammmtest.AssertPanics(t, func() { g.Add(ctx, inst) })
 }
 
 func TestGraph_Add_NilInstance(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	defer func() {
@@ -113,7 +106,7 @@ func TestGraph_Add_NilInstance(t *testing.T) {
 }
 
 func TestGraph_Add_SchemaMismatch(t *testing.T) {
-	// Instance validated against a completely different schema should fail
+	// graph.Instance validated against a completely different schema should fail
 	schemaA, _ := schema.NewBuilder().
 		WithName("schema_a").
 		WithSourceID(location.MustNewSourceID("test://a.yammm")).
@@ -130,7 +123,7 @@ func TestGraph_Add_SchemaMismatch(t *testing.T) {
 		Done().
 		Build()
 
-	g := New(schemaA)
+	g := graph.New(schemaA)
 	ctx := t.Context()
 
 	// Create instance from schemaB
@@ -152,9 +145,9 @@ func TestGraph_Add_SchemaMismatch(t *testing.T) {
 }
 
 func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
-	// Instance from an imported schema should be allowed
+	// graph.Instance from an imported schema should be allowed
 	mainSchema, importedSchema := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Create instance from the imported schema (common)
@@ -175,7 +168,7 @@ func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
 
 func TestGraph_Add_ContextCancellation(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // Cancel immediately
 
@@ -207,7 +200,7 @@ func TestGraph_Add_ContextCancellation(t *testing.T) {
 
 func TestGraph_Add_Success(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -236,16 +229,16 @@ func TestGraph_Add_Success(t *testing.T) {
 		t.Fatalf("InstancesOf(\"Person\") returned %d instances, want 1", len(instances))
 	}
 	if instances[0].TypeName() != "Person" {
-		t.Errorf("Instance.TypeName() = %q, want \"Person\"", instances[0].TypeName())
+		t.Errorf("graph.Instance.TypeName() = %q, want \"Person\"", instances[0].TypeName())
 	}
 	if instances[0].PrimaryKey().String() != `["alice"]` {
-		t.Errorf("Instance.PrimaryKey() = %q, want [\"alice\"]", instances[0].PrimaryKey().String())
+		t.Errorf("graph.Instance.PrimaryKey() = %q, want [\"alice\"]", instances[0].PrimaryKey().String())
 	}
 }
 
 func TestGraph_Add_DuplicatePK(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -276,28 +269,19 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 	}
 
 	// Check for E_DUPLICATE_PK
-	hasError := false
-	for issue := range result.Issues() {
-		if issue.Code() == diag.E_DUPLICATE_PK {
-			hasError = true
-			break
-		}
-	}
-	if !hasError {
-		t.Error("Expected E_DUPLICATE_PK diagnostic")
-	}
+	assertHasCode(t, result, diag.E_DUPLICATE_PK)
 
 	// Verify snapshot has duplicates
 	snap := g.Snapshot()
 	dups := snap.Duplicates()
 	if len(dups) != 1 {
-		t.Errorf("Snapshot.Duplicates() returned %d, want 1", len(dups))
+		t.Errorf("graph.Snapshot.Duplicates() returned %d, want 1", len(dups))
 	}
 }
 
 func TestGraph_Add_MissingPK(t *testing.T) {
 	s := testSchemaWithPKLessType(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	abstractType, _ := s.Type("Abstract")
@@ -315,21 +299,12 @@ func TestGraph_Add_MissingPK(t *testing.T) {
 	}
 
 	// Check for E_GRAPH_MISSING_PK
-	hasError := false
-	for issue := range result.Issues() {
-		if issue.Code() == diag.E_GRAPH_MISSING_PK {
-			hasError = true
-			break
-		}
-	}
-	if !hasError {
-		t.Error("Expected E_GRAPH_MISSING_PK diagnostic")
-	}
+	assertHasCode(t, result, diag.E_GRAPH_MISSING_PK)
 }
 
 func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -359,7 +334,7 @@ func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 	expected := []string{`["alice"]`, `["bob"]`, `["charlie"]`}
 	for i, inst := range instances {
 		if inst.PrimaryKey().String() != expected[i] {
-			t.Errorf("Instance[%d].PrimaryKey() = %q, want %q",
+			t.Errorf("graph.Instance[%d].PrimaryKey() = %q, want %q",
 				i, inst.PrimaryKey().String(), expected[i])
 		}
 	}
@@ -367,7 +342,7 @@ func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 
 func TestGraph_InstanceByKey(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -386,7 +361,7 @@ func TestGraph_InstanceByKey(t *testing.T) {
 	snap := g.Snapshot()
 
 	// Lookup by key
-	found, ok := snap.InstanceByKey("Person", FormatKey("alice"))
+	found, ok := snap.InstanceByKey("Person", graph.FormatKey("alice"))
 	if !ok {
 		t.Fatal("InstanceByKey() should find the instance")
 	}
@@ -395,30 +370,25 @@ func TestGraph_InstanceByKey(t *testing.T) {
 	}
 
 	// Lookup non-existent
-	_, ok = snap.InstanceByKey("Person", FormatKey("bob"))
+	_, ok = snap.InstanceByKey("Person", graph.FormatKey("bob"))
 	if ok {
 		t.Error("InstanceByKey() should not find non-existent instance")
 	}
 
 	// Lookup non-existent type
-	_, ok = snap.InstanceByKey("NonExistent", FormatKey("alice"))
+	_, ok = snap.InstanceByKey("NonExistent", graph.FormatKey("alice"))
 	if ok {
 		t.Error("InstanceByKey() should not find instance of non-existent type")
 	}
 }
 
 func TestGraph_Check_NilReceiver(t *testing.T) {
-	var g *Graph
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Check on nil Graph should panic")
-		}
-	}()
-	g.Check(t.Context())
+	var g *graph.Graph
+	yammmtest.AssertPanics(t, func() { g.Check(t.Context()) })
 }
 
 func TestSnapshot_NilReceiver(t *testing.T) {
-	var r *Snapshot
+	var r *graph.Snapshot
 
 	// All methods should handle nil gracefully
 	if r.Types() != nil {
@@ -454,7 +424,7 @@ func TestSnapshot_NilReceiver(t *testing.T) {
 }
 
 func TestInstance_NilReceiver(t *testing.T) {
-	var i *Instance
+	var i *graph.Instance
 
 	// All methods should handle nil gracefully
 	if i.TypeName() != "" {
@@ -484,7 +454,7 @@ func TestInstance_NilReceiver(t *testing.T) {
 }
 
 func TestEdge_NilReceiver(t *testing.T) {
-	var e *Edge
+	var e *graph.Edge
 
 	// All methods should handle nil gracefully
 	if e.Relation() != "" {
@@ -512,7 +482,7 @@ func TestEdge_NilReceiver(t *testing.T) {
 func TestGraph_Add_PartType_Rejected(t *testing.T) {
 	// Part type via Add() → E_GRAPH_INVALID_COMPOSITION
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Try to add a part type directly (should fail)
@@ -524,22 +494,13 @@ func TestGraph_Add_PartType_Rejected(t *testing.T) {
 		t.Error("Add should fail for part type added directly")
 	}
 
-	hasCode := false
-	for issue := range result.Issues() {
-		if issue.Code() == diag.E_GRAPH_INVALID_COMPOSITION {
-			hasCode = true
-			break
-		}
-	}
-	if !hasCode {
-		t.Error("Expected E_GRAPH_INVALID_COMPOSITION diagnostic")
-	}
+	assertHasCode(t, result, diag.E_GRAPH_INVALID_COMPOSITION)
 }
 
 func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 	// PK-less parts have positional identity - multiple can coexist
 	s := testSchemaWithPKLessChild(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add Container
@@ -555,7 +516,7 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 		item := mustValidPKLessInstance(t, s, "Item",
 			map[string]any{"value": "same-value"})
 
-		result := g.AddComposed(ctx, "Container", FormatKey("box1"), "items", item)
+		result := g.AddComposed(ctx, "Container", graph.FormatKey("box1"), "items", item)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed item %d should succeed (positional identity): %v", i, err)
 		}
@@ -574,7 +535,7 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
 	// Same PK in same parent = duplicate
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add Parent
@@ -589,7 +550,7 @@ func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"shared-pk"}, map[string]any{"name": "Child 1"})
 
-	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1)
+	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child1)
 	if err := result.Err(); err != nil {
 		t.Errorf("First child should succeed: %v", err)
 	}
@@ -598,7 +559,7 @@ func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"shared-pk"}, map[string]any{"name": "Child 2"})
 
-	result = g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
+	result = g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
 	if result.OK() {
 		t.Error("Second child with same PK should fail")
 	}
@@ -607,7 +568,7 @@ func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
 func TestGraph_NestedComposition(t *testing.T) {
 	// Part containing part (multi-level nesting)
 	s := testSchemaWithNestedComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add Parent
@@ -622,7 +583,7 @@ func TestGraph_NestedComposition(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	if r := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child); !r.OK() {
+	if r := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child); !r.OK() {
 		t.Fatalf("AddComposed child failed: %s", r.String())
 	}
 
@@ -643,12 +604,12 @@ func TestGraph_NestedComposition(t *testing.T) {
 	}
 }
 
-// Ordering and Edge Case Tests
+// Ordering and graph.Edge Case Tests
 
 func TestGraph_Duplicates_Ordering(t *testing.T) {
 	// Duplicates should be sorted by (type, pk)
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -711,7 +672,7 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 func TestGraph_Unresolved_Ordering(t *testing.T) {
 	// Unresolved edges should be sorted by (sourceType, sourceKey, relation, targetType, targetKey)
 	s := testSchemaWithChainedAssociations(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add instances with forward refs in non-sorted order
@@ -765,7 +726,7 @@ func TestGraph_Unresolved_Ordering(t *testing.T) {
 func TestGraph_LargeGraph_Performance(t *testing.T) {
 	// 1000+ instances, verify ordering is correct
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -806,7 +767,7 @@ func TestGraph_LargeGraph_Performance(t *testing.T) {
 func TestGraph_SpecialChars_InKeys(t *testing.T) {
 	// Spaces, quotes, brackets in PK values
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -847,7 +808,7 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 
 	// Verify lookup works for each key
 	for _, key := range specialKeys {
-		formatted := FormatKey(key)
+		formatted := graph.FormatKey(key)
 		_, ok := snap.InstanceByKey("Person", formatted)
 		if !ok {
 			t.Errorf("InstanceByKey failed for key %q (formatted: %s)", key, formatted)
@@ -858,7 +819,7 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 func TestGraph_Unicode_InKeys(t *testing.T) {
 	// Unicode characters in key values
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -898,7 +859,7 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 func TestGraph_CompositeKey_Large(t *testing.T) {
 	// 5+ component composite keys
 	s := testSchemaWithCompositeKey(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	recordType, _ := s.Type("Record")
@@ -929,7 +890,7 @@ func TestGraph_CompositeKey_Large(t *testing.T) {
 	}
 
 	// Verify lookup by composite key works
-	key := FormatKey("us-east", "id-0")
+	key := graph.FormatKey("us-east", "id-0")
 	found, ok := snap.InstanceByKey("Record", key)
 	if !ok {
 		t.Errorf("InstanceByKey failed for composite key %s", key)
@@ -943,9 +904,9 @@ func TestGraph_CompositeKey_Large(t *testing.T) {
 }
 
 func TestGraph_EmptyProperties(t *testing.T) {
-	// Instance with no properties beyond PK
+	// graph.Instance with no properties beyond PK
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -979,7 +940,7 @@ func TestGraph_EmptyProperties(t *testing.T) {
 func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 	// ComposedRelations() returns sorted relation names
 	s := testSchemaWithMultipleCompositions(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add Document
@@ -996,10 +957,10 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 	tag := mustValidPartInstance(t, s, "Tag",
 		[]any{"t1"}, map[string]any{})
 
-	if r := g.AddComposed(ctx, "Document", FormatKey("doc1"), "notes", note); !r.OK() {
+	if r := g.AddComposed(ctx, "Document", graph.FormatKey("doc1"), "notes", note); !r.OK() {
 		t.Fatalf("AddComposed note failed: %s", r.String())
 	}
-	if r := g.AddComposed(ctx, "Document", FormatKey("doc1"), "tags", tag); !r.OK() {
+	if r := g.AddComposed(ctx, "Document", graph.FormatKey("doc1"), "tags", tag); !r.OK() {
 		t.Fatalf("AddComposed tag failed: %s", r.String())
 	}
 
@@ -1026,7 +987,7 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 func TestGraph_MultipleCompositions(t *testing.T) {
 	// Parent with multiple composition relations
 	s := testSchemaWithMultipleCompositions(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add Document
@@ -1041,7 +1002,7 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	for i := range 3 {
 		note := mustValidPartInstance(t, s, "Note",
 			[]any{fmt.Sprintf("n%d", i)}, map[string]any{"text": fmt.Sprintf("Note %d", i)})
-		if r := g.AddComposed(ctx, "Document", FormatKey("doc1"), "notes", note); !r.OK() {
+		if r := g.AddComposed(ctx, "Document", graph.FormatKey("doc1"), "notes", note); !r.OK() {
 			t.Fatalf("AddComposed note %d failed: %s", i, r.String())
 		}
 	}
@@ -1050,7 +1011,7 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	for i := range 2 {
 		tag := mustValidPartInstance(t, s, "Tag",
 			[]any{fmt.Sprintf("t%d", i)}, map[string]any{})
-		if r := g.AddComposed(ctx, "Document", FormatKey("doc1"), "tags", tag); !r.OK() {
+		if r := g.AddComposed(ctx, "Document", graph.FormatKey("doc1"), "tags", tag); !r.OK() {
 			t.Fatalf("AddComposed tag %d failed: %s", i, r.String())
 		}
 	}
@@ -1069,7 +1030,7 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 func TestContract2_PKRequiredForTopLevel(t *testing.T) {
 	// Primary key is required for top-level instances
 	s := testSchemaWithPKLessType(t) // Abstract type has no PK
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	abstractType, _ := s.Type("Abstract")
@@ -1086,16 +1047,7 @@ func TestContract2_PKRequiredForTopLevel(t *testing.T) {
 		t.Error(" violation: PK-less top-level instance should be rejected")
 	}
 
-	hasCode := false
-	for issue := range result.Issues() {
-		if issue.Code() == diag.E_GRAPH_MISSING_PK {
-			hasCode = true
-			break
-		}
-	}
-	if !hasCode {
-		t.Error("Expected E_GRAPH_MISSING_PK for violation")
-	}
+	assertHasCode(t, result, diag.E_GRAPH_MISSING_PK)
 }
 
 func TestContract6_InstanceTagForm(t *testing.T) {
@@ -1103,7 +1055,7 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 	// Local types: unqualified (e.g., "Person")
 	// Imported types: alias-qualified (e.g., "c.Entity")
 	mainSchema, commonSchema := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add local User
@@ -1160,14 +1112,14 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 		t.Error(" violation: InstancesOf(\"c.Entity\") should find imported type")
 	}
 
-	// Verify Instance.TypeName() returns instance tag form
+	// Verify graph.Instance.TypeName() returns instance tag form
 	users := snap.InstancesOf("User")
 	if users[0].TypeName() != "User" {
-		t.Errorf(" violation: Instance.TypeName() should be \"User\", got %q", users[0].TypeName())
+		t.Errorf(" violation: graph.Instance.TypeName() should be \"User\", got %q", users[0].TypeName())
 	}
 	entities := snap.InstancesOf("c.Entity")
 	if entities[0].TypeName() != "c.Entity" {
-		t.Errorf(" violation: Instance.TypeName() should be \"c.Entity\", got %q", entities[0].TypeName())
+		t.Errorf(" violation: graph.Instance.TypeName() should be \"c.Entity\", got %q", entities[0].TypeName())
 	}
 }
 
@@ -1210,7 +1162,7 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 		Done().
 		Build()
 
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add b.Product with PK "p1"
@@ -1256,7 +1208,7 @@ func TestContract14_ComposedKeyFormat(t *testing.T) {
 	// Composed children are identified within their parent
 	// Verify that duplicate PK within same parent is detected
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add parent
@@ -1271,7 +1223,7 @@ func TestContract14_ComposedKeyFormat(t *testing.T) {
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	if r := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1); !r.OK() {
+	if r := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child1); !r.OK() {
 		t.Fatalf("AddComposed child1 failed: %s", r.String())
 	}
 
@@ -1279,9 +1231,9 @@ func TestContract14_ComposedKeyFormat(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1 Dup"})
 
-	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
+	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
 	if result.OK() {
-		t.Error(" violation: Duplicate child PK should be rejected")
+		t.Error(" violation: graph.Duplicate child PK should be rejected")
 	}
 
 	hasCode := false
@@ -1312,7 +1264,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	// Data issues → result with diagnostics; programmer errors → panic;
 	// context cancellation → Fatal diagnostic in result
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -1326,7 +1278,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	)
 	inst2 := instance.NewValidInstance(
 		"Person", personType.ID(),
-		immutable.WrapKey([]any{"alice"}), // Duplicate
+		immutable.WrapKey([]any{"alice"}), // graph.Duplicate
 		immutable.WrapProperties(map[string]any{"name": "Alice 2"}),
 		nil, nil, nil,
 	)
@@ -1338,7 +1290,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 
 	result2 := g.Add(ctx, inst2)
 	if result2.OK() {
-		t.Error(" violation: Duplicate PK result should not be OK")
+		t.Error(" violation: graph.Duplicate PK result should not be OK")
 	}
 
 	// Test case 2: Nil instance → panic
@@ -1378,7 +1330,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 
 func TestResult_Instances(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -1416,7 +1368,7 @@ func TestResult_Instances(t *testing.T) {
 
 func TestResult_DiagnosticsAndFlags(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -1462,7 +1414,7 @@ func TestResult_DiagnosticsAndFlags(t *testing.T) {
 func TestGraph_Add_InlineCompositions(t *testing.T) {
 	// Tests extractCompositions by adding parent with inline children
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Create child instances
@@ -1515,7 +1467,7 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 	// Tests nested extractCompositions
 	s := testSchemaWithNestedComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Create grandchild
@@ -1582,7 +1534,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 	// Tests extractCompositions with empty composition slice
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Create parent with empty composed slice
@@ -1616,7 +1568,7 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 func TestGraph_resolveTypeName_QualifiedTypeNotFound(t *testing.T) {
 	// Tests the "type not found in imported schema" branch
 	mainSchema, _ := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Try to add instance with alias prefix pointing to valid import
@@ -1639,9 +1591,9 @@ func TestGraph_resolveTypeName_QualifiedTypeNotFound(t *testing.T) {
 }
 
 func TestGraph_resolveTypeName_QualifiedImportAliasNotFound(t *testing.T) {
-	// Instance from completely unknown schema panics (schema mismatch)
+	// graph.Instance from completely unknown schema panics (schema mismatch)
 	mainSchema, _ := testMultiSchemaSetup(t)
-	g := New(mainSchema)
+	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Try to add instance with unknown schema (not in import chain)
@@ -1665,7 +1617,7 @@ func TestGraph_resolveTypeName_QualifiedImportAliasNotFound(t *testing.T) {
 func TestGraph_resolveTypeName_UnqualifiedTypeNotFound(t *testing.T) {
 	// Tests the "local type not found" branch
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Try to add instance with non-existent local type
@@ -1690,7 +1642,7 @@ func TestGraph_resolveTypeName_UnqualifiedTypeNotFound(t *testing.T) {
 // nested compositions from streamed children.
 func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 	s := testSchemaWithNestedComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add parent first
@@ -1726,7 +1678,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 	)
 
 	// AddComposed the child (with inline grandchild) to the parent
-	result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
+	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 	if err := result.Err(); err != nil {
 		t.Fatalf("AddComposed should succeed: %v", err)
 	}
@@ -1763,7 +1715,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 // (one) relations with multiple children emit an error.
 func TestExtractCompositions_OneCardinality_MultipleChildren_Error(t *testing.T) {
 	s := testSchemaWithOneComposition(t) // Parent -> (one) Child
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Create two children
@@ -1805,16 +1757,7 @@ func TestExtractCompositions_OneCardinality_MultipleChildren_Error(t *testing.T)
 	}
 
 	// Verify E_DUPLICATE_COMPOSED_PK was emitted
-	foundError := false
-	for issue := range result.Issues() {
-		if issue.Code() == diag.E_DUPLICATE_COMPOSED_PK {
-			foundError = true
-			break
-		}
-	}
-	if !foundError {
-		t.Error("Expected E_DUPLICATE_COMPOSED_PK for (one) cardinality violation")
-	}
+	assertHasCode(t, result, diag.E_DUPLICATE_COMPOSED_PK)
 
 	// Verify only first child was attached
 	snap := g.Snapshot()
@@ -1833,7 +1776,7 @@ func TestExtractCompositions_OneCardinality_MultipleChildren_Error(t *testing.T)
 // handles bare *ValidInstance (not wrapped in slice) defensively.
 func TestExtractCompositions_BareValidInstance(t *testing.T) {
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Create child
@@ -1890,7 +1833,7 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 // not cumulative results. A successful Add after a failed Add should return OK.
 func TestAdd_PerOperationDiagnostics(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// First add - use an invalid type to trigger an error
@@ -1916,14 +1859,14 @@ func TestAdd_PerOperationDiagnostics(t *testing.T) {
 		t.Errorf("Second Add should return 0 issues, got %d", issueCount2)
 	}
 
-	// Snapshot.Diagnostics() should still contain the first error (cumulative)
+	// graph.Snapshot.Diagnostics() should still contain the first error (cumulative)
 	snap := g.Snapshot()
 	if snap.Diagnostics().OK() {
-		t.Error("Snapshot.Diagnostics() should NOT be OK (cumulative)")
+		t.Error("graph.Snapshot.Diagnostics() should NOT be OK (cumulative)")
 	}
 	snapIssueCount := countIssues(snap.Diagnostics())
 	if snapIssueCount != 1 {
-		t.Errorf("Snapshot.Diagnostics() should have 1 issue, got %d", snapIssueCount)
+		t.Errorf("graph.Snapshot.Diagnostics() should have 1 issue, got %d", snapIssueCount)
 	}
 }
 
@@ -1931,7 +1874,7 @@ func TestAdd_PerOperationDiagnostics(t *testing.T) {
 // multiple calls return identical results without accumulating issues.
 func TestCheck_Idempotent_IssueCount(t *testing.T) {
 	s := testSchemaWithAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add Person with reference to missing Company
@@ -1963,10 +1906,10 @@ func TestCheck_Idempotent_IssueCount(t *testing.T) {
 		t.Errorf("Expected 1 unresolved issue, got %d", count1)
 	}
 
-	// Snapshot.Diagnostics() should NOT include Check() issues
+	// graph.Snapshot.Diagnostics() should NOT include Check() issues
 	snap := g.Snapshot()
 	if !snap.Diagnostics().OK() {
-		t.Error("Snapshot.Diagnostics() should be OK (Check doesn't merge)")
+		t.Error("graph.Snapshot.Diagnostics() should be OK (Check doesn't merge)")
 	}
 }
 
@@ -1974,7 +1917,7 @@ func TestCheck_Idempotent_IssueCount(t *testing.T) {
 // includes target_pk detail when the target key is known.
 func TestCheck_UnresolvedRequired_TargetPK(t *testing.T) {
 	s := testSchemaWithAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add Person with reference to specific missing Company
@@ -2026,7 +1969,7 @@ func TestCheck_UnresolvedRequired_TargetPK(t *testing.T) {
 // uses "target_missing" as the reason token for missing target instances.
 func TestCheck_UnresolvedRequired_TargetMissingReason(t *testing.T) {
 	s := testSchemaWithAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add Person with reference to missing Company
@@ -2067,10 +2010,10 @@ func TestCheck_UnresolvedRequired_TargetMissingReason(t *testing.T) {
 }
 
 // TestDuplicateComposedPK_PKDetail verifies that E_DUPLICATE_COMPOSED_PK
-// includes "pk" detail with FormatComposedKey format.
+// includes "pk" detail with graph.FormatComposedKey format.
 func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add parent
@@ -2085,7 +2028,7 @@ func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result1 := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child1)
+	result1 := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child1)
 	if !result1.OK() {
 		t.Fatalf("First AddComposed should succeed: %s", result1.String())
 	}
@@ -2094,9 +2037,9 @@ func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1 Dup"})
 
-	result2 := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child2)
+	result2 := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
 	if result2.OK() {
-		t.Fatal("Duplicate AddComposed should fail")
+		t.Fatal("graph.Duplicate AddComposed should fail")
 	}
 
 	var issue diag.Issue
@@ -2118,7 +2061,7 @@ func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 	for _, d := range issue.Details() {
 		if d.Key == "pk" {
 			foundPK = true
-			// Should be in FormatComposedKey format: [["p1"],"children",["c1"]]
+			// Should be in graph.FormatComposedKey format: [["p1"],"children",["c1"]]
 			expected := `[["p1"],"children",["c1"]]`
 			if d.Value != expected {
 				t.Errorf("Expected pk %q, got %q", expected, d.Value)
@@ -2163,7 +2106,7 @@ func countIssues(result diag.Result) int {
 // messages when passed a nil context.
 func TestNilContext_Panics(t *testing.T) {
 	s := testSchema(t)
-	g := New(s)
+	g := graph.New(s)
 
 	inst := mustValidInstance(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"})
@@ -2208,43 +2151,6 @@ func TestNilContext_Panics(t *testing.T) {
 			tc.fn()
 		})
 	}
-}
-
-type recordHandler struct {
-	mu      sync.Mutex
-	records []slog.Record
-	level   slog.Level
-}
-
-func newRecordHandler(level slog.Level) *recordHandler { //nolint:unparam // test helper with fixed level
-	return &recordHandler{level: level}
-}
-
-func (h *recordHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= h.level
-}
-
-func (h *recordHandler) Handle(_ context.Context, r slog.Record) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.records = append(h.records, r.Clone())
-	return nil
-}
-
-func (h *recordHandler) WithAttrs(_ []slog.Attr) slog.Handler {
-	return h
-}
-
-func (h *recordHandler) WithGroup(_ string) slog.Handler {
-	return h
-}
-
-func (h *recordHandler) Records() []slog.Record {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	result := make([]slog.Record, len(h.records))
-	copy(result, h.records)
-	return result
 }
 
 // hasOpName checks if any record has the given operation name.
@@ -2304,273 +2210,185 @@ func countLevel(records []slog.Record, level slog.Level) int {
 	return count
 }
 
-func TestGraph_Add_Logging(t *testing.T) {
-	s := testSchemaWithAssociation(t)
-
-	h := newRecordHandler(slog.LevelDebug)
-	logger := slog.New(h)
-
-	g := New(s, WithLogger(logger))
-
-	// Add a Company instance
-	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	if r := g.Add(t.Context(), company); !r.OK() {
-		t.Fatalf("Add failed: %s", r.String())
+// TestGraph_Logging drives every logged operation through one scenario
+// table: each row builds its schema, runs its graph operations against a
+// captured logger, then asserts the expected operation names, attributes,
+// messages, and warn-level presence in the records.
+func TestGraph_Logging(t *testing.T) {
+	tests := []struct {
+		name      string
+		schema    func(*testing.T) *schema.Schema
+		run       func(t *testing.T, g *graph.Graph, s *schema.Schema)
+		wantOps   []string
+		wantAttrs [][2]string
+		wantMsgs  []string
+		wantWarn  bool
+	}{
+		{
+			name:   "add",
+			schema: testSchemaWithAssociation,
+			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
+				t.Helper()
+				company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
+				if r := g.Add(t.Context(), company); !r.OK() {
+					t.Fatalf("Add failed: %s", r.String())
+				}
+			},
+			wantOps:   []string{"yammm.graph.add"},
+			wantAttrs: [][2]string{{"type", "Company"}, {"pk", `["acme"]`}},
+		},
+		{
+			name:   "add duplicate",
+			schema: testSchemaWithAssociation,
+			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
+				t.Helper()
+				company1 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
+				if r := g.Add(t.Context(), company1); !r.OK() {
+					t.Fatalf("First Add failed: %s", r.String())
+				}
+				company2 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Inc"})
+				g.Add(t.Context(), company2)
+			},
+			wantMsgs: []string{"duplicate primary key"},
+			wantWarn: true,
+		},
+		{
+			name:   "edge resolution",
+			schema: testSchemaWithAssociation,
+			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
+				t.Helper()
+				company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
+				if r := g.Add(t.Context(), company); !r.OK() {
+					t.Fatalf("Add Company failed: %s", r.String())
+				}
+				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
+				if r := g.Add(t.Context(), person); !r.OK() {
+					t.Fatalf("Add Person failed: %s", r.String())
+				}
+			},
+			wantMsgs: []string{"edge resolved"},
+		},
+		{
+			name:   "forward reference",
+			schema: testSchemaWithOptionalAssociation,
+			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
+				t.Helper()
+				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
+				if r := g.Add(t.Context(), person); !r.OK() {
+					t.Fatalf("Add Person failed: %s", r.String())
+				}
+			},
+			wantMsgs: []string{"forward reference created"},
+		},
+		{
+			name:   "pending edges resolved",
+			schema: testSchemaWithOptionalAssociation,
+			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
+				t.Helper()
+				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
+				if r := g.Add(t.Context(), person); !r.OK() {
+					t.Fatalf("Add Person failed: %s", r.String())
+				}
+				company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
+				if r := g.Add(t.Context(), company); !r.OK() {
+					t.Fatalf("Add Company failed: %s", r.String())
+				}
+			},
+			wantMsgs: []string{"pending edges resolved"},
+		},
+		{
+			name:   "check",
+			schema: testSchemaWithAssociation,
+			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
+				t.Helper()
+				person := mustValidInstance(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"})
+				if r := g.Add(t.Context(), person); !r.OK() {
+					t.Fatalf("Add failed: %s", r.String())
+				}
+				g.Check(t.Context())
+			},
+			wantOps: []string{"yammm.graph.check"},
+		},
+		{
+			name:   "check unresolved",
+			schema: testSchemaWithAssociation,
+			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
+				t.Helper()
+				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"missing"}})
+				if r := g.Add(t.Context(), person); !r.OK() {
+					t.Fatalf("Add failed: %s", r.String())
+				}
+				g.Check(t.Context())
+			},
+			wantMsgs: []string{"unresolved required association"},
+			wantWarn: true,
+		},
+		{
+			name:   "add composed",
+			schema: testSchemaWithComposition,
+			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
+				t.Helper()
+				parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
+				if r := g.Add(t.Context(), parent); !r.OK() {
+					t.Fatalf("Add parent failed: %s", r.String())
+				}
+				child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
+				if r := g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child); !r.OK() {
+					t.Fatalf("AddComposed failed: %s", r.String())
+				}
+			},
+			wantOps:   []string{"yammm.graph.add_composed"},
+			wantAttrs: [][2]string{{"parent_type", "Parent"}, {"relation", "children"}},
+		},
+		{
+			name:   "add composed duplicate",
+			schema: testSchemaWithComposition,
+			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
+				t.Helper()
+				parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
+				if r := g.Add(t.Context(), parent); !r.OK() {
+					t.Fatalf("Add parent failed: %s", r.String())
+				}
+				child1 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
+				if r := g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child1); !r.OK() {
+					t.Fatalf("First AddComposed failed: %s", r.String())
+				}
+				child2 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1 Dup"})
+				g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child2)
+			},
+			wantMsgs: []string{"duplicate composed child"},
+			wantWarn: true,
+		},
 	}
 
-	records := h.Records()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.schema(t)
+			h := yammmtest.NewRecordHandler(slog.LevelDebug)
+			g := graph.New(s, graph.WithLogger(slog.New(h)))
 
-	// Should have operation start and end logs
-	if !hasOpName(records, "yammm.graph.add") {
-		t.Error("expected yammm.graph.add operation to be logged")
-	}
+			tt.run(t, g, s)
 
-	// Should have type and pk attributes
-	if !hasAttr(records, "type", "Company") {
-		t.Error("expected type=Company attribute")
-	}
-	if !hasAttr(records, "pk", `["acme"]`) {
-		t.Error(`expected pk=["acme"] attribute`)
-	}
-}
-
-func TestGraph_Add_DuplicateLogging(t *testing.T) {
-	s := testSchemaWithAssociation(t)
-
-	h := newRecordHandler(slog.LevelDebug)
-	logger := slog.New(h)
-
-	g := New(s, WithLogger(logger))
-
-	// Add first Company
-	company1 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	if r := g.Add(t.Context(), company1); !r.OK() {
-		t.Fatalf("First Add failed: %s", r.String())
-	}
-
-	// Add duplicate Company
-	company2 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Inc"})
-	g.Add(t.Context(), company2)
-
-	records := h.Records()
-
-	// Should have Warn level log for duplicate
-	warnCount := countLevel(records, slog.LevelWarn)
-	if warnCount == 0 {
-		t.Error("expected Warn level log for duplicate primary key")
-	}
-
-	// Should have the duplicate message
-	if !hasMessage(records, "duplicate primary key") {
-		t.Error("expected 'duplicate primary key' message")
-	}
-}
-
-func TestGraph_Add_EdgeResolutionLogging(t *testing.T) {
-	s := testSchemaWithAssociation(t)
-
-	h := newRecordHandler(slog.LevelDebug)
-	logger := slog.New(h)
-
-	g := New(s, WithLogger(logger))
-
-	// Add Company first
-	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	if r := g.Add(t.Context(), company); !r.OK() {
-		t.Fatalf("Add Company failed: %s", r.String())
-	}
-
-	// Add Person with edge to Company
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-	if r := g.Add(t.Context(), person); !r.OK() {
-		t.Fatalf("Add Person failed: %s", r.String())
-	}
-
-	records := h.Records()
-
-	// Should log edge resolved
-	if !hasMessage(records, "edge resolved") {
-		t.Error("expected 'edge resolved' message")
-	}
-}
-
-func TestGraph_Add_ForwardReferenceLogging(t *testing.T) {
-	s := testSchemaWithOptionalAssociation(t)
-
-	h := newRecordHandler(slog.LevelDebug)
-	logger := slog.New(h)
-
-	g := New(s, WithLogger(logger))
-
-	// Add Person first with edge to non-existent Company (forward reference)
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-	if r := g.Add(t.Context(), person); !r.OK() {
-		t.Fatalf("Add Person failed: %s", r.String())
-	}
-
-	records := h.Records()
-
-	// Should log forward reference created
-	if !hasMessage(records, "forward reference created") {
-		t.Error("expected 'forward reference created' message")
-	}
-}
-
-func TestGraph_Add_PendingEdgesResolvedLogging(t *testing.T) {
-	s := testSchemaWithOptionalAssociation(t)
-
-	h := newRecordHandler(slog.LevelDebug)
-	logger := slog.New(h)
-
-	g := New(s, WithLogger(logger))
-
-	// Add Person first with edge to non-existent Company (creates forward reference)
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-	if r := g.Add(t.Context(), person); !r.OK() {
-		t.Fatalf("Add Person failed: %s", r.String())
-	}
-
-	// Now add Company to resolve the forward reference
-	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	if r := g.Add(t.Context(), company); !r.OK() {
-		t.Fatalf("Add Company failed: %s", r.String())
-	}
-
-	records := h.Records()
-
-	// Should log pending edges resolved
-	if !hasMessage(records, "pending edges resolved") {
-		t.Error("expected 'pending edges resolved' message")
-	}
-}
-
-func TestGraph_Check_Logging(t *testing.T) {
-	s := testSchemaWithAssociation(t)
-
-	h := newRecordHandler(slog.LevelDebug)
-	logger := slog.New(h)
-
-	g := New(s, WithLogger(logger))
-
-	// Add person without employer (required relation)
-	person := mustValidInstance(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"})
-	if r := g.Add(t.Context(), person); !r.OK() {
-		t.Fatalf("Add failed: %s", r.String())
-	}
-
-	// Check should log the operation
-	g.Check(t.Context())
-
-	records := h.Records()
-
-	// Should have check operation
-	if !hasOpName(records, "yammm.graph.check") {
-		t.Error("expected yammm.graph.check operation to be logged")
-	}
-}
-
-func TestGraph_Check_UnresolvedLogging(t *testing.T) {
-	s := testSchemaWithAssociation(t)
-
-	h := newRecordHandler(slog.LevelDebug)
-	logger := slog.New(h)
-
-	g := New(s, WithLogger(logger))
-
-	// Add person with reference to non-existent company (required relation)
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"missing"}})
-	if r := g.Add(t.Context(), person); !r.OK() {
-		t.Fatalf("Add failed: %s", r.String())
-	}
-
-	// Check should log unresolved
-	g.Check(t.Context())
-
-	records := h.Records()
-
-	// Should have Warn level log for unresolved
-	warnCount := countLevel(records, slog.LevelWarn)
-	if warnCount == 0 {
-		t.Error("expected Warn level log for unresolved required association")
-	}
-
-	// Should have the unresolved message
-	if !hasMessage(records, "unresolved required association") {
-		t.Error("expected 'unresolved required association' message")
-	}
-}
-
-func TestGraph_AddComposed_Logging(t *testing.T) {
-	s := testSchemaWithComposition(t)
-
-	h := newRecordHandler(slog.LevelDebug)
-	logger := slog.New(h)
-
-	g := New(s, WithLogger(logger))
-
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	if r := g.Add(t.Context(), parent); !r.OK() {
-		t.Fatalf("Add parent failed: %s", r.String())
-	}
-
-	// Add composed child
-	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-	if r := g.AddComposed(t.Context(), "Parent", FormatKey("p1"), "children", child); !r.OK() {
-		t.Fatalf("AddComposed failed: %s", r.String())
-	}
-
-	records := h.Records()
-
-	// Should have add_composed operation
-	if !hasOpName(records, "yammm.graph.add_composed") {
-		t.Error("expected yammm.graph.add_composed operation to be logged")
-	}
-
-	// Should have parent and child attributes
-	if !hasAttr(records, "parent_type", "Parent") {
-		t.Error("expected parent_type=Parent attribute")
-	}
-	if !hasAttr(records, "relation", "children") {
-		t.Error("expected relation=children attribute")
-	}
-}
-
-func TestGraph_AddComposed_DuplicateLogging(t *testing.T) {
-	s := testSchemaWithComposition(t)
-
-	h := newRecordHandler(slog.LevelDebug)
-	logger := slog.New(h)
-
-	g := New(s, WithLogger(logger))
-
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-	if r := g.Add(t.Context(), parent); !r.OK() {
-		t.Fatalf("Add parent failed: %s", r.String())
-	}
-
-	// Add first child
-	child1 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-	if r := g.AddComposed(t.Context(), "Parent", FormatKey("p1"), "children", child1); !r.OK() {
-		t.Fatalf("First AddComposed failed: %s", r.String())
-	}
-
-	// Add duplicate child (same PK)
-	child2 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1 Dup"})
-	g.AddComposed(t.Context(), "Parent", FormatKey("p1"), "children", child2)
-
-	records := h.Records()
-
-	// Should have Warn level log for duplicate
-	warnCount := countLevel(records, slog.LevelWarn)
-	if warnCount == 0 {
-		t.Error("expected Warn level log for duplicate composed child")
-	}
-
-	// Should have the duplicate message
-	if !hasMessage(records, "duplicate composed child") {
-		t.Error("expected 'duplicate composed child' message")
+			records := h.Records()
+			for _, op := range tt.wantOps {
+				if !hasOpName(records, op) {
+					t.Errorf("expected %s operation to be logged", op)
+				}
+			}
+			for _, attr := range tt.wantAttrs {
+				if !hasAttr(records, attr[0], attr[1]) {
+					t.Errorf("expected %s=%s attribute", attr[0], attr[1])
+				}
+			}
+			for _, msg := range tt.wantMsgs {
+				if !hasMessage(records, msg) {
+					t.Errorf("expected %q message", msg)
+				}
+			}
+			if tt.wantWarn && countLevel(records, slog.LevelWarn) == 0 {
+				t.Error("expected a Warn-level record")
+			}
+		})
 	}
 }
 
@@ -2578,7 +2396,7 @@ func TestGraph_NoLogging_WhenNilLogger(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 
 	// No logger - should not panic
-	g := New(s)
+	g := graph.New(s)
 
 	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
 	if r := g.Add(t.Context(), company); !r.OK() {

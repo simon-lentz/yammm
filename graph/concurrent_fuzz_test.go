@@ -1,4 +1,4 @@
-package graph
+package graph_test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
@@ -39,7 +40,7 @@ func FuzzGraph_ConcurrentOperations(f *testing.F) {
 
 		// Create schema
 		s := buildFuzzSchema(t)
-		g := New(s)
+		g := graph.New(s)
 		ctx := t.Context()
 
 		// Run concurrent operations
@@ -79,7 +80,7 @@ func buildFuzzSchema(t *testing.T) *schema.Schema {
 }
 
 // runFuzzOperations performs random graph operations.
-func runFuzzOperations(t *testing.T, g *Graph, s *schema.Schema, ctx context.Context, r *rand.Rand, workerID, numOps int) {
+func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx context.Context, r *rand.Rand, workerID, numOps int) {
 	t.Helper()
 
 	personType, ok := s.Type("Person")
@@ -88,7 +89,7 @@ func runFuzzOperations(t *testing.T, g *Graph, s *schema.Schema, ctx context.Con
 	}
 
 	for range numOps {
-		op := r.Intn(4) // 0=Add, 1=Snapshot, 2=Check, 3=InstanceByKey
+		op := r.Intn(4) // 0=Add, 1=graph.Snapshot, 2=Check, 3=InstanceByKey
 
 		switch op {
 		case 0: // Add
@@ -104,7 +105,7 @@ func runFuzzOperations(t *testing.T, g *Graph, s *schema.Schema, ctx context.Con
 			// Ignore results - we just want to test for races/panics
 			g.Add(ctx, inst)
 
-		case 1: // Snapshot
+		case 1: // graph.Snapshot
 			snap := g.Snapshot()
 			// Read from snapshot to ensure no concurrent modification issues
 			_ = snap.Types()
@@ -117,7 +118,7 @@ func runFuzzOperations(t *testing.T, g *Graph, s *schema.Schema, ctx context.Con
 		case 3: // InstanceByKey
 			id := r.Intn(100)
 			snap := g.Snapshot()
-			_, _ = snap.InstanceByKey("Person", FormatKey(formatID(workerID, id)))
+			_, _ = snap.InstanceByKey("Person", graph.FormatKey(formatID(workerID, id)))
 		}
 	}
 }
@@ -131,7 +132,7 @@ func formatName(workerID, id int) string {
 }
 
 // verifyGraphConsistency checks that the graph is in a valid state.
-func verifyGraphConsistency(t *testing.T, g *Graph) {
+func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 	t.Helper()
 
 	snap := g.Snapshot()
@@ -144,7 +145,7 @@ func verifyGraphConsistency(t *testing.T, g *Graph) {
 		for _, inst := range instances {
 			_, ok := snap.InstanceByKey(typeName, inst.PrimaryKey().String())
 			if !ok {
-				t.Errorf("Instance %s/%s not retrievable by key", typeName, inst.PrimaryKey())
+				t.Errorf("graph.Instance %s/%s not retrievable by key", typeName, inst.PrimaryKey())
 			}
 		}
 	}
@@ -155,7 +156,7 @@ func verifyGraphConsistency(t *testing.T, g *Graph) {
 		srcKey := edge.Source().PrimaryKey().String()
 		_, ok := snap.InstanceByKey(srcType, srcKey)
 		if !ok {
-			t.Errorf("Edge source %s/%s not in graph", srcType, srcKey)
+			t.Errorf("graph.Edge source %s/%s not in graph", srcType, srcKey)
 		}
 	}
 }
@@ -169,7 +170,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, seed int64) {
 		s := buildFuzzSchema(t)
-		g := New(s)
+		g := graph.New(s)
 		ctx := t.Context()
 
 		personType, _ := s.Type("Person")
@@ -200,7 +201,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 			uniqueIDs[id] = true
 		}
 
-		// Graph should have exactly the unique instances (duplicates ignored)
+		// graph.Graph should have exactly the unique instances (duplicates ignored)
 		snap := g.Snapshot()
 		instanceCount := len(snap.InstancesOf("Person"))
 		if instanceCount != len(uniqueIDs) {

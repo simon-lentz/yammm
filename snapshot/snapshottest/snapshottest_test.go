@@ -74,10 +74,6 @@ func TestRoundTripHelpers(t *testing.T) {
 	snapshottest.AssertRoundTrip(t, snap, s)
 	snapshottest.AssertDeterministic(t, snap, s)
 	snapshottest.DiffSnapshots(t, snap, snap)
-
-	if err := snapshottest.CompareSnapshots(snap, snap); err != nil {
-		t.Errorf("CompareSnapshots(self, self) = %v, want nil", err)
-	}
 }
 
 // TestDiffSnapshots_DetectsDifference pins that the comparer actually
@@ -101,9 +97,5 @@ func TestDiffSnapshots_DetectsDifference(t *testing.T) {
 	snapshottest.DiffSnapshots(probe, a, b)
 	if !probe.Failed() {
 		t.Error("DiffSnapshots did not fail on differing snapshots")
-	}
-
-	if err := snapshottest.CompareSnapshots(a, b); err == nil {
-		t.Error("CompareSnapshots(a, b) = nil, want difference error")
 	}
 }

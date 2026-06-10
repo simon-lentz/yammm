@@ -355,8 +355,7 @@ func TestNewFromSnapshot_RoundTripFidelity(t *testing.T) {
 	reconstructed := g.Snapshot()
 
 	// Structural comparison.
-	err := snapshottest.CompareSnapshots(original, reconstructed)
-	assert.NoError(t, err)
+	snapshottest.DiffSnapshots(t, original, reconstructed)
 }
 
 func TestNewFromSnapshot_Independence(t *testing.T) {

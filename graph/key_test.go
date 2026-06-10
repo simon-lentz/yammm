@@ -1,7 +1,9 @@
-package graph
+package graph_test
 
 import (
 	"testing"
+
+	"github.com/simon-lentz/yammm/graph"
 )
 
 func TestFormatKey(t *testing.T) {
@@ -69,9 +71,9 @@ func TestFormatKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FormatKey(tt.values...)
+			got := graph.FormatKey(tt.values...)
 			if got != tt.want {
-				t.Errorf("FormatKey() = %q, want %q", got, tt.want)
+				t.Errorf("graph.FormatKey() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -80,13 +82,13 @@ func TestFormatKey(t *testing.T) {
 func TestFormatKey_PanicOnUnmarshalable(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("FormatKey should panic on unmarshalable value")
+			t.Error("graph.FormatKey should panic on unmarshalable value")
 		}
 	}()
 
 	// Channels cannot be JSON-marshaled
 	ch := make(chan int)
-	FormatKey(ch)
+	graph.FormatKey(ch)
 }
 
 func TestFormatComposedKey(t *testing.T) {
@@ -179,19 +181,19 @@ func TestFormatComposedKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := FormatComposedKey(tt.parentKeyValues, tt.compositionName, tt.childKeyOrIndex)
+			got, err := graph.FormatComposedKey(tt.parentKeyValues, tt.compositionName, tt.childKeyOrIndex)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("FormatComposedKey() expected error, got nil")
+					t.Errorf("graph.FormatComposedKey() expected error, got nil")
 				}
 				return
 			}
 			if err != nil {
-				t.Errorf("FormatComposedKey() unexpected error: %v", err)
+				t.Errorf("graph.FormatComposedKey() unexpected error: %v", err)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("FormatComposedKey() = %q, want %q", got, tt.want)
+				t.Errorf("graph.FormatComposedKey() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -282,25 +284,25 @@ func TestParseComposedKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parent, comp, childOrIdx, err := ParseComposedKey(tt.input)
+			parent, comp, childOrIdx, err := graph.ParseComposedKey(tt.input)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("ParseComposedKey() expected error, got nil")
+					t.Errorf("graph.ParseComposedKey() expected error, got nil")
 				}
 				return
 			}
 			if err != nil {
-				t.Errorf("ParseComposedKey() unexpected error: %v", err)
+				t.Errorf("graph.ParseComposedKey() unexpected error: %v", err)
 				return
 			}
 
 			// Check parent
 			if len(parent) != len(tt.wantParent) {
-				t.Errorf("ParseComposedKey() parent = %v, want %v", parent, tt.wantParent)
+				t.Errorf("graph.ParseComposedKey() parent = %v, want %v", parent, tt.wantParent)
 			} else {
 				for i, v := range parent {
 					if v != tt.wantParent[i] {
-						t.Errorf("ParseComposedKey() parent[%d] = %v (%T), want %v (%T)",
+						t.Errorf("graph.ParseComposedKey() parent[%d] = %v (%T), want %v (%T)",
 							i, v, v, tt.wantParent[i], tt.wantParent[i])
 					}
 				}
@@ -308,24 +310,24 @@ func TestParseComposedKey(t *testing.T) {
 
 			// Check composition
 			if comp != tt.wantComposition {
-				t.Errorf("ParseComposedKey() composition = %q, want %q", comp, tt.wantComposition)
+				t.Errorf("graph.ParseComposedKey() composition = %q, want %q", comp, tt.wantComposition)
 			}
 
 			// Check childOrIndex
 			switch want := tt.wantChildOrIndex.(type) {
 			case nil:
 				if childOrIdx != nil {
-					t.Errorf("ParseComposedKey() childOrIndex = %v, want nil", childOrIdx)
+					t.Errorf("graph.ParseComposedKey() childOrIndex = %v, want nil", childOrIdx)
 				}
 			case int:
 				got, ok := childOrIdx.(int)
 				if !ok || got != want {
-					t.Errorf("ParseComposedKey() childOrIndex = %v, want %v", childOrIdx, want)
+					t.Errorf("graph.ParseComposedKey() childOrIndex = %v, want %v", childOrIdx, want)
 				}
 			case []any:
 				got, ok := childOrIdx.([]any)
 				if !ok || len(got) != len(want) {
-					t.Errorf("ParseComposedKey() childOrIndex = %v, want %v", childOrIdx, want)
+					t.Errorf("graph.ParseComposedKey() childOrIndex = %v, want %v", childOrIdx, want)
 				}
 			}
 		})
@@ -367,14 +369,14 @@ func TestFormatComposedKeyRoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			encoded, err := FormatComposedKey(tt.parentKeyValues, tt.compositionName, tt.childKeyOrIndex)
+			encoded, err := graph.FormatComposedKey(tt.parentKeyValues, tt.compositionName, tt.childKeyOrIndex)
 			if err != nil {
-				t.Fatalf("FormatComposedKey() error: %v", err)
+				t.Fatalf("graph.FormatComposedKey() error: %v", err)
 			}
 
-			parent, comp, childOrIdx, err := ParseComposedKey(encoded)
+			parent, comp, childOrIdx, err := graph.ParseComposedKey(encoded)
 			if err != nil {
-				t.Fatalf("ParseComposedKey() error: %v", err)
+				t.Fatalf("graph.ParseComposedKey() error: %v", err)
 			}
 
 			// Verify composition name

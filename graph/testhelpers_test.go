@@ -1,8 +1,10 @@
-package graph
+package graph_test
 
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
@@ -324,7 +326,7 @@ func testSchemaWithCircularChain(t *testing.T) *schema.Schema {
 	return s
 }
 
-// Instance Creation Helpers
+// graph.Instance Creation Helpers
 //
 // These helpers create ValidInstance objects for testing.
 
@@ -615,7 +617,7 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 // Assertion Helpers
 
 // assertInstanceCount verifies the number of instances of a type in the result.
-func assertInstanceCount(t *testing.T, result *Snapshot, typeName string, expected int) bool {
+func assertInstanceCount(t *testing.T, result *graph.Snapshot, typeName string, expected int) bool {
 	t.Helper()
 
 	instances := result.InstancesOf(typeName)
@@ -627,7 +629,7 @@ func assertInstanceCount(t *testing.T, result *Snapshot, typeName string, expect
 }
 
 // assertEdgeCount verifies the number of edges in the result.
-func assertEdgeCount(t *testing.T, result *Snapshot, expected int) {
+func assertEdgeCount(t *testing.T, result *graph.Snapshot, expected int) {
 	t.Helper()
 
 	edges := result.Edges()
@@ -637,7 +639,7 @@ func assertEdgeCount(t *testing.T, result *Snapshot, expected int) {
 }
 
 // assertUnresolvedCount verifies the number of unresolved edges in the result.
-func assertUnresolvedCount(t *testing.T, result *Snapshot, expected int) {
+func assertUnresolvedCount(t *testing.T, result *graph.Snapshot, expected int) {
 	t.Helper()
 
 	unresolved := result.Unresolved()
@@ -647,11 +649,33 @@ func assertUnresolvedCount(t *testing.T, result *Snapshot, expected int) {
 }
 
 // assertComposedCount verifies the number of composed children for a relation.
-func assertComposedCount(t *testing.T, inst *Instance, relationName string, expected int) {
+func assertComposedCount(t *testing.T, inst *graph.Instance, relationName string, expected int) {
 	t.Helper()
 
 	count := inst.ComposedCount(relationName)
 	if count != expected {
 		t.Errorf("Expected %d composed children for %s, got %d", expected, relationName, count)
 	}
+}
+
+// assertHasCode fails t unless result carries at least one issue with code.
+func assertHasCode(t *testing.T, result diag.Result, code diag.Code) {
+	t.Helper()
+	for issue := range result.Issues() {
+		if issue.Code() == code {
+			return
+		}
+	}
+	t.Errorf("expected an issue with code %v in result: %s", code, result.String())
+}
+
+// countCode returns the number of issues in result carrying code.
+func countCode(result diag.Result, code diag.Code) int {
+	count := 0
+	for issue := range result.Issues() {
+		if issue.Code() == code {
+			count++
+		}
+	}
+	return count
 }
