@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -658,13 +659,11 @@ func TestTemporal_DebouncePipeline(t *testing.T) {
 	contentB := "schema \"test\"\n\ntype Beta {\n\tid String primary\n\tage Integer\n}\n"
 	require.NoError(t, h.ChangeDocument("test.yammm", contentB, 2))
 
-	require.True(t, server.Workspace().WaitForAnalysis(analysisTimeout),
-		"timed out waiting for analysis")
-	h.Sync()
-
-	symbols, err = h.DocumentSymbols("test.yammm")
-	require.NoError(t, err)
-	testutil.AssertDocumentSymbolExists(t, symbols, "Beta")
+	require.Eventually(t, func() bool {
+		h.Sync()
+		syms, symErr := h.DocumentSymbols("test.yammm")
+		return symErr == nil && testutil.HasDocumentSymbol(syms, "Beta")
+	}, analysisTimeout, 10*time.Millisecond, "expected Beta symbol after change is analyzed")
 }
 
 func TestTemporal_RapidEditsSettle(t *testing.T) {
@@ -687,7 +686,6 @@ func TestTemporal_RapidEditsSettle(t *testing.T) {
 	require.NoError(t, h.ChangeDocument("test.yammm", finalContent, 11))
 
 	require.Eventually(t, func() bool {
-		server.Workspace().WaitForAnalysis(100 * time.Millisecond)
 		h.Sync()
 		syms, err := h.DocumentSymbols("test.yammm")
 		if err != nil {
@@ -697,34 +695,41 @@ func TestTemporal_RapidEditsSettle(t *testing.T) {
 	}, analysisTimeout, 10*time.Millisecond, "expected Final symbol after rapid edits settle")
 }
 
+// TestTemporal_CloseCancelsPendingAnalysis pins the close-cancels contract
+// under synctest's fake clock: a change schedules a debounced re-analysis,
+// the close cancels it, and sleeping past the full debounce window proves
+// the cancelled analysis never fires — the stale snapshot and diagnostics
+// stay cleared. (Real-time sleeps cannot catch this: the default debounce
+// outlives any tolerable sleep.)
 func TestTemporal_CloseCancelsPendingAnalysis(t *testing.T) {
-	t.Parallel()
-
 	tmpDir := t.TempDir()
-	h, server := newTestHarnessWithServer(t, tmpDir)
-	defer h.Close()
+	synctest.Test(t, func(t *testing.T) {
+		h, server := newTestHarnessWithServer(t, tmpDir)
+		defer h.Close()
 
-	require.NoError(t, h.OpenDocument("test.yammm",
-		"schema \"test\"\n\ntype Alpha {\n\tname String primary\n}\n"))
-	h.Sync()
+		require.NoError(t, h.OpenDocument("test.yammm",
+			"schema \"test\"\n\ntype Alpha {\n\tname String primary\n}\n"))
+		h.Sync()
+		synctest.Wait()
 
-	uri := testutil.PathToURI(filepath.Join(tmpDir, "test.yammm"))
-	snap := server.Workspace().LatestSnapshot(uri)
-	require.NotNil(t, snap, "snapshot should exist after open")
+		uri := testutil.PathToURI(filepath.Join(tmpDir, "test.yammm"))
+		require.Eventually(t, func() bool {
+			return server.Workspace().LatestSnapshot(uri) != nil
+		}, time.Second, 10*time.Millisecond, "snapshot should exist after open")
 
-	require.NoError(t, h.ChangeDocument("test.yammm", "not valid!!!", 2))
+		// Schedule a re-analysis, then close before the debounce elapses.
+		require.NoError(t, h.ChangeDocument("test.yammm", "not valid!!!", 2))
+		require.NoError(t, h.CloseDocument("test.yammm"))
+		h.Sync()
 
-	require.NoError(t, h.CloseDocument("test.yammm"))
-	h.Sync()
+		// Sleep past the entire debounce window in fake time: a cancelled
+		// analysis must not resurrect the snapshot or publish diagnostics.
+		time.Sleep(2 * workspace.DefaultDebounceDelay)
+		synctest.Wait()
 
-	time.Sleep(50 * time.Millisecond)
-	h.Sync()
-
-	snap = server.Workspace().LatestSnapshot(uri)
-	assert.Nil(t, snap, "snapshot should be nil after close")
-
-	diags := h.Diagnostics(uri)
-	assert.Empty(t, diags, "diagnostics should be cleared after close")
+		assert.Nil(t, server.Workspace().LatestSnapshot(uri), "snapshot should be nil after close")
+		assert.Empty(t, h.Diagnostics(uri), "diagnostics should be cleared after close")
+	})
 }
 
 func TestTemporal_ConcurrentOpenChangeClose(t *testing.T) {

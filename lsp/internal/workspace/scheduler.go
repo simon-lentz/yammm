@@ -63,11 +63,6 @@ type analysisScheduler struct {
 	// checking stopping and calling wg.Add(1) (via wg.Go).
 	stoppingMu sync.RWMutex
 	stopping   bool
-
-	// doneCond is signaled after each analysis completes.
-	// Used by WaitForAnalysis to block until a specific URI's analysis finishes.
-	doneCond *sync.Cond
-	doneMu   sync.Mutex
 }
 
 // newAnalysisScheduler creates an analysisScheduler with all fields initialized.
@@ -81,7 +76,6 @@ func newAnalysisScheduler(logger *slog.Logger, bgCtx context.Context, bgCancel c
 		debounceDelay: DefaultDebounceDelay,
 		sem:           make(chan struct{}, maxConcurrentAnalysis),
 	}
-	s.doneCond = sync.NewCond(&s.doneMu)
 	return s
 }
 
@@ -152,9 +146,6 @@ func (s *analysisScheduler) schedule(uri string, analyzeFn func(context.Context,
 				delete(s.debounces, uri)
 			}
 			s.debounceMu.Unlock()
-
-			// Signal WaitForAnalysis waiters.
-			s.doneCond.Broadcast()
 		}) {
 			// goAttach returned false — shutdown in progress, cancel.
 			cancel()
@@ -202,9 +193,6 @@ func (s *analysisScheduler) shutdown() {
 		delete(s.debounces, uri)
 	}
 	s.debounceMu.Unlock()
-
-	// Wake up any WaitForAnalysis waiters so they can observe shutdown.
-	s.doneCond.Broadcast()
 
 	// 4. Wait for tracked goroutines with internal timeout.
 	done := make(chan struct{})
