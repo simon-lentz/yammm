@@ -18,6 +18,28 @@ func TestParse_ValidPaths(t *testing.T) {
 			input:    "$",
 			expected: "$",
 		},
+		// Numeric PK values canonicalize on output: scientific notation and
+		// trailing-zero forms parse, then render in the canonical decimal form.
+		{
+			name:     "scientific notation canonicalizes",
+			input:    "$[value=1.5e10]",
+			expected: "$[value=15000000000.0]",
+		},
+		{
+			name:     "negative scientific canonicalizes",
+			input:    "$[value=-2.5e-5]",
+			expected: "$[value=-0.000025]",
+		},
+		{
+			name:     "very small float",
+			input:    "$[value=0.0000001]",
+			expected: "$[value=0.0000001]",
+		},
+		{
+			name:     "zero integer pk value",
+			input:    "$[count=0]",
+			expected: "$[count=0]",
+		},
 		{
 			name:     "single key",
 			input:    "$.name",
@@ -322,55 +344,21 @@ func TestParse_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestParse_PKValueTypes(t *testing.T) {
+func TestParse_PKValueRoundTrip(t *testing.T) {
+	// Each typed PK value round-trips through its formatted form — the
+	// type distinction is observable only in the rendered text (quoted
+	// string vs bare int vs decimal float vs bool keyword).
 	tests := []struct {
-		name          string
-		input         string
-		expectedType  string
-		expectedValue any
+		name  string
+		input string
 	}{
-		{
-			name:          "integer",
-			input:         "$[id=42]",
-			expectedType:  "int64",
-			expectedValue: int64(42),
-		},
-		{
-			name:          "negative integer",
-			input:         "$[id=-42]",
-			expectedType:  "int64",
-			expectedValue: int64(-42),
-		},
-		{
-			name:          "float",
-			input:         "$[x=3.14]",
-			expectedType:  "float64",
-			expectedValue: 3.14,
-		},
-		{
-			name:          "negative float",
-			input:         "$[x=-3.14]",
-			expectedType:  "float64",
-			expectedValue: -3.14,
-		},
-		{
-			name:          "string",
-			input:         `$[name="Alice"]`,
-			expectedType:  "string",
-			expectedValue: "Alice",
-		},
-		{
-			name:          "boolean true",
-			input:         "$[active=true]",
-			expectedType:  "bool",
-			expectedValue: true,
-		},
-		{
-			name:          "boolean false",
-			input:         "$[active=false]",
-			expectedType:  "bool",
-			expectedValue: false,
-		},
+		{name: "integer", input: "$[id=42]"},
+		{name: "negative integer", input: "$[id=-42]"},
+		{name: "float", input: "$[x=3.14]"},
+		{name: "negative float", input: "$[x=-3.14]"},
+		{name: "string", input: `$[name="Alice"]`},
+		{name: "boolean true", input: "$[active=true]"},
+		{name: "boolean false", input: "$[active=false]"},
 	}
 
 	for _, tt := range tests {
@@ -837,46 +825,6 @@ func TestParse_ParseIntegerEdgeCases(t *testing.T) {
 		{
 			name:    "zero index",
 			input:   "$[0]",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := Parse(tt.input)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestParse_ParseNumberEdgeCases(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
-	}{
-		{
-			name:    "scientific notation",
-			input:   "$[value=1.5e10]",
-			wantErr: false,
-		},
-		{
-			name:    "negative scientific",
-			input:   "$[value=-2.5e-5]",
-			wantErr: false,
-		},
-		{
-			name:    "very small float",
-			input:   "$[value=0.0000001]",
-			wantErr: false,
-		},
-		{
-			name:    "integer as pk value",
-			input:   "$[count=0]",
 			wantErr: false,
 		},
 	}

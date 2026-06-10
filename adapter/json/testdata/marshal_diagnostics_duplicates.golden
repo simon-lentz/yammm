@@ -1,0 +1,22 @@
+{
+  "$diagnostics": {
+    "duplicates": [
+      {
+        "conflict_key": [
+          "p1"
+        ],
+        "key": [
+          "p1"
+        ],
+        "type": "Person"
+      }
+    ]
+  },
+  "Person": [
+    {
+      "age": 30,
+      "id": "p1",
+      "name": "Alice"
+    }
+  ]
+}

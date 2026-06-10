@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 	"github.com/simon-lentz/yammm/lsp/internal/workspace"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +13,7 @@ import (
 
 func TestHandleHover_NilUnit(t *testing.T) {
 	t.Parallel()
-	h := handleHover(&fakeResolver{unit: nil}, testLogger())
+	h := handleHover(&fakeResolver{unit: nil}, testutil.DiscardLogger())
 	var result *protocol.Hover
 	err := callHandler(t, h, &protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
@@ -36,7 +37,7 @@ func TestHandleHover_WithUnit(t *testing.T) {
 			LocalLine: 2, // LSP 0-indexed line for "type Person {"
 			LocalChar: 7, // cursor on "P" of "Person"
 		},
-	}, testLogger())
+	}, testutil.DiscardLogger())
 
 	var result *protocol.Hover
 	err := callHandler(t, h, &protocol.HoverParams{
@@ -69,7 +70,7 @@ func TestHandleHover_CrossSchemaQualifiedRef(t *testing.T) {
 			LocalLine: 4,
 			LocalChar: 28,
 		},
-	}, testLogger())
+	}, testutil.DiscardLogger())
 
 	var result *protocol.Hover
 	err := callHandler(t, h, &protocol.HoverParams{

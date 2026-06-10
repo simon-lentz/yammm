@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 	"github.com/simon-lentz/yammm/lsp/internal/workspace"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +13,7 @@ import (
 
 func TestHandleDocumentSymbol_NilUnits(t *testing.T) {
 	t.Parallel()
-	h := handleDocumentSymbol(&fakeResolver{units: nil}, testLogger())
+	h := handleDocumentSymbol(&fakeResolver{units: nil}, testutil.DiscardLogger())
 	var result any
 	err := callHandler(t, h, &protocol.DocumentSymbolParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.yammm"},
@@ -33,7 +34,7 @@ func TestHandleDocumentSymbol_WithUnits(t *testing.T) {
 				Doc:      doc,
 			},
 		},
-	}, testLogger())
+	}, testutil.DiscardLogger())
 
 	var result []protocol.DocumentSymbol
 	err := callHandler(t, h, &protocol.DocumentSymbolParams{

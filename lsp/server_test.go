@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	lsp "github.com/simon-lentz/yammm/lsp"
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
@@ -63,40 +64,6 @@ func newMarkdownTestHarness(t *testing.T, root string) *testutil.Harness {
 	err := h.Initialize()
 	require.NoError(t, err, "harness initialization failed")
 	return h
-}
-
-// notificationCollector captures LSP notifications for testing.
-type notificationCollector struct {
-	mu      sync.Mutex
-	entries []notificationEntry
-}
-
-type notificationEntry struct {
-	Method string
-	Params any
-}
-
-func (c *notificationCollector) notify(method string, params any) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.entries = append(c.entries, notificationEntry{Method: method, Params: params})
-}
-
-func (c *notificationCollector) diagnosticsFor(uri string) []protocol.Diagnostic {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for i := len(c.entries) - 1; i >= 0; i-- {
-		e := c.entries[i]
-		if e.Method != protocol.ServerTextDocumentPublishDiagnostics {
-			continue
-		}
-		p, ok := e.Params.(protocol.PublishDiagnosticsParams)
-		if ok && p.URI == uri {
-			return p.Diagnostics
-		}
-	}
-	return nil
 }
 
 func TestNewServer(t *testing.T) {
@@ -444,8 +411,6 @@ func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 
 	unformatted, err := os.ReadFile("testdata/lsp/formatting/unformatted.yammm")
 	require.NoError(t, err, "failed to read unformatted fixture")
-	golden, err := os.ReadFile("testdata/lsp/formatting/formatted.yammm.golden")
-	require.NoError(t, err, "failed to read golden fixture")
 
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "main.yammm")
@@ -467,7 +432,7 @@ func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 	testutil.AssertFormattingApplied(t, edits)
 
 	result := testutil.ApplyEdits(string(unformatted), edits, "utf-16")
-	assert.Equal(t, string(golden), result, "round-trip result != golden")
+	yammmtest.Golden(t, "lsp/formatting/formatted.yammm", []byte(result))
 }
 
 func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
@@ -846,11 +811,11 @@ func TestMarkdownIntegration_DiagnosticsInCodeBlock(t *testing.T) {
 	uri := testutil.PathToURI(mdPath)
 	server.Workspace().MarkdownDocumentOpenedForTest(uri, 1, content)
 
-	collector := &notificationCollector{}
-	server.Workspace().SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	server.Workspace().SetNotifier(collector.Notify)
 	server.Workspace().AnalyzeMarkdownAndPublish(t.Context(), uri)
 
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	assert.NotEmpty(t, diags, "expected diagnostics for syntax error in code block")
 
 	var hasMarkdownCoords bool
@@ -1032,11 +997,11 @@ func TestMarkdownIntegration_ImportRejection(t *testing.T) {
 	uri := testutil.PathToURI(mdPath)
 	server.Workspace().MarkdownDocumentOpenedForTest(uri, 1, content)
 
-	collector := &notificationCollector{}
-	server.Workspace().SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	server.Workspace().SetNotifier(collector.Notify)
 	server.Workspace().AnalyzeMarkdownAndPublish(t.Context(), uri)
 
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")
 
 	var found bool

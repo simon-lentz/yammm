@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -294,57 +295,10 @@ func TestContextualError_LogValue_AttributeGolden(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("unmarshal log: %v\nraw: %s", err, buf.String())
 	}
-	d := out["diagnostic"].(map[string]any)
-	if got := d["context"]; got != "schema_load" {
-		t.Errorf("context = %v, want %v", got, "schema_load")
-	}
-	if got := d["code"]; got != testCodeError.String() {
-		t.Errorf("top-level code = %v, want %v", got, testCodeError.String())
-	}
-	counts := d["counts"].(map[string]any)
-	if counts["errors"].(float64) != 1 {
-		t.Errorf("counts.errors = %v, want 1", counts["errors"])
-	}
-	if counts["warnings"].(float64) != 0 {
-		t.Errorf("counts.warnings = %v, want 0", counts["warnings"])
-	}
-	issues := d["issues"].([]any)
-	if len(issues) != 1 {
-		t.Fatalf("issues len = %d, want 1", len(issues))
-	}
-	iss := issues[0].(map[string]any)
-	if iss["severity"] != "error" {
-		t.Errorf("issue.severity = %v, want error", iss["severity"])
-	}
-	if iss["message"] != "full-shape issue" {
-		t.Errorf("issue.message = %v, want 'full-shape issue'", iss["message"])
-	}
-	if iss["code"] != testCodeError.String() {
-		t.Errorf("issue.code = %v, want %v", iss["code"], testCodeError.String())
-	}
-	if iss["path"] != "$.Foo[0].bar" {
-		t.Errorf("issue.path = %v", iss["path"])
-	}
-	if iss["hint"] != "fix it" {
-		t.Errorf("issue.hint = %v", iss["hint"])
-	}
-	loc := iss["location"].(map[string]any)
-	if loc["source"] != source.String() {
-		t.Errorf("issue.location.source = %v, want %v", loc["source"], source.String())
-	}
-	if loc["line"].(float64) != 10 {
-		t.Errorf("issue.location.line = %v, want 10", loc["line"])
-	}
-	if loc["column"].(float64) != 4 {
-		t.Errorf("issue.location.column = %v, want 4", loc["column"])
-	}
-	details := iss["details"].(map[string]any)
-	if details[diag.DetailKeyTypeName] != "Foo" {
-		t.Errorf("issue.details.type = %v, want Foo", details[diag.DetailKeyTypeName])
-	}
-	if details[diag.DetailKeyPropertyName] != "bar" {
-		t.Errorf("issue.details.property = %v, want bar", details[diag.DetailKeyPropertyName])
-	}
+	// Golden only the diagnostic attribute tree (the slog envelope carries a
+	// timestamp); it pins context, top-level code, counts, and the complete
+	// per-issue shape — severity, message, code, path, hint, span, details.
+	yammmtest.GoldenJSON(t, "contextual_error_log_value", out["diagnostic"])
 }
 
 func TestContextualError_StructuredOutput_TextHandler(t *testing.T) {

@@ -113,9 +113,7 @@ func TestNewCanonicalPath_NonExistentPath(t *testing.T) {
 }
 
 func TestNewCanonicalPath_Symlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink test not reliable on Windows")
-	}
+	skipOnWindows(t, "symlink test not reliable on Windows")
 
 	// Create a temp directory with a symlink
 	tmpDir := t.TempDir()
@@ -156,9 +154,7 @@ func TestNewCanonicalPath_Symlink(t *testing.T) {
 }
 
 func TestNewCanonicalPath_ErrorHandling(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink/permission tests not reliable on Windows")
-	}
+	skipOnWindows(t, "symlink/permission tests not reliable on Windows")
 
 	tmpDir := t.TempDir()
 
@@ -318,9 +314,7 @@ func TestCanonicalPath_Base(t *testing.T) {
 }
 
 func TestCanonicalPath_Dir(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix path test")
-	}
+	skipOnWindows(t, "Unix path test")
 
 	cp, err := NewCanonicalPath("/a/b/c.txt")
 	if err != nil {
@@ -338,9 +332,7 @@ func TestCanonicalPath_Dir(t *testing.T) {
 }
 
 func TestCanonicalPath_Join(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix path test")
-	}
+	skipOnWindows(t, "Unix path test")
 
 	cp, err := NewCanonicalPath("/a/b")
 	if err != nil {
@@ -358,9 +350,7 @@ func TestCanonicalPath_Join(t *testing.T) {
 }
 
 func TestCanonicalPath_Join_WithDotDot(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix path test")
-	}
+	skipOnWindows(t, "Unix path test")
 
 	cp, err := NewCanonicalPath("/a/b/c")
 	if err != nil {
@@ -394,9 +384,7 @@ func TestCanonicalPath_Join_ZeroValue(t *testing.T) {
 }
 
 func TestCanonicalPath_Join_BackslashNormalization(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix path test")
-	}
+	skipOnWindows(t, "Unix path test")
 
 	cp, err := NewCanonicalPath("/base/path")
 	if err != nil {
@@ -579,9 +567,7 @@ func TestCanonicalPath_String_Empty(t *testing.T) {
 }
 
 func TestCanonicalPath_Equality(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix path test")
-	}
+	skipOnWindows(t, "Unix path test")
 
 	cp1, _ := NewCanonicalPath("/a/b/c")
 	cp2, _ := NewCanonicalPath("/a/b/c")
@@ -597,9 +583,7 @@ func TestCanonicalPath_Equality(t *testing.T) {
 
 func TestCanonicalPath_MapKey(t *testing.T) {
 	// CanonicalPath should work as map key
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix path test")
-	}
+	skipOnWindows(t, "Unix path test")
 
 	cp1, _ := NewCanonicalPath("/a/b/c")
 	cp2, _ := NewCanonicalPath("/a/b/c")
@@ -1250,9 +1234,7 @@ func TestCanonicalPath_JoinNFCNormalization(t *testing.T) {
 // This test ensures consistency between NewCanonicalPath, Join, and
 // canonicalizeAbsolutePath: all normalize backslashes to forward slashes.
 func TestNewCanonicalPath_UnixBackslashNormalization(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("backslash normalization test is for Unix systems where \\ is valid in filenames")
-	}
+	skipOnWindows(t, "backslash normalization test is for Unix systems where \\ is valid in filenames")
 
 	// On Unix, we can't easily create files with literal backslashes in names
 	// due to shell escaping issues. Instead, we test via canonicalizeAbsolutePath
@@ -1323,5 +1305,14 @@ func TestNewCanonicalPath_BackslashInvariant(t *testing.T) {
 
 	if strings.Contains(joined.String(), "\\") {
 		t.Errorf("Joined path should not contain backslashes: %q", joined.String())
+	}
+}
+
+// skipOnWindows skips tests that exercise Unix-style absolute paths or
+// platform behaviors (symlinks, permissions) that are unreliable on Windows.
+func skipOnWindows(t *testing.T, reason string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip(reason)
 	}
 }

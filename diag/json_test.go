@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -88,41 +89,14 @@ func TestFormatIssueJSON_WithSpan(t *testing.T) {
 	r := NewRenderer()
 	data := r.FormatIssueJSON(issue)
 
+	// The golden pins the complete JSON wire format — the span object with
+	// line/column/byte for both endpoints is the behavior under test, and
+	// the message field is part of this format's contract.
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-
-	span, ok := parsed["span"].(map[string]any)
-	if !ok {
-		t.Fatal("span should be present")
-	}
-
-	if span["source"] != "test://schema.yammm" {
-		t.Errorf("span.source = %v; want 'test://schema.yammm'", span["source"])
-	}
-
-	start := span["start"].(map[string]any)
-	if start["line"] != float64(10) {
-		t.Errorf("start.line = %v; want 10", start["line"])
-	}
-	if start["column"] != float64(5) {
-		t.Errorf("start.column = %v; want 5", start["column"])
-	}
-	if start["byte"] != float64(150) {
-		t.Errorf("start.byte = %v; want 150", start["byte"])
-	}
-
-	end := span["end"].(map[string]any)
-	if end["line"] != float64(10) {
-		t.Errorf("end.line = %v; want 10", end["line"])
-	}
-	if end["column"] != float64(15) {
-		t.Errorf("end.column = %v; want 15", end["column"])
-	}
-	if end["byte"] != float64(160) {
-		t.Errorf("end.byte = %v; want 160", end["byte"])
-	}
+	yammmtest.GoldenJSON(t, "format_issue_json_with_span", parsed)
 }
 
 // TestFormatIssueJSON_ByteOffsetEncoding verifies's three-case table

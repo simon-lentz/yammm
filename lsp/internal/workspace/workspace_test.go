@@ -14,6 +14,7 @@ import (
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
@@ -2089,46 +2090,14 @@ func TestRemapPathToURI_NonexistentPathWithDotDot(t *testing.T) {
 }
 
 // notificationCollector is a test helper that records LSP notifications.
-type notificationCollector struct {
-	mu      sync.Mutex
-	entries []notificationEntry
-}
-
-type notificationEntry struct {
-	Method string
-	Params any
-}
-
-func (c *notificationCollector) notify(method string, params any) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.entries = append(c.entries, notificationEntry{Method: method, Params: params})
-}
-
-func (c *notificationCollector) diagnosticsFor(uri string) []protocol.Diagnostic {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for i := len(c.entries) - 1; i >= 0; i-- {
-		e := c.entries[i]
-		if e.Method != protocol.ServerTextDocumentPublishDiagnostics {
-			continue
-		}
-		p, ok := e.Params.(protocol.PublishDiagnosticsParams)
-		if ok && p.URI == uri {
-			return p.Diagnostics
-		}
-	}
-	return nil
-}
 
 func TestPublishDiagnostics_HashDedup_SuppressesIdentical(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	collector := &notificationCollector{}
-	ws.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	ws.SetNotifier(collector.Notify)
 	uri := "file:///test.yammm"
 
 	diags := []protocol.Diagnostic{
@@ -2137,11 +2106,11 @@ func TestPublishDiagnostics_HashDedup_SuppressesIdentical(t *testing.T) {
 
 	// First publish goes through.
 	ws.publishDiagnostics(uri, nil, diags)
-	require.Len(t, collector.entries, 1, "after first publish")
+	require.Len(t, collector.Entries(), 1, "after first publish")
 
 	// Second identical publish is suppressed.
 	ws.publishDiagnostics(uri, nil, diags)
-	assert.Len(t, collector.entries, 1, "identical should be suppressed")
+	assert.Len(t, collector.Entries(), 1, "identical should be suppressed")
 }
 
 func TestPublishDiagnostics_HashDedup_AllowsDifferent(t *testing.T) {
@@ -2149,8 +2118,8 @@ func TestPublishDiagnostics_HashDedup_AllowsDifferent(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	collector := &notificationCollector{}
-	ws.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	ws.SetNotifier(collector.Notify)
 	uri := "file:///test.yammm"
 
 	diagsA := []protocol.Diagnostic{
@@ -2163,7 +2132,7 @@ func TestPublishDiagnostics_HashDedup_AllowsDifferent(t *testing.T) {
 	ws.publishDiagnostics(uri, nil, diagsA)
 	ws.publishDiagnostics(uri, nil, diagsB)
 
-	assert.Len(t, collector.entries, 2, "different diagnostics should both be published")
+	assert.Len(t, collector.Entries(), 2, "different diagnostics should both be published")
 }
 
 func TestPublishDiagnostics_HashDedup_EmptyDiagnostics(t *testing.T) {
@@ -2171,15 +2140,15 @@ func TestPublishDiagnostics_HashDedup_EmptyDiagnostics(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	collector := &notificationCollector{}
-	ws.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	ws.SetNotifier(collector.Notify)
 	uri := "file:///test.yammm"
 
 	// Two successive empty publishes: first goes through, second is suppressed.
 	ws.publishDiagnostics(uri, nil, nil)
 	ws.publishDiagnostics(uri, nil, []protocol.Diagnostic{})
 
-	assert.Len(t, collector.entries, 1, "empty diagnostics should be deduped")
+	assert.Len(t, collector.Entries(), 1, "empty diagnostics should be deduped")
 }
 
 func TestPublishDiagnostics_ClearHashOnClose_AllowsFreshPublish(t *testing.T) {
@@ -2187,8 +2156,8 @@ func TestPublishDiagnostics_ClearHashOnClose_AllowsFreshPublish(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	collector := &notificationCollector{}
-	ws.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	ws.SetNotifier(collector.Notify)
 	uri := "file:///test.yammm"
 
 	diags := []protocol.Diagnostic{
@@ -2204,7 +2173,7 @@ func TestPublishDiagnostics_ClearHashOnClose_AllowsFreshPublish(t *testing.T) {
 	// Same diagnostics after hash clear: should publish again.
 	ws.publishDiagnostics(uri, nil, diags)
 
-	assert.Len(t, collector.entries, 2, "after hash clear")
+	assert.Len(t, collector.Entries(), 2, "after hash clear")
 }
 
 func TestPublishDiagnostics_NilNotify_NoHash(t *testing.T) {
@@ -2677,8 +2646,8 @@ func TestMarkdownDocumentClosed_CleansUp(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	w.markdownDocumentOpened(uri, 1, "# Test")
 	w.markdownDocumentClosed(uri)
@@ -2692,8 +2661,8 @@ func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/close_diag.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	// Open markdown with syntax error to produce diagnostics.
 	content := "# Test\n\n```yammm\nnot valid schema!!!\n```\n"
@@ -2701,7 +2670,7 @@ func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 
 	// Verify non-empty diagnostics were published.
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	require.NotEmpty(t, diags, "precondition: diagnostics published for invalid content")
 
 	// Close — should publish empty diagnostics to clear editor.
@@ -2714,7 +2683,7 @@ func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
 	// Verify empty diagnostics notification was published.
 	// diagnosticsFor scans in reverse — the latest entry should be the clear notification
 	// with Diagnostics: []protocol.Diagnostic{} (non-nil empty slice per workspace.go:755-756).
-	finalDiags := collector.diagnosticsFor(uri)
+	finalDiags := collector.DiagnosticsFor(uri)
 	require.NotNil(t, finalDiags, "expected PublishDiagnostics notification after close")
 	assert.Empty(t, finalDiags, "expected empty diagnostics to clear editor squiggles")
 }
@@ -2724,8 +2693,8 @@ func TestAnalyzeMarkdownAndPublish_ProducesDiagnostics(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	// Content with a syntax error in the code block
 	content := "# Test\n\n```yammm\nnot valid schema!!!\n```\n"
@@ -2733,7 +2702,7 @@ func TestAnalyzeMarkdownAndPublish_ProducesDiagnostics(t *testing.T) {
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 
 	// Verify diagnostics were published
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	assert.NotEmpty(t, diags, "expected diagnostics for syntax error")
 
 	// Verify the snapshot has blocks
@@ -2748,8 +2717,8 @@ func TestAnalyzeMarkdownAndPublish_EmptyBlocks(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	// Markdown with no yammm blocks
 	content := "# Just prose\n\nNo code here.\n"
@@ -2767,14 +2736,14 @@ func TestAnalyzeMarkdownAndPublish_ImportRejection(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	content := "# Import Test\n\n```yammm\nschema \"import_test\"\n\nimport \"./sibling\" as s\n\ntype Foo {\n    id String primary\n}\n```\n"
 	w.markdownDocumentOpened(uri, 1, content)
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")
 
 	// Check that at least one diagnostic has E_IMPORT_NOT_ALLOWED code
@@ -2799,8 +2768,8 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlock(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/snippet.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	// A snippet block with no schema declaration — just a type definition
 	content := "# Snippet Example\n\n```yammm\ntype Foo {\n    id String primary\n    name String required\n}\n```\n"
@@ -2820,7 +2789,7 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlock(t *testing.T) {
 	assert.True(t, snap.Snapshots[0].Result.OK(), "snippet block should produce no errors, got: %v", snap.Snapshots[0].Result)
 
 	// Diagnostics should have no Fatal/Error entries
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	for _, d := range diags {
 		if d.Severity != nil {
 			assert.NotEqual(t, protocol.DiagnosticSeverityError, *d.Severity,
@@ -2853,8 +2822,8 @@ func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n```\n"
 	w.markdownDocumentOpened(uri, 1, content)
@@ -2893,8 +2862,8 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	content := "# Valid Schema\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
 	w.markdownDocumentOpened(uri, 1, content)
@@ -2911,7 +2880,7 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 	}
 
 	// Diagnostics should be empty for a valid schema
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	assert.Empty(t, diags, "expected no diagnostics for valid schema")
 }
 

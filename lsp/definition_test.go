@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 	"github.com/simon-lentz/yammm/lsp/internal/workspace"
 
 	"github.com/stretchr/testify/assert"
@@ -16,7 +17,7 @@ import (
 
 func TestHandleDefinition_NilUnit(t *testing.T) {
 	t.Parallel()
-	h := handleDefinition(&fakeResolver{unit: nil}, testLogger())
+	h := handleDefinition(&fakeResolver{unit: nil}, testutil.DiscardLogger())
 	var result any
 	err := callHandler(t, h, &protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
@@ -47,7 +48,7 @@ func TestHandleDefinition_WithUnit(t *testing.T) {
 		uriMap: map[string]string{
 			sourceKey: "file:///client/test.yammm",
 		},
-	}, testLogger())
+	}, testutil.DiscardLogger())
 
 	var result *protocol.Location
 	err := callHandler(t, h, &protocol.DefinitionParams{
@@ -87,7 +88,7 @@ func TestHandleDefinition_CrossSchemaImport(t *testing.T) {
 		uriMap: map[string]string{
 			foundationSourceID.String(): foundationURI,
 		},
-	}, testLogger())
+	}, testutil.DiscardLogger())
 
 	var result *protocol.Location
 	err = callHandler(t, h, &protocol.DefinitionParams{

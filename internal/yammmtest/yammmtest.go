@@ -70,3 +70,17 @@ func Diff(tb testing.TB, want, got any, opts ...cmp.Option) {
 		tb.Errorf("mismatch (-want +got):\n%s", d)
 	}
 }
+
+// AssertPanics runs fn and reports a test error unless it panicked.
+// Returns the recovered value for callers that assert on its content.
+func AssertPanics(tb testing.TB, fn func()) (recovered any) {
+	tb.Helper()
+	defer func() {
+		recovered = recover()
+		if recovered == nil {
+			tb.Errorf("expected panic, got none")
+		}
+	}()
+	fn()
+	return nil
+}

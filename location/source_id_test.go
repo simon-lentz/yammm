@@ -484,38 +484,6 @@ func TestMustCanonicalizePathForSourceID_PanicsOnNonExistent(t *testing.T) {
 	MustCanonicalizePathForSourceID("/nonexistent/path/12345/file.txt")
 }
 
-// TestCanonicalizePathForSourceID_UNCRejection verifies that UNC paths are rejected
-// for consistency with NewCanonicalPath and SourceIDFromAbsolutePath.
-func TestCanonicalizePathForSourceID_UNCRejection(t *testing.T) {
-	// Note: We can't easily test actual UNC paths without Windows infrastructure,
-	// but the UNC rejection logic is tested via canonicalizeAbsolutePath tests
-	// and NewCanonicalPath_UNCRejection. This test documents the expected behavior.
-	//
-	// The UNC check in CanonicalizePathForSourceID happens after filepath.EvalSymlinks,
-	// so we'd need a real UNC path that EvalSymlinks can resolve. Instead, we verify
-	// the check exists by examining the code structure and testing via other paths.
-
-	// Test that the error message format is correct when UNC is detected
-	// by testing SourceIDFromAbsolutePath which uses canonicalizeAbsolutePath
-	tests := []string{
-		"//server/share/file.txt",
-		"//server/share",
-	}
-
-	for _, path := range tests {
-		t.Run(path, func(t *testing.T) {
-			_, err := SourceIDFromAbsolutePath(path)
-			if err == nil {
-				t.Errorf("SourceIDFromAbsolutePath(%q) should reject UNC path", path)
-				return
-			}
-			if !errors.Is(err, ErrUNCPath) {
-				t.Errorf("expected ErrUNCPath, got: %v", err)
-			}
-		})
-	}
-}
-
 // TestNewSourceID_EmptyString documents that NewSourceID("") returns a zero-value
 // SourceID (both cp and synthetic fields are empty). This is because NewSourceID
 // bypasses validation. Use MustNewSourceID instead to catch empty identifiers.

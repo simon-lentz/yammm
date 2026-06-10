@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -668,25 +669,10 @@ func TestRenderer_CompleteOutput(t *testing.T) {
 		}).
 		Build()
 
-	output := r.FormatIssue(issue)
-
-	// Verify all components are present
-	expected := []string{
-		"src/schema.yammm:1:6",           // Relativized location
-		"error",                          // Severity
-		"E_TYPE_COLLISION",               // Code
-		"type 'User' is already defined", // Message
-		"hint: consider renaming",        // Hint
-		"note: first definition here",    // Related
-		"type User {",                    // Source excerpt
-		"^^^^",                           // Underline
-	}
-
-	for _, s := range expected {
-		if !strings.Contains(output, s) {
-			t.Errorf("output should contain %q, got:\n%s", s, output)
-		}
-	}
+	// The golden pins the complete rendered form: relativized location,
+	// severity, code, message, hint, related note, source excerpt, and the
+	// underline — including their exact layout and ordering.
+	yammmtest.Golden(t, "renderer_complete_output", []byte(r.FormatIssue(issue)))
 }
 
 // TestRenderer_WriteLocation_SourceNameOnly verifies that issues with only

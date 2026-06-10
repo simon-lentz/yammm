@@ -3,6 +3,7 @@ package diag
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -307,52 +308,23 @@ func TestNewIssue_AllSeverities(t *testing.T) {
 // TestNewIssue_PanicOnInvalidSeverity verifies that NewIssue panics when
 // given an out-of-range severity value. This enforces's guarantee
 // that IssueBuilder produces only valid issues.
-func TestNewIssue_PanicOnInvalidSeverity(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("NewIssue with invalid severity should panic")
-		}
-	}()
-
-	NewIssue(Severity(255), E_SYNTAX, "test")
-}
-
-// TestNewIssue_PanicOnZeroCode verifies that NewIssue panics when
-// given a zero Code value. This enforces's guarantee
-// that IssueBuilder produces only valid issues.
-func TestNewIssue_PanicOnZeroCode(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("NewIssue with zero code should panic")
-		}
-	}()
-
-	NewIssue(Error, Code{}, "test")
-}
-
-// TestNewIssue_PanicOnEmptyMessage verifies that NewIssue panics when
-// given an empty message. This enforces's guarantee
-// that IssueBuilder produces only valid issues.
-func TestNewIssue_PanicOnEmptyMessage(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("NewIssue with empty message should panic")
-		}
-	}()
-
-	NewIssue(Error, E_SYNTAX, "")
-}
-
-// TestNewIssue_PanicOnSeverityJustAboveHint verifies the boundary case
-// where severity is just above the valid range (Hint + 1 = 5).
-func TestNewIssue_PanicOnSeverityJustAboveHint(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("NewIssue with severity > Hint should panic")
-		}
-	}()
-
-	NewIssue(Severity(5), E_SYNTAX, "test") // Hint = 4, so 5 is invalid
+// TestNewIssue_PanicsOnInvalidInput pins the constructor's guarantee that
+// IssueBuilder produces only valid issues: each invalid input class panics.
+func TestNewIssue_PanicsOnInvalidInput(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func()
+	}{
+		{"invalid severity", func() { NewIssue(Severity(255), E_SYNTAX, "test") }},
+		{"zero code", func() { NewIssue(Error, Code{}, "test") }},
+		{"empty message", func() { NewIssue(Error, E_SYNTAX, "") }},
+		{"severity just above Hint", func() { NewIssue(Severity(5), E_SYNTAX, "test") }}, // Hint = 4
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yammmtest.AssertPanics(t, tt.fn)
+		})
+	}
 }
 
 // TestFromIssue_ValidatesInput verifies that FromIssue panics on invalid issues.

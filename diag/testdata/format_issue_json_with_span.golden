@@ -1,0 +1,18 @@
+{
+  "code": "E_SYNTAX",
+  "message": "error",
+  "severity": "error",
+  "span": {
+    "end": {
+      "byte": 160,
+      "column": 15,
+      "line": 10
+    },
+    "source": "test://schema.yammm",
+    "start": {
+      "byte": 150,
+      "column": 5,
+      "line": 10
+    }
+  }
+}

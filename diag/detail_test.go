@@ -81,135 +81,35 @@ func TestDetailKeyConstants_Uniqueness(t *testing.T) {
 	}
 }
 
-func TestExpectedGot(t *testing.T) {
-	details := ExpectedGot("string", "int")
-
-	if len(details) != 2 {
-		t.Fatalf("ExpectedGot returned %d details; want 2", len(details))
+// TestDetailPairBuilders covers every two-detail convenience constructor:
+// each returns exactly two details with its documented key pair in order.
+func TestDetailPairBuilders(t *testing.T) {
+	tests := []struct {
+		name            string
+		got             []Detail
+		wantKey0, want0 string
+		wantKey1, want1 string
+	}{
+		{"ExpectedGot", ExpectedGot("string", "int"), DetailKeyExpected, "string", DetailKeyGot, "int"},
+		{"TypeProp", TypeProp("Person", "name"), DetailKeyTypeName, "Person", DetailKeyPropertyName, "name"},
+		{"TypeRelation", TypeRelation("Person", "friends"), DetailKeyTypeName, "Person", DetailKeyRelationName, "friends"},
+		{"RelationField", RelationField("owns", "unknownField"), DetailKeyRelationName, "owns", DetailKeyField, "unknownField"},
+		{"TypeField", TypeField("Car", "invalidField"), DetailKeyTypeName, "Car", DetailKeyField, "invalidField"},
+		{"PathRelation", PathRelation("OwnedCars", "owned_cars"), DetailKeyRelationName, "OwnedCars", DetailKeyJSONField, "owned_cars"},
 	}
 
-	if details[0].Key != DetailKeyExpected {
-		t.Errorf("first detail key = %q; want %q", details[0].Key, DetailKeyExpected)
-	}
-	if details[0].Value != "string" {
-		t.Errorf("first detail value = %q; want %q", details[0].Value, "string")
-	}
-
-	if details[1].Key != DetailKeyGot {
-		t.Errorf("second detail key = %q; want %q", details[1].Key, DetailKeyGot)
-	}
-	if details[1].Value != "int" {
-		t.Errorf("second detail value = %q; want %q", details[1].Value, "int")
-	}
-}
-
-func TestTypeProp(t *testing.T) {
-	details := TypeProp("Person", "name")
-
-	if len(details) != 2 {
-		t.Fatalf("TypeProp returned %d details; want 2", len(details))
-	}
-
-	if details[0].Key != DetailKeyTypeName {
-		t.Errorf("first detail key = %q; want %q", details[0].Key, DetailKeyTypeName)
-	}
-	if details[0].Value != "Person" {
-		t.Errorf("first detail value = %q; want %q", details[0].Value, "Person")
-	}
-
-	if details[1].Key != DetailKeyPropertyName {
-		t.Errorf("second detail key = %q; want %q", details[1].Key, DetailKeyPropertyName)
-	}
-	if details[1].Value != "name" {
-		t.Errorf("second detail value = %q; want %q", details[1].Value, "name")
-	}
-}
-
-func TestTypeRelation(t *testing.T) {
-	details := TypeRelation("Person", "friends")
-
-	if len(details) != 2 {
-		t.Fatalf("TypeRelation returned %d details; want 2", len(details))
-	}
-
-	if details[0].Key != DetailKeyTypeName {
-		t.Errorf("first detail key = %q; want %q", details[0].Key, DetailKeyTypeName)
-	}
-	if details[0].Value != "Person" {
-		t.Errorf("first detail value = %q; want %q", details[0].Value, "Person")
-	}
-
-	if details[1].Key != DetailKeyRelationName {
-		t.Errorf("second detail key = %q; want %q", details[1].Key, DetailKeyRelationName)
-	}
-	if details[1].Value != "friends" {
-		t.Errorf("second detail value = %q; want %q", details[1].Value, "friends")
-	}
-}
-
-func TestRelationField(t *testing.T) {
-	details := RelationField("owns", "unknownField")
-
-	if len(details) != 2 {
-		t.Fatalf("RelationField returned %d details; want 2", len(details))
-	}
-
-	if details[0].Key != DetailKeyRelationName {
-		t.Errorf("first detail key = %q; want %q", details[0].Key, DetailKeyRelationName)
-	}
-	if details[0].Value != "owns" {
-		t.Errorf("first detail value = %q; want %q", details[0].Value, "owns")
-	}
-
-	if details[1].Key != DetailKeyField {
-		t.Errorf("second detail key = %q; want %q", details[1].Key, DetailKeyField)
-	}
-	if details[1].Value != "unknownField" {
-		t.Errorf("second detail value = %q; want %q", details[1].Value, "unknownField")
-	}
-}
-
-func TestTypeField(t *testing.T) {
-	details := TypeField("Car", "invalidField")
-
-	if len(details) != 2 {
-		t.Fatalf("TypeField returned %d details; want 2", len(details))
-	}
-
-	if details[0].Key != DetailKeyTypeName {
-		t.Errorf("first detail key = %q; want %q", details[0].Key, DetailKeyTypeName)
-	}
-	if details[0].Value != "Car" {
-		t.Errorf("first detail value = %q; want %q", details[0].Value, "Car")
-	}
-
-	if details[1].Key != DetailKeyField {
-		t.Errorf("second detail key = %q; want %q", details[1].Key, DetailKeyField)
-	}
-	if details[1].Value != "invalidField" {
-		t.Errorf("second detail value = %q; want %q", details[1].Value, "invalidField")
-	}
-}
-
-func TestPathRelation(t *testing.T) {
-	details := PathRelation("OwnedCars", "owned_cars")
-
-	if len(details) != 2 {
-		t.Fatalf("PathRelation returned %d details; want 2", len(details))
-	}
-
-	if details[0].Key != DetailKeyRelationName {
-		t.Errorf("first detail key = %q; want %q", details[0].Key, DetailKeyRelationName)
-	}
-	if details[0].Value != "OwnedCars" {
-		t.Errorf("first detail value = %q; want %q", details[0].Value, "OwnedCars")
-	}
-
-	if details[1].Key != DetailKeyJSONField {
-		t.Errorf("second detail key = %q; want %q", details[1].Key, DetailKeyJSONField)
-	}
-	if details[1].Value != "owned_cars" {
-		t.Errorf("second detail value = %q; want %q", details[1].Value, "owned_cars")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.got) != 2 {
+				t.Fatalf("%s returned %d details; want 2", tt.name, len(tt.got))
+			}
+			if tt.got[0].Key != tt.wantKey0 || tt.got[0].Value != tt.want0 {
+				t.Errorf("first detail = {%q, %q}; want {%q, %q}", tt.got[0].Key, tt.got[0].Value, tt.wantKey0, tt.want0)
+			}
+			if tt.got[1].Key != tt.wantKey1 || tt.got[1].Value != tt.want1 {
+				t.Errorf("second detail = {%q, %q}; want {%q, %q}", tt.got[1].Key, tt.got[1].Value, tt.wantKey1, tt.want1)
+			}
+		})
 	}
 }
 

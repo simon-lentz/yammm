@@ -1,0 +1,26 @@
+{
+  "code": "E_SYNTAX",
+  "context": "schema_load",
+  "counts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "issues": [
+    {
+      "code": "E_SYNTAX",
+      "details": {
+        "property": "bar",
+        "type": "Foo"
+      },
+      "hint": "fix it",
+      "location": {
+        "column": 4,
+        "line": 10,
+        "source": "test://schema.yammm"
+      },
+      "message": "full-shape issue",
+      "path": "$.Foo[0].bar",
+      "severity": "error"
+    }
+  ]
+}

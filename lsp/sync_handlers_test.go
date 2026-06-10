@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,7 +15,7 @@ import (
 func TestHandleDidOpen_CallsOpenDocument(t *testing.T) {
 	t.Parallel()
 	dm := &fakeDocManager{}
-	h := handleDidOpen(dm, testLogger())
+	h := handleDidOpen(dm, testutil.DiscardLogger())
 	err := callHandler(t, h, &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
 			URI:     "file:///test.yammm",
@@ -29,7 +30,7 @@ func TestHandleDidOpen_CallsOpenDocument(t *testing.T) {
 func TestHandleDidChange_ExtractsFullSyncText(t *testing.T) {
 	t.Parallel()
 	dm := &fakeDocManager{}
-	h := handleDidChange(dm, testLogger())
+	h := handleDidChange(dm, testutil.DiscardLogger())
 	err := callHandler(t, h, &protocol.DidChangeTextDocumentParams{
 		TextDocument: protocol.VersionedTextDocumentIdentifier{
 			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: "file:///test.yammm"},
@@ -44,7 +45,7 @@ func TestHandleDidChange_ExtractsFullSyncText(t *testing.T) {
 func TestHandleDidClose_CallsCloseDocument(t *testing.T) {
 	t.Parallel()
 	dm := &fakeDocManager{}
-	h := handleDidClose(dm, testLogger())
+	h := handleDidClose(dm, testutil.DiscardLogger())
 	err := callHandler(t, h, &protocol.DidCloseTextDocumentParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.yammm"},
 	}, nil)

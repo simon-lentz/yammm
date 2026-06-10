@@ -3,39 +3,26 @@ package gogen_test
 import (
 	"bytes"
 	"context"
-	"flag"
 	"go/ast"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/adapter/gogen"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-var update = flag.Bool("update", false, "update golden files")
-
-// checkGolden compares got against testdata/<name>.go.golden, updating it under -update.
+// checkGolden compares got against testdata/<name>.go.golden via the shared
+// yammmtest flow (one repo-wide -update flag; the .go.golden suffix marks the
+// content as generated Go source).
 func checkGolden(t *testing.T, name string, got []byte) {
 	t.Helper()
-	golden := filepath.Join("testdata", name+".go.golden")
-	if *update {
-		if err := os.WriteFile(golden, got, 0o644); err != nil { //nolint:gosec // golden test fixture, not sensitive
-			t.Fatalf("write golden: %v", err)
-		}
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatalf("read golden (run with -update to create): %v", err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Errorf("output mismatch for %s.\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
-	}
+	yammmtest.Golden(t, name+".go", got)
 }
 
 func TestSerializedModel(t *testing.T) {
