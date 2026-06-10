@@ -1,0 +1,16 @@
+CREATE CONSTRAINT basic_test__Entity_id_unique IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.id IS UNIQUE
+CREATE CONSTRAINT basic_test__Entity_id_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.id IS NOT NULL
+CREATE CONSTRAINT basic_test__Entity_name_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.name IS NOT NULL
+CREATE CONSTRAINT basic_test__Entity_count_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.count IS NOT NULL
+CREATE CONSTRAINT basic_test__Entity_active_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.active IS NOT NULL
+CREATE CONSTRAINT basic_test__Entity_created_at_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.created_at IS NOT NULL
+CREATE CONSTRAINT basic_test__Entity_id_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.id IS :: STRING
+CREATE CONSTRAINT basic_test__Entity_name_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.name IS :: STRING
+CREATE CONSTRAINT basic_test__Entity_description_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.description IS :: STRING
+CREATE CONSTRAINT basic_test__Entity_count_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.count IS :: INTEGER
+CREATE CONSTRAINT basic_test__Entity_score_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.score IS :: FLOAT
+CREATE CONSTRAINT basic_test__Entity_active_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.active IS :: BOOLEAN
+CREATE CONSTRAINT basic_test__Entity_created_at_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.created_at IS :: ZONED DATETIME
+CREATE CONSTRAINT basic_test__Entity_birth_date_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.birth_date IS :: DATE
+CREATE CONSTRAINT basic_test__Entity_ref_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.ref IS :: STRING
+CREATE CONSTRAINT basic_test__Entity_embedding_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.embedding IS :: LIST<FLOAT NOT NULL>

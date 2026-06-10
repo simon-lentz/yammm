@@ -1,0 +1,6 @@
+CREATE CONSTRAINT enum_pattern_test__Record_id_unique IF NOT EXISTS FOR (n:enum_pattern_test__Record) REQUIRE n.id IS UNIQUE
+CREATE CONSTRAINT enum_pattern_test__Record_id_not_null IF NOT EXISTS FOR (n:enum_pattern_test__Record) REQUIRE n.id IS NOT NULL
+CREATE CONSTRAINT enum_pattern_test__Record_status_not_null IF NOT EXISTS FOR (n:enum_pattern_test__Record) REQUIRE n.status IS NOT NULL
+CREATE CONSTRAINT enum_pattern_test__Record_id_type IF NOT EXISTS FOR (n:enum_pattern_test__Record) REQUIRE n.id IS :: STRING
+CREATE CONSTRAINT enum_pattern_test__Record_status_type IF NOT EXISTS FOR (n:enum_pattern_test__Record) REQUIRE n.status IS :: STRING
+CREATE CONSTRAINT enum_pattern_test__Record_email_type IF NOT EXISTS FOR (n:enum_pattern_test__Record) REQUIRE n.email IS :: STRING

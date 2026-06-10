@@ -1,0 +1,11 @@
+schema "test"
+
+// Inferred from Neo4j database.
+// TODO: Replace String types with UUID, Pattern, or Enum where appropriate.
+// TODO: Review inferred relationship field names.
+// TODO: Add invariants if needed.
+
+type Record {
+    record_id String primary // TODO: verify type (could be UUID, Pattern, or Enum)
+    schema_id String primary // TODO: verify type (could be UUID, Pattern, or Enum)
+}

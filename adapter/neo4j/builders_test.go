@@ -8,78 +8,6 @@ import (
 const returnCountSuffix = "\nRETURN count(*) AS matched_rows"
 
 // -----------------------------------------------------------------------------
-// Smoke tests — each exported name returns a non-empty string of the expected
-// shape. Pins that the rename promoted the four previously-private builders
-// to public API without dropping anything at the signature level.
-// -----------------------------------------------------------------------------
-
-func TestBuildNodeMergeQuery_Smoke(t *testing.T) {
-	t.Parallel()
-	got := BuildNodeMergeQuery("Entity", []string{"id"}, MutableKeys)
-	if got == "" {
-		t.Fatal("expected non-empty string")
-	}
-	if !strings.Contains(got, "MERGE (n:Entity") {
-		t.Errorf("expected MERGE clause, got: %q", got)
-	}
-}
-
-func TestBuildBatchNodeMergeQuery_Smoke(t *testing.T) {
-	t.Parallel()
-	got := BuildBatchNodeMergeQuery("Entity", []string{"id"}, MutableKeys)
-	if got == "" {
-		t.Fatal("expected non-empty string")
-	}
-	if !strings.HasPrefix(got, "UNWIND $rows AS row\n") {
-		t.Errorf("expected UNWIND prefix, got: %q", got)
-	}
-	if !strings.Contains(got, "MERGE (n:Entity") {
-		t.Errorf("expected MERGE clause, got: %q", got)
-	}
-}
-
-func TestBuildRelationshipMergeQuery_Smoke(t *testing.T) {
-	t.Parallel()
-	got := BuildRelationshipMergeQuery(
-		"A", []string{"x"},
-		"KNOWS",
-		"B", []string{"y"},
-		false,
-	)
-	if got == "" {
-		t.Fatal("expected non-empty string")
-	}
-	if !strings.Contains(got, "MATCH (from:A") {
-		t.Errorf("expected MATCH from clause, got: %q", got)
-	}
-	if !strings.Contains(got, "MATCH (to:B") {
-		t.Errorf("expected MATCH to clause, got: %q", got)
-	}
-	if !strings.Contains(got, "MERGE (from)-[r:KNOWS]->(to)") {
-		t.Errorf("expected MERGE relationship, got: %q", got)
-	}
-}
-
-func TestBuildBatchRelationshipMergeQuery_Smoke(t *testing.T) {
-	t.Parallel()
-	got := BuildBatchRelationshipMergeQuery(
-		"A", []string{"x"},
-		"KNOWS",
-		"B", []string{"y"},
-		false,
-	)
-	if got == "" {
-		t.Fatal("expected non-empty string")
-	}
-	if !strings.HasPrefix(got, "UNWIND $rows AS row\n") {
-		t.Errorf("expected UNWIND prefix, got: %q", got)
-	}
-	if !strings.Contains(got, "MERGE (from)-[r:KNOWS]->(to)") {
-		t.Errorf("expected MERGE relationship, got: %q", got)
-	}
-}
-
-// -----------------------------------------------------------------------------
 // KeyMutability branch-coverage tests — two tests per node builder, pinned via
 // golden-string equality. A future implementation change that alters the
 // emitted Cypher surface (e.g., accidental switch from SET to SET DISTINCT,
@@ -331,22 +259,5 @@ func TestBuildBatchRelationshipMergeQuery_CompositeKeys(t *testing.T) {
 		"RETURN count(*) AS matched_rows"
 	if got != want {
 		t.Errorf("composite keys mismatch\n got: %q\nwant: %q", got, want)
-	}
-}
-
-// -----------------------------------------------------------------------------
-// KeyMutability enum value pins — catches any accidental renumbering of the
-// iota constants. The enum's values aren't part of the serialized wire format
-// (they only drive an in-memory switch), but pinning them prevents a future
-// refactor from silently flipping the default branch.
-// -----------------------------------------------------------------------------
-
-func TestKeyMutability_Values(t *testing.T) {
-	t.Parallel()
-	if MutableKeys != 0 {
-		t.Errorf("MutableKeys: expected 0, got %d", MutableKeys)
-	}
-	if ImmutableKeys != 1 {
-		t.Errorf("ImmutableKeys: expected 1, got %d", ImmutableKeys)
 	}
 }

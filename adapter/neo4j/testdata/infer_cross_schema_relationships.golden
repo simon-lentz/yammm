@@ -1,0 +1,13 @@
+schema "catalog"
+
+import "geo"
+
+// Inferred from Neo4j database.
+// TODO: Replace String types with UUID, Pattern, or Enum where appropriate.
+// TODO: Review inferred relationship field names.
+// TODO: Add invariants if needed.
+
+type Publisher {
+    id String primary // TODO: verify type (could be UUID, Pattern, or Enum)
+    --> IN_REGION geo.Region // TODO: verify cross-schema reference
+}

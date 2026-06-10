@@ -1,0 +1,7 @@
+CREATE CONSTRAINT abstract_test__Widget_id_code_unique IF NOT EXISTS FOR (n:abstract_test__Widget) REQUIRE (n.id, n.code) IS UNIQUE
+CREATE CONSTRAINT abstract_test__Widget_id_not_null IF NOT EXISTS FOR (n:abstract_test__Widget) REQUIRE n.id IS NOT NULL
+CREATE CONSTRAINT abstract_test__Widget_code_not_null IF NOT EXISTS FOR (n:abstract_test__Widget) REQUIRE n.code IS NOT NULL
+CREATE CONSTRAINT abstract_test__Widget_name_not_null IF NOT EXISTS FOR (n:abstract_test__Widget) REQUIRE n.name IS NOT NULL
+CREATE CONSTRAINT abstract_test__Widget_id_type IF NOT EXISTS FOR (n:abstract_test__Widget) REQUIRE n.id IS :: STRING
+CREATE CONSTRAINT abstract_test__Widget_code_type IF NOT EXISTS FOR (n:abstract_test__Widget) REQUIRE n.code IS :: STRING
+CREATE CONSTRAINT abstract_test__Widget_name_type IF NOT EXISTS FOR (n:abstract_test__Widget) REQUIRE n.name IS :: STRING

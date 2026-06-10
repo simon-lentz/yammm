@@ -1,0 +1,13 @@
+CREATE CONSTRAINT list_test__Entity_id_unique IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.id IS UNIQUE
+CREATE CONSTRAINT list_test__Entity_id_not_null IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.id IS NOT NULL
+CREATE CONSTRAINT list_test__Entity_name_not_null IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.name IS NOT NULL
+CREATE CONSTRAINT list_test__Entity_active_not_null IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.active IS NOT NULL
+CREATE CONSTRAINT list_test__Entity_tags_type IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.tags IS :: LIST<STRING NOT NULL>
+CREATE CONSTRAINT list_test__Entity_scores_type IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.scores IS :: LIST<INTEGER NOT NULL>
+CREATE CONSTRAINT list_test__Entity_ratios_type IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.ratios IS :: LIST<FLOAT NOT NULL>
+CREATE CONSTRAINT list_test__Entity_flags_type IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.flags IS :: LIST<BOOLEAN NOT NULL>
+CREATE CONSTRAINT list_test__Entity_times_type IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.times IS :: LIST<ZONED DATETIME NOT NULL>
+CREATE CONSTRAINT list_test__Entity_dates_type IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.dates IS :: LIST<DATE NOT NULL>
+CREATE CONSTRAINT list_test__Entity_id_type IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.id IS :: STRING
+CREATE CONSTRAINT list_test__Entity_name_type IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.name IS :: STRING
+CREATE CONSTRAINT list_test__Entity_active_type IF NOT EXISTS FOR (n:list_test__Entity) REQUIRE n.active IS :: BOOLEAN

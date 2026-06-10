@@ -27,6 +27,36 @@ func loadSchemaAndValidator(t *testing.T, name string) (*schema.Schema, *instanc
 	return s, instance.NewValidator(s)
 }
 
+// setupWrite loads a fixture and prepares the full write-path harness:
+// a default adapter, the sealed schema, its validator, and the graph shape.
+func setupWrite(t *testing.T, fixture string) (*Adapter, *schema.Schema, *instance.Validator, *GraphShape) {
+	t.Helper()
+	s, v := loadSchemaAndValidator(t, fixture)
+	a := New()
+	shape, result := a.ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatalf("ShapeForSchema(%s): %v", fixture, err)
+	}
+	return a, s, v, shape
+}
+
+// collidingSchema builds a schema whose two type names sanitize to the same
+// Neo4j label. The DSL cannot express this (type names are UC_WORD), but
+// [schema.NewBuilder] does not restrict name characters, so programmatically
+// built schemas can collide and the label-collision detector must catch them.
+func collidingSchema(t *testing.T) *schema.Schema {
+	t.Helper()
+	s, result := schema.NewBuilder().
+		WithName("collide").
+		AddType("Foo-Bar").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
+		AddType("Foo_Bar").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
+		Build()
+	if err := result.Err(); err != nil {
+		t.Fatalf("build colliding schema: %v", err)
+	}
+	return s
+}
+
 // buildGraphResult validates instances and builds a graph.Snapshot.
 func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, instances map[string][]map[string]any) *graph.Snapshot {
 	t.Helper()

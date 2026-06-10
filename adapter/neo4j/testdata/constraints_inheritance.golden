@@ -1,0 +1,9 @@
+CREATE CONSTRAINT inherit_test__Entity_id_unique IF NOT EXISTS FOR (n:inherit_test__Entity) REQUIRE n.id IS UNIQUE
+CREATE CONSTRAINT inherit_test__Entity_id_not_null IF NOT EXISTS FOR (n:inherit_test__Entity) REQUIRE n.id IS NOT NULL
+CREATE CONSTRAINT inherit_test__Entity_name_not_null IF NOT EXISTS FOR (n:inherit_test__Entity) REQUIRE n.name IS NOT NULL
+CREATE CONSTRAINT inherit_test__Entity_run_id_not_null IF NOT EXISTS FOR (n:inherit_test__Entity) REQUIRE n.run_id IS NOT NULL
+CREATE CONSTRAINT inherit_test__Entity_source_fetched_at_not_null IF NOT EXISTS FOR (n:inherit_test__Entity) REQUIRE n.source_fetched_at IS NOT NULL
+CREATE CONSTRAINT inherit_test__Entity_id_type IF NOT EXISTS FOR (n:inherit_test__Entity) REQUIRE n.id IS :: STRING
+CREATE CONSTRAINT inherit_test__Entity_name_type IF NOT EXISTS FOR (n:inherit_test__Entity) REQUIRE n.name IS :: STRING
+CREATE CONSTRAINT inherit_test__Entity_run_id_type IF NOT EXISTS FOR (n:inherit_test__Entity) REQUIRE n.run_id IS :: STRING
+CREATE CONSTRAINT inherit_test__Entity_source_fetched_at_type IF NOT EXISTS FOR (n:inherit_test__Entity) REQUIRE n.source_fetched_at IS :: ZONED DATETIME

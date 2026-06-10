@@ -1,0 +1,8 @@
+CREATE CONSTRAINT composite_test__Record_schema_id_record_id_unique IF NOT EXISTS FOR (n:composite_test__Record) REQUIRE (n.schema_id, n.record_id) IS UNIQUE
+CREATE CONSTRAINT composite_test__Record_schema_id_not_null IF NOT EXISTS FOR (n:composite_test__Record) REQUIRE n.schema_id IS NOT NULL
+CREATE CONSTRAINT composite_test__Record_record_id_not_null IF NOT EXISTS FOR (n:composite_test__Record) REQUIRE n.record_id IS NOT NULL
+CREATE CONSTRAINT composite_test__Record_name_not_null IF NOT EXISTS FOR (n:composite_test__Record) REQUIRE n.name IS NOT NULL
+CREATE CONSTRAINT composite_test__Record_schema_id_type IF NOT EXISTS FOR (n:composite_test__Record) REQUIRE n.schema_id IS :: STRING
+CREATE CONSTRAINT composite_test__Record_record_id_type IF NOT EXISTS FOR (n:composite_test__Record) REQUIRE n.record_id IS :: STRING
+CREATE CONSTRAINT composite_test__Record_name_type IF NOT EXISTS FOR (n:composite_test__Record) REQUIRE n.name IS :: STRING
+CREATE CONSTRAINT composite_test__Record_value_type IF NOT EXISTS FOR (n:composite_test__Record) REQUIRE n.value IS :: FLOAT
