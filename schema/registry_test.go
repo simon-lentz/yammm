@@ -413,7 +413,7 @@ func TestRegistry_Register_IdempotenceDoesNotWeakenNameCollision(t *testing.T) {
 		"name collisions must continue to fire DuplicateName, not DuplicateSourceID")
 }
 
-// --- Benchmarks (PR-7) ---
+// --- Shared-registry benchmarks ---
 //
 // Four benchmarks measure the cost of Register across two dimensions:
 // schema size (tiny vs synthetic-large) and path (fresh registration vs

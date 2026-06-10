@@ -1158,11 +1158,11 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip pins the §6 fidelity
-// fix: edge properties declared on a forward reference to an absent target
-// must survive Marshal → Load intact. Pre-PR-6 behavior silently dropped
-// these at graph.go:825-827 and at the unresolvedWire layer; this test
-// regresses on both failure modes.
+// TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip pins unresolved-edge
+// property fidelity: edge properties declared on a forward reference to an
+// absent target must survive Marshal → Load intact. A prior implementation
+// silently dropped these both in the graph's unresolved-edge bookkeeping and
+// at the unresolvedWire layer; this test regresses on both failure modes.
 func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 	s := testSchema(t)
 	// Person with EMPLOYER edge to non-existent Company c99, carrying
@@ -1210,8 +1210,9 @@ func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 // TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties pins wire-format
 // parity: an edge with identical property shape survives round-trip
 // regardless of whether it resolves (target present) or stays unresolved
-// (target absent). This is the high-level invariant the §6 golden-bytes
-// parity test exists to pin at the serialization-bytes layer.
+// (target absent). This is the high-level invariant that
+// [TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes] pins at the
+// serialization-bytes layer.
 func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 	s := testSchema(t)
 

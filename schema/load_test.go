@@ -1626,7 +1626,7 @@ type Order {
 	assert.True(t, found, "expected E_UNKNOWN_PROPERTY for nonexistent on LineItem")
 }
 
-// --- Shared-Registry cross-Load tests (PR-7) ---
+// --- Shared-Registry cross-Load tests ---
 
 // writeSharedRegistryFixtures sets up a tempdir with:
 //   - common.yammm — a leaf schema shared as a transitive import

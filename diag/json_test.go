@@ -99,8 +99,9 @@ func TestFormatIssueJSON_WithSpan(t *testing.T) {
 	yammmtest.GoldenJSON(t, "format_issue_json_with_span", parsed)
 }
 
-// TestFormatIssueJSON_ByteOffsetEncoding verifies's three-case table
-// for byte offset encoding.
+// TestFormatIssueJSON_ByteOffsetEncoding verifies the three-case byte-offset
+// encoding contract: unknown (-1) offsets are omitted from the JSON, while
+// zero and positive offsets are emitted as-is.
 //
 // Each test case uses consistent byte offsets for both start and end positions
 // to ensure clean test vectors. The end byte is computed to stay in the same

@@ -305,9 +305,6 @@ func TestNewIssue_AllSeverities(t *testing.T) {
 	}
 }
 
-// TestNewIssue_PanicOnInvalidSeverity verifies that NewIssue panics when
-// given an out-of-range severity value. This enforces's guarantee
-// that IssueBuilder produces only valid issues.
 // TestNewIssue_PanicsOnInvalidInput pins the constructor's guarantee that
 // IssueBuilder produces only valid issues: each invalid input class panics.
 func TestNewIssue_PanicsOnInvalidInput(t *testing.T) {

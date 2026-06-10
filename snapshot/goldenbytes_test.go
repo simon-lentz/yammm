@@ -49,8 +49,8 @@ func loadFixture(t *testing.T) fixtureFile {
 	return ff
 }
 
-// TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes is the §6 resolved-
-// vs-unresolved wire-format parity test. For each edge in the committed
+// TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes pins resolved-
+// vs-unresolved wire-format parity for edge properties. For each edge in the committed
 // fixture, it builds two snapshots — one where the edge resolves (target
 // present, Edge.Properties() path) and one where the edge remains
 // unresolved (target absent, UnresolvedEdge.Properties() path) — marshals

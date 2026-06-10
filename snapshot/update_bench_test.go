@@ -169,7 +169,7 @@ func BenchmarkUpdateMetadataRatio(b *testing.B) {
 // faster than Load + Marshal on a 20 MB input. Median of 5 samples per
 // path; runtime.GC between samples to damp CI-runner noise.
 //
-// Threshold rationale (per §3): 3× is the floor below which the
+// Threshold rationale: 3× is the floor below which the
 // primitive stops being interesting. Target on M2-class hardware is
 // ~8-10×, on typical CI runners ~6-8×; a drop below 3× signals a
 // regression that operator-facing documentation (the ~10% cost claim)

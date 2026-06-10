@@ -887,7 +887,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 		return false, nil
 	}
 
-	// Cross-Load short-circuit (PR-7): derive the candidate SourceIDs without
+	// Cross-Load short-circuit: derive the candidate SourceIDs without
 	// reading the import file, then check the within-Load cache and the
 	// shared Registry. If either holds the schema, reuse the existing pointer
 	// and skip the read + parse + compile + register pipeline entirely.
