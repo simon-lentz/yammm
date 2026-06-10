@@ -1899,7 +1899,7 @@ func Test_documentOpened_CRLFNormalization(t *testing.T) {
 	doc := ws.GetDocumentSnapshot(uri)
 	require.NotNil(t, doc, "document not found after open")
 
-	assert.False(t, strings.Contains(doc.Text, "\r"), "stored text still contains CR; want CRLF normalized to LF")
+	assert.NotContains(t, doc.Text, "\r", "stored text still contains CR; want CRLF normalized to LF")
 
 	expectedLines := 4 // "type Person {\n\tname string\n}\n" + trailing empty
 	actualLines := len(strings.Split(doc.Text, "\n"))
@@ -1928,7 +1928,7 @@ func TestDocumentChanged_CRLFNormalization(t *testing.T) {
 	doc := ws.GetDocumentSnapshot(uri)
 	require.NotNil(t, doc, "document not found after change")
 
-	assert.False(t, strings.Contains(doc.Text, "\r"), "stored text still contains CR after change; want CRLF normalized to LF")
+	assert.NotContains(t, doc.Text, "\r", "stored text still contains CR after change; want CRLF normalized to LF")
 }
 
 func TestDocumentChanged_VersionOrdering(t *testing.T) {

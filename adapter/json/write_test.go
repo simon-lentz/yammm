@@ -649,7 +649,7 @@ func TestWriteObject_WritesToBuffer(t *testing.T) {
 	n, err := adapter.WriteObject(context.Background(), &buf, result)
 	require.NoError(t, err)
 	assert.Equal(t, int64(buf.Len()), n)
-	assert.Greater(t, n, int64(0))
+	assert.Positive(t, n)
 
 	// Verify JSON is valid
 	var output map[string]any
@@ -999,7 +999,7 @@ func TestWriteObject_ShortWrite(t *testing.T) {
 	lw := &limitedWriter{limit: 5}
 	n, err := adapter.WriteObject(context.Background(), lw, result)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, io.ErrShortWrite)
+	require.ErrorIs(t, err, io.ErrShortWrite)
 	assert.Equal(t, int64(5), n)
 }
 

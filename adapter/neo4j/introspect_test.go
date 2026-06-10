@@ -79,7 +79,7 @@ func TestParseRemoteConstraints_MissingName(t *testing.T) {
 	}
 
 	_, err := ParseRemoteConstraints(records)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing constraint name")
 }
 

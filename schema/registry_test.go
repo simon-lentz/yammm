@@ -2,7 +2,6 @@ package schema_test
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 
@@ -378,7 +377,7 @@ func TestRegistry_Register_ContentDivergence(t *testing.T) {
 	assert.Contains(t, msg, "incoming=", "incoming hash must be named")
 	assert.Contains(t, msg, hash1, "existing structural hash must appear")
 	assert.Contains(t, msg, hash2, "incoming structural hash must appear")
-	assert.True(t, strings.Contains(msg, "sha256:"),
+	assert.Contains(t, msg, "sha256:",
 		"hash format prefix must be preserved so log consumers can parse it")
 
 	// The divergent registration must not mutate the registry.

@@ -106,7 +106,7 @@ func TestWriteTyped_Basic(t *testing.T) {
 	var buf bytes.Buffer
 	n, err := a.WriteTyped(context.Background(), &buf, valids, st)
 	require.NoError(t, err)
-	assert.Greater(t, n, int64(0))
+	assert.Positive(t, n)
 	assert.Contains(t, buf.String(), "e1")
 }
 

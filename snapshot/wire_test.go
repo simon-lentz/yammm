@@ -125,7 +125,7 @@ func TestWireFormat_TopLevelKeyOrder(t *testing.T) {
 				var skip json.RawMessage
 				require.NoError(t, dec.Decode(&skip), "skip value for key %q", key)
 			}
-			require.Equal(t, 4, len(seen), "top-level keys observed: %v", seen)
+			require.Len(t, seen, 4, "top-level keys observed: %v", seen)
 			require.Equal(t, want0, seen[0], "first key")
 			require.Equal(t, want1, seen[1], "second key")
 			require.Equal(t, want2, seen[2], "third key")
@@ -169,7 +169,7 @@ func TestWireFormat_BodySuffixContract(t *testing.T) {
 			require.NoError(t, dec.Decode(&headerRaw))
 
 			bodyOffset := dec.InputOffset()
-			require.Greater(t, bodyOffset, int64(0), "bodyOffset must be > 0")
+			require.Positive(t, bodyOffset, "bodyOffset must be > 0")
 			require.Less(t, bodyOffset, int64(len(data)), "bodyOffset must be < len(data)")
 			require.Equal(t, byte(','), data[bodyOffset],
 				"byte at bodyOffset must be ',', got %q (data near offset: %q)",

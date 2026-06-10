@@ -1091,7 +1091,7 @@ type Source {
 					}
 				}
 				require.NotNil(t, rel, "should have an association with properties")
-				assert.Equal(t, tt.wantRelProps, len(rel.Properties))
+				assert.Len(t, rel.Properties, tt.wantRelProps)
 			} else {
 				assert.False(t, result.OK(), "expected errors")
 			}
@@ -1446,7 +1446,7 @@ type Child extends A, B, {}`,
 					}
 				}
 				require.NotNil(t, childType)
-				assert.Equal(t, tt.wantCount, len(childType.Inherits))
+				assert.Len(t, childType.Inherits, tt.wantCount)
 			} else {
 				assert.False(t, result.OK(), "expected errors")
 			}

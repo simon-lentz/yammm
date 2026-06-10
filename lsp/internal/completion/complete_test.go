@@ -307,7 +307,7 @@ func TestTypeBodySnippets_NoCommasBeforeModifiers(t *testing.T) {
 		insertText := *item.InsertText
 
 		for _, pattern := range invalidPatterns {
-			assert.False(t, strings.Contains(insertText, pattern),
+			assert.NotContains(t, insertText, pattern,
 				"snippet %q contains invalid pattern %q; this would produce a comma in output",
 				item.Label, pattern)
 		}

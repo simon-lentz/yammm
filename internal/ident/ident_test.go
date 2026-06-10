@@ -248,12 +248,12 @@ func TestCamelTransforms_PreservesAcronymRuns(t *testing.T) {
 
 func TestToUpperCamel_EmptyString(t *testing.T) {
 	got := ident.ToUpperCamel("")
-	assert.Equal(t, "", got, "ToUpperCamel(\"\") should return empty string")
+	assert.Empty(t, got, "ToUpperCamel(\"\") should return empty string")
 }
 
 func TestToLowerCamel_EmptyString(t *testing.T) {
 	got := ident.ToLowerCamel("")
-	assert.Equal(t, "", got, "ToLowerCamel(\"\") should return empty string")
+	assert.Empty(t, got, "ToLowerCamel(\"\") should return empty string")
 }
 
 // TestCamelTransforms_LeadingDigits tests that identifiers starting with digits

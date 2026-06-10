@@ -740,7 +740,7 @@ func TestBuiltin_Len_Unsupported(t *testing.T) {
 	// Len on int should error
 	e := makeBuiltinCall(expr.NewLiteral(int64(42)), "Len", nil, nil)
 	_, err := ev.Evaluate(e, scope)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported")
 }
 
@@ -892,7 +892,7 @@ func TestBuiltin_match_NonStringReceiver(t *testing.T) {
 	}
 
 	_, err := ev.Evaluate(e, scope)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "string")
 }
 

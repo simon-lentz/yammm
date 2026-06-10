@@ -119,7 +119,7 @@ func TestParseObject(t *testing.T) {
 
 		result, diags := adapter.ParseObject(context.Background(), source, data)
 		require.True(t, diags.OK())
-		assert.Len(t, result, 0)
+		assert.Empty(t, result)
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
@@ -144,7 +144,7 @@ func TestParseObject(t *testing.T) {
 
 		result, diags := adapter.ParseObject(context.Background(), source, data)
 		require.False(t, diags.OK())
-		assert.Len(t, result, 0) // Invalid type should be skipped
+		assert.Empty(t, result) // Invalid type should be skipped
 	})
 
 	t.Run("qualified type name", func(t *testing.T) {
@@ -246,7 +246,7 @@ func TestParseArray(t *testing.T) {
 
 		result, diags := adapter.ParseArray(context.Background(), source, data)
 		require.True(t, diags.OK())
-		assert.Len(t, result, 0)
+		assert.Empty(t, result)
 	})
 
 	t.Run("expected array at root", func(t *testing.T) {
@@ -290,7 +290,7 @@ func TestParseTypedArray(t *testing.T) {
 
 		result, diags := adapter.ParseTypedArray(context.Background(), source, "Person", data)
 		require.True(t, diags.OK())
-		assert.Len(t, result, 0)
+		assert.Empty(t, result)
 	})
 }
 
@@ -459,7 +459,7 @@ func TestEdgeCases(t *testing.T) {
 
 		result, diags := adapter.ParseOne(context.Background(), source, "Test", data)
 		require.True(t, diags.OK())
-		assert.Equal(t, "", result.Properties["name"])
+		assert.Empty(t, result.Properties["name"])
 	})
 
 	t.Run("empty object as value", func(t *testing.T) {
@@ -471,7 +471,7 @@ func TestEdgeCases(t *testing.T) {
 
 		obj, ok := result.Properties["data"].(map[string]any)
 		require.True(t, ok)
-		assert.Len(t, obj, 0)
+		assert.Empty(t, obj)
 	})
 
 	t.Run("empty array as value", func(t *testing.T) {
@@ -483,7 +483,7 @@ func TestEdgeCases(t *testing.T) {
 
 		arr, ok := result.Properties["items"].([]any)
 		require.True(t, ok)
-		assert.Len(t, arr, 0)
+		assert.Empty(t, arr)
 	})
 }
 

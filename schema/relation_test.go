@@ -325,7 +325,7 @@ func TestRelation_Backref_Empty(t *testing.T) {
 		location.Span{}, "", false, false, "", false, false, "Owner", nil,
 	)
 
-	assert.Equal(t, "", r.Backref())
+	assert.Empty(t, r.Backref())
 }
 
 func TestRelation_ReverseMultiplicity(t *testing.T) {

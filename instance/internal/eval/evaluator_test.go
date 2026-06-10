@@ -207,7 +207,7 @@ func TestEvaluator_Variables(t *testing.T) {
 		scope := eval.EmptyScope()
 		e := expr.SExpr{expr.Op("$"), expr.NewLiteral("undefined")}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "undefined variable")
 	})
 
@@ -394,7 +394,7 @@ func TestEvaluator_EvaluateBool(t *testing.T) {
 
 	t.Run("non_bool_error", func(t *testing.T) {
 		_, err := ev.EvaluateBool(expr.NewLiteral("string"), scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "expected boolean")
 	})
 }
@@ -534,7 +534,7 @@ func TestEvaluator_Ternary_NilCondition(t *testing.T) {
 		expr.NewLiteral("no"),
 	}
 	_, err := ev.Evaluate(e, scope)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "boolean")
 }
 
@@ -589,7 +589,7 @@ func TestEvaluator_In_InvalidType(t *testing.T) {
 		expr.NewLiteral("hello world"),
 	}
 	_, err := ev.Evaluate(e, scope)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "slice or array")
 }
 
@@ -674,7 +674,7 @@ func TestEvaluator_NotOperator(t *testing.T) {
 	t.Run("not_nil_errors", func(t *testing.T) {
 		e := expr.SExpr{expr.Op("!"), expr.NewLiteral(nil)}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "boolean")
 	})
 }
@@ -790,7 +790,7 @@ func TestEvaluator_SliceAccess(t *testing.T) {
 			expr.NewLiteral("not-int"),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "integer")
 	})
 
@@ -801,7 +801,7 @@ func TestEvaluator_SliceAccess(t *testing.T) {
 			expr.NewLiteral(int64(0)),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot index")
 	})
 }
@@ -935,7 +935,7 @@ func TestEvaluator_DatatypeLiteral(t *testing.T) {
 
 	t.Run("unknown_datatype_errors", func(t *testing.T) {
 		_, err := ev.Evaluate(expr.DatatypeLiteral("unknown"), scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown datatype")
 	})
 }
@@ -985,7 +985,7 @@ func TestEvaluator_MatchWithTypeChecker(t *testing.T) {
 			expr.NewLiteral(int64(42)), // int is not valid matcher
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "regexp or type checker")
 	})
 }
@@ -1136,7 +1136,7 @@ func TestEvaluator_DirectBuiltinCall(t *testing.T) {
 			}),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "undefined")
 	})
 }
@@ -1265,7 +1265,7 @@ func TestEvaluator_BuiltinErrors(t *testing.T) {
 			}),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "accepts at most")
 	})
 
@@ -1282,7 +1282,7 @@ func TestEvaluator_BuiltinErrors(t *testing.T) {
 			expr.NewLiteral(int64(1)),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "accepts at most")
 	})
 }
@@ -1307,7 +1307,7 @@ func TestMethodStyleCallValidation(t *testing.T) {
 			expr.NewLiteral("map"),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "requires a lambda expression")
 	})
 
@@ -1343,7 +1343,7 @@ func TestMethodStyleCallValidation(t *testing.T) {
 			expr.NewLiteral(true), // body expression - not allowed
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "does not accept a lambda expression")
 	})
 
@@ -1361,7 +1361,7 @@ func TestMethodStyleCallValidation(t *testing.T) {
 			expr.NewLiteral(true), // body expression - not allowed
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "does not accept a lambda expression")
 	})
 
@@ -1379,7 +1379,7 @@ func TestMethodStyleCallValidation(t *testing.T) {
 			expr.NewLiteral(int64(1)),                // body
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "accepts at most")
 	})
 
@@ -1402,7 +1402,7 @@ func TestMethodStyleCallValidation(t *testing.T) {
 			},
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "accepts at most")
 	})
 }
@@ -1419,7 +1419,7 @@ func TestEvaluator_MemberAccessOnNonMap(t *testing.T) {
 			expr.NewLiteral("property"),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot access member")
 	})
 
@@ -1430,7 +1430,7 @@ func TestEvaluator_MemberAccessOnNonMap(t *testing.T) {
 			expr.NewLiteral("field"),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot access member")
 	})
 }
@@ -1545,7 +1545,7 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 			expr.NewLiteral("len"),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported")
 	})
 }
@@ -1766,7 +1766,7 @@ func TestEvaluator_SliceConversion(t *testing.T) {
 			expr.NewLiteral("sum"),
 		}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "slice or array")
 	})
 }
@@ -1860,14 +1860,14 @@ func TestEvaluator_DivisionErrors(t *testing.T) {
 	t.Run("div_by_zero_int", func(t *testing.T) {
 		e := expr.SExpr{expr.Op("/"), expr.NewLiteral(int64(10)), expr.NewLiteral(int64(0))}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "zero")
 	})
 
 	t.Run("mod_by_zero", func(t *testing.T) {
 		e := expr.SExpr{expr.Op("%"), expr.NewLiteral(int64(10)), expr.NewLiteral(int64(0))}
 		_, err := ev.Evaluate(e, scope)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "zero")
 	})
 }

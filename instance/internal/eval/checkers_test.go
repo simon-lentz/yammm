@@ -579,7 +579,7 @@ func TestCheckValue_UnresolvedAlias(t *testing.T) {
 	constraint := schema.NewAliasConstraint("UnresolvedType", nil)
 
 	err := eval.CheckValue(int64(10), constraint)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unresolved")
 }
 
@@ -621,7 +621,7 @@ func TestCheckValue_Float_NaNInf(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := eval.CheckValue(tt.val, tt.constraint)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errMsg)
 			} else {
 				assert.NoError(t, err)
@@ -656,7 +656,7 @@ func TestCheckValue_Vector_NaNInf(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := eval.CheckValue(tt.val, constraint)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errMsg)
 			} else {
 				assert.NoError(t, err)
@@ -1423,7 +1423,7 @@ func TestCheckValue_List_ElementConstraintViolation(t *testing.T) {
 	t.Run("element exceeds constraint", func(t *testing.T) {
 		t.Parallel()
 		err := eval.CheckValue([]any{"ab", "toolong"}, constraint)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "element [1]")
 	})
 }
@@ -1512,7 +1512,7 @@ func TestCoerceValue_List(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewIntegerConstraint())
 		_, err := checker.CoerceValue([]any{"not_an_int"}, constraint)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "element [0]")
 	})
 }

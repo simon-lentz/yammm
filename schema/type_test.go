@@ -201,7 +201,7 @@ func TestType_SourceID(t *testing.T) {
 
 func TestType_SchemaName(t *testing.T) {
 	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	assert.Equal(t, "", typ.SchemaName()) // Initially empty
+	assert.Empty(t, typ.SchemaName()) // Initially empty
 
 	schema.TestSetTypeSchemaName(typ, "myschema")
 	assert.Equal(t, "myschema", typ.SchemaName())

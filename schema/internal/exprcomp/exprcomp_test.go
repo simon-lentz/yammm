@@ -303,7 +303,7 @@ func TestBuiltinRegistry_Register(t *testing.T) {
 	// Register a custom function
 	err := reg.Register("CustomFunc")
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, reg.Has("CustomFunc"))
 }
 
@@ -312,7 +312,7 @@ func TestBuiltinRegistry_Register_ErrorOnDuplicate(t *testing.T) {
 
 	err := reg.Register("Count") // Already exists in defaults
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already registered")
 }
 
@@ -321,7 +321,7 @@ func TestBuiltinRegistry_Register_ErrorOnEmpty(t *testing.T) {
 
 	err := reg.Register("")
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "empty")
 }
 
@@ -330,7 +330,7 @@ func TestBuiltinRegistry_Register_ErrorOnNilReceiver(t *testing.T) {
 
 	err := reg.Register("Anything")
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil")
 }
 
@@ -356,7 +356,7 @@ func TestBuiltinRegistry_Register_ErrorOnWhitespace(t *testing.T) {
 
 			err := reg.Register(tt.input)
 
-			assert.Error(t, err)
+			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantMatch)
 		})
 	}
@@ -368,7 +368,7 @@ func TestBuiltinRegistry_Register_ErrorMessageQuoted(t *testing.T) {
 	// Register duplicate should use %q format (quoted)
 	err := reg.Register("Count")
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), `"Count"`) // Should be quoted
 }
 
@@ -396,7 +396,7 @@ func TestBuiltinRegistry_Names(t *testing.T) {
 	names := reg.Names()
 
 	// Should return sorted names
-	assert.Greater(t, len(names), 0)
+	assert.NotEmpty(t, names)
 
 	// Verify sorted order
 	for i := 1; i < len(names); i++ {
@@ -455,7 +455,7 @@ func TestBuiltinRegistry_ZeroValue(t *testing.T) {
 
 	t.Run("Register works on zero value", func(t *testing.T) {
 		err := reg.Register("ZeroValueCustom")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.True(t, reg.Has("ZeroValueCustom"))
 	})
 
@@ -699,7 +699,7 @@ func TestCompileString_EmptyListLiteral(t *testing.T) {
 	result := exprcomp.CompileString("[]", collector, sourceID)
 	require.NotNil(t, result)
 	assert.Equal(t, "[]", result.Op())
-	assert.Len(t, result.Children(), 0)
+	assert.Empty(t, result.Children())
 }
 
 func TestCompileString_NestedListLiteral(t *testing.T) {

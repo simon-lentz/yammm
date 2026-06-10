@@ -33,7 +33,7 @@ func TestLocalTypeRef(t *testing.T) {
 
 	ref := schema.LocalTypeRef("Customer", span)
 
-	assert.Equal(t, "", ref.Qualifier())
+	assert.Empty(t, ref.Qualifier())
 	assert.Equal(t, "Customer", ref.Name())
 	assert.Equal(t, span, ref.Span())
 	assert.False(t, ref.IsQualified())
@@ -137,7 +137,7 @@ func TestLocalDataTypeRef(t *testing.T) {
 
 	ref := schema.LocalDataTypeRef("PhoneNumber", span)
 
-	assert.Equal(t, "", ref.Qualifier())
+	assert.Empty(t, ref.Qualifier())
 	assert.Equal(t, "PhoneNumber", ref.Name())
 	assert.Equal(t, span, ref.Span())
 	assert.False(t, ref.IsQualified())
@@ -414,7 +414,7 @@ func TestResolvedTypeRefFromType_SameSchema(t *testing.T) {
 
 	resolved := schema.ResolvedTypeRefFromType(typ, "test://app")
 
-	assert.Equal(t, "", resolved.Qualifier())
+	assert.Empty(t, resolved.Qualifier())
 	assert.Equal(t, "User", resolved.Name())
 	assert.Equal(t, "User", resolved.String())
 	assert.True(t, resolved.IsLocal())

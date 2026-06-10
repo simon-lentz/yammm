@@ -18,19 +18,19 @@ func TestTypeID_Contract5_Equality(t *testing.T) {
 	t.Run("same path and name are equal", func(t *testing.T) {
 		id1 := schema.NewTypeID(path1, "User")
 		id2 := schema.NewTypeID(path1, "User")
-		assert.True(t, id1 == id2, "TypeID should be comparable with ==")
+		assert.Equal(t, id1, id2, "TypeID should be comparable with ==")
 	})
 
 	t.Run("different paths are not equal", func(t *testing.T) {
 		id1 := schema.NewTypeID(path1, "User")
 		id2 := schema.NewTypeID(path2, "User")
-		assert.False(t, id1 == id2, "TypeIDs from different schemas should not be equal")
+		assert.NotEqual(t, id1, id2, "TypeIDs from different schemas should not be equal")
 	})
 
 	t.Run("different names are not equal", func(t *testing.T) {
 		id1 := schema.NewTypeID(path1, "User")
 		id2 := schema.NewTypeID(path1, "Account")
-		assert.False(t, id1 == id2, "TypeIDs with different names should not be equal")
+		assert.NotEqual(t, id1, id2, "TypeIDs with different names should not be equal")
 	})
 
 	t.Run("zero value detection", func(t *testing.T) {
@@ -55,7 +55,7 @@ func TestTypeRef_Syntactic(t *testing.T) {
 	t.Run("local type ref", func(t *testing.T) {
 		ref := schema.LocalTypeRef("User", location.Span{})
 		assert.Equal(t, "User", ref.Name())
-		assert.Equal(t, "", ref.Qualifier())
+		assert.Empty(t, ref.Qualifier())
 		assert.False(t, ref.IsQualified())
 		assert.Equal(t, "User", ref.String())
 	})

@@ -27,12 +27,7 @@ lint:
 lint-fix:
 	go tool golangci-lint run --fix
 
-PUBLIC_TEST_PACKAGES := .
-
-.PHONY: test-public test-internal
-test-public:
-	go test $(PUBLIC_TEST_PACKAGES)
-
+.PHONY: test-internal
 test-internal:
 	go test ./...
 

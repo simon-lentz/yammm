@@ -219,7 +219,7 @@ func TestCodeEmission_ZeroCode(t *testing.T) {
 
 	var zeroCode diag.Code
 	assert.True(t, zeroCode.IsZero())
-	assert.Equal(t, "", zeroCode.String())
+	assert.Empty(t, zeroCode.String())
 }
 
 // TestCodeEmission_SpecificCodes tests specific codes mentioned in the architecture.

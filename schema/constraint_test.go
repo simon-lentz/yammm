@@ -300,7 +300,7 @@ func TestTimestampConstraint_Format(t *testing.T) {
 func TestTimestampConstraint_Format_NoFormat(t *testing.T) {
 	c := schema.NewTimestampConstraint()
 	format := c.Format()
-	assert.Equal(t, "", format)
+	assert.Empty(t, format)
 }
 
 func TestTimestampConstraint_Equal_Same(t *testing.T) {
@@ -381,7 +381,7 @@ func TestPatternConstraint_Pattern(t *testing.T) {
 
 func TestPatternConstraint_Pattern_Empty(t *testing.T) {
 	c := schema.NewPatternConstraint([]*regexp.Regexp{})
-	assert.Equal(t, "", c.Pattern())
+	assert.Empty(t, c.Pattern())
 }
 
 func TestPatternConstraint_CompiledPatterns(t *testing.T) {

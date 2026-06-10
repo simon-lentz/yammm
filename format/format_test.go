@@ -607,7 +607,7 @@ func TestNormalizeIndentation_Empty(t *testing.T) {
 	input := ""
 	result := NormalizeIndentation(input)
 
-	assert.Equal(t, "", result, "empty input should return empty")
+	assert.Empty(t, result, "empty input should return empty")
 }
 
 func TestTokenStream_ConvertSpacesToTabs(t *testing.T) {
@@ -828,7 +828,7 @@ func TestAlignColumns_EmptyAndPassthrough(t *testing.T) {
 	t.Parallel()
 
 	// Empty string
-	assert.Equal(t, "", AlignColumns(""), "empty input should return empty")
+	assert.Empty(t, AlignColumns(""), "empty input should return empty")
 
 	// Non-alignable content passes through unchanged
 	nonAlignable := "schema \"test\"\n\n// comment\n! \"msg\" expr\n}\n"
@@ -1225,7 +1225,7 @@ func TestWrapLongLines_EmptyAndPassthrough(t *testing.T) {
 	t.Parallel()
 
 	// Empty string
-	assert.Equal(t, "", WrapLongLines(""), "empty input should return empty")
+	assert.Empty(t, WrapLongLines(""), "empty input should return empty")
 
 	// Non-wrappable content passes through unchanged
 	input := "schema \"test\"\n\ntype T {\n\tname String\n}\n"

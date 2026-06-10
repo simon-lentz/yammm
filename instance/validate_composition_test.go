@@ -45,7 +45,7 @@ func TestValidateCompositions_Single(t *testing.T) {
 
 	composed, ok := valid.Composed("addresses")
 	require.True(t, ok)
-	require.True(t, !composed.IsNil())
+	require.False(t, composed.IsNil())
 }
 
 func TestValidateCompositions_Multiple(t *testing.T) {
@@ -82,7 +82,7 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 
 	composed, ok := valid.Composed("addresses")
 	require.True(t, ok)
-	require.True(t, !composed.IsNil())
+	require.False(t, composed.IsNil())
 }
 
 func TestValidateCompositions_Optional_Nil(t *testing.T) {
@@ -148,7 +148,7 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 	// Composition should be present but empty
 	composed, ok := valid.Composed("addresses")
 	require.True(t, ok)
-	require.True(t, !composed.IsNil())
+	require.False(t, composed.IsNil())
 }
 
 func TestValidateCompositions_Required_Missing(t *testing.T) {

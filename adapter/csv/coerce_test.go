@@ -32,7 +32,7 @@ func TestCoerceStringValue_IntegerInvalid(t *testing.T) {
 	t.Parallel()
 	a := New()
 	_, err := a.coerceStringValue("abc", schema.NewIntegerConstraint())
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot parse")
 }
 
@@ -101,7 +101,7 @@ func TestCoerceStringValue_EmptyString(t *testing.T) {
 	// Empty string is a valid string value (null is handled by the caller).
 	val, err := a.coerceStringValue("", schema.NewStringConstraint())
 	require.NoError(t, err)
-	assert.Equal(t, "", val)
+	assert.Empty(t, val)
 }
 
 func TestCoerceStringValue_ListString(t *testing.T) {

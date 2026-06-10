@@ -118,11 +118,7 @@ func TestNewCanonicalPath_Symlink(t *testing.T) {
 	}
 
 	// Create a temp directory with a symlink
-	tmpDir, err := os.MkdirTemp("", "canonical_path_test")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	realDir := filepath.Join(tmpDir, "real")
 	if err := os.Mkdir(realDir, 0o750); err != nil {
@@ -147,13 +143,15 @@ func TestNewCanonicalPath_Symlink(t *testing.T) {
 		t.Fatalf("NewCanonicalPath failed: %v", err)
 	}
 
-	// Should resolve to the real path
-	s := cp.String()
-	if !strings.Contains(s, "real") {
-		t.Errorf("expected symlink to be resolved to real path, got %q", s)
+	// The canonical form of an existing absolute path is its fully
+	// symlink-resolved form (the link component AND any symlinked temp-dir
+	// ancestors, e.g. /var -> /private/var on macOS).
+	want, err := filepath.EvalSymlinks(linkedFile)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", linkedFile, err)
 	}
-	if strings.Contains(s, "link") {
-		t.Errorf("expected symlink component to be resolved, got %q", s)
+	if s := cp.String(); s != want {
+		t.Errorf("NewCanonicalPath(%q) = %q, want fully resolved %q", linkedFile, s, want)
 	}
 }
 

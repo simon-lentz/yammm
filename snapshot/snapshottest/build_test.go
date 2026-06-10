@@ -1,7 +1,6 @@
 package snapshottest_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -73,8 +72,8 @@ func TestBuildTestSnapshot_HappyPath(t *testing.T) {
 	)
 
 	require.NotNil(t, snap)
-	assert.Equal(t, 1, len(snap.InstancesOf("Company")))
-	assert.Equal(t, 1, len(snap.InstancesOf("Person")))
+	assert.Len(t, snap.InstancesOf("Company"), 1)
+	assert.Len(t, snap.InstancesOf("Person"), 1)
 	assert.False(t, snap.Diagnostics().HasErrors(),
 		"happy-path snapshot has unexpected diagnostics: %s", snap.Diagnostics().String())
 }
@@ -94,7 +93,7 @@ func TestBuildTestSnapshot_AddFailure_Fatal(t *testing.T) {
 
 	assert.True(t, rec.fatalled, "expected Fatalf to fire on validation failure")
 	require.NotEmpty(t, rec.errors)
-	assert.True(t, strings.Contains(rec.errors[0], "BuildTestSnapshot: Add[0] (Person)"),
+	assert.Contains(t, rec.errors[0], "BuildTestSnapshot: Add[0] (Person)",
 		"error message did not include expected prefix; got: %s", rec.errors[0])
 }
 
@@ -120,6 +119,6 @@ func TestBuildTestSnapshot_FinalizeFailure_Fatal(t *testing.T) {
 
 	assert.True(t, rec.fatalled, "expected Fatalf to fire on Check failure")
 	require.NotEmpty(t, rec.errors)
-	assert.True(t, strings.Contains(rec.errors[0], "BuildTestSnapshot: Finalize"),
+	assert.Contains(t, rec.errors[0], "BuildTestSnapshot: Finalize",
 		"error message did not include expected prefix; got: %s", rec.errors[0])
 }

@@ -123,8 +123,8 @@ func TestFlagParsing_Defaults(t *testing.T) {
 	require.NoError(t, fs.Parse([]string{}))
 
 	assert.Equal(t, "info", *logLevel)
-	assert.Equal(t, "", *logFile)
-	assert.Equal(t, "", *moduleRoot)
+	assert.Empty(t, *logFile)
+	assert.Empty(t, *moduleRoot)
 	assert.False(t, *showVer)
 }
 

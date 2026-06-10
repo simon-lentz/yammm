@@ -764,19 +764,27 @@ func TestSchemaBuilder_NotConcurrentSafe_DocumentedShape(t *testing.T) {
 	// variant to keep CI green while still pinning the contract.
 	s := personSchema(t)
 	var wg sync.WaitGroup
-	wg.Add(2)
 	results := make([]string, 2)
+	errs := make([]error, 2)
 	for i := range 2 {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			b, err := instance.BuilderFor(s, "Person")
-			require.NoError(t, err)
+			if err != nil {
+				errs[i] = err
+				return
+			}
 			raw, err := b.Property("id", fmt.Sprintf("p%d", i)).Property("name", "X").Build()
-			require.NoError(t, err)
+			if err != nil {
+				errs[i] = err
+				return
+			}
 			results[i], _ = raw.Properties["id"].(string)
-		}()
+		})
 	}
 	wg.Wait()
+	for i, err := range errs {
+		require.NoError(t, err, "builder goroutine %d", i)
+	}
 	assert.Equal(t, "p0", results[0])
 	assert.Equal(t, "p1", results[1])
 }

@@ -24,4 +24,7 @@ jobs:
           version: v2.10.1
           args: --config=.golangci.yml
       - name: Test
-        run: go test -v ./...
+        # -race enforces the data-race gate in CI rather than as local
+        # etiquette; -shuffle=on surfaces inter-test order coupling, which
+        # large-scale test dedup/merging is most likely to introduce.
+        run: go test -v -race -shuffle=on ./...

@@ -419,7 +419,7 @@ func TestSchema_FindImportAlias_NotFound(t *testing.T) {
 
 	result := s.FindImportAlias(location.MustNewSourceID("test://unknown"))
 
-	assert.Equal(t, "", result)
+	assert.Empty(t, result)
 }
 
 func TestSchema_FindImportAlias_OwnPath(t *testing.T) {
@@ -428,7 +428,7 @@ func TestSchema_FindImportAlias_OwnPath(t *testing.T) {
 
 	result := s.FindImportAlias(sourceID)
 
-	assert.Equal(t, "", result)
+	assert.Empty(t, result)
 }
 
 func TestSchema_Sources_Nil(t *testing.T) {

@@ -127,16 +127,16 @@ func TestWrapPanicValue_NilInput(t *testing.T) {
 
 func TestErrCorruptedSchema_Is(t *testing.T) {
 	t.Run("is ErrInternalFailure", func(t *testing.T) {
-		assert.True(t, errors.Is(ErrCorruptedSchema, ErrInternalFailure))
+		assert.ErrorIs(t, ErrCorruptedSchema, ErrInternalFailure)
 	})
 
 	t.Run("is not ErrNilValidator", func(t *testing.T) {
-		assert.False(t, errors.Is(ErrCorruptedSchema, ErrNilValidator))
+		assert.NotErrorIs(t, ErrCorruptedSchema, ErrNilValidator)
 	})
 }
 
 func TestErrNilValidator_Is(t *testing.T) {
-	assert.True(t, errors.Is(ErrNilValidator, ErrInternalFailure))
+	assert.ErrorIs(t, ErrNilValidator, ErrInternalFailure)
 }
 
 func TestInternalError_Is(t *testing.T) {
@@ -150,7 +150,7 @@ func TestInternalError_Is(t *testing.T) {
 		}()
 
 		require.NotNil(t, panicErr)
-		assert.True(t, errors.Is(panicErr, ErrInternalFailure),
+		assert.ErrorIs(t, panicErr, ErrInternalFailure,
 			"panic-derived InternalError should match ErrInternalFailure")
 	})
 
@@ -164,7 +164,7 @@ func TestInternalError_Is(t *testing.T) {
 		}()
 
 		require.NotNil(t, panicErr)
-		assert.True(t, errors.Is(panicErr, ErrInternalFailure),
+		assert.ErrorIs(t, panicErr, ErrInternalFailure,
 			"KindConstraintPanic should match ErrInternalFailure")
 	})
 
@@ -173,7 +173,7 @@ func TestInternalError_Is(t *testing.T) {
 			Kind:  KindConstraintPanic,
 			Cause: errors.New("some cause"),
 		}
-		assert.False(t, errors.Is(err, errors.New("unrelated")))
+		assert.NotErrorIs(t, err, errors.New("unrelated"))
 	})
 
 	t.Run("constructed InternalError is ErrInternalFailure", func(t *testing.T) {
@@ -181,7 +181,7 @@ func TestInternalError_Is(t *testing.T) {
 			Kind:  KindCorruptedSchema,
 			Cause: errors.New("schema corrupted"),
 		}
-		assert.True(t, errors.Is(err, ErrInternalFailure),
+		assert.ErrorIs(t, err, ErrInternalFailure,
 			"all InternalError should match ErrInternalFailure")
 	})
 }

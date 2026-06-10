@@ -1569,7 +1569,7 @@ func TestWriteFile_CreateFailsOnNonexistentDirectory(t *testing.T) {
 	err := snapshot.WriteFile(path, []byte("payload"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "create temp", "error should be tagged with the failing step")
-	assert.True(t, errors.Is(err, fs.ErrNotExist), "wrapped cause should be fs.ErrNotExist")
+	require.ErrorIs(t, err, fs.ErrNotExist, "wrapped cause should be fs.ErrNotExist")
 
 	// No partial tmp should exist anywhere reachable under dir.
 	_, statErr := os.Stat(path + snapshot.TmpSuffix)
@@ -1626,16 +1626,18 @@ func TestWriteFile_ConcurrentDistinctPaths(t *testing.T) {
 	letters := []byte{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'}
 	const n = 8
 	var wg sync.WaitGroup
-	wg.Add(n)
+	writeErrs := make([]error, n)
 	for i := range n {
-		go func(idx int) {
-			defer wg.Done()
-			path := filepath.Join(dir, fmt.Sprintf("snap-%d.ys", idx))
-			payload := bytes.Repeat([]byte{letters[idx]}, 32)
-			require.NoError(t, snapshot.WriteFile(path, payload))
-		}(i)
+		wg.Go(func() {
+			path := filepath.Join(dir, fmt.Sprintf("snap-%d.ys", i))
+			payload := bytes.Repeat([]byte{letters[i]}, 32)
+			writeErrs[i] = snapshot.WriteFile(path, payload)
+		})
 	}
 	wg.Wait()
+	for i, err := range writeErrs {
+		require.NoError(t, err, "goroutine %d write", i)
+	}
 
 	for i := range n {
 		path := filepath.Join(dir, fmt.Sprintf("snap-%d.ys", i))

@@ -432,7 +432,7 @@ func TestVirtualSourceID(t *testing.T) {
 
 			id, err := markdown.VirtualSourceID(tt.path, tt.blockIndex)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.True(t, id.IsZero())
 				return
 			}

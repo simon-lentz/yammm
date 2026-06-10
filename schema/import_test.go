@@ -93,7 +93,7 @@ func TestImport_ResolvedPath_ZeroSourceID(t *testing.T) {
 
 	// Returns empty string for zero SourceID
 	result := imp.ResolvedPath()
-	assert.Equal(t, "", result)
+	assert.Empty(t, result)
 }
 
 func TestImport_Schema_Nil(t *testing.T) {

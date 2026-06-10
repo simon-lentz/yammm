@@ -783,7 +783,7 @@ func TestComplete_DataType_Multiple(t *testing.T) {
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
-	assert.Equal(t, 3, len(s.DataTypesSlice()))
+	assert.Len(t, s.DataTypesSlice(), 3)
 }
 
 func TestComplete_DataType_NilSkipped(t *testing.T) {
@@ -802,7 +802,7 @@ func TestComplete_DataType_NilSkipped(t *testing.T) {
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
-	assert.Equal(t, 1, len(s.DataTypesSlice()))
+	assert.Len(t, s.DataTypesSlice(), 1)
 }
 
 func TestComplete_Invariant_Single(t *testing.T) {
@@ -1623,7 +1623,7 @@ func TestComplete_NilTypeDecl_Skipped(t *testing.T) {
 
 	require.NotNil(t, s)
 	assert.False(t, collector.HasErrors())
-	assert.Equal(t, 1, len(s.TypesSlice()))
+	assert.Len(t, s.TypesSlice(), 1)
 }
 
 func TestComplete_NilPropertyDecl_Skipped(t *testing.T) {
@@ -1650,7 +1650,7 @@ func TestComplete_NilPropertyDecl_Skipped(t *testing.T) {
 
 	typ, ok := s.Type("Person")
 	require.True(t, ok)
-	assert.Equal(t, 1, len(typ.PropertiesSlice()))
+	assert.Len(t, typ.PropertiesSlice(), 1)
 }
 
 func TestComplete_NilRelationDecl_Skipped(t *testing.T) {
