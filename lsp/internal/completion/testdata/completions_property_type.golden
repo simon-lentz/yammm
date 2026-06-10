@@ -1,0 +1,68 @@
+[
+  {
+    "label": "Boolean",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_Boolean"
+  },
+  {
+    "label": "Date",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_Date"
+  },
+  {
+    "label": "Enum",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_Enum"
+  },
+  {
+    "label": "Float",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_Float"
+  },
+  {
+    "label": "Integer",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_Integer"
+  },
+  {
+    "label": "List",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_List"
+  },
+  {
+    "label": "Pattern",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_Pattern"
+  },
+  {
+    "label": "String",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_String"
+  },
+  {
+    "label": "Timestamp",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_Timestamp"
+  },
+  {
+    "label": "UUID",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_UUID"
+  },
+  {
+    "label": "Vector",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "0_Vector"
+  }
+]

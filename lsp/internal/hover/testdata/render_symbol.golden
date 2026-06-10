@@ -1,0 +1,80 @@
+=== schema ===
+**schema** `MySchema`
+
+=== import ===
+**import** `./parts` as `parts`
+
+Resolved to: `/test/parts.yammm`
+=== documented type with project root ===
+**type** `Person`
+
+A person entity.
+
+---
+
+- Properties: 1
+- Source: `test://types.yammm`
+
+=== abstract type ===
+**abstract type** `Entity`
+
+---
+
+- Properties: 1
+- Source: `test://types.yammm`
+
+=== part type ===
+**part type** `Wheel`
+
+---
+
+- Properties: 1
+- Source: `test://types.yammm`
+
+=== property ===
+**property** `Person.name`
+
+- Type: `String`
+- Modifiers: required
+
+=== association ===
+**association** `Person.addresses`
+
+```yammm
+--> addresses (many) Address
+```
+
+- Target: `Address`
+- Multiplicity: many
+
+=== composition ===
+**composition** `Car.wheels`
+
+```yammm
+*-> wheels (many) Wheel
+```
+
+- Target: `Wheel`
+- Multiplicity: many
+
+=== datatype ===
+**datatype** `ShortName` = `String`
+
+A short name string.
+
+=== type with source path relative to root ===
+**type** `TestType`
+
+---
+
+- Properties: 1
+- Source: `./schemas/person.yammm`
+
+=== type with absolute source path when no root ===
+**type** `TestType`
+
+---
+
+- Properties: 1
+- Source: `/project/person.yammm`
+

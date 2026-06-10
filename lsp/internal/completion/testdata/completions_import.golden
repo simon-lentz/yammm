@@ -1,0 +1,10 @@
+[
+  {
+    "label": "import",
+    "kind": 15,
+    "detail": "Import statement",
+    "insertText": "import \"${1:./path}\"${2: as ${3:alias}}",
+    "insertTextFormat": 2,
+    "sortText": "1_import"
+  }
+]

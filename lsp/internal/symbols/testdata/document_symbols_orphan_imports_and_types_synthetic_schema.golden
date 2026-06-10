@@ -1,0 +1,79 @@
+[
+  {
+    "name": "(schema)",
+    "detail": "parse error",
+    "kind": 2,
+    "range": {
+      "start": {
+        "line": 0,
+        "character": 0
+      },
+      "end": {
+        "line": 0,
+        "character": 0
+      }
+    },
+    "selectionRange": {
+      "start": {
+        "line": 0,
+        "character": 0
+      },
+      "end": {
+        "line": 0,
+        "character": 0
+      }
+    },
+    "children": [
+      {
+        "name": "parts",
+        "detail": "import \"./parts\" as parts",
+        "kind": 4,
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 29
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 0,
+            "character": 19
+          },
+          "end": {
+            "line": 0,
+            "character": 24
+          }
+        }
+      },
+      {
+        "name": "Car",
+        "detail": "type Car",
+        "kind": 5,
+        "range": {
+          "start": {
+            "line": 2,
+            "character": 0
+          },
+          "end": {
+            "line": 5,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 2,
+            "character": 5
+          },
+          "end": {
+            "line": 2,
+            "character": 8
+          }
+        }
+      }
+    ]
+  }
+]

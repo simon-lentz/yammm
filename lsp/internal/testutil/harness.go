@@ -235,8 +235,9 @@ func (h *Harness) Hover(path string, line, char int) (*protocol.Hover, error) {
 	return result, nil
 }
 
-// Definition requests go-to-definition at the given position.
-func (h *Harness) Definition(path string, line, char int) (any, error) {
+// Definition requests go-to-definition at the given position. A nil
+// Location with nil error means the server returned null (no definition).
+func (h *Harness) Definition(path string, line, char int) (*protocol.Location, error) {
 	h.t.Helper()
 
 	absPath := path
@@ -267,8 +268,9 @@ func (h *Harness) Definition(path string, line, char int) (any, error) {
 	return result, nil
 }
 
-// Completion requests completion items at the given position.
-func (h *Harness) Completion(path string, line, char int) (any, error) {
+// Completion requests completion items at the given position. A nil slice
+// with nil error means the server returned null (no completions).
+func (h *Harness) Completion(path string, line, char int) ([]protocol.CompletionItem, error) {
 	h.t.Helper()
 
 	absPath := path
@@ -291,13 +293,14 @@ func (h *Harness) Completion(path string, line, char int) (any, error) {
 		},
 	}, &result)
 	if err != nil {
-		return nil, nil //nolint:nilerr,nilnil // LSP protocol: null result = no completions
+		return nil, nil //nolint:nilerr // LSP protocol: null result = no completions
 	}
 	return result, nil
 }
 
-// DocumentSymbols requests document symbols.
-func (h *Harness) DocumentSymbols(path string) (any, error) {
+// DocumentSymbols requests document symbols. A nil slice with nil error
+// means the server returned null (no symbols).
+func (h *Harness) DocumentSymbols(path string) ([]protocol.DocumentSymbol, error) {
 	h.t.Helper()
 
 	absPath := path
@@ -314,7 +317,7 @@ func (h *Harness) DocumentSymbols(path string) (any, error) {
 		},
 	}, &result)
 	if err != nil {
-		return nil, nil //nolint:nilerr,nilnil // LSP protocol: null result = no symbols
+		return nil, nil //nolint:nilerr // LSP protocol: null result = no symbols
 	}
 	return result, nil
 }

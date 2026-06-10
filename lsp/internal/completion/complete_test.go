@@ -1,14 +1,13 @@
 package completion
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
@@ -16,78 +15,17 @@ import (
 	"github.com/simon-lentz/yammm/lsp/internal/symbols"
 )
 
-func TestTopLevelCompletions(t *testing.T) {
+// TestCompletionLists_Golden pins every static completion list — labels,
+// kinds, snippet bodies, insert-text formats, documentation — as JSON
+// goldens. Membership and format assertions live in the golden bytes.
+func TestCompletionLists_Golden(t *testing.T) {
 	t.Parallel()
 
-	items := TopLevelCompletions()
-
-	require.NotEmpty(t, items, "expected some completions")
-
-	// Check for expected keywords
-	labels := make(map[string]bool)
-	for _, item := range items {
-		labels[item.Label] = true
-	}
-
-	expected := []string{"schema", "import", "type", "abstract type", "part type"}
-	for _, exp := range expected {
-		assert.True(t, labels[exp], "missing expected completion: %s", exp)
-	}
-
-	// Check that items have snippet format
-	for _, item := range items {
-		assert.NotNil(t, item.InsertTextFormat, "completion %q should have snippet format", item.Label)
-		if item.InsertTextFormat != nil {
-			assert.Equal(t, protocol.InsertTextFormatSnippet, *item.InsertTextFormat, "completion %q should have snippet format", item.Label)
-		}
-	}
-}
-
-func TestTypeBodyCompletions(t *testing.T) {
-	t.Parallel()
-
-	items := TypeBodyCompletions()
-
-	require.NotEmpty(t, items, "expected some completions")
-
-	// Check for snippets
-	hasProperty := false
-	hasAssociation := false
-	hasComposition := false
-	hasInvariant := false
-
-	for _, item := range items {
-		switch {
-		case strings.Contains(item.Label, "property"):
-			hasProperty = true
-		case strings.Contains(item.Label, "association"):
-			hasAssociation = true
-		case strings.Contains(item.Label, "composition"):
-			hasComposition = true
-		case strings.Contains(item.Label, "invariant"):
-			hasInvariant = true
-		}
-	}
-
-	assert.True(t, hasProperty, "missing property snippet")
-	assert.True(t, hasAssociation, "missing association snippet")
-	assert.True(t, hasComposition, "missing composition snippet")
-	assert.True(t, hasInvariant, "missing invariant snippet")
-
-	// Check that built-in types are included
-	hasString := false
-	hasInteger := false
-	for _, item := range items {
-		if item.Label == "String" {
-			hasString = true
-		}
-		if item.Label == "Integer" {
-			hasInteger = true
-		}
-	}
-
-	assert.True(t, hasString, "missing String built-in type")
-	assert.True(t, hasInteger, "missing Integer built-in type")
+	yammmtest.GoldenJSON(t, "completions_top_level", TopLevelCompletions())
+	yammmtest.GoldenJSON(t, "completions_type_body", TypeBodyCompletions())
+	yammmtest.GoldenJSON(t, "completions_property_type", PropertyTypeCompletions(nil, location.SourceID{}))
+	yammmtest.GoldenJSON(t, "completions_import", ImportCompletions())
+	yammmtest.GoldenJSON(t, "builtin_types", BuiltinTypes)
 }
 
 func TestTypeCompletions_NilSnapshot(t *testing.T) {
@@ -121,84 +59,6 @@ func TestTypeCompletions_EmptySchema(t *testing.T) {
 
 	// Should return empty but not nil
 	assert.NotNil(t, items, "expected non-nil slice")
-}
-
-func TestPropertyTypeCompletions_BuiltinTypes(t *testing.T) {
-	t.Parallel()
-
-	// Use zero SourceID since nil snapshot means no lookup occurs
-	items := PropertyTypeCompletions(nil, location.SourceID{})
-
-	// Should have built-in types even without snapshot
-	builtins := map[string]bool{
-		"String":    false,
-		"Integer":   false,
-		"Float":     false,
-		"Boolean":   false,
-		"UUID":      false,
-		"Date":      false,
-		"Timestamp": false,
-	}
-
-	for _, item := range items {
-		if _, ok := builtins[item.Label]; ok {
-			builtins[item.Label] = true
-		}
-	}
-
-	for name, found := range builtins {
-		assert.True(t, found, "missing built-in type: %s", name)
-	}
-}
-
-func TestKeywordCompletion(t *testing.T) {
-	t.Parallel()
-
-	item := KeywordCompletion("type", "type ${1:Name} {}", "Type declaration")
-
-	assert.Equal(t, "type", item.Label)
-	require.NotNil(t, item.Kind, "expected keyword kind")
-	assert.Equal(t, protocol.CompletionItemKindKeyword, *item.Kind, "expected keyword kind")
-	require.NotNil(t, item.InsertTextFormat, "expected snippet format")
-	assert.Equal(t, protocol.InsertTextFormatSnippet, *item.InsertTextFormat, "expected snippet format")
-	require.NotNil(t, item.InsertText, "insert text mismatch")
-	assert.Equal(t, "type ${1:Name} {}", *item.InsertText, "insert text mismatch")
-}
-
-func TestSnippetCompletion(t *testing.T) {
-	t.Parallel()
-
-	item := SnippetCompletion("property", "${1:name} String", "Property")
-
-	assert.Equal(t, "property", item.Label)
-	require.NotNil(t, item.Kind, "expected snippet kind")
-	assert.Equal(t, protocol.CompletionItemKindSnippet, *item.Kind, "expected snippet kind")
-	require.NotNil(t, item.InsertTextFormat, "expected snippet format")
-	assert.Equal(t, protocol.InsertTextFormatSnippet, *item.InsertTextFormat, "expected snippet format")
-}
-
-func TestImportCompletions(t *testing.T) {
-	t.Parallel()
-
-	items := ImportCompletions()
-
-	require.NotEmpty(t, items, "expected import completion")
-
-	assert.Equal(t, "import", items[0].Label)
-}
-
-func TestBuiltinTypes_Complete(t *testing.T) {
-	t.Parallel()
-
-	// Verify all expected built-in types are present
-	expected := []string{
-		"Boolean", "Date", "Enum", "Float", "Integer", "List",
-		"Pattern", "String", "Timestamp", "UUID", "Vector",
-	}
-
-	for _, exp := range expected {
-		assert.True(t, slices.Contains(BuiltinTypes, exp), "missing built-in type: %s", exp)
-	}
 }
 
 func TestComputeByteOffsetFromText_UTF8Mode(t *testing.T) {

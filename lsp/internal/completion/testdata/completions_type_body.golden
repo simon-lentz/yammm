@@ -1,0 +1,108 @@
+[
+  {
+    "label": "property",
+    "kind": 15,
+    "detail": "Property declaration",
+    "insertText": "${1:name} ${2|String,Integer,Float,Boolean,UUID|}${3|, required, primary|}",
+    "insertTextFormat": 2,
+    "sortText": "1_property"
+  },
+  {
+    "label": "property with constraint",
+    "kind": 15,
+    "detail": "Property with constraint",
+    "insertText": "${1:name} ${2:String}[${3:1}, ${4:100}]${5|, required|}",
+    "insertTextFormat": 2,
+    "sortText": "1_property with constraint"
+  },
+  {
+    "label": "association",
+    "kind": 15,
+    "detail": "Association declaration",
+    "insertText": "--\u003e ${1:NAME} (${2|one,many|}) ${3:TargetType}",
+    "insertTextFormat": 2,
+    "sortText": "1_association"
+  },
+  {
+    "label": "composition",
+    "kind": 15,
+    "detail": "Composition declaration",
+    "insertText": "*-\u003e ${1:CONTAINS} (${2|one,many|}) ${3:PartType}",
+    "insertTextFormat": 2,
+    "sortText": "1_composition"
+  },
+  {
+    "label": "invariant",
+    "kind": 15,
+    "detail": "Invariant declaration",
+    "insertText": "! \"${1:message}\" ${2:expression}",
+    "insertTextFormat": 2,
+    "sortText": "1_invariant"
+  },
+  {
+    "label": "Boolean",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_Boolean"
+  },
+  {
+    "label": "Date",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_Date"
+  },
+  {
+    "label": "Enum",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_Enum"
+  },
+  {
+    "label": "Float",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_Float"
+  },
+  {
+    "label": "Integer",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_Integer"
+  },
+  {
+    "label": "List",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_List"
+  },
+  {
+    "label": "Pattern",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_Pattern"
+  },
+  {
+    "label": "String",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_String"
+  },
+  {
+    "label": "Timestamp",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_Timestamp"
+  },
+  {
+    "label": "UUID",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_UUID"
+  },
+  {
+    "label": "Vector",
+    "kind": 25,
+    "detail": "Built-in type",
+    "sortText": "2_Vector"
+  }
+]

@@ -1,0 +1,13 @@
+[
+  "Boolean",
+  "Date",
+  "Enum",
+  "Float",
+  "Integer",
+  "List",
+  "Pattern",
+  "String",
+  "Timestamp",
+  "UUID",
+  "Vector"
+]

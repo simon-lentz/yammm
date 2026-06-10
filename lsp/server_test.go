@@ -26,24 +26,10 @@ import (
 )
 
 // newTestHarness creates a harness for integration testing with a real LSP server.
-func newTestHarness(t *testing.T, root string) *testutil.Harness {
-	t.Helper()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := lsp.NewServer(logger, lsp.Config{
-		ModuleRoot: root,
-	})
-
-	ctx := t.Context()
-	h := testutil.NewHarness(t, server.Mux(), root)
-	server.Workspace().SetNotifier(func(method string, params any) {
-		_ = h.JRPCServer().Notify(ctx, method, params)
-	})
-	return h
-}
-
-// newTestHarnessWithServer creates a harness with an initialized LSP server,
-// returning both the harness and server for tests that need direct workspace access.
+// newTestHarnessWithServer is the single harness constructor: it wires a
+// fresh server to an in-process client, connects diagnostics notification
+// push, runs the LSP initialize handshake, and returns both the harness and
+// the server for tests that need direct workspace access.
 func newTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *lsp.Server) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -57,13 +43,11 @@ func newTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *ls
 	return h, server
 }
 
-// newMarkdownTestHarness creates a harness for markdown integration testing.
-// Initializes the server with the given root directory.
-func newMarkdownTestHarness(t *testing.T, root string) *testutil.Harness {
+// newTestHarness returns just the initialized harness for tests that never
+// touch the server side.
+func newTestHarness(t *testing.T, root string) *testutil.Harness {
 	t.Helper()
-	h := newTestHarness(t, root)
-	err := h.Initialize()
-	require.NoError(t, err, "harness initialization failed")
+	h, _ := newTestHarnessWithServer(t, root)
 	return h
 }
 
@@ -136,9 +120,6 @@ func TestIntegration_InitializeSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err := h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 }
 
 func TestIntegration_FormattingWithoutOpen(t *testing.T) {
@@ -153,9 +134,6 @@ func TestIntegration_FormattingWithoutOpen(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	edits, err := h.Formatting("main.yammm")
 	require.NoError(t, err, "Formatting failed")
@@ -175,9 +153,6 @@ func TestIntegration_HoverWithoutOpen(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	hover, err := h.Hover("main.yammm", 2, 5)
 	require.NoError(t, err, "Hover returned error")
@@ -203,9 +178,6 @@ func TestIntegration_DefinitionWithoutOpen(t *testing.T) {
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
-
 	result, err := h.Definition("main.yammm", 5, 22)
 	require.NoError(t, err, "Definition returned error")
 
@@ -224,9 +196,6 @@ func TestIntegration_OverlayOverridesDisk(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	overlayContent := "schema \"test\"\n\ntype Person {\n\toverlayField String primary\n}\n"
 	err = h.OpenDocument("main.yammm", overlayContent)
@@ -262,9 +231,6 @@ func TestIntegration_DiskFallbackForUnopened(t *testing.T) {
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
-
 	err = h.OpenDocument("main.yammm", mainContent)
 	require.NoError(t, err, "OpenDocument failed")
 
@@ -273,17 +239,7 @@ func TestIntegration_DiskFallbackForUnopened(t *testing.T) {
 
 	require.NotNil(t, result, "Definition returned nil - schema may be invalid or symbol index missing")
 
-	switch v := result.(type) {
-	case protocol.Location:
-		testutil.AssertLocationURI(t, v, "parts.yammm")
-	case *protocol.Location:
-		testutil.AssertLocationURI(t, *v, "parts.yammm")
-	case []protocol.Location:
-		require.NotEmpty(t, v, "Definition returned empty location array")
-		testutil.AssertLocationURI(t, v[0], "parts.yammm")
-	default:
-		require.Failf(t, "Unexpected definition result type", "got type %T", result)
-	}
+	testutil.AssertLocationURI(t, *result, "parts.yammm")
 }
 
 func TestIntegration_OpenedImportOverridesDisk(t *testing.T) {
@@ -298,9 +254,6 @@ func TestIntegration_OpenedImportOverridesDisk(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	partsContentOverlay := "schema \"parts\"\n\ntype OverlayWheel {\n\tid String primary\n\toverlayDiameter Integer\n}\n"
 	err = h.OpenDocument("parts.yammm", partsContentOverlay)
@@ -373,9 +326,6 @@ func TestIntegration_MultiDocumentWorkflow(t *testing.T) {
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
-
 	err = h.OpenDocument(typesPath, typesContent)
 	require.NoError(t, err, "OpenDocument types.yammm failed")
 	err = h.OpenDocument(mainPath, mainContent)
@@ -394,17 +344,7 @@ func TestIntegration_MultiDocumentWorkflow(t *testing.T) {
 
 	require.NotNil(t, result, "Definition returned nil - schema may be invalid or symbol index missing")
 
-	switch v := result.(type) {
-	case protocol.Location:
-		testutil.AssertLocationURI(t, v, "types.yammm")
-	case *protocol.Location:
-		testutil.AssertLocationURI(t, *v, "types.yammm")
-	case []protocol.Location:
-		require.NotEmpty(t, v, "Definition returned empty location array")
-		testutil.AssertLocationURI(t, v[0], "types.yammm")
-	default:
-		require.Failf(t, "Unexpected definition result type", "got type %T", result)
-	}
+	testutil.AssertLocationURI(t, *result, "types.yammm")
 }
 
 func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
@@ -420,9 +360,6 @@ func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	err = h.OpenDocument("main.yammm", string(unformatted))
 	require.NoError(t, err, "OpenDocument failed")
@@ -447,9 +384,6 @@ func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	err = h.OpenDocument("test.yammm", content)
 	require.NoError(t, err, "OpenDocument failed")
@@ -595,14 +529,8 @@ func TestCompletion_UTF8Mode_Integration(t *testing.T) {
 			result, err := h.Completion(filePath, tt.line, tt.char)
 			require.NoError(t, err, "completion failed")
 
-			switch v := result.(type) {
-			case nil:
-				// No completions is valid.
-			case []protocol.CompletionItem:
-				t.Logf("got %d completion items", len(v))
-			default:
-				assert.Failf(t, "unexpected result type", "got type %T", result)
-			}
+			// A nil slice (no completions) is valid for some positions.
+			t.Logf("got %d completion items", len(result))
 		})
 	}
 }
@@ -627,12 +555,7 @@ func TestCompletion_UTF8Mode_NoPanic(t *testing.T) {
 	result, err := h.Completion(filePath, 3, 0)
 	require.NoError(t, err, "completion failed")
 
-	items, ok := result.([]protocol.CompletionItem)
-	if !ok {
-		t.Skipf("no completion items returned (result type: %T)", result)
-	}
-
-	assert.NotEmpty(t, items, "expected completion items for type body context")
+	assert.NotEmpty(t, result, "expected completion items for type body context")
 }
 
 const (
@@ -838,7 +761,7 @@ func TestMarkdownIntegration_HoverInCodeBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
@@ -862,7 +785,7 @@ func TestMarkdownIntegration_OutsideCodeBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\nSome prose here.\n\n```yammm\nschema \"test\"\n```\n"
@@ -881,7 +804,7 @@ func TestMarkdownIntegration_CompletionOutsideCodeBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\nSome prose here.\n\n```yammm\nschema \"test\"\n```\n"
@@ -900,7 +823,7 @@ func TestMarkdownIntegration_DefinitionOutsideCodeBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\nSome prose here.\n\n```yammm\nschema \"test\"\n```\n"
@@ -919,7 +842,7 @@ func TestMarkdownIntegration_SymbolsNoCodeBlocks(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Just Prose\n\nNo code blocks here.\n\nMore text.\n"
@@ -938,7 +861,7 @@ func TestMarkdownIntegration_MultipleBlocks(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Block One\n\n```yammm\nschema \"block_one\"\n\ntype Alpha {\n    id String primary\n}\n```\n\n# Block Two\n\n```yammm\nschema \"block_two\"\n\ntype Beta {\n    name String primary\n}\n```\n"
@@ -960,16 +883,14 @@ func TestMarkdownIntegration_MultipleBlocks(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, symbols, "expected symbols from both blocks")
 
-	syms, ok := symbols.([]protocol.DocumentSymbol)
-	require.True(t, ok, "expected []protocol.DocumentSymbol")
-	assert.GreaterOrEqual(t, len(syms), 2, "expected symbols from both blocks")
+	assert.GreaterOrEqual(t, len(symbols), 2, "expected symbols from both blocks")
 }
 
 func TestMarkdownIntegration_CompletionInBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    \n}\n```\n"
@@ -983,9 +904,7 @@ func TestMarkdownIntegration_CompletionInBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result, "expected completion items inside code block")
 
-	if items, ok := result.([]protocol.CompletionItem); ok {
-		assert.NotEmpty(t, items, "expected completion items")
-	}
+	assert.NotEmpty(t, result, "expected completion items")
 }
 
 func TestMarkdownIntegration_ImportRejection(t *testing.T) {
@@ -1039,7 +958,7 @@ func TestMarkdownIntegration_CloseCleansDiagnostics(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
@@ -1094,7 +1013,7 @@ func TestMarkdownIntegration_FormattingReturnsEmpty(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
@@ -1113,7 +1032,7 @@ func TestMarkdownIntegration_IgnoreNonMarkdownExtension(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
@@ -1133,7 +1052,7 @@ func TestMarkdownIntegration_SnippetBlockNoSchema(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Snippet Example\n\n```yammm\ntype Foo {\n    id String primary\n    name String required\n}\n```\n"
@@ -1156,9 +1075,9 @@ func TestMarkdownIntegration_SnippetBlockNoSchema(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, symbols, "expected document symbols for snippet block")
 
-	if syms, ok := symbols.([]protocol.DocumentSymbol); ok {
+	{
 		var foundFoo bool
-		for _, sym := range syms {
+		for _, sym := range symbols {
 			if sym.Name == "Foo" {
 				foundFoo = true
 				assert.GreaterOrEqual(t, int(sym.Range.Start.Line), 3,
@@ -1180,7 +1099,7 @@ func TestMarkdownIntegration_FeaturesWithMarkdownOnly(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Only Markdown\n\n```yammm\nschema \"md_only\"\n\ntype Solo {\n    id String primary\n}\n```\n"
@@ -1232,7 +1151,7 @@ func TestMarkdownIntegration_Fixtures(t *testing.T) {
 			t.Parallel()
 
 			tmpDir := t.TempDir()
-			h := newMarkdownTestHarness(t, tmpDir)
+			h := newTestHarness(t, tmpDir)
 			defer h.Close()
 
 			data, err := os.ReadFile(filepath.Join(fixtureDir, tt.file))
@@ -1288,9 +1207,7 @@ func TestMarkdownIntegration_CompletionNilSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result, "completion should return items even with nil snapshot (graceful degradation)")
 
-	items, ok := result.([]protocol.CompletionItem)
-	require.True(t, ok, "expected []CompletionItem")
-	assert.NotEmpty(t, items, "expected keyword/snippet completions")
+	assert.NotEmpty(t, result, "expected keyword/snippet completions")
 }
 
 func TestMarkdownIntegration_DefinitionRemapsURI(t *testing.T) {
@@ -1316,13 +1233,10 @@ func TestMarkdownIntegration_DefinitionRemapsURI(t *testing.T) {
 	require.NoError(t, err)
 
 	if result != nil {
-		loc, ok := result.(*protocol.Location)
-		if ok && loc != nil {
-			assert.Contains(t, loc.URI, "definition.md",
-				"definition URI should reference the markdown file")
-			assert.GreaterOrEqual(t, int(loc.Range.Start.Line), 3,
-				"definition range should be in markdown coordinates")
-		}
+		assert.Contains(t, result.URI, "definition.md",
+			"definition URI should reference the markdown file")
+		assert.GreaterOrEqual(t, int(result.Range.Start.Line), 3,
+			"definition range should be in markdown coordinates")
 	}
 }
 
