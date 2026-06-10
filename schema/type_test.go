@@ -6,152 +6,38 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func TestType_Seal_PreventsSetProperties(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSetTypeProperties(typ, []*schema.Property{})
-	schema.TestSealType(typ)
+// TestType_Seal_PreventsMutation drives every post-seal mutation through one panic table:
+// a sealed Type must reject each setter.
+func TestType_Seal_PreventsMutation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(s *schema.Type)
+	}{
+		{"SetProperties", func(s *schema.Type) { schema.TestSetTypeProperties(s, []*schema.Property{}) }},
+		{"SetAssociations", func(s *schema.Type) { schema.TestSetTypeAssociations(s, []*schema.Relation{}) }},
+		{"SetCompositions", func(s *schema.Type) { schema.TestSetTypeCompositions(s, []*schema.Relation{}) }},
+		{"SetInvariants", func(s *schema.Type) { schema.TestSetTypeInvariants(s, []*schema.Invariant{}) }},
+		{"SetInherits", func(s *schema.Type) { schema.TestSetTypeInherits(s, []schema.TypeRef{}) }},
+		{"SetAllProperties", func(s *schema.Type) { schema.TestSetTypeAllProperties(s, []*schema.Property{}) }},
+		{"SetPrimaryKeys", func(s *schema.Type) { schema.TestSetTypePrimaryKeys(s, []*schema.Property{}) }},
+		{"SetAllAssociations", func(s *schema.Type) { schema.TestSetTypeAllAssociations(s, []*schema.Relation{}) }},
+		{"SetAllCompositions", func(s *schema.Type) { schema.TestSetTypeAllCompositions(s, []*schema.Relation{}) }},
+		{"SetSuperTypes", func(s *schema.Type) { schema.TestSetTypeSuperTypes(s, []schema.ResolvedTypeRef{}) }},
+		{"SetSubTypes", func(s *schema.Type) { schema.TestSetTypeSubTypes(s, []schema.ResolvedTypeRef{}) }},
+	}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetProperties after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeProperties(typ, []*schema.Property{})
-}
-
-func TestType_Seal_PreventsSetAssociations(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetAssociations after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeAssociations(typ, []*schema.Relation{})
-}
-
-func TestType_Seal_PreventsSetCompositions(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetCompositions after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeCompositions(typ, []*schema.Relation{})
-}
-
-func TestType_Seal_PreventsSetInvariants(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetInvariants after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeInvariants(typ, []*schema.Invariant{})
-}
-
-func TestType_Seal_PreventsSetInherits(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetInherits after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeInherits(typ, []schema.TypeRef{})
-}
-
-func TestType_Seal_PreventsSetAllProperties(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetAllProperties after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeAllProperties(typ, []*schema.Property{})
-}
-
-func TestType_Seal_PreventsSetPrimaryKeys(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetPrimaryKeys after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypePrimaryKeys(typ, []*schema.Property{})
-}
-
-func TestType_Seal_PreventsSetAllAssociations(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetAllAssociations after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeAllAssociations(typ, []*schema.Relation{})
-}
-
-func TestType_Seal_PreventsSetAllCompositions(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetAllCompositions after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeAllCompositions(typ, []*schema.Relation{})
-}
-
-func TestType_Seal_PreventsSetSuperTypes(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetSuperTypes after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeSuperTypes(typ, []schema.ResolvedTypeRef{})
-}
-
-func TestType_Seal_PreventsSetSubTypes(t *testing.T) {
-	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSealType(typ)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetSubTypes after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetTypeSubTypes(typ, []schema.ResolvedTypeRef{})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
+			schema.TestSealType(s)
+			yammmtest.AssertPanics(t, func() { tt.mutate(s) })
+		})
+	}
 }
 
 func TestType_SettersWorkBeforeSeal(t *testing.T) {

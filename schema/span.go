@@ -90,7 +90,13 @@ func (b *spanBuilder) FromTokens(start, stop antlr.Token) location.Span {
 }
 
 // fromRuneOffsets creates a Span from rune-based start/end offsets.
+// ANTLR error-recovery tokens (missing tokens, EOF placeholders) carry
+// negative offsets; like nil tokens, they have no real source extent and
+// yield the zero Span rather than tripping the offset invariants.
 func (b *spanBuilder) fromRuneOffsets(startRune, endRune int) location.Span {
+	if startRune < 0 || endRune < 0 {
+		return location.Span{}
+	}
 	startByte := mustRuneToByteOffset(b.converter, b.sourceID, startRune)
 	endByte := mustRuneToByteOffset(b.converter, b.sourceID, endRune)
 

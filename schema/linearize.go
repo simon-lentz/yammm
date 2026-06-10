@@ -220,9 +220,16 @@ func (c *completer) completeTypes() bool {
 		for _, p := range allProps {
 			if p.IsPrimaryKey() {
 				if !isPrimaryKeyAllowed(p.Constraint()) {
+					// The constraint is nil when parse-error recovery kept a
+					// property that never received a type; describe that
+					// rather than dereferencing it.
+					kind := "missing type"
+					if pc := p.Constraint(); pc != nil {
+						kind = pc.Kind().String()
+					}
 					c.errorf(p.Span(), diag.E_INVALID_PRIMARY_KEY_TYPE,
 						"property %q: %s cannot be used as a primary key (allowed: String, UUID, Date, Timestamp)",
-						p.Name(), p.Constraint().Kind())
+						p.Name(), kind)
 					ok = false
 					continue
 				}

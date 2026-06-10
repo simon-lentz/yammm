@@ -223,136 +223,57 @@ func TestStructuralHash_CompositionSensitivity(t *testing.T) {
 		"different composition targets must produce different hashes")
 }
 
-func TestStructuralHash_StringConstraintMinMax(t *testing.T) {
-	t.Run("unbounded vs min", func(t *testing.T) {
-		propA := makeProp("x", schema.NewStringConstraint(), false, false)
-		propB := makeProp("x", schema.StringMinLen(5), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("unbounded vs max", func(t *testing.T) {
-		propA := makeProp("x", schema.NewStringConstraint(), false, false)
-		propB := makeProp("x", schema.StringMaxLen(100), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("different min", func(t *testing.T) {
-		propA := makeProp("x", schema.StringMinLen(1), false, false)
-		propB := makeProp("x", schema.StringMinLen(2), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("both bounds vs one", func(t *testing.T) {
-		propA := makeProp("x", schema.StringLenBetween(1, 100), false, false)
-		propB := makeProp("x", schema.StringMinLen(1), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-}
+// TestStructuralHash_ConstraintSensitivity drives every constraint-level
+// hash distinction through one table: each row's two constraints land on
+// the same property/type/schema scaffold and the hashes must differ
+// (wantSame=false) or match (wantSame=true — sorted-set semantics).
+func TestStructuralHash_ConstraintSensitivity(t *testing.T) {
+	tests := []struct {
+		name     string
+		a, b     schema.Constraint
+		wantSame bool
+	}{
+		{"string unbounded vs min", schema.NewStringConstraint(), schema.StringMinLen(5), false},
+		{"string unbounded vs max", schema.NewStringConstraint(), schema.StringMaxLen(100), false},
+		{"string different min", schema.StringMinLen(1), schema.StringMinLen(2), false},
+		{"string both bounds vs one", schema.StringLenBetween(1, 100), schema.StringMinLen(1), false},
+		{"integer unbounded vs min", schema.NewIntegerConstraint(), schema.IntegerMin(0), false},
+		{"integer different max", schema.IntegerMax(100), schema.IntegerMax(200), false},
+		{"integer between vs single bound", schema.IntegerBetween(0, 100), schema.IntegerMin(0), false},
+		{"float unbounded vs min", schema.NewFloatConstraint(), schema.FloatMin(0.0), false},
+		{"float different min", schema.FloatMin(1.5), schema.FloatMin(2.5), false},
+		{"enum different values", schema.NewEnumConstraint([]string{"ACTIVE", "INACTIVE"}), schema.NewEnumConstraint([]string{"ACTIVE", "DELETED"}), false},
+		// Enum values are sorted before hashing, so order must not matter.
+		{"enum order insensitive", schema.NewEnumConstraint([]string{"B", "A"}), schema.NewEnumConstraint([]string{"A", "B"}), true},
+		{"enum different count", schema.NewEnumConstraint([]string{"A"}), schema.NewEnumConstraint([]string{"A", "B"}), false},
+		{"pattern different patterns", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[A-Z]+$`)}), schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[0-9]+$`)}), false},
+		// Pattern sets are sorted before hashing, so order must not matter.
+		{
+			"pattern order insensitive",
+			schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[A-Z]`), regexp.MustCompile(`[0-9]$`)}),
+			schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`[0-9]$`), regexp.MustCompile(`^[A-Z]`)}),
+			true,
+		},
+		{"vector dimension", schema.NewVectorConstraint(128), schema.NewVectorConstraint(256), false},
+		{"boolean vs string kind", schema.NewBooleanConstraint(), schema.NewStringConstraint(), false},
+		{"timestamp default vs formatted", schema.NewTimestampConstraint(), schema.NewTimestampConstraintFormatted("2006-01-02T15:04:05Z07:00"), false},
+		{"date vs uuid kind", schema.NewDateConstraint(), schema.NewUUIDConstraint(), false},
+		{"list different element types", schema.NewListConstraint(schema.NewStringConstraint()), schema.NewListConstraint(schema.NewIntegerConstraint()), false},
+		{"list unbounded vs bounded", schema.NewListConstraint(schema.NewStringConstraint()), schema.ListMinLen(schema.NewStringConstraint(), 1), false},
+		{"list same bounds match", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), true},
+	}
 
-func TestStructuralHash_IntegerConstraintMinMax(t *testing.T) {
-	t.Run("unbounded vs min", func(t *testing.T) {
-		propA := makeProp("x", schema.NewIntegerConstraint(), false, false)
-		propB := makeProp("x", schema.IntegerMin(0), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("different max", func(t *testing.T) {
-		propA := makeProp("x", schema.IntegerMax(100), false, false)
-		propB := makeProp("x", schema.IntegerMax(200), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("between vs single bound", func(t *testing.T) {
-		propA := makeProp("x", schema.IntegerBetween(0, 100), false, false)
-		propB := makeProp("x", schema.IntegerMin(0), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-}
-
-func TestStructuralHash_FloatConstraintMinMax(t *testing.T) {
-	t.Run("unbounded vs min", func(t *testing.T) {
-		propA := makeProp("x", schema.NewFloatConstraint(), false, false)
-		propB := makeProp("x", schema.FloatMin(0.0), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("different min", func(t *testing.T) {
-		propA := makeProp("x", schema.FloatMin(1.5), false, false)
-		propB := makeProp("x", schema.FloatMin(2.5), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-}
-
-func TestStructuralHash_EnumValues(t *testing.T) {
-	t.Run("different values", func(t *testing.T) {
-		propA := makeProp("status", schema.NewEnumConstraint([]string{"ACTIVE", "INACTIVE"}), false, false)
-		propB := makeProp("status", schema.NewEnumConstraint([]string{"ACTIVE", "DELETED"}), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("order insensitive", func(t *testing.T) {
-		propA := makeProp("status", schema.NewEnumConstraint([]string{"B", "A"}), false, false)
-		propB := makeProp("status", schema.NewEnumConstraint([]string{"A", "B"}), false, false)
-		// Enum values are sorted before hashing, so order should not matter.
-		assertConstraintsMatch(t, propA, propB)
-	})
-	t.Run("different count", func(t *testing.T) {
-		propA := makeProp("status", schema.NewEnumConstraint([]string{"A"}), false, false)
-		propB := makeProp("status", schema.NewEnumConstraint([]string{"A", "B"}), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-}
-
-func TestStructuralHash_PatternStrings(t *testing.T) {
-	t.Run("different patterns", func(t *testing.T) {
-		propA := makeProp("code", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[A-Z]+$`)}), false, false)
-		propB := makeProp("code", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[0-9]+$`)}), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("order insensitive", func(t *testing.T) {
-		propA := makeProp("code", schema.NewPatternConstraint([]*regexp.Regexp{
-			regexp.MustCompile(`^[A-Z]`), regexp.MustCompile(`[0-9]$`),
-		}), false, false)
-		propB := makeProp("code", schema.NewPatternConstraint([]*regexp.Regexp{
-			regexp.MustCompile(`[0-9]$`), regexp.MustCompile(`^[A-Z]`),
-		}), false, false)
-		assertConstraintsMatch(t, propA, propB)
-	})
-}
-
-func TestStructuralHash_VectorDimension(t *testing.T) {
-	propA := makeProp("embedding", schema.NewVectorConstraint(128), false, false)
-	propB := makeProp("embedding", schema.NewVectorConstraint(256), false, false)
-	assertConstraintsDiffer(t, propA, propB)
-}
-
-func TestStructuralHash_BooleanConstraint(t *testing.T) {
-	propA := makeProp("active", schema.NewBooleanConstraint(), false, false)
-	propB := makeProp("active", schema.NewStringConstraint(), false, false)
-	assertConstraintsDiffer(t, propA, propB)
-}
-
-func TestStructuralHash_TimestampFormat(t *testing.T) {
-	propA := makeProp("ts", schema.NewTimestampConstraint(), false, false)
-	propB := makeProp("ts", schema.NewTimestampConstraintFormatted("2006-01-02T15:04:05Z07:00"), false, false)
-	assertConstraintsDiffer(t, propA, propB)
-}
-
-func TestStructuralHash_DateVsUUID(t *testing.T) {
-	propA := makeProp("x", schema.NewDateConstraint(), false, false)
-	propB := makeProp("x", schema.NewUUIDConstraint(), false, false)
-	assertConstraintsDiffer(t, propA, propB)
-}
-
-func TestStructuralHash_ListConstraint(t *testing.T) {
-	t.Run("different element types", func(t *testing.T) {
-		propA := makeProp("tags", schema.NewListConstraint(schema.NewStringConstraint()), false, false)
-		propB := makeProp("tags", schema.NewListConstraint(schema.NewIntegerConstraint()), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("unbounded vs bounded", func(t *testing.T) {
-		propA := makeProp("tags", schema.NewListConstraint(schema.NewStringConstraint()), false, false)
-		propB := makeProp("tags", schema.ListMinLen(schema.NewStringConstraint(), 1), false, false)
-		assertConstraintsDiffer(t, propA, propB)
-	})
-	t.Run("same bounds match", func(t *testing.T) {
-		propA := makeProp("tags", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), false, false)
-		propB := makeProp("tags", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), false, false)
-		assertConstraintsMatch(t, propA, propB)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			propA := makeProp("x", tt.a, false, false)
+			propB := makeProp("x", tt.b, false, false)
+			if tt.wantSame {
+				assertConstraintsMatch(t, propA, propB)
+			} else {
+				assertConstraintsDiffer(t, propA, propB)
+			}
+		})
+	}
 }
 
 func TestStructuralHash_DataTypeSensitivity(t *testing.T) {

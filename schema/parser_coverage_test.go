@@ -26,30 +26,60 @@ func parseSchema(t *testing.T, schemaSource string) (*schema.TestModel, diag.Res
 	return model, collector.Result()
 }
 
+// parseCase is one parser-coverage scenario: source text, the expected
+// outcome, and an optional model check run only on wantOK cases.
+type parseCase struct {
+	name         string
+	source       string
+	wantOK       bool
+	wantWarnings bool
+	checkFn      func(t *testing.T, model *schema.TestModel)
+}
+
+// runParseCases runs the canonical parser-coverage loop over cases.
+func runParseCases(t *testing.T, tests []parseCase) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			model, result := parseSchema(t, tt.source)
+			if tt.wantOK {
+				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				if tt.checkFn != nil {
+					tt.checkFn(t, model)
+				}
+			} else {
+				assert.False(t, result.OK(), "expected errors")
+			}
+			if tt.wantWarnings {
+				assert.True(t, result.HasWarnings(), "expected warnings, got: %v", result)
+			}
+		})
+	}
+}
+
+// firstPropIsFloat asserts the model holds exactly one type whose sole
+// property carries the Float constraint kind — the shared check for the
+// float-bounds parse variants.
+func firstPropIsFloat(t *testing.T, model *schema.TestModel) {
+	t.Helper()
+	require.Len(t, model.Types, 1)
+	require.Len(t, model.Types[0].Properties, 1)
+	assert.Equal(t, schema.KindFloat, model.Types[0].Properties[0].Constraint.Kind())
+}
+
 func TestParse_FloatConstraints(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name         string
-		source       string
-		wantOK       bool
-		wantWarnings bool
-		checkFn      func(t *testing.T, model *schema.TestModel)
-	}{
+	tests := []parseCase{
 		{
 			name: "float with min only",
 			source: `schema "test"
 type Thing {
 	value Float[0.0, _]
 }`,
-			wantOK: true,
-			checkFn: func(t *testing.T, model *schema.TestModel) {
-				t.Helper()
-				require.Len(t, model.Types, 1)
-				require.Len(t, model.Types[0].Properties, 1)
-				prop := model.Types[0].Properties[0]
-				assert.Equal(t, schema.KindFloat, prop.Constraint.Kind())
-			},
+			wantOK:  true,
+			checkFn: firstPropIsFloat,
 		},
 		{
 			name: "float with max only",
@@ -57,14 +87,8 @@ type Thing {
 type Thing {
 	value Float[_, 100.0]
 }`,
-			wantOK: true,
-			checkFn: func(t *testing.T, model *schema.TestModel) {
-				t.Helper()
-				require.Len(t, model.Types, 1)
-				require.Len(t, model.Types[0].Properties, 1)
-				prop := model.Types[0].Properties[0]
-				assert.Equal(t, schema.KindFloat, prop.Constraint.Kind())
-			},
+			wantOK:  true,
+			checkFn: firstPropIsFloat,
 		},
 		{
 			name: "float with both bounds",
@@ -72,14 +96,8 @@ type Thing {
 type Thing {
 	value Float[0.0, 100.0]
 }`,
-			wantOK: true,
-			checkFn: func(t *testing.T, model *schema.TestModel) {
-				t.Helper()
-				require.Len(t, model.Types, 1)
-				require.Len(t, model.Types[0].Properties, 1)
-				prop := model.Types[0].Properties[0]
-				assert.Equal(t, schema.KindFloat, prop.Constraint.Kind())
-			},
+			wantOK:  true,
+			checkFn: firstPropIsFloat,
 		},
 		{
 			name: "float unbounded",
@@ -87,14 +105,8 @@ type Thing {
 type Thing {
 	value Float
 }`,
-			wantOK: true,
-			checkFn: func(t *testing.T, model *schema.TestModel) {
-				t.Helper()
-				require.Len(t, model.Types, 1)
-				require.Len(t, model.Types[0].Properties, 1)
-				prop := model.Types[0].Properties[0]
-				assert.Equal(t, schema.KindFloat, prop.Constraint.Kind())
-			},
+			wantOK:  true,
+			checkFn: firstPropIsFloat,
 		},
 		{
 			name: "float with negative min",
@@ -196,23 +208,7 @@ type Thing {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			model, result := parseSchema(t, tt.source)
-			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
-				if tt.checkFn != nil {
-					tt.checkFn(t, model)
-				}
-			} else {
-				assert.False(t, result.OK(), "expected errors")
-			}
-			if tt.wantWarnings {
-				assert.True(t, result.HasWarnings(), "expected warnings, got: %v", result)
-			}
-		})
-	}
+	runParseCases(t, tests)
 }
 
 func TestParse_BooleanProperty(t *testing.T) {
@@ -246,11 +242,7 @@ type Thing {
 func TestParse_PatternConstraint(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "single pattern",
 			source: `schema "test"
@@ -306,11 +298,7 @@ type Thing {
 func TestParse_TimestampProperty(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "default timestamp",
 			source: `schema "test"
@@ -369,11 +357,7 @@ type Event {
 func TestParse_VectorProperty(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "vector with dimension",
 			source: `schema "test"
@@ -413,11 +397,7 @@ type Embedding {
 func TestParse_ListProperty(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "basic list of strings",
 			source: `schema "test"
@@ -616,13 +596,7 @@ type B {
 func TestParse_IntegerConstraintEdgeCases(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name         string
-		source       string
-		wantOK       bool
-		wantWarnings bool
-		checkFn      func(t *testing.T, model *schema.TestModel)
-	}{
+	tests := []parseCase{
 		{
 			name: "integer with min only",
 			source: `schema "test"
@@ -750,11 +724,7 @@ type Thing {
 func TestParse_EnumEdgeCases(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "enum with escape sequences",
 			source: `schema "test"
@@ -968,11 +938,7 @@ type C extends A, B {}`
 func TestParse_InvariantEdgeCases(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "invariant with complex expression",
 			source: `schema "test"
@@ -1457,11 +1423,7 @@ type Child extends A, B, {}`,
 func TestParse_InvariantExpressionVarieties(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "invariant with boolean literal",
 			source: `schema "test"
@@ -1642,11 +1604,7 @@ type Source {
 func TestParse_StringEscapeSequences(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "string with newline escape",
 			source: `schema "test\nwith\nnewlines"
@@ -1704,11 +1662,7 @@ type Foo {
 func TestParse_SyntaxErrorRecovery(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "missing closing brace",
 			source: `schema "test"
@@ -2010,11 +1964,7 @@ type Foo { id UUID primary }`,
 func TestParse_DatatypeAlias(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "integer alias",
 			source: `schema "test"
@@ -2205,11 +2155,7 @@ type Child {
 func TestParse_InvariantScenarios(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "simple property comparison invariant",
 			source: `schema "test"
@@ -2460,11 +2406,7 @@ type lowercase {}`,
 func TestParse_ExtendedTypeEdgeCases(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "part type",
 			source: `schema "test"
@@ -2507,11 +2449,7 @@ type Child extends base.Parent {}`,
 func TestParse_ExtendedDatatypeDefinitions(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "datatype with documentation",
 			source: `schema "test"
@@ -2562,11 +2500,7 @@ type Item {
 func TestParse_UsingClause(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "association with local using type",
 			source: `schema "test"
@@ -2731,11 +2665,7 @@ type Entity {
 func TestParse_StringConstraints(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		wantOK bool
-	}{
+	tests := []parseCase{
 		{
 			name: "string with min length only",
 			source: `schema "test"
@@ -3419,10 +3349,7 @@ type Parent {
 func TestParse_InvalidMultiplicityKeyword(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-	}{
+	tests := []parseCase{
 		{
 			name: "invalid multiplicity in association",
 			source: `schema "test"
@@ -3480,10 +3407,7 @@ import "" as empty`
 func TestParse_SyntaxErrorReporting(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-	}{
+	tests := []parseCase{
 		{
 			name: "unexpected token",
 			source: `schema "test"

@@ -17,6 +17,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// requireOK fails the test when result carries errors, logging every
+// collected issue first so load failures are diagnosable.
+func requireOK(t *testing.T, result diag.Result) {
+	t.Helper()
+	if result.HasErrors() {
+		for _, issue := range slices.Collect(result.Issues()) {
+			t.Logf("Unexpected issue: %v", issue)
+		}
+	}
+	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+}
+
 func TestString_SimpleSchema(t *testing.T) {
 	// Note: YAMMM grammar uses `name Type` syntax, not `name: Type`
 	source := `schema "test" type Person { name String primary }`
@@ -26,12 +38,7 @@ func TestString_SimpleSchema(t *testing.T) {
 
 	require.NotNil(t, s)
 	assert.Equal(t, "test", s.Name())
-	if result.HasErrors() {
-		for _, issue := range slices.Collect(result.Issues()) {
-			t.Logf("Unexpected issue: %v", issue)
-		}
-	}
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	requireOK(t, result)
 
 	typ, ok := s.Type("Person")
 	require.True(t, ok)

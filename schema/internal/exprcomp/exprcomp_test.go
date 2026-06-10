@@ -18,142 +18,107 @@ type noopSpans struct{}
 
 func (noopSpans) FromContext(antlr.ParserRuleContext) location.Span { return location.Span{} }
 
-func TestCompileString_SimpleExpression(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://simple.yammm")
-	collector := diag.NewCollector(0)
+// TestCompileString_Ops drives every operator and expression form through
+// one table: each source compiles without diagnostics and roots at the
+// expected op (with child counts where the arity is part of the contract).
+// A chained ->call roots at the FIRST call in the chain.
+func TestCompileString_Ops(t *testing.T) {
+	tests := []struct {
+		name         string
+		src          string
+		wantOp       string
+		wantChildren int // -1: don't check
+	}{
+		{"addition", "1 + 2", "+", 2},
+		{"comparison", "x > 0", ">", -1},
+		{"logical and", "a && b", "&&", -1},
+		{"logical or", "a || b", "||", -1},
+		{"complex boolean", "(a && b) || (c && d)", "||", -1},
+		{"property access", "name", "p", -1},
+		{"variable", "$x", "$", -1},
+		{"self reference", "$self", "$", -1},
+		{"variable arithmetic", "$x + $y", "+", -1},
+		{"list literal", "[1, 2, 3]", "[]", 3},
+		{"empty list literal", "[]", "[]", 0},
+		{"nested list literal", "[[1, 2], [3, 4]]", "[]", 2},
+		{"function call", "items->Count()", "Count", -1},
+		// Unknown functions compile successfully — validation is deferred
+		// to the eval layer, supporting runtime builtin registration.
+		{"unknown function", "items->UnknownFunc()", "UnknownFunc", -1},
+		{"lambda parameter", "items->Filter(|x| x > 0)", "Filter", -1},
+		{"function arguments", "str->Substring(0, 5)", "Substring", -1},
+		{"multiple arguments", `str->Replace("old", "new")`, "Replace", -1},
+		{"chained calls root at first", "items->Filter(|x| x > 0)->Count()", "Filter", -1},
+		{"chained map sum roots at first", "items->Map(|x| x * 2)->Sum()", "Map", -1},
+		{"ternary", "a ? b : c", "?", 3},
+		{"nested ternary", "a ? b : c ? d : e", "?", -1},
+		{"unary minus", "-x", "-x", -1},
+		{"negative number", "-42", "-x", -1},
+		{"not", "!done", "!", -1},
+		{"member access", "obj.prop", ".", -1},
+		{"nested member access", "a.b.c", ".", -1},
+		{"in operator", "x in [1, 2, 3]", "in", -1},
+		{"regexp match", "name =~ /^A/", "=~", -1},
+		{"multiplication", "2 * 3", "*", -1},
+		{"division", "10 / 2", "/", -1},
+		{"modulo", "7 % 3", "%", -1},
+		{"group precedence", "(1 + 2) * 3", "*", -1},
+		{"complex arithmetic", "(a + b) * (c - d) / e", "/", 2},
+		{"array index", "items[0]", "@", -1},
+		{"equals", "x == y", "==", -1},
+		{"not equals", "x != y", "!=", -1},
+		{"less", "a < b", "<", -1},
+		{"less or equal", "a <= b", "<=", -1},
+		{"greater", "a > b", ">", -1},
+		{"greater or equal", "a >= b", ">=", -1},
+	}
 
-	// Compile a simple arithmetic expression
-	result := exprcomp.CompileString("1 + 2", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "+", result.Op())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sourceID := location.MustNewSourceID("test://ops.yammm")
+			collector := diag.NewCollector(0)
 
-	children := result.Children()
-	require.Len(t, children, 2)
+			result := exprcomp.CompileString(tt.src, collector, sourceID)
+			require.False(t, collector.HasErrors(), "compile %q: %s", tt.src, collector.Result().String())
+			require.NotNil(t, result)
+			assert.Equal(t, tt.wantOp, result.Op(), "op for %q", tt.src)
+			if tt.wantChildren >= 0 {
+				assert.Len(t, result.Children(), tt.wantChildren, "children for %q", tt.src)
+			}
+		})
+	}
 }
 
-func TestCompileString_ComparisonExpression(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://compare.yammm")
-	collector := diag.NewCollector(0)
+// TestCompileString_Literals pins the literal value (and Go type) each
+// literal form compiles to; hex integers compile as literals too.
+func TestCompileString_Literals(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want any
+	}{
+		{"string", `"hello"`, "hello"},
+		{"integer", "42", int64(42)},
+		// Hex is NOT supported: the lexer takes the leading 0 as the whole
+		// literal and CompileString accepts the trailing "x10" silently.
+		{"hex prefix takes leading zero only", "0x10", int64(0)},
+		{"float", "3.14", 3.14},
+		{"boolean true", "true", true},
+		{"boolean false", "false", false},
+		{"nil", "nil", nil},
+	}
 
-	result := exprcomp.CompileString("x > 0", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, ">", result.Op())
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sourceID := location.MustNewSourceID("test://literals.yammm")
+			collector := diag.NewCollector(0)
 
-func TestCompileString_LogicalExpression(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://logical.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("a && b", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "&&", result.Op())
-}
-
-func TestCompileString_PropertyAccess(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://property.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("name", collector, sourceID)
-	require.NotNil(t, result)
-	// Property access becomes (p "name")
-	assert.Equal(t, "p", result.Op())
-}
-
-func TestCompileString_Variable(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://variable.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("$x", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "$", result.Op())
-}
-
-func TestCompileString_ListLiteral(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://list.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("[1, 2, 3]", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "[]", result.Op())
-	assert.Len(t, result.Children(), 3)
-}
-
-func TestCompileString_FunctionCall(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://fcall.yammm")
-	collector := diag.NewCollector(0)
-
-	// Grammar uses -> for function calls, not .
-	result := exprcomp.CompileString("items->Count()", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "Count", result.Op())
-}
-
-func TestCompileString_UnknownFunction(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://unknown.yammm")
-	collector := diag.NewCollector(0)
-
-	// Unknown functions compile successfully - validation is deferred to eval layer.
-	// This allows schemas to be compiled without knowing all builtins,
-	// supporting runtime extension and custom builtin registration.
-	result := exprcomp.CompileString("items->UnknownFunc()", collector, sourceID)
-	assert.False(t, collector.HasErrors(), "unknown function should compile without error")
-	assert.NotNil(t, result)
-	assert.Equal(t, "UnknownFunc", result.Op())
-}
-
-func TestCompileString_TernaryExpression(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://test.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("a ? b : c", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "?", result.Op())
-	assert.Len(t, result.Children(), 3)
-}
-
-func TestCompileString_UnaryMinus(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://test.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("-x", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "-x", result.Op())
-}
-
-func TestCompileString_Not(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://test.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("!done", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "!", result.Op())
-}
-
-func TestCompileString_MemberAccess(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://test.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("obj.prop", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, ".", result.Op())
-}
-
-func TestCompileString_InOperator(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://test.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("x in [1, 2, 3]", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "in", result.Op())
-}
-
-func TestCompileString_RegexpMatch(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://test.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("name =~ /^A/", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "=~", result.Op())
+			result := exprcomp.CompileString(tt.src, collector, sourceID)
+			require.False(t, collector.HasErrors(), "compile %q", tt.src)
+			require.NotNil(t, result)
+			assert.Equal(t, tt.want, result.Literal())
+		})
+	}
 }
 
 func TestCompileString_DatatypeLiteral(t *testing.T) {
@@ -503,274 +468,4 @@ func TestBuiltinRegistry_Clone(t *testing.T) {
 		assert.NotNil(t, clone)
 		assert.True(t, clone.Has("Count"), "nil clone should have defaults")
 	})
-}
-
-func TestCompileString_MulDivExpression(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://muldiv.yammm")
-	collector := diag.NewCollector(0)
-
-	t.Run("multiplication", func(t *testing.T) {
-		result := exprcomp.CompileString("2 * 3", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, "*", result.Op())
-	})
-
-	t.Run("division", func(t *testing.T) {
-		result := exprcomp.CompileString("10 / 2", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, "/", result.Op())
-	})
-
-	t.Run("modulo", func(t *testing.T) {
-		result := exprcomp.CompileString("7 % 3", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, "%", result.Op())
-	})
-}
-
-func TestCompileString_EqualityExpression(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://equality.yammm")
-	collector := diag.NewCollector(0)
-
-	t.Run("equals", func(t *testing.T) {
-		result := exprcomp.CompileString("x == y", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, "==", result.Op())
-	})
-
-	t.Run("not equals", func(t *testing.T) {
-		result := exprcomp.CompileString("x != y", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, "!=", result.Op())
-	})
-}
-
-func TestCompileString_OrExpression(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://or.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("a || b", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "||", result.Op())
-}
-
-func TestCompileString_GroupExpression(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://group.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("(1 + 2) * 3", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "*", result.Op())
-}
-
-func TestCompileString_ArrayIndexAccess(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://at.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("items[0]", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "@", result.Op())
-}
-
-func TestCompileString_LiteralTypes(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://literals.yammm")
-	collector := diag.NewCollector(0)
-
-	t.Run("string literal", func(t *testing.T) {
-		result := exprcomp.CompileString(`"hello"`, collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, "hello", result.Literal())
-	})
-
-	t.Run("integer literal", func(t *testing.T) {
-		result := exprcomp.CompileString("42", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, int64(42), result.Literal())
-	})
-
-	t.Run("float literal", func(t *testing.T) {
-		result := exprcomp.CompileString("3.14", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, 3.14, result.Literal())
-	})
-
-	t.Run("boolean true", func(t *testing.T) {
-		result := exprcomp.CompileString("true", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, true, result.Literal())
-	})
-
-	t.Run("boolean false", func(t *testing.T) {
-		result := exprcomp.CompileString("false", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Equal(t, false, result.Literal())
-	})
-
-	t.Run("nil literal", func(t *testing.T) {
-		result := exprcomp.CompileString("nil", collector, sourceID)
-		require.NotNil(t, result)
-		assert.Nil(t, result.Literal())
-	})
-}
-
-func TestCompileString_LambdaWithParameters(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://lambda.yammm")
-	collector := diag.NewCollector(0)
-
-	// Filter with lambda parameter
-	result := exprcomp.CompileString("items->Filter(|x| x > 0)", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "Filter", result.Op())
-}
-
-func TestCompileString_FunctionWithArguments(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://args.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("str->Substring(0, 5)", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "Substring", result.Op())
-}
-
-func TestCompileString_ChainedExpressions(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://chain.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("items->Filter(|x| x > 0)->Count()", collector, sourceID)
-	require.NotNil(t, result)
-	// The AST represents the chain - first Filter is applied
-	assert.Contains(t, []string{"Filter", "Count"}, result.Op())
-}
-
-func TestCompileString_NestedTernary(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://nested-ternary.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("a ? b : c ? d : e", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "?", result.Op())
-}
-
-func TestCompileString_ComplexBoolean(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://complex.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("(a && b) || (c && d)", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "||", result.Op())
-}
-
-func TestCompileString_NegativeNumber(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://negative.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("-42", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "-x", result.Op())
-}
-
-func TestCompileString_AllComparisonOperators(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://compare.yammm")
-	collector := diag.NewCollector(0)
-
-	tests := []struct {
-		expr string
-		op   string
-	}{
-		{"a < b", "<"},
-		{"a <= b", "<="},
-		{"a > b", ">"},
-		{"a >= b", ">="},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.expr, func(t *testing.T) {
-			result := exprcomp.CompileString(tt.expr, collector, sourceID)
-			require.NotNil(t, result)
-			assert.Equal(t, tt.op, result.Op())
-		})
-	}
-}
-
-func TestCompileString_EmptyListLiteral(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://empty-list.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("[]", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "[]", result.Op())
-	assert.Empty(t, result.Children())
-}
-
-func TestCompileString_NestedListLiteral(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://nested-list.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("[[1, 2], [3, 4]]", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "[]", result.Op())
-	assert.Len(t, result.Children(), 2)
-}
-
-func TestCompileString_HexInteger(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://hex.yammm")
-	collector := diag.NewCollector(0)
-
-	// Hex literal if supported
-	result := exprcomp.CompileString("0x10", collector, sourceID)
-	if !collector.HasErrors() {
-		require.NotNil(t, result)
-	}
-}
-
-func TestCompileString_SelfReference(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://self.yammm")
-	collector := diag.NewCollector(0)
-
-	// Self reference via $self or similar if supported
-	result := exprcomp.CompileString("$self", collector, sourceID)
-	require.NotNil(t, result)
-}
-
-func TestCompileString_MultipleVariables(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://vars.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("$x + $y", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "+", result.Op())
-}
-
-func TestCompileString_NestedMemberAccess(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://nested.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("a.b.c", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, ".", result.Op())
-}
-
-func TestCompileString_ComplexArithmetic(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://complex-arith.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("(a + b) * (c - d) / e", collector, sourceID)
-	require.NotNil(t, result)
-}
-
-func TestCompileString_MultipleArguments(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://multi-args.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("str->Replace(\"old\", \"new\")", collector, sourceID)
-	require.NotNil(t, result)
-	assert.Equal(t, "Replace", result.Op())
-}
-
-func TestCompileString_NestedFunctions(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://nested-fn.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.CompileString("items->Map(|x| x * 2)->Sum()", collector, sourceID)
-	require.NotNil(t, result)
 }
