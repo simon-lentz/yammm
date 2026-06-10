@@ -1165,6 +1165,29 @@ func TestBuiltin_Flatten(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []any{}, result)
 	})
+
+	t.Run("typed_nested_slice", func(t *testing.T) {
+		// A typed nested slice ([][]int, not []any) exercises the reflect
+		// flattening path.
+		e := makeBuiltinCall(expr.NewLiteral([][]int{{1, 2}, {3, 4}}), "Flatten", nil, nil)
+		result, err := ev.Evaluate(e, scope)
+		require.NoError(t, err)
+		assert.Len(t, result.([]any), 4)
+	})
+
+	t.Run("non_nested_passthrough", func(t *testing.T) {
+		// [1, 2, 3] stays [1, 2, 3].
+		list := expr.SExpr{
+			expr.Op("[]"),
+			expr.NewLiteral(int64(1)),
+			expr.NewLiteral(int64(2)),
+			expr.NewLiteral(int64(3)),
+		}
+		e := makeBuiltinCall(list, "Flatten", nil, nil)
+		result, err := ev.Evaluate(e, scope)
+		require.NoError(t, err)
+		assert.Equal(t, []any{int64(1), int64(2), int64(3)}, result)
+	})
 }
 
 func TestBuiltin_Contains(t *testing.T) {
