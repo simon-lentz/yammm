@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -546,24 +549,24 @@ func goldenDir(t *testing.T) string {
 	return filepath.Join(wd, "testdata", "updatemetadata")
 }
 
-// TestMain seeds the golden corpus before any test runs. The corpus is
-// generated deterministically so the on-disk fixtures can be committed
-// once and reused; re-running TestMain is a no-op.
+// TestMain seeds the golden corpus before any test runs and fails loudly
+// when the committed fixtures no longer match the deterministic generator:
+// silent drift here would let TestUpdateMetadata_GoldenCorpus validate
+// against stale bytes.
 func TestMain(m *testing.M) {
 	wd, _ := os.Getwd()
 	corpusDir := filepath.Join(wd, "testdata", "updatemetadata")
 	if err := seedCorpus(corpusDir); err != nil {
-		_, _ = os.Stderr.WriteString("warning: seedCorpus failed: " + err.Error() + "\n")
+		_, _ = os.Stderr.WriteString("seedCorpus: " + err.Error() + "\n")
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
 
-// seedCorpus generates the four golden fixtures if missing.
+// seedCorpus generates the four golden fixtures, writing any that are
+// missing and returning an error if a committed fixture differs from the
+// generator's output (fixture drift).
 func seedCorpus(dir string) error {
-	if _, err := os.Stat(dir); err == nil {
-		// Already present; do not regenerate (files may be hand-curated).
-		return nil
-	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
@@ -617,8 +620,17 @@ func seedCorpus(dir string) error {
 		if res.HasErrors() {
 			return res.Err()
 		}
-		if err := os.WriteFile(filepath.Join(dir, f.name), data, 0o600); err != nil {
+		path := filepath.Join(dir, f.name)
+		committed, err := os.ReadFile(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				return err
+			}
+		case err != nil:
 			return err
+		case !bytes.Equal(committed, data):
+			return fmt.Errorf("fixture drift: %s no longer matches the generator output; delete the file to regenerate or fix the generator", path)
 		}
 	}
 	return nil

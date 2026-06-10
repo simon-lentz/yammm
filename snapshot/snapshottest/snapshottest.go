@@ -1,60 +1,25 @@
-// Package snapshottest provides test helpers for snapshot persistence tests.
-//
-// This is a separate package (not _test.go helpers in snapshot/) so that it
-// is available to both snapshot/ tests and cmd/yammm/ CLI integration tests.
+// Package snapshottest provides test helpers for snapshot persistence
+// tests. It is a separate package (not _test.go helpers in snapshot/) so
+// the graph and snapshot test suites can share one structural-equivalence
+// vocabulary for round-trip assertions.
 package snapshottest
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-var update = flag.Bool("update", false, "update golden files")
-
-// ReadGolden reads a golden .ys file from snapshot/testdata/<name>.ys.
-// Calls t.Fatal if the file does not exist or cannot be read.
-func ReadGolden(tb testing.TB, name string) []byte {
-	tb.Helper()
-	path := goldenPath(name)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		tb.Fatalf("ReadGolden(%q): %v", name, err)
-	}
-	return data
-}
-
-// UpdateGolden writes data to snapshot/testdata/<name>.ys when the test is
-// run with the -update flag (e.g., "go test -update ./snapshot/...").
-// When -update is not set, UpdateGolden is a no-op.
-func UpdateGolden(tb testing.TB, name string, data []byte) {
-	tb.Helper()
-	if !*update {
-		return
-	}
-	path := goldenPath(name)
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		tb.Fatalf("UpdateGolden(%q): %v", name, err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		tb.Fatalf("UpdateGolden(%q): %v", name, err)
-	}
-	tb.Logf("Updated golden file: %s", path)
-}
-
-// AssertRoundTrip marshals a snapshot, loads it back, and verifies structural
-// equivalence via [CompareSnapshots]. Fails the test with a detailed diff on
-// mismatch.
+// AssertRoundTrip marshals a snapshot, loads it back, and verifies
+// structural equivalence via [DiffSnapshots]. Fails the test with a
+// (-want +got) diff on mismatch.
 func AssertRoundTrip(tb testing.TB, snap *graph.Snapshot, s *schema.Schema, opts ...snapshot.Option) {
 	tb.Helper()
 	ctx := context.Background()
@@ -69,9 +34,7 @@ func AssertRoundTrip(tb testing.TB, snap *graph.Snapshot, s *schema.Schema, opts
 		tb.Fatalf("AssertRoundTrip: Load failed: %v", err)
 	}
 
-	if err := CompareSnapshots(snap, loaded); err != nil {
-		tb.Errorf("AssertRoundTrip: snapshots differ:\n%v", err)
-	}
+	DiffSnapshots(tb, snap, loaded)
 }
 
 // AssertDeterministic marshals a snapshot twice with the same options and
@@ -312,134 +275,119 @@ func valuesEqual(a, b any) bool {
 	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
 }
 
-func goldenPath(name string) string {
-	// Get the directory of this source file to find testdata relative to it.
-	_, thisFile, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(thisFile), "..", "testdata", name+".ys")
+// snapProjection is the comparable view DiffSnapshots builds from a
+// snapshot's public accessors. Properties come from Clone() so go-cmp can
+// walk plain maps rather than immutable wrappers.
+type snapProjection struct {
+	Types      []string
+	Instances  map[string][]instProjection
+	Duplicates []string
+	Unresolved []unresProjection
 }
 
-// State describes the expected [snapshot.ScanDir] outcome for a single
-// .ys file. Used by [ExpectDirState] to assert a directory snapshot in
-// a single call rather than inlining per-file assertions across tests.
-type State struct {
-	// Valid asserts entry.Result.HasErrors() == false AND Header != nil.
-	Valid bool
-	// ErrorCode asserts the entry's first error-severity issue carries
-	// this code. The zero value (diag.Code{}) means "any error code
-	// accepted" — use when the test only cares that the entry failed,
-	// not why. Ignored when Valid is true.
-	ErrorCode diag.Code
+type instProjection struct {
+	PK         string
+	Properties map[string]any
+	Edges      []edgeProjection
+	Composed   map[string][]instProjection
+	SourceName string
 }
 
-// ExpectDirState asserts that [snapshot.ScanDir](ctx, dir) yields
-// entries whose Name-keyed result matches the expected map. Files
-// present in the directory but absent from expected, or expected but
-// absent from the directory, fail the test with a list of differences.
-// Uses context.Background() internally; tests needing cancellation
-// semantics should call ScanDir directly.
-//
-// The helper pairs with the [State] type: each expected file declares
-// whether it should yield a valid header (State{Valid: true}) or fail
-// with a specific diagnostic code (State{Valid: false,
-// ErrorCode: diag.E_SNAPSHOT_MALFORMED}).
-func ExpectDirState(tb testing.TB, dir string, expected map[string]State) {
+type edgeProjection struct {
+	Relation   string
+	TargetType string
+	TargetPK   string
+	Properties map[string]any
+}
+
+type unresProjection struct {
+	SourceType string
+	Relation   string
+	TargetType string
+	TargetKey  string
+	Required   bool
+	Reason     string
+	Properties map[string]any
+}
+
+// DiffSnapshots compares two snapshots structurally with go-cmp and fails
+// the test with a (-want +got) diff on mismatch. Numeric property values
+// compare by float64 value, tolerating the wire format's int64↔float64
+// representations across a marshal/load boundary.
+func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 	tb.Helper()
-	seen := make(map[string]bool, len(expected))
-	for entry, err := range snapshot.ScanDir(context.Background(), dir) {
-		if err != nil {
-			tb.Fatalf("ExpectDirState: iterator error: %v", err)
+	numericCoercion := cmp.FilterValues(func(a, b any) bool {
+		_, aInt := a.(int64)
+		_, aFloat := a.(float64)
+		_, bInt := b.(int64)
+		_, bFloat := b.(float64)
+		return (aInt || aFloat) && (bInt || bFloat)
+	}, cmp.Transformer("toFloat64", func(v any) float64 {
+		switch n := v.(type) {
+		case int64:
+			return float64(n)
+		case float64:
+			return n
 		}
-		seen[entry.Name] = true
-		want, ok := expected[entry.Name]
-		if !ok {
-			tb.Errorf("ExpectDirState: unexpected file %q in dir", entry.Name)
-			continue
-		}
-		assertEntryMatches(tb, entry, want)
-	}
-	for name := range expected {
-		if !seen[name] {
-			tb.Errorf("ExpectDirState: expected file %q not found in dir", name)
-		}
+		panic("unreachable: filter admits only int64/float64")
+	}))
+	// EquateEmpty: a built snapshot carries nil property maps where a
+	// loaded one carries empty maps; the distinction is not part of the
+	// structural contract.
+	if d := cmp.Diff(project(want), project(got), numericCoercion, cmpopts.EquateEmpty()); d != "" {
+		tb.Errorf("snapshots differ (-want +got):\n%s", d)
 	}
 }
 
-// ExpectMetadataPreserved asserts that two .ys byte slices agree on the
-// values of the named metadata keys. Intended for tests exercising
-// metadata-rewrite primitives ([snapshot.UpdateMetadata],
-// [snapshot.UpdateMetadataOrReMarshal]) or any workflow that must
-// preserve an invariant set of metadata keys across a rewrite.
-//
-// Fails the test if either input fails to parse as a .ys header, if a
-// named key is absent from before (assertion-setup error), or if any
-// named key's value differs between before and after.
-//
-// Uses context.Background() internally; tests needing cancellation
-// semantics should call [snapshot.HeaderOnly] directly.
-func ExpectMetadataPreserved(tb testing.TB, before, after []byte, preservedKeys ...string) {
-	tb.Helper()
-	ctx := context.Background()
-
-	beforeHdr, beforeRes := snapshot.HeaderOnly(ctx, before)
-	if beforeRes.HasErrors() {
-		tb.Fatalf("ExpectMetadataPreserved: before does not parse: %v", beforeRes)
-		return
+func project(s *graph.Snapshot) snapProjection {
+	p := snapProjection{
+		Types:     s.Types(),
+		Instances: make(map[string][]instProjection, len(s.Types())),
 	}
-	afterHdr, afterRes := snapshot.HeaderOnly(ctx, after)
-	if afterRes.HasErrors() {
-		tb.Fatalf("ExpectMetadataPreserved: after does not parse: %v", afterRes)
-		return
-	}
-
-	for _, k := range preservedKeys {
-		bv, bok := beforeHdr.Metadata[k]
-		if !bok {
-			tb.Errorf("ExpectMetadataPreserved: key %q is not in before's metadata (test-setup error)", k)
-			continue
-		}
-		av, aok := afterHdr.Metadata[k]
-		if !aok {
-			tb.Errorf("ExpectMetadataPreserved: key %q preserved in before=%q but absent from after", k, bv)
-			continue
-		}
-		if av != bv {
-			tb.Errorf("ExpectMetadataPreserved: key %q diverged: before=%q, after=%q", k, bv, av)
+	for _, typeName := range s.Types() {
+		for _, inst := range s.InstancesOf(typeName) {
+			ip := instProjection{
+				PK:         inst.PrimaryKey().String(),
+				Properties: inst.Properties().Clone(),
+			}
+			for _, e := range s.EdgesFrom(inst) {
+				ip.Edges = append(ip.Edges, edgeProjection{
+					Relation:   e.Relation(),
+					TargetType: e.Target().TypeName(),
+					TargetPK:   e.Target().PrimaryKey().String(),
+					Properties: e.Properties().Clone(),
+				})
+			}
+			if rels := inst.ComposedRelations(); len(rels) > 0 {
+				ip.Composed = make(map[string][]instProjection, len(rels))
+				for _, rel := range rels {
+					for _, child := range inst.Composed(rel) {
+						ip.Composed[rel] = append(ip.Composed[rel], instProjection{
+							PK:         child.PrimaryKey().String(),
+							Properties: child.Properties().Clone(),
+						})
+					}
+				}
+			}
+			if prov := inst.Provenance(); prov != nil {
+				ip.SourceName = prov.SourceName()
+			}
+			p.Instances[typeName] = append(p.Instances[typeName], ip)
 		}
 	}
-}
-
-// assertEntryMatches compares one entry against one expected State.
-func assertEntryMatches(tb testing.TB, entry snapshot.ScanEntry, want State) {
-	tb.Helper()
-	if want.Valid {
-		if entry.Result.HasErrors() {
-			tb.Errorf("%s: expected valid, got errors: %v", entry.Name, entry.Result)
-		}
-		if entry.Header == nil {
-			tb.Errorf("%s: expected Header, got nil", entry.Name)
-		}
-		return
+	for _, d := range s.Duplicates() {
+		p.Duplicates = append(p.Duplicates, d.Instance.TypeName()+d.Instance.PrimaryKey().String())
 	}
-	if !entry.Result.HasErrors() {
-		tb.Errorf("%s: expected errors, got OK", entry.Name)
-		return
+	for _, u := range s.Unresolved() {
+		p.Unresolved = append(p.Unresolved, unresProjection{
+			SourceType: u.Source.TypeName(),
+			Relation:   u.Relation,
+			TargetType: u.TargetType,
+			TargetKey:  u.TargetKey,
+			Required:   u.Required,
+			Reason:     u.Reason,
+			Properties: u.Properties().Clone(),
+		})
 	}
-	// Zero-value ErrorCode means "any error accepted".
-	if want.ErrorCode == (diag.Code{}) {
-		return
-	}
-	var first diag.Issue
-	var hasFirst bool
-	for iss := range entry.Result.Errors() {
-		first = iss
-		hasFirst = true
-		break
-	}
-	if !hasFirst {
-		tb.Errorf("%s: expected ErrorCode %v, result carried no errors", entry.Name, want.ErrorCode)
-		return
-	}
-	if first.Code() != want.ErrorCode {
-		tb.Errorf("%s: expected ErrorCode %v, got %v", entry.Name, want.ErrorCode, first.Code())
-	}
+	return p
 }

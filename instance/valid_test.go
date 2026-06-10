@@ -8,18 +8,16 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestValidInstance_TypeName(t *testing.T) {
-	vi := instance.NewValidInstance(
+	vi := instancetest.VI(
 		"Person",
-		schema.TypeID{},
-		immutable.WrapKey([]any{int64(1)}),
-		immutable.WrapProperties(nil),
-		nil, nil, nil,
+		instancetest.PK(int64(1)),
 	)
 
 	assert.Equal(t, "Person", vi.TypeName())
@@ -27,12 +25,10 @@ func TestValidInstance_TypeName(t *testing.T) {
 
 func TestValidInstance_TypeID(t *testing.T) {
 	typeID := schema.NewTypeID(location.SourceID{}, "Person")
-	vi := instance.NewValidInstance(
+	vi := instancetest.VI(
 		"Person",
-		typeID,
-		immutable.WrapKey(nil),
-		immutable.WrapProperties(nil),
-		nil, nil, nil,
+		instancetest.TypeID(typeID),
+		instancetest.PK(),
 	)
 
 	assert.Equal(t, typeID, vi.TypeID())
@@ -40,23 +36,19 @@ func TestValidInstance_TypeID(t *testing.T) {
 
 func TestValidInstance_PrimaryKey(t *testing.T) {
 	t.Run("single_key", func(t *testing.T) {
-		pk := immutable.WrapKey([]any{int64(42)})
-		vi := instance.NewValidInstance(
-			"Person", schema.TypeID{}, pk,
-			immutable.WrapProperties(nil),
-			nil, nil, nil,
+		vi := instancetest.VI(
+			"Person",
+			instancetest.PK(int64(42)),
 		)
 
-		assert.Equal(t, pk, vi.PrimaryKey())
+		assert.Equal(t, immutable.WrapKey([]any{int64(42)}), vi.PrimaryKey())
 		assert.Equal(t, "[42]", vi.PrimaryKey().String())
 	})
 
 	t.Run("composite_key", func(t *testing.T) {
-		pk := immutable.WrapKey([]any{"us-east", int64(123)})
-		vi := instance.NewValidInstance(
-			"RegionalOrder", schema.TypeID{}, pk,
-			immutable.WrapProperties(nil),
-			nil, nil, nil,
+		vi := instancetest.VI(
+			"RegionalOrder",
+			instancetest.PK("us-east", int64(123)),
 		)
 
 		assert.Equal(t, `["us-east",123]`, vi.PrimaryKey().String())
@@ -64,15 +56,13 @@ func TestValidInstance_PrimaryKey(t *testing.T) {
 }
 
 func TestValidInstance_Property(t *testing.T) {
-	props := immutable.WrapProperties(map[string]any{
-		"name": "Alice",
-		"age":  int64(30),
-	})
-	vi := instance.NewValidInstance(
-		"Person", schema.TypeID{},
-		immutable.WrapKey([]any{int64(1)}),
-		props,
-		nil, nil, nil,
+	vi := instancetest.VI(
+		"Person",
+		instancetest.PK(int64(1)),
+		instancetest.Props(map[string]any{
+			"name": "Alice",
+			"age":  int64(30),
+		}),
 	)
 
 	t.Run("existing_property", func(t *testing.T) {
@@ -98,16 +88,13 @@ func TestValidInstance_Property(t *testing.T) {
 }
 
 func TestValidInstance_Properties(t *testing.T) {
-	propsMap := map[string]any{
-		"name":  "Bob",
-		"email": "bob@example.com",
-	}
-	props := immutable.WrapProperties(propsMap)
-	vi := instance.NewValidInstance(
-		"User", schema.TypeID{},
-		immutable.WrapKey([]any{int64(1)}),
-		props,
-		nil, nil, nil,
+	vi := instancetest.VI(
+		"User",
+		instancetest.PK(int64(1)),
+		instancetest.Props(map[string]any{
+			"name":  "Bob",
+			"email": "bob@example.com",
+		}),
 	)
 
 	allProps := vi.Properties()
@@ -134,11 +121,10 @@ func TestValidInstance_Edge(t *testing.T) {
 		edges := map[string]*instance.ValidEdgeData{
 			"manager": instance.NewValidEdgeData(targets),
 		}
-		vi := instance.NewValidInstance(
-			"Employee", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			edges, nil, nil,
+		vi := instancetest.VI(
+			"Employee",
+			instancetest.PK(int64(1)),
+			instancetest.Edges(edges),
 		)
 
 		edge, ok := vi.Edge("manager")
@@ -148,11 +134,9 @@ func TestValidInstance_Edge(t *testing.T) {
 	})
 
 	t.Run("missing_edge", func(t *testing.T) {
-		vi := instance.NewValidInstance(
-			"Employee", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, nil, nil,
+		vi := instancetest.VI(
+			"Employee",
+			instancetest.PK(int64(1)),
 		)
 
 		edge, ok := vi.Edge("manager")
@@ -164,11 +148,10 @@ func TestValidInstance_Edge(t *testing.T) {
 		edges := map[string]*instance.ValidEdgeData{
 			"manager": instance.NewValidEdgeData(nil),
 		}
-		vi := instance.NewValidInstance(
-			"Employee", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			edges, nil, nil,
+		vi := instancetest.VI(
+			"Employee",
+			instancetest.PK(int64(1)),
+			instancetest.Edges(edges),
 		)
 
 		edge, ok := vi.Edge("nonexistent")
@@ -186,11 +169,10 @@ func TestValidInstance_Composed(t *testing.T) {
 		composed := map[string]immutable.Value{
 			"addresses": composedChildren,
 		}
-		vi := instance.NewValidInstance(
-			"Person", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, composed, nil,
+		vi := instancetest.VI(
+			"Person",
+			instancetest.PK(int64(1)),
+			instancetest.Composed(composed),
 		)
 
 		val, ok := vi.Composed("addresses")
@@ -201,11 +183,9 @@ func TestValidInstance_Composed(t *testing.T) {
 	})
 
 	t.Run("missing_composition", func(t *testing.T) {
-		vi := instance.NewValidInstance(
-			"Person", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, nil, nil,
+		vi := instancetest.VI(
+			"Person",
+			instancetest.PK(int64(1)),
 		)
 
 		_, ok := vi.Composed("addresses")
@@ -216,11 +196,10 @@ func TestValidInstance_Composed(t *testing.T) {
 		composed := map[string]immutable.Value{
 			"addresses": immutable.Wrap([]any{}),
 		}
-		vi := instance.NewValidInstance(
-			"Person", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, composed, nil,
+		vi := instancetest.VI(
+			"Person",
+			instancetest.PK(int64(1)),
+			instancetest.Composed(composed),
 		)
 
 		_, ok := vi.Composed("nonexistent")
@@ -235,11 +214,10 @@ func TestValidInstance_Provenance(t *testing.T) {
 			path.Root().Key("users").Index(0),
 			location.Range(location.SourceID{}, 10, 1, 20, 100),
 		)
-		vi := instance.NewValidInstance(
-			"User", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, nil, prov,
+		vi := instancetest.VI(
+			"User",
+			instancetest.PK(int64(1)),
+			instancetest.Provenance(prov),
 		)
 
 		result := vi.Provenance()
@@ -249,11 +227,9 @@ func TestValidInstance_Provenance(t *testing.T) {
 	})
 
 	t.Run("without_provenance", func(t *testing.T) {
-		vi := instance.NewValidInstance(
-			"User", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, nil, nil,
+		vi := instancetest.VI(
+			"User",
+			instancetest.PK(int64(1)),
 		)
 
 		assert.Nil(t, vi.Provenance())
@@ -378,22 +354,19 @@ func TestValidInstance_HasProvenance(t *testing.T) {
 			path.Root(),
 			location.Span{},
 		)
-		vi := instance.NewValidInstance(
-			"User", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, nil, prov,
+		vi := instancetest.VI(
+			"User",
+			instancetest.PK(int64(1)),
+			instancetest.Provenance(prov),
 		)
 
 		assert.True(t, vi.HasProvenance())
 	})
 
 	t.Run("without_provenance", func(t *testing.T) {
-		vi := instance.NewValidInstance(
-			"User", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, nil, nil,
+		vi := instancetest.VI(
+			"User",
+			instancetest.PK(int64(1)),
 		)
 
 		assert.False(t, vi.HasProvenance())
@@ -413,11 +386,10 @@ func TestValidInstance_Edges_Iterator(t *testing.T) {
 			"manager":  instance.NewValidEdgeData(targets1),
 			"coworker": instance.NewValidEdgeData(targets2),
 		}
-		vi := instance.NewValidInstance(
-			"Employee", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			edges, nil, nil,
+		vi := instancetest.VI(
+			"Employee",
+			instancetest.PK(int64(1)),
+			instancetest.Edges(edges),
 		)
 
 		count := 0
@@ -430,11 +402,9 @@ func TestValidInstance_Edges_Iterator(t *testing.T) {
 	})
 
 	t.Run("no_edges", func(t *testing.T) {
-		vi := instance.NewValidInstance(
-			"Employee", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, nil, nil,
+		vi := instancetest.VI(
+			"Employee",
+			instancetest.PK(int64(1)),
 		)
 
 		count := 0
@@ -451,11 +421,10 @@ func TestValidInstance_Compositions_Iterator(t *testing.T) {
 			"addresses": immutable.Wrap([]any{map[string]any{"id": int64(1)}}),
 			"phones":    immutable.Wrap([]any{map[string]any{"id": int64(2)}}),
 		}
-		vi := instance.NewValidInstance(
-			"Person", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, composed, nil,
+		vi := instancetest.VI(
+			"Person",
+			instancetest.PK(int64(1)),
+			instancetest.Composed(composed),
 		)
 
 		count := 0
@@ -468,11 +437,9 @@ func TestValidInstance_Compositions_Iterator(t *testing.T) {
 	})
 
 	t.Run("no_compositions", func(t *testing.T) {
-		vi := instance.NewValidInstance(
-			"Person", schema.TypeID{},
-			immutable.WrapKey([]any{int64(1)}),
-			immutable.WrapProperties(nil),
-			nil, nil, nil,
+		vi := instancetest.VI(
+			"Person",
+			instancetest.PK(int64(1)),
 		)
 
 		count := 0

@@ -8,9 +8,9 @@ repos:
       # whitespace) is the contract under test, so the text-rewriting hooks
       # must never touch them.
       - id: trailing-whitespace
-        exclude: '\.golden$'
+        exclude: '\.(golden|ys)$'
       - id: end-of-file-fixer
-        exclude: '\.golden$'
+        exclude: '\.(golden|ys)$'
       - id: check-added-large-files
       - id: check-yaml
       - id: check-json

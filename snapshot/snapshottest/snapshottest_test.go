@@ -2,241 +2,108 @@ package snapshottest_test
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/snapshot"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
-// minimalSchema is a tiny schema local to this test file — the wider
-// testSchema helpers live in the snapshot_test package, which
-// snapshottest can't import (would create a cycle).
-func minimalSchema(t *testing.T) *schema.Schema {
+func testSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("snapshottest-scan").
-		WithSourceID(location.MustNewSourceID("test://snapshottest-scan.yammm")).
-		AddType("Doc").
+	s, res := schema.NewBuilder().
+		WithName("snapshottest-self").
+		WithSourceID(location.MustNewSourceID("test://snapshottest-self.yammm")).
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("name", schema.NewStringConstraint()).
+		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), false, false).
+		Done().
+		AddType("Company").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
 		Done().
 		Build()
-	require.False(t, result.HasErrors(), "minimalSchema: %s", result)
+	if res.HasErrors() {
+		t.Fatalf("testSchema: %v", res.Err())
+	}
 	return s
 }
 
-func seedValidYS(t *testing.T, path string) {
+func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	t.Helper()
-	s := minimalSchema(t)
-	typ, ok := s.Type("Doc")
-	require.True(t, ok)
-	inst := instance.NewValidInstance(
-		"Doc", typ.ID(),
-		immutable.WrapKey([]any{"d1"}),
-		immutable.WrapProperties(map[string]any{"id": "d1"}),
-		nil, nil, nil,
-	)
 	g := graph.New(s)
-	g.Add(context.Background(), inst)
-	snap := g.Snapshot()
-
-	data, result := snapshot.Marshal(context.Background(), snap)
-	require.NoError(t, result.Err())
-	require.NoError(t, snapshot.WriteFile(path, data))
+	for _, inst := range instances {
+		g.Add(context.Background(), inst)
+	}
+	return g.Snapshot()
 }
 
-func seedCorruptYS(t *testing.T, path string) {
+func personType(t *testing.T, s *schema.Schema) schema.TypeID {
 	t.Helper()
-	require.NoError(t, os.WriteFile(path, []byte("garbage"), 0o600))
+	typ, ok := s.Type("Person")
+	if !ok {
+		t.Fatal("Person type missing")
+	}
+	return typ.ID()
 }
 
-// recordingTB captures Errorf / Fatalf / Fail calls so tests can
-// exercise failure branches of ExpectDirState without actually failing
-// the enclosing test.
-type recordingTB struct {
-	testing.TB
-	errors   []string
-	fatalled bool
-}
-
-func (r *recordingTB) Errorf(format string, args ...any) {
-	r.errors = append(r.errors, fmt.Sprintf(format, args...))
-}
-
-func (r *recordingTB) Fatalf(format string, args ...any) {
-	r.fatalled = true
-	r.errors = append(r.errors, fmt.Sprintf(format, args...))
-}
-
-func (r *recordingTB) Fatal(args ...any) {
-	r.fatalled = true
-	r.errors = append(r.errors, fmt.Sprint(args...))
-}
-
-func (r *recordingTB) Helper() {}
-
-func TestExpectDirState_HappyPathAllValid(t *testing.T) {
-	dir := t.TempDir()
-	seedValidYS(t, filepath.Join(dir, "a.ys"))
-	seedValidYS(t, filepath.Join(dir, "b.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		"a.ys": {Valid: true},
-		"b.ys": {Valid: true},
-	})
-
-	assert.Empty(t, rec.errors, "happy path should produce no failures")
-	assert.False(t, rec.fatalled)
-}
-
-func TestExpectDirState_ExpectedValidGotErrorFails(t *testing.T) {
-	dir := t.TempDir()
-	seedCorruptYS(t, filepath.Join(dir, "a.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		"a.ys": {Valid: true},
-	})
-
-	require.NotEmpty(t, rec.errors, "expected failure but got clean result")
-	assert.Contains(t, rec.errors[0], "a.ys",
-		"failure message should name the offending file")
-}
-
-func TestExpectDirState_ErrorCodeMismatch(t *testing.T) {
-	dir := t.TempDir()
-	seedCorruptYS(t, filepath.Join(dir, "bad.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		// Corrupt JSON -> E_SNAPSHOT_MALFORMED, but we claim E_SNAPSHOT_IO.
-		"bad.ys": {Valid: false, ErrorCode: diag.E_SNAPSHOT_IO},
-	})
-
-	require.NotEmpty(t, rec.errors, "code mismatch should fail")
-	assert.Contains(t, rec.errors[0], "ErrorCode")
-}
-
-func TestExpectDirState_ErrorCodeWildcardMatchesAny(t *testing.T) {
-	dir := t.TempDir()
-	seedCorruptYS(t, filepath.Join(dir, "bad.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		"bad.ys": {Valid: false}, // ErrorCode = zero value = wildcard
-	})
-
-	assert.Empty(t, rec.errors, "zero-value ErrorCode should accept any error code")
-}
-
-func TestExpectDirState_MissingExpectedFile(t *testing.T) {
-	dir := t.TempDir() // empty
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		"ghost.ys": {Valid: true},
-	})
-
-	require.NotEmpty(t, rec.errors)
-	assert.Contains(t, rec.errors[0], "ghost.ys")
-	assert.Contains(t, rec.errors[0], "not found")
-}
-
-func TestExpectDirState_UnexpectedFile(t *testing.T) {
-	dir := t.TempDir()
-	seedValidYS(t, filepath.Join(dir, "surprise.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{})
-
-	require.NotEmpty(t, rec.errors)
-	assert.Contains(t, rec.errors[0], "surprise.ys")
-	assert.Contains(t, rec.errors[0], "unexpected")
-}
-
-// makeSnapshotBytesWithMeta produces a marshaled .ys with the given
-// metadata using the minimal snapshottest-local schema. Used by the
-// ExpectMetadataPreserved coverage tests below.
-func makeSnapshotBytesWithMeta(t *testing.T, meta map[string]string) []byte {
-	t.Helper()
-	s := minimalSchema(t)
-	typ, ok := s.Type("Doc")
-	require.True(t, ok)
-	inst := instance.NewValidInstance(
-		"Doc", typ.ID(),
-		immutable.WrapKey([]any{"d1"}),
-		immutable.WrapProperties(map[string]any{"id": "d1"}),
-		nil, nil, nil,
+// TestRoundTripHelpers exercises the live helper surface end-to-end on a
+// snapshot with an instance, a resolved edge, and an unresolved edge.
+func TestRoundTripHelpers(t *testing.T) {
+	s := testSchema(t)
+	edges := map[string]*instance.ValidEdgeData{
+		"EMPLOYER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"c-missing"}), immutable.WrapProperties(nil)),
+		}),
+	}
+	snap := buildSnapshot(
+		t, s,
+		instancetest.VI(
+			"Person",
+			instancetest.TypeID(personType(t, s)),
+			instancetest.PK("p1"),
+			instancetest.Props(map[string]any{"id": "p1", "name": "Alice"}),
+			instancetest.Edges(edges),
+		),
 	)
-	g := graph.New(s)
-	g.Add(context.Background(), inst)
-	snap := g.Snapshot()
-	data, res := snapshot.Marshal(context.Background(), snap, snapshot.WithMetadata(meta))
-	require.NoError(t, res.Err())
-	return data
+
+	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertDeterministic(t, snap, s)
+	snapshottest.DiffSnapshots(t, snap, snap)
+
+	if err := snapshottest.CompareSnapshots(snap, snap); err != nil {
+		t.Errorf("CompareSnapshots(self, self) = %v, want nil", err)
+	}
 }
 
-func TestExpectMetadataPreserved_HappyPath(t *testing.T) {
-	before := makeSnapshotBytesWithMeta(t, map[string]string{
-		"phase":       "extract",
-		"pipeline_id": "abc",
-	})
-	// "after" has phase changed but pipeline_id retained.
-	afterData, res := snapshot.UpdateMetadata(context.Background(), before,
-		map[string]string{"phase": "link", "pipeline_id": "abc"})
-	require.NoError(t, res.Err())
+// TestDiffSnapshots_DetectsDifference pins that the comparer actually
+// fails on structurally different snapshots, via a probe testing.T.
+func TestDiffSnapshots_DetectsDifference(t *testing.T) {
+	s := testSchema(t)
+	a := buildSnapshot(t, s, instancetest.VI(
+		"Person",
+		instancetest.TypeID(personType(t, s)),
+		instancetest.PK("p1"),
+		instancetest.Props(map[string]any{"id": "p1", "name": "Alice"}),
+	))
+	b := buildSnapshot(t, s, instancetest.VI(
+		"Person",
+		instancetest.TypeID(personType(t, s)),
+		instancetest.PK("p1"),
+		instancetest.Props(map[string]any{"id": "p1", "name": "Bob"}),
+	))
 
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectMetadataPreserved(rec, before, afterData, "pipeline_id")
-	assert.Empty(t, rec.errors, "preserved key should not fail")
-}
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, a, b)
+	if !probe.Failed() {
+		t.Error("DiffSnapshots did not fail on differing snapshots")
+	}
 
-func TestExpectMetadataPreserved_Divergence(t *testing.T) {
-	before := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "extract"})
-	afterData, res := snapshot.UpdateMetadata(context.Background(), before,
-		map[string]string{"phase": "link"})
-	require.NoError(t, res.Err())
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectMetadataPreserved(rec, before, afterData, "phase")
-	require.NotEmpty(t, rec.errors, "divergent key must fail")
-	assert.Contains(t, rec.errors[0], "phase")
-	assert.Contains(t, rec.errors[0], "diverged")
-}
-
-func TestExpectMetadataPreserved_MissingInBefore(t *testing.T) {
-	before := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "extract"})
-	afterData := before // no change
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectMetadataPreserved(rec, before, afterData, "never_existed")
-	require.NotEmpty(t, rec.errors, "missing-in-before is a test-setup error")
-	assert.Contains(t, rec.errors[0], "never_existed")
-	assert.Contains(t, rec.errors[0], "test-setup error")
-}
-
-func TestExpectMetadataPreserved_InvalidBeforeFails(t *testing.T) {
-	rec := &recordingTB{TB: t}
-	after := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "link"})
-	snapshottest.ExpectMetadataPreserved(rec, []byte("garbage"), after, "phase")
-	require.True(t, rec.fatalled, "unparsable before should fatal")
-}
-
-func TestExpectMetadataPreserved_InvalidAfterFails(t *testing.T) {
-	rec := &recordingTB{TB: t}
-	before := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "extract"})
-	snapshottest.ExpectMetadataPreserved(rec, before, []byte("garbage"), "phase")
-	require.True(t, rec.fatalled, "unparsable after should fatal")
+	if err := snapshottest.CompareSnapshots(a, b); err == nil {
+		t.Error("CompareSnapshots(a, b) = nil, want difference error")
+	}
 }

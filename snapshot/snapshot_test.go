@@ -11,7 +11,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +23,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -1055,9 +1055,7 @@ func TestConstructionPathEquivalence(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if err := snapshottest.CompareSnapshots(constructed, loaded); err != nil {
-		t.Errorf("construction path equivalence failed:\n%v", err)
-	}
+	snapshottest.DiffSnapshots(t, constructed, loaded)
 }
 
 func TestLoad_TypeIDReconstruction(t *testing.T) {
@@ -1303,53 +1301,6 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 				}
 			}
 			require.True(t, found, "expected E_SNAPSHOT_UNSUPPORTED_VERSION")
-		})
-	}
-}
-
-func TestWireStructFieldOrder(t *testing.T) {
-	// Verify that JSON serialization produces keys in the expected order.
-	// This guards against accidental field reordering in wire structs.
-	tests := []struct {
-		name     string
-		typ      reflect.Type
-		expected []string
-	}{
-		{
-			name: "headerWire",
-			typ: reflect.TypeFor[struct {
-				Version             int               `json:"version"`
-				SchemaName          string            `json:"schema_name"`
-				SchemaSource        string            `json:"schema_source"`
-				SchemaHash          string            `json:"schema_hash"`
-				SchemaHashAlgorithm int               `json:"schema_hash_algorithm"`
-				IntegrityHash       string            `json:"integrity_hash"`
-				Features            []string          `json:"features"`
-				CreatedAt           string            `json:"created_at,omitempty"`
-				Metadata            map[string]string `json:"metadata,omitempty"`
-			}](),
-			expected: []string{
-				"version", "schema_name", "schema_source", "schema_hash",
-				"schema_hash_algorithm", "integrity_hash", "features",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Check struct field json tags match expected order.
-			for i, expectedKey := range tt.expected {
-				if i >= tt.typ.NumField() {
-					t.Errorf("expected field %d (%q) but type has only %d fields",
-						i, expectedKey, tt.typ.NumField())
-					continue
-				}
-				tag := tt.typ.Field(i).Tag.Get("json")
-				tagName := strings.Split(tag, ",")[0]
-				if tagName != expectedKey {
-					t.Errorf("field %d: expected json tag %q, got %q", i, expectedKey, tagName)
-				}
-			}
 		})
 	}
 }
@@ -1740,4 +1691,25 @@ func TestWriteFile_LeavesNoTmpOnSuccess(t *testing.T) {
 
 	_, statErr := os.Stat(stale)
 	assert.True(t, os.IsNotExist(statErr), "successful WriteFile must rename the tmp away, even when a stale tmp pre-existed")
+}
+
+// TestMarshal_GoldenBytes pins the exact serialized .ys wire bytes for a
+// representative snapshot — header shape, key order, instance encoding,
+// resolved edge, and unresolved-edge entry — so any wire-format change is a
+// reviewed golden diff, not an incidental one.
+func TestMarshal_GoldenBytes(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(
+		t, s,
+		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}),
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"title": "Acme"}),
+		mustValidInstanceWithEdge(t, s, "Person", []any{"p2"}, map[string]any{"name": "Bob"},
+			"EMPLOYER", [][]any{{"c1"}}),
+		mustValidInstanceWithEdge(t, s, "Person", []any{"p3"}, map[string]any{"name": "Cara"},
+			"EMPLOYER", [][]any{{"c-missing"}}),
+	)
+
+	data, res := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
+	require.NoError(t, res.Err())
+	yammmtest.Golden(t, "marshal_representative.ys", data)
 }
