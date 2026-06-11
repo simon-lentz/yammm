@@ -1,0 +1,58 @@
+[
+  {
+    "label": "schema",
+    "kind": 14,
+    "detail": "Schema declaration",
+    "insertText": "schema \"${1:name}\"",
+    "insertTextFormat": 2,
+    "sortText": "0_schema"
+  },
+  {
+    "label": "import",
+    "kind": 14,
+    "detail": "Import statement",
+    "insertText": "import \"${1:./path}\"${2: as ${3:alias}}",
+    "insertTextFormat": 2,
+    "sortText": "0_import"
+  },
+  {
+    "label": "type",
+    "kind": 14,
+    "detail": "Type declaration",
+    "insertText": "type ${1:Name} {\n\t$0\n}",
+    "insertTextFormat": 2,
+    "sortText": "0_type"
+  },
+  {
+    "label": "abstract type",
+    "kind": 14,
+    "detail": "Abstract type declaration",
+    "insertText": "abstract type ${1:Name} {\n\t$0\n}",
+    "insertTextFormat": 2,
+    "sortText": "0_abstract type"
+  },
+  {
+    "label": "part type",
+    "kind": 14,
+    "detail": "Part type declaration",
+    "insertText": "part type ${1:Name} {\n\t$0\n}",
+    "insertTextFormat": 2,
+    "sortText": "0_part type"
+  },
+  {
+    "label": "datatype",
+    "kind": 14,
+    "detail": "Datatype alias",
+    "insertText": "type ${1:Name} = ${2|String,Integer,Float,Boolean,UUID,Date,Timestamp,Enum,Pattern|}",
+    "insertTextFormat": 2,
+    "sortText": "0_datatype"
+  },
+  {
+    "label": "datatype with constraint",
+    "kind": 14,
+    "detail": "Datatype alias with numeric constraints",
+    "insertText": "type ${1:Name} = ${2|String,Integer|}[${3:min}, ${4:max}]",
+    "insertTextFormat": 2,
+    "sortText": "0_datatype with constraint"
+  }
+]

@@ -49,7 +49,8 @@ type analysisScheduler struct {
 	logger *slog.Logger
 
 	// debounceDelay controls the debounce timer duration.
-	// Defaults to DefaultDebounceDelay; overridden in tests via SetDebounceDelayForTest.
+	// Set from [Config.DebounceDelay] at construction; zero or negative
+	// falls back to DefaultDebounceDelay.
 	debounceDelay time.Duration
 
 	// sem bounds concurrent analysis goroutines.
@@ -63,25 +64,23 @@ type analysisScheduler struct {
 	// checking stopping and calling wg.Add(1) (via wg.Go).
 	stoppingMu sync.RWMutex
 	stopping   bool
-
-	// doneCond is signaled after each analysis completes.
-	// Used by WaitForAnalysis to block until a specific URI's analysis finishes.
-	doneCond *sync.Cond
-	doneMu   sync.Mutex
 }
 
 // newAnalysisScheduler creates an analysisScheduler with all fields initialized.
-func newAnalysisScheduler(logger *slog.Logger, bgCtx context.Context, bgCancel context.CancelFunc) *analysisScheduler {
+// A zero or negative debounceDelay falls back to DefaultDebounceDelay.
+func newAnalysisScheduler(logger *slog.Logger, bgCtx context.Context, bgCancel context.CancelFunc, debounceDelay time.Duration) *analysisScheduler {
+	if debounceDelay <= 0 {
+		debounceDelay = DefaultDebounceDelay
+	}
 	s := &analysisScheduler{
 		debounces:     make(map[string]*debounceEntry),
 		bgCtx:         bgCtx,
 		bgCancel:      bgCancel,
 		analyzer:      analysis.NewAnalyzer(logger),
 		logger:        logger,
-		debounceDelay: DefaultDebounceDelay,
+		debounceDelay: debounceDelay,
 		sem:           make(chan struct{}, maxConcurrentAnalysis),
 	}
-	s.doneCond = sync.NewCond(&s.doneMu)
 	return s
 }
 
@@ -152,9 +151,6 @@ func (s *analysisScheduler) schedule(uri string, analyzeFn func(context.Context,
 				delete(s.debounces, uri)
 			}
 			s.debounceMu.Unlock()
-
-			// Signal WaitForAnalysis waiters.
-			s.doneCond.Broadcast()
 		}) {
 			// goAttach returned false — shutdown in progress, cancel.
 			cancel()
@@ -202,9 +198,6 @@ func (s *analysisScheduler) shutdown() {
 		delete(s.debounces, uri)
 	}
 	s.debounceMu.Unlock()
-
-	// Wake up any WaitForAnalysis waiters so they can observe shutdown.
-	s.doneCond.Broadcast()
 
 	// 4. Wait for tracked goroutines with internal timeout.
 	done := make(chan struct{})

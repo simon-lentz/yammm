@@ -1,0 +1,16 @@
+[
+  {
+    "Code": "E_MISSING_FK_TARGET",
+    "Details": [
+      {
+        "Key": "relation",
+        "Value": "employer"
+      },
+      {
+        "Key": "expected",
+        "Value": "_target_id"
+      }
+    ],
+    "Severity": "error"
+  }
+]

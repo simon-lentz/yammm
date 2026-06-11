@@ -19,6 +19,7 @@ type Schema struct {
 	dataTypes     []*DataType
 	imports       []*Import
 	sources       *Sources
+	moduleRoot    string
 	typeByName    map[string]*Type
 	dataByName    map[string]*DataType
 	importByAlias map[string]*Import
@@ -209,6 +210,22 @@ func (s *Schema) HasSourceProvider() bool {
 	return s.sources != nil
 }
 
+// ModuleRoot returns the canonicalized module root the load resolved
+// module-style imports against: the WithModuleRoot value when given, the
+// entry file's directory for a plain Load, and the canonicalized root
+// argument for LoadSources/LoadSourcesWithEntry (including the "." form).
+// Returns "" when no module root was in play — LoadString sources, an
+// empty root passed to LoadSources, or a Builder-built schema.
+//
+// The entry schema and every import compiled by the same load record that
+// load's root. An import reused from a shared Registry cache (see
+// [WithRegistry]) instead retains the root of the load that originally
+// compiled it: sealed schemas are immutable, and the cache hands the same
+// pointer to every load that hits it.
+func (s *Schema) ModuleRoot() string {
+	return s.moduleRoot
+}
+
 // --- Internal setters used during completion ---
 
 // seal marks the schema as immutable.
@@ -264,4 +281,12 @@ func (s *Schema) setSources(sources *Sources) {
 		panic("schema: cannot mutate sealed schema")
 	}
 	s.sources = sources
+}
+
+// setModuleRoot records the load's effective module root (called during loading).
+func (s *Schema) setModuleRoot(root string) {
+	if s.sealed {
+		panic("schema: cannot mutate sealed schema")
+	}
+	s.moduleRoot = root
 }

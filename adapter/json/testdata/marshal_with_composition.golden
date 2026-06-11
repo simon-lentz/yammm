@@ -1,0 +1,18 @@
+{
+  "Order": [
+    {
+      "customer": "Alice",
+      "id": "o1",
+      "items": [
+        {
+          "qty": 2,
+          "sku": "SKU-A"
+        },
+        {
+          "qty": 1,
+          "sku": "SKU-B"
+        }
+      ]
+    }
+  ]
+}

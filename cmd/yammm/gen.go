@@ -23,7 +23,10 @@ Currently supports Go (--to go): a single file of typed structs for every schema
 type (including imported types), named Enum/DataType types, EDGE_ association
 structs, a Graph aggregate, and an embedded SerializedModel. Output is stdlib-only.
 Use --initialisms to upper-case extra acronyms (e.g. GUID,JWT) in generated
-identifiers; they merge with the default golint acronym set.`,
+identifiers; they merge with the default golint acronym set.
+Use --module-root to resolve module-style imports against a root directory other
+than the schema's own (e.g. a repository root); embedded SerializedModel keys are
+relative to that root.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runGen,
 	}
@@ -31,6 +34,7 @@ identifiers; they merge with the default golint acronym set.`,
 	cmd.Flags().String("package", "", "generated Go package name (default: derived from schema name)")
 	cmd.Flags().String("output", "", "output file path (default: stdout)")
 	cmd.Flags().StringSlice("initialisms", nil, "extra acronyms to upper-case in generated Go names, e.g. GUID,JWT")
+	cmd.Flags().String("module-root", "", "root directory for module-style imports (default: the schema's directory)")
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
 }
@@ -42,6 +46,7 @@ func runGen(cmd *cobra.Command, args []string) error {
 	pkgName, _ := cmd.Flags().GetString("package")
 	outputPath, _ := cmd.Flags().GetString("output")
 	initialisms, _ := cmd.Flags().GetStringSlice("initialisms")
+	moduleRoot, _ := cmd.Flags().GetString("module-root")
 
 	outputFormat, err := cli.ParseOutputFormat(formatStr)
 	if err != nil {
@@ -59,9 +64,20 @@ func runGen(cmd *cobra.Command, args []string) error {
 		return &cli.ExitError{Code: cli.ExitUsage}
 	}
 
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
+	var loadOpts []schema.LoadOption
+	moduleRootAbs := ""
+	if moduleRoot != "" {
+		absRoot, err := filepath.Abs(moduleRoot)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: resolve module root %q: %v\n", moduleRoot, err)
+			return &cli.ExitError{Code: cli.ExitUsage}
+		}
+		loadOpts = append(loadOpts, schema.WithModuleRoot(absRoot))
+		moduleRootAbs = absRoot
+	}
+	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
 	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), schemaResult)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRootAbs, absSchemaPath), schemaResult)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 

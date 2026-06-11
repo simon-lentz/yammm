@@ -50,36 +50,51 @@ func TestConstraint_Kind(t *testing.T) {
 	assert.Equal(t, schema.KindVector, schema.NewVectorConstraint(128).Kind())
 }
 
+// TestConstraint_Equal drives Equal through one table covering every
+// concrete constraint type: same-value equality, per-field inequality,
+// cross-kind inequality, and the set-based semantics for enums.
 func TestConstraint_Equal(t *testing.T) {
-	t.Run("same constraints are equal", func(t *testing.T) {
-		c1 := schema.StringLenBetween(1, 100)
-		c2 := schema.StringLenBetween(1, 100)
-		assert.True(t, c1.Equal(c2))
-	})
+	tests := []struct {
+		name string
+		a, b schema.Constraint
+		want bool
+	}{
+		{"string same bounds", schema.StringLenBetween(1, 100), schema.StringLenBetween(1, 100), true},
+		{"string different bounds", schema.StringLenBetween(1, 100), schema.StringLenBetween(1, 200), false},
+		{"different kinds", schema.NewStringConstraint(), schema.NewIntegerConstraint(), false},
+		{"enum set equality ignores order", schema.NewEnumConstraint([]string{"a", "b", "c"}), schema.NewEnumConstraint([]string{"c", "b", "a"}), true},
+		{"enum different values", schema.NewEnumConstraint([]string{"a", "b"}), schema.NewEnumConstraint([]string{"a", "c"}), false},
+		{"integer same", schema.IntegerBetween(10, 100), schema.IntegerBetween(10, 100), true},
+		{"integer different min", schema.IntegerBetween(10, 100), schema.IntegerBetween(20, 100), false},
+		{"integer different max", schema.IntegerBetween(10, 100), schema.IntegerBetween(10, 200), false},
+		{"float same", schema.FloatBetween(1.5, 10.5), schema.FloatBetween(1.5, 10.5), true},
+		{"float different min", schema.FloatBetween(1.5, 10.5), schema.FloatBetween(2.0, 10.5), false},
+		{"boolean same", schema.NewBooleanConstraint(), schema.NewBooleanConstraint(), true},
+		{"boolean vs string", schema.NewBooleanConstraint(), schema.NewStringConstraint(), false},
+		{"timestamp same format", schema.NewTimestampConstraintFormatted("2006-01-02"), schema.NewTimestampConstraintFormatted("2006-01-02"), true},
+		{"timestamp different format", schema.NewTimestampConstraintFormatted("2006-01-02"), schema.NewTimestampConstraintFormatted("2006-01-02T15:04:05Z07:00"), false},
+		{"timestamp no format both", schema.NewTimestampConstraint(), schema.NewTimestampConstraint(), true},
+		{"date same", schema.NewDateConstraint(), schema.NewDateConstraint(), true},
+		{"date vs timestamp", schema.NewDateConstraint(), schema.NewTimestampConstraint(), false},
+		{"uuid same", schema.NewUUIDConstraint(), schema.NewUUIDConstraint(), true},
+		{"uuid vs string", schema.NewUUIDConstraint(), schema.NewStringConstraint(), false},
+		{"pattern same", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}), schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}), true},
+		{"pattern different", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}), schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^other")}), false},
+		{
+			"pattern different count",
+			schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}),
+			schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test"), regexp.MustCompile("end$")}),
+			false,
+		},
+		{"vector same dimension", schema.NewVectorConstraint(128), schema.NewVectorConstraint(128), true},
+		{"vector different dimension", schema.NewVectorConstraint(128), schema.NewVectorConstraint(256), false},
+	}
 
-	t.Run("different bounds are not equal", func(t *testing.T) {
-		c1 := schema.StringLenBetween(1, 100)
-		c2 := schema.StringLenBetween(1, 200)
-		assert.False(t, c1.Equal(c2))
-	})
-
-	t.Run("different kinds are not equal", func(t *testing.T) {
-		c1 := schema.NewStringConstraint()
-		c2 := schema.NewIntegerConstraint()
-		assert.False(t, c1.Equal(c2))
-	})
-
-	t.Run("enum set equality", func(t *testing.T) {
-		c1 := schema.NewEnumConstraint([]string{"a", "b", "c"})
-		c2 := schema.NewEnumConstraint([]string{"c", "b", "a"}) // different order
-		assert.True(t, c1.Equal(c2), "Enum equality should be set-based")
-	})
-
-	t.Run("enum different values", func(t *testing.T) {
-		c1 := schema.NewEnumConstraint([]string{"a", "b"})
-		c2 := schema.NewEnumConstraint([]string{"a", "c"})
-		assert.False(t, c1.Equal(c2))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.a.Equal(tt.b))
+		})
+	}
 }
 
 func TestEnumConstraint_DefensiveCopy(t *testing.T) {
@@ -223,24 +238,6 @@ func TestIntegerConstraint_Max_Unbounded(t *testing.T) {
 	assert.False(t, hasMax)
 }
 
-func TestIntegerConstraint_Equal_Same(t *testing.T) {
-	c1 := schema.IntegerBetween(10, 100)
-	c2 := schema.IntegerBetween(10, 100)
-	assert.True(t, c1.Equal(c2))
-}
-
-func TestIntegerConstraint_Equal_DifferentMin(t *testing.T) {
-	c1 := schema.IntegerBetween(10, 100)
-	c2 := schema.IntegerBetween(20, 100)
-	assert.False(t, c1.Equal(c2))
-}
-
-func TestIntegerConstraint_Equal_DifferentMax(t *testing.T) {
-	c1 := schema.IntegerBetween(10, 100)
-	c2 := schema.IntegerBetween(10, 200)
-	assert.False(t, c1.Equal(c2))
-}
-
 func TestFloatConstraint_Min(t *testing.T) {
 	c := schema.FloatBetween(1.5, 10.5)
 	minVal, hasMin := c.Min()
@@ -267,30 +264,6 @@ func TestFloatConstraint_Max_Unbounded(t *testing.T) {
 	assert.False(t, hasMax)
 }
 
-func TestFloatConstraint_Equal_Same(t *testing.T) {
-	c1 := schema.FloatBetween(1.5, 10.5)
-	c2 := schema.FloatBetween(1.5, 10.5)
-	assert.True(t, c1.Equal(c2))
-}
-
-func TestFloatConstraint_Equal_DifferentMin(t *testing.T) {
-	c1 := schema.FloatBetween(1.5, 10.5)
-	c2 := schema.FloatBetween(2.0, 10.5)
-	assert.False(t, c1.Equal(c2))
-}
-
-func TestBooleanConstraint_Equal_Same(t *testing.T) {
-	c1 := schema.NewBooleanConstraint()
-	c2 := schema.NewBooleanConstraint()
-	assert.True(t, c1.Equal(c2))
-}
-
-func TestBooleanConstraint_Equal_DifferentType(t *testing.T) {
-	c1 := schema.NewBooleanConstraint()
-	c2 := schema.NewStringConstraint()
-	assert.False(t, c1.Equal(c2))
-}
-
 func TestTimestampConstraint_Format(t *testing.T) {
 	c := schema.NewTimestampConstraintFormatted("2006-01-02")
 	format := c.Format()
@@ -300,49 +273,7 @@ func TestTimestampConstraint_Format(t *testing.T) {
 func TestTimestampConstraint_Format_NoFormat(t *testing.T) {
 	c := schema.NewTimestampConstraint()
 	format := c.Format()
-	assert.Equal(t, "", format)
-}
-
-func TestTimestampConstraint_Equal_Same(t *testing.T) {
-	c1 := schema.NewTimestampConstraintFormatted("2006-01-02")
-	c2 := schema.NewTimestampConstraintFormatted("2006-01-02")
-	assert.True(t, c1.Equal(c2))
-}
-
-func TestTimestampConstraint_Equal_DifferentFormat(t *testing.T) {
-	c1 := schema.NewTimestampConstraintFormatted("2006-01-02")
-	c2 := schema.NewTimestampConstraintFormatted("2006-01-02T15:04:05Z07:00")
-	assert.False(t, c1.Equal(c2))
-}
-
-func TestTimestampConstraint_Equal_NoFormatBoth(t *testing.T) {
-	c1 := schema.NewTimestampConstraint()
-	c2 := schema.NewTimestampConstraint()
-	assert.True(t, c1.Equal(c2))
-}
-
-func TestDateConstraint_Equal_Same(t *testing.T) {
-	c1 := schema.NewDateConstraint()
-	c2 := schema.NewDateConstraint()
-	assert.True(t, c1.Equal(c2))
-}
-
-func TestDateConstraint_Equal_DifferentType(t *testing.T) {
-	c1 := schema.NewDateConstraint()
-	c2 := schema.NewTimestampConstraint()
-	assert.False(t, c1.Equal(c2))
-}
-
-func TestUUIDConstraint_Equal_Same(t *testing.T) {
-	c1 := schema.NewUUIDConstraint()
-	c2 := schema.NewUUIDConstraint()
-	assert.True(t, c1.Equal(c2))
-}
-
-func TestUUIDConstraint_Equal_DifferentType(t *testing.T) {
-	c1 := schema.NewUUIDConstraint()
-	c2 := schema.NewStringConstraint()
-	assert.False(t, c1.Equal(c2))
+	assert.Empty(t, format)
 }
 
 func TestPatternConstraint_Kind(t *testing.T) {
@@ -381,7 +312,7 @@ func TestPatternConstraint_Pattern(t *testing.T) {
 
 func TestPatternConstraint_Pattern_Empty(t *testing.T) {
 	c := schema.NewPatternConstraint([]*regexp.Regexp{})
-	assert.Equal(t, "", c.Pattern())
+	assert.Empty(t, c.Pattern())
 }
 
 func TestPatternConstraint_CompiledPatterns(t *testing.T) {
@@ -408,44 +339,9 @@ func TestPatternConstraint_String_Multiple(t *testing.T) {
 	assert.Equal(t, `Pattern["^a", "b$"]`, c.String())
 }
 
-func TestPatternConstraint_Equal_Same(t *testing.T) {
-	p := regexp.MustCompile("^test")
-	c1 := schema.NewPatternConstraint([]*regexp.Regexp{p})
-	c2 := schema.NewPatternConstraint([]*regexp.Regexp{p})
-	assert.True(t, c1.Equal(c2))
-}
-
-func TestPatternConstraint_Equal_DifferentPattern(t *testing.T) {
-	p1 := regexp.MustCompile("^test")
-	p2 := regexp.MustCompile("^other")
-	c1 := schema.NewPatternConstraint([]*regexp.Regexp{p1})
-	c2 := schema.NewPatternConstraint([]*regexp.Regexp{p2})
-	assert.False(t, c1.Equal(c2))
-}
-
-func TestPatternConstraint_Equal_DifferentCount(t *testing.T) {
-	p1 := regexp.MustCompile("^test")
-	p2 := regexp.MustCompile("end$")
-	c1 := schema.NewPatternConstraint([]*regexp.Regexp{p1})
-	c2 := schema.NewPatternConstraint([]*regexp.Regexp{p1, p2})
-	assert.False(t, c1.Equal(c2))
-}
-
 func TestVectorConstraint_Dimension(t *testing.T) {
 	c := schema.NewVectorConstraint(256)
 	assert.Equal(t, 256, c.Dimension())
-}
-
-func TestVectorConstraint_Equal_Same(t *testing.T) {
-	c1 := schema.NewVectorConstraint(128)
-	c2 := schema.NewVectorConstraint(128)
-	assert.True(t, c1.Equal(c2))
-}
-
-func TestVectorConstraint_Equal_Different(t *testing.T) {
-	c1 := schema.NewVectorConstraint(128)
-	c2 := schema.NewVectorConstraint(256)
-	assert.False(t, c1.Equal(c2))
 }
 
 func TestAliasConstraint_DataTypeName(t *testing.T) {

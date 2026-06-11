@@ -54,7 +54,9 @@ func ExtractCodeBlocks(content string) []CodeBlock {
 				continue
 			}
 
-			// 1-3 space indented fences are explicitly skipped per §6.1.
+			// Fences indented 1-3 spaces are deliberately not treated
+			// as fence toggles: only zero-indent fences delimit code
+			// blocks in this scanner.
 			if indent >= 1 {
 				continue
 			}

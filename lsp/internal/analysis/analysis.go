@@ -194,11 +194,10 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 // [schema.WithDisallowImports] to reject import declarations.
 //
 // Source-registry invariance: The Analyzer creates its own [source.Registry],
-// pre-registers overlay content, and stores it in the resulting [Snapshot].
-// This registry is authoritative for position conversion and symbol indexing.
-// The Analyzer always appends [schema.WithSourceRegistry] after caller-supplied
-// opts (last-write-wins), so callers must not pass [schema.WithSourceRegistry]
-// — it will be silently overridden.
+// pre-registers overlay content, and — after the load — copies the loaded
+// schema's full source closure into it, covering the sources the load
+// resolved from disk. The registry is stored in the resulting [Snapshot]
+// and is authoritative for position conversion and symbol indexing.
 //
 // The overlays map provides in-memory content that takes precedence over
 // disk files. Keys should be canonical absolute paths (matching SourceID.String()).
@@ -244,17 +243,37 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	// Perform the load with explicit entry path.
 	// This ensures the correct document is analyzed even when multiple
 	// documents are open (overlays from different files).
-	// Caller opts applied first; Analyzer's registry always wins (appended last).
-	allOpts := make([]schema.LoadOption, len(opts), len(opts)+1)
-	copy(allOpts, opts)
-	allOpts = append(allOpts, schema.WithSourceRegistry(sourceRegistry))
 	schemaResult, diagResult := schema.LoadSourcesWithEntry(
 		ctx,
 		sources,
 		entryPath,
 		moduleRoot,
-		allOpts...,
+		opts...,
 	)
+
+	// Copy the loaded schema's source closure into the analyzer's registry:
+	// the load reads sources the overlays did not provide (disk-resolved
+	// imports), and position conversion plus symbol indexing need their
+	// content. Same-content re-registration of the overlays is a no-op. On
+	// a failed load there is no schema, so the registry holds the overlays
+	// alone; diagnostic spans still carry line/column positions.
+	if schemaResult != nil {
+		if srcs := schemaResult.Sources(); srcs != nil {
+			for _, id := range srcs.SourceIDs() {
+				content, ok := srcs.ContentBySource(id)
+				if !ok {
+					continue
+				}
+				if err := sourceRegistry.Register(id, content); err != nil {
+					a.logger.Warn(
+						"failed to register loaded source",
+						slog.String("source", id.String()),
+						slog.Any("error", err),
+					)
+				}
+			}
+		}
+	}
 
 	entrySourceID, idErr := location.SourceIDFromAbsolutePath(entryPath)
 	if idErr != nil {

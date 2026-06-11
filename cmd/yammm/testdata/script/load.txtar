@@ -1,0 +1,29 @@
+# load: parses and validates data without producing output artifacts.
+
+exec yammm load valid.yammm data.json
+
+exec yammm load --type Person valid.yammm data.csv
+
+exec yammm load --from csv --type Person valid.yammm data.csv
+
+! exec yammm load valid.yammm nonexistent.json
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}
+-- data.json --
+{
+  "Person": [
+    {"id": "alice", "name": "Alice", "age": 30},
+    {"id": "bob", "name": "Bob", "age": 25}
+  ]
+}
+-- data.csv --
+id,name,age
+carol,Carol,28
+dave,Dave,35

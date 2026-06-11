@@ -1,4 +1,4 @@
-package graph
+package graph_test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
@@ -39,7 +40,7 @@ func FuzzGraph_ConcurrentOperations(f *testing.F) {
 
 		// Create schema
 		s := buildFuzzSchema(t)
-		g := New(s)
+		g := graph.New(s)
 		ctx := t.Context()
 
 		// Run concurrent operations
@@ -79,7 +80,7 @@ func buildFuzzSchema(t *testing.T) *schema.Schema {
 }
 
 // runFuzzOperations performs random graph operations.
-func runFuzzOperations(t *testing.T, g *Graph, s *schema.Schema, ctx context.Context, r *rand.Rand, workerID, numOps int) {
+func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx context.Context, r *rand.Rand, workerID, numOps int) {
 	t.Helper()
 
 	personType, ok := s.Type("Person")
@@ -117,7 +118,7 @@ func runFuzzOperations(t *testing.T, g *Graph, s *schema.Schema, ctx context.Con
 		case 3: // InstanceByKey
 			id := r.Intn(100)
 			snap := g.Snapshot()
-			_, _ = snap.InstanceByKey("Person", FormatKey(formatID(workerID, id)))
+			_, _ = snap.InstanceByKey("Person", graph.FormatKey(formatID(workerID, id)))
 		}
 	}
 }
@@ -131,7 +132,7 @@ func formatName(workerID, id int) string {
 }
 
 // verifyGraphConsistency checks that the graph is in a valid state.
-func verifyGraphConsistency(t *testing.T, g *Graph) {
+func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 	t.Helper()
 
 	snap := g.Snapshot()
@@ -169,7 +170,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, seed int64) {
 		s := buildFuzzSchema(t)
-		g := New(s)
+		g := graph.New(s)
 		ctx := t.Context()
 
 		personType, _ := s.Type("Person")

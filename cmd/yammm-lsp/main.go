@@ -55,11 +55,12 @@ func run(stdout io.Writer, args []string) error {
 	fs.SetOutput(io.Discard) // Suppress default output; we print usage ourselves
 
 	var (
-		logLevel   = fs.String("log-level", "info", "log level: error|warn|info|debug|trace")
-		logFile    = fs.String("log-file", "", "log file path (empty to log to stderr)")
-		moduleRoot = fs.String("module-root", "", "override module root for import resolution")
-		showVer    = fs.Bool("version", false, "print version and exit")
-		_          = fs.Bool("stdio", false, "use stdio transport (default, accepted for VS Code compatibility)")
+		logLevel      = fs.String("log-level", "info", "log level: error|warn|info|debug|trace")
+		logFile       = fs.String("log-file", "", "log file path (empty to log to stderr)")
+		moduleRoot    = fs.String("module-root", "", "override module root for import resolution")
+		debounceDelay = fs.Duration("debounce-delay", 0, "delay between a document change and re-analysis (0 uses the server default, 150ms)")
+		showVer       = fs.Bool("version", false, "print version and exit")
+		_             = fs.Bool("stdio", false, "use stdio transport (default, accepted for VS Code compatibility)")
 	)
 
 	fs.Usage = func() {
@@ -98,8 +99,9 @@ func run(stdout io.Writer, args []string) error {
 	// Validate canonicalizes ModuleRoot, applies version default, and
 	// warns about module root issues without failing (graceful degradation).
 	cfg := lsp.Config{
-		ModuleRoot: *moduleRoot,
-		Version:    version,
+		ModuleRoot:    *moduleRoot,
+		Version:       version,
+		DebounceDelay: *debounceDelay,
 	}
 	if err := cfg.Validate(logger); err != nil {
 		return fmt.Errorf("validate config: %w", err)
@@ -113,6 +115,7 @@ func run(stdout io.Writer, args []string) error {
 		slog.String("os_arch", runtime.GOOS+"/"+runtime.GOARCH),
 		slog.String("module_root", cfg.ModuleRoot),
 		slog.String("log_level", *logLevel),
+		slog.Duration("debounce_delay", cfg.DebounceDelay),
 	)
 
 	server := lsp.NewServer(logger, cfg)

@@ -420,6 +420,141 @@ func TestBuilder_EmptyRelationNameFails(t *testing.T) {
 	assert.Contains(t, issues[0].Message(), "relation name cannot be empty")
 }
 
+// TestBuilder_InvalidNamesFail pins the Builder's grammar-conformance name
+// validation: declared names must match the productions the parser enforces
+// structurally (type and datatype names UC_WORD, property names LC_WORD,
+// relation names UC_WORD or LC_WORD), so every Builder-built schema remains
+// expressible in the DSL.
+func TestBuilder_InvalidNamesFail(t *testing.T) {
+	tests := []struct {
+		name      string
+		build     func() (*schema.Schema, diag.Result)
+		wantInMsg string
+	}{
+		{
+			"hyphenated type name",
+			func() (*schema.Schema, diag.Result) {
+				return schema.NewBuilder().WithName("t").
+					AddType("Foo-Bar").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
+					Build()
+			},
+			`type name "Foo-Bar"`,
+		},
+		{
+			"lowercase type name",
+			func() (*schema.Schema, diag.Result) {
+				return schema.NewBuilder().WithName("t").
+					AddType("foo").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
+					Build()
+			},
+			`type name "foo"`,
+		},
+		{
+			"digit-leading type name",
+			func() (*schema.Schema, diag.Result) {
+				return schema.NewBuilder().WithName("t").
+					AddType("9Lives").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
+					Build()
+			},
+			`type name "9Lives"`,
+		},
+		{
+			"lowercase datatype name",
+			func() (*schema.Schema, diag.Result) {
+				return schema.NewBuilder().WithName("t").
+					AddDataType("email", schema.NewStringConstraint()).
+					Build()
+			},
+			`datatype name "email"`,
+		},
+		{
+			"uppercase property name",
+			func() (*schema.Schema, diag.Result) {
+				return schema.NewBuilder().WithName("t").
+					AddType("Person").
+					WithPrimaryKey("id", schema.NewStringConstraint()).
+					WithProperty("FirstName", schema.NewStringConstraint()).
+					Done().
+					Build()
+			},
+			`property name "FirstName"`,
+		},
+		{
+			"hyphenated property name",
+			func() (*schema.Schema, diag.Result) {
+				return schema.NewBuilder().WithName("t").
+					AddType("Person").
+					WithPrimaryKey("first-name", schema.NewStringConstraint()).
+					Done().
+					Build()
+			},
+			`property name "first-name"`,
+		},
+		{
+			"digit-leading relation name",
+			func() (*schema.Schema, diag.Result) {
+				return schema.NewBuilder().WithName("t").
+					AddType("Car").
+					WithPrimaryKey("id", schema.NewStringConstraint()).
+					WithRelation("9wheels", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
+					Done().
+					AddType("Wheel").
+					WithPrimaryKey("id", schema.NewStringConstraint()).
+					Done().
+					Build()
+			},
+			`relation name "9wheels"`,
+		},
+		{
+			"hyphenated relation name",
+			func() (*schema.Schema, diag.Result) {
+				return schema.NewBuilder().WithName("t").
+					AddType("Car").
+					WithPrimaryKey("id", schema.NewStringConstraint()).
+					WithRelation("WHEEL-SET", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
+					Done().
+					AddType("Wheel").
+					WithPrimaryKey("id", schema.NewStringConstraint()).
+					Done().
+					Build()
+			},
+			`relation name "WHEEL-SET"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, result := tt.build()
+			require.Nil(t, s, "schema with an invalid name must not build")
+			require.True(t, result.HasCode(diag.E_INVALID_NAME),
+				"want E_INVALID_NAME, got: %v", result.Err())
+			assert.Contains(t, result.Err().Error(), tt.wantInMsg)
+		})
+	}
+}
+
+// TestBuilder_GrammarValidNamesBuild is the positive control for name
+// validation: underscores, digits after the first character, and
+// either-case relation names are all valid per the grammar.
+func TestBuilder_GrammarValidNamesBuild(t *testing.T) {
+	s, result := schema.NewBuilder().
+		WithName("t").
+		AddDataType("Email2", schema.NewStringConstraint()).
+		AddType("Foo_Bar").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("first_name", schema.NewStringConstraint()).
+		WithRelation("wheels", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
+		WithRelation("WHEELS_2", schema.NewTypeRef("", "Wheel", location.Span{}), true, true).
+		Done().
+		AddType("Wheel").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		Build()
+
+	require.NoError(t, result.Err(), "grammar-valid names must build")
+	require.NotNil(t, s)
+}
+
 func TestBuilder_WithIssueLimit(t *testing.T) {
 	// Test that WithIssueLimit affects the collector
 	s, result := schema.NewBuilder().

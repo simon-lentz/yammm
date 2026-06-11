@@ -1,0 +1,55 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": true,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        },
+        {
+          "Constraint": "String[1, 100]",
+          "Name": "name",
+          "Optional": true,
+          "PrimaryKey": false
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Base",
+      "Part": false,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String[1, 100]",
+          "Name": "name",
+          "Optional": false,
+          "PrimaryKey": false
+        },
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Child",
+      "Part": false,
+      "SuperTypes": [
+        "Base"
+      ]
+    }
+  ]
+}

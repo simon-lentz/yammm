@@ -854,12 +854,12 @@ type Record {
 
 func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 	// Property paths should use schema property names, not input field names.
-	// When input uses different case (e.g., "firstname"), path should still use "FirstName".
+	// When input uses different case (e.g., "firstname"), path should still use "firstName".
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("FirstName", schema.NewIntegerConstraint()). // Integer type to cause mismatch
+		WithProperty("firstName", schema.NewIntegerConstraint()). // Integer type to cause mismatch
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -877,7 +877,7 @@ func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	// Check that the path uses schema property name "FirstName", not input name "firstname"
+	// Check that the path uses schema property name "firstName", not input name "firstname"
 	var foundPath string
 	for issue := range result.Issues() {
 		if issue.Path() != "" {
@@ -886,7 +886,7 @@ func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 		}
 	}
 
-	assert.Contains(t, foundPath, "FirstName", "path should use schema property name")
+	assert.Contains(t, foundPath, "firstName", "path should use schema property name")
 	assert.NotContains(t, foundPath, "firstname", "path should not use input field name")
 }
 
@@ -897,7 +897,7 @@ func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
 		WithName("test").
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("FirstName", schema.NewIntegerConstraint()). // Integer to cause type error
+		WithProperty("firstName", schema.NewIntegerConstraint()). // Integer to cause type error
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -1044,256 +1044,144 @@ func TestNewValidator_NilSchemaPanics(t *testing.T) {
 // "After Validate() returns, callers MAY mutate their original RawInstance
 // values without affecting any ValidInstance outputs."
 
-// TestOwnership_NestedMapIsolation verifies that mutating deeply nested maps
-// in the original data does not affect the ValidInstance properties.
-func TestOwnership_NestedMapIsolation(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("street", schema.NewStringConstraint()).
-		WithProperty("city", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	// Create nested structure - the address data is a nested map
-	addressData := map[string]any{
-		"id":     "100",
-		"street": "Original Street",
-		"city":   "Original City",
+// TestOwnership_Isolation drives every mutate-after-validate scenario
+// through one skeleton: build the schema, validate, mutate every retained
+// alias into the raw input, then verify the ValidInstance kept the
+// original values. Each row owns its schema, its tampering, and its
+// scenario-specific assertions.
+func TestOwnership_Isolation(t *testing.T) {
+	type scenario struct {
+		name     string
+		schema   func(t *testing.T) *schema.Schema
+		typeName string
+		// raw returns the input plus a mutate func that tampers with every
+		// alias the test retained into the raw data.
+		raw    func() (instance.RawInstance, func())
+		verify func(t *testing.T, valid *instance.ValidInstance)
 	}
-	rawData := map[string]any{
-		"id":        "1",
-		"addresses": []any{addressData},
+
+	compositionSchema := func(part, parent, relation string, extraProps ...string) func(t *testing.T) *schema.Schema {
+		return func(t *testing.T) *schema.Schema {
+			t.Helper()
+			b := schema.NewBuilder().WithName("test").
+				AddType(part).
+				AsPart().
+				WithPrimaryKey("id", schema.NewStringConstraint())
+			for _, prop := range extraProps {
+				b = b.WithProperty(prop, schema.NewStringConstraint())
+			}
+			return mustBuild(t, b.Done().
+				AddType(parent).
+				WithPrimaryKey("id", schema.NewStringConstraint()).
+				WithComposition(relation, schema.LocalTypeRef(part, location.Span{}), true, true).
+				Done())
+		}
 	}
-	raw := instance.RawInstance{Properties: rawData}
 
-	// Validate
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
-
-	// Mutate the nested address data AFTER validation
-	addressData["street"] = "Mutated Street"
-	addressData["city"] = "Mutated City"
-
-	// The ValidInstance's composed children should NOT be affected
-	composed, ok := valid.Composed("addresses")
-	require.True(t, ok)
-	require.False(t, composed.IsNil())
-
-	composedSlice, ok := composed.Slice()
-	require.True(t, ok)
-	require.Equal(t, 1, composedSlice.Len())
-
-	child := composedSlice.Get(0).Unwrap().(*instance.ValidInstance)
-	streetVal, ok := child.Property("street")
-	require.True(t, ok)
-	street, ok := streetVal.String()
-	require.True(t, ok)
-	assert.Equal(t, "Original Street", street, "nested map isolation failed: street was mutated")
-
-	cityVal, ok := child.Property("city")
-	require.True(t, ok)
-	city, ok := cityVal.String()
-	require.True(t, ok)
-	assert.Equal(t, "Original City", city, "nested map isolation failed: city was mutated")
-}
-
-// TestOwnership_NestedSliceIsolation verifies that mutating nested slices
-// (like adding/removing elements or modifying slice elements) in the original
-// data does not affect the ValidInstance.
-func TestOwnership_NestedSliceIsolation(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Note").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("text", schema.NewStringConstraint()).
-		Done().
-		AddType("Document").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("notes", schema.LocalTypeRef("Note", location.Span{}), true, true).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	// Create data with slice of notes
-	note1 := map[string]any{"id": "1", "text": "Original Note 1"}
-	note2 := map[string]any{"id": "2", "text": "Original Note 2"}
-	notesSlice := []any{note1, note2}
-	rawData := map[string]any{
-		"id":    "1",
-		"notes": notesSlice,
+	childProp := func(t *testing.T, valid *instance.ValidInstance, relation string, idx int, prop, want string) {
+		t.Helper()
+		composed, ok := valid.Composed(relation)
+		require.True(t, ok)
+		composedSlice, ok := composed.Slice()
+		require.True(t, ok)
+		require.Greater(t, composedSlice.Len(), idx)
+		child := composedSlice.Get(idx).Unwrap().(*instance.ValidInstance)
+		val, ok := child.Property(prop)
+		require.True(t, ok)
+		got, ok := val.String()
+		require.True(t, ok)
+		assert.Equal(t, want, got, "isolation failed: %s[%d].%s was mutated", relation, idx, prop)
 	}
-	raw := instance.RawInstance{Properties: rawData}
 
-	// Validate
-	valid, result := validator.ValidateOne(t.Context(), "Document", raw)
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
-
-	// Mutate the slice: modify elements
-	note1["text"] = "Mutated Note 1"
-	note2["text"] = "Mutated Note 2"
-
-	// Also try to mutate the slice structure (won't affect wrapped, but for completeness)
-	rawData["notes"] = []any{map[string]any{"id": "999", "text": "New Note"}}
-
-	// The ValidInstance should NOT be affected
-	composed, ok := valid.Composed("notes")
-	require.True(t, ok)
-	require.False(t, composed.IsNil())
-
-	composedSlice, ok := composed.Slice()
-	require.True(t, ok)
-	require.Equal(t, 2, composedSlice.Len(), "original slice length should be preserved")
-
-	child0 := composedSlice.Get(0).Unwrap().(*instance.ValidInstance)
-	text1Val, ok := child0.Property("text")
-	require.True(t, ok)
-	text1, ok := text1Val.String()
-	require.True(t, ok)
-	assert.Equal(t, "Original Note 1", text1, "nested slice isolation failed: note 1 text was mutated")
-
-	child1 := composedSlice.Get(1).Unwrap().(*instance.ValidInstance)
-	text2Val, ok := child1.Property("text")
-	require.True(t, ok)
-	text2, ok := text2Val.String()
-	require.True(t, ok)
-	assert.Equal(t, "Original Note 2", text2, "nested slice isolation failed: note 2 text was mutated")
-}
-
-// TestOwnership_CompositionIsolation verifies that mutating composition data
-// in RawInstance does not affect recursively validated composed children.
-func TestOwnership_CompositionIsolation(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Item").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		Done().
-		AddType("Order").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("items", schema.LocalTypeRef("Item", location.Span{}), true, true).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	// Create composition data
-	itemData := map[string]any{"id": "100", "name": "Original Item"}
-	compositionArray := []any{itemData}
-	rawData := map[string]any{
-		"id":    "1",
-		"items": compositionArray,
-	}
-	raw := instance.RawInstance{Properties: rawData}
-
-	// Validate
-	valid, result := validator.ValidateOne(t.Context(), "Order", raw)
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
-
-	// Mutate the composition data AFTER validation
-	itemData["name"] = "Mutated Item"
-	compositionArray[0] = map[string]any{"id": "999", "name": "Replaced Item"}
-	rawData["items"] = nil // Try to null out the composition
-
-	// The ValidInstance's composed children should NOT be affected
-	composed, ok := valid.Composed("items")
-	require.True(t, ok)
-	require.False(t, composed.IsNil())
-
-	composedSlice, ok := composed.Slice()
-	require.True(t, ok)
-	require.Equal(t, 1, composedSlice.Len())
-
-	child := composedSlice.Get(0).Unwrap().(*instance.ValidInstance)
-	nameVal, ok := child.Property("name")
-	require.True(t, ok)
-	name, ok := nameVal.String()
-	require.True(t, ok)
-	assert.Equal(t, "Original Item", name, "composition isolation failed")
-}
-
-// TestOwnership_DeeplyNestedCompositionIsolation verifies isolation with
-// multiple levels of nesting (parent -> child -> child's nested properties).
-func TestOwnership_DeeplyNestedCompositionIsolation(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Detail").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("value", schema.NewStringConstraint()).
-		WithProperty("count", schema.NewIntegerConstraint()).
-		Done().
-		AddType("Container").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("details", schema.LocalTypeRef("Detail", location.Span{}), true, true).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	// Create deeply nested structure
-	detailData := map[string]any{
-		"id":    "1",
-		"value": "Original Value",
-		"count": int64(42),
-	}
-	rawData := map[string]any{
-		"id":      "1",
-		"details": []any{detailData},
-	}
-	raw := instance.RawInstance{Properties: rawData}
-
-	// Validate
-	valid, result := validator.ValidateOne(t.Context(), "Container", raw)
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
-
-	// Mutate all nested data
-	detailData["value"] = "Mutated Value"
-	detailData["count"] = int64(999)
-	detailData["id"] = "888"
-
-	// The ValidInstance should NOT be affected
-	composed, ok := valid.Composed("details")
-	require.True(t, ok)
-
-	composedSlice, ok := composed.Slice()
-	require.True(t, ok)
-	require.Equal(t, 1, composedSlice.Len())
-
-	child := composedSlice.Get(0).Unwrap().(*instance.ValidInstance)
-
-	// Check all properties
-	valueVal, ok := child.Property("value")
-	require.True(t, ok)
-	value, ok := valueVal.String()
-	require.True(t, ok)
-	assert.Equal(t, "Original Value", value, "deeply nested isolation failed: value was mutated")
-
-	countVal, ok := child.Property("count")
-	require.True(t, ok)
-	count, ok := countVal.Int()
-	require.True(t, ok)
-	assert.Equal(t, int64(42), count, "deeply nested isolation failed: count was mutated")
-
-	// PK should also be isolated
-	assert.Equal(t, `["1"]`, child.PrimaryKey().String(), "deeply nested isolation failed: PK was mutated")
-}
-
-// TestOwnership_EdgePropertyIsolation verifies that mutating edge properties
-// after validation does not affect ValidInstance edge data.
-func TestOwnership_EdgePropertyIsolation(t *testing.T) {
-	s := mustLoadString(t, `schema "test"
+	scenarios := []scenario{
+		{
+			name:     "nested map",
+			schema:   compositionSchema("Address", "Person", "addresses", "street", "city"),
+			typeName: "Person",
+			raw: func() (instance.RawInstance, func()) {
+				addressData := map[string]any{"id": "100", "street": "Original Street", "city": "Original City"}
+				raw := instance.RawInstance{Properties: map[string]any{"id": "1", "addresses": []any{addressData}}}
+				return raw, func() {
+					addressData["street"] = "Mutated Street"
+					addressData["city"] = "Mutated City"
+				}
+			},
+			verify: func(t *testing.T, valid *instance.ValidInstance) {
+				t.Helper()
+				childProp(t, valid, "addresses", 0, "street", "Original Street")
+				childProp(t, valid, "addresses", 0, "city", "Original City")
+			},
+		},
+		{
+			name:     "nested slice",
+			schema:   compositionSchema("Note", "Document", "notes", "text"),
+			typeName: "Document",
+			raw: func() (instance.RawInstance, func()) {
+				note1 := map[string]any{"id": "1", "text": "Original Note 1"}
+				note2 := map[string]any{"id": "2", "text": "Original Note 2"}
+				rawData := map[string]any{"id": "1", "notes": []any{note1, note2}}
+				return instance.RawInstance{Properties: rawData}, func() {
+					note1["text"] = "Mutated Note 1"
+					note2["text"] = "Mutated Note 2"
+					rawData["notes"] = []any{map[string]any{"id": "999", "text": "New Note"}}
+				}
+			},
+			verify: func(t *testing.T, valid *instance.ValidInstance) {
+				t.Helper()
+				composed, ok := valid.Composed("notes")
+				require.True(t, ok)
+				composedSlice, ok := composed.Slice()
+				require.True(t, ok)
+				require.Equal(t, 2, composedSlice.Len(), "original slice length should be preserved")
+				childProp(t, valid, "notes", 0, "text", "Original Note 1")
+				childProp(t, valid, "notes", 1, "text", "Original Note 2")
+			},
+		},
+		{
+			name:     "composition replacement",
+			schema:   compositionSchema("Item", "Order", "items", "name"),
+			typeName: "Order",
+			raw: func() (instance.RawInstance, func()) {
+				itemData := map[string]any{"id": "100", "name": "Original Item"}
+				compositionArray := []any{itemData}
+				rawData := map[string]any{"id": "1", "items": compositionArray}
+				return instance.RawInstance{Properties: rawData}, func() {
+					itemData["name"] = "Mutated Item"
+					compositionArray[0] = map[string]any{"id": "999", "name": "Replaced Item"}
+					rawData["items"] = nil
+				}
+			},
+			verify: func(t *testing.T, valid *instance.ValidInstance) {
+				t.Helper()
+				childProp(t, valid, "items", 0, "name", "Original Item")
+			},
+		},
+		{
+			name:     "deeply nested composition",
+			schema:   compositionSchema("Detail", "Container", "details", "value"),
+			typeName: "Container",
+			raw: func() (instance.RawInstance, func()) {
+				detailData := map[string]any{"id": "1", "value": "Original Value"}
+				raw := instance.RawInstance{Properties: map[string]any{"id": "1", "details": []any{detailData}}}
+				return raw, func() {
+					detailData["value"] = "Mutated Value"
+					detailData["id"] = "888"
+				}
+			},
+			verify: func(t *testing.T, valid *instance.ValidInstance) {
+				t.Helper()
+				childProp(t, valid, "details", 0, "value", "Original Value")
+				composed, _ := valid.Composed("details")
+				composedSlice, _ := composed.Slice()
+				child := composedSlice.Get(0).Unwrap().(*instance.ValidInstance)
+				assert.Equal(t, `["1"]`, child.PrimaryKey().String(), "isolation failed: PK was mutated")
+			},
+		},
+		{
+			name: "edge properties",
+			schema: func(t *testing.T) *schema.Schema {
+				t.Helper()
+				return mustLoadString(t, `schema "test"
 type Company {
     id String primary
 }
@@ -1304,52 +1192,47 @@ type Person {
         startDate String
     }
 }`, "test.yammm")
-
-	validator := instance.NewValidator(s)
-
-	// Create edge with properties
-	edgeData := map[string]any{
-		"_target_id": "42",
-		"role":       "Original Role",
-		"startDate":  "2024-01-01",
+			},
+			typeName: "Person",
+			raw: func() (instance.RawInstance, func()) {
+				edgeData := map[string]any{"_target_id": "42", "role": "Original Role", "startDate": "2024-01-01"}
+				raw := instance.RawInstance{Properties: map[string]any{"id": "1", "employer": edgeData}}
+				return raw, func() {
+					edgeData["role"] = "Mutated Role"
+					edgeData["startDate"] = "2099-12-31"
+					edgeData["_target_id"] = "999"
+				}
+			},
+			verify: func(t *testing.T, valid *instance.ValidInstance) {
+				t.Helper()
+				edge, ok := valid.Edge("employer")
+				require.True(t, ok)
+				targets := edge.Targets()
+				require.Len(t, targets, 1)
+				roleVal, ok := targets[0].Property("role")
+				require.True(t, ok)
+				role, _ := roleVal.String()
+				assert.Equal(t, "Original Role", role, "isolation failed: role was mutated")
+				dateVal, ok := targets[0].Property("startDate")
+				require.True(t, ok)
+				date, _ := dateVal.String()
+				assert.Equal(t, "2024-01-01", date, "isolation failed: startDate was mutated")
+				assert.Equal(t, `["42"]`, targets[0].TargetKey().String(), "isolation failed: target key was mutated")
+			},
+		},
 	}
-	rawData := map[string]any{
-		"id":       "1",
-		"employer": edgeData,
+
+	for _, tt := range scenarios {
+		t.Run(tt.name, func(t *testing.T) {
+			validator := instance.NewValidator(tt.schema(t))
+			raw, mutate := tt.raw()
+
+			valid, result := validator.ValidateOne(t.Context(), tt.typeName, raw)
+			require.True(t, result.OK())
+			require.NotNil(t, valid)
+
+			mutate()
+			tt.verify(t, valid)
+		})
 	}
-	raw := instance.RawInstance{Properties: rawData}
-
-	// Validate
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
-
-	// Mutate edge properties AFTER validation
-	edgeData["role"] = "Mutated Role"
-	edgeData["startDate"] = "2099-12-31"
-	edgeData["_target_id"] = "999"
-
-	// The ValidInstance's edge should NOT be affected
-	edge, ok := valid.Edge("employer")
-	require.True(t, ok)
-	require.NotNil(t, edge)
-
-	targets := edge.Targets()
-	require.Len(t, targets, 1)
-
-	// Check edge properties
-	roleVal, ok := targets[0].Property("role")
-	require.True(t, ok)
-	role, ok := roleVal.String()
-	require.True(t, ok)
-	assert.Equal(t, "Original Role", role, "edge property isolation failed: role was mutated")
-
-	startDateVal, ok := targets[0].Property("startDate")
-	require.True(t, ok)
-	startDate, ok := startDateVal.String()
-	require.True(t, ok)
-	assert.Equal(t, "2024-01-01", startDate, "edge property isolation failed: startDate was mutated")
-
-	// Target key should also be isolated
-	assert.Equal(t, `["42"]`, targets[0].TargetKey().String(), "edge property isolation failed: target key was mutated")
 }

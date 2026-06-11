@@ -8,176 +8,15 @@ import (
 	"testing"
 )
 
-func TestAdapter_DefaultConfig(t *testing.T) {
-	t.Parallel()
-	a := New()
-
-	ctx := context.Background()
-
-	// Verify defaults by checking observable behavior.
-	// separator="__"
-	if got := a.Label(ctx, "s", "T"); got != "s__T" {
-		t.Errorf("default separator: Label('s','T') = %q; want 's__T'", got)
-	}
-	// prefix=""
-	if got := a.Label(ctx, "s", "T"); !strings.HasPrefix(got, "s") {
-		t.Errorf("default prefix: Label should not have prefix, got %q", got)
-	}
-	// edition=Enterprise: generate NOT NULL constraints
-	s := loadSchema(t, "basic.yammm")
-	stmts, result := a.ConstraintsForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-	hasNotNull := false
-	hasType := false
-	hasNamed := false
-	for _, stmt := range stmts {
-		if strings.Contains(stmt, "IS NOT NULL") {
-			hasNotNull = true
-		}
-		if strings.Contains(stmt, "IS :: STRING") {
-			hasType = true
-		}
-		// Named: name appears before IF NOT EXISTS.
-		after := strings.TrimPrefix(stmt, "CREATE CONSTRAINT ")
-		if !strings.HasPrefix(after, "IF NOT EXISTS") {
-			hasNamed = true
-		}
-	}
-	if !hasNotNull {
-		t.Error("default edition=Enterprise should produce NOT NULL constraints")
-	}
-	if !hasType {
-		t.Error("default scalarTypeConstraints=true should produce TYPE constraints")
-	}
-	if !hasNamed {
-		t.Error("default namedConstraints=true should produce named constraints")
-	}
-	// nodeKeyConstraints=false: should use UNIQUE, not NODE KEY
-	for _, stmt := range stmts {
-		if strings.Contains(stmt, "IS NODE KEY") {
-			t.Error("default nodeKeyConstraints=false should not produce NODE KEY")
-		}
-	}
-}
-
-func TestAdapter_FullPipeline_BasicSchema(t *testing.T) {
-	t.Parallel()
-	s := loadSchema(t, "basic.yammm")
-	a := New()
-	ctx := context.Background()
-
-	// Generate constraints.
-	stmts, result := a.ConstraintsForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if len(stmts) == 0 {
-		t.Fatal("expected non-empty constraints")
-	}
-
-	// Generate shapes.
-	shape, result := a.ShapeForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify shapes match constraint labels.
-	for _, ns := range shape.Types {
-		found := false
-		for _, stmt := range stmts {
-			if strings.Contains(stmt, ns.Label) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("shape label %q not found in any constraint statement", ns.Label)
-		}
-	}
-}
-
-func TestAdapter_FullPipeline_WithWrite(t *testing.T) {
-	t.Parallel()
-	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
-	a := New()
-	ctx := context.Background()
-
-	// Generate constraints + shapes.
-	stmts, result := a.ConstraintsForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-
-	shape, result := a.ShapeForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Build graph with instances.
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Publisher": {{"publisher_id": "iss1", "name": "Test Publisher"}},
-		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test Book", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
-	})
-
-	// Generate batch node queries.
-	nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(nodeQueries) == 0 {
-		t.Fatal("expected node queries")
-	}
-
-	// Verify labels in MERGE statements match constraint labels.
-	for _, nq := range nodeQueries {
-		// Extract label from MERGE (n:LABEL {
-		mergeIdx := strings.Index(nq.Statement, "MERGE (n:")
-		if mergeIdx == -1 {
-			t.Errorf("no MERGE in node query: %s", nq.Statement)
-			continue
-		}
-		after := nq.Statement[mergeIdx+len("MERGE (n:"):]
-		spaceIdx := strings.IndexAny(after, " {")
-		if spaceIdx == -1 {
-			continue
-		}
-		mergeLabel := after[:spaceIdx]
-
-		// This label should appear in at least one constraint.
-		found := false
-		for _, stmt := range stmts {
-			if strings.Contains(stmt, mergeLabel) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("MERGE label %q not found in constraints — label consistency violated", mergeLabel)
-		}
-	}
-}
-
-func TestAdapter_CommunityEdition_ReducedOutput(t *testing.T) {
+// TestAdapter_ShapesUnaffectedByEdition pins that edition gates constraint
+// output only; the graph shape is identical either way. (Community's reduced
+// constraint output itself is asserted in TestConstraints_CommunityEdition.)
+func TestAdapter_ShapesUnaffectedByEdition(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithEdition(Community))
-	ctx := context.Background()
 
-	// Constraints: only UNIQUE.
-	stmts, result := a.ConstraintsForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range stmts {
-		if !strings.Contains(stmt, "IS UNIQUE") {
-			t.Errorf("Community should only produce UNIQUE, got: %s", stmt)
-		}
-	}
-
-	// Shapes: unaffected by edition.
-	shape, result := a.ShapeForSchema(ctx, s)
+	shape, result := a.ShapeForSchema(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -186,118 +25,69 @@ func TestAdapter_CommunityEdition_ReducedOutput(t *testing.T) {
 	}
 }
 
-func TestAdapter_CustomSeparator_Consistency(t *testing.T) {
+// TestAdapter_LabelOptionConsistency walks one labeling option through every
+// surface that renders a label — Label(), constraint statements, the graph
+// shape, and the MERGE statement of a batch write — and requires they all
+// agree. TestAdapter_LabelConsistency covers the default options.
+func TestAdapter_LabelOptionConsistency(t *testing.T) {
 	t.Parallel()
-	s, v := loadSchemaAndValidator(t, "basic.yammm")
-	a := New(WithLabelSeparator("_"))
-	ctx := context.Background()
-
-	expectedLabel := "basic_test_Entity"
-
-	// Label method.
-	directLabel := a.Label(ctx, s.Name(), "Entity")
-	if directLabel != expectedLabel {
-		t.Errorf("Label() = %q; want %q", directLabel, expectedLabel)
+	cases := []struct {
+		name      string
+		opt       Option
+		wantLabel string
+	}{
+		{"custom separator", WithLabelSeparator("_"), "basic_test_Entity"},
+		{"custom prefix", WithLabelPrefix("app_"), "app_basic_test__Entity"},
 	}
 
-	// Constraints use same label.
-	stmts, result := a.ConstraintsForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range stmts {
-		if strings.Contains(stmt, "basic_test__Entity") {
-			t.Errorf("constraint uses default separator instead of custom: %s", stmt)
-		}
-	}
-	constraintHasLabel := false
-	for _, stmt := range stmts {
-		if strings.Contains(stmt, expectedLabel) {
-			constraintHasLabel = true
-			break
-		}
-	}
-	if !constraintHasLabel {
-		t.Errorf("no constraint contains custom-separator label %q", expectedLabel)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s, v := loadSchemaAndValidator(t, "basic.yammm")
+			a := New(tc.opt)
+			ctx := context.Background()
 
-	// Shape uses same label.
-	shape, result := a.ShapeForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if ns, ok := shape.Types["Entity"]; !ok || ns.Label != expectedLabel {
-		t.Errorf("shape label = %q; want %q", shape.Types["Entity"].Label, expectedLabel)
-	}
+			if got := a.Label(ctx, s.Name(), "Entity"); got != tc.wantLabel {
+				t.Errorf("Label() = %q; want %q", got, tc.wantLabel)
+			}
 
-	// Write query uses same label.
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-	nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(nodeQueries) == 0 {
-		t.Fatal("expected node queries")
-	}
-	if !strings.Contains(nodeQueries[0].Statement, expectedLabel) {
-		t.Errorf("MERGE statement uses wrong label: %s", nodeQueries[0].Statement)
-	}
-}
+			stmts, result := a.ConstraintsForSchema(ctx, s)
+			if err := result.Err(); err != nil {
+				t.Fatal(err)
+			}
+			constraintHasLabel := false
+			for _, stmt := range stmts {
+				if strings.Contains(stmt, tc.wantLabel) {
+					constraintHasLabel = true
+					break
+				}
+			}
+			if !constraintHasLabel {
+				t.Errorf("no constraint contains label %q", tc.wantLabel)
+			}
 
-func TestAdapter_CustomPrefix_Consistency(t *testing.T) {
-	t.Parallel()
-	s, v := loadSchemaAndValidator(t, "basic.yammm")
-	a := New(WithLabelPrefix("app_"))
-	ctx := context.Background()
+			shape, result := a.ShapeForSchema(ctx, s)
+			if err := result.Err(); err != nil {
+				t.Fatal(err)
+			}
+			if ns, ok := shape.Types["Entity"]; !ok || ns.Label != tc.wantLabel {
+				t.Errorf("shape label = %q; want %q", shape.Types["Entity"].Label, tc.wantLabel)
+			}
 
-	expectedLabel := "app_basic_test__Entity"
-
-	// Label method.
-	directLabel := a.Label(ctx, s.Name(), "Entity")
-	if directLabel != expectedLabel {
-		t.Errorf("Label() = %q; want %q", directLabel, expectedLabel)
-	}
-
-	// Constraints use same label.
-	stmts, result := a.ConstraintsForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-	constraintHasLabel := false
-	for _, stmt := range stmts {
-		if strings.Contains(stmt, expectedLabel) {
-			constraintHasLabel = true
-			break
-		}
-	}
-	if !constraintHasLabel {
-		t.Errorf("no constraint contains prefixed label %q", expectedLabel)
-	}
-
-	// Shape uses same label.
-	shape, result := a.ShapeForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if ns, ok := shape.Types["Entity"]; !ok || ns.Label != expectedLabel {
-		t.Errorf("shape label = %q; want %q", shape.Types["Entity"].Label, expectedLabel)
-	}
-
-	// Write query uses same label.
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-	nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(nodeQueries) == 0 {
-		t.Fatal("expected node queries")
-	}
-	if !strings.Contains(nodeQueries[0].Statement, expectedLabel) {
-		t.Errorf("MERGE statement uses wrong label: %s", nodeQueries[0].Statement)
+			graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+				"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
+			})
+			nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(nodeQueries) != 1 {
+				t.Fatalf("expected 1 node query, got %d", len(nodeQueries))
+			}
+			if !strings.Contains(nodeQueries[0].Statement, tc.wantLabel) {
+				t.Errorf("MERGE statement uses wrong label: %s", nodeQueries[0].Statement)
+			}
+		})
 	}
 }
 

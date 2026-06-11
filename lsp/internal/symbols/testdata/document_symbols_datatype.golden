@@ -1,0 +1,27 @@
+[
+  {
+    "name": "ShortName",
+    "detail": "type ShortName = String[1, 50]",
+    "kind": 26,
+    "range": {
+      "start": {
+        "line": 0,
+        "character": 0
+      },
+      "end": {
+        "line": 0,
+        "character": 29
+      }
+    },
+    "selectionRange": {
+      "start": {
+        "line": 0,
+        "character": 5
+      },
+      "end": {
+        "line": 0,
+        "character": 14
+      }
+    }
+  }
+]

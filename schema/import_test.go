@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -93,7 +94,7 @@ func TestImport_ResolvedPath_ZeroSourceID(t *testing.T) {
 
 	// Returns empty string for zero SourceID
 	result := imp.ResolvedPath()
-	assert.Equal(t, "", result)
+	assert.Empty(t, result)
 }
 
 func TestImport_Schema_Nil(t *testing.T) {
@@ -126,30 +127,28 @@ func TestImport_Span(t *testing.T) {
 	assert.Equal(t, 20, result.Start.Byte)
 }
 
-func TestImport_Seal_PreventsSetResolvedSourceID(t *testing.T) {
-	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	schema.TestSealImport(imp)
+// TestImport_Seal_PreventsMutation drives every post-seal mutation through
+// one panic table: a sealed Import must reject each setter.
+func TestImport_Seal_PreventsMutation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(s *schema.Import)
+	}{
+		{"SetResolvedSourceID", func(s *schema.Import) {
+			schema.TestSetImportResolvedSourceID(s, location.MustNewSourceID("test://new"))
+		}},
+		{"SetSchema", func(s *schema.Import) {
+			schema.TestSetImportSchema(s, schema.TestNewSchema("test", location.SourceID{}, location.Span{}, ""))
+		}},
+	}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetResolvedSourceID after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetImportResolvedSourceID(imp, location.MustNewSourceID("test://new"))
-}
-
-func TestImport_Seal_PreventsSetSchema(t *testing.T) {
-	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-	schema.TestSealImport(imp)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetSchema after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetImportSchema(imp, schema.TestNewSchema("test", location.SourceID{}, location.Span{}, ""))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
+			schema.TestSealImport(s)
+			yammmtest.AssertPanics(t, func() { tt.mutate(s) })
+		})
+	}
 }
 
 func TestImport_SettersWorkBeforeSeal(t *testing.T) {

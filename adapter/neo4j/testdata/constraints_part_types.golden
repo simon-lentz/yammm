@@ -1,0 +1,12 @@
+CREATE CONSTRAINT part_test__LineItem_line_id_unique IF NOT EXISTS FOR (n:part_test__LineItem) REQUIRE n.line_id IS UNIQUE
+CREATE CONSTRAINT part_test__LineItem_line_id_not_null IF NOT EXISTS FOR (n:part_test__LineItem) REQUIRE n.line_id IS NOT NULL
+CREATE CONSTRAINT part_test__LineItem_description_not_null IF NOT EXISTS FOR (n:part_test__LineItem) REQUIRE n.description IS NOT NULL
+CREATE CONSTRAINT part_test__LineItem_quantity_not_null IF NOT EXISTS FOR (n:part_test__LineItem) REQUIRE n.quantity IS NOT NULL
+CREATE CONSTRAINT part_test__LineItem_line_id_type IF NOT EXISTS FOR (n:part_test__LineItem) REQUIRE n.line_id IS :: STRING
+CREATE CONSTRAINT part_test__LineItem_description_type IF NOT EXISTS FOR (n:part_test__LineItem) REQUIRE n.description IS :: STRING
+CREATE CONSTRAINT part_test__LineItem_quantity_type IF NOT EXISTS FOR (n:part_test__LineItem) REQUIRE n.quantity IS :: INTEGER
+CREATE CONSTRAINT part_test__Order_order_id_unique IF NOT EXISTS FOR (n:part_test__Order) REQUIRE n.order_id IS UNIQUE
+CREATE CONSTRAINT part_test__Order_order_id_not_null IF NOT EXISTS FOR (n:part_test__Order) REQUIRE n.order_id IS NOT NULL
+CREATE CONSTRAINT part_test__Order_customer_not_null IF NOT EXISTS FOR (n:part_test__Order) REQUIRE n.customer IS NOT NULL
+CREATE CONSTRAINT part_test__Order_order_id_type IF NOT EXISTS FOR (n:part_test__Order) REQUIRE n.order_id IS :: STRING
+CREATE CONSTRAINT part_test__Order_customer_type IF NOT EXISTS FOR (n:part_test__Order) REQUIRE n.customer IS :: STRING

@@ -2,241 +2,224 @@ package snapshottest_test
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/instancetest"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/snapshot"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
-// minimalSchema is a tiny schema local to this test file — the wider
-// testSchema helpers live in the snapshot_test package, which
-// snapshottest can't import (would create a cycle).
-func minimalSchema(t *testing.T) *schema.Schema {
+func testSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("snapshottest-scan").
-		WithSourceID(location.MustNewSourceID("test://snapshottest-scan.yammm")).
-		AddType("Doc").
+	s, res := schema.NewBuilder().
+		WithName("snapshottest-self").
+		WithSourceID(location.MustNewSourceID("test://snapshottest-self.yammm")).
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("name", schema.NewStringConstraint()).
+		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), false, false).
+		Done().
+		AddType("Company").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
 		Done().
 		Build()
-	require.False(t, result.HasErrors(), "minimalSchema: %s", result)
+	if res.HasErrors() {
+		t.Fatalf("testSchema: %v", res.Err())
+	}
 	return s
 }
 
-func seedValidYS(t *testing.T, path string) {
+// buildSnapshot is a local alias for the exported helper under test.
+func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	t.Helper()
-	s := minimalSchema(t)
-	typ, ok := s.Type("Doc")
-	require.True(t, ok)
-	inst := instance.NewValidInstance(
-		"Doc", typ.ID(),
-		immutable.WrapKey([]any{"d1"}),
-		immutable.WrapProperties(map[string]any{"id": "d1"}),
-		nil, nil, nil,
+	return snapshottest.BuildSnapshot(t, s, instances...)
+}
+
+func typeID(t *testing.T, s *schema.Schema, name string) schema.TypeID {
+	t.Helper()
+	typ, ok := s.Type(name)
+	if !ok {
+		t.Fatalf("%s type missing", name)
+	}
+	return typ.ID()
+}
+
+// compositionSchema declares a two-level composition (Holder -> Account ->
+// Card) so projection depth is observable.
+func compositionSchema(t *testing.T) *schema.Schema {
+	t.Helper()
+	const src = `schema "snaptest"
+
+part type Card {
+	last4 String primary
+}
+
+part type Account {
+	number String primary
+	*-> CARDS (_:many) Card
+}
+
+type Holder {
+	id String primary
+	*-> ACCOUNTS (_:many) Account
+}
+`
+	s, res := schema.LoadString(context.Background(), src, "snaptest.yammm")
+	if res.HasErrors() {
+		t.Fatalf("compositionSchema: %v", res.Err())
+	}
+	return s
+}
+
+// TestRoundTripHelpers exercises the live helper surface end-to-end on a
+// snapshot with an instance, a resolved edge, and an unresolved edge.
+func TestRoundTripHelpers(t *testing.T) {
+	s := testSchema(t)
+	edges := map[string]*instance.ValidEdgeData{
+		"EMPLOYER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"c-missing"}), immutable.WrapProperties(nil)),
+		}),
+	}
+	snap := buildSnapshot(
+		t, s,
+		instancetest.VI(
+			"Person",
+			instancetest.TypeID(typeID(t, s, "Person")),
+			instancetest.PK("p1"),
+			instancetest.Props(map[string]any{"id": "p1", "name": "Alice"}),
+			instancetest.Edges(edges),
+		),
 	)
-	g := graph.New(s)
-	g.Add(context.Background(), inst)
-	snap := g.Snapshot()
 
-	data, result := snapshot.Marshal(context.Background(), snap)
-	require.NoError(t, result.Err())
-	require.NoError(t, snapshot.WriteFile(path, data))
+	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertDeterministic(t, snap)
+	snapshottest.DiffSnapshots(t, snap, snap)
 }
 
-func seedCorruptYS(t *testing.T, path string) {
-	t.Helper()
-	require.NoError(t, os.WriteFile(path, []byte("garbage"), 0o600))
+// TestDiffSnapshots_DetectsDifference pins that the comparer actually
+// fails on structurally different snapshots, via a probe testing.T.
+func TestDiffSnapshots_DetectsDifference(t *testing.T) {
+	s := testSchema(t)
+	a := buildSnapshot(t, s, instancetest.VI(
+		"Person",
+		instancetest.TypeID(typeID(t, s, "Person")),
+		instancetest.PK("p1"),
+		instancetest.Props(map[string]any{"id": "p1", "name": "Alice"}),
+	))
+	b := buildSnapshot(t, s, instancetest.VI(
+		"Person",
+		instancetest.TypeID(typeID(t, s, "Person")),
+		instancetest.PK("p1"),
+		instancetest.Props(map[string]any{"id": "p1", "name": "Bob"}),
+	))
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, a, b)
+	if !probe.Failed() {
+		t.Error("DiffSnapshots did not fail on differing snapshots")
+	}
 }
 
-// recordingTB captures Errorf / Fatalf / Fail calls so tests can
-// exercise failure branches of ExpectDirState without actually failing
-// the enclosing test.
-type recordingTB struct {
-	testing.TB
-	errors   []string
-	fatalled bool
+// TestDiffSnapshots_DetectsBigIntegerCorruption pins exact comparison of
+// same-typed integer properties: two int64 values differing by 1 above 2^53
+// collapse to the same float64, so a float-coercing comparer would miss
+// exactly the corruption class a wire round trip could introduce. Mixed
+// int64/float64 pairs of equal value must still compare equal — the wire
+// narrows whole float64 values to int64 on load.
+func TestDiffSnapshots_DetectsBigIntegerCorruption(t *testing.T) {
+	s := testSchema(t)
+	person := func(code any) *graph.Snapshot {
+		return buildSnapshot(t, s, instancetest.VI(
+			"Person",
+			instancetest.TypeID(typeID(t, s, "Person")),
+			instancetest.PK("p1"),
+			instancetest.Props(map[string]any{"id": "p1", "code": code}),
+		))
+	}
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, person(int64(1<<53+1)), person(int64(1<<53)))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must detect a ±1 corruption of an int64 property above 2^53")
+	}
+
+	// Tolerated representation change: int64(1) vs float64(1).
+	snapshottest.DiffSnapshots(t, person(int64(1)), person(float64(1)))
 }
 
-func (r *recordingTB) Errorf(format string, args ...any) {
-	r.errors = append(r.errors, fmt.Sprintf(format, args...))
+// TestDiffSnapshots_DistinguishesProvenancePresence pins that an instance
+// carrying provenance with an empty source name and an instance carrying no
+// provenance do not compare equal: a round trip dropping provenance objects
+// is data loss even when the source name is empty.
+func TestDiffSnapshots_DistinguishesProvenancePresence(t *testing.T) {
+	s := testSchema(t)
+	person := func(opts ...instancetest.VIOption) *graph.Snapshot {
+		base := []instancetest.VIOption{
+			instancetest.TypeID(typeID(t, s, "Person")),
+			instancetest.PK("p1"),
+			instancetest.Props(map[string]any{"id": "p1"}),
+		}
+		return buildSnapshot(t, s, instancetest.VI("Person", append(base, opts...)...))
+	}
+
+	with := person(instancetest.Provenance(location.NewProvenance("", path.Root(), location.Span{})))
+	without := person()
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, with, without)
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must distinguish empty-named provenance from no provenance")
+	}
 }
 
-func (r *recordingTB) Fatalf(format string, args ...any) {
-	r.fatalled = true
-	r.errors = append(r.errors, fmt.Sprintf(format, args...))
-}
+// TestDiffSnapshots_ComparesComposedTreesRecursively pins that composition
+// comparison descends past one level: snapshots differing only in a composed
+// child's own children, or only in a composed child's provenance, must not
+// compare equal.
+func TestDiffSnapshots_ComparesComposedTreesRecursively(t *testing.T) {
+	s := compositionSchema(t)
+	holder := func(withCard bool, accountProv *location.Provenance) *graph.Snapshot {
+		var cards []*instance.ValidInstance
+		if withCard {
+			cards = append(cards, instancetest.VI(
+				"Card",
+				instancetest.TypeID(typeID(t, s, "Card")),
+				instancetest.PK("4242"),
+				instancetest.Props(map[string]any{"last4": "4242"}),
+			))
+		}
+		account := instancetest.VI(
+			"Account",
+			instancetest.TypeID(typeID(t, s, "Account")),
+			instancetest.PK("a1"),
+			instancetest.Props(map[string]any{"number": "a1"}),
+			instancetest.Composed(map[string]immutable.Value{"CARDS": immutable.Wrap(cards)}),
+			instancetest.Provenance(accountProv),
+		)
+		return buildSnapshot(t, s, instancetest.VI(
+			"Holder",
+			instancetest.TypeID(typeID(t, s, "Holder")),
+			instancetest.PK("h1"),
+			instancetest.Props(map[string]any{"id": "h1"}),
+			instancetest.Composed(map[string]immutable.Value{"ACCOUNTS": immutable.Wrap([]*instance.ValidInstance{account})}),
+		))
+	}
 
-func (r *recordingTB) Fatal(args ...any) {
-	r.fatalled = true
-	r.errors = append(r.errors, fmt.Sprint(args...))
-}
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, holder(true, nil), holder(false, nil))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must detect loss of a composed child's own children")
+	}
 
-func (r *recordingTB) Helper() {}
-
-func TestExpectDirState_HappyPathAllValid(t *testing.T) {
-	dir := t.TempDir()
-	seedValidYS(t, filepath.Join(dir, "a.ys"))
-	seedValidYS(t, filepath.Join(dir, "b.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		"a.ys": {Valid: true},
-		"b.ys": {Valid: true},
-	})
-
-	assert.Empty(t, rec.errors, "happy path should produce no failures")
-	assert.False(t, rec.fatalled)
-}
-
-func TestExpectDirState_ExpectedValidGotErrorFails(t *testing.T) {
-	dir := t.TempDir()
-	seedCorruptYS(t, filepath.Join(dir, "a.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		"a.ys": {Valid: true},
-	})
-
-	require.NotEmpty(t, rec.errors, "expected failure but got clean result")
-	assert.Contains(t, rec.errors[0], "a.ys",
-		"failure message should name the offending file")
-}
-
-func TestExpectDirState_ErrorCodeMismatch(t *testing.T) {
-	dir := t.TempDir()
-	seedCorruptYS(t, filepath.Join(dir, "bad.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		// Corrupt JSON -> E_SNAPSHOT_MALFORMED, but we claim E_SNAPSHOT_IO.
-		"bad.ys": {Valid: false, ErrorCode: diag.E_SNAPSHOT_IO},
-	})
-
-	require.NotEmpty(t, rec.errors, "code mismatch should fail")
-	assert.Contains(t, rec.errors[0], "ErrorCode")
-}
-
-func TestExpectDirState_ErrorCodeWildcardMatchesAny(t *testing.T) {
-	dir := t.TempDir()
-	seedCorruptYS(t, filepath.Join(dir, "bad.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		"bad.ys": {Valid: false}, // ErrorCode = zero value = wildcard
-	})
-
-	assert.Empty(t, rec.errors, "zero-value ErrorCode should accept any error code")
-}
-
-func TestExpectDirState_MissingExpectedFile(t *testing.T) {
-	dir := t.TempDir() // empty
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{
-		"ghost.ys": {Valid: true},
-	})
-
-	require.NotEmpty(t, rec.errors)
-	assert.Contains(t, rec.errors[0], "ghost.ys")
-	assert.Contains(t, rec.errors[0], "not found")
-}
-
-func TestExpectDirState_UnexpectedFile(t *testing.T) {
-	dir := t.TempDir()
-	seedValidYS(t, filepath.Join(dir, "surprise.ys"))
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectDirState(rec, dir, map[string]snapshottest.State{})
-
-	require.NotEmpty(t, rec.errors)
-	assert.Contains(t, rec.errors[0], "surprise.ys")
-	assert.Contains(t, rec.errors[0], "unexpected")
-}
-
-// makeSnapshotBytesWithMeta produces a marshaled .ys with the given
-// metadata using the minimal snapshottest-local schema. Used by the
-// ExpectMetadataPreserved coverage tests below.
-func makeSnapshotBytesWithMeta(t *testing.T, meta map[string]string) []byte {
-	t.Helper()
-	s := minimalSchema(t)
-	typ, ok := s.Type("Doc")
-	require.True(t, ok)
-	inst := instance.NewValidInstance(
-		"Doc", typ.ID(),
-		immutable.WrapKey([]any{"d1"}),
-		immutable.WrapProperties(map[string]any{"id": "d1"}),
-		nil, nil, nil,
-	)
-	g := graph.New(s)
-	g.Add(context.Background(), inst)
-	snap := g.Snapshot()
-	data, res := snapshot.Marshal(context.Background(), snap, snapshot.WithMetadata(meta))
-	require.NoError(t, res.Err())
-	return data
-}
-
-func TestExpectMetadataPreserved_HappyPath(t *testing.T) {
-	before := makeSnapshotBytesWithMeta(t, map[string]string{
-		"phase":       "extract",
-		"pipeline_id": "abc",
-	})
-	// "after" has phase changed but pipeline_id retained.
-	afterData, res := snapshot.UpdateMetadata(context.Background(), before,
-		map[string]string{"phase": "link", "pipeline_id": "abc"})
-	require.NoError(t, res.Err())
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectMetadataPreserved(rec, before, afterData, "pipeline_id")
-	assert.Empty(t, rec.errors, "preserved key should not fail")
-}
-
-func TestExpectMetadataPreserved_Divergence(t *testing.T) {
-	before := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "extract"})
-	afterData, res := snapshot.UpdateMetadata(context.Background(), before,
-		map[string]string{"phase": "link"})
-	require.NoError(t, res.Err())
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectMetadataPreserved(rec, before, afterData, "phase")
-	require.NotEmpty(t, rec.errors, "divergent key must fail")
-	assert.Contains(t, rec.errors[0], "phase")
-	assert.Contains(t, rec.errors[0], "diverged")
-}
-
-func TestExpectMetadataPreserved_MissingInBefore(t *testing.T) {
-	before := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "extract"})
-	afterData := before // no change
-
-	rec := &recordingTB{TB: t}
-	snapshottest.ExpectMetadataPreserved(rec, before, afterData, "never_existed")
-	require.NotEmpty(t, rec.errors, "missing-in-before is a test-setup error")
-	assert.Contains(t, rec.errors[0], "never_existed")
-	assert.Contains(t, rec.errors[0], "test-setup error")
-}
-
-func TestExpectMetadataPreserved_InvalidBeforeFails(t *testing.T) {
-	rec := &recordingTB{TB: t}
-	after := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "link"})
-	snapshottest.ExpectMetadataPreserved(rec, []byte("garbage"), after, "phase")
-	require.True(t, rec.fatalled, "unparsable before should fatal")
-}
-
-func TestExpectMetadataPreserved_InvalidAfterFails(t *testing.T) {
-	rec := &recordingTB{TB: t}
-	before := makeSnapshotBytesWithMeta(t, map[string]string{"phase": "extract"})
-	snapshottest.ExpectMetadataPreserved(rec, before, []byte("garbage"), "phase")
-	require.True(t, rec.fatalled, "unparsable after should fatal")
+	probe = &testing.T{}
+	prov := location.NewProvenance("feed", path.Root(), location.Span{})
+	snapshottest.DiffSnapshots(probe, holder(false, prov), holder(false, nil))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must detect loss of a composed child's provenance")
+	}
 }

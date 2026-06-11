@@ -1,0 +1,20 @@
+[
+  {
+    "Code": "E_UNRESOLVED_REQUIRED_COMPOSITION",
+    "Details": [
+      {
+        "Key": "reason",
+        "Value": "empty"
+      },
+      {
+        "Key": "relation",
+        "Value": "addresses"
+      },
+      {
+        "Key": "json_field",
+        "Value": "addresses"
+      }
+    ],
+    "Severity": "error"
+  }
+]

@@ -1,57 +1,11 @@
 package trace
 
 import (
-	"context"
 	"log/slog"
-	"sync"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
-
-// recordHandler is a test handler that records log records for inspection.
-type recordHandler struct {
-	mu      sync.Mutex
-	records []slog.Record
-	level   slog.Level
-}
-
-func newRecordHandler(level slog.Level) *recordHandler {
-	return &recordHandler{level: level}
-}
-
-func (h *recordHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= h.level
-}
-
-func (h *recordHandler) Handle(_ context.Context, r slog.Record) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	// Clone the record to avoid retaining internal buffers that slog may reuse.
-	// This is a standard test handler pattern to avoid flaky tests.
-	h.records = append(h.records, r.Clone())
-	return nil
-}
-
-func (h *recordHandler) WithAttrs(_ []slog.Attr) slog.Handler {
-	return h
-}
-
-func (h *recordHandler) WithGroup(_ string) slog.Handler {
-	return h
-}
-
-func (h *recordHandler) Records() []slog.Record {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	result := make([]slog.Record, len(h.records))
-	copy(result, h.records)
-	return result
-}
-
-func (h *recordHandler) Clear() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.records = nil
-}
 
 func TestEnabled_NilLogger(t *testing.T) {
 	if Enabled(t.Context(), nil, slog.LevelDebug) {
@@ -60,7 +14,7 @@ func TestEnabled_NilLogger(t *testing.T) {
 }
 
 func TestEnabled_EnabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -73,7 +27,7 @@ func TestEnabled_EnabledLevel(t *testing.T) {
 }
 
 func TestEnabled_DisabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelWarn) // only Warn and above enabled
+	h := yammmtest.NewRecordHandler(slog.LevelWarn) // only Warn and above enabled
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -94,7 +48,7 @@ func TestDebug_NilLogger(t *testing.T) {
 }
 
 func TestDebug_EnabledLogger(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -128,7 +82,7 @@ func TestDebug_EnabledLogger(t *testing.T) {
 }
 
 func TestDebug_DisabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
+	h := yammmtest.NewRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 
 	Debug(t.Context(), logger, "test message")
@@ -152,7 +106,7 @@ func TestDebugLazy_NilLogger(t *testing.T) {
 }
 
 func TestDebugLazy_DisabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
+	h := yammmtest.NewRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 
 	called := false
@@ -167,7 +121,7 @@ func TestDebugLazy_DisabledLevel(t *testing.T) {
 }
 
 func TestDebugLazy_EnabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -201,7 +155,7 @@ func TestDebugLazy_EnabledLevel(t *testing.T) {
 }
 
 func TestInfo_EnabledLogger(t *testing.T) {
-	h := newRecordHandler(slog.LevelInfo)
+	h := yammmtest.NewRecordHandler(slog.LevelInfo)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -219,7 +173,7 @@ func TestInfo_EnabledLogger(t *testing.T) {
 }
 
 func TestInfoLazy_DisabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelWarn) // Info not enabled
+	h := yammmtest.NewRecordHandler(slog.LevelWarn) // Info not enabled
 	logger := slog.New(h)
 
 	called := false
@@ -235,7 +189,7 @@ func TestInfoLazy_DisabledLevel(t *testing.T) {
 
 // Symmetric test: InfoLazy must call fn when level is enabled.
 func TestInfoLazy_EnabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelInfo)
+	h := yammmtest.NewRecordHandler(slog.LevelInfo)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -269,7 +223,7 @@ func TestInfoLazy_EnabledLevel(t *testing.T) {
 }
 
 func TestWarn_EnabledLogger(t *testing.T) {
-	h := newRecordHandler(slog.LevelWarn)
+	h := yammmtest.NewRecordHandler(slog.LevelWarn)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -287,7 +241,7 @@ func TestWarn_EnabledLogger(t *testing.T) {
 }
 
 func TestWarnLazy_DisabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelError) // Warn not enabled
+	h := yammmtest.NewRecordHandler(slog.LevelError) // Warn not enabled
 	logger := slog.New(h)
 
 	called := false
@@ -303,7 +257,7 @@ func TestWarnLazy_DisabledLevel(t *testing.T) {
 
 // Symmetric test: WarnLazy must call fn when level is enabled.
 func TestWarnLazy_EnabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelWarn)
+	h := yammmtest.NewRecordHandler(slog.LevelWarn)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -337,7 +291,7 @@ func TestWarnLazy_EnabledLevel(t *testing.T) {
 }
 
 func TestError_EnabledLogger(t *testing.T) {
-	h := newRecordHandler(slog.LevelError)
+	h := yammmtest.NewRecordHandler(slog.LevelError)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -355,7 +309,7 @@ func TestError_EnabledLogger(t *testing.T) {
 }
 
 func TestErrorLazy_EnabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelError)
+	h := yammmtest.NewRecordHandler(slog.LevelError)
 	logger := slog.New(h)
 	ctx := t.Context()
 

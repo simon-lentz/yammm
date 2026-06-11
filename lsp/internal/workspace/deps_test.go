@@ -1,10 +1,10 @@
 package workspace
 
 import (
-	"log/slog"
 	"testing"
 
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,15 +18,10 @@ func newTestDepGraph() depGraph {
 	}
 }
 
-// testLogger returns a discard logger suitable for unit tests.
-func testLogger() *slog.Logger {
-	return slog.New(slog.DiscardHandler)
-}
-
 func TestDepGraph_TransitiveClosureTracking(t *testing.T) {
 	t.Parallel()
 	dg := newTestDepGraph()
-	log := testLogger()
+	log := testutil.DiscardLogger()
 
 	// Caller provides the full transitive closure for each entry.
 	// A imports B and C (caller says A's closure is {B, C}).
@@ -53,7 +48,7 @@ func TestDepGraph_TransitiveClosureTracking(t *testing.T) {
 func TestDepGraph_CascadeTrigger_ThreeLevelDAG(t *testing.T) {
 	t.Parallel()
 	dg := newTestDepGraph()
-	log := testLogger()
+	log := testutil.DiscardLogger()
 
 	// Simulate a 3-level import DAG:
 	// foundation.yammm is imported by 7 downstream entries.
@@ -86,7 +81,7 @@ func TestDepGraph_CascadeTrigger_ThreeLevelDAG(t *testing.T) {
 func TestDepGraph_EdgeRemovalOnClose(t *testing.T) {
 	t.Parallel()
 	dg := newTestDepGraph()
-	log := testLogger()
+	log := testutil.DiscardLogger()
 
 	// A imports B and C.
 	dg.updateDependencies("file:///A.yammm", []string{"/B.yammm", "/C.yammm"}, log)
@@ -120,7 +115,7 @@ func TestDepGraph_EdgeRemovalOnClose(t *testing.T) {
 func TestDepGraph_EdgeUpdateOnReAnalysis(t *testing.T) {
 	t.Parallel()
 	dg := newTestDepGraph()
-	log := testLogger()
+	log := testutil.DiscardLogger()
 
 	// Initial: entry imports B and C.
 	entryURI := "file:///entry.yammm"
@@ -153,7 +148,7 @@ func TestDepGraph_EdgeUpdateOnReAnalysis(t *testing.T) {
 func TestDepGraph_MultipleEntriesSharingImport(t *testing.T) {
 	t.Parallel()
 	dg := newTestDepGraph()
-	log := testLogger()
+	log := testutil.DiscardLogger()
 
 	sharedPath := "/shared/common.yammm"
 	sharedURI := lsputil.PathToURI(sharedPath)

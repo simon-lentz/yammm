@@ -1,0 +1,12 @@
+CREATE CONSTRAINT multi_test__Widget_id_unique IF NOT EXISTS FOR (n:multi_test__Widget) REQUIRE n.id IS UNIQUE
+CREATE CONSTRAINT multi_test__Widget_id_not_null IF NOT EXISTS FOR (n:multi_test__Widget) REQUIRE n.id IS NOT NULL
+CREATE CONSTRAINT multi_test__Widget_code_not_null IF NOT EXISTS FOR (n:multi_test__Widget) REQUIRE n.code IS NOT NULL
+CREATE CONSTRAINT multi_test__Widget_id_type IF NOT EXISTS FOR (n:multi_test__Widget) REQUIRE n.id IS :: STRING
+CREATE CONSTRAINT multi_test__Widget_code_type IF NOT EXISTS FOR (n:multi_test__Widget) REQUIRE n.code IS :: STRING
+CREATE CONSTRAINT multi_test__Widget_description_type IF NOT EXISTS FOR (n:multi_test__Widget) REQUIRE n.description IS :: STRING
+CREATE CONSTRAINT multi_test__Gadget_uid_sku_unique IF NOT EXISTS FOR (n:multi_test__Gadget) REQUIRE (n.uid, n.sku) IS UNIQUE
+CREATE CONSTRAINT multi_test__Gadget_uid_not_null IF NOT EXISTS FOR (n:multi_test__Gadget) REQUIRE n.uid IS NOT NULL
+CREATE CONSTRAINT multi_test__Gadget_sku_not_null IF NOT EXISTS FOR (n:multi_test__Gadget) REQUIRE n.sku IS NOT NULL
+CREATE CONSTRAINT multi_test__Gadget_uid_type IF NOT EXISTS FOR (n:multi_test__Gadget) REQUIRE n.uid IS :: STRING
+CREATE CONSTRAINT multi_test__Gadget_sku_type IF NOT EXISTS FOR (n:multi_test__Gadget) REQUIRE n.sku IS :: STRING
+CREATE CONSTRAINT multi_test__Gadget_optional_note_type IF NOT EXISTS FOR (n:multi_test__Gadget) REQUIRE n.optional_note IS :: STRING

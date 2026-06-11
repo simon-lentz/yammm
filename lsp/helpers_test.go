@@ -2,8 +2,6 @@ package lsp
 
 import (
 	"encoding/json"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,6 +17,7 @@ import (
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 	"github.com/simon-lentz/yammm/lsp/internal/symbols"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 	"github.com/simon-lentz/yammm/lsp/internal/workspace"
 
 	"github.com/stretchr/testify/require"
@@ -111,10 +110,6 @@ func callHandler(t *testing.T, h jrpc2.Handler, params any, result any) error {
 	return nil
 }
 
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
 // buildTestSnapshot creates a minimal analysis.Snapshot with a type symbol at a
 // known position. The source content is registered in the source.Registry so
 // that PositionFromLSP succeeds.
@@ -131,9 +126,11 @@ func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 
 	const content = "schema \"test\"\n\ntype Person {\n\tname String primary\n}\n"
 
-	reg := source.NewRegistry()
-	s, result := schema.LoadString(t.Context(), content, "test.yammm", schema.WithSourceRegistry(reg))
+	s, result := schema.LoadString(t.Context(), content, "test.yammm")
 	require.True(t, result.OK(), "schema should parse without errors: %v", result)
+
+	reg := source.NewRegistry()
+	require.NoError(t, reg.Register(s.SourceID(), []byte(content)))
 
 	sourceID := s.SourceID()
 
@@ -195,7 +192,7 @@ func buildCrossSchemaSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snaps
 	require.NoError(t, os.WriteFile(foundationPath, []byte(foundationContent), 0o600))
 	require.NoError(t, os.WriteFile(entryPath, []byte(entryContent), 0o600))
 
-	analyzer := analysis.NewAnalyzer(testLogger())
+	analyzer := analysis.NewAnalyzer(testutil.DiscardLogger())
 	overlays := map[string][]byte{
 		entryPath: []byte(entryContent),
 	}

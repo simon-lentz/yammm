@@ -1,17 +1,34 @@
 package instance_test
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
+
+// compositionSchema builds the canonical composition schema — part type
+// Address(id) plus Person(id) with a many-valued "addresses" composition —
+// parameterized on whether the composition is optional.
+func compositionSchema(t *testing.T, optional bool) *schema.Schema {
+	t.Helper()
+	return mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://test.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), optional, true).
+		Done())
+}
 
 func TestValidateCompositions_Single(t *testing.T) {
 	s := mustBuild(t, schema.NewBuilder().
@@ -45,7 +62,7 @@ func TestValidateCompositions_Single(t *testing.T) {
 
 	composed, ok := valid.Composed("addresses")
 	require.True(t, ok)
-	require.True(t, !composed.IsNil())
+	require.False(t, composed.IsNil())
 }
 
 func TestValidateCompositions_Multiple(t *testing.T) {
@@ -82,21 +99,11 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 
 	composed, ok := valid.Composed("addresses")
 	require.True(t, ok)
-	require.True(t, !composed.IsNil())
+	require.False(t, composed.IsNil())
 }
 
 func TestValidateCompositions_Optional_Nil(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
+	s := compositionSchema(t, true)
 
 	validator := instance.NewValidator(s)
 
@@ -119,17 +126,7 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 }
 
 func TestValidateCompositions_Optional_Empty(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
+	s := compositionSchema(t, true)
 
 	validator := instance.NewValidator(s)
 
@@ -148,21 +145,11 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 	// Composition should be present but empty
 	composed, ok := valid.Composed("addresses")
 	require.True(t, ok)
-	require.True(t, !composed.IsNil())
+	require.False(t, composed.IsNil())
 }
 
 func TestValidateCompositions_Required_Missing(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
-		Done())
+	s := compositionSchema(t, false)
 
 	validator := instance.NewValidator(s)
 
@@ -181,17 +168,7 @@ func TestValidateCompositions_Required_Missing(t *testing.T) {
 }
 
 func TestValidateCompositions_Required_Empty(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
-		Done())
+	s := compositionSchema(t, false)
 
 	validator := instance.NewValidator(s)
 
@@ -210,17 +187,7 @@ func TestValidateCompositions_Required_Empty(t *testing.T) {
 }
 
 func TestValidateCompositions_DuplicatePK(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
+	s := compositionSchema(t, true)
 
 	validator := instance.NewValidator(s)
 
@@ -274,17 +241,7 @@ func TestValidateCompositions_ChildValidationFails(t *testing.T) {
 }
 
 func TestValidateCompositions_InvalidChildShape(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
+	s := compositionSchema(t, true)
 
 	validator := instance.NewValidator(s)
 
@@ -305,17 +262,7 @@ func TestValidateCompositions_InvalidChildShape(t *testing.T) {
 }
 
 func TestValidateCompositions_NotArray(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
+	s := compositionSchema(t, true)
 
 	validator := instance.NewValidator(s)
 
@@ -335,17 +282,7 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 
 func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 	// Per architecture spec: null is always a shape error, even for optional compositions.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
+	s := compositionSchema(t, true)
 
 	validator := instance.NewValidator(s)
 
@@ -362,41 +299,12 @@ func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid composition value")
 
-	// Verify error code is E_EDGE_SHAPE_MISMATCH
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 1)
-	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
-
-	// Verify expected/got details
-	details := issues[0].Details()
-	var hasExpected, hasGot bool
-	for _, d := range details {
-		if d.Key == diag.DetailKeyExpected {
-			hasExpected = true
-			assert.Equal(t, "array", d.Value)
-		}
-		if d.Key == diag.DetailKeyGot {
-			hasGot = true
-			assert.Equal(t, "null", d.Value)
-		}
-	}
-	assert.True(t, hasExpected, "should have 'expected' detail")
-	assert.True(t, hasGot, "should have 'got' detail")
+	yammmtest.GoldenJSON(t, "composition_diag_null_optional", issueProjection(result))
 }
 
 func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 	// Per architecture spec: null is always a shape error.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
-		Done())
+	s := compositionSchema(t, false)
 
 	validator := instance.NewValidator(s)
 
@@ -413,24 +321,12 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid composition value")
 
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 1)
-	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
+	yammmtest.GoldenJSON(t, "composition_diag_null_required", issueProjection(result))
 }
 
 func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 	// Verify E_UNRESOLVED_REQUIRED_COMPOSITION includes reason="absent" for missing field.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
-		Done())
+	s := compositionSchema(t, false)
 
 	validator := instance.NewValidator(s)
 
@@ -446,45 +342,12 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 1)
-	assert.Equal(t, instance.ErrUnresolvedRequiredComposition, issues[0].Code())
-
-	// Verify required details including reason="absent"
-	details := issues[0].Details()
-	var hasReason, hasRelation, hasJSONField bool
-	for _, d := range details {
-		if d.Key == diag.DetailKeyReason {
-			hasReason = true
-			assert.Equal(t, "absent", d.Value)
-		}
-		if d.Key == diag.DetailKeyRelationName {
-			hasRelation = true
-			assert.Equal(t, "addresses", d.Value)
-		}
-		if d.Key == diag.DetailKeyJSONField {
-			hasJSONField = true
-			assert.Equal(t, "addresses", d.Value)
-		}
-	}
-	assert.True(t, hasReason, "should have 'reason' detail")
-	assert.True(t, hasRelation, "should have 'relation' detail")
-	assert.True(t, hasJSONField, "should have 'json_field' detail")
+	yammmtest.GoldenJSON(t, "composition_diag_reason_absent", issueProjection(result))
 }
 
 func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 	// Verify E_UNRESOLVED_REQUIRED_COMPOSITION includes reason="empty" for empty array.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
-		Done())
+	s := compositionSchema(t, false)
 
 	validator := instance.NewValidator(s)
 
@@ -500,45 +363,12 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 1)
-	assert.Equal(t, instance.ErrUnresolvedRequiredComposition, issues[0].Code())
-
-	// Verify required details including reason="empty"
-	details := issues[0].Details()
-	var hasReason, hasRelation, hasJSONField bool
-	for _, d := range details {
-		if d.Key == diag.DetailKeyReason {
-			hasReason = true
-			assert.Equal(t, "empty", d.Value)
-		}
-		if d.Key == diag.DetailKeyRelationName {
-			hasRelation = true
-			assert.Equal(t, "addresses", d.Value)
-		}
-		if d.Key == diag.DetailKeyJSONField {
-			hasJSONField = true
-			assert.Equal(t, "addresses", d.Value)
-		}
-	}
-	assert.True(t, hasReason, "should have 'reason' detail")
-	assert.True(t, hasRelation, "should have 'relation' detail")
-	assert.True(t, hasJSONField, "should have 'json_field' detail")
+	yammmtest.GoldenJSON(t, "composition_diag_reason_empty", issueProjection(result))
 }
 
 func TestValidateCompositions_DuplicatePK_PathFormat(t *testing.T) {
 	// Verify that duplicate PK errors use PK-based path format, not array index.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
+	s := compositionSchema(t, true)
 
 	validator := instance.NewValidator(s)
 

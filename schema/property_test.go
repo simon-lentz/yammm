@@ -99,7 +99,7 @@ func TestDeclaringScope_RelationName(t *testing.T) {
 func TestDeclaringScope_RelationName_EmptyForType(t *testing.T) {
 	scope := schema.TypeScope(schema.NewTypeRef("", "Test", location.Span{}))
 
-	assert.Equal(t, "", scope.RelationName())
+	assert.Empty(t, scope.RelationName())
 }
 
 func TestDeclaringScope_TypeName_Valid(t *testing.T) {
@@ -146,7 +146,7 @@ func TestDeclaringScope_String_Unknown(t *testing.T) {
 	scope := schema.DeclaringScope{}
 
 	// Default kind is ScopeType (0), with empty typeRef, returns empty string
-	assert.Equal(t, "", scope.String())
+	assert.Empty(t, scope.String())
 }
 
 func TestNewProperty(t *testing.T) {

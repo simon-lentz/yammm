@@ -12,41 +12,9 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
-func TestSnapshotVerify_ValidSnapshot(t *testing.T) {
-	t.Parallel()
-
-	ysPath := createYSFixture(t, t.TempDir())
-
-	code := executeCmd(t, "snapshot", "verify", "testdata/valid.yammm", ysPath)
-	assert.Equal(t, cli.ExitOK, code)
-}
-
-func TestSnapshotVerify_WrongSchema(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	ysPath := createYSFixture(t, tmpDir)
-
-	// Create a different schema.
-	altSchema := filepath.Join(tmpDir, "alt.yammm")
-	require.NoError(t, os.WriteFile(altSchema, []byte(`schema "alt"
-
-type Widget {
-	id   String primary
-	name String required
-}
-`), 0o600))
-
-	cmd := newRootCmd("test")
-	var errBuf bytes.Buffer
-	cmd.SetErr(&errBuf)
-	cmd.SetArgs([]string{"snapshot", "verify", altSchema, ysPath})
-
-	err := cmd.Execute()
-	require.Error(t, err)
-
-	assert.Contains(t, errBuf.String(), "E_SNAPSHOT_INCOMPATIBLE_SCHEMA")
-}
+// The tampering tests need byte surgery on the .ys payload, which the
+// testscript scripts cannot express — they stay in-process alongside their
+// exact exit-code claims.
 
 func TestSnapshotVerify_CorruptedFile(t *testing.T) {
 	t.Parallel()
@@ -54,7 +22,6 @@ func TestSnapshotVerify_CorruptedFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	ysPath := createYSFixture(t, tmpDir)
 
-	// Tamper with the file contents.
 	data, err := os.ReadFile(ysPath)
 	require.NoError(t, err)
 
@@ -72,7 +39,6 @@ func TestSnapshotVerify_SkipIntegrityCheck(t *testing.T) {
 	tmpDir := t.TempDir()
 	ysPath := createYSFixture(t, tmpDir)
 
-	// Tamper with the file but skip integrity check.
 	data, err := os.ReadFile(ysPath)
 	require.NoError(t, err)
 

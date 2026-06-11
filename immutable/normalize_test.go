@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
 func TestNormalizeNumber(t *testing.T) {
@@ -49,23 +49,37 @@ func TestNormalizeNumber(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NormalizeNumber(tt.num)
-			assert.Equal(t, tt.want, got)
+			if got := NormalizeNumber(tt.num); got != tt.want {
+				t.Errorf("NormalizeNumber(%q) = %v (%T), want %v (%T)", tt.num, got, got, tt.want, tt.want)
+			}
 		})
 	}
 }
 
 func TestNormalizeValue_Scalars(t *testing.T) {
-	// json.Number values are normalized
-	assert.Equal(t, int64(42), NormalizeValue(json.Number("42")))
-	assert.Equal(t, float64(3.14), NormalizeValue(json.Number("3.14")))
-	assert.Equal(t, float64(100), NormalizeValue(json.Number("1e2")))
+	tests := []struct {
+		name  string
+		input any
+		want  any
+	}{
+		// json.Number values are normalized
+		{"integer number", json.Number("42"), int64(42)},
+		{"float number", json.Number("3.14"), float64(3.14)},
+		{"scientific number", json.Number("1e2"), float64(100)},
+		// Non-json.Number values pass through unchanged
+		{"string", "hello", "hello"},
+		{"bool", true, true},
+		{"nil", nil, nil},
+		{"int64", int64(7), int64(7)},
+	}
 
-	// Non-json.Number values pass through unchanged
-	assert.Equal(t, "hello", NormalizeValue("hello"))
-	assert.Equal(t, true, NormalizeValue(true))
-	assert.Nil(t, NormalizeValue(nil))
-	assert.Equal(t, int64(7), NormalizeValue(int64(7)))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeValue(tt.input); got != tt.want {
+				t.Errorf("NormalizeValue(%v) = %v (%T), want %v (%T)", tt.input, got, got, tt.want, tt.want)
+			}
+		})
+	}
 }
 
 func TestNormalizeValue_Map(t *testing.T) {
@@ -80,14 +94,14 @@ func TestNormalizeValue_Map(t *testing.T) {
 		"rate":  float64(150),
 		"name":  "test",
 	}
-	assert.Equal(t, expected, got)
+	yammmtest.Diff(t, expected, got)
 }
 
 func TestNormalizeValue_Slice(t *testing.T) {
 	s := []any{json.Number("1"), json.Number("2.5"), "text"}
 	got := NormalizeValue(s)
 	expected := []any{int64(1), float64(2.5), "text"}
-	assert.Equal(t, expected, got)
+	yammmtest.Diff(t, expected, got)
 }
 
 func TestNormalizeValue_Nested(t *testing.T) {
@@ -112,7 +126,7 @@ func TestNormalizeValue_Nested(t *testing.T) {
 			},
 		},
 	}
-	assert.Equal(t, expected, got)
+	yammmtest.Diff(t, expected, got)
 }
 
 func TestNormalizeValue_DepthGuard(t *testing.T) {
@@ -137,7 +151,9 @@ func TestNormalizeValue_DepthGuard(t *testing.T) {
 		current = m["nested"]
 	}
 	// At depth 65, the json.Number should be unchanged (not normalized)
-	assert.Equal(t, json.Number("99"), current)
+	if current != json.Number("99") {
+		t.Errorf("value below the depth guard = %v (%T), want json.Number(99) unchanged", current, current)
+	}
 }
 
 func TestNormalizeValue_DepthGuard_NormalizesWithinLimit(t *testing.T) {
@@ -159,5 +175,7 @@ func TestNormalizeValue_DepthGuard_NormalizesWithinLimit(t *testing.T) {
 		}
 		current = m["n"]
 	}
-	assert.Equal(t, int64(42), current)
+	if current != int64(42) {
+		t.Errorf("value at the depth limit = %v (%T), want int64(42) normalized", current, current)
+	}
 }

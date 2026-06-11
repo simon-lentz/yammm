@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
-	"flag"
 	"io"
 	"os"
 	"path/filepath"
@@ -43,6 +41,20 @@ func TestRun_InvalidLogLevel(t *testing.T) {
 	err := run(io.Discard, []string{"--log-level", "invalid"})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "invalid log level")
+}
+
+func TestRun_DebounceDelayFlag(t *testing.T) {
+	t.Parallel()
+
+	// --version short-circuits before the server starts, so success here
+	// proves the duration flag parses and is accepted.
+	var buf bytes.Buffer
+	err := run(&buf, []string{"--debounce-delay", "5ms", "--version"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "yammm-lsp")
+
+	err = run(io.Discard, []string{"--debounce-delay", "not-a-duration"})
+	assert.Error(t, err, "a malformed duration must fail flag parsing")
 }
 
 func TestSetupLogger_ValidLevels(t *testing.T) {
@@ -109,44 +121,4 @@ func TestSetupLogger_FileAppends(t *testing.T) {
 	content := string(data)
 	assert.Contains(t, content, "existing")
 	assert.Contains(t, content, "appended message")
-}
-
-func TestFlagParsing_Defaults(t *testing.T) {
-	t.Parallel()
-
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	logLevel := fs.String("log-level", "info", "")
-	logFile := fs.String("log-file", "", "")
-	moduleRoot := fs.String("module-root", "", "")
-	showVer := fs.Bool("version", false, "")
-
-	require.NoError(t, fs.Parse([]string{}))
-
-	assert.Equal(t, "info", *logLevel)
-	assert.Equal(t, "", *logFile)
-	assert.Equal(t, "", *moduleRoot)
-	assert.False(t, *showVer)
-}
-
-func TestFlagParsing_AllOptions(t *testing.T) {
-	t.Parallel()
-
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	logLevel := fs.String("log-level", "info", "")
-	logFile := fs.String("log-file", "", "")
-	moduleRoot := fs.String("module-root", "", "")
-	showVer := fs.Bool("version", false, "")
-
-	err := fs.Parse([]string{
-		"--log-level", "debug",
-		"--log-file", "/tmp/test.log",
-		"--module-root", "/path/to/root",
-		"--version",
-	})
-	require.True(t, err == nil || errors.Is(err, flag.ErrHelp))
-
-	assert.Equal(t, "debug", *logLevel)
-	assert.Equal(t, "/tmp/test.log", *logFile)
-	assert.Equal(t, "/path/to/root", *moduleRoot)
-	assert.True(t, *showVer)
 }

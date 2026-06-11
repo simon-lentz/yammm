@@ -52,7 +52,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	// Load schema
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
 	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, absSchemaPath, schemaResult)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), schemaResult)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 

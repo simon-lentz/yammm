@@ -169,17 +169,25 @@ func BenchmarkUpdateMetadataRatio(b *testing.B) {
 // faster than Load + Marshal on a 20 MB input. Median of 5 samples per
 // path; runtime.GC between samples to damp CI-runner noise.
 //
-// Threshold rationale (per §3): 3× is the floor below which the
+// Threshold rationale: 3× is the floor below which the
 // primitive stops being interesting. Target on M2-class hardware is
 // ~8-10×, on typical CI runners ~6-8×; a drop below 3× signals a
 // regression that operator-facing documentation (the ~10% cost claim)
 // no longer holds.
 //
 // Skipped under `go test -short` since the 20 MB setup is ~2 seconds
-// and the median-of-5 loop dominates short-test runtime.
+// and the median-of-5 loop dominates short-test runtime. Also skipped
+// under the race detector: instrumentation slows the allocation-heavy
+// Load+Marshal baseline far more than the byte-splice fast path, so the
+// instrumented ratio neither measures the documented claim nor gates it
+// honestly — and the median-of-5 loop costs ~40s instrumented. The plain
+// (uninstrumented) test run remains the gate.
 func TestUpdateMetadataRatioFloor(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping ratio-floor benchmark gate under -short")
+	}
+	if raceEnabled {
+		t.Skip("skipping ratio-floor benchmark gate under the race detector")
 	}
 	in := loadBenchInputs(t)
 	ctx := context.Background()

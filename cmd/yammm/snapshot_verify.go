@@ -52,7 +52,7 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	// Load schema.
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
 	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), schemaResult)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), schemaResult)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -73,7 +73,7 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	result := snapshot.Verify(cmd.Context(), data, s, opts...)
 
 	// Render diagnostics.
-	renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), result)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 
 	exitCode := cli.ExitForResult(result)
 	if exitCode != cli.ExitOK {

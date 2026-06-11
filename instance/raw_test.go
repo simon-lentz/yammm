@@ -30,7 +30,7 @@ func TestProvenance_SourceName(t *testing.T) {
 
 	t.Run("nil_returns_empty", func(t *testing.T) {
 		var prov *location.Provenance
-		assert.Equal(t, "", prov.SourceName())
+		assert.Empty(t, prov.SourceName())
 	})
 }
 
@@ -81,7 +81,7 @@ func TestProvenance_WithPath(t *testing.T) {
 
 		updated := prov.WithPath(newPath)
 
-		assert.Equal(t, "", updated.SourceName())
+		assert.Empty(t, updated.SourceName())
 		assert.Equal(t, `$.data`, updated.Path().String())
 		assert.Equal(t, location.Span{}, updated.Span())
 	})
@@ -106,7 +106,7 @@ func TestProvenance_AtKey(t *testing.T) {
 
 		extended := prov.AtKey("property")
 
-		assert.Equal(t, "", extended.SourceName())
+		assert.Empty(t, extended.SourceName())
 		assert.Equal(t, `$.property`, extended.Path().String())
 	})
 
@@ -138,7 +138,7 @@ func TestProvenance_AtIndex(t *testing.T) {
 
 		extended := prov.AtIndex(0)
 
-		assert.Equal(t, "", extended.SourceName())
+		assert.Empty(t, extended.SourceName())
 		assert.Equal(t, `$[0]`, extended.Path().String())
 	})
 

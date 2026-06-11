@@ -51,23 +51,15 @@ func TestPrintDiffResult_WithDrift(t *testing.T) {
 	assert.Contains(t, buf.String(), "create: CREATE CONSTRAINT c2")
 }
 
-func TestNeo4jDiff_RequiresURI(t *testing.T) {
-	t.Parallel()
-
-	code := executeCmd(t, "neo4j", "diff", "testdata/valid.yammm")
-	assert.Equal(t, 2, code) // ExitUsage — missing --uri
-}
-
-func TestNeo4jIntrospect_RequiresURI(t *testing.T) {
-	t.Parallel()
-
-	code := executeCmd(t, "neo4j", "introspect")
-	assert.Equal(t, 2, code) // ExitUsage — missing --uri
-}
-
 func TestNeo4jDiff_EnvVarSatisfiesURI(t *testing.T) {
 	// Cannot run in parallel due to env var mutation.
-	t.Setenv("YAMMM_NEO4J_URI", "neo4j://localhost:7687")
+	//
+	// Loopback port 1 is essentially never listening (binding it requires
+	// root) and refuses connections immediately, so the connection failure
+	// is deterministic and fast — unlike a real localhost:7687, where a
+	// developer's running Neo4j would change the outcome, or an unroutable
+	// TEST-NET address, where the dial would hang until timeout.
+	t.Setenv("YAMMM_NEO4J_URI", "neo4j://127.0.0.1:1")
 
 	code := executeCmd(t, "neo4j", "diff", "testdata/valid.yammm")
 	// The command progresses past URI validation but fails at connection.

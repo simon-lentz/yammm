@@ -1,0 +1,57 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Target",
+      "Part": false,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [
+        {
+          "EdgeProps": [
+            {
+              "Constraint": "Date",
+              "Name": "since",
+              "Optional": false,
+              "PrimaryKey": false
+            }
+          ],
+          "FieldName": "friend",
+          "Many": false,
+          "Name": "friend",
+          "Optional": false,
+          "Target": "Target"
+        }
+      ],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Person",
+      "Part": false,
+      "SuperTypes": null
+    }
+  ]
+}

@@ -51,7 +51,7 @@ func yammmgrammarParserInit() {
 		"OR", "AND", "EQUAL", "NOTEQUAL", "MATCH", "NOTMATCH", "QMARK", "GT",
 		"GTE", "LT", "LTE", "DOLLAR", "PIPE", "PERIOD", "PERCENT", "HAT", "STRING",
 		"DOC_COMMENT", "SL_COMMENT", "REGEXP", "WS", "VARIABLE", "INTEGER",
-		"FLOAT", "BOOLEAN", "UC_WORD", "LC_WORD", "ANY_OTHER",
+		"FLOAT", "INVALID_NUMBER", "BOOLEAN", "UC_WORD", "LC_WORD", "ANY_OTHER",
 	}
 	staticData.RuleNames = []string{
 		"schema", "schema_name", "import_decl", "type", "datatype", "type_name",
@@ -64,7 +64,7 @@ func yammmgrammarParserInit() {
 	}
 	staticData.PredictionContextCache = antlr.NewPredictionContextCache()
 	staticData.serializedATN = []int32{
-		4, 1, 73, 505, 2, 0, 7, 0, 2, 1, 7, 1, 2, 2, 7, 2, 2, 3, 7, 3, 2, 4, 7,
+		4, 1, 74, 505, 2, 0, 7, 0, 2, 1, 7, 1, 2, 2, 7, 2, 2, 3, 7, 3, 2, 4, 7,
 		4, 2, 5, 7, 5, 2, 6, 7, 6, 2, 7, 7, 7, 2, 8, 7, 8, 2, 9, 7, 9, 2, 10, 7,
 		10, 2, 11, 7, 11, 2, 12, 7, 12, 2, 13, 7, 13, 2, 14, 7, 14, 2, 15, 7, 15,
 		2, 16, 7, 16, 2, 17, 7, 17, 2, 18, 7, 18, 2, 19, 7, 19, 2, 20, 7, 20, 2,
@@ -119,44 +119,44 @@ func yammmgrammarParserInit() {
 		3, 36, 497, 8, 36, 1, 36, 1, 36, 1, 37, 1, 37, 1, 38, 1, 38, 1, 38, 0,
 		1, 68, 39, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32,
 		34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68,
-		70, 72, 74, 76, 0, 14, 1, 0, 71, 72, 1, 0, 10, 11, 2, 0, 40, 40, 68, 68,
+		70, 72, 74, 76, 0, 14, 1, 0, 72, 73, 1, 0, 10, 11, 2, 0, 40, 40, 68, 68,
 		2, 0, 40, 40, 68, 69, 1, 0, 12, 22, 2, 0, 24, 24, 40, 40, 3, 0, 39, 39,
 		41, 41, 60, 60, 1, 0, 44, 45, 1, 0, 53, 56, 1, 0, 50, 51, 1, 0, 48, 49,
-		2, 0, 46, 46, 61, 61, 3, 0, 62, 62, 65, 65, 68, 70, 4, 0, 1, 2, 4, 4, 6,
-		11, 25, 26, 564, 0, 78, 1, 0, 0, 0, 2, 95, 1, 0, 0, 0, 4, 100, 1, 0, 0,
-		0, 6, 107, 1, 0, 0, 0, 8, 123, 1, 0, 0, 0, 10, 130, 1, 0, 0, 0, 12, 132,
-		1, 0, 0, 0, 14, 137, 1, 0, 0, 0, 16, 141, 1, 0, 0, 0, 18, 159, 1, 0, 0,
-		0, 20, 163, 1, 0, 0, 0, 22, 172, 1, 0, 0, 0, 24, 181, 1, 0, 0, 0, 26, 185,
-		1, 0, 0, 0, 28, 190, 1, 0, 0, 0, 30, 195, 1, 0, 0, 0, 32, 218, 1, 0, 0,
-		0, 34, 233, 1, 0, 0, 0, 36, 235, 1, 0, 0, 0, 38, 252, 1, 0, 0, 0, 40, 267,
-		1, 0, 0, 0, 42, 269, 1, 0, 0, 0, 44, 283, 1, 0, 0, 0, 46, 297, 1, 0, 0,
-		0, 48, 299, 1, 0, 0, 0, 50, 307, 1, 0, 0, 0, 52, 321, 1, 0, 0, 0, 54, 330,
-		1, 0, 0, 0, 56, 336, 1, 0, 0, 0, 58, 341, 1, 0, 0, 0, 60, 343, 1, 0, 0,
-		0, 62, 345, 1, 0, 0, 0, 64, 356, 1, 0, 0, 0, 66, 359, 1, 0, 0, 0, 68, 395,
-		1, 0, 0, 0, 70, 470, 1, 0, 0, 0, 72, 486, 1, 0, 0, 0, 74, 500, 1, 0, 0,
-		0, 76, 502, 1, 0, 0, 0, 78, 82, 3, 2, 1, 0, 79, 81, 3, 4, 2, 0, 80, 79,
-		1, 0, 0, 0, 81, 84, 1, 0, 0, 0, 82, 80, 1, 0, 0, 0, 82, 83, 1, 0, 0, 0,
-		83, 89, 1, 0, 0, 0, 84, 82, 1, 0, 0, 0, 85, 88, 3, 6, 3, 0, 86, 88, 3,
-		8, 4, 0, 87, 85, 1, 0, 0, 0, 87, 86, 1, 0, 0, 0, 88, 91, 1, 0, 0, 0, 89,
-		87, 1, 0, 0, 0, 89, 90, 1, 0, 0, 0, 90, 92, 1, 0, 0, 0, 91, 89, 1, 0, 0,
-		0, 92, 93, 5, 0, 0, 1, 93, 1, 1, 0, 0, 0, 94, 96, 5, 63, 0, 0, 95, 94,
-		1, 0, 0, 0, 95, 96, 1, 0, 0, 0, 96, 97, 1, 0, 0, 0, 97, 98, 5, 1, 0, 0,
-		98, 99, 5, 62, 0, 0, 99, 3, 1, 0, 0, 0, 100, 101, 5, 2, 0, 0, 101, 104,
-		5, 62, 0, 0, 102, 103, 5, 3, 0, 0, 103, 105, 3, 12, 6, 0, 104, 102, 1,
-		0, 0, 0, 104, 105, 1, 0, 0, 0, 105, 5, 1, 0, 0, 0, 106, 108, 5, 63, 0,
-		0, 107, 106, 1, 0, 0, 0, 107, 108, 1, 0, 0, 0, 108, 111, 1, 0, 0, 0, 109,
-		112, 5, 4, 0, 0, 110, 112, 5, 5, 0, 0, 111, 109, 1, 0, 0, 0, 111, 110,
-		1, 0, 0, 0, 111, 112, 1, 0, 0, 0, 112, 113, 1, 0, 0, 0, 113, 114, 5, 6,
-		0, 0, 114, 116, 3, 10, 5, 0, 115, 117, 3, 16, 8, 0, 116, 115, 1, 0, 0,
-		0, 116, 117, 1, 0, 0, 0, 117, 118, 1, 0, 0, 0, 118, 119, 5, 27, 0, 0, 119,
-		120, 3, 18, 9, 0, 120, 121, 5, 28, 0, 0, 121, 7, 1, 0, 0, 0, 122, 124,
-		5, 63, 0, 0, 123, 122, 1, 0, 0, 0, 123, 124, 1, 0, 0, 0, 124, 125, 1, 0,
-		0, 0, 125, 126, 5, 6, 0, 0, 126, 127, 3, 10, 5, 0, 127, 128, 5, 35, 0,
-		0, 128, 129, 3, 40, 20, 0, 129, 9, 1, 0, 0, 0, 130, 131, 5, 71, 0, 0, 131,
-		11, 1, 0, 0, 0, 132, 133, 7, 0, 0, 0, 133, 13, 1, 0, 0, 0, 134, 135, 3,
-		12, 6, 0, 135, 136, 5, 59, 0, 0, 136, 138, 1, 0, 0, 0, 137, 134, 1, 0,
-		0, 0, 137, 138, 1, 0, 0, 0, 138, 139, 1, 0, 0, 0, 139, 140, 3, 10, 5, 0,
-		140, 15, 1, 0, 0, 0, 141, 142, 5, 7, 0, 0, 142, 147, 3, 14, 7, 0, 143,
+		2, 0, 46, 46, 61, 61, 4, 0, 62, 62, 65, 65, 68, 69, 71, 71, 4, 0, 1, 2,
+		4, 4, 6, 11, 25, 26, 564, 0, 78, 1, 0, 0, 0, 2, 95, 1, 0, 0, 0, 4, 100,
+		1, 0, 0, 0, 6, 107, 1, 0, 0, 0, 8, 123, 1, 0, 0, 0, 10, 130, 1, 0, 0, 0,
+		12, 132, 1, 0, 0, 0, 14, 137, 1, 0, 0, 0, 16, 141, 1, 0, 0, 0, 18, 159,
+		1, 0, 0, 0, 20, 163, 1, 0, 0, 0, 22, 172, 1, 0, 0, 0, 24, 181, 1, 0, 0,
+		0, 26, 185, 1, 0, 0, 0, 28, 190, 1, 0, 0, 0, 30, 195, 1, 0, 0, 0, 32, 218,
+		1, 0, 0, 0, 34, 233, 1, 0, 0, 0, 36, 235, 1, 0, 0, 0, 38, 252, 1, 0, 0,
+		0, 40, 267, 1, 0, 0, 0, 42, 269, 1, 0, 0, 0, 44, 283, 1, 0, 0, 0, 46, 297,
+		1, 0, 0, 0, 48, 299, 1, 0, 0, 0, 50, 307, 1, 0, 0, 0, 52, 321, 1, 0, 0,
+		0, 54, 330, 1, 0, 0, 0, 56, 336, 1, 0, 0, 0, 58, 341, 1, 0, 0, 0, 60, 343,
+		1, 0, 0, 0, 62, 345, 1, 0, 0, 0, 64, 356, 1, 0, 0, 0, 66, 359, 1, 0, 0,
+		0, 68, 395, 1, 0, 0, 0, 70, 470, 1, 0, 0, 0, 72, 486, 1, 0, 0, 0, 74, 500,
+		1, 0, 0, 0, 76, 502, 1, 0, 0, 0, 78, 82, 3, 2, 1, 0, 79, 81, 3, 4, 2, 0,
+		80, 79, 1, 0, 0, 0, 81, 84, 1, 0, 0, 0, 82, 80, 1, 0, 0, 0, 82, 83, 1,
+		0, 0, 0, 83, 89, 1, 0, 0, 0, 84, 82, 1, 0, 0, 0, 85, 88, 3, 6, 3, 0, 86,
+		88, 3, 8, 4, 0, 87, 85, 1, 0, 0, 0, 87, 86, 1, 0, 0, 0, 88, 91, 1, 0, 0,
+		0, 89, 87, 1, 0, 0, 0, 89, 90, 1, 0, 0, 0, 90, 92, 1, 0, 0, 0, 91, 89,
+		1, 0, 0, 0, 92, 93, 5, 0, 0, 1, 93, 1, 1, 0, 0, 0, 94, 96, 5, 63, 0, 0,
+		95, 94, 1, 0, 0, 0, 95, 96, 1, 0, 0, 0, 96, 97, 1, 0, 0, 0, 97, 98, 5,
+		1, 0, 0, 98, 99, 5, 62, 0, 0, 99, 3, 1, 0, 0, 0, 100, 101, 5, 2, 0, 0,
+		101, 104, 5, 62, 0, 0, 102, 103, 5, 3, 0, 0, 103, 105, 3, 12, 6, 0, 104,
+		102, 1, 0, 0, 0, 104, 105, 1, 0, 0, 0, 105, 5, 1, 0, 0, 0, 106, 108, 5,
+		63, 0, 0, 107, 106, 1, 0, 0, 0, 107, 108, 1, 0, 0, 0, 108, 111, 1, 0, 0,
+		0, 109, 112, 5, 4, 0, 0, 110, 112, 5, 5, 0, 0, 111, 109, 1, 0, 0, 0, 111,
+		110, 1, 0, 0, 0, 111, 112, 1, 0, 0, 0, 112, 113, 1, 0, 0, 0, 113, 114,
+		5, 6, 0, 0, 114, 116, 3, 10, 5, 0, 115, 117, 3, 16, 8, 0, 116, 115, 1,
+		0, 0, 0, 116, 117, 1, 0, 0, 0, 117, 118, 1, 0, 0, 0, 118, 119, 5, 27, 0,
+		0, 119, 120, 3, 18, 9, 0, 120, 121, 5, 28, 0, 0, 121, 7, 1, 0, 0, 0, 122,
+		124, 5, 63, 0, 0, 123, 122, 1, 0, 0, 0, 123, 124, 1, 0, 0, 0, 124, 125,
+		1, 0, 0, 0, 125, 126, 5, 6, 0, 0, 126, 127, 3, 10, 5, 0, 127, 128, 5, 35,
+		0, 0, 128, 129, 3, 40, 20, 0, 129, 9, 1, 0, 0, 0, 130, 131, 5, 72, 0, 0,
+		131, 11, 1, 0, 0, 0, 132, 133, 7, 0, 0, 0, 133, 13, 1, 0, 0, 0, 134, 135,
+		3, 12, 6, 0, 135, 136, 5, 59, 0, 0, 136, 138, 1, 0, 0, 0, 137, 134, 1,
+		0, 0, 0, 137, 138, 1, 0, 0, 0, 138, 139, 1, 0, 0, 0, 139, 140, 3, 10, 5,
+		0, 140, 15, 1, 0, 0, 0, 141, 142, 5, 7, 0, 0, 142, 147, 3, 14, 7, 0, 143,
 		144, 5, 34, 0, 0, 144, 146, 3, 14, 7, 0, 145, 143, 1, 0, 0, 0, 146, 149,
 		1, 0, 0, 0, 147, 145, 1, 0, 0, 0, 147, 148, 1, 0, 0, 0, 148, 151, 1, 0,
 		0, 0, 149, 147, 1, 0, 0, 0, 150, 152, 5, 34, 0, 0, 151, 150, 1, 0, 0, 0,
@@ -171,12 +171,12 @@ func yammmgrammarParserInit() {
 		0, 0, 170, 21, 1, 0, 0, 0, 171, 173, 5, 63, 0, 0, 172, 171, 1, 0, 0, 0,
 		172, 173, 1, 0, 0, 0, 173, 174, 1, 0, 0, 0, 174, 175, 3, 24, 12, 0, 175,
 		177, 3, 26, 13, 0, 176, 178, 5, 9, 0, 0, 177, 176, 1, 0, 0, 0, 177, 178,
-		1, 0, 0, 0, 178, 23, 1, 0, 0, 0, 179, 182, 5, 72, 0, 0, 180, 182, 3, 76,
+		1, 0, 0, 0, 178, 23, 1, 0, 0, 0, 179, 182, 5, 73, 0, 0, 180, 182, 3, 76,
 		38, 0, 181, 179, 1, 0, 0, 0, 181, 180, 1, 0, 0, 0, 182, 25, 1, 0, 0, 0,
 		183, 186, 3, 40, 20, 0, 184, 186, 3, 28, 14, 0, 185, 183, 1, 0, 0, 0, 185,
 		184, 1, 0, 0, 0, 186, 27, 1, 0, 0, 0, 187, 188, 3, 12, 6, 0, 188, 189,
 		5, 59, 0, 0, 189, 191, 1, 0, 0, 0, 190, 187, 1, 0, 0, 0, 190, 191, 1, 0,
-		0, 0, 191, 192, 1, 0, 0, 0, 192, 193, 5, 71, 0, 0, 193, 29, 1, 0, 0, 0,
+		0, 0, 191, 192, 1, 0, 0, 0, 192, 193, 5, 72, 0, 0, 193, 29, 1, 0, 0, 0,
 		194, 196, 5, 63, 0, 0, 195, 194, 1, 0, 0, 0, 195, 196, 1, 0, 0, 0, 196,
 		197, 1, 0, 0, 0, 197, 198, 5, 36, 0, 0, 198, 200, 3, 34, 17, 0, 199, 201,
 		3, 36, 18, 0, 200, 199, 1, 0, 0, 0, 200, 201, 1, 0, 0, 0, 201, 202, 1,
@@ -251,7 +251,7 @@ func yammmgrammarParserInit() {
 		0, 0, 382, 383, 5, 45, 0, 0, 383, 396, 3, 68, 34, 20, 384, 385, 5, 43,
 		0, 0, 385, 396, 3, 68, 34, 16, 386, 387, 5, 31, 0, 0, 387, 388, 3, 68,
 		34, 0, 388, 389, 5, 32, 0, 0, 389, 396, 1, 0, 0, 0, 390, 396, 5, 67, 0,
-		0, 391, 396, 3, 24, 12, 0, 392, 396, 3, 64, 32, 0, 393, 396, 5, 71, 0,
+		0, 391, 396, 3, 24, 12, 0, 392, 396, 3, 64, 32, 0, 393, 396, 5, 72, 0,
 		0, 394, 396, 7, 5, 0, 0, 395, 365, 1, 0, 0, 0, 395, 367, 1, 0, 0, 0, 395,
 		382, 1, 0, 0, 0, 395, 384, 1, 0, 0, 0, 395, 386, 1, 0, 0, 0, 395, 390,
 		1, 0, 0, 0, 395, 391, 1, 0, 0, 0, 395, 392, 1, 0, 0, 0, 395, 393, 1, 0,
@@ -339,80 +339,81 @@ func NewYammmGrammarParser(input antlr.TokenStream) *YammmGrammarParser {
 
 // YammmGrammarParser tokens.
 const (
-	YammmGrammarParserEOF         = antlr.TokenEOF
-	YammmGrammarParserT__0        = 1
-	YammmGrammarParserT__1        = 2
-	YammmGrammarParserT__2        = 3
-	YammmGrammarParserT__3        = 4
-	YammmGrammarParserT__4        = 5
-	YammmGrammarParserT__5        = 6
-	YammmGrammarParserT__6        = 7
-	YammmGrammarParserT__7        = 8
-	YammmGrammarParserT__8        = 9
-	YammmGrammarParserT__9        = 10
-	YammmGrammarParserT__10       = 11
-	YammmGrammarParserT__11       = 12
-	YammmGrammarParserT__12       = 13
-	YammmGrammarParserT__13       = 14
-	YammmGrammarParserT__14       = 15
-	YammmGrammarParserT__15       = 16
-	YammmGrammarParserT__16       = 17
-	YammmGrammarParserT__17       = 18
-	YammmGrammarParserT__18       = 19
-	YammmGrammarParserT__19       = 20
-	YammmGrammarParserT__20       = 21
-	YammmGrammarParserT__21       = 22
-	YammmGrammarParserT__22       = 23
-	YammmGrammarParserT__23       = 24
-	YammmGrammarParserT__24       = 25
-	YammmGrammarParserT__25       = 26
-	YammmGrammarParserLBRACE      = 27
-	YammmGrammarParserRBRACE      = 28
-	YammmGrammarParserLBRACK      = 29
-	YammmGrammarParserRBRACK      = 30
-	YammmGrammarParserLPAR        = 31
-	YammmGrammarParserRPAR        = 32
-	YammmGrammarParserCOLON       = 33
-	YammmGrammarParserCOMMA       = 34
-	YammmGrammarParserEQUALS      = 35
-	YammmGrammarParserASSOC       = 36
-	YammmGrammarParserCOMP        = 37
-	YammmGrammarParserARROW       = 38
-	YammmGrammarParserSLASH       = 39
-	YammmGrammarParserUSCORE      = 40
-	YammmGrammarParserSTAR        = 41
-	YammmGrammarParserAT          = 42
-	YammmGrammarParserEXCLAMATION = 43
-	YammmGrammarParserPLUS        = 44
-	YammmGrammarParserMINUS       = 45
-	YammmGrammarParserOR          = 46
-	YammmGrammarParserAND         = 47
-	YammmGrammarParserEQUAL       = 48
-	YammmGrammarParserNOTEQUAL    = 49
-	YammmGrammarParserMATCH       = 50
-	YammmGrammarParserNOTMATCH    = 51
-	YammmGrammarParserQMARK       = 52
-	YammmGrammarParserGT          = 53
-	YammmGrammarParserGTE         = 54
-	YammmGrammarParserLT          = 55
-	YammmGrammarParserLTE         = 56
-	YammmGrammarParserDOLLAR      = 57
-	YammmGrammarParserPIPE        = 58
-	YammmGrammarParserPERIOD      = 59
-	YammmGrammarParserPERCENT     = 60
-	YammmGrammarParserHAT         = 61
-	YammmGrammarParserSTRING      = 62
-	YammmGrammarParserDOC_COMMENT = 63
-	YammmGrammarParserSL_COMMENT  = 64
-	YammmGrammarParserREGEXP      = 65
-	YammmGrammarParserWS          = 66
-	YammmGrammarParserVARIABLE    = 67
-	YammmGrammarParserINTEGER     = 68
-	YammmGrammarParserFLOAT       = 69
-	YammmGrammarParserBOOLEAN     = 70
-	YammmGrammarParserUC_WORD     = 71
-	YammmGrammarParserLC_WORD     = 72
-	YammmGrammarParserANY_OTHER   = 73
+	YammmGrammarParserEOF            = antlr.TokenEOF
+	YammmGrammarParserT__0           = 1
+	YammmGrammarParserT__1           = 2
+	YammmGrammarParserT__2           = 3
+	YammmGrammarParserT__3           = 4
+	YammmGrammarParserT__4           = 5
+	YammmGrammarParserT__5           = 6
+	YammmGrammarParserT__6           = 7
+	YammmGrammarParserT__7           = 8
+	YammmGrammarParserT__8           = 9
+	YammmGrammarParserT__9           = 10
+	YammmGrammarParserT__10          = 11
+	YammmGrammarParserT__11          = 12
+	YammmGrammarParserT__12          = 13
+	YammmGrammarParserT__13          = 14
+	YammmGrammarParserT__14          = 15
+	YammmGrammarParserT__15          = 16
+	YammmGrammarParserT__16          = 17
+	YammmGrammarParserT__17          = 18
+	YammmGrammarParserT__18          = 19
+	YammmGrammarParserT__19          = 20
+	YammmGrammarParserT__20          = 21
+	YammmGrammarParserT__21          = 22
+	YammmGrammarParserT__22          = 23
+	YammmGrammarParserT__23          = 24
+	YammmGrammarParserT__24          = 25
+	YammmGrammarParserT__25          = 26
+	YammmGrammarParserLBRACE         = 27
+	YammmGrammarParserRBRACE         = 28
+	YammmGrammarParserLBRACK         = 29
+	YammmGrammarParserRBRACK         = 30
+	YammmGrammarParserLPAR           = 31
+	YammmGrammarParserRPAR           = 32
+	YammmGrammarParserCOLON          = 33
+	YammmGrammarParserCOMMA          = 34
+	YammmGrammarParserEQUALS         = 35
+	YammmGrammarParserASSOC          = 36
+	YammmGrammarParserCOMP           = 37
+	YammmGrammarParserARROW          = 38
+	YammmGrammarParserSLASH          = 39
+	YammmGrammarParserUSCORE         = 40
+	YammmGrammarParserSTAR           = 41
+	YammmGrammarParserAT             = 42
+	YammmGrammarParserEXCLAMATION    = 43
+	YammmGrammarParserPLUS           = 44
+	YammmGrammarParserMINUS          = 45
+	YammmGrammarParserOR             = 46
+	YammmGrammarParserAND            = 47
+	YammmGrammarParserEQUAL          = 48
+	YammmGrammarParserNOTEQUAL       = 49
+	YammmGrammarParserMATCH          = 50
+	YammmGrammarParserNOTMATCH       = 51
+	YammmGrammarParserQMARK          = 52
+	YammmGrammarParserGT             = 53
+	YammmGrammarParserGTE            = 54
+	YammmGrammarParserLT             = 55
+	YammmGrammarParserLTE            = 56
+	YammmGrammarParserDOLLAR         = 57
+	YammmGrammarParserPIPE           = 58
+	YammmGrammarParserPERIOD         = 59
+	YammmGrammarParserPERCENT        = 60
+	YammmGrammarParserHAT            = 61
+	YammmGrammarParserSTRING         = 62
+	YammmGrammarParserDOC_COMMENT    = 63
+	YammmGrammarParserSL_COMMENT     = 64
+	YammmGrammarParserREGEXP         = 65
+	YammmGrammarParserWS             = 66
+	YammmGrammarParserVARIABLE       = 67
+	YammmGrammarParserINTEGER        = 68
+	YammmGrammarParserFLOAT          = 69
+	YammmGrammarParserINVALID_NUMBER = 70
+	YammmGrammarParserBOOLEAN        = 71
+	YammmGrammarParserUC_WORD        = 72
+	YammmGrammarParserLC_WORD        = 73
+	YammmGrammarParserANY_OTHER      = 74
 )
 
 // YammmGrammarParser rules.
@@ -9532,7 +9533,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 		}
 		_la = p.GetTokenStream().LA(1)
 
-		if ((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&4611731101214310358) != 0) || ((int64((_la-65)) & ^0x3f) == 0 && ((int64(1)<<(_la-65))&253) != 0) {
+		if ((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&4611731101214310358) != 0) || ((int64((_la-65)) & ^0x3f) == 0 && ((int64(1)<<(_la-65))&477) != 0) {
 			{
 				p.SetState(368)
 
@@ -9788,7 +9789,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(397)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 17)) {
+				if !p.Precpred(p.GetParserRuleContext(), 17) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 17)", ""))
 					goto errorExit
 				}
@@ -9815,7 +9816,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(400)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 15)) {
+				if !p.Precpred(p.GetParserRuleContext(), 15) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 15)", ""))
 					goto errorExit
 				}
@@ -9852,7 +9853,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(403)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 14)) {
+				if !p.Precpred(p.GetParserRuleContext(), 14) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 14)", ""))
 					goto errorExit
 				}
@@ -9889,7 +9890,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(406)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 13)) {
+				if !p.Precpred(p.GetParserRuleContext(), 13) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 13)", ""))
 					goto errorExit
 				}
@@ -9926,7 +9927,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(409)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 12)) {
+				if !p.Precpred(p.GetParserRuleContext(), 12) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 12)", ""))
 					goto errorExit
 				}
@@ -9956,7 +9957,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(412)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 11)) {
+				if !p.Precpred(p.GetParserRuleContext(), 11) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 11)", ""))
 					goto errorExit
 				}
@@ -9993,7 +9994,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(415)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 10)) {
+				if !p.Precpred(p.GetParserRuleContext(), 10) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 10)", ""))
 					goto errorExit
 				}
@@ -10030,7 +10031,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(418)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 9)) {
+				if !p.Precpred(p.GetParserRuleContext(), 9) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 9)", ""))
 					goto errorExit
 				}
@@ -10060,7 +10061,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(421)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 8)) {
+				if !p.Precpred(p.GetParserRuleContext(), 8) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 8)", ""))
 					goto errorExit
 				}
@@ -10097,7 +10098,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(424)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 19)) {
+				if !p.Precpred(p.GetParserRuleContext(), 19) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 19)", ""))
 					goto errorExit
 				}
@@ -10116,7 +10117,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				}
 				_la = p.GetTokenStream().LA(1)
 
-				if ((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&4611731101214310358) != 0) || ((int64((_la-65)) & ^0x3f) == 0 && ((int64(1)<<(_la-65))&253) != 0) {
+				if ((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&4611731101214310358) != 0) || ((int64((_la-65)) & ^0x3f) == 0 && ((int64(1)<<(_la-65))&477) != 0) {
 					{
 						p.SetState(426)
 
@@ -10199,7 +10200,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(440)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 18)) {
+				if !p.Precpred(p.GetParserRuleContext(), 18) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 18)", ""))
 					goto errorExit
 				}
@@ -10299,7 +10300,7 @@ func (p *YammmGrammarParser) expr(_p int) (localctx IExprContext) {
 				p.PushNewRecursionContext(localctx, _startState, YammmGrammarParserRULE_expr)
 				p.SetState(455)
 
-				if !(p.Precpred(p.GetParserRuleContext(), 7)) {
+				if !p.Precpred(p.GetParserRuleContext(), 7) {
 					p.SetError(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 7)", ""))
 					goto errorExit
 				}
@@ -10575,7 +10576,7 @@ func (p *YammmGrammarParser) Arguments() (localctx IArgumentsContext) {
 	}
 	_la = p.GetTokenStream().LA(1)
 
-	if ((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&4611731101214310358) != 0) || ((int64((_la-65)) & ^0x3f) == 0 && ((int64(1)<<(_la-65))&253) != 0) {
+	if ((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&4611731101214310358) != 0) || ((int64((_la-65)) & ^0x3f) == 0 && ((int64(1)<<(_la-65))&477) != 0) {
 		{
 			p.SetState(471)
 
@@ -11027,7 +11028,7 @@ func (p *YammmGrammarParser) Literal() (localctx ILiteralContext) {
 
 		_la = p.GetTokenStream().LA(1)
 
-		if !((int64((_la-62)) & ^0x3f) == 0 && ((int64(1)<<(_la-62))&457) != 0) {
+		if !((int64((_la-62)) & ^0x3f) == 0 && ((int64(1)<<(_la-62))&713) != 0) {
 			_ri := p.GetErrorHandler().RecoverInline(p)
 
 			localctx.(*LiteralContext).v = _ri

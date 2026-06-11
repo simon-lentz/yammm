@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 
@@ -23,6 +24,11 @@ import (
 type Config struct {
 	// ModuleRoot overrides the computed module root for import resolution.
 	ModuleRoot string
+
+	// DebounceDelay is the delay between a document change and the analysis
+	// it triggers. Zero or negative means DefaultDebounceDelay. Tests use a
+	// small value (e.g., 1ms) to make temporal behavior deterministic.
+	DebounceDelay time.Duration
 }
 
 // NotifyFunc is a function that sends LSP notifications.
@@ -76,6 +82,14 @@ type Workspace struct {
 	// Separate from mu because publishDiagnostics is called outside the
 	// workspace lock (to avoid deadlock on I/O).
 	diagHash diagHashState
+
+	// analysisCompletedHook, when non-nil, runs after an analysis completes
+	// and before the version gate re-checks the document — on both the
+	// .yammm path (analyzeAndPublish) and the markdown path
+	// (AnalyzeMarkdownAndPublish). It exists so tests can deterministically
+	// interleave a document change into the window the gate protects;
+	// production leaves it nil. Protected by mu; invoked outside it.
+	analysisCompletedHook func(uri string)
 }
 
 // NewWorkspace creates a new workspace.
@@ -110,7 +124,7 @@ func NewWorkspace(logger *slog.Logger, cfg Config) *Workspace {
 			importsByEntry: make(map[string]map[string]struct{}),
 			reverseDeps:    make(map[string]map[string]struct{}),
 		},
-		sched: newAnalysisScheduler(logger, bgCtx, bgCancel),
+		sched: newAnalysisScheduler(logger, bgCtx, bgCancel, cfg.DebounceDelay),
 		mapper: uriMapper{
 			publishedByEntry: make(map[string]map[string]struct{}),
 		},
@@ -124,6 +138,24 @@ func (w *Workspace) SetNotifier(fn NotifyFunc) {
 	w.notifyMu.Lock()
 	w.notifyFn = fn
 	w.notifyMu.Unlock()
+}
+
+// setAnalysisCompletedHook installs the test-only hook that runs after an
+// analysis completes and before the version gate re-checks the document,
+// on both the .yammm and markdown paths.
+func (w *Workspace) setAnalysisCompletedHook(h func(uri string)) {
+	w.mu.Lock()
+	w.analysisCompletedHook = h
+	w.mu.Unlock()
+}
+
+// analysisCompletedHookFn snapshots the installed hook under lock; callers
+// invoke the returned hook outside the lock, since it may mutate the
+// workspace.
+func (w *Workspace) analysisCompletedHookFn() func(uri string) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.analysisCompletedHook
 }
 
 // OpenDocument stores document state and triggers immediate analysis.
@@ -381,6 +413,10 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 			slog.Any("error", analyzeCtx.Err()),
 		)
 		return
+	}
+
+	if hook := w.analysisCompletedHookFn(); hook != nil {
+		hook(uri)
 	}
 
 	w.mu.RLock()

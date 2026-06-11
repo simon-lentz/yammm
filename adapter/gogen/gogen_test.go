@@ -3,7 +3,6 @@ package gogen_test
 import (
 	"bytes"
 	"context"
-	"flag"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -15,27 +14,16 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/adapter/gogen"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-var update = flag.Bool("update", false, "update golden files")
-
-// checkGolden compares got against testdata/<name>.go.golden, updating it under -update.
+// checkGolden compares got against testdata/<name>.go.golden via the shared
+// yammmtest flow (one repo-wide -update flag; the .go.golden suffix marks the
+// content as generated Go source).
 func checkGolden(t *testing.T, name string, got []byte) {
 	t.Helper()
-	golden := filepath.Join("testdata", name+".go.golden")
-	if *update {
-		if err := os.WriteFile(golden, got, 0o644); err != nil { //nolint:gosec // golden test fixture, not sensitive
-			t.Fatalf("write golden: %v", err)
-		}
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatalf("read golden (run with -update to create): %v", err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Errorf("output mismatch for %s.\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
-	}
+	yammmtest.Golden(t, name+".go", got)
 }
 
 func TestSerializedModel(t *testing.T) {
@@ -299,6 +287,171 @@ func TestMarshal_Golden(t *testing.T) {
 			checkGolden(t, name, got)
 		})
 	}
+}
+
+// TestMarshal_ModuleRoot pins the module-root-aware SerializedModel keys for a
+// registry-style layout: the module root is an ANCESTOR of the entry's directory
+// (root/a/b/entry.yammm importing root/lib/dep.yammm by module-style path), so
+// entry-directory-relative keys would be "../"-shaped and would not match the
+// import statement on re-load. Keys must be root-relative and "../"-free.
+func TestMarshal_ModuleRoot(t *testing.T) {
+	s := loadModrootSchema(t)
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"type Contract struct",
+		"type Vendor struct",
+		`"a/b/entry.yammm":`,
+		`"lib/dep.yammm":`,
+		`const SerializedModelEntry = "a/b/entry.yammm"`,
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+	if bytes.Contains(got, []byte("../")) {
+		t.Error(`output contains "../" — keys must be module-root-relative, not entry-dir-relative`)
+	}
+	absRoot, _ := filepath.Abs(filepath.Join("testdata", "modroot"))
+	if bytes.Contains(got, []byte(absRoot)) {
+		t.Errorf("absolute path %q leaked into output", absRoot)
+	}
+	checkGolden(t, "modroot/entry", got)
+}
+
+// TestMarshal_ModuleRoot_CwdIndependent pins the fix for the silent disk
+// fallback: Marshal's round-trip self-check must succeed (and produce
+// identical bytes) regardless of the process working directory. Before the
+// module-root-aware keys, the multi-source round-trip only resolved with cwd
+// at the consumer's module root — from anywhere else it failed with
+// E_IMPORT_RESOLVE.
+func TestMarshal_ModuleRoot_CwdIndependent(t *testing.T) {
+	s := loadModrootSchema(t) // resolve fixture paths before changing cwd
+	want, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal from a foreign cwd: %v", err)
+	}
+	if !bytes.Equal(want, got) {
+		t.Error("Marshal output differs across working directories")
+	}
+}
+
+// TestMarshal_ModuleRoot_HermeticReload pins the documented consumer recipe
+// for the embedded model: LoadSourcesWithEntry over the root-relative keys
+// with module root "." and WithSourcesOnly re-loads the schema from a
+// directory containing no .yammm files at all — the embedded map is
+// self-contained and the filesystem never participates.
+func TestMarshal_ModuleRoot_HermeticReload(t *testing.T) {
+	s := loadModrootSchema(t)
+	want := schema.StructuralHash(s)
+
+	entrySrc, err := os.ReadFile(filepath.Join("testdata", "modroot", "a", "b", "entry.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	depSrc, err := os.ReadFile(filepath.Join("testdata", "modroot", "lib", "dep.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(t.TempDir())
+	got, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
+		"a/b/entry.yammm": entrySrc,
+		"lib/dep.yammm":   depSrc,
+	}, "a/b/entry.yammm", ".", schema.WithSourcesOnly())
+	if res.HasErrors() {
+		t.Fatalf("hermetic re-load: %v", res.Err())
+	}
+	if h := schema.StructuralHash(got); h != want {
+		t.Errorf("hermetic re-load hash mismatch: got %s, want %s", h, want)
+	}
+}
+
+// TestMarshal_SymlinkedImportDir pins that the embedded-model round-trip
+// check is independent of working-directory contents: a schema whose import
+// path traverses a symlinked directory (lib -> real) marshals successfully
+// even when the cwd is the module root itself, where every embedded key
+// resolves to an existing file through the symlink. The re-load must match
+// pre-registered keys textually rather than resolving them against disk.
+func TestMarshal_SymlinkedImportDir(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(root, "a", "b"),
+		filepath.Join(root, "real"),
+	} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("real", filepath.Join(root, "lib")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	entry := filepath.Join(root, "a", "b", "entry.yammm")
+	entrySrc := []byte("schema \"registry\"\n\nimport \"lib/dep\" as dep\n\ntype Contract {\n\tcontract_id String primary\n\t--> SUPPLIED_BY (one) dep.Vendor\n}\n")
+	depSrc := []byte("schema \"deplib\"\n\ntype Vendor {\n\tvendor_id String primary\n}\n")
+	if err := os.WriteFile(entry, entrySrc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "real", "dep.yammm"), depSrc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s, res := schema.Load(context.Background(), entry, schema.WithModuleRoot(root))
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	t.Chdir(root) // embedded keys now join the cwd to paths that exist through the symlink
+	if _, err := gogen.Marshal(s); err != nil {
+		t.Fatalf("Marshal with the module root as cwd: %v", err)
+	}
+}
+
+// TestMarshal_ModuleRoot_SharedRegistryDeterministic pins that a shared
+// Registry does not perturb the embedded keys: a second load of the same
+// entry cache-hits the import (the registry returns the first load's
+// schema pointer), and Marshal output stays byte-identical — keys derive
+// from the entry schema's recorded ModuleRoot, not from how its imports
+// were obtained.
+func TestMarshal_ModuleRoot_SharedRegistryDeterministic(t *testing.T) {
+	registry := schema.NewRegistry()
+	first := loadModrootSchema(t, schema.WithRegistry(registry))
+	second := loadModrootSchema(t, schema.WithRegistry(registry))
+
+	a, err := gogen.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := gogen.Marshal(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Error("shared-registry re-load changed Marshal output")
+	}
+}
+
+// loadModrootSchema loads the modroot fixture entry with the fixture tree's
+// top directory as the module root — the registry-style consumer load shape
+// (module root != entry directory).
+func loadModrootSchema(t *testing.T, opts ...schema.LoadOption) *schema.Schema {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("testdata", "modroot"))
+	if err != nil {
+		t.Fatalf("abs root: %v", err)
+	}
+	entry := filepath.Join(root, "a", "b", "entry.yammm")
+	s, res := schema.Load(context.Background(), entry, append([]schema.LoadOption{schema.WithModuleRoot(root)}, opts...)...)
+	if res.HasErrors() {
+		t.Fatalf("load modroot entry: %v", res.Err())
+	}
+	return s
 }
 
 // loadSchema loads a testdata schema, failing on any diagnostic error.

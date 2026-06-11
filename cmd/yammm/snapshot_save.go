@@ -89,7 +89,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	// Load schema.
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
 	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), schemaResult)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), schemaResult)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -102,7 +102,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 			return &cli.ExitError{Code: cli.ExitRuntime}
 		}
 		if loadResult.HasErrors() {
-			renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), loadResult)
+			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), loadResult)
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 		g = graph.NewFromSnapshot(s, snap)
@@ -129,7 +129,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	// Merge all diagnostics.
 	result := cli.MergeResults(parseResult, validateResult, graphResult)
 	if result.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), result)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 

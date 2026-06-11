@@ -1,6 +1,6 @@
 # CLI Reference
 
-The `yammm` CLI provides schema validation, formatting, data checking, snapshot persistence, and export from the terminal.
+The `yammm` CLI provides schema validation, formatting, data checking, snapshot persistence, export, and Go code generation from the terminal.
 
 ---
 
@@ -13,12 +13,14 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | `yammm check <schema> <data>` | Validate data against a schema |
 | `yammm load <schema> <data>` | Load data into graph and validate |
 | `yammm export <schema> <data>` | Export data to JSON, CSV, or Cypher |
+| `yammm gen --to go <schema>` | Generate Go source from a schema |
 | `yammm neo4j constraints <schema>` | Generate Neo4j constraint statements |
 | `yammm neo4j diff <schema>` | Diff schema constraints vs live database |
 | `yammm neo4j introspect` | Infer schema from live Neo4j database |
 | `yammm snapshot save <schema> <data>` | Save graph snapshot to `.ys` file |
 | `yammm snapshot info <snapshot>` | Display snapshot metadata |
 | `yammm snapshot verify <schema> <snapshot>` | Verify snapshot against schema |
+| `yammm snapshot update-metadata <snapshot>` | Rewrite metadata on an existing `.ys` file |
 
 ## Global Flags
 
@@ -127,6 +129,20 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, and custom metadata.
 
+### snapshot update-metadata
+
+```bash
+yammm snapshot update-metadata --set env=prod --set version=3 output.ys
+yammm snapshot update-metadata --unset env output.ys
+```
+
+Rewrites metadata on an existing `.ys` file. Uses a fast path that reuses the snapshot body when possible; when it cannot, it falls back to a full load + re-marshal and reports `W_UPDATE_METADATA_FALLBACK`.
+
+| Flag | Description |
+|------|-------------|
+| `-s, --set` | `key=value` metadata pair to set (repeatable) |
+| `--unset` | Metadata key to remove (repeatable) |
+
 ### Typical pipeline
 
 ```bash
@@ -154,6 +170,26 @@ yammm export --to json --output result.json schema.yammm data.csv --type User
 | `--output-dir` | Output directory (CSV multi-type: one file per type) |
 | `--type` | Type name for single-type CSV input |
 | `--type-column` | Column for multi-type CSV input |
+
+---
+
+## Code Generation
+
+```bash
+yammm gen --to go schema.yammm
+yammm gen --to go --package models --output models_gen.go schema.yammm
+yammm gen --to go --initialisms GUID,JWT --module-root . schema.yammm
+```
+
+Generates Go source from a schema via the `adapter/gogen` adapter: one struct per type, named Enum/DataType types, `EDGE_` association structs, a Graph aggregate, and an embedded `SerializedModel`. Output is stdlib-only (imports at most `time`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
+
+| Flag | Description |
+|------|-------------|
+| `--to` | Target: `go` (required) |
+| `--package` | Generated Go package name (default: derived from schema name) |
+| `--output` | Output file path (default: stdout) |
+| `--initialisms` | Extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
+| `--module-root` | Root directory for module-style imports (default: the schema's directory) |
 
 ---
 

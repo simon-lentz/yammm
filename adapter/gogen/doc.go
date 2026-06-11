@@ -108,13 +108,21 @@
 //   - A multi-source (imported) schema embeds var SerializedModel map[string]string
 //     keyed by module-root-relative path, plus const SerializedModelEntry naming the
 //     entry point, re-loadable via
-//     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with module root ".".
+//     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with module root "."
+//     (add [github.com/simon-lentz/yammm/schema.WithSourcesOnly] to guarantee the
+//     re-load never touches the filesystem).
 //
-// Keys are module-root-relative (never absolute generation-machine paths) so the
-// output is byte-reproducible across checkouts and CI. const SchemaHash carries the
-// schema's [github.com/simon-lentz/yammm/schema.StructuralHash]. Before returning,
-// [Marshal] re-loads the embedded model in memory and confirms its StructuralHash
-// matches the input's, so the embedded provenance is a guaranteed re-loadable model
+// Keys are relative to the load's recorded module root
+// ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot] — the WithModuleRoot
+// value when given, else the entry's directory), never absolute generation-machine
+// paths, so the output is byte-reproducible across checkouts and CI and the keys
+// match the module-style import statements inside the sources on re-load. const
+// SchemaHash carries the schema's
+// [github.com/simon-lentz/yammm/schema.StructuralHash]. Before returning, [Marshal]
+// re-loads the embedded model and confirms its StructuralHash matches the input's —
+// hermetically, under [github.com/simon-lentz/yammm/schema.WithSourcesOnly], so a
+// mis-keyed source fails generation rather than being silently satisfied by an
+// on-disk file — making the embedded provenance a guaranteed re-loadable model
 // rather than an unverified claim.
 //
 // # Output Guarantees

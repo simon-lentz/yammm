@@ -145,6 +145,12 @@ func (a *Adapter) Label(ctx context.Context, schemaName, typeName string) string
 // DetectLabelCollisions checks whether any non-abstract types in the schema
 // would produce the same Neo4j label after sanitization.
 //
+// Both schema front doors (the parser and [schema.NewBuilder]) enforce the
+// DSL name productions, on which [SanitizeIdentifier] is the identity
+// function — so two distinct type names from either front door cannot
+// collide. The check is retained as defense-in-depth for construction
+// paths that bypass both.
+//
 // Returns a [diag.Result] containing one [E_NEO4J_LABEL_COLLISION] issue per
 // colliding label, e.g.:
 //

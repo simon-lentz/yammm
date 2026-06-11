@@ -1,0 +1,34 @@
+[
+  {
+    "Code": "E_PARTIAL_COMPOSITE_FK",
+    "Details": [
+      {
+        "Key": "relation",
+        "Value": "enrollment"
+      },
+      {
+        "Key": "expected",
+        "Value": "_target_region, _target_studentId"
+      },
+      {
+        "Key": "got",
+        "Value": "_target_region"
+      }
+    ],
+    "Severity": "error"
+  },
+  {
+    "Code": "E_TYPE_MISMATCH",
+    "Details": [
+      {
+        "Key": "relation",
+        "Value": "enrollment"
+      },
+      {
+        "Key": "field",
+        "Value": "_target_region"
+      }
+    ],
+    "Severity": "error"
+  }
+]

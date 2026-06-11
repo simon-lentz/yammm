@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -59,40 +58,9 @@ func importTestSchemaRequired(t *testing.T) *schema.Schema {
 	return s
 }
 
-func buildValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
-	t.Helper()
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), nil, nil, nil)
-}
-
-func buildValidInstanceWithEdge(t *testing.T, s *schema.Schema, pk []any, props map[string]any, relName string, targetKeys [][]any) *instance.ValidInstance { //nolint:unparam // relName always "EMPLOYER" in this file but kept general for clarity
-	t.Helper()
-	const typeName = "Person"
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
-	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
-	for i, tk := range targetKeys {
-		targets[i] = instance.NewValidEdgeTarget(immutable.WrapKey(tk), immutable.Properties{})
-	}
-	edges := map[string]*instance.ValidEdgeData{
-		relName: instance.NewValidEdgeData(targets),
-	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), edges, nil, nil)
-}
-
 func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	t.Helper()
-	g := graph.New(s)
-	ctx := context.Background()
-	for _, inst := range instances {
-		g.Add(ctx, inst)
-	}
-	return g.Snapshot()
+	return snapshottest.BuildSnapshot(t, s, instances...)
 }
 
 func TestNewFromSnapshot_NilPanics(t *testing.T) {
@@ -130,26 +98,26 @@ func TestNewFromSnapshot_EmptySnapshot(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a new instance to the imported graph.
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	result := g.Add(ctx, company)
 	assert.True(t, result.OK())
 
 	reSnap := g.Snapshot()
-	assert.Equal(t, 1, len(reSnap.InstancesOf("Company")))
+	assert.Len(t, reSnap.InstancesOf("Company"), 1)
 }
 
 func TestNewFromSnapshot_InstancesIndexed(t *testing.T) {
 	t.Parallel()
 	s := importTestSchema(t)
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
-	person := buildValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	person := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
 	snap := buildSnapshot(t, s, company, person)
 
 	g := graph.NewFromSnapshot(s, snap)
 	reSnap := g.Snapshot()
 
-	assert.Equal(t, 1, len(reSnap.InstancesOf("Company")))
-	assert.Equal(t, 1, len(reSnap.InstancesOf("Person")))
+	assert.Len(t, reSnap.InstancesOf("Company"), 1)
+	assert.Len(t, reSnap.InstancesOf("Person"), 1)
 
 	// InstanceByKey works.
 	inst, ok := reSnap.InstanceByKey("Company", `["c1"]`)
@@ -160,18 +128,18 @@ func TestNewFromSnapshot_InstancesIndexed(t *testing.T) {
 func TestNewFromSnapshot_EdgesPreserved(t *testing.T) {
 	t.Parallel()
 	s := importTestSchema(t)
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
-	person := buildValidInstanceWithEdge(t, s, []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	snap := buildSnapshot(t, s, company, person)
 
 	// Verify original has edges.
-	require.Equal(t, 1, len(snap.Edges()))
+	require.Len(t, snap.Edges(), 1)
 
 	g := graph.NewFromSnapshot(s, snap)
 	reSnap := g.Snapshot()
 
 	// Edges survive round-trip.
-	require.Equal(t, 1, len(reSnap.Edges()))
+	require.Len(t, reSnap.Edges(), 1)
 	edge := reSnap.Edges()[0]
 	assert.Equal(t, "EMPLOYER", edge.Relation())
 	assert.Equal(t, "Person", edge.Source().TypeName())
@@ -181,7 +149,7 @@ func TestNewFromSnapshot_EdgesPreserved(t *testing.T) {
 	personInst, ok := reSnap.InstanceByKey("Person", `["p1"]`)
 	require.True(t, ok)
 	edges := reSnap.EdgesFrom(personInst)
-	assert.Equal(t, 1, len(edges))
+	assert.Len(t, edges, 1)
 }
 
 func TestNewFromSnapshot_UnresolvedTargetMissing(t *testing.T) {
@@ -189,23 +157,23 @@ func TestNewFromSnapshot_UnresolvedTargetMissing(t *testing.T) {
 	s := importTestSchema(t)
 
 	// Person references Company["c1"] which doesn't exist → unresolved.
-	person := buildValidInstanceWithEdge(t, s, []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	snap := buildSnapshot(t, s, person)
-	require.Equal(t, 1, len(snap.Unresolved()))
+	require.Len(t, snap.Unresolved(), 1)
 	assert.Equal(t, "target_missing", snap.Unresolved()[0].Reason)
 
 	// Import, then add the missing Company.
 	g := graph.NewFromSnapshot(s, snap)
 	ctx := context.Background()
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	result := g.Add(ctx, company)
 	assert.True(t, result.OK())
 
 	reSnap := g.Snapshot()
 
 	// The edge should now be resolved.
-	assert.Equal(t, 1, len(reSnap.Edges()))
-	assert.Equal(t, 0, len(reSnap.Unresolved()))
+	assert.Len(t, reSnap.Edges(), 1)
+	assert.Empty(t, reSnap.Unresolved())
 }
 
 func TestNewFromSnapshot_UnresolvedAbsentEmpty(t *testing.T) {
@@ -213,7 +181,7 @@ func TestNewFromSnapshot_UnresolvedAbsentEmpty(t *testing.T) {
 	s := importTestSchemaRequired(t)
 
 	// Person without EMPLOYER field → "absent" unresolved.
-	person := buildValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
+	person := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
 	snap := buildSnapshot(t, s, person)
 	require.GreaterOrEqual(t, len(snap.Unresolved()), 1)
 
@@ -244,15 +212,15 @@ func TestNewFromSnapshot_DuplicatesPreserved(t *testing.T) {
 	s := importTestSchema(t)
 
 	// Add two companies with same PK → one is a duplicate.
-	c1a := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
-	c1b := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Beta"})
+	c1a := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	c1b := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Beta"})
 	snap := buildSnapshot(t, s, c1a, c1b)
-	require.Equal(t, 1, len(snap.Duplicates()))
+	require.Len(t, snap.Duplicates(), 1)
 
 	g := graph.NewFromSnapshot(s, snap)
 	reSnap := g.Snapshot()
 
-	assert.Equal(t, 1, len(reSnap.Duplicates()))
+	assert.Len(t, reSnap.Duplicates(), 1)
 	assert.Equal(t, "Company", reSnap.Duplicates()[0].Instance.TypeName())
 }
 
@@ -261,59 +229,59 @@ func TestNewFromSnapshot_AddAfterImport_NewType(t *testing.T) {
 	s := importTestSchema(t)
 
 	// Original snapshot has only Person.
-	person := buildValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
+	person := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
 	snap := buildSnapshot(t, s, person)
 
 	g := graph.NewFromSnapshot(s, snap)
 	ctx := context.Background()
 
 	// Add a Company — a type not in the original snapshot.
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	result := g.Add(ctx, company)
 	assert.True(t, result.OK())
 
 	reSnap := g.Snapshot()
-	assert.Equal(t, 1, len(reSnap.InstancesOf("Person")))
-	assert.Equal(t, 1, len(reSnap.InstancesOf("Company")))
+	assert.Len(t, reSnap.InstancesOf("Person"), 1)
+	assert.Len(t, reSnap.InstancesOf("Company"), 1)
 }
 
 func TestNewFromSnapshot_AddAfterImport_DuplicatePK(t *testing.T) {
 	t.Parallel()
 	s := importTestSchema(t)
 
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	snap := buildSnapshot(t, s, company)
 
 	g := graph.NewFromSnapshot(s, snap)
 	ctx := context.Background()
 
 	// Add another Company with same PK → should be flagged as duplicate.
-	dup := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Beta"})
+	dup := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Beta"})
 	result := g.Add(ctx, dup)
 	assert.True(t, result.HasErrors()) // E_DUPLICATE_PK is an error
 
 	reSnap := g.Snapshot()
-	assert.Equal(t, 1, len(reSnap.InstancesOf("Company")))
-	assert.Equal(t, 1, len(reSnap.Duplicates()))
+	assert.Len(t, reSnap.InstancesOf("Company"), 1)
+	assert.Len(t, reSnap.Duplicates(), 1)
 }
 
 func TestNewFromSnapshot_AddAfterImport_EdgeResolution(t *testing.T) {
 	t.Parallel()
 	s := importTestSchema(t)
 
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	snap := buildSnapshot(t, s, company)
 
 	g := graph.NewFromSnapshot(s, snap)
 	ctx := context.Background()
 
 	// Add Person with edge to imported Company.
-	person := buildValidInstanceWithEdge(t, s, []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	result := g.Add(ctx, person)
 	assert.True(t, result.OK())
 
 	reSnap := g.Snapshot()
-	assert.Equal(t, 1, len(reSnap.Edges()))
+	assert.Len(t, reSnap.Edges(), 1)
 	assert.Equal(t, "EMPLOYER", reSnap.Edges()[0].Relation())
 }
 
@@ -322,21 +290,21 @@ func TestNewFromSnapshot_CrossResolution(t *testing.T) {
 	s := importTestSchema(t)
 
 	// Build snapshot with Person→Company unresolved (Company doesn't exist).
-	person := buildValidInstanceWithEdge(t, s, []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	snap := buildSnapshot(t, s, person)
-	require.Equal(t, 1, len(snap.Unresolved()))
-	require.Equal(t, 0, len(snap.Edges()))
+	require.Len(t, snap.Unresolved(), 1)
+	require.Empty(t, snap.Edges())
 
 	// Import, then add the Company that resolves the pending edge.
 	g := graph.NewFromSnapshot(s, snap)
 	ctx := context.Background()
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	result := g.Add(ctx, company)
 	assert.True(t, result.OK())
 
 	reSnap := g.Snapshot()
-	assert.Equal(t, 1, len(reSnap.Edges()), "pending edge should be resolved")
-	assert.Equal(t, 0, len(reSnap.Unresolved()), "no unresolved edges should remain")
+	assert.Len(t, reSnap.Edges(), 1, "pending edge should be resolved")
+	assert.Empty(t, reSnap.Unresolved(), "no unresolved edges should remain")
 	assert.Equal(t, "EMPLOYER", reSnap.Edges()[0].Relation())
 	assert.Equal(t, `["p1"]`, reSnap.Edges()[0].Source().PrimaryKey().String())
 	assert.Equal(t, `["c1"]`, reSnap.Edges()[0].Target().PrimaryKey().String())
@@ -346,8 +314,8 @@ func TestNewFromSnapshot_RoundTripFidelity(t *testing.T) {
 	t.Parallel()
 	s := importTestSchema(t)
 
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
-	person := buildValidInstanceWithEdge(t, s, []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	original := buildSnapshot(t, s, company, person)
 
 	// Import and re-snapshot.
@@ -355,25 +323,24 @@ func TestNewFromSnapshot_RoundTripFidelity(t *testing.T) {
 	reconstructed := g.Snapshot()
 
 	// Structural comparison.
-	err := snapshottest.CompareSnapshots(original, reconstructed)
-	assert.NoError(t, err)
+	snapshottest.DiffSnapshots(t, original, reconstructed)
 }
 
 func TestNewFromSnapshot_Independence(t *testing.T) {
 	t.Parallel()
 	s := importTestSchema(t)
 
-	company := buildValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	snap := buildSnapshot(t, s, company)
 
 	g := graph.NewFromSnapshot(s, snap)
 	ctx := context.Background()
 
 	// Add a new instance to the graph.
-	person := buildValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
+	person := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
 	g.Add(ctx, person)
 
 	// Original snapshot should be unaffected.
-	assert.Equal(t, 0, len(snap.InstancesOf("Person")), "original snapshot should not be modified")
-	assert.Equal(t, 1, len(snap.InstancesOf("Company")))
+	assert.Empty(t, snap.InstancesOf("Person"), "original snapshot should not be modified")
+	assert.Len(t, snap.InstancesOf("Company"), 1)
 }

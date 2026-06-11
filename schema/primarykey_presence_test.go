@@ -8,16 +8,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// hasCode reports whether res contains an issue with the given code.
-func hasCode(res diag.Result, code diag.Code) bool {
-	for issue := range res.Issues() {
-		if issue.Code() == code {
-			return true
-		}
-	}
-	return false
-}
-
 // TestCompletion_ConcreteTypeRequiresPrimaryKey pins the schema-level enforcement: a
 // concrete (non-abstract, non-part) type with no primary key — own or inherited — is
 // rejected at load with E_NO_PRIMARY_KEY, hoisting the graph layer's existing
@@ -25,7 +15,7 @@ func hasCode(res diag.Result, code diag.Code) bool {
 func TestCompletion_ConcreteTypeRequiresPrimaryKey(t *testing.T) {
 	_, res := schema.LoadString(context.Background(),
 		"schema \"geo\"\n\ntype Tag {\n\tlabel String required\n}\n", "t.yammm")
-	if !res.HasErrors() || !hasCode(res, diag.E_NO_PRIMARY_KEY) {
+	if !res.HasErrors() || !res.HasCode(diag.E_NO_PRIMARY_KEY) {
 		t.Fatalf("expected E_NO_PRIMARY_KEY for a PK-less concrete type; got: %v", res.Err())
 	}
 }
@@ -43,7 +33,7 @@ func TestCompletion_PrimaryKeyExemptions(t *testing.T) {
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, res := schema.LoadString(context.Background(), src, name+".yammm")
-			if hasCode(res, diag.E_NO_PRIMARY_KEY) {
+			if res.HasCode(diag.E_NO_PRIMARY_KEY) {
 				t.Errorf("unexpected E_NO_PRIMARY_KEY for %s; got: %v", name, res.Err())
 			}
 		})
@@ -60,7 +50,7 @@ func TestCompletion_PrimaryKeyInheritedCrossSchema(t *testing.T) {
 		"base.yammm": []byte("schema \"base\"\n\nabstract type Entity {\n\tid String primary\n}\n"),
 	}
 	_, res := schema.LoadSourcesWithEntry(context.Background(), sources, "main.yammm", ".")
-	if hasCode(res, diag.E_NO_PRIMARY_KEY) {
+	if res.HasCode(diag.E_NO_PRIMARY_KEY) {
 		t.Errorf("unexpected E_NO_PRIMARY_KEY for a concrete type inheriting a cross-schema PK; got: %v", res.Err())
 	}
 }
@@ -93,7 +83,7 @@ func TestCompletion_PrimaryKeyDeferredCrossSchemaSupertype_NotFlagged(t *testing
 	collector := diag.NewCollector(0)
 	schema.TestCompleteModel(model, sourceID(t, "deferred_pk.yammm"), collector, nil, nil)
 
-	if hasCode(collector.Result(), diag.E_NO_PRIMARY_KEY) {
+	if collector.Result().HasCode(diag.E_NO_PRIMARY_KEY) {
 		t.Errorf("unexpected E_NO_PRIMARY_KEY for a concrete type whose supertype is a deferred cross-schema reference; got: %v", collector.Result().Err())
 	}
 }
@@ -134,7 +124,7 @@ func TestCompletion_PrimaryKeyDeferredTransitiveSupertype_NotFlagged(t *testing.
 	collector := diag.NewCollector(0)
 	schema.TestCompleteModel(model, sourceID(t, "deferred_transitive_pk.yammm"), collector, nil, nil)
 
-	if hasCode(collector.Result(), diag.E_NO_PRIMARY_KEY) {
+	if collector.Result().HasCode(diag.E_NO_PRIMARY_KEY) {
 		t.Errorf("unexpected E_NO_PRIMARY_KEY for a concrete type whose key is deferred through a transitive cross-schema supertype; got: %v", collector.Result().Err())
 	}
 }

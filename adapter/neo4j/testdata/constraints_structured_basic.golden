@@ -1,0 +1,162 @@
+[
+  {
+    "Name": "basic_test__Entity_id_unique",
+    "Kind": 0,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "id"
+    ],
+    "TypeExpr": "",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_id_unique IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.id IS UNIQUE"
+  },
+  {
+    "Name": "basic_test__Entity_id_not_null",
+    "Kind": 1,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "id"
+    ],
+    "TypeExpr": "",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_id_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.id IS NOT NULL"
+  },
+  {
+    "Name": "basic_test__Entity_name_not_null",
+    "Kind": 1,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "name"
+    ],
+    "TypeExpr": "",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_name_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.name IS NOT NULL"
+  },
+  {
+    "Name": "basic_test__Entity_count_not_null",
+    "Kind": 1,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "count"
+    ],
+    "TypeExpr": "",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_count_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.count IS NOT NULL"
+  },
+  {
+    "Name": "basic_test__Entity_active_not_null",
+    "Kind": 1,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "active"
+    ],
+    "TypeExpr": "",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_active_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.active IS NOT NULL"
+  },
+  {
+    "Name": "basic_test__Entity_created_at_not_null",
+    "Kind": 1,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "created_at"
+    ],
+    "TypeExpr": "",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_created_at_not_null IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.created_at IS NOT NULL"
+  },
+  {
+    "Name": "basic_test__Entity_id_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "id"
+    ],
+    "TypeExpr": "STRING",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_id_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.id IS :: STRING"
+  },
+  {
+    "Name": "basic_test__Entity_name_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "name"
+    ],
+    "TypeExpr": "STRING",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_name_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.name IS :: STRING"
+  },
+  {
+    "Name": "basic_test__Entity_description_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "description"
+    ],
+    "TypeExpr": "STRING",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_description_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.description IS :: STRING"
+  },
+  {
+    "Name": "basic_test__Entity_count_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "count"
+    ],
+    "TypeExpr": "INTEGER",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_count_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.count IS :: INTEGER"
+  },
+  {
+    "Name": "basic_test__Entity_score_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "score"
+    ],
+    "TypeExpr": "FLOAT",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_score_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.score IS :: FLOAT"
+  },
+  {
+    "Name": "basic_test__Entity_active_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "active"
+    ],
+    "TypeExpr": "BOOLEAN",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_active_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.active IS :: BOOLEAN"
+  },
+  {
+    "Name": "basic_test__Entity_created_at_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "created_at"
+    ],
+    "TypeExpr": "ZONED DATETIME",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_created_at_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.created_at IS :: ZONED DATETIME"
+  },
+  {
+    "Name": "basic_test__Entity_birth_date_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "birth_date"
+    ],
+    "TypeExpr": "DATE",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_birth_date_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.birth_date IS :: DATE"
+  },
+  {
+    "Name": "basic_test__Entity_ref_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "ref"
+    ],
+    "TypeExpr": "STRING",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_ref_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.ref IS :: STRING"
+  },
+  {
+    "Name": "basic_test__Entity_embedding_type",
+    "Kind": 2,
+    "Label": "basic_test__Entity",
+    "Properties": [
+      "embedding"
+    ],
+    "TypeExpr": "LIST\u003cFLOAT NOT NULL\u003e",
+    "Statement": "CREATE CONSTRAINT basic_test__Entity_embedding_type IF NOT EXISTS FOR (n:basic_test__Entity) REQUIRE n.embedding IS :: LIST\u003cFLOAT NOT NULL\u003e"
+  }
+]

@@ -17,6 +17,7 @@ type loadConfig struct {
 	sourceRegistry  *source.Registry
 	logger          *slog.Logger
 	disallowImports bool
+	sourcesOnly     bool
 }
 
 // defaultLoadConfig returns a loadConfig with sensible defaults.
@@ -52,13 +53,15 @@ func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 //     registry.LookupBySourceID(rootID) returns the first Load's pointer on
 //     repeat calls; only imports benefit from the cache. This asymmetry is
 //     intentional.
-//   - Cross-Load sharing only fires when imports resolve to the same
-//     SourceID. SourceIDs derive from the canonical absolute path, so
-//     WithModuleRoot values resolving to different canonical paths for the
-//     same file yield different SourceIDs and do not share. For LoadString,
-//     the synthetic "string://<sourceName>" SourceID scheme means two
-//     LoadString calls sharing a Registry must use distinct sourceName
-//     values unless re-registering byte-identical content.
+//   - Cross-Load sharing fires whenever an import resolves to a SourceID
+//     already in r — including across loads with different WithModuleRoot
+//     values whose root+key combinations land on the same canonical path
+//     (nested roots reaching one shared file, for example). A cache-reused
+//     import keeps the ModuleRoot of the load that compiled it; see
+//     [Schema.ModuleRoot]. For LoadString, the synthetic
+//     "string://<sourceName>" SourceID scheme means two LoadString calls
+//     sharing a Registry must use distinct sourceName values unless
+//     re-registering byte-identical content.
 func WithRegistry(r *Registry) LoadOption {
 	return func(c *loadConfig) {
 		c.registry = r
@@ -83,11 +86,34 @@ func WithIssueLimit(limit int) LoadOption {
 	}
 }
 
-// WithSourceRegistry provides a source registry for position tracking.
+// withSourceRegistry provides a source registry for position tracking.
 // If not provided, a new source registry is created for the load operation.
-func WithSourceRegistry(reg *source.Registry) LoadOption {
+//
+// Unexported: the parameter type lives in internal/source, so no caller
+// outside the module can construct a meaningful argument — consumers read
+// the loaded schema's source closure via [Schema.Sources] instead. Tests
+// reach this seam through the package's test-only exports.
+func withSourceRegistry(reg *source.Registry) LoadOption {
 	return func(c *loadConfig) {
 		c.sourceRegistry = reg
+	}
+}
+
+// WithSourcesOnly restricts import resolution to the pre-registered
+// in-memory sources: an import that misses the registered set fails with
+// E_IMPORT_RESOLVE instead of falling back to a filesystem read under the
+// module root. Use it when loading embedded sources (e.g. a generated
+// package's SerializedModel via LoadSourcesWithEntry) to make the load
+// hermetic: source bytes come only from the provided map, a missing or
+// mis-keyed source surfaces as an error rather than being silently
+// satisfied by an on-disk file, and on-disk state cannot change how keys
+// resolve — SourceIDs derive textually from the module root and key, and
+// the module-root sandbox is never opened. Meaningful for
+// LoadSources/LoadSourcesWithEntry; a plain Load resolves its entry from
+// disk by definition (its imports would still be restricted).
+func WithSourcesOnly() LoadOption {
+	return func(c *loadConfig) {
+		c.sourcesOnly = true
 	}
 }
 

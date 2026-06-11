@@ -2,7 +2,6 @@ package snapshot_test
 
 import (
 	"context"
-	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -128,7 +127,7 @@ func TestScanDir_DirectoryDoesNotExist(t *testing.T) {
 	}
 
 	require.Error(t, trailingErr, "nonexistent dir should surface as iterator-level error")
-	assert.True(t, errors.Is(trailingErr, fs.ErrNotExist),
+	require.ErrorIs(t, trailingErr, fs.ErrNotExist,
 		"iterator error should wrap fs.ErrNotExist")
 	assert.Empty(t, got, "no per-file entries should yield")
 	assert.Equal(t, snapshot.ScanEntry{}, trailingEntry,
@@ -260,7 +259,7 @@ func TestScanDir_ContextCancelledMidIteration(t *testing.T) {
 	}
 
 	require.Error(t, trailingErr, "cancellation should yield a trailing iterator error")
-	assert.True(t, errors.Is(trailingErr, context.Canceled),
+	require.ErrorIs(t, trailingErr, context.Canceled,
 		"trailing error should be context.Canceled")
 	assert.Len(t, received, 2, "only the files consumed before cancel should be received")
 }
@@ -284,7 +283,7 @@ func TestScanDir_ContextAlreadyCancelledAtEntry(t *testing.T) {
 	}
 
 	require.Error(t, trailingErr)
-	assert.True(t, errors.Is(trailingErr, context.Canceled))
+	require.ErrorIs(t, trailingErr, context.Canceled)
 	assert.Empty(t, received, "already-cancelled ctx should skip os.ReadDir and yield no files")
 }
 
@@ -318,7 +317,7 @@ func TestScanDir_CtxCancelBeatsPerFileIOError(t *testing.T) {
 	}
 
 	require.Error(t, trailingErr, "cancellation must win over per-file error")
-	assert.True(t, errors.Is(trailingErr, context.Canceled))
+	require.ErrorIs(t, trailingErr, context.Canceled)
 	assert.False(t, entryReceived, "denied.ys must not be yielded as a ScanEntry when ctx is cancelled")
 }
 

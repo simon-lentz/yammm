@@ -10,12 +10,12 @@ import (
 
 func TestProvenance_RawPath_Default(t *testing.T) {
 	prov := NewProvenance("test.json", path.Root().Key("Person"), Span{})
-	assert.Equal(t, "", prov.RawPath())
+	assert.Empty(t, prov.RawPath())
 }
 
 func TestProvenance_RawPath_NilReceiver(t *testing.T) {
 	var prov *Provenance
-	assert.Equal(t, "", prov.RawPath())
+	assert.Empty(t, prov.RawPath())
 }
 
 func TestProvenance_WithRawPath(t *testing.T) {
@@ -32,7 +32,7 @@ func TestProvenance_WithRawPath_NilReceiver(t *testing.T) {
 	withRaw := prov.WithRawPath("$.custom")
 
 	assert.Equal(t, "$.custom", withRaw.RawPath())
-	assert.Equal(t, "", withRaw.SourceName())
+	assert.Empty(t, withRaw.SourceName())
 }
 
 func TestProvenance_WithRawPath_RoundTrip(t *testing.T) {

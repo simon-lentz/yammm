@@ -11,7 +11,7 @@ func TestRoot(t *testing.T) {
 	assert.Equal(t, "$", b.String())
 	assert.True(t, b.IsRoot())
 	assert.Equal(t, 0, b.Len())
-	assert.Equal(t, "", b.Last())
+	assert.Empty(t, b.Last())
 }
 
 func TestBuilder_Index(t *testing.T) {
@@ -324,7 +324,7 @@ func TestBuilder_Navigation(t *testing.T) {
 	})
 
 	t.Run("Last", func(t *testing.T) {
-		assert.Equal(t, "", Root().Last())
+		assert.Empty(t, Root().Last())
 		assert.Equal(t, ".a", Root().Key("a").Last())
 		assert.Equal(t, "[0]", Root().Key("a").Index(0).Last())
 		assert.Equal(t, "[id=42]", Root().Key("Person").PK(PKField{Name: "id", Value: 42}).Last())
@@ -368,6 +368,6 @@ func TestBuilder_EdgeCases(t *testing.T) {
 			longKey[i] = 'a'
 		}
 		b := Root().Key(string(longKey))
-		assert.Equal(t, 10002, len(b.String())) // "$." + key
+		assert.Len(t, b.String(), 10002) // "$." + key
 	})
 }

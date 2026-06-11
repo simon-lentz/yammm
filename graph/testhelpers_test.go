@@ -1,10 +1,13 @@
-package graph
+package graph_test
 
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -326,23 +329,41 @@ func testSchemaWithCircularChain(t *testing.T) *schema.Schema {
 
 // Instance Creation Helpers
 //
-// These helpers create ValidInstance objects for testing.
+// Thin wrappers over [instancetest.VI] adding the schema type lookup and
+// the edge-target assembly the graph suites repeat. Edge resolution is
+// exact-TypeID, so every instance must carry its real schema TypeID.
 
-// mustValidInstance creates a ValidInstance for testing. Panics on failure.
-func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+// mustTypeID resolves a schema type's ID, failing the test if absent.
+func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
-
 	typ, ok := s.Type(typeName)
 	if !ok {
 		t.Fatalf("Type %q not found in schema", typeName)
 	}
+	return typ.ID()
+}
 
-	return instance.NewValidInstance(
+// edgeData assembles single-relation edge data: every target key shares
+// the same edge properties (pass nil for none).
+func edgeData(relationName string, edgeProps map[string]any, targetKeys ...[]any) map[string]*instance.ValidEdgeData {
+	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
+	for i, targetKey := range targetKeys {
+		targets[i] = instance.NewValidEdgeTarget(
+			immutable.WrapKey(targetKey),
+			immutable.WrapProperties(edgeProps),
+		)
+	}
+	return map[string]*instance.ValidEdgeData{relationName: instance.NewValidEdgeData(targets)}
+}
+
+// mustValidInstance creates a ValidInstance for testing.
+func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+	t.Helper()
+	return instancetest.VI(
 		typeName,
-		typ.ID(),
-		immutable.WrapKey(pk),
-		immutable.WrapProperties(props),
-		nil, nil, nil,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
 	)
 }
 
@@ -357,33 +378,12 @@ func mustValidInstanceWithEdge(
 	targetKeys [][]any,
 ) *instance.ValidInstance {
 	t.Helper()
-
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("Type %q not found in schema", typeName)
-	}
-
-	// Build edge targets
-	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
-	for i, targetKey := range targetKeys {
-		targets[i] = instance.NewValidEdgeTarget(
-			immutable.WrapKey(targetKey),
-			immutable.Properties{},
-		)
-	}
-
-	edges := map[string]*instance.ValidEdgeData{
-		relationName: instance.NewValidEdgeData(targets),
-	}
-
-	return instance.NewValidInstance(
+	return instancetest.VI(
 		typeName,
-		typ.ID(),
-		immutable.WrapKey(pk),
-		immutable.WrapProperties(props),
-		edges,
-		nil,
-		nil,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+		instancetest.Edges(edgeData(relationName, nil, targetKeys...)),
 	)
 }
 
@@ -399,31 +399,12 @@ func mustValidInstanceWithEdgeProps(
 	edgeProps map[string]any,
 ) *instance.ValidInstance {
 	t.Helper()
-
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("Type %q not found in schema", typeName)
-	}
-
-	targets := []instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(
-			immutable.WrapKey(targetKey),
-			immutable.WrapProperties(edgeProps),
-		),
-	}
-
-	edges := map[string]*instance.ValidEdgeData{
-		relationName: instance.NewValidEdgeData(targets),
-	}
-
-	return instance.NewValidInstance(
+	return instancetest.VI(
 		typeName,
-		typ.ID(),
-		immutable.WrapKey(pk),
-		immutable.WrapProperties(props),
-		edges,
-		nil,
-		nil,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+		instancetest.Edges(edgeData(relationName, edgeProps, targetKey)),
 	)
 }
 
@@ -437,61 +418,40 @@ func mustValidInstanceWithEmptyEdge(
 	relationName string,
 ) *instance.ValidInstance {
 	t.Helper()
-
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("Type %q not found in schema", typeName)
-	}
-
-	edges := map[string]*instance.ValidEdgeData{
-		relationName: instance.NewValidEdgeData(nil), // Empty targets
-	}
-
-	return instance.NewValidInstance(
+	return instancetest.VI(
 		typeName,
-		typ.ID(),
-		immutable.WrapKey(pk),
-		immutable.WrapProperties(props),
-		edges,
-		nil,
-		nil,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+		instancetest.Edges(map[string]*instance.ValidEdgeData{relationName: instance.NewValidEdgeData(nil)}),
 	)
 }
 
 // mustValidPartInstance creates a ValidInstance for a part type.
 func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
 	t.Helper()
-
 	typ, ok := s.Type(typeName)
 	if !ok {
 		t.Fatalf("Type %q not found in schema", typeName)
 	}
-
 	if !typ.IsPart() {
 		t.Fatalf("Type %q is not a part type", typeName)
 	}
-
-	return instance.NewValidInstance(
+	return instancetest.VI(
 		typeName,
-		typ.ID(),
-		immutable.WrapKey(pk),
-		immutable.WrapProperties(props),
-		nil, nil, nil,
+		instancetest.TypeID(typ.ID()),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
 	)
 }
 
 // mustValidPKLessInstance creates a ValidInstance for a PK-less part type.
+// The zero Key has no [instancetest.VI] option, so this one builds directly.
 func mustValidPKLessInstance(t *testing.T, s *schema.Schema, typeName string, props map[string]any) *instance.ValidInstance {
 	t.Helper()
-
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("Type %q not found in schema", typeName)
-	}
-
 	return instance.NewValidInstance(
 		typeName,
-		typ.ID(),
+		mustTypeID(t, s, typeName),
 		immutable.Key{}, // No PK
 		immutable.WrapProperties(props),
 		nil, nil, nil,
@@ -615,7 +575,7 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 // Assertion Helpers
 
 // assertInstanceCount verifies the number of instances of a type in the result.
-func assertInstanceCount(t *testing.T, result *Snapshot, typeName string, expected int) bool {
+func assertInstanceCount(t *testing.T, result *graph.Snapshot, typeName string, expected int) bool {
 	t.Helper()
 
 	instances := result.InstancesOf(typeName)
@@ -627,7 +587,7 @@ func assertInstanceCount(t *testing.T, result *Snapshot, typeName string, expect
 }
 
 // assertEdgeCount verifies the number of edges in the result.
-func assertEdgeCount(t *testing.T, result *Snapshot, expected int) {
+func assertEdgeCount(t *testing.T, result *graph.Snapshot, expected int) {
 	t.Helper()
 
 	edges := result.Edges()
@@ -637,7 +597,7 @@ func assertEdgeCount(t *testing.T, result *Snapshot, expected int) {
 }
 
 // assertUnresolvedCount verifies the number of unresolved edges in the result.
-func assertUnresolvedCount(t *testing.T, result *Snapshot, expected int) {
+func assertUnresolvedCount(t *testing.T, result *graph.Snapshot, expected int) {
 	t.Helper()
 
 	unresolved := result.Unresolved()
@@ -647,11 +607,30 @@ func assertUnresolvedCount(t *testing.T, result *Snapshot, expected int) {
 }
 
 // assertComposedCount verifies the number of composed children for a relation.
-func assertComposedCount(t *testing.T, inst *Instance, relationName string, expected int) {
+func assertComposedCount(t *testing.T, inst *graph.Instance, relationName string, expected int) {
 	t.Helper()
 
 	count := inst.ComposedCount(relationName)
 	if count != expected {
 		t.Errorf("Expected %d composed children for %s, got %d", expected, relationName, count)
 	}
+}
+
+// assertHasCode fails t unless result carries at least one issue with code.
+func assertHasCode(t *testing.T, result diag.Result, code diag.Code) {
+	t.Helper()
+	if !result.HasCode(code) {
+		t.Errorf("expected an issue with code %v in result: %s", code, result.String())
+	}
+}
+
+// countCode returns the number of issues in result carrying code.
+func countCode(result diag.Result, code diag.Code) int {
+	count := 0
+	for issue := range result.Issues() {
+		if issue.Code() == code {
+			count++
+		}
+	}
+	return count
 }

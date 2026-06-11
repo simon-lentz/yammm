@@ -1,0 +1,17 @@
+{
+  "Proxy": [
+    {
+      "id": "px1",
+      "url": "http://proxy.example.com"
+    }
+  ],
+  "Service": [
+    {
+      "http_proxy": [
+        "px1"
+      ],
+      "id": "svc1",
+      "name": "API Gateway"
+    }
+  ]
+}

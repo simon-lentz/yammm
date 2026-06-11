@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
@@ -1267,69 +1267,48 @@ func TestComputePublicationPlan_DocumentCloseClearsAllEntryURIs(t *testing.T) {
 	assert.Empty(t, published, "published should be empty after close")
 }
 
+// TestWorkspace_FileChanged_SymlinkResolution verifies that FileChanged
+// resolves a symlinked path to its canonical form before the reverse-deps
+// lookup: a change notification arriving via the symlink must schedule
+// re-analysis of the entry document that imported the canonical path.
 func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
-	// Test that FileChanged correctly resolves symlinked paths for reverse deps
 	t.Parallel()
 
-	// Create temp directory structure
 	tmpDir := t.TempDir()
 	actualDir := tmpDir + "/actual"
 	require.NoError(t, os.MkdirAll(actualDir, 0o750), "failed to create actual dir")
 
-	// Create actual/parts.yammm
 	actualParts := actualDir + "/parts.yammm"
 	require.NoError(t, os.WriteFile(actualParts, []byte("schema \"parts\""), 0o600), "failed to write parts")
 
-	// Create symlink: linked -> actual
 	linkedDir := tmpDir + "/linked"
 	if err := os.Symlink(actualDir, linkedDir); err != nil {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Resolve canonical paths (handles /var -> /private/var on macOS)
+	// Canonical path (handles /var -> /private/var on macOS).
 	canonicalParts, err := filepath.EvalSymlinks(actualParts)
 	require.NoError(t, err, "failed to resolve parts path")
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := newTestWorkspace(t, logger, Config{})
+	// Keep the scheduled debounce pending so the real analyzeAndPublish
+	// (disk I/O) never fires; the assertion is on scheduling itself.
+	ws := newTestWorkspace(t, nil, Config{DebounceDelay: time.Hour})
 
-	// Create main.yammm that imports parts via canonical path
 	mainURI := "file:///main.yammm"
 	ws.documentOpened(mainURI, 1, "import parts")
-
-	// Simulate the loader tracking: main depends on canonical parts path
 	ws.updateDeps(mainURI, []string{canonicalParts})
 
-	// Verify reverse deps are set up
-	ws.mu.RLock()
-	canonicalPartsURI := lsputil.PathToURI(canonicalParts)
-	deps := ws.deps.reverseDeps[canonicalPartsURI]
-	ws.mu.RUnlock()
-
-	require.Contains(t, deps, mainURI, "reverse deps should contain main; canonicalPartsURI=%s", canonicalPartsURI)
-
-	// FileChanged with symlinked path (linked/parts.yammm)
+	// A change notification arrives via the SYMLINKED path.
 	linkedParts := linkedDir + "/parts.yammm"
-	linkedPartsURI := lsputil.PathToURI(linkedParts)
+	ws.FileChanged(lsputil.PathToURI(linkedParts), protocol.FileChangeTypeChanged)
 
-	// Verify the path resolution works by checking the deps lookup
+	ws.sched.debounceMu.Lock()
+	_, scheduled := ws.sched.debounces[mainURI]
+	ws.sched.debounceMu.Unlock()
+	require.True(t, scheduled,
+		"FileChanged via symlinked path must schedule re-analysis of the dependent entry")
 
-	// Manually test the canonicalization logic that FileChanged uses
-	path, _ := lsputil.URIToPath(linkedPartsURI)
-	resolved, _ := filepath.EvalSymlinks(path)
-	resolvedPath := filepath.Clean(resolved)
-	resolvedSourceID, _ := location.SourceIDFromAbsolutePath(resolvedPath)
-	resolvedURI := lsputil.PathToURI(resolvedSourceID.String())
-
-	// The resolved URI should match the canonical parts URI
-	assert.Equal(t, canonicalPartsURI, resolvedURI)
-
-	// And the reverse deps lookup should find main
-	ws.mu.RLock()
-	depsForResolved := ws.deps.reverseDeps[resolvedURI]
-	ws.mu.RUnlock()
-
-	assert.Contains(t, depsForResolved, mainURI, "reverse deps for resolved path should contain main")
+	ws.cancelPendingAnalysis(mainURI)
 }
 
 func TestWorkspace_FileChanged_CanonicalPathMatching(t *testing.T) {
@@ -1371,68 +1350,6 @@ func TestWorkspace_FileChanged_CanonicalPathMatching(t *testing.T) {
 // test for the issue: "Workspace debounce cleanup introduces a race that can
 // delete *new* timers/cancels".
 //
-// The race scenario:
-// 1. scheduleAnalysis(uri) creates entry0, schedules timer
-// 2. Timer fires, callback starts running analyzeAndPublish (takes time)
-// 3. User types, scheduleAnalysis(uri) called again, creates entry1
-// 4. Old callback finishes - must NOT delete entry1
-func TestScheduleAnalysis_EntryPointerIdentity(t *testing.T) {
-	t.Parallel()
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := newTestWorkspace(t, logger, Config{})
-
-	uri := "file:///test.yammm"
-
-	// Create entry0 (simulating first schedule)
-	ws.sched.debounceMu.Lock()
-	entry0 := &debounceEntry{
-		timer:  time.NewTimer(1 * time.Hour),
-		cancel: func() {},
-	}
-	ws.sched.debounces[uri] = entry0
-	ws.sched.debounceMu.Unlock()
-
-	// Simulate: while entry0's callback is running, a new schedule happens
-	// This creates entry1 and stores it in the map
-	ws.sched.debounceMu.Lock()
-	entry1 := &debounceEntry{
-		timer:  time.NewTimer(1 * time.Hour),
-		cancel: func() {},
-	}
-	ws.sched.debounces[uri] = entry1
-	ws.sched.debounceMu.Unlock()
-
-	// Now simulate entry0's callback cleanup logic:
-	// It should NOT delete because ws.sched.debounces[uri] != entry0
-	ws.sched.debounceMu.Lock()
-	if ws.sched.debounces[uri] == entry0 {
-		// BUG: This would delete entry1 if pointer check wasn't working
-		delete(ws.sched.debounces, uri)
-	}
-	ws.sched.debounceMu.Unlock()
-
-	// Verify entry1 is still in the map
-	ws.sched.debounceMu.Lock()
-	currentEntry := ws.sched.debounces[uri]
-	ws.sched.debounceMu.Unlock()
-
-	assert.Equal(t, entry1, currentEntry, "entry1 should still be in debounces map after entry0's cleanup attempt")
-
-	// Clean up: entry1's cleanup should succeed since it IS the current entry
-	ws.sched.debounceMu.Lock()
-	if ws.sched.debounces[uri] == entry1 {
-		delete(ws.sched.debounces, uri)
-	}
-	ws.sched.debounceMu.Unlock()
-
-	ws.sched.debounceMu.Lock()
-	_, hasEntry := ws.sched.debounces[uri]
-	ws.sched.debounceMu.Unlock()
-
-	assert.False(t, hasEntry, "entry1's cleanup should have removed the entry")
-}
-
 // TestScheduleAnalysis_RescheduleWhilePending verifies that calling
 // scheduleAnalysis while a previous timer is pending correctly cancels
 // the old entry and installs a new one.
@@ -1467,66 +1384,6 @@ func TestScheduleAnalysis_RescheduleWhilePending(t *testing.T) {
 
 	// Clean up
 	ws.cancelPendingAnalysis(uri)
-}
-
-// TestScheduleMarkdownAnalysis_EntryPointerIdentity verifies that the markdown
-// debounce cleanup uses pointer identity to avoid deleting newer entries.
-// This mirrors TestScheduleAnalysis_EntryPointerIdentity for the markdown path.
-func TestScheduleMarkdownAnalysis_EntryPointerIdentity(t *testing.T) {
-	t.Parallel()
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := newTestWorkspace(t, logger, Config{})
-
-	uri := "file:///test.md"
-
-	// Set up a markdown document so scheduleMarkdownAnalysis has something to work with
-	ws.markdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
-
-	// Create entry0 (simulating first schedule)
-	ws.sched.debounceMu.Lock()
-	entry0 := &debounceEntry{
-		timer:  time.NewTimer(1 * time.Hour),
-		cancel: func() {},
-	}
-	ws.sched.debounces[uri] = entry0
-	ws.sched.debounceMu.Unlock()
-
-	// Simulate: while entry0's callback is running, a new schedule happens
-	ws.sched.debounceMu.Lock()
-	entry1 := &debounceEntry{
-		timer:  time.NewTimer(1 * time.Hour),
-		cancel: func() {},
-	}
-	ws.sched.debounces[uri] = entry1
-	ws.sched.debounceMu.Unlock()
-
-	// Simulate entry0's callback cleanup: should NOT delete entry1
-	ws.sched.debounceMu.Lock()
-	if ws.sched.debounces[uri] == entry0 {
-		delete(ws.sched.debounces, uri)
-	}
-	ws.sched.debounceMu.Unlock()
-
-	// Verify entry1 is still in the map
-	ws.sched.debounceMu.Lock()
-	currentEntry := ws.sched.debounces[uri]
-	ws.sched.debounceMu.Unlock()
-
-	assert.Equal(t, entry1, currentEntry, "entry1 should still be in debounces map after entry0's cleanup attempt")
-
-	// entry1's cleanup should succeed
-	ws.sched.debounceMu.Lock()
-	if ws.sched.debounces[uri] == entry1 {
-		delete(ws.sched.debounces, uri)
-	}
-	ws.sched.debounceMu.Unlock()
-
-	ws.sched.debounceMu.Lock()
-	_, hasEntry := ws.sched.debounces[uri]
-	ws.sched.debounceMu.Unlock()
-
-	assert.False(t, hasEntry, "entry1's cleanup should have removed the entry")
 }
 
 // TestScheduleMarkdownAnalysis_RescheduleWhilePending verifies that calling
@@ -1899,7 +1756,7 @@ func Test_documentOpened_CRLFNormalization(t *testing.T) {
 	doc := ws.GetDocumentSnapshot(uri)
 	require.NotNil(t, doc, "document not found after open")
 
-	assert.False(t, strings.Contains(doc.Text, "\r"), "stored text still contains CR; want CRLF normalized to LF")
+	assert.NotContains(t, doc.Text, "\r", "stored text still contains CR; want CRLF normalized to LF")
 
 	expectedLines := 4 // "type Person {\n\tname string\n}\n" + trailing empty
 	actualLines := len(strings.Split(doc.Text, "\n"))
@@ -1928,7 +1785,7 @@ func TestDocumentChanged_CRLFNormalization(t *testing.T) {
 	doc := ws.GetDocumentSnapshot(uri)
 	require.NotNil(t, doc, "document not found after change")
 
-	assert.False(t, strings.Contains(doc.Text, "\r"), "stored text still contains CR after change; want CRLF normalized to LF")
+	assert.NotContains(t, doc.Text, "\r", "stored text still contains CR after change; want CRLF normalized to LF")
 }
 
 func TestDocumentChanged_VersionOrdering(t *testing.T) {
@@ -2089,46 +1946,14 @@ func TestRemapPathToURI_NonexistentPathWithDotDot(t *testing.T) {
 }
 
 // notificationCollector is a test helper that records LSP notifications.
-type notificationCollector struct {
-	mu      sync.Mutex
-	entries []notificationEntry
-}
-
-type notificationEntry struct {
-	Method string
-	Params any
-}
-
-func (c *notificationCollector) notify(method string, params any) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.entries = append(c.entries, notificationEntry{Method: method, Params: params})
-}
-
-func (c *notificationCollector) diagnosticsFor(uri string) []protocol.Diagnostic {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for i := len(c.entries) - 1; i >= 0; i-- {
-		e := c.entries[i]
-		if e.Method != protocol.ServerTextDocumentPublishDiagnostics {
-			continue
-		}
-		p, ok := e.Params.(protocol.PublishDiagnosticsParams)
-		if ok && p.URI == uri {
-			return p.Diagnostics
-		}
-	}
-	return nil
-}
 
 func TestPublishDiagnostics_HashDedup_SuppressesIdentical(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	collector := &notificationCollector{}
-	ws.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	ws.SetNotifier(collector.Notify)
 	uri := "file:///test.yammm"
 
 	diags := []protocol.Diagnostic{
@@ -2137,11 +1962,11 @@ func TestPublishDiagnostics_HashDedup_SuppressesIdentical(t *testing.T) {
 
 	// First publish goes through.
 	ws.publishDiagnostics(uri, nil, diags)
-	require.Len(t, collector.entries, 1, "after first publish")
+	require.Len(t, collector.Entries(), 1, "after first publish")
 
 	// Second identical publish is suppressed.
 	ws.publishDiagnostics(uri, nil, diags)
-	assert.Len(t, collector.entries, 1, "identical should be suppressed")
+	assert.Len(t, collector.Entries(), 1, "identical should be suppressed")
 }
 
 func TestPublishDiagnostics_HashDedup_AllowsDifferent(t *testing.T) {
@@ -2149,8 +1974,8 @@ func TestPublishDiagnostics_HashDedup_AllowsDifferent(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	collector := &notificationCollector{}
-	ws.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	ws.SetNotifier(collector.Notify)
 	uri := "file:///test.yammm"
 
 	diagsA := []protocol.Diagnostic{
@@ -2163,7 +1988,7 @@ func TestPublishDiagnostics_HashDedup_AllowsDifferent(t *testing.T) {
 	ws.publishDiagnostics(uri, nil, diagsA)
 	ws.publishDiagnostics(uri, nil, diagsB)
 
-	assert.Len(t, collector.entries, 2, "different diagnostics should both be published")
+	assert.Len(t, collector.Entries(), 2, "different diagnostics should both be published")
 }
 
 func TestPublishDiagnostics_HashDedup_EmptyDiagnostics(t *testing.T) {
@@ -2171,15 +1996,15 @@ func TestPublishDiagnostics_HashDedup_EmptyDiagnostics(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	collector := &notificationCollector{}
-	ws.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	ws.SetNotifier(collector.Notify)
 	uri := "file:///test.yammm"
 
 	// Two successive empty publishes: first goes through, second is suppressed.
 	ws.publishDiagnostics(uri, nil, nil)
 	ws.publishDiagnostics(uri, nil, []protocol.Diagnostic{})
 
-	assert.Len(t, collector.entries, 1, "empty diagnostics should be deduped")
+	assert.Len(t, collector.Entries(), 1, "empty diagnostics should be deduped")
 }
 
 func TestPublishDiagnostics_ClearHashOnClose_AllowsFreshPublish(t *testing.T) {
@@ -2187,8 +2012,8 @@ func TestPublishDiagnostics_ClearHashOnClose_AllowsFreshPublish(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	collector := &notificationCollector{}
-	ws.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	ws.SetNotifier(collector.Notify)
 	uri := "file:///test.yammm"
 
 	diags := []protocol.Diagnostic{
@@ -2204,7 +2029,7 @@ func TestPublishDiagnostics_ClearHashOnClose_AllowsFreshPublish(t *testing.T) {
 	// Same diagnostics after hash clear: should publish again.
 	ws.publishDiagnostics(uri, nil, diags)
 
-	assert.Len(t, collector.entries, 2, "after hash clear")
+	assert.Len(t, collector.Entries(), 2, "after hash clear")
 }
 
 func TestPublishDiagnostics_NilNotify_NoHash(t *testing.T) {
@@ -2677,8 +2502,8 @@ func TestMarkdownDocumentClosed_CleansUp(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	w.markdownDocumentOpened(uri, 1, "# Test")
 	w.markdownDocumentClosed(uri)
@@ -2692,8 +2517,8 @@ func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/close_diag.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	// Open markdown with syntax error to produce diagnostics.
 	content := "# Test\n\n```yammm\nnot valid schema!!!\n```\n"
@@ -2701,7 +2526,7 @@ func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 
 	// Verify non-empty diagnostics were published.
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	require.NotEmpty(t, diags, "precondition: diagnostics published for invalid content")
 
 	// Close — should publish empty diagnostics to clear editor.
@@ -2714,7 +2539,7 @@ func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
 	// Verify empty diagnostics notification was published.
 	// diagnosticsFor scans in reverse — the latest entry should be the clear notification
 	// with Diagnostics: []protocol.Diagnostic{} (non-nil empty slice per workspace.go:755-756).
-	finalDiags := collector.diagnosticsFor(uri)
+	finalDiags := collector.DiagnosticsFor(uri)
 	require.NotNil(t, finalDiags, "expected PublishDiagnostics notification after close")
 	assert.Empty(t, finalDiags, "expected empty diagnostics to clear editor squiggles")
 }
@@ -2724,8 +2549,8 @@ func TestAnalyzeMarkdownAndPublish_ProducesDiagnostics(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	// Content with a syntax error in the code block
 	content := "# Test\n\n```yammm\nnot valid schema!!!\n```\n"
@@ -2733,7 +2558,7 @@ func TestAnalyzeMarkdownAndPublish_ProducesDiagnostics(t *testing.T) {
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 
 	// Verify diagnostics were published
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	assert.NotEmpty(t, diags, "expected diagnostics for syntax error")
 
 	// Verify the snapshot has blocks
@@ -2748,8 +2573,8 @@ func TestAnalyzeMarkdownAndPublish_EmptyBlocks(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	// Markdown with no yammm blocks
 	content := "# Just prose\n\nNo code here.\n"
@@ -2767,14 +2592,14 @@ func TestAnalyzeMarkdownAndPublish_ImportRejection(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	content := "# Import Test\n\n```yammm\nschema \"import_test\"\n\nimport \"./sibling\" as s\n\ntype Foo {\n    id String primary\n}\n```\n"
 	w.markdownDocumentOpened(uri, 1, content)
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")
 
 	// Check that at least one diagnostic has E_IMPORT_NOT_ALLOWED code
@@ -2799,8 +2624,8 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlock(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/snippet.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	// A snippet block with no schema declaration — just a type definition
 	content := "# Snippet Example\n\n```yammm\ntype Foo {\n    id String primary\n    name String required\n}\n```\n"
@@ -2820,7 +2645,7 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlock(t *testing.T) {
 	assert.True(t, snap.Snapshots[0].Result.OK(), "snippet block should produce no errors, got: %v", snap.Snapshots[0].Result)
 
 	// Diagnostics should have no Fatal/Error entries
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	for _, d := range diags {
 		if d.Severity != nil {
 			assert.NotEqual(t, protocol.DiagnosticSeverityError, *d.Severity,
@@ -2848,44 +2673,93 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlockWithSchemaSkipsPrefix(t *testing.
 	assert.Equal(t, 0, snap.Blocks[0].PrefixLines, "block with schema declaration should have PrefixLines=0")
 }
 
+// TestAnalyzeMarkdownAndPublish_VersionGate exercises the version-discard
+// path for real: the completion hook changes the document to a newer
+// version inside the window between analysis finishing and the gate
+// re-checking, so the gate must discard the stale results — no blocks or
+// snapshots stored, no diagnostics published.
 func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	t.Parallel()
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
-	content := "# Test\n\n```yammm\nschema \"test\"\n```\n"
+	// An INVALID schema block, so a non-discarded publish would carry
+	// error diagnostics — making a gate failure observable.
+	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Broken {\n\tid Unknown primary\n}\n```\n"
 	w.markdownDocumentOpened(uri, 1, content)
 
-	// Change the document version before analysis completes
-	w.markdownDocumentChanged(uri, 2, "# Changed\n\n```yammm\nschema \"changed\"\n```\n")
-
-	// Analyze with original version — the results should be discarded
-	// because the document version has changed
-	w.mu.Lock()
-	w.markdownDocs[uri].Version = 1
-	w.mu.Unlock()
-
-	// Manually change back to force version mismatch after analysis
-	w.mu.Lock()
-	w.markdownDocs[uri].Version = 2
-	w.mu.Unlock()
-
-	// Simulate analysis starting with v1 — since we can't easily test async
-	// version gating, we verify the snapshot structure is correct after a
-	// successful analysis
-	w.mu.Lock()
-	w.markdownDocs[uri].Version = 1
-	w.mu.Unlock()
+	w.setAnalysisCompletedHook(func(hookURI string) {
+		if hookURI == uri {
+			w.markdownDocumentChanged(uri, 2, content)
+		}
+	})
 
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 
-	// This should succeed since version matches
+	// The gate saw version 2 != entry version 1: results discarded.
+	w.mu.RLock()
+	md := w.markdownDocs[uri]
+	blocks, snapshots := md.Blocks, md.Snapshots
+	w.mu.RUnlock()
+	assert.Nil(t, blocks, "stale analysis must not store blocks")
+	assert.Nil(t, snapshots, "stale analysis must not store snapshots")
+	assert.Empty(t, collector.DiagnosticsFor(uri), "stale analysis must not publish diagnostics")
+
+	// A re-run at the current version stores and publishes normally.
+	w.setAnalysisCompletedHook(nil)
+	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
-	assert.Equal(t, 1, snap.Version)
+	assert.Equal(t, 2, snap.Version)
+	assert.NotEmpty(t, snap.Blocks, "current-version analysis must store blocks")
+	assert.NotEmpty(t, collector.DiagnosticsFor(uri), "invalid block must publish diagnostics once current")
+}
+
+// TestAnalyzeAndPublish_VersionGate exercises the version-discard path on
+// the .yammm analysis pipeline, mirroring the markdown gate test: the
+// completion hook changes the document to a newer version inside the window
+// between analysis finishing and the gate re-checking, so the gate must
+// discard the stale snapshot — nothing stored, no diagnostics published.
+func TestAnalyzeAndPublish_VersionGate(t *testing.T) {
+	t.Parallel()
+
+	w := newTestWorkspace(t, slog.Default(), Config{})
+	uri := "file:///test/doc.yammm"
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
+
+	// An INVALID schema, so a non-discarded publish would carry error
+	// diagnostics — making a gate failure observable.
+	content := "schema \"test\"\n\ntype Broken {\n\tid Unknown primary\n}\n"
+	w.documentOpened(uri, 1, content)
+
+	w.setAnalysisCompletedHook(func(hookURI string) {
+		if hookURI == uri {
+			w.documentChanged(uri, 2, content)
+		}
+	})
+
+	w.analyzeAndPublish(t.Context(), uri)
+
+	// The gate saw version 2 != entry version 1: results discarded.
+	w.mu.RLock()
+	_, stored := w.snapshots[uri]
+	w.mu.RUnlock()
+	assert.False(t, stored, "stale analysis must not store a snapshot")
+	assert.Empty(t, collector.DiagnosticsFor(uri), "stale analysis must not publish diagnostics")
+
+	// A re-run at the current version stores and publishes normally.
+	w.setAnalysisCompletedHook(nil)
+	w.analyzeAndPublish(t.Context(), uri)
+	w.mu.RLock()
+	snap := w.snapshots[uri]
+	w.mu.RUnlock()
+	require.NotNil(t, snap, "current-version analysis must store a snapshot")
+	assert.Equal(t, 2, snap.EntryVersion)
+	assert.NotEmpty(t, collector.DiagnosticsFor(uri), "invalid schema must publish diagnostics once current")
 }
 
 func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
@@ -2893,8 +2767,8 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
-	collector := &notificationCollector{}
-	w.SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
 
 	content := "# Valid Schema\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
 	w.markdownDocumentOpened(uri, 1, content)
@@ -2911,7 +2785,7 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 	}
 
 	// Diagnostics should be empty for a valid schema
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	assert.Empty(t, diags, "expected no diagnostics for valid schema")
 }
 

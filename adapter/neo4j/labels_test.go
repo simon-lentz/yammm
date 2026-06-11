@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -107,44 +106,17 @@ func TestValidateIdentifier_Invalid(t *testing.T) {
 	}
 }
 
-func TestValidateIdentifier_ErrorsIs(t *testing.T) {
+func TestValidateIdentifier_ContextInMessage(t *testing.T) {
 	t.Parallel()
-
-	t.Run("ErrEmptyIdentifier", func(t *testing.T) {
-		t.Parallel()
-		err := ValidateIdentifier("", "field")
-		if !errors.Is(err, ErrEmptyIdentifier) {
-			t.Errorf("errors.Is(err, ErrEmptyIdentifier) = false; err = %v", err)
-		}
-	})
-
-	t.Run("ErrInvalidIdentifier", func(t *testing.T) {
-		t.Parallel()
-		err := ValidateIdentifier("123bad", "field")
-		if !errors.Is(err, ErrInvalidIdentifier) {
-			t.Errorf("errors.Is(err, ErrInvalidIdentifier) = false; err = %v", err)
-		}
-	})
-
-	t.Run("ErrReservedKeyword", func(t *testing.T) {
-		t.Parallel()
-		err := ValidateIdentifier("MATCH", "field")
-		if !errors.Is(err, ErrReservedKeyword) {
-			t.Errorf("errors.Is(err, ErrReservedKeyword) = false; err = %v", err)
-		}
-	})
-
-	t.Run("context in message", func(t *testing.T) {
-		t.Parallel()
-		err := ValidateIdentifier("", "property 'run_id'")
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		msg := err.Error()
-		if !strings.Contains(msg, "property 'run_id'") {
-			t.Errorf("error message %q does not contain context", msg)
-		}
-	})
+	// The caller-supplied context string must appear in the error so a
+	// failure names which field carried the bad identifier.
+	err := ValidateIdentifier("", "property 'run_id'")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "property 'run_id'") {
+		t.Errorf("error message %q does not contain context", msg)
+	}
 }
 
 func TestLabel_Default(t *testing.T) {
@@ -239,25 +211,22 @@ func TestDetectLabelCollisions_NoCollision(t *testing.T) {
 	}
 }
 
-func TestDetectLabelCollisions_Collision(t *testing.T) {
+// TestLabel_SanitizationCollision pins the collision mechanism that
+// [Adapter.DetectLabelCollisions] guards against: distinct raw names whose
+// sanitized forms coincide. Such names can no longer enter a schema — both
+// the parser and [schema.NewBuilder] enforce the DSL name productions, on
+// which [SanitizeIdentifier] is the identity function — so the detector's
+// collision branch is defense-in-depth for construction paths that bypass
+// both front doors.
+func TestLabel_SanitizationCollision(t *testing.T) {
 	t.Parallel()
 
-	// Verify the diag code is registered and constructible.
-	issue := diag.NewIssue(diag.Error, E_NEO4J_LABEL_COLLISION, "test collision").Build()
-	if issue.Code() != E_NEO4J_LABEL_COLLISION {
-		t.Error("E_NEO4J_LABEL_COLLISION code mismatch")
-	}
-
-	// Verify no collision on a valid schema.
-	s, loadResult := schema.Load(context.Background(), filepath.Join("testdata", "basic.yammm"))
-	if err := loadResult.Err(); err != nil {
-		t.Fatalf("schema has errors: %v", err)
-	}
-
 	a := New()
-	result := a.DetectLabelCollisions(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Errorf("unexpected collision errors: %v", err)
+	ctx := context.Background()
+	got := a.Label(ctx, "collide", "Foo-Bar")
+	want := a.Label(ctx, "collide", "Foo_Bar")
+	if got != want {
+		t.Fatalf("Label(Foo-Bar) = %q, Label(Foo_Bar) = %q; sanitization should map both to one label", got, want)
 	}
 }
 
@@ -274,7 +243,8 @@ func TestCypherReservedKeywords(t *testing.T) {
 		}
 	}
 
-	// Verify reasonable count (55 keywords per plan).
+	// The registry holds the Cypher 5 reserved words; assert a floor so a
+	// refactor that accidentally truncates the set fails loudly.
 	if len(keywords) < 50 {
 		t.Errorf("CypherReservedKeywords() returned %d entries; expected at least 50", len(keywords))
 	}

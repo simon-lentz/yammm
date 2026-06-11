@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/ident"
-	"github.com/stretchr/testify/assert"
 )
 
 // TestToLowerSnake_SpecExamples tests all examples from the architecture spec.
@@ -25,8 +24,9 @@ func TestToLowerSnake_SpecExamples(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ident.ToLowerSnake(tt.input)
-			assert.Equal(t, tt.want, got, "ToLowerSnake(%q)", tt.input)
+			if got := ident.ToLowerSnake(tt.input); got != tt.want {
+				t.Errorf("ToLowerSnake(%q) = %q, want %q", tt.input, got, tt.want)
+			}
 		})
 	}
 }
@@ -60,8 +60,9 @@ func TestToLowerSnake_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ident.ToLowerSnake(tt.input)
-			assert.Equal(t, tt.want, got, "ToLowerSnake(%q)", tt.input)
+			if got := ident.ToLowerSnake(tt.input); got != tt.want {
+				t.Errorf("ToLowerSnake(%q) = %q, want %q", tt.input, got, tt.want)
+			}
 		})
 	}
 }
@@ -81,8 +82,9 @@ func TestToLowerSnake_Unicode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ident.ToLowerSnake(tt.input)
-			assert.Equal(t, tt.want, got, "ToLowerSnake(%q)", tt.input)
+			if got := ident.ToLowerSnake(tt.input); got != tt.want {
+				t.Errorf("ToLowerSnake(%q) = %q, want %q", tt.input, got, tt.want)
+			}
 		})
 	}
 }
@@ -106,8 +108,9 @@ func TestToLowerSnake_Idempotent(t *testing.T) {
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
 			first := ident.ToLowerSnake(input)
-			second := ident.ToLowerSnake(first)
-			assert.Equal(t, first, second, "ToLowerSnake should be idempotent on %q", input)
+			if second := ident.ToLowerSnake(first); second != first {
+				t.Errorf("ToLowerSnake not idempotent on %q: %q then %q", input, first, second)
+			}
 		})
 	}
 }
@@ -129,8 +132,9 @@ func TestToLowerSnake_Idempotent_Random(t *testing.T) {
 	for range 100 {
 		src := next()
 		first := ident.ToLowerSnake(src)
-		second := ident.ToLowerSnake(first)
-		assert.Equal(t, first, second, "ToLowerSnake should be idempotent on random input %q", src)
+		if second := ident.ToLowerSnake(first); second != first {
+			t.Errorf("ToLowerSnake not idempotent on random input %q: %q then %q", src, first, second)
+		}
 	}
 }
 
@@ -150,8 +154,9 @@ func TestCapitalize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ident.Capitalize(tt.input)
-			assert.Equal(t, tt.want, got, "Capitalize(%q)", tt.input)
+			if got := ident.Capitalize(tt.input); got != tt.want {
+				t.Errorf("Capitalize(%q) = %q, want %q", tt.input, got, tt.want)
+			}
 		})
 	}
 }
@@ -170,8 +175,9 @@ func TestToUpperCamel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ident.ToUpperCamel(tt.input)
-			assert.Equal(t, tt.want, got, "ToUpperCamel(%q)", tt.input)
+			if got := ident.ToUpperCamel(tt.input); got != tt.want {
+				t.Errorf("ToUpperCamel(%q) = %q, want %q", tt.input, got, tt.want)
+			}
 		})
 	}
 }
@@ -199,8 +205,9 @@ func TestToUpperCamelInitialisms(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ident.ToUpperCamelInitialisms(tt.input, inits)
-			assert.Equal(t, tt.want, got, "ToUpperCamelInitialisms(%q)", tt.input)
+			if got := ident.ToUpperCamelInitialisms(tt.input, inits); got != tt.want {
+				t.Errorf("ToUpperCamelInitialisms(%q) = %q, want %q", tt.input, got, tt.want)
+			}
 		})
 	}
 }
@@ -221,8 +228,9 @@ func TestToLowerCamel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ident.ToLowerCamel(tt.input)
-			assert.Equal(t, tt.want, got, "ToLowerCamel(%q)", tt.input)
+			if got := ident.ToLowerCamel(tt.input); got != tt.want {
+				t.Errorf("ToLowerCamel(%q) = %q, want %q", tt.input, got, tt.want)
+			}
 		})
 	}
 }
@@ -230,30 +238,50 @@ func TestToLowerCamel(t *testing.T) {
 // TestCamelTransforms_NumericSegmentsSeparated tests numeric segment handling.
 func TestCamelTransforms_NumericSegmentsSeparated(t *testing.T) {
 	// Adjacent numeric segments should always be separated by "_" including 0 and 9.
-	assert.Equal(t, "foo1_2Bar", ident.ToLowerCamel("foo 1 2 bar"))
-	assert.Equal(t, "foo0_0Bar", ident.ToLowerCamel("foo 0 0 bar"))
-	assert.Equal(t, "foo9_9Bar", ident.ToLowerCamel("foo 9 9 bar"))
+	if got := ident.ToLowerCamel("foo 1 2 bar"); got != "foo1_2Bar" {
+		t.Errorf("ToLowerCamel(\"foo 1 2 bar\") = %q, want \"foo1_2Bar\"", got)
+	}
+	if got := ident.ToLowerCamel("foo 0 0 bar"); got != "foo0_0Bar" {
+		t.Errorf("ToLowerCamel(\"foo 0 0 bar\") = %q, want \"foo0_0Bar\"", got)
+	}
+	if got := ident.ToLowerCamel("foo 9 9 bar"); got != "foo9_9Bar" {
+		t.Errorf("ToLowerCamel(\"foo 9 9 bar\") = %q, want \"foo9_9Bar\"", got)
+	}
 
-	assert.Equal(t, "Foo1_2Bar", ident.ToUpperCamel("foo 1 2 bar"))
-	assert.Equal(t, "Foo0_0Bar", ident.ToUpperCamel("foo 0 0 bar"))
-	assert.Equal(t, "Foo9_9Bar", ident.ToUpperCamel("foo 9 9 bar"))
+	if got := ident.ToUpperCamel("foo 1 2 bar"); got != "Foo1_2Bar" {
+		t.Errorf("ToUpperCamel(\"foo 1 2 bar\") = %q, want \"Foo1_2Bar\"", got)
+	}
+	if got := ident.ToUpperCamel("foo 0 0 bar"); got != "Foo0_0Bar" {
+		t.Errorf("ToUpperCamel(\"foo 0 0 bar\") = %q, want \"Foo0_0Bar\"", got)
+	}
+	if got := ident.ToUpperCamel("foo 9 9 bar"); got != "Foo9_9Bar" {
+		t.Errorf("ToUpperCamel(\"foo 9 9 bar\") = %q, want \"Foo9_9Bar\"", got)
+	}
 }
 
 // TestCamelTransforms_PreservesAcronymRuns tests acronym preservation.
 func TestCamelTransforms_PreservesAcronymRuns(t *testing.T) {
-	assert.Equal(t, "httpServer", ident.ToLowerCamel("HTTPServer"))
-	assert.Equal(t, "httpServer", ident.ToLowerCamel("HTTP_Server"))
-	assert.Equal(t, "IDNumber", ident.ToUpperCamel("ID_number"))
+	if got := ident.ToLowerCamel("HTTPServer"); got != "httpServer" {
+		t.Errorf("ToLowerCamel(\"HTTPServer\") = %q, want \"httpServer\"", got)
+	}
+	if got := ident.ToLowerCamel("HTTP_Server"); got != "httpServer" {
+		t.Errorf("ToLowerCamel(\"HTTP_Server\") = %q, want \"httpServer\"", got)
+	}
+	if got := ident.ToUpperCamel("ID_number"); got != "IDNumber" {
+		t.Errorf("ToUpperCamel(\"ID_number\") = %q, want \"IDNumber\"", got)
+	}
 }
 
 func TestToUpperCamel_EmptyString(t *testing.T) {
-	got := ident.ToUpperCamel("")
-	assert.Equal(t, "", got, "ToUpperCamel(\"\") should return empty string")
+	if got := ident.ToUpperCamel(""); got != "" {
+		t.Errorf("ToUpperCamel(%q) = %q, want %q", "", got, "")
+	}
 }
 
 func TestToLowerCamel_EmptyString(t *testing.T) {
-	got := ident.ToLowerCamel("")
-	assert.Equal(t, "", got, "ToLowerCamel(\"\") should return empty string")
+	if got := ident.ToLowerCamel(""); got != "" {
+		t.Errorf("ToLowerCamel(%q) = %q, want %q", "", got, "")
+	}
 }
 
 // TestCamelTransforms_LeadingDigits tests that identifiers starting with digits
@@ -276,11 +304,12 @@ func TestCamelTransforms_LeadingDigits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotUpper := ident.ToUpperCamel(tt.input)
-			assert.Equal(t, tt.wantUpper, gotUpper, "ToUpperCamel(%q)", tt.input)
-
-			gotLower := ident.ToLowerCamel(tt.input)
-			assert.Equal(t, tt.wantLower, gotLower, "ToLowerCamel(%q)", tt.input)
+			if got := ident.ToUpperCamel(tt.input); got != tt.wantUpper {
+				t.Errorf("ToUpperCamel(%q) = %q, want %q", tt.input, got, tt.wantUpper)
+			}
+			if got := ident.ToLowerCamel(tt.input); got != tt.wantLower {
+				t.Errorf("ToLowerCamel(%q) = %q, want %q", tt.input, got, tt.wantLower)
+			}
 		})
 	}
 }
@@ -303,12 +332,18 @@ func TestCamelTransforms_IdempotentOnOutput(t *testing.T) {
 		src := next()
 
 		lower1 := ident.ToLowerCamel(src)
-		assert.Equal(t, lower1, ident.ToLowerCamel(lower1))
+		if got := ident.ToLowerCamel(lower1); got != lower1 {
+			t.Errorf("ToLowerCamel not idempotent on %q: %q then %q", src, lower1, got)
+		}
 
 		upper1 := ident.ToUpperCamel(src)
-		assert.Equal(t, upper1, ident.ToUpperCamel(upper1))
+		if got := ident.ToUpperCamel(upper1); got != upper1 {
+			t.Errorf("ToUpperCamel not idempotent on %q: %q then %q", src, upper1, got)
+		}
 
 		snake1 := ident.ToLowerSnake(src)
-		assert.Equal(t, snake1, ident.ToLowerSnake(snake1))
+		if got := ident.ToLowerSnake(snake1); got != snake1 {
+			t.Errorf("ToLowerSnake not idempotent on %q: %q then %q", src, snake1, got)
+		}
 	}
 }

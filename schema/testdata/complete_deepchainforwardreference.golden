@@ -1,0 +1,120 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "d_prop",
+          "Optional": false,
+          "PrimaryKey": false
+        },
+        {
+          "Constraint": "String",
+          "Name": "a_prop",
+          "Optional": false,
+          "PrimaryKey": true
+        },
+        {
+          "Constraint": "String",
+          "Name": "b_prop",
+          "Optional": false,
+          "PrimaryKey": false
+        },
+        {
+          "Constraint": "String",
+          "Name": "c_prop",
+          "Optional": false,
+          "PrimaryKey": false
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "D",
+      "Part": false,
+      "SuperTypes": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "c_prop",
+          "Optional": false,
+          "PrimaryKey": false
+        },
+        {
+          "Constraint": "String",
+          "Name": "a_prop",
+          "Optional": false,
+          "PrimaryKey": true
+        },
+        {
+          "Constraint": "String",
+          "Name": "b_prop",
+          "Optional": false,
+          "PrimaryKey": false
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "C",
+      "Part": false,
+      "SuperTypes": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "b_prop",
+          "Optional": false,
+          "PrimaryKey": false
+        },
+        {
+          "Constraint": "String",
+          "Name": "a_prop",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "B",
+      "Part": false,
+      "SuperTypes": [
+        "A"
+      ]
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "a_prop",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "A",
+      "Part": false,
+      "SuperTypes": null
+    }
+  ]
+}

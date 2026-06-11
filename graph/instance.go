@@ -14,8 +14,8 @@ import (
 // concurrent read access from multiple goroutines.
 //
 // Instances are created internally by [Graph.Add] and [Graph.AddComposed].
-// They are accessed via [Result.Instances], [Result.InstancesOf], or
-// [Result.InstanceByKey].
+// They are accessed via [Snapshot.Instances], [Snapshot.InstancesOf], or
+// [Snapshot.InstanceByKey].
 type Instance struct {
 	// typeName is the canonical instance tag form.
 	// Local types: unqualified (e.g., "Person")
@@ -47,7 +47,7 @@ type Instance struct {
 // For imported types, returns the alias-qualified name (e.g., "c.Entity")
 // using the bound schema's import alias.
 //
-// This matches the string used in [Result.Types] and [Result.Instances] keys.
+// This matches the string used in [Snapshot.Types] and [Snapshot.Instances] keys.
 func (i *Instance) TypeName() string {
 	if i == nil {
 		return ""

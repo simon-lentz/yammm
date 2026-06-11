@@ -1,11 +1,11 @@
 {
   "yammm_snapshot": {
-    "version": 1,
+    "version": 2,
     "schema_name": "test",
     "schema_source": "test://test.yammm",
     "schema_hash": "sha256:d10215e44a4c1b383b89b9f644c79d6e4f1192c46ae1fc52cbbd49ad37c9280e",
     "schema_hash_algorithm": 1,
-    "integrity_hash": "sha256:603f5c1bdfe9e04b7474433b4f85d712213cad406d23ddb53cbdc10546bddd08",
+    "integrity_hash": "sha256:b4b19ef70839367f2c2da18ce3484e88fc86ff6cedfaa270d2133aae46c8ce9c",
     "features": []
   },
   "types": [

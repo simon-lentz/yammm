@@ -45,6 +45,9 @@ linters:
     # - gochecknoinits # ban init() functions
     # - gochecknoglobals # ban globals
     - exhaustive # enum-style switch exhaustiveness (scoped to //exhaustive:enforce)
+    - depguard # import denylist — enforces the testify freeze for new test code
+    - testifylint # testify API misuse guards for the grandfathered call sites
+    - usetesting # t.TempDir()/t.Context()/t.Chdir() over os equivalents in tests
   disable:
     - lll # long lines
     - funlen # function length
@@ -137,7 +140,114 @@ linters:
         text: "G101"
         linters:
           - gosec
+      # --- testify freeze ratchet ---
+      # depguard denies new github.com/stretchr/testify imports repo-wide.
+      # The entries below grandfather the test files that already imported
+      # testify when the freeze landed. The list only shrinks: when a file
+      # drops its testify import, delete it from its directory's entry (and
+      # delete the whole entry when its alternation empties). Never add a
+      # file here.
+      - path: "^adapter/csv/(coerce|parse|write)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^adapter/json/(adapter|write)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^adapter/json/internal/typetag/(validate)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^adapter/neo4j/(diff|infer|introspect)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^cmd/yammm/(check|export|neo4j_diff|snapshot_info|snapshot_save|snapshot_update_metadata|snapshot_verify|validate)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^cmd/yammm-lsp/(main)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^cmd/yammm/internal/cli/(data|output)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^diag/(code_emission)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^format/(format)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^graph/(duplicate|import|result)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^instance/(errors|options|raw|schema_builder|valid|validate_composition|validate_edge|validator)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^instance/internal/eval/(builtins|checkers|evaluator|scope)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^location/(provenance)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^location/path/(builder|parse)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/(completion|definition|format|helpers|hover|server|symbols|sync_handlers)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/analysis/(analyzer)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/completion/(complete|context)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/definition/(resolve)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/docstate/(brace|normalize)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/hover/(hover|render)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/lsputil/(posconv|uri)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/markdown/(markdown)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/protocol/(protocol)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/symbols/(document|symbols)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^lsp/internal/workspace/(deps|mapper|workspace)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^schema/(alias|builder|complete|constraint|cross_cycle|datatype|hash|import|invariant|load|parse|parser_coverage|property|registry|relation|schema|sources|type|typeid|typeref|validate_invariants)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^schema/expr/(expr)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^schema/internal/exprcomp/(exprcomp)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^snapshot/(goldenbytes|scan|snapshot|update|version|wire)_test\\.go$"
+        linters:
+          - depguard
   settings:
+    depguard:
+      rules:
+        testify-freeze:
+          deny:
+            - pkg: github.com/stretchr/testify
+              desc: "testify is frozen for new code — use the stdlib plus internal/yammmtest (cmp + goldens); grandfathered files are enumerated in linters.exclusions.rules and that list only shrinks"
+    testifylint:
+      disable:
+        # The DSL contract pins exact float results (parsed literals,
+        # JSON-number normalization, single-op arithmetic on exactly
+        # representable values); InDelta-style rewrites would weaken those
+        # spec assertions.
+        - float-compare
     exhaustive:
       # Only switches annotated with //exhaustive:enforce are checked, so
       # enabling this linter does not churn the many intentional partial

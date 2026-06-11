@@ -1,0 +1,24 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "name",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Person",
+      "Part": false,
+      "SuperTypes": null
+    }
+  ]
+}

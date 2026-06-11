@@ -169,7 +169,7 @@ func Order(left, right any) (int, error) {
 		leftLen := leftVo.Len()
 		rightVo := reflect.ValueOf(right)
 		rightLen := rightVo.Len()
-		minLen := Min(leftLen, rightLen)
+		minLen := min(leftLen, rightLen)
 		for i := range minLen {
 			leftVal := leftVo.Index(i).Interface()
 			rightVal := rightVo.Index(i).Interface()

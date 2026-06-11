@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 	"github.com/simon-lentz/yammm/lsp/internal/workspace"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +14,7 @@ import (
 
 func TestHandleCompletion_NilUnit(t *testing.T) {
 	t.Parallel()
-	h := handleCompletion(&fakeResolver{unit: nil}, testLogger())
+	h := handleCompletion(&fakeResolver{unit: nil}, testutil.DiscardLogger())
 	var result any
 	err := callHandler(t, h, &protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
@@ -39,7 +40,7 @@ func TestHandleCompletion_WithUnit(t *testing.T) {
 			LocalLine: 3,
 			LocalChar: 0,
 		},
-	}, testLogger())
+	}, testutil.DiscardLogger())
 
 	var result []protocol.CompletionItem
 	err := callHandler(t, h, &protocol.CompletionParams{
@@ -71,7 +72,7 @@ func TestHandleCompletion_CrossSchemaImports(t *testing.T) {
 			LocalLine: 4,
 			LocalChar: 21,
 		},
-	}, testLogger())
+	}, testutil.DiscardLogger())
 
 	var result []protocol.CompletionItem
 	err := callHandler(t, h, &protocol.CompletionParams{

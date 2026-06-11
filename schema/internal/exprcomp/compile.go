@@ -1,6 +1,8 @@
 package exprcomp
 
 import (
+	"fmt"
+
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -9,6 +11,44 @@ import (
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
+
+// InvalidNumberMessage is the diagnostic text for the lexer's
+// INVALID_NUMBER token — a numeric literal running straight into
+// identifier characters ("0x10", "42abc", a broken exponent). Shared by
+// every parser error listener so the message is identical wherever the
+// malformed literal appears: expressions, constraint bounds, or any other
+// numeric position.
+func InvalidNumberMessage(text string) string {
+	return fmt.Sprintf("malformed numeric literal %q: numeric literals are decimal (hexadecimal and suffixed forms are not supported)", text)
+}
+
+// syntaxErrorListener collects ANTLR lexer and parser errors into a diag
+// collector, so CompileString fails on input the parser could not consume
+// cleanly instead of compiling whatever expression error recovery
+// salvaged.
+type syntaxErrorListener struct {
+	*antlr.DefaultErrorListener
+	collector *diag.Collector
+	sourceID  location.SourceID
+	sawError  bool
+}
+
+func (l *syntaxErrorListener) SyntaxError(
+	_ antlr.Recognizer,
+	offendingSymbol any,
+	line, column int,
+	msg string,
+	_ antlr.RecognitionException,
+) {
+	l.sawError = true
+	if token, ok := offendingSymbol.(antlr.Token); ok && token != nil &&
+		token.GetTokenType() == grammar.YammmGrammarLexerINVALID_NUMBER {
+		msg = InvalidNumberMessage(token.GetText())
+	}
+	pos := location.Position{Line: line, Column: column + 1, Byte: -1}
+	l.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX, msg).
+		WithSpan(location.Span{Source: l.sourceID, Start: pos, End: pos}).Build())
+}
 
 // Compile compiles an ANTLR expression context into an Expression AST.
 //
@@ -59,12 +99,19 @@ func CompileString(
 	stream := antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel)
 	parser := grammar.NewYammmGrammarParser(stream)
 
-	// Remove default error listeners to avoid console spam
+	// Surface every lexer and parser error into the collector instead of
+	// the default console listeners: source that does not parse cleanly
+	// must fail compilation rather than compile whatever expression error
+	// recovery salvaged.
+	el := &syntaxErrorListener{collector: collector, sourceID: sourceID}
+	lexer.RemoveErrorListeners()
+	lexer.AddErrorListener(el)
 	parser.RemoveErrorListeners()
+	parser.AddErrorListener(el)
 
 	// Parse the schema to get to the invariant
 	schema := parser.Schema()
-	if schema == nil {
+	if schema == nil || el.sawError {
 		return nil
 	}
 

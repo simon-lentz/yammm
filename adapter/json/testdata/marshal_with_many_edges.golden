@@ -1,0 +1,26 @@
+{
+  "Company": [
+    {
+      "id": "c1",
+      "name": "Acme Inc"
+    },
+    {
+      "id": "c2",
+      "name": "Beta Corp"
+    }
+  ],
+  "Person": [
+    {
+      "employers": [
+        [
+          "c1"
+        ],
+        [
+          "c2"
+        ]
+      ],
+      "id": "p1",
+      "name": "Alice"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "name": "MySchema",
+    "detail": "schema \"MySchema\"",
+    "kind": 2,
+    "range": {
+      "start": {
+        "line": 0,
+        "character": 0
+      },
+      "end": {
+        "line": 0,
+        "character": 19
+      }
+    },
+    "selectionRange": {
+      "start": {
+        "line": 0,
+        "character": 0
+      },
+      "end": {
+        "line": 0,
+        "character": 19
+      }
+    }
+  }
+]

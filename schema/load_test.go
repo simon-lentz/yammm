@@ -3,6 +3,7 @@ package schema_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,26 +13,50 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/source"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestString_SimpleSchema(t *testing.T) {
-	// Note: YAMMM grammar uses `name Type` syntax, not `name: Type`
-	source := `schema "test" type Person { name String primary }`
-	ctx := t.Context()
-
-	s, result := schema.LoadString(ctx, source, "test.yammm")
-
-	require.NotNil(t, s)
-	assert.Equal(t, "test", s.Name())
+// requireOK fails the test when result carries errors, logging every
+// collected issue first so load failures are diagnosable.
+func requireOK(t *testing.T, result diag.Result) {
+	t.Helper()
 	if result.HasErrors() {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Unexpected issue: %v", issue)
 		}
 	}
 	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+}
+
+// loadOK loads source from a string and requires success: a non-nil
+// schema with no error diagnostics (each issue logged on failure).
+func loadOK(t *testing.T, source string) *schema.Schema {
+	t.Helper()
+	s, result := schema.LoadString(t.Context(), source, "test.yammm")
+	requireOK(t, result)
+	require.NotNil(t, s)
+	return s
+}
+
+// loadErr loads source from a string and requires failure: a nil schema
+// with error diagnostics. Returns the result for code-level assertions.
+func loadErr(t *testing.T, source string) diag.Result {
+	t.Helper()
+	s, result := schema.LoadString(t.Context(), source, "test.yammm")
+	require.Nil(t, s, "load should fail")
+	require.True(t, result.HasErrors(), "load should produce error diagnostics")
+	return result
+}
+
+func TestString_SimpleSchema(t *testing.T) {
+	// Note: YAMMM grammar uses `name Type` syntax, not `name: Type`
+	source := `schema "test" type Person { name String primary }`
+	s := loadOK(t, source)
+	assert.Equal(t, "test", s.Name())
 
 	typ, ok := s.Type("Person")
 	require.True(t, ok)
@@ -40,24 +65,14 @@ func TestString_SimpleSchema(t *testing.T) {
 
 func TestString_EmptySchema(t *testing.T) {
 	source := `schema "empty"`
-	ctx := t.Context()
-
-	s, result := schema.LoadString(ctx, source, "empty.yammm")
-
-	require.NotNil(t, s)
+	s := loadOK(t, source)
 	assert.Equal(t, "empty", s.Name())
-	assert.False(t, result.HasErrors())
 }
 
 func TestString_SyntaxError(t *testing.T) {
 	// Completely invalid syntax that can't be recovered
 	source := `not a valid schema at all!!!`
-	ctx := t.Context()
-
-	s, result := schema.LoadString(ctx, source, "syntax.yammm")
-
-	assert.Nil(t, s) // No valid schema could be produced
-	assert.True(t, result.HasErrors())
+	loadErr(t, source)
 }
 
 func TestString_NilContextPanics(t *testing.T) {
@@ -70,12 +85,7 @@ func TestString_NilContextPanics(t *testing.T) {
 
 func TestString_DisallowsImports(t *testing.T) {
 	source := `schema "test" import "./other"`
-	ctx := t.Context()
-
-	s, result := schema.LoadString(ctx, source, "test.yammm")
-
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	loadErr(t, source)
 }
 
 func TestWithDisallowImports_SourcesWithEntry(t *testing.T) {
@@ -1626,7 +1636,7 @@ type Order {
 	assert.True(t, found, "expected E_UNKNOWN_PROPERTY for nonexistent on LineItem")
 }
 
-// --- Shared-Registry cross-Load tests (PR-7) ---
+// --- Shared-Registry cross-Load tests ---
 
 // writeSharedRegistryFixtures sets up a tempdir with:
 //   - common.yammm — a leaf schema shared as a transitive import
@@ -1836,4 +1846,333 @@ func TestLoad_SharedRegistry_TopLevelReparse(t *testing.T) {
 	require.True(t, ok)
 	assert.Same(t, s1, regStored,
 		"registry must retain the first Load's pointer; idempotent Register must not overwrite")
+}
+
+// canonicalPath mirrors the loader's path canonicalization (absolute,
+// cleaned, symlinks resolved) so ModuleRoot expectations compare equal on
+// systems where TempDir rides a symlink (e.g. macOS /var -> /private/var).
+func canonicalPath(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	require.NoError(t, err)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	return filepath.Clean(abs)
+}
+
+// writeModuleTree writes a two-file module-style layout under a fresh
+// temp root: sub/entry.yammm imports lib/dep.yammm by module path.
+// Returns (root, entryPath).
+func writeModuleTree(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sub"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o750))
+	entry := filepath.Join(root, "sub", "entry.yammm")
+	require.NoError(t, os.WriteFile(entry, []byte("schema \"entry\"\n\nimport \"lib/dep\" as dep\n\ntype Thing {\n\tid String primary\n\t--> USES (one) dep.Part\n}\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "dep.yammm"), []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n}\n"), 0o600))
+	return root, entry
+}
+
+// TestModuleRoot_Recorded pins Schema.ModuleRoot across every load form:
+// the canonicalized WithModuleRoot value when given, the entry directory
+// for a plain Load, the canonicalized root for the in-memory loaders
+// (including the "." form), and "" for LoadString. Imported sub-schemas
+// record the same root as their entry.
+func TestModuleRoot_Recorded(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("load default is entry dir", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "solo.yammm")
+		require.NoError(t, os.WriteFile(path, []byte("schema \"solo\"\n\ntype T {\n\tid String primary\n}\n"), 0o600))
+		s, res := schema.Load(ctx, path)
+		requireOK(t, res)
+		assert.Equal(t, canonicalPath(t, dir), s.ModuleRoot())
+	})
+
+	t.Run("with module root, entry and import record it", func(t *testing.T) {
+		t.Parallel()
+		root, entry := writeModuleTree(t)
+		s, res := schema.Load(ctx, entry, schema.WithModuleRoot(root))
+		requireOK(t, res)
+		want := canonicalPath(t, root)
+		assert.Equal(t, want, s.ModuleRoot())
+		require.Len(t, s.ImportsSlice(), 1)
+		sub := s.ImportsSlice()[0].Schema()
+		require.NotNil(t, sub)
+		assert.Equal(t, want, sub.ModuleRoot(), "imported sub-schema records the same root")
+	})
+
+	t.Run("load string records none", func(t *testing.T) {
+		t.Parallel()
+		s, res := schema.LoadString(ctx, "schema \"s\"\n\ntype T {\n\tid String primary\n}\n", "inline.yammm")
+		requireOK(t, res)
+		assert.Empty(t, s.ModuleRoot())
+	})
+
+	t.Run("sources with entry records canonicalized dot", func(t *testing.T) {
+		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+			"x.yammm": []byte("schema \"x\"\n\ntype T {\n\tid String primary\n}\n"),
+		}, "x.yammm", ".")
+		requireOK(t, res)
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		assert.Equal(t, canonicalPath(t, cwd), s.ModuleRoot())
+	})
+
+	t.Run("registry cache hit retains producing load's root", func(t *testing.T) {
+		t.Parallel()
+		reg := schema.NewRegistry()
+		root := t.TempDir()
+		sub := filepath.Join(root, "sub")
+		require.NoError(t, os.MkdirAll(sub, 0o750))
+		shared := []byte("schema \"shared\"\n\ntype Part {\n\tpart_id String primary\n}\n")
+		require.NoError(t, os.WriteFile(filepath.Join(sub, "shared.yammm"), shared, 0o600))
+		entryA := filepath.Join(root, "a.yammm")
+		require.NoError(t, os.WriteFile(entryA, []byte("schema \"a\"\n\nimport \"sub/shared\" as sh\n\ntype Thing {\n\tid String primary\n\t--> USES (one) sh.Part\n}\n"), 0o600))
+		entryB := filepath.Join(sub, "b.yammm")
+		require.NoError(t, os.WriteFile(entryB, []byte("schema \"b\"\n\nimport \"shared\" as sh\n\ntype Thing {\n\tid String primary\n\t--> USES (one) sh.Part\n}\n"), 0o600))
+
+		a, res := schema.Load(ctx, entryA, schema.WithModuleRoot(root), schema.WithRegistry(reg))
+		requireOK(t, res)
+		b, res := schema.Load(ctx, entryB, schema.WithModuleRoot(sub), schema.WithRegistry(reg))
+		requireOK(t, res)
+
+		require.Len(t, b.ImportsSlice(), 1)
+		imp := b.ImportsSlice()[0].Schema()
+		require.NotNil(t, imp)
+		assert.Same(t, a.ImportsSlice()[0].Schema(), imp,
+			"nested roots reaching the same canonical file share via the registry")
+		assert.Equal(t, canonicalPath(t, sub), b.ModuleRoot())
+		assert.Equal(t, canonicalPath(t, root), imp.ModuleRoot(),
+			"a cache-reused import keeps the root of the load that compiled it")
+	})
+}
+
+// TestLoad_MalformedNumericLiterals pins the lexer-level rejection of
+// prefixed/suffixed numeric forms: the load fails with E_SYNTAX and the
+// message names the malformed literal itself, in both expression and
+// constraint-bound positions — not an oblique "mismatched input" pointing
+// past it.
+func TestLoad_MalformedNumericLiterals(t *testing.T) {
+	tests := map[string]string{
+		"hex in invariant":         "schema \"t\"\n\ntype T {\n\tid String primary\n\t! \"bound\" 0x10\n}\n",
+		"hex in constraint bounds": "schema \"t\"\n\ntype T {\n\tid String[0x10, 20] primary\n}\n",
+		"suffixed integer":         "schema \"t\"\n\ntype T {\n\tid String primary\n\t! \"bound\" 42abc\n}\n",
+	}
+	for name, src := range tests {
+		t.Run(name, func(t *testing.T) {
+			res := loadErr(t, src)
+			require.True(t, res.HasCode(diag.E_SYNTAX), "want E_SYNTAX, got: %v", res.Err())
+			assert.Contains(t, res.Err().Error(), "malformed numeric literal")
+		})
+	}
+}
+
+// TestLoad_FloatExponentForms pins the documented numeric-literal grammar:
+// the exponent sign is optional, so the signless form loads identically to
+// the signed ones.
+func TestLoad_FloatExponentForms(t *testing.T) {
+	for name, bound := range map[string]string{
+		"signless exponent": "2.5e10",
+		"plus exponent":     "2.5e+10",
+		"minus exponent":    "1.0e-5",
+		"upper E":           "3.0E8",
+	} {
+		t.Run(name, func(t *testing.T) {
+			loadOK(t, "schema \"t\"\n\ntype T {\n\tid String primary\n\tv Float[0.0, "+bound+"]\n}\n")
+		})
+	}
+}
+
+// TestWithSourcesOnly pins the hermetic-load contract: with the option, an
+// import that misses the pre-registered set fails with E_IMPORT_RESOLVE even
+// when a matching file exists on disk under the module root — the filesystem
+// fallback is structurally skipped. Without the option the same layout loads
+// via the disk fallback; with the full set pre-registered the option is
+// satisfied entirely in memory.
+func TestWithSourcesOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	entrySrc := []byte("schema \"entry\"\n\nimport \"lib/dep\" as dep\n\ntype Thing {\n\tid String primary\n\t--> USES (one) dep.Part\n}\n")
+	depSrc := []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n}\n")
+
+	t.Run("miss fails instead of reading disk", func(t *testing.T) {
+		t.Parallel()
+		root, _ := writeModuleTree(t) // dep exists ON DISK under root
+		_, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+			"sub/entry.yammm": entrySrc,
+		}, "sub/entry.yammm", root, schema.WithSourcesOnly())
+		require.True(t, res.HasErrors(), "expected the import miss to fail under WithSourcesOnly")
+		assert.Contains(t, res.Err().Error(), "not found in pre-registered sources")
+	})
+
+	t.Run("same layout loads via disk without the option", func(t *testing.T) {
+		t.Parallel()
+		root, _ := writeModuleTree(t)
+		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+			"sub/entry.yammm": entrySrc,
+		}, "sub/entry.yammm", root)
+		requireOK(t, res)
+		assert.Equal(t, "entry", s.Name())
+	})
+
+	t.Run("complete in-memory set satisfies the option", func(t *testing.T) {
+		t.Parallel()
+		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+			"sub/entry.yammm": entrySrc,
+			"lib/dep.yammm":   depSrc,
+		}, "sub/entry.yammm", t.TempDir(), schema.WithSourcesOnly())
+		requireOK(t, res)
+		assert.Equal(t, "entry", s.Name())
+	})
+}
+
+// TestWithSourcesOnly_SymlinkedImportDir pins that in-memory resolution is
+// independent of filesystem state. The module root contains lib -> real (a
+// symlinked directory on both the entry and import paths) and the on-disk
+// files hold garbage; the pre-registered sources must still resolve, because
+// source registration, entry selection, and import lookup all derive the
+// same SourceID from the same textual root-relative key — no step resolves
+// the joined path against the filesystem. A symlink-resolved registration
+// paired with a textual lookup would miss and fail the load.
+func TestWithSourcesOnly_SymlinkedImportDir(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "real"), 0o750))
+	if err := os.Symlink("real", filepath.Join(root, "lib")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	// The on-disk bytes are garbage: any code path that reads the joined key
+	// paths from disk (or resolves them through the symlink) fails loudly
+	// instead of silently shadowing the pre-registered content.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "real", "entry.yammm"), []byte("NOT A SCHEMA"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "real", "dep.yammm"), []byte("NOT A SCHEMA"), 0o600))
+
+	depSrc := []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n}\n")
+	for name, importDecl := range map[string]string{
+		"module-style import": `import "lib/dep" as dep`,
+		"relative import":     `import "./dep" as dep`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			entrySrc := []byte("schema \"entry\"\n\n" + importDecl + "\n\ntype Thing {\n\tid String primary\n\t--> USES (one) dep.Part\n}\n")
+			s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+				"lib/entry.yammm": entrySrc,
+				"lib/dep.yammm":   depSrc,
+			}, "lib/entry.yammm", root, schema.WithSourcesOnly())
+			requireOK(t, res)
+			require.NotNil(t, s)
+			assert.Equal(t, "entry", s.Name())
+		})
+	}
+}
+
+// TestSharedRegistry_CacheHitSourcesComplete pins that a cross-Load
+// registry cache hit still yields a complete Sources() on the new load:
+// the cached import's content is copied into the load's source registry,
+// so closure-content consumers (diagnostics rendering, gogen's embedded
+// SerializedModel) see every source even when the read+parse pipeline was
+// short-circuited.
+func TestSharedRegistry_CacheHitSourcesComplete(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	root, entry := writeModuleTree(t)
+	registry := schema.NewRegistry()
+
+	first, res := schema.Load(ctx, entry, schema.WithModuleRoot(root), schema.WithRegistry(registry))
+	requireOK(t, res)
+	second, res := schema.Load(ctx, entry, schema.WithModuleRoot(root), schema.WithRegistry(registry))
+	requireOK(t, res)
+
+	require.Len(t, second.ImportsSlice(), 1)
+	imp := second.ImportsSlice()[0]
+	assert.Same(t, first.ImportsSlice()[0].Schema(), imp.Schema(), "second load should cache-hit the import")
+
+	srcs := second.Sources()
+	require.NotNil(t, srcs)
+	if _, ok := srcs.ContentBySource(imp.ResolvedSourceID()); !ok {
+		t.Error("cache-hit import content missing from the new load's Sources()")
+	}
+}
+
+// TestSharedRegistry_CacheHitDivergentSourceConflict pins that a cross-Load
+// registry cache hit cannot silently mix a cached compiled import with
+// conflicting pre-registered source bytes: copying the cached closure's
+// content into a source registry that already holds different bytes for the
+// same SourceID must surface a diagnostic, not succeed with a Sources() view
+// that disagrees with the schema the import was compiled from.
+func TestSharedRegistry_CacheHitDivergentSourceConflict(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	root := t.TempDir()
+	reg := schema.NewRegistry()
+
+	depSrc := []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n}\n")
+	entrySrc := func(name string) []byte {
+		return []byte("schema \"" + name + "\"\n\nimport \"dep\" as dep\n\ntype Thing {\n\tid String primary\n\t--> USES (one) dep.Part\n}\n")
+	}
+
+	_, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+		"entry.yammm": entrySrc("entry"),
+		"dep.yammm":   depSrc,
+	}, "entry.yammm", root, schema.WithRegistry(reg))
+	requireOK(t, res)
+
+	// The second load shares the schema registry but its source registry
+	// already holds DIFFERENT bytes under dep's SourceID; the import of dep
+	// cache-hits the first load's schema, whose closure content collides.
+	depID, err := location.SourceIDFromAbsolutePath(filepath.Join(canonicalPath(t, root), "dep.yammm"))
+	require.NoError(t, err)
+	srcReg := source.NewRegistry()
+	require.NoError(t, srcReg.Register(depID, []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n\tname String required\n}\n")))
+
+	_, res = schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+		"entry2.yammm": entrySrc("entry2"),
+	}, "entry2.yammm", root, schema.WithRegistry(reg), schema.TestWithSourceRegistry(srcReg))
+	require.True(t, res.HasErrors(), "conflicting cached-closure content must surface a diagnostic")
+	assert.Contains(t, res.Err().Error(), "dep.yammm")
+}
+
+// TestLoadSources_DiamondClosureRegistrationLinear guards the cost of
+// cache-hit closure registration on diamond-shaped import graphs. Each
+// level's two branch schemas import the same next-level schema, so the
+// graph has 2^depth import paths but only 3*depth+1 schemas; per-path
+// traversal makes Load exponential in depth, per-schema traversal keeps it
+// linear. The generous wall-clock bound only trips when traversal is
+// per-path.
+func TestLoadSources_DiamondClosureRegistrationLinear(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	const depth = 26
+	sources := make(map[string][]byte, 3*depth+1)
+	level := func(i int) string { return fmt.Sprintf("l_%02d", i) }
+	branch := func(p string, i int) string { return fmt.Sprintf("%s_%02d", p, i) }
+	for i := range depth {
+		sources[level(i)+".yammm"] = fmt.Appendf(nil,
+			"schema %q\n\nimport %q as a\nimport %q as b\n\ntype T {\n\tid String primary\n}\n",
+			level(i), branch("a", i), branch("b", i))
+		for _, p := range []string{"a", "b"} {
+			sources[branch(p, i)+".yammm"] = fmt.Appendf(nil,
+				"schema %q\n\nimport %q as next\n\ntype T {\n\tid String primary\n}\n",
+				branch(p, i), level(i+1))
+		}
+	}
+	sources[level(depth)+".yammm"] = fmt.Appendf(nil, "schema %q\n\ntype T {\n\tid String primary\n}\n", level(depth))
+
+	start := time.Now()
+	s, res := schema.LoadSourcesWithEntry(ctx, sources, level(0)+".yammm", t.TempDir())
+	elapsed := time.Since(start)
+	requireOK(t, res)
+	require.NotNil(t, s)
+	require.Less(t, elapsed, 10*time.Second,
+		"diamond closure registration must be per-schema, not per-import-path")
 }

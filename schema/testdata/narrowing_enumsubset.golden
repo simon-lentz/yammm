@@ -1,0 +1,55 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": true,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        },
+        {
+          "Constraint": "Enum[\"a\", \"b\", \"c\"]",
+          "Name": "status",
+          "Optional": true,
+          "PrimaryKey": false
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Base",
+      "Part": false,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "Enum[\"a\", \"b\"]",
+          "Name": "status",
+          "Optional": true,
+          "PrimaryKey": false
+        },
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Restricted",
+      "Part": false,
+      "SuperTypes": [
+        "Base"
+      ]
+    }
+  ]
+}

@@ -2,8 +2,9 @@ package immutable
 
 import (
 	"math"
-	"sync"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
 func TestValue_Wrap_Primitives(t *testing.T) {
@@ -17,9 +18,7 @@ func TestValue_Wrap_Primitives(t *testing.T) {
 			input: nil,
 			check: func(t *testing.T, v Value) {
 				t.Helper()
-				if !v.IsNil() {
-					t.Error("expected IsNil() to be true")
-				}
+				wantNil(t, v)
 				if v.Unwrap() != nil {
 					t.Error("expected Unwrap() to be nil")
 				}
@@ -30,13 +29,7 @@ func TestValue_Wrap_Primitives(t *testing.T) {
 			input: true,
 			check: func(t *testing.T, v Value) {
 				t.Helper()
-				b, ok := v.Bool()
-				if !ok {
-					t.Error("expected Bool() ok to be true")
-				}
-				if !b {
-					t.Error("expected Bool() to be true")
-				}
+				wantBool(t, v, true)
 			},
 		},
 		{
@@ -44,13 +37,7 @@ func TestValue_Wrap_Primitives(t *testing.T) {
 			input: false,
 			check: func(t *testing.T, v Value) {
 				t.Helper()
-				b, ok := v.Bool()
-				if !ok {
-					t.Error("expected Bool() ok to be true")
-				}
-				if b {
-					t.Error("expected Bool() to be false")
-				}
+				wantBool(t, v, false)
 			},
 		},
 		{
@@ -192,17 +179,13 @@ func TestValue_Map(t *testing.T) {
 	if !ok {
 		t.Fatal("expected Get('name') ok to be true")
 	}
-	if s, ok := name.String(); !ok || s != "Alice" {
-		t.Errorf("expected name to be 'Alice', got %v", name.Unwrap())
-	}
+	wantString(t, name, "Alice")
 
 	age, ok := m.Get("age")
 	if !ok {
 		t.Fatal("expected Get('age') ok to be true")
 	}
-	if n, ok := age.Int(); !ok || n != 30 {
-		t.Errorf("expected age to be 30, got %v", age.Unwrap())
-	}
+	wantInt(t, age, 30)
 }
 
 func TestValue_Slice(t *testing.T) {
@@ -220,9 +203,7 @@ func TestValue_Slice(t *testing.T) {
 	}
 
 	elem := s.Get(0)
-	if str, ok := elem.String(); !ok || str != "a" {
-		t.Errorf("expected first element to be 'a', got %v", elem.Unwrap())
-	}
+	wantString(t, elem, "a")
 }
 
 func TestValue_NestedStructures(t *testing.T) {
@@ -277,9 +258,7 @@ func TestValue_NestedStructures(t *testing.T) {
 	}
 
 	first := s.Get(0)
-	if str, ok := first.String(); !ok || str != "deep" {
-		t.Errorf("expected first element 'deep', got %v", first.Unwrap())
-	}
+	wantString(t, first, "deep")
 }
 
 func TestValue_Wrap_WithClone_Isolation(t *testing.T) {
@@ -317,9 +296,7 @@ func TestValue_Wrap_WithClone_Isolation(t *testing.T) {
 	if !ok {
 		t.Fatal("expected key in nested")
 	}
-	if str, ok := keyVal.String(); !ok || str != "original" {
-		t.Errorf("expected nested key to be 'original', got %v", keyVal.Unwrap())
-	}
+	wantString(t, keyVal, "original")
 }
 
 func TestValue_IntTypes(t *testing.T) {
@@ -1174,27 +1151,17 @@ func TestConcurrent_Value_Read(t *testing.T) {
 
 	v := Wrap(input)
 
-	var wg sync.WaitGroup
-	const goroutines = 100
-	const iterations = 1000
-
-	for range goroutines {
-		wg.Go(func() {
-			for range iterations {
-				// Read operations
-				_ = v.Unwrap()
-				_ = v.IsNil()
-				_, _ = v.Bool()
-				_, _ = v.Int()
-				_, _ = v.Float()
-				_, _ = v.String()
-				_, _ = v.Map()
-				_, _ = v.Slice()
-			}
-		})
-	}
-
-	wg.Wait()
+	yammmtest.RunConcurrent(100, 1000, func() {
+		// Read operations
+		_ = v.Unwrap()
+		_ = v.IsNil()
+		_, _ = v.Bool()
+		_, _ = v.Int()
+		_, _ = v.Float()
+		_, _ = v.String()
+		_, _ = v.Map()
+		_, _ = v.Slice()
+	})
 }
 
 func TestConcurrent_Map_Read(t *testing.T) {
@@ -1206,31 +1173,21 @@ func TestConcurrent_Map_Read(t *testing.T) {
 
 	m := WrapMap(input)
 
-	var wg sync.WaitGroup
-	const goroutines = 100
-	const iterations = 1000
+	yammmtest.RunConcurrent(100, 1000, func() {
+		// Read operations
+		_ = m.Len()
+		_, _ = m.Get("a")
+		_, _ = m.Get("nonexistent")
 
-	for range goroutines {
-		wg.Go(func() {
-			for range iterations {
-				// Read operations
-				_ = m.Len()
-				_, _ = m.Get("a")
-				_, _ = m.Get("nonexistent")
+		// Iterator operations — verify concurrent iteration doesn't panic
+		for k := range m.Keys() {
+			_ = k
+		}
 
-				// Iterator operations — verify concurrent iteration doesn't panic
-				for k := range m.Keys() {
-					_ = k
-				}
-
-				for k, v := range m.Range() {
-					_, _ = k, v
-				}
-			}
-		})
-	}
-
-	wg.Wait()
+		for k, v := range m.Range() {
+			_, _ = k, v
+		}
+	})
 }
 
 func TestConcurrent_Slice_Read(t *testing.T) {
@@ -1238,27 +1195,17 @@ func TestConcurrent_Slice_Read(t *testing.T) {
 
 	s := WrapSlice(input)
 
-	var wg sync.WaitGroup
-	const goroutines = 100
-	const iterations = 1000
+	yammmtest.RunConcurrent(100, 1000, func() {
+		// Read operations
+		_ = s.Len()
+		_ = s.Get(0)
+		_ = s.Get(1)
 
-	for range goroutines {
-		wg.Go(func() {
-			for range iterations {
-				// Read operations
-				_ = s.Len()
-				_ = s.Get(0)
-				_ = s.Get(1)
-
-				// Iterator operations — verify concurrent iteration doesn't panic
-				for v := range s.Iter() {
-					_ = v
-				}
-			}
-		})
-	}
-
-	wg.Wait()
+		// Iterator operations — verify concurrent iteration doesn't panic
+		for v := range s.Iter() {
+			_ = v
+		}
+	})
 }
 
 func TestConcurrent_Properties_Read(t *testing.T) {
@@ -1271,37 +1218,27 @@ func TestConcurrent_Properties_Read(t *testing.T) {
 
 	p := WrapProperties(input)
 
-	var wg sync.WaitGroup
-	const goroutines = 100
-	const iterations = 1000
+	yammmtest.RunConcurrent(100, 1000, func() {
+		// Read operations
+		_ = p.Len()
+		_, _ = p.Get("Name")
+		_, _ = p.GetFold("name")
+		_, _ = p.GetFold("NAME")
+		_, _ = p.GetFold("nonexistent")
 
-	for range goroutines {
-		wg.Go(func() {
-			for range iterations {
-				// Read operations
-				_ = p.Len()
-				_, _ = p.Get("Name")
-				_, _ = p.GetFold("name")
-				_, _ = p.GetFold("NAME")
-				_, _ = p.GetFold("nonexistent")
+		// Iterator operations
+		for range p.Keys() {
+			// Just iterate
+		}
 
-				// Iterator operations
-				for range p.Keys() {
-					// Just iterate
-				}
+		for range p.SortedKeys() {
+			// Just iterate
+		}
 
-				for range p.SortedKeys() {
-					// Just iterate
-				}
-
-				for range p.Range() {
-					// Just iterate
-				}
-			}
-		})
-	}
-
-	wg.Wait()
+		for range p.Range() {
+			// Just iterate
+		}
+	})
 }
 
 func TestConcurrent_Key_Read(t *testing.T) {
@@ -1309,30 +1246,20 @@ func TestConcurrent_Key_Read(t *testing.T) {
 
 	k := WrapKey(input)
 
-	var wg sync.WaitGroup
-	const goroutines = 100
-	const iterations = 1000
+	yammmtest.RunConcurrent(100, 1000, func() {
+		// Read operations
+		_ = k.Len()
+		_ = k.Get(0)
+		_ = k.Get(1)
+		_ = k.String()
+		_, _ = k.SingleString()
+		_, _ = k.SingleInt()
 
-	for range goroutines {
-		wg.Go(func() {
-			for range iterations {
-				// Read operations
-				_ = k.Len()
-				_ = k.Get(0)
-				_ = k.Get(1)
-				_ = k.String()
-				_, _ = k.SingleString()
-				_, _ = k.SingleInt()
-
-				// Iterator operations
-				for range k.Iter() {
-					// Just iterate
-				}
-			}
-		})
-	}
-
-	wg.Wait()
+		// Iterator operations
+		for range k.Iter() {
+			// Just iterate
+		}
+	})
 }
 
 func TestConcurrent_Clone_Safety(t *testing.T) {
@@ -1344,19 +1271,12 @@ func TestConcurrent_Clone_Safety(t *testing.T) {
 
 	m := WrapMap(input)
 
-	var wg sync.WaitGroup
-	const goroutines = 100
-
-	for range goroutines {
-		wg.Go(func() {
-			cloned := m.Clone()
-			// Mutate the clone (safe, it's independent)
-			nested := cloned["nested"].(map[string]any)
-			nested["new"] = "added"
-		})
-	}
-
-	wg.Wait()
+	yammmtest.RunConcurrent(100, 1, func() {
+		cloned := m.Clone()
+		// Mutate the clone (safe, it's independent)
+		nested := cloned["nested"].(map[string]any)
+		nested["new"] = "added"
+	})
 
 	// Verify original is unchanged
 	nested, _ := m.Get("nested")
@@ -1378,35 +1298,25 @@ func TestConcurrent_NestedAccess(t *testing.T) {
 
 	m := WrapMap(input)
 
-	var wg sync.WaitGroup
-	const goroutines = 100
-	const iterations = 100
+	yammmtest.RunConcurrent(100, 100, func() {
+		// Navigate to deeply nested value
+		l1Val, _ := m.Get("level1")
+		l1Map, _ := l1Val.Map()
+		l2Val, _ := l1Map.Get("level2")
+		l2Map, _ := l2Val.Map()
+		l3Val, _ := l2Map.Get("level3")
+		l3Slice, _ := l3Val.Slice()
 
-	for range goroutines {
-		wg.Go(func() {
-			for range iterations {
-				// Navigate to deeply nested value
-				l1Val, _ := m.Get("level1")
-				l1Map, _ := l1Val.Map()
-				l2Val, _ := l1Map.Get("level2")
-				l2Map, _ := l2Val.Map()
-				l3Val, _ := l2Map.Get("level3")
-				l3Slice, _ := l3Val.Slice()
+		// Access elements
+		for i := range l3Slice.Len() {
+			_ = l3Slice.Get(i)
+		}
 
-				// Access elements
-				for i := range l3Slice.Len() {
-					_ = l3Slice.Get(i)
-				}
-
-				// Iterate
-				for range l3Slice.Iter() {
-					// Just iterate
-				}
-			}
-		})
-	}
-
-	wg.Wait()
+		// Iterate
+		for range l3Slice.Iter() {
+			// Just iterate
+		}
+	})
 }
 
 func TestConcurrent_MixedTypes(t *testing.T) {
@@ -1417,30 +1327,20 @@ func TestConcurrent_MixedTypes(t *testing.T) {
 	keyData := WrapKey([]any{"us", 123})
 	valueData := Wrap(map[string]any{"nested": []any{"a", "b"}})
 
-	var wg sync.WaitGroup
-	const goroutines = 50
-	const iterations = 100
+	yammmtest.RunConcurrent(50, 100, func() {
+		// Access all types
+		_, _ = mapData.Get("key")
+		_ = sliceData.Get(0)
+		_, _ = propsData.GetFold("prop")
+		_ = keyData.String()
+		_, _ = valueData.Map()
 
-	for range goroutines {
-		wg.Go(func() {
-			for range iterations {
-				// Access all types
-				_, _ = mapData.Get("key")
-				_ = sliceData.Get(0)
-				_, _ = propsData.GetFold("prop")
-				_ = keyData.String()
-				_, _ = valueData.Map()
-
-				// Clone all types
-				_ = mapData.Clone()
-				_ = sliceData.Clone()
-				_ = propsData.Clone()
-				_ = keyData.Clone()
-			}
-		})
-	}
-
-	wg.Wait()
+		// Clone all types
+		_ = mapData.Clone()
+		_ = sliceData.Clone()
+		_ = propsData.Clone()
+		_ = keyData.Clone()
+	})
 }
 
 func TestConcurrent_IteratorConsistency(t *testing.T) {
@@ -1450,20 +1350,13 @@ func TestConcurrent_IteratorConsistency(t *testing.T) {
 
 	results := make(chan int, 100)
 
-	var wg sync.WaitGroup
-	const goroutines = 100
-
-	for range goroutines {
-		wg.Go(func() {
-			count := 0
-			for range m.Keys() {
-				count++
-			}
-			results <- count
-		})
-	}
-
-	wg.Wait()
+	yammmtest.RunConcurrent(100, 1, func() {
+		count := 0
+		for range m.Keys() {
+			count++
+		}
+		results <- count
+	})
 	close(results)
 
 	// All goroutines should have seen 3 keys

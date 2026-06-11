@@ -1,92 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
-
-func TestExport_ToJSON(t *testing.T) {
-	t.Parallel()
-
-	cmd := newRootCmd("test")
-	var outBuf bytes.Buffer
-	cmd.SetOut(&outBuf)
-	cmd.SetArgs([]string{"export", "--to", "json", "testdata/valid.yammm", "testdata/data.json"})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-	assert.Contains(t, outBuf.String(), `"Person"`)
-	assert.Contains(t, outBuf.String(), `"alice"`)
-}
-
-func TestExport_ToCSVOutputDir(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	cmd := newRootCmd("test")
-	cmd.SetArgs([]string{"export", "--to", "csv", "--output-dir", tmpDir, "testdata/valid.yammm", "testdata/data.json"})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	// Should have created Person.csv
-	personCSV := filepath.Join(tmpDir, "Person.csv")
-	data, err := os.ReadFile(personCSV)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), "alice")
-}
-
-func TestExport_ToJSONOutputFile(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	outFile := filepath.Join(tmpDir, "output.json")
-
-	cmd := newRootCmd("test")
-	cmd.SetArgs([]string{"export", "--to", "json", "--output", outFile, "testdata/valid.yammm", "testdata/data.json"})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	data, err := os.ReadFile(outFile)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), `"Person"`)
-}
-
-func TestExport_ToCypher(t *testing.T) {
-	t.Parallel()
-
-	cmd := newRootCmd("test")
-	var outBuf bytes.Buffer
-	cmd.SetOut(&outBuf)
-	cmd.SetArgs([]string{"export", "--to", "cypher", "testdata/valid.yammm", "testdata/data.json"})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-	assert.Contains(t, outBuf.String(), "MERGE")
-}
-
-func TestExport_ToCSVOutputFile(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	outFile := filepath.Join(tmpDir, "output.csv")
-
-	cmd := newRootCmd("test")
-	cmd.SetArgs([]string{"export", "--to", "csv", "--output", outFile, "testdata/valid.yammm", "testdata/data.json"})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	data, err := os.ReadFile(outFile)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), "alice")
-}
 
 func TestExport_CSVMultiTypeRequiresOutputDir(t *testing.T) {
 	t.Parallel()
@@ -114,71 +37,7 @@ type Pet {
 	require.NoError(t, os.WriteFile(schemaPath, []byte(schemaContent), 0o600))
 	require.NoError(t, os.WriteFile(dataPath, []byte(dataContent), 0o600))
 
+	// Multi-type CSV export cannot go to a single stream — usage error.
 	code := executeCmd(t, "export", "--to", "csv", schemaPath, dataPath)
-	assert.Equal(t, 2, code) // ExitUsage — multi-type CSV without --output-dir
-}
-
-func TestExport_RequiresToFlag(t *testing.T) {
-	t.Parallel()
-
-	cmd := newRootCmd("test")
-	cmd.SetArgs([]string{"export", "testdata/valid.yammm", "testdata/data.json"})
-
-	err := cmd.Execute()
-	require.Error(t, err) // --to is required
-}
-
-func TestExport_FromSnapshot_ToJSON(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	ysPath := filepath.Join(tmpDir, "test.ys")
-
-	// Create a .ys fixture.
-	code := executeCmd(t, "snapshot", "save", "testdata/valid.yammm", "testdata/data.json", "-o", ysPath)
-	require.Equal(t, 0, code)
-
-	// Export from snapshot to JSON.
-	cmd := newRootCmd("test")
-	var outBuf bytes.Buffer
-	cmd.SetOut(&outBuf)
-	cmd.SetArgs([]string{"export", "--to", "json", "testdata/valid.yammm", ysPath})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-	assert.Contains(t, outBuf.String(), `"Person"`)
-	assert.Contains(t, outBuf.String(), `"alice"`)
-}
-
-func TestExport_FromSnapshot_ToCypher(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	ysPath := filepath.Join(tmpDir, "test.ys")
-
-	code := executeCmd(t, "snapshot", "save", "testdata/valid.yammm", "testdata/data.json", "-o", ysPath)
-	require.Equal(t, 0, code)
-
-	cmd := newRootCmd("test")
-	var outBuf bytes.Buffer
-	cmd.SetOut(&outBuf)
-	cmd.SetArgs([]string{"export", "--to", "cypher", "testdata/valid.yammm", ysPath})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-	assert.Contains(t, outBuf.String(), "MERGE")
-}
-
-func TestExport_SnapshotDetection_NonSnapshotJSON(t *testing.T) {
-	t.Parallel()
-
-	// A regular JSON data file should NOT be detected as a snapshot.
-	cmd := newRootCmd("test")
-	var outBuf bytes.Buffer
-	cmd.SetOut(&outBuf)
-	cmd.SetArgs([]string{"export", "--to", "json", "testdata/valid.yammm", "testdata/data.json"})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-	assert.Contains(t, outBuf.String(), `"Person"`)
+	assert.Equal(t, cli.ExitUsage, code)
 }

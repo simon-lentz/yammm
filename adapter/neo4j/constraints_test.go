@@ -6,153 +6,32 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
-func TestConstraints_BasicSinglePK(t *testing.T) {
+// TestConstraintsForSchema_Golden pins the complete default-option statement
+// list per schema fixture: statement text, statement count, and emission
+// order. Absences are load-bearing — the abstract_types and inheritance
+// goldens contain no statements for their abstract types, and the per-fixture
+// type mappings (aliases, enum/pattern, lists, UUID→STRING) are pinned in
+// full rather than per-substring.
+func TestConstraintsForSchema_Golden(t *testing.T) {
 	t.Parallel()
-	s := loadSchema(t, "basic.yammm")
-	a := New()
-
-	stmts, result := a.ConstraintsForSchema(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("ConstraintsForSchema failed: %v", err)
+	fixtures := []string{
+		"abstract_types", "aliases", "basic", "composite_pk", "enum_pattern",
+		"inheritance", "list_properties", "multiple_types", "part_types",
 	}
-
-	// UNIQUE for id.
-	assertContains(t, stmts, "REQUIRE n.id IS UNIQUE")
-
-	// NOT NULL for required props: id, name, count, active, created_at.
-	for _, prop := range []string{"id", "name", "count", "active", "created_at"} {
-		assertContains(t, stmts, "REQUIRE n."+prop+" IS NOT NULL")
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+			s := loadSchema(t, fixture+".yammm")
+			stmts, result := New().ConstraintsForSchema(context.Background(), s)
+			if err := result.Err(); err != nil {
+				t.Fatalf("ConstraintsForSchema(%s): %v", fixture, err)
+			}
+			yammmtest.Golden(t, "constraints_"+fixture, []byte(strings.Join(stmts, "\n")+"\n"))
+		})
 	}
-
-	// Scalar TYPE constraints for all properties.
-	assertContains(t, stmts, "REQUIRE n.id IS :: STRING")
-	assertContains(t, stmts, "REQUIRE n.name IS :: STRING")
-	assertContains(t, stmts, "REQUIRE n.description IS :: STRING")
-	assertContains(t, stmts, "REQUIRE n.count IS :: INTEGER")
-	assertContains(t, stmts, "REQUIRE n.score IS :: FLOAT")
-	assertContains(t, stmts, "REQUIRE n.active IS :: BOOLEAN")
-	assertContains(t, stmts, "REQUIRE n.created_at IS :: ZONED DATETIME")
-	assertContains(t, stmts, "REQUIRE n.birth_date IS :: DATE")
-	assertContains(t, stmts, "REQUIRE n.ref IS :: STRING") // UUID maps to STRING
-	assertContains(t, stmts, "REQUIRE n.embedding IS :: LIST<FLOAT NOT NULL>")
-
-	// 1 UNIQUE + 5 NOT NULL + 10 TYPE = 16 constraints.
-	if len(stmts) != 16 {
-		t.Errorf("expected 16 constraints, got %d:\n%s", len(stmts), strings.Join(stmts, "\n"))
-	}
-}
-
-func TestConstraints_CompositePK(t *testing.T) {
-	t.Parallel()
-	s := loadSchema(t, "composite_pk.yammm")
-	a := New()
-
-	stmts, result := a.ConstraintsForSchema(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("ConstraintsForSchema failed: %v", err)
-	}
-
-	// Composite UNIQUE.
-	assertContains(t, stmts, "REQUIRE (n.schema_id, n.record_id) IS UNIQUE")
-
-	// NOT NULL for PKs and required.
-	assertContains(t, stmts, "REQUIRE n.schema_id IS NOT NULL")
-	assertContains(t, stmts, "REQUIRE n.record_id IS NOT NULL")
-	assertContains(t, stmts, "REQUIRE n.name IS NOT NULL")
-}
-
-func TestConstraints_SkipsAbstract(t *testing.T) {
-	t.Parallel()
-	s := loadSchema(t, "abstract_types.yammm")
-	a := New()
-
-	stmts, result := a.ConstraintsForSchema(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("ConstraintsForSchema failed: %v", err)
-	}
-
-	// No constraints should reference abstract type Base.
-	for _, stmt := range stmts {
-		if strings.Contains(stmt, "abstract_test__Base") {
-			t.Errorf("found constraint for abstract type Base: %s", stmt)
-		}
-	}
-
-	// Widget should have composite UNIQUE for (id, code).
-	assertContains(t, stmts, "REQUIRE (n.id, n.code) IS UNIQUE")
-
-	// NOT NULL for id, code, name.
-	assertContains(t, stmts, "REQUIRE n.id IS NOT NULL")
-	assertContains(t, stmts, "REQUIRE n.code IS NOT NULL")
-	assertContains(t, stmts, "REQUIRE n.name IS NOT NULL")
-}
-
-func TestConstraints_PartTypes(t *testing.T) {
-	t.Parallel()
-	s := loadSchema(t, "part_types.yammm")
-	a := New()
-
-	stmts, result := a.ConstraintsForSchema(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("ConstraintsForSchema failed: %v", err)
-	}
-
-	// LineItem (part type) receives constraints — not skipped.
-	hasLineItem := false
-	hasOrder := false
-	for _, stmt := range stmts {
-		if strings.Contains(stmt, "part_test__LineItem") {
-			hasLineItem = true
-		}
-		if strings.Contains(stmt, "part_test__Order") {
-			hasOrder = true
-		}
-	}
-	if !hasLineItem {
-		t.Error("part type LineItem should have constraints")
-	}
-	if !hasOrder {
-		t.Error("type Order should have constraints")
-	}
-}
-
-func TestConstraints_ListProperties(t *testing.T) {
-	t.Parallel()
-	s := loadSchema(t, "list_properties.yammm")
-	a := New()
-
-	stmts, result := a.ConstraintsForSchema(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("ConstraintsForSchema failed: %v", err)
-	}
-
-	assertContains(t, stmts, "REQUIRE n.tags IS :: LIST<STRING NOT NULL>")
-	assertContains(t, stmts, "REQUIRE n.scores IS :: LIST<INTEGER NOT NULL>")
-	assertContains(t, stmts, "REQUIRE n.ratios IS :: LIST<FLOAT NOT NULL>")
-	assertContains(t, stmts, "REQUIRE n.flags IS :: LIST<BOOLEAN NOT NULL>")
-	assertContains(t, stmts, "REQUIRE n.times IS :: LIST<ZONED DATETIME NOT NULL>")
-	assertContains(t, stmts, "REQUIRE n.dates IS :: LIST<DATE NOT NULL>")
-}
-
-func TestConstraints_Aliases(t *testing.T) {
-	t.Parallel()
-	s := loadSchema(t, "aliases.yammm")
-	a := New()
-
-	stmts, result := a.ConstraintsForSchema(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("ConstraintsForSchema failed: %v", err)
-	}
-
-	// Email (Pattern) -> STRING, Money (Float) -> FLOAT,
-	// ShortCode (String) -> STRING, Priority (Enum) -> STRING.
-	assertContains(t, stmts, "REQUIRE n.email IS :: STRING")
-	assertContains(t, stmts, "REQUIRE n.price IS :: FLOAT")
-	assertContains(t, stmts, "REQUIRE n.code IS :: STRING")
-	assertContains(t, stmts, "REQUIRE n.priority IS :: STRING")
 }
 
 func TestConstraints_NamedConstraints(t *testing.T) {
@@ -307,6 +186,8 @@ func TestConstraints_ScalarTypesDisabled(t *testing.T) {
 
 func TestConstraints_DeterministicOrder(t *testing.T) {
 	t.Parallel()
+	// Call-to-call determinism; the emission order itself is pinned by the
+	// per-fixture goldens in TestConstraintsForSchema_Golden.
 	s := loadSchema(t, "multiple_types.yammm")
 	a := New()
 
@@ -322,137 +203,20 @@ func TestConstraints_DeterministicOrder(t *testing.T) {
 	if !slices.Equal(stmts1, stmts2) {
 		t.Error("ConstraintsForSchema produced different output on second call")
 	}
-
-	// Widget should come before Gadget (schema declaration order).
-	widgetIdx := -1
-	gadgetIdx := -1
-	for i, stmt := range stmts1 {
-		if strings.Contains(stmt, "multi_test__Widget") && widgetIdx == -1 {
-			widgetIdx = i
-		}
-		if strings.Contains(stmt, "multi_test__Gadget") && gadgetIdx == -1 {
-			gadgetIdx = i
-		}
-	}
-	if widgetIdx == -1 || gadgetIdx == -1 {
-		t.Fatal("missing Widget or Gadget constraints")
-	}
-	if widgetIdx >= gadgetIdx {
-		t.Errorf("Widget (idx %d) should come before Gadget (idx %d)", widgetIdx, gadgetIdx)
-	}
 }
 
-func TestConstraints_Inheritance(t *testing.T) {
-	t.Parallel()
-	s := loadSchema(t, "inheritance.yammm")
-	a := New()
-
-	stmts, result := a.ConstraintsForSchema(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("ConstraintsForSchema failed: %v", err)
-	}
-
-	// No constraints for abstract type Tracked.
-	for _, stmt := range stmts {
-		if strings.Contains(stmt, "inherit_test__Tracked") {
-			t.Errorf("found constraint for abstract type Tracked: %s", stmt)
-		}
-	}
-
-	// Inherited properties should receive NOT NULL and TYPE constraints on Entity.
-	assertContains(t, stmts, "REQUIRE n.run_id IS NOT NULL")
-	assertContains(t, stmts, "REQUIRE n.source_fetched_at IS NOT NULL")
-	assertContains(t, stmts, "REQUIRE n.run_id IS :: STRING")
-	assertContains(t, stmts, "REQUIRE n.source_fetched_at IS :: ZONED DATETIME")
-
-	// Own properties too.
-	assertContains(t, stmts, "REQUIRE n.id IS UNIQUE")
-	assertContains(t, stmts, "REQUIRE n.name IS NOT NULL")
-}
-
-func TestConstraints_LabelCollision(t *testing.T) {
-	t.Parallel()
-
-	// Verify DetectLabelCollisions propagates through ConstraintsForSchema.
-	// Since valid yammm schemas can't produce label collisions (UC_WORD type names),
-	// we verify the diag code is registered and constructible.
-	issue := diag.NewIssue(diag.Error, E_NEO4J_LABEL_COLLISION, "test collision").Build()
-	if issue.Code() != E_NEO4J_LABEL_COLLISION {
-		t.Error("E_NEO4J_LABEL_COLLISION code mismatch")
-	}
-}
-
-func TestConstraints_EnumPattern(t *testing.T) {
-	t.Parallel()
-	s := loadSchema(t, "enum_pattern.yammm")
-	a := New()
-
-	stmts, result := a.ConstraintsForSchema(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("ConstraintsForSchema failed: %v", err)
-	}
-
-	// Enum and Pattern both map to STRING.
-	assertContains(t, stmts, "REQUIRE n.status IS :: STRING")
-	assertContains(t, stmts, "REQUIRE n.email IS :: STRING")
-}
-
-func TestConstraintsStructured(t *testing.T) {
+// TestConstraintsStructured_Golden pins the full structured form — Name,
+// Kind, Label, Properties, TypeExpr, and the complete Statement — for the
+// default options over the basic fixture.
+func TestConstraintsStructured_Golden(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")
-	a := New()
 
-	constraints, result := a.ConstraintsStructured(context.Background(), s)
+	constraints, result := New().ConstraintsStructured(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("ConstraintsStructured failed: %v", err)
 	}
-
-	if len(constraints) == 0 {
-		t.Fatal("expected non-empty constraints")
-	}
-
-	// Find the UNIQUE constraint.
-	var uniqueC *Constraint
-	for i := range constraints {
-		if constraints[i].Kind == ConstraintUnique {
-			uniqueC = &constraints[i]
-			break
-		}
-	}
-	if uniqueC == nil {
-		t.Fatal("no UNIQUE constraint found")
-	}
-
-	if uniqueC.Label != "basic_test__Entity" {
-		t.Errorf("UNIQUE constraint Label = %q; want %q", uniqueC.Label, "basic_test__Entity")
-	}
-	if !slices.Equal(uniqueC.Properties, []string{"id"}) {
-		t.Errorf("UNIQUE constraint Properties = %v; want [id]", uniqueC.Properties)
-	}
-	if uniqueC.Name != "basic_test__Entity_id_unique" {
-		t.Errorf("UNIQUE constraint Name = %q; want %q", uniqueC.Name, "basic_test__Entity_id_unique")
-	}
-	if !strings.Contains(uniqueC.Statement, "IS UNIQUE") {
-		t.Errorf("UNIQUE constraint Statement missing IS UNIQUE: %s", uniqueC.Statement)
-	}
-
-	// Find a TYPE constraint to verify TypeExpr.
-	var typeC *Constraint
-	for i := range constraints {
-		if constraints[i].Kind == ConstraintType && constraints[i].TypeExpr == "INTEGER" {
-			typeC = &constraints[i]
-			break
-		}
-	}
-	if typeC == nil {
-		t.Fatal("no INTEGER TYPE constraint found")
-	}
-	if typeC.TypeExpr != "INTEGER" {
-		t.Errorf("TYPE constraint TypeExpr = %q; want %q", typeC.TypeExpr, "INTEGER")
-	}
-	if !slices.Equal(typeC.Properties, []string{"count"}) {
-		t.Errorf("TYPE constraint Properties = %v; want [count]", typeC.Properties)
-	}
+	yammmtest.GoldenJSON(t, "constraints_structured_basic", constraints)
 }
 
 func assertContains(t *testing.T, stmts []string, substring string) {

@@ -1,9 +1,10 @@
-package graph
+package graph_test
 
 import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -32,12 +33,12 @@ func rebuildTestSchema(t *testing.T) *schema.Schema {
 
 func TestRebuildSnapshot_EmptyParts(t *testing.T) {
 	s := rebuildTestSchema(t)
-	parts := SnapshotParts{
+	parts := graph.SnapshotParts{
 		Types:     []string{},
-		Instances: map[string][]InstanceParts{},
+		Instances: map[string][]graph.InstanceParts{},
 	}
 
-	snap, result := RebuildSnapshot(s, parts)
+	snap, result := graph.RebuildSnapshot(s, parts)
 	if result.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
@@ -51,9 +52,9 @@ func TestRebuildSnapshot_EmptyParts(t *testing.T) {
 
 func TestRebuildSnapshot_WithInstances(t *testing.T) {
 	s := rebuildTestSchema(t)
-	parts := SnapshotParts{
+	parts := graph.SnapshotParts{
 		Types: []string{"Company", "Person"},
-		Instances: map[string][]InstanceParts{
+		Instances: map[string][]graph.InstanceParts{
 			"Company": {
 				{
 					TypeName:   "Company",
@@ -73,7 +74,7 @@ func TestRebuildSnapshot_WithInstances(t *testing.T) {
 		},
 	}
 
-	snap, result := RebuildSnapshot(s, parts)
+	snap, result := graph.RebuildSnapshot(s, parts)
 	if result.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
@@ -91,9 +92,9 @@ func TestRebuildSnapshot_WithInstances(t *testing.T) {
 
 func TestRebuildSnapshot_WithEdges(t *testing.T) {
 	s := rebuildTestSchema(t)
-	parts := SnapshotParts{
+	parts := graph.SnapshotParts{
 		Types: []string{"Company", "Person"},
-		Instances: map[string][]InstanceParts{
+		Instances: map[string][]graph.InstanceParts{
 			"Company": {
 				{
 					TypeName:   "Company",
@@ -111,7 +112,7 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 				},
 			},
 		},
-		Edges: []EdgeParts{
+		Edges: []graph.EdgeParts{
 			{
 				Relation:   "EMPLOYER",
 				SourceType: "Person",
@@ -123,7 +124,7 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 		},
 	}
 
-	snap, result := RebuildSnapshot(s, parts)
+	snap, result := graph.RebuildSnapshot(s, parts)
 	if result.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
@@ -151,9 +152,9 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 
 func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 	s := rebuildTestSchema(t)
-	parts := SnapshotParts{
+	parts := graph.SnapshotParts{
 		Types: []string{"Company"},
-		Instances: map[string][]InstanceParts{
+		Instances: map[string][]graph.InstanceParts{
 			"Company": {
 				{
 					TypeName:   "Company",
@@ -163,7 +164,7 @@ func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 				},
 			},
 		},
-		Edges: []EdgeParts{
+		Edges: []graph.EdgeParts{
 			{
 				Relation:   "EMPLOYER",
 				SourceType: "Person",
@@ -174,7 +175,7 @@ func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 		},
 	}
 
-	snap, result := RebuildSnapshot(s, parts)
+	snap, result := graph.RebuildSnapshot(s, parts)
 	if snap != nil {
 		t.Error("expected nil snapshot on error")
 	}
@@ -195,9 +196,9 @@ func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 
 func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 	s := rebuildTestSchema(t)
-	parts := SnapshotParts{
+	parts := graph.SnapshotParts{
 		Types: []string{"Company"},
-		Instances: map[string][]InstanceParts{
+		Instances: map[string][]graph.InstanceParts{
 			"Company": {
 				{
 					TypeName:   "Company",
@@ -207,11 +208,11 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 				},
 			},
 		},
-		Duplicates: []DuplicateParts{
+		Duplicates: []graph.DuplicateParts{
 			{
 				Type: "Company",
 				Key:  immutable.WrapKey([]any{"c1"}),
-				Instance: InstanceParts{
+				Instance: graph.InstanceParts{
 					TypeName:   "Company",
 					TypeID:     mustTypeID(t, s, "Company"),
 					PrimaryKey: immutable.WrapKey([]any{"c1"}),
@@ -221,7 +222,7 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 		},
 	}
 
-	snap, result := RebuildSnapshot(s, parts)
+	snap, result := graph.RebuildSnapshot(s, parts)
 	if result.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
@@ -245,14 +246,14 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 
 func TestRebuildSnapshot_DuplicateConflictMissing(t *testing.T) {
 	s := rebuildTestSchema(t)
-	parts := SnapshotParts{
+	parts := graph.SnapshotParts{
 		Types:     []string{"Company"},
-		Instances: map[string][]InstanceParts{"Company": {}},
-		Duplicates: []DuplicateParts{
+		Instances: map[string][]graph.InstanceParts{"Company": {}},
+		Duplicates: []graph.DuplicateParts{
 			{
 				Type: "Company",
 				Key:  immutable.WrapKey([]any{"c_missing"}),
-				Instance: InstanceParts{
+				Instance: graph.InstanceParts{
 					TypeName:   "Company",
 					TypeID:     mustTypeID(t, s, "Company"),
 					PrimaryKey: immutable.WrapKey([]any{"c_missing"}),
@@ -262,7 +263,7 @@ func TestRebuildSnapshot_DuplicateConflictMissing(t *testing.T) {
 		},
 	}
 
-	snap, result := RebuildSnapshot(s, parts)
+	snap, result := graph.RebuildSnapshot(s, parts)
 	if snap != nil {
 		t.Error("expected nil snapshot on error")
 	}
@@ -273,9 +274,9 @@ func TestRebuildSnapshot_DuplicateConflictMissing(t *testing.T) {
 
 func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 	s := rebuildTestSchema(t)
-	parts := SnapshotParts{
+	parts := graph.SnapshotParts{
 		Types: []string{"Person"},
-		Instances: map[string][]InstanceParts{
+		Instances: map[string][]graph.InstanceParts{
 			"Person": {
 				{
 					TypeName:   "Person",
@@ -285,7 +286,7 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 				},
 			},
 		},
-		Unresolved: []UnresolvedParts{
+		Unresolved: []graph.UnresolvedParts{
 			{
 				SourceType: "Person",
 				SourceKey:  immutable.WrapKey([]any{"p1"}),
@@ -298,7 +299,7 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 		},
 	}
 
-	snap, result := RebuildSnapshot(s, parts)
+	snap, result := graph.RebuildSnapshot(s, parts)
 	if result.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
@@ -315,13 +316,4 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 	if u.Source == nil {
 		t.Error("source should be resolved")
 	}
-}
-
-func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
-	t.Helper()
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
-	return typ.ID()
 }

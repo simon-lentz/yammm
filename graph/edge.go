@@ -12,7 +12,7 @@ import (
 //
 // Edge is safe for concurrent read access from multiple goroutines.
 //
-// Edges are accessed via [Result.Edges].
+// Edges are accessed via [Snapshot.Edges].
 type Edge struct {
 	// relation is the DSL relation name (e.g., "OWNER", "WORKS_AT").
 	relation string
@@ -41,7 +41,7 @@ func (e *Edge) Relation() string {
 
 // Source returns the instance that declares this relationship.
 //
-// The source instance is always non-nil for edges returned by [Result.Edges].
+// The source instance is always non-nil for edges returned by [Snapshot.Edges].
 func (e *Edge) Source() *Instance {
 	if e == nil {
 		return nil
@@ -52,8 +52,8 @@ func (e *Edge) Source() *Instance {
 // Target returns the instance being referenced.
 //
 // The target instance is always non-nil for resolved edges returned by
-// [Result.Edges]. Unresolved edges (where the target is not in the graph)
-// are reported separately via [Result.Unresolved].
+// [Snapshot.Edges]. Unresolved edges (where the target is not in the graph)
+// are reported separately via [Snapshot.Unresolved].
 func (e *Edge) Target() *Instance {
 	if e == nil {
 		return nil

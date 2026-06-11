@@ -17,7 +17,7 @@ import (
 func TestLoad_QualifiedExtends_UndefinedAlias_Errors(t *testing.T) {
 	_, res := schema.LoadString(context.Background(),
 		"schema \"geo\"\n\ntype Doc extends nope.Base {\n\tid String primary\n}\n", "doc.yammm")
-	if !res.HasErrors() || !hasCode(res, diag.E_UNKNOWN_TYPE) {
+	if !res.HasErrors() || !res.HasCode(diag.E_UNKNOWN_TYPE) {
 		t.Fatalf("expected E_UNKNOWN_TYPE for an extends clause with an undefined qualifier; got: %v", res.Err())
 	}
 }
@@ -30,7 +30,7 @@ func TestLoad_QualifiedExtends_MissingType_Errors(t *testing.T) {
 		"base.yammm": []byte("schema \"base\"\n\nabstract type Entity {\n\tid String primary\n}\n"),
 	}
 	_, res := schema.LoadSourcesWithEntry(context.Background(), sources, "main.yammm", ".")
-	if !res.HasErrors() || !hasCode(res, diag.E_UNKNOWN_TYPE) {
+	if !res.HasErrors() || !res.HasCode(diag.E_UNKNOWN_TYPE) {
 		t.Fatalf("expected E_UNKNOWN_TYPE for an extends clause referencing a missing imported type; got: %v", res.Err())
 	}
 }

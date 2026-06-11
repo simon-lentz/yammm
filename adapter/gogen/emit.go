@@ -320,17 +320,19 @@ func (g *generator) emitEdgeStructs() error {
 
 // emitSerializedModel embeds every source in the closure plus the schema's
 // structural hash. One source -> a string var re-loadable via LoadString; multiple
-// sources -> a map keyed by MODULE-ROOT-RELATIVE source path (via sourceKey) plus
-// SerializedModelEntry, re-loadable via LoadSourcesWithEntry with moduleRoot ".".
-// Relative keys (never absolute SourceID strings) keep the .go output reproducible
-// across checkouts/CI. This MUST stay paired with verifyRoundTrip: the single- vs
-// multi-source dispatch, the keys, and the entry are all derived the same way (every
-// key routes through sourceKey against g.schema.SourceID()), so a change to the shape
-// here needs the mirror change there.
+// sources -> a map keyed by MODULE-ROOT-RELATIVE source path (via sourceKey against
+// the schema's recorded ModuleRoot) plus SerializedModelEntry, re-loadable via
+// LoadSourcesWithEntry with moduleRoot ".". Relative keys (never absolute SourceID
+// strings) keep the .go output reproducible across checkouts/CI. This MUST stay
+// paired with verifyRoundTrip: the single- vs multi-source dispatch, the keys, and
+// the entry are all derived the same way (every key routes through sourceKey with
+// the same root and g.schema.SourceID()), so a change to the shape here needs the
+// mirror change there.
 func (g *generator) emitSerializedModel() error {
 	srcs := g.schema.Sources()
 	ids := srcs.SourceIDs()
 	entry := g.schema.SourceID()
+	root := g.schema.ModuleRoot()
 	switch len(ids) {
 	case 0:
 		return errors.New("gogen: schema is not source-backed")
@@ -340,42 +342,52 @@ func (g *generator) emitSerializedModel() error {
 			return errors.New("gogen: schema source content unavailable")
 		}
 		g.buf.WriteString("// SerializedModel is the verbatim .yammm source this file was generated from.\n")
-		fmt.Fprintf(g.buf, "// Re-load with: schema.LoadString(ctx, SerializedModel, %s)\n", strconv.Quote(sourceKey(entry, ids[0])))
+		fmt.Fprintf(g.buf, "// Re-load with: schema.LoadString(ctx, SerializedModel, %s)\n", strconv.Quote(sourceKey(root, entry, ids[0])))
 		fmt.Fprintf(g.buf, "var SerializedModel = %s\n\n", strconv.Quote(string(content)))
 	default:
 		g.buf.WriteString("// SerializedModel maps every source in the import closure (by module-root-relative\n")
 		g.buf.WriteString("// path) to its verbatim .yammm content; SerializedModelEntry is the entry-point key.\n")
 		g.buf.WriteString("// Re-load with:\n")
 		g.buf.WriteString("//   schema.LoadSourcesWithEntry(ctx, toBytes(SerializedModel), SerializedModelEntry, \".\")\n")
-		g.buf.WriteString("// where toBytes converts each map value to []byte.\n")
+		g.buf.WriteString("// where toBytes converts each map value to []byte. Add schema.WithSourcesOnly()\n")
+		g.buf.WriteString("// to guarantee the re-load never reads the filesystem.\n")
 		g.buf.WriteString("var SerializedModel = map[string]string{\n")
 		for _, id := range ids { // SourceIDs() is sorted/deterministic
 			content, ok := srcs.ContentBySource(id)
 			if !ok {
 				return fmt.Errorf("gogen: source %s content unavailable", id)
 			}
-			fmt.Fprintf(g.buf, "%s: %s,\n", strconv.Quote(sourceKey(entry, id)), strconv.Quote(string(content)))
+			fmt.Fprintf(g.buf, "%s: %s,\n", strconv.Quote(sourceKey(root, entry, id)), strconv.Quote(string(content)))
 		}
 		g.buf.WriteString("}\n\n")
-		fmt.Fprintf(g.buf, "const SerializedModelEntry = %s\n\n", strconv.Quote(sourceKey(entry, entry)))
+		fmt.Fprintf(g.buf, "const SerializedModelEntry = %s\n\n", strconv.Quote(sourceKey(root, entry, entry)))
 	}
 	fmt.Fprintf(g.buf, "const SchemaHash = %q\n", schema.StructuralHash(g.schema))
 	return nil
 }
 
-// sourceKey returns id's path relative to the module root (the entry source's
-// directory), forward-slashed — so embedded SerializedModel keys are
-// machine-independent. An absolute generation-machine path baked into the output
-// would make the .go.golden files non-reproducible across checkouts/CI. filepath.Rel
-// against filepath.Dir(entry) reproduces the relative layout schema.Load resolved
-// imports against (its module root IS the entry's directory), so re-loading with
-// moduleRoot "." matches every key (LoadSourcesWithEntry canonicalises
-// filepath.Join(".", key) the same way for registration and import resolution).
-// Falls back to the absolute id only when relativization is impossible (e.g. a
-// different Windows volume) — still re-loadable on the generation machine, merely
-// non-portable in that rare case, which verifyRoundTrip would surface.
-func sourceKey(entry, id location.SourceID) string {
-	root := filepath.Dir(entry.String())
+// sourceKey returns id's path relative to moduleRoot (the schema's recorded
+// ModuleRoot — the root the load actually resolved module-style imports
+// against), forward-slashed — so embedded SerializedModel keys are
+// machine-independent AND match the import statements inside the sources:
+// a module-style `import "a/b/x"` re-resolves to the key "a/b/x.yammm" on
+// re-load, hitting the pre-registered source with no filesystem fallback.
+// An absolute generation-machine path baked into the output would make the
+// .go.golden files non-reproducible across checkouts/CI. When moduleRoot is
+// empty (a LoadString-backed schema; imports are impossible there), keys
+// fall back to entry-directory-relative — for the single source that exists
+// in that case, its own base name. A source outside the module root (a legal
+// entry layout; imports are sandboxed but the entry is not) yields a
+// "../"-prefixed key, which still registers and re-loads consistently —
+// merely an unusual-looking key. Falls back to the absolute id only when
+// relativization is impossible (e.g. a different Windows volume) — still
+// re-loadable on the generation machine, merely non-portable in that rare
+// case, which verifyRoundTrip would surface.
+func sourceKey(moduleRoot string, entry, id location.SourceID) string {
+	root := moduleRoot
+	if root == "" {
+		root = filepath.Dir(entry.String())
+	}
 	if rel, err := filepath.Rel(root, id.String()); err == nil {
 		return filepath.ToSlash(rel)
 	}

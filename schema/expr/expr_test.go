@@ -222,8 +222,8 @@ func TestExpression_Children_EdgeCases(t *testing.T) {
 func TestSExpr_Empty(t *testing.T) {
 	empty := expr.SExpr{}
 
-	assert.Equal(t, "", empty.Op())
+	assert.Empty(t, empty.Op())
 	// Empty SExpr's Literal returns the op string which is ""
-	assert.Equal(t, "", empty.Literal())
+	assert.Empty(t, empty.Literal())
 	assert.Nil(t, empty.Children())
 }

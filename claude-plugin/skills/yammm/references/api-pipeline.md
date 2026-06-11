@@ -84,8 +84,8 @@ schema.Load(ctx, path,
     schema.WithIssueLimit(100),
     schema.WithLogger(logger),
     schema.WithDisallowImports(),
-    schema.WithSourceRegistry(reg),
     schema.WithRegistry(registry),
+    schema.WithSourcesOnly(), // hermetic: imports resolve only against in-memory sources — pair with LoadSources/LoadSourcesWithEntry, which seed them
 )
 ```
 
@@ -107,6 +107,8 @@ s, result := schema.NewBuilder().
         Done().
     Build()
 ```
+
+`Build()` validates declared names against the DSL's own productions (`E_INVALID_NAME`): type and datatype names start with an uppercase letter, property names with a lowercase letter, relation names with a letter of either case — all continuing with letters, digits, or underscores. Schema names and invariant names are free-form strings.
 
 ### Schema Type (Read API)
 
@@ -299,7 +301,7 @@ info, result := snapshot.Info(ctx, data)
 - **Validated instances** (`*instance.ValidInstance`) are immutable
 - **Graph snapshots** (`*graph.Snapshot`) are immutable
 - **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddComposed` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns an immutable snapshot
-- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe by default with opt-in `WithValidatorPool(n)` for CPU-bound consumers. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state). See `docs/API.md` § Batch Assembly
+- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe by default with opt-in `WithValidatorPool(n)` for CPU-bound consumers. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---

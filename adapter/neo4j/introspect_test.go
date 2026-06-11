@@ -3,6 +3,7 @@ package neo4j
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,15 +24,16 @@ func TestParseRemoteConstraints_Uniqueness(t *testing.T) {
 
 	constraints, err := ParseRemoteConstraints(records)
 	require.NoError(t, err)
-	require.Len(t, constraints, 1)
 
-	c := constraints[0]
-	assert.Equal(t, "book_catalog__Publisher_publisher_id_unique", c.Name)
-	assert.Equal(t, "UNIQUENESS", c.Type)
-	assert.Equal(t, "NODE", c.EntityType)
-	assert.Equal(t, []string{"book_catalog__Publisher"}, c.LabelsOrTypes)
-	assert.Equal(t, []string{"publisher_id"}, c.Properties)
-	assert.Empty(t, c.PropertyType)
+	want := []RemoteConstraint{{
+		Name:            "book_catalog__Publisher_publisher_id_unique",
+		Type:            "UNIQUENESS",
+		EntityType:      "NODE",
+		LabelsOrTypes:   []string{"book_catalog__Publisher"},
+		Properties:      []string{"publisher_id"},
+		CreateStatement: "CREATE CONSTRAINT book_catalog__Publisher_publisher_id_unique IF NOT EXISTS FOR (n:book_catalog__Publisher) REQUIRE n.publisher_id IS UNIQUE",
+	}}
+	yammmtest.Diff(t, want, constraints)
 }
 
 func TestParseRemoteConstraints_TypeConstraint(t *testing.T) {
@@ -79,7 +81,7 @@ func TestParseRemoteConstraints_MissingName(t *testing.T) {
 	}
 
 	_, err := ParseRemoteConstraints(records)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing constraint name")
 }
 

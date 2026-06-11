@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
+	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,7 +16,7 @@ import (
 
 func TestHandleFormatting_NilDoc(t *testing.T) {
 	t.Parallel()
-	h := handleFormatting(&fakeResolver{docSnap: nil}, testLogger())
+	h := handleFormatting(&fakeResolver{docSnap: nil}, testutil.DiscardLogger())
 	var result []protocol.TextEdit
 	err := callHandler(t, h, &protocol.DocumentFormattingParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.yammm"},
@@ -36,7 +37,7 @@ func TestHandleFormatting_WithDoc(t *testing.T) {
 			Version: 1,
 			Text:    unformatted,
 		},
-	}, testLogger())
+	}, testutil.DiscardLogger())
 
 	var result []protocol.TextEdit
 	err := callHandler(t, h, &protocol.DocumentFormattingParams{

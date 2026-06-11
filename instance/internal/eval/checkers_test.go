@@ -54,9 +54,21 @@ func TestIsInteger(t *testing.T) {
 		{"int32", int32(42), true},
 		{"int64", int64(42), true},
 		{"uint", uint(42), true},
-		{"float", 3.14, false},
+		{"uint64", uint64(42), true},
 		{"string", "42", false},
 		{"bool", true, false},
+
+		// Float64 whole numbers are integers; fractions and non-finite are not.
+		{"float64_zero", float64(0.0), true},
+		{"float64_positive", float64(42.0), true},
+		{"float64_negative", float64(-42.0), true},
+		{"float64_large", float64(1000000.0), true},
+		{"float64_fraction_half", float64(0.5), false},
+		{"float64_fraction_pi", float64(3.14), false},
+		{"float64_fraction_negative", float64(-2.5), false},
+		{"float64_nan", math.NaN(), false},
+		{"float64_inf", math.Inf(1), false},
+		{"float64_neg_inf", math.Inf(-1), false},
 	}
 
 	for _, tt := range tests {
@@ -131,9 +143,16 @@ func TestIsUUID(t *testing.T) {
 		expected bool
 	}{
 		{"valid_uuid", "550e8400-e29b-41d4-a716-446655440000", true},
+		{"uuid_uppercase", "550E8400-E29B-41D4-A716-446655440000", true},
 		{"invalid_uuid", "not-a-uuid", false},
 		{"short_uuid", "550e8400-e29b-41d4", false},
 		{"int", 42, false},
+
+		// uuid.UUID values are accepted without string parsing.
+		{"uuid_type_valid", uuid.MustParse("550e8400-e29b-41d4-a716-446655440000"), true},
+		{"uuid_type_nil", uuid.Nil, true},
+		{"uuid_type_new", uuid.New(), true},
+		{"float", 3.14, false},
 	}
 
 	for _, tt := range tests {
@@ -160,6 +179,13 @@ func TestIsTimestamp(t *testing.T) {
 		{"rfc3339_nano", "2024-01-15T10:30:00.123456789Z", true},
 		{"invalid_format", "2024/01/15", false},
 		{"not_string", 12345, false},
+
+		// time.Time values are timestamps without string parsing.
+		{"time_now", time.Now(), true},
+		{"time_utc", time.Now().UTC(), true},
+		{"time_zero", time.Time{}, true},
+		{"time_fixed", time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC), true},
+		{"float", 3.14, false},
 	}
 
 	for _, tt := range tests {
@@ -286,62 +312,127 @@ func TestCheckValue_String(t *testing.T) {
 	}
 }
 
-func TestCheckValue_Integer(t *testing.T) {
+// TestCheckCoerce_Integer drives CheckValue and CoerceValue through one
+// table. CheckValue enforces kind AND bounds; CoerceValue converts kind only
+// (it documents itself as running after a successful CheckValue), so a
+// bounds-violating whole number still coerces — wantCoerced pins that split.
+// A nil wantCoerced with wantCoerceErr=false skips the coercion assertions.
+func TestCheckCoerce_Integer(t *testing.T) {
 	tests := []struct {
-		name       string
-		val        any
-		constraint schema.Constraint
-		wantErr    bool
+		name          string
+		val           any
+		constraint    schema.Constraint
+		wantErr       bool
+		wantCoerced   any
+		wantCoerceErr bool
 	}{
-		{"valid_int", int64(42), schema.NewIntegerConstraint(), false},
-		{"valid_int32", int32(42), schema.NewIntegerConstraint(), false},
-		{"valid_uint", uint(42), schema.NewIntegerConstraint(), false},
-		{"wrong_type_string", "42", schema.NewIntegerConstraint(), true},
-		{"wrong_type_float", 3.14, schema.NewIntegerConstraint(), true},
-		{"min_ok", int64(10), schema.IntegerBetween(10, 100), false},
-		{"min_fail", int64(9), schema.IntegerBetween(10, 100), true},
-		{"max_ok", int64(100), schema.IntegerBetween(10, 100), false},
-		{"max_fail", int64(101), schema.IntegerBetween(10, 100), true},
-		{"no_min", int64(-1000), schema.IntegerMax(100), false},
-		{"no_max", int64(1000), schema.IntegerMin(0), false},
+		{"valid_int", int64(42), schema.NewIntegerConstraint(), false, int64(42), false},
+		{"valid_int32", int32(42), schema.NewIntegerConstraint(), false, int64(42), false},
+		{"valid_uint", uint(42), schema.NewIntegerConstraint(), false, int64(42), false},
+		{"uint8", uint8(255), schema.NewIntegerConstraint(), false, int64(255), false},
+		{"int16", int16(-32768), schema.NewIntegerConstraint(), false, int64(-32768), false},
+		{"wrong_type_string", "42", schema.NewIntegerConstraint(), true, nil, true},
+		{"wrong_type_float", 3.14, schema.NewIntegerConstraint(), true, nil, true},
+		{"min_ok", int64(10), schema.IntegerBetween(10, 100), false, int64(10), false},
+		{"min_fail", int64(9), schema.IntegerBetween(10, 100), true, int64(9), false},
+		{"max_ok", int64(100), schema.IntegerBetween(10, 100), false, int64(100), false},
+		{"max_fail", int64(101), schema.IntegerBetween(10, 100), true, int64(101), false},
+		{"no_min", int64(-1000), schema.IntegerMax(100), false, int64(-1000), false},
+		{"no_max", int64(1000), schema.IntegerMin(0), false, int64(1000), false},
+
+		// Float64 whole numbers are integers; fractions and non-finite fail
+		// both checking and coercion.
+		{"float64_whole_zero", float64(0.0), schema.NewIntegerConstraint(), false, int64(0), false},
+		{"float64_whole_positive", float64(42.0), schema.NewIntegerConstraint(), false, int64(42), false},
+		{"float64_whole_negative", float64(-42.0), schema.NewIntegerConstraint(), false, int64(-42), false},
+		{"float64_whole_large", float64(1000000.0), schema.NewIntegerConstraint(), false, int64(1000000), false},
+		{"float64_fraction", float64(3.14), schema.NewIntegerConstraint(), true, nil, true},
+		{"float64_fraction_half", float64(0.5), schema.NewIntegerConstraint(), true, nil, true},
+		{"float64_min_ok", float64(10.0), schema.IntegerBetween(10, 100), false, int64(10), false},
+		{"float64_min_fail", float64(9.0), schema.IntegerBetween(10, 100), true, int64(9), false},
+		{"float64_max_ok", float64(100.0), schema.IntegerBetween(10, 100), false, int64(100), false},
+		{"float64_max_fail", float64(101.0), schema.IntegerBetween(10, 100), true, int64(101), false},
+		{"float64_nan", math.NaN(), schema.NewIntegerConstraint(), true, nil, true},
+		{"float64_inf", math.Inf(1), schema.NewIntegerConstraint(), true, nil, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := eval.CheckValue(tt.val, tt.constraint)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
+			}
+
+			coerced, coerceErr := eval.CoerceValue(tt.val, tt.constraint)
+			if tt.wantCoerceErr {
+				assert.Error(t, coerceErr)
+				return
+			}
+			require.NoError(t, coerceErr)
+			if tt.wantCoerced != nil {
+				assert.Equal(t, tt.wantCoerced, coerced)
 			}
 		})
 	}
 }
 
-func TestCheckValue_Float(t *testing.T) {
+// TestCheckCoerce_Float drives CheckValue and CoerceValue through one table;
+// non-finite values fail both, and coercion converts every accepted numeric
+// representation to float64 exactly.
+func TestCheckCoerce_Float(t *testing.T) {
 	tests := []struct {
-		name       string
-		val        any
-		constraint schema.Constraint
-		wantErr    bool
+		name          string
+		val           any
+		constraint    schema.Constraint
+		wantErr       bool
+		errMsg        string
+		wantCoerced   any
+		wantCoerceErr bool
 	}{
-		{"valid_float", 3.14, schema.NewFloatConstraint(), false},
-		{"valid_int_as_float", int64(42), schema.NewFloatConstraint(), false},
-		{"wrong_type_string", "3.14", schema.NewFloatConstraint(), true},
-		{"wrong_type_bool", true, schema.NewFloatConstraint(), true},
-		{"min_ok", 0.0, schema.FloatBetween(0.0, 1.0), false},
-		{"min_fail", -0.1, schema.FloatBetween(0.0, 1.0), true},
-		{"max_ok", 1.0, schema.FloatBetween(0.0, 1.0), false},
-		{"max_fail", 1.1, schema.FloatBetween(0.0, 1.0), true},
+		{"valid_float", 3.14, schema.NewFloatConstraint(), false, "", float64(3.14), false},
+		{"valid_int_as_float", int64(42), schema.NewFloatConstraint(), false, "", float64(42), false},
+		{"float32_to_float64", float32(1.5), schema.NewFloatConstraint(), false, "", float64(1.5), false},
+		{"float32_imprecise", float32(3.14), schema.NewFloatConstraint(), false, "", float64(float32(3.14)), false},
+		{"uint64_to_float64", uint64(100), schema.NewFloatConstraint(), false, "", float64(100), false},
+		{"wrong_type_string", "3.14", schema.NewFloatConstraint(), true, "", nil, true},
+		{"wrong_type_bool", true, schema.NewFloatConstraint(), true, "", nil, true},
+		{"min_ok", 0.0, schema.FloatBetween(0.0, 1.0), false, "", float64(0), false},
+		{"min_fail", -0.1, schema.FloatBetween(0.0, 1.0), true, "", float64(-0.1), false},
+		{"max_ok", 1.0, schema.FloatBetween(0.0, 1.0), false, "", float64(1), false},
+		{"max_fail", 1.1, schema.FloatBetween(0.0, 1.0), true, "", float64(1.1), false},
+
+		// Non-finite floats are rejected before bounds by both paths.
+		{"reject_nan", math.NaN(), schema.NewFloatConstraint(), true, "not finite", nil, true},
+		{"reject_pos_inf", math.Inf(1), schema.NewFloatConstraint(), true, "not finite", nil, true},
+		{"reject_neg_inf", math.Inf(-1), schema.NewFloatConstraint(), true, "not finite", nil, true},
+		{"nan_with_bounds", math.NaN(), schema.FloatBetween(0, 100), true, "not finite", nil, true},
+		{"inf_with_bounds", math.Inf(1), schema.FloatBetween(0, 100), true, "not finite", nil, true},
+		{"accept_large", 1e308, schema.NewFloatConstraint(), false, "", float64(1e308), false},
+		{"accept_small", 1e-308, schema.NewFloatConstraint(), false, "", float64(1e-308), false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := eval.CheckValue(tt.val, tt.constraint)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
+			}
+
+			coerced, coerceErr := eval.CoerceValue(tt.val, tt.constraint)
+			if tt.wantCoerceErr {
+				assert.Error(t, coerceErr)
+				return
+			}
+			require.NoError(t, coerceErr)
+			if tt.wantCoerced != nil {
+				assert.Equal(t, tt.wantCoerced, coerced)
 			}
 		})
 	}
@@ -371,51 +462,50 @@ func TestCheckValue_Boolean(t *testing.T) {
 	}
 }
 
-func TestCheckValue_Timestamp(t *testing.T) {
+// TestCheckCoerce_Timestamp covers string and time.Time forms plus the
+// custom-format constraint. Timestamp is a canonical kind, so CoerceValue
+// passes every value through unchanged — even ones CheckValue rejects.
+func TestCheckCoerce_Timestamp(t *testing.T) {
+	defaultC := schema.NewTimestampConstraint()
+	customC := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")
+
 	tests := []struct {
-		name    string
-		val     any
-		wantErr bool
+		name       string
+		val        any
+		constraint schema.Constraint
+		wantErr    bool
 	}{
-		{"rfc3339", "2024-01-15T10:30:00Z", false},
-		{"rfc3339_offset", "2024-01-15T10:30:00+05:00", false},
-		{"rfc3339_nano", "2024-01-15T10:30:00.123456789Z", false},
-		{"invalid_format", "2024/01/15 10:30:00", true},
-		{"wrong_type", 12345, true},
+		{"rfc3339", "2024-01-15T10:30:00Z", defaultC, false},
+		{"rfc3339_offset", "2024-01-15T10:30:00+05:00", defaultC, false},
+		{"rfc3339_nano", "2024-01-15T10:30:00.123456789Z", defaultC, false},
+		{"invalid_format", "2024/01/15 10:30:00", defaultC, true},
+		{"wrong_type", 12345, defaultC, true},
+		{"float", 3.14, defaultC, true},
+
+		// time.Time values are accepted directly.
+		{"time_now", time.Now(), defaultC, false},
+		{"time_utc", time.Now().UTC(), defaultC, false},
+		{"time_zero", time.Time{}, defaultC, false},
+		{"time_fixed", time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC), defaultC, false},
+		{"time_with_location", time.Date(2024, 1, 15, 10, 30, 0, 0, time.FixedZone("EST", -5*60*60)), defaultC, false},
+
+		// Custom format replaces RFC3339, not extends it.
+		{"custom_format", "2024-01-15 10:30:00", customC, false},
+		{"custom_format_rejects_rfc3339", "2024-01-15T10:30:00Z", customC, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := eval.CheckValue(tt.val, schema.NewTimestampConstraint())
+			err := eval.CheckValue(tt.val, tt.constraint)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
-		})
-	}
-}
 
-func TestCheckValue_TimestampCustomFormat(t *testing.T) {
-	constraint := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")
-
-	tests := []struct {
-		name    string
-		val     any
-		wantErr bool
-	}{
-		{"custom_format", "2024-01-15 10:30:00", false},
-		{"rfc3339_wrong", "2024-01-15T10:30:00Z", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := eval.CheckValue(tt.val, constraint)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
+			coerced, coerceErr := eval.CoerceValue(tt.val, tt.constraint)
+			require.NoError(t, coerceErr)
+			assert.Equal(t, tt.val, coerced, "canonical kind must pass through unchanged")
 		})
 	}
 }
@@ -443,25 +533,40 @@ func TestCheckValue_Date(t *testing.T) {
 	}
 }
 
-func TestCheckValue_UUID(t *testing.T) {
+// TestCheckCoerce_UUID covers string and uuid.UUID forms. UUID is a
+// canonical kind, so CoerceValue passes every value through unchanged.
+func TestCheckCoerce_UUID(t *testing.T) {
+	constraint := schema.NewUUIDConstraint()
+
 	tests := []struct {
 		name    string
 		val     any
 		wantErr bool
 	}{
 		{"valid_uuid", "550e8400-e29b-41d4-a716-446655440000", false},
+		{"uuid_uppercase", "550E8400-E29B-41D4-A716-446655440000", false},
 		{"invalid_uuid", "not-a-uuid", true},
 		{"wrong_type", 12345, true},
+		{"float", 3.14, true},
+
+		// uuid.UUID values are accepted directly.
+		{"uuid_type_valid", uuid.MustParse("550e8400-e29b-41d4-a716-446655440000"), false},
+		{"uuid_type_nil", uuid.Nil, false},
+		{"uuid_type_new", uuid.New(), false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := eval.CheckValue(tt.val, schema.NewUUIDConstraint())
+			err := eval.CheckValue(tt.val, constraint)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
+
+			coerced, coerceErr := eval.CoerceValue(tt.val, constraint)
+			require.NoError(t, coerceErr)
+			assert.Equal(t, tt.val, coerced, "canonical kind must pass through unchanged")
 		})
 	}
 }
@@ -520,29 +625,58 @@ func TestCheckValue_Pattern(t *testing.T) {
 	}
 }
 
-func TestCheckValue_Vector(t *testing.T) {
+// TestCheckCoerce_Vector drives CheckValue and CoerceValue through one
+// table: dimension and element-kind violations (with their element-index
+// error anchors), non-finite element rejection, and coercion of every
+// accepted representation to []float64.
+func TestCheckCoerce_Vector(t *testing.T) {
 	constraint := schema.NewVectorConstraint(3)
 
 	tests := []struct {
-		name    string
-		val     any
-		wantErr bool
+		name          string
+		val           any
+		wantErr       bool
+		errMsg        string
+		wantCoerced   any
+		wantCoerceErr bool
 	}{
-		{"valid_vector", []any{1.0, 2.0, 3.0}, false},
-		{"valid_int_vector", []any{int64(1), int64(2), int64(3)}, false},
-		{"wrong_dimensions", []any{1.0, 2.0}, true},
-		{"wrong_element_type", []any{"a", "b", "c"}, true},
-		{"wrong_type", "not a vector", true},
-		{"typed_float_slice", []float64{1.0, 2.0, 3.0}, false},
+		{"valid_vector", []any{1.0, 2.0, 3.0}, false, "", []float64{1, 2, 3}, false},
+		{"valid_int_vector", []any{int64(1), int64(2), int64(3)}, false, "", []float64{1, 2, 3}, false},
+		{"mixed_int_float", []any{int64(1), 2.5, int64(3)}, false, "", []float64{1, 2.5, 3}, false},
+		{"typed_float_slice", []float64{1.0, 2.0, 3.0}, false, "", []float64{1, 2, 3}, false},
+		{"wrong_dimensions", []any{1.0, 2.0}, true, "", nil, false},
+		{"wrong_element_type", []any{"a", "b", "c"}, true, "", nil, true},
+		{"wrong_type", "not a vector", true, "", nil, true},
+
+		// Non-finite elements are rejected with their index in the message.
+		{"reject_nan_element", []any{1.0, math.NaN(), 3.0}, true, "element [1]", nil, true},
+		{"reject_inf_element", []any{1.0, math.Inf(1), 3.0}, true, "element [1]", nil, true},
+		{"reject_neg_inf_element", []any{math.Inf(-1), 2.0, 3.0}, true, "element [0]", nil, true},
+		{"reject_all_nan", []any{math.NaN(), math.NaN(), math.NaN()}, true, "element [0]", nil, true},
+		{"reject_nan_float64_slice", []float64{1.0, math.NaN(), 3.0}, true, "element [1]", nil, true},
+		{"reject_inf_float64_slice", []float64{math.Inf(1), 2.0, 3.0}, true, "element [0]", nil, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := eval.CheckValue(tt.val, constraint)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
+			}
+
+			coerced, coerceErr := eval.CoerceValue(tt.val, constraint)
+			if tt.wantCoerceErr {
+				assert.Error(t, coerceErr)
+				return
+			}
+			require.NoError(t, coerceErr)
+			if tt.wantCoerced != nil {
+				assert.Equal(t, tt.wantCoerced, coerced)
 			}
 		})
 	}
@@ -579,7 +713,7 @@ func TestCheckValue_UnresolvedAlias(t *testing.T) {
 	constraint := schema.NewAliasConstraint("UnresolvedType", nil)
 
 	err := eval.CheckValue(int64(10), constraint)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unresolved")
 }
 
@@ -596,148 +730,11 @@ func TestCheckerFor(t *testing.T) {
 	assert.NotEmpty(t, msg)
 }
 
-func TestCheckValue_Float_NaNInf(t *testing.T) {
-	tests := []struct {
-		name       string
-		val        any
-		constraint schema.Constraint
-		wantErr    bool
-		errMsg     string
-	}{
-		{"reject_nan", math.NaN(), schema.NewFloatConstraint(), true, "not finite"},
-		{"reject_pos_inf", math.Inf(1), schema.NewFloatConstraint(), true, "not finite"},
-		{"reject_neg_inf", math.Inf(-1), schema.NewFloatConstraint(), true, "not finite"},
-		{"accept_zero", 0.0, schema.NewFloatConstraint(), false, ""},
-		{"accept_negative", -1.5, schema.NewFloatConstraint(), false, ""},
-		{"accept_large", 1e308, schema.NewFloatConstraint(), false, ""},
-		{"accept_small", 1e-308, schema.NewFloatConstraint(), false, ""},
-
-		// NaN/Inf with bounds - should fail on NaN/Inf check before bounds
-		{"nan_with_bounds", math.NaN(), schema.FloatBetween(0, 100), true, "not finite"},
-		{"inf_with_bounds", math.Inf(1), schema.FloatBetween(0, 100), true, "not finite"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := eval.CheckValue(tt.val, tt.constraint)
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errMsg)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestCheckValue_Vector_NaNInf(t *testing.T) {
-	constraint := schema.NewVectorConstraint(3)
-
-	tests := []struct {
-		name    string
-		val     any
-		wantErr bool
-		errMsg  string
-	}{
-		{"reject_nan_element", []any{1.0, math.NaN(), 3.0}, true, "element [1]"},
-		{"reject_inf_element", []any{1.0, math.Inf(1), 3.0}, true, "element [1]"},
-		{"reject_neg_inf_element", []any{math.Inf(-1), 2.0, 3.0}, true, "element [0]"},
-		{"reject_all_nan", []any{math.NaN(), math.NaN(), math.NaN()}, true, "element [0]"},
-		{"accept_valid_vector", []any{1.0, 2.0, 3.0}, false, ""},
-		{"accept_mixed_int_float", []any{int64(1), 2.5, int64(3)}, false, ""},
-		{"accept_typed_slice", []float64{1.0, 2.0, 3.0}, false, ""},
-
-		// Edge cases with typed slices
-		{"reject_nan_float64_slice", []float64{1.0, math.NaN(), 3.0}, true, "element [1]"},
-		{"reject_inf_float64_slice", []float64{math.Inf(1), 2.0, 3.0}, true, "element [0]"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := eval.CheckValue(tt.val, constraint)
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errMsg)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestCoerceValue_Float_NaNInf(t *testing.T) {
-	tests := []struct {
-		name    string
-		val     any
-		wantErr bool
-	}{
-		{"reject_nan", math.NaN(), true},
-		{"reject_inf", math.Inf(1), true},
-		{"reject_neg_inf", math.Inf(-1), true},
-		{"accept_zero", 0.0, false},
-		{"accept_int", int64(42), false},
-		{"accept_negative", -3.14, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := eval.CoerceValue(tt.val, schema.NewFloatConstraint())
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestCoerceValue_Vector_NaNInf(t *testing.T) {
-	constraint := schema.NewVectorConstraint(3)
-
-	tests := []struct {
-		name    string
-		val     any
-		wantErr bool
-	}{
-		{"reject_nan_element", []any{1.0, math.NaN(), 3.0}, true},
-		{"reject_inf_element", []any{1.0, math.Inf(1), 3.0}, true},
-		{"accept_valid", []any{1.0, 2.0, 3.0}, false},
-		{"accept_int_elements", []any{int64(1), int64(2), int64(3)}, false},
-		{"reject_typed_nan", []float64{1.0, math.NaN(), 3.0}, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := eval.CoerceValue(tt.val, constraint)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 // NOTE: The Registry enables custom type KIND DETECTION via ClassifyWithRegistry,
 // but named scalar types (e.g., `type MyInt int64`) remain unsupported for value
 // extraction (GetInt64/GetFloat64 don't convert them). This is by design.
 //
 // These tests verify the registry wiring is correct, not that named scalars work.
-
-func TestChecker_DefaultChecker(t *testing.T) {
-	// DefaultChecker should use built-in type detection
-	checker := eval.DefaultChecker()
-
-	// Built-in types should work
-	err := checker.CheckValue(int64(42), schema.NewIntegerConstraint())
-	require.NoError(t, err)
-
-	err = checker.CheckValue(3.14, schema.NewFloatConstraint())
-	require.NoError(t, err)
-
-	err = checker.CheckValue("hello", schema.NewStringConstraint())
-	require.NoError(t, err)
-}
 
 func TestChecker_NewChecker_WithRegistry(t *testing.T) {
 	// Verify NewChecker accepts a Registry and the Checker is usable
@@ -763,36 +760,6 @@ func TestChecker_NewChecker_WithRegistry(t *testing.T) {
 	_ = checker.CheckValue(customType{}, schema.NewIntegerConstraint())
 	// We don't care about the error; we just want to verify the hook was called
 	assert.True(t, hookCalled, "registry hook should be called for unrecognized types in Integer check")
-}
-
-func TestChecker_CheckValue_Backward_Compatibility(t *testing.T) {
-	// Package-level CheckValue should continue to work (uses DefaultChecker internally)
-	err := eval.CheckValue(int64(42), schema.NewIntegerConstraint())
-	require.NoError(t, err)
-
-	err = eval.CheckValue(3.14, schema.NewFloatConstraint())
-	require.NoError(t, err)
-
-	err = eval.CheckValue("hello", schema.NewStringConstraint())
-	require.NoError(t, err)
-
-	// All integer variants should work
-	err = eval.CheckValue(int8(42), schema.NewIntegerConstraint())
-	require.NoError(t, err)
-
-	err = eval.CheckValue(uint64(42), schema.NewIntegerConstraint())
-	require.NoError(t, err)
-}
-
-func TestChecker_CoerceValue_Backward_Compatibility(t *testing.T) {
-	// Package-level CoerceValue should continue to work
-	result, err := eval.CoerceValue(42, schema.NewIntegerConstraint())
-	require.NoError(t, err)
-	assert.Equal(t, int64(42), result)
-
-	result, err = eval.CoerceValue(float32(3.14), schema.NewFloatConstraint())
-	require.NoError(t, err)
-	assert.IsType(t, float64(0), result)
 }
 
 func TestChecker_Method_vs_PackageLevel(t *testing.T) {
@@ -867,412 +834,6 @@ func TestCoerceValue_AliasConstraint(t *testing.T) {
 	// Test nil value
 	t.Run("nil_value_returns_nil", func(t *testing.T) {
 		result, err := checker.CoerceValue(nil, intAlias)
-		require.NoError(t, err)
-		assert.Nil(t, result)
-	})
-}
-
-func TestCoerceValue_VectorConstraint(t *testing.T) {
-	checker := eval.NewChecker(value.Registry{})
-	vectorConstraint := schema.NewVectorConstraint(3)
-
-	t.Run("typed_float64_slice", func(t *testing.T) {
-		input := []float64{1.0, 2.0, 3.0}
-		result, err := checker.CoerceValue(input, vectorConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, input, result)
-	})
-
-	t.Run("any_slice_of_floats", func(t *testing.T) {
-		input := []any{1.0, 2.0, 3.0}
-		result, err := checker.CoerceValue(input, vectorConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, []float64{1.0, 2.0, 3.0}, result)
-	})
-
-	t.Run("any_slice_of_ints", func(t *testing.T) {
-		input := []any{int64(1), int64(2), int64(3)}
-		result, err := checker.CoerceValue(input, vectorConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, []float64{1.0, 2.0, 3.0}, result)
-	})
-
-	t.Run("coerce_error_non_numeric", func(t *testing.T) {
-		input := []any{"a", "b", "c"}
-		_, err := checker.CoerceValue(input, vectorConstraint)
-		assert.Error(t, err)
-	})
-}
-
-func TestCoerceValue_FloatEdgeCases(t *testing.T) {
-	checker := eval.NewChecker(value.Registry{})
-	floatConstraint := schema.NewFloatConstraint()
-
-	t.Run("float32_to_float64", func(t *testing.T) {
-		result, err := checker.CoerceValue(float32(1.5), floatConstraint)
-		require.NoError(t, err)
-		assert.InDelta(t, 1.5, result.(float64), 0.0001)
-	})
-
-	t.Run("uint64_to_float64", func(t *testing.T) {
-		result, err := checker.CoerceValue(uint64(100), floatConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, float64(100), result)
-	})
-}
-
-func TestCoerceValue_IntegerEdgeCases(t *testing.T) {
-	checker := eval.NewChecker(value.Registry{})
-	intConstraint := schema.NewIntegerConstraint()
-
-	t.Run("uint8_to_int64", func(t *testing.T) {
-		result, err := checker.CoerceValue(uint8(255), intConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, int64(255), result)
-	})
-
-	t.Run("int16_to_int64", func(t *testing.T) {
-		result, err := checker.CoerceValue(int16(-32768), intConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, int64(-32768), result)
-	})
-}
-
-func TestCheckValue_BooleanConstraint(t *testing.T) {
-	boolConstraint := schema.NewBooleanConstraint()
-
-	t.Run("true_value", func(t *testing.T) {
-		err := eval.CheckValue(true, boolConstraint)
-		require.NoError(t, err)
-	})
-
-	t.Run("false_value", func(t *testing.T) {
-		err := eval.CheckValue(false, boolConstraint)
-		require.NoError(t, err)
-	})
-
-	t.Run("string_true_fails", func(t *testing.T) {
-		err := eval.CheckValue("true", boolConstraint)
-		assert.Error(t, err)
-	})
-
-	t.Run("int_one_fails", func(t *testing.T) {
-		err := eval.CheckValue(1, boolConstraint)
-		assert.Error(t, err)
-	})
-}
-
-func TestIsInteger_Float64WholeNumber(t *testing.T) {
-	checker := eval.IsInteger()
-
-	tests := []struct {
-		name     string
-		val      any
-		expected bool
-	}{
-		// Float64 whole numbers should be accepted
-		{"float64_zero", float64(0.0), true},
-		{"float64_positive", float64(42.0), true},
-		{"float64_negative", float64(-42.0), true},
-		{"float64_large", float64(1000000.0), true},
-
-		// Float64 with fractions should be rejected
-		{"float64_fraction_half", float64(0.5), false},
-		{"float64_fraction_pi", float64(3.14), false},
-		{"float64_fraction_negative", float64(-2.5), false},
-
-		// Non-finite floats should be rejected
-		{"float64_nan", math.NaN(), false},
-		{"float64_inf", math.Inf(1), false},
-		{"float64_neg_inf", math.Inf(-1), false},
-
-		// Standard integer types still work
-		{"int", 42, true},
-		{"int64", int64(42), true},
-		{"uint64", uint64(42), true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ok, msg := checker(tt.val)
-			assert.Equal(t, tt.expected, ok)
-			if !tt.expected {
-				assert.NotEmpty(t, msg)
-			}
-		})
-	}
-}
-
-func TestCheckValue_Integer_Float64WholeNumber(t *testing.T) {
-	tests := []struct {
-		name       string
-		val        any
-		constraint schema.Constraint
-		wantErr    bool
-	}{
-		// Float64 whole numbers should be accepted
-		{"float64_whole_zero", float64(0.0), schema.NewIntegerConstraint(), false},
-		{"float64_whole_positive", float64(42.0), schema.NewIntegerConstraint(), false},
-		{"float64_whole_negative", float64(-42.0), schema.NewIntegerConstraint(), false},
-		{"float64_whole_large", float64(1000000.0), schema.NewIntegerConstraint(), false},
-
-		// Float64 with fractions should be rejected
-		{"float64_fraction", float64(3.14), schema.NewIntegerConstraint(), true},
-		{"float64_fraction_half", float64(0.5), schema.NewIntegerConstraint(), true},
-
-		// Float64 whole numbers should respect bounds
-		{"float64_min_ok", float64(10.0), schema.IntegerBetween(10, 100), false},
-		{"float64_min_fail", float64(9.0), schema.IntegerBetween(10, 100), true},
-		{"float64_max_ok", float64(100.0), schema.IntegerBetween(10, 100), false},
-		{"float64_max_fail", float64(101.0), schema.IntegerBetween(10, 100), true},
-
-		// Non-finite should be rejected
-		{"float64_nan", math.NaN(), schema.NewIntegerConstraint(), true},
-		{"float64_inf", math.Inf(1), schema.NewIntegerConstraint(), true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := eval.CheckValue(tt.val, tt.constraint)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestCoerceValue_Integer_Float64WholeNumber(t *testing.T) {
-	checker := eval.NewChecker(value.Registry{})
-	intConstraint := schema.NewIntegerConstraint()
-
-	tests := []struct {
-		name    string
-		val     any
-		wantVal int64
-		wantErr bool
-	}{
-		// Float64 whole numbers should coerce to int64
-		{"float64_zero", float64(0.0), 0, false},
-		{"float64_positive", float64(42.0), 42, false},
-		{"float64_negative", float64(-42.0), -42, false},
-		{"float64_large", float64(1000000.0), 1000000, false},
-
-		// Float64 with fractions should fail
-		{"float64_fraction", float64(3.14), 0, true},
-		{"float64_half", float64(0.5), 0, true},
-
-		// Non-finite should fail
-		{"float64_nan", math.NaN(), 0, true},
-		{"float64_inf", math.Inf(1), 0, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := checker.CoerceValue(tt.val, intConstraint)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, tt.wantVal, result)
-			}
-		})
-	}
-}
-
-func TestIsTimestamp_TimeTime(t *testing.T) {
-	checker := eval.IsTimestamp()
-
-	tests := []struct {
-		name     string
-		val      any
-		expected bool
-	}{
-		// time.Time should be accepted
-		{"time_now", time.Now(), true},
-		{"time_utc", time.Now().UTC(), true},
-		{"time_zero", time.Time{}, true},
-		{"time_fixed", time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC), true},
-
-		// Valid timestamp strings still work
-		{"string_rfc3339", "2024-01-15T10:30:00Z", true},
-		{"string_rfc3339_offset", "2024-01-15T10:30:00+05:00", true},
-
-		// Invalid types should be rejected
-		{"int", 12345, false},
-		{"float", 3.14, false},
-		{"invalid_string", "not a timestamp", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ok, msg := checker(tt.val)
-			assert.Equal(t, tt.expected, ok)
-			if !tt.expected {
-				assert.NotEmpty(t, msg)
-			}
-		})
-	}
-}
-
-func TestCheckValue_Timestamp_TimeTime(t *testing.T) {
-	tests := []struct {
-		name    string
-		val     any
-		wantErr bool
-	}{
-		// time.Time should be accepted
-		{"time_now", time.Now(), false},
-		{"time_utc", time.Now().UTC(), false},
-		{"time_zero", time.Time{}, false},
-		{"time_fixed", time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC), false},
-		{"time_with_location", time.Date(2024, 1, 15, 10, 30, 0, 0, time.FixedZone("EST", -5*60*60)), false},
-
-		// Valid timestamp strings still work
-		{"string_rfc3339", "2024-01-15T10:30:00Z", false},
-		{"string_rfc3339_nano", "2024-01-15T10:30:00.123456789Z", false},
-
-		// Invalid types should be rejected
-		{"int", 12345, true},
-		{"float", 3.14, true},
-		{"invalid_string", "not a timestamp", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := eval.CheckValue(tt.val, schema.NewTimestampConstraint())
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestIsUUID_UUIDType(t *testing.T) {
-	checker := eval.IsUUID()
-
-	// Generate some UUIDs for testing
-	validUUID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
-	nilUUID := uuid.Nil
-
-	tests := []struct {
-		name     string
-		val      any
-		expected bool
-	}{
-		// uuid.UUID should be accepted
-		{"uuid_valid", validUUID, true},
-		{"uuid_nil", nilUUID, true},
-		{"uuid_new", uuid.New(), true},
-
-		// Valid UUID strings still work
-		{"string_uuid", "550e8400-e29b-41d4-a716-446655440000", true},
-		{"string_uuid_uppercase", "550E8400-E29B-41D4-A716-446655440000", true},
-
-		// Invalid types should be rejected
-		{"int", 12345, false},
-		{"float", 3.14, false},
-		{"invalid_string", "not-a-uuid", false},
-		{"short_string", "550e8400-e29b-41d4", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ok, msg := checker(tt.val)
-			assert.Equal(t, tt.expected, ok)
-			if !tt.expected {
-				assert.NotEmpty(t, msg)
-			}
-		})
-	}
-}
-
-func TestCheckValue_UUID_UUIDType(t *testing.T) {
-	// Generate some UUIDs for testing
-	validUUID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
-	nilUUID := uuid.Nil
-
-	tests := []struct {
-		name    string
-		val     any
-		wantErr bool
-	}{
-		// uuid.UUID should be accepted
-		{"uuid_valid", validUUID, false},
-		{"uuid_nil", nilUUID, false},
-		{"uuid_new", uuid.New(), false},
-
-		// Valid UUID strings still work
-		{"string_uuid", "550e8400-e29b-41d4-a716-446655440000", false},
-
-		// Invalid types should be rejected
-		{"int", 12345, true},
-		{"float", 3.14, true},
-		{"invalid_string", "not-a-uuid", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := eval.CheckValue(tt.val, schema.NewUUIDConstraint())
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestCoerceValue_Timestamp_TimeTime(t *testing.T) {
-	checker := eval.NewChecker(value.Registry{})
-	timestampConstraint := schema.NewTimestampConstraint()
-
-	fixedTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
-
-	t.Run("time_time_passthrough", func(t *testing.T) {
-		result, err := checker.CoerceValue(fixedTime, timestampConstraint)
-		require.NoError(t, err)
-		// time.Time should pass through unchanged
-		assert.Equal(t, fixedTime, result)
-	})
-
-	t.Run("string_timestamp_passthrough", func(t *testing.T) {
-		result, err := checker.CoerceValue("2024-01-15T10:30:00Z", timestampConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, "2024-01-15T10:30:00Z", result)
-	})
-
-	t.Run("nil_passthrough", func(t *testing.T) {
-		result, err := checker.CoerceValue(nil, timestampConstraint)
-		require.NoError(t, err)
-		assert.Nil(t, result)
-	})
-}
-
-func TestCoerceValue_UUID_UUIDType(t *testing.T) {
-	checker := eval.NewChecker(value.Registry{})
-	uuidConstraint := schema.NewUUIDConstraint()
-
-	validUUID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
-
-	t.Run("uuid_type_passthrough", func(t *testing.T) {
-		result, err := checker.CoerceValue(validUUID, uuidConstraint)
-		require.NoError(t, err)
-		// uuid.UUID should pass through unchanged
-		assert.Equal(t, validUUID, result)
-	})
-
-	t.Run("string_uuid_passthrough", func(t *testing.T) {
-		result, err := checker.CoerceValue("550e8400-e29b-41d4-a716-446655440000", uuidConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", result)
-	})
-
-	t.Run("nil_passthrough", func(t *testing.T) {
-		result, err := checker.CoerceValue(nil, uuidConstraint)
 		require.NoError(t, err)
 		assert.Nil(t, result)
 	})
@@ -1423,7 +984,7 @@ func TestCheckValue_List_ElementConstraintViolation(t *testing.T) {
 	t.Run("element exceeds constraint", func(t *testing.T) {
 		t.Parallel()
 		err := eval.CheckValue([]any{"ab", "toolong"}, constraint)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "element [1]")
 	})
 }
@@ -1512,7 +1073,7 @@ func TestCoerceValue_List(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewIntegerConstraint())
 		_, err := checker.CoerceValue([]any{"not_an_int"}, constraint)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "element [0]")
 	})
 }

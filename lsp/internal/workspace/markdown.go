@@ -184,6 +184,10 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 		return
 	}
 
+	if hook := w.analysisCompletedHookFn(); hook != nil {
+		hook(uri)
+	}
+
 	// Version-gate and store results atomically
 	w.mu.Lock()
 	md = w.markdownDocs[uri]

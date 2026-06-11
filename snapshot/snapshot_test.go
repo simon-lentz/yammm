@@ -24,6 +24,8 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/instancetest"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -73,67 +75,70 @@ func testSchemaWithComposition(t *testing.T) *schema.Schema {
 	return s
 }
 
-func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+// mustTypeID resolves a schema type's ID, failing the test if absent.
+func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
 		t.Fatalf("type %q not found", typeName)
 	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), nil, nil, nil)
+	return typ.ID()
+}
+
+func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+	t.Helper()
+	return instancetest.VI(
+		typeName,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+	)
 }
 
 func mustValidInstanceWithEdge(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKeys [][]any) *instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
 	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
 	for i, tk := range targetKeys {
-		targets[i] = instance.NewValidEdgeTarget(immutable.WrapKey(tk), immutable.Properties{})
+		targets[i] = instance.NewValidEdgeTarget(immutable.WrapKey(tk), immutable.WrapProperties(nil))
 	}
-	edges := map[string]*instance.ValidEdgeData{
-		relName: instance.NewValidEdgeData(targets),
-	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), edges, nil, nil)
+	return instancetest.VI(
+		typeName,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
+	)
 }
 
 func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
 	t.Helper()
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), nil, nil, nil)
+	return instancetest.VI(
+		typeName,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+	)
 }
 
-// mustValidInstanceWithEdgeProps mirrors the graph-package helper of the same
-// name (graph/testhelpers_test.go:391) but is available to snapshot tests.
-// Builds a ValidInstance with a single edge that carries schema-declared edge
-// properties. Used by PR-6's unresolved-edge-properties round-trip tests.
+// mustValidInstanceWithEdgeProps builds a ValidInstance with a single edge
+// that carries schema-declared edge properties.
 func mustValidInstanceWithEdgeProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKey []any, edgeProps map[string]any) *instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
 	targets := []instance.ValidEdgeTarget{
 		instance.NewValidEdgeTarget(immutable.WrapKey(targetKey), immutable.WrapProperties(edgeProps)),
 	}
-	edges := map[string]*instance.ValidEdgeData{
-		relName: instance.NewValidEdgeData(targets),
-	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), edges, nil, nil)
+	return instancetest.VI(
+		typeName,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
+	)
 }
 
 func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	t.Helper()
-	g := graph.New(s)
-	ctx := context.Background()
-	for _, inst := range instances {
-		g.Add(ctx, inst)
-	}
-	return g.Snapshot()
+	return snapshottest.BuildSnapshot(t, s, instances...)
 }
 
 func TestMarshal_NilPanics(t *testing.T) {
@@ -205,7 +210,7 @@ func TestMarshal_Deterministic(t *testing.T) {
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	snap := buildSnapshot(t, s, company, person)
-	snapshottest.AssertDeterministic(t, snap, s)
+	snapshottest.AssertDeterministic(t, snap)
 }
 
 func TestMarshalLoad_RoundTrip_Basic(t *testing.T) {
@@ -472,6 +477,28 @@ func TestInfo_Basic(t *testing.T) {
 	}
 }
 
+// sharedFields projects two structs' exported fields onto name-keyed maps
+// restricted to the field names they share, so cross-type parity tests
+// compare every common field without a hand-maintained list.
+func sharedFields(t *testing.T, a, b any) (av, bv map[string]any) {
+	t.Helper()
+	ra, rb := reflect.ValueOf(a), reflect.ValueOf(b)
+	names := make(map[string]bool)
+	for i := range ra.NumField() {
+		names[ra.Type().Field(i).Name] = true
+	}
+	av, bv = make(map[string]any), make(map[string]any)
+	for i := range rb.NumField() {
+		name := rb.Type().Field(i).Name
+		if names[name] {
+			av[name] = ra.FieldByName(name).Interface()
+			bv[name] = rb.Field(i).Interface()
+		}
+	}
+	require.NotEmpty(t, av, "structs share no fields — parity test is vacuous")
+	return av, bv
+}
+
 func TestHeaderOnly_Basic(t *testing.T) {
 	s := testSchema(t)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
@@ -554,18 +581,11 @@ func TestHeaderOnly_ConsistentWithInfo(t *testing.T) {
 	header, headerRes := snapshot.HeaderOnly(ctx, data)
 	require.NoError(t, headerRes.Err())
 
-	// Every field common to both APIs must match byte-for-byte.
-	assert.Equal(t, info.Version, header.Version)
-	assert.Equal(t, info.Features, header.Features)
-	assert.Equal(t, info.SchemaName, header.SchemaName)
-	assert.Equal(t, info.SchemaSource, header.SchemaSource)
-	assert.Equal(t, info.SchemaHash, header.SchemaHash)
-	assert.Equal(t, info.SchemaHashAlgorithm, header.SchemaHashAlgorithm)
-	assert.Equal(t, info.IntegrityHash, header.IntegrityHash)
-	assert.Equal(t, info.CreatedAt, header.CreatedAt)
-	assert.Equal(t, info.Metadata, header.Metadata)
-	assert.Equal(t, info.Types, header.Types)
-	assert.Equal(t, info.FileSize, header.FileSize)
+	// Every field common to both APIs must match byte-for-byte. The
+	// reflected projection keys on shared field names, so fields added to
+	// both structs later are parity-checked automatically.
+	infoFields, headerFields := sharedFields(t, *info, *header)
+	assert.Equal(t, infoFields, headerFields)
 }
 
 func TestHeaderOnly_IntegrityNotVerified(t *testing.T) {
@@ -690,20 +710,15 @@ func TestHeaderOnlyRead_ParityWithHeaderOnly(t *testing.T) {
 	require.NoError(t, readerRes.Err())
 
 	// Every HeaderInfo field equal EXCEPT FileSize — the single
-	// documented structural delta between the two entry points.
-	assert.Equal(t, fromBytes.Version, fromReader.Version)
-	assert.Equal(t, fromBytes.Features, fromReader.Features)
-	assert.Equal(t, fromBytes.SchemaName, fromReader.SchemaName)
-	assert.Equal(t, fromBytes.SchemaSource, fromReader.SchemaSource)
-	assert.Equal(t, fromBytes.SchemaHash, fromReader.SchemaHash)
-	assert.Equal(t, fromBytes.SchemaHashAlgorithm, fromReader.SchemaHashAlgorithm)
-	assert.Equal(t, fromBytes.IntegrityHash, fromReader.IntegrityHash)
-	assert.Equal(t, fromBytes.CreatedAt, fromReader.CreatedAt)
-	assert.Equal(t, fromBytes.Metadata, fromReader.Metadata)
-	assert.Equal(t, fromBytes.Types, fromReader.Types)
-
+	// documented structural delta between the two entry points. Pin the
+	// delta explicitly, then zero it and compare whole structs so fields
+	// added to HeaderInfo later are parity-checked automatically.
 	assert.Equal(t, int64(len(data)), fromBytes.FileSize)
 	assert.Equal(t, int64(0), fromReader.FileSize)
+
+	fb, fr := *fromBytes, *fromReader
+	fb.FileSize, fr.FileSize = 0, 0
+	assert.Equal(t, fb, fr)
 }
 
 func TestHeaderOnlyRead_ExceedsMaxHeaderSize(t *testing.T) {
@@ -1055,9 +1070,7 @@ func TestConstructionPathEquivalence(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if err := snapshottest.CompareSnapshots(constructed, loaded); err != nil {
-		t.Errorf("construction path equivalence failed:\n%v", err)
-	}
+	snapshottest.DiffSnapshots(t, constructed, loaded)
 }
 
 func TestLoad_TypeIDReconstruction(t *testing.T) {
@@ -1158,11 +1171,11 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip pins the §6 fidelity
-// fix: edge properties declared on a forward reference to an absent target
-// must survive Marshal → Load intact. Pre-PR-6 behavior silently dropped
-// these at graph.go:825-827 and at the unresolvedWire layer; this test
-// regresses on both failure modes.
+// TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip pins unresolved-edge
+// property fidelity: edge properties declared on a forward reference to an
+// absent target must survive Marshal → Load intact. A prior implementation
+// silently dropped these both in the graph's unresolved-edge bookkeeping and
+// at the unresolvedWire layer; this test regresses on both failure modes.
 func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 	s := testSchema(t)
 	// Person with EMPLOYER edge to non-existent Company c99, carrying
@@ -1210,8 +1223,9 @@ func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 // TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties pins wire-format
 // parity: an edge with identical property shape survives round-trip
 // regardless of whether it resolves (target present) or stays unresolved
-// (target absent). This is the high-level invariant the §6 golden-bytes
-// parity test exists to pin at the serialization-bytes layer.
+// (target absent). This is the high-level invariant that
+// [TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes] pins at the
+// serialization-bytes layer.
 func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 	s := testSchema(t)
 
@@ -1302,53 +1316,6 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 				}
 			}
 			require.True(t, found, "expected E_SNAPSHOT_UNSUPPORTED_VERSION")
-		})
-	}
-}
-
-func TestWireStructFieldOrder(t *testing.T) {
-	// Verify that JSON serialization produces keys in the expected order.
-	// This guards against accidental field reordering in wire structs.
-	tests := []struct {
-		name     string
-		typ      reflect.Type
-		expected []string
-	}{
-		{
-			name: "headerWire",
-			typ: reflect.TypeFor[struct {
-				Version             int               `json:"version"`
-				SchemaName          string            `json:"schema_name"`
-				SchemaSource        string            `json:"schema_source"`
-				SchemaHash          string            `json:"schema_hash"`
-				SchemaHashAlgorithm int               `json:"schema_hash_algorithm"`
-				IntegrityHash       string            `json:"integrity_hash"`
-				Features            []string          `json:"features"`
-				CreatedAt           string            `json:"created_at,omitempty"`
-				Metadata            map[string]string `json:"metadata,omitempty"`
-			}](),
-			expected: []string{
-				"version", "schema_name", "schema_source", "schema_hash",
-				"schema_hash_algorithm", "integrity_hash", "features",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Check struct field json tags match expected order.
-			for i, expectedKey := range tt.expected {
-				if i >= tt.typ.NumField() {
-					t.Errorf("expected field %d (%q) but type has only %d fields",
-						i, expectedKey, tt.typ.NumField())
-					continue
-				}
-				tag := tt.typ.Field(i).Tag.Get("json")
-				tagName := strings.Split(tag, ",")[0]
-				if tagName != expectedKey {
-					t.Errorf("field %d: expected json tag %q, got %q", i, expectedKey, tagName)
-				}
-			}
 		})
 	}
 }
@@ -1569,7 +1536,7 @@ func TestWriteFile_CreateFailsOnNonexistentDirectory(t *testing.T) {
 	err := snapshot.WriteFile(path, []byte("payload"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "create temp", "error should be tagged with the failing step")
-	assert.True(t, errors.Is(err, fs.ErrNotExist), "wrapped cause should be fs.ErrNotExist")
+	require.ErrorIs(t, err, fs.ErrNotExist, "wrapped cause should be fs.ErrNotExist")
 
 	// No partial tmp should exist anywhere reachable under dir.
 	_, statErr := os.Stat(path + snapshot.TmpSuffix)
@@ -1626,16 +1593,18 @@ func TestWriteFile_ConcurrentDistinctPaths(t *testing.T) {
 	letters := []byte{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'}
 	const n = 8
 	var wg sync.WaitGroup
-	wg.Add(n)
+	writeErrs := make([]error, n)
 	for i := range n {
-		go func(idx int) {
-			defer wg.Done()
-			path := filepath.Join(dir, fmt.Sprintf("snap-%d.ys", idx))
-			payload := bytes.Repeat([]byte{letters[idx]}, 32)
-			require.NoError(t, snapshot.WriteFile(path, payload))
-		}(i)
+		wg.Go(func() {
+			path := filepath.Join(dir, fmt.Sprintf("snap-%d.ys", i))
+			payload := bytes.Repeat([]byte{letters[i]}, 32)
+			writeErrs[i] = snapshot.WriteFile(path, payload)
+		})
 	}
 	wg.Wait()
+	for i, err := range writeErrs {
+		require.NoError(t, err, "goroutine %d write", i)
+	}
 
 	for i := range n {
 		path := filepath.Join(dir, fmt.Sprintf("snap-%d.ys", i))
@@ -1737,4 +1706,25 @@ func TestWriteFile_LeavesNoTmpOnSuccess(t *testing.T) {
 
 	_, statErr := os.Stat(stale)
 	assert.True(t, os.IsNotExist(statErr), "successful WriteFile must rename the tmp away, even when a stale tmp pre-existed")
+}
+
+// TestMarshal_GoldenBytes pins the exact serialized .ys wire bytes for a
+// representative snapshot — header shape, key order, instance encoding,
+// resolved edge, and unresolved-edge entry — so any wire-format change is a
+// reviewed golden diff, not an incidental one.
+func TestMarshal_GoldenBytes(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(
+		t, s,
+		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}),
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"title": "Acme"}),
+		mustValidInstanceWithEdge(t, s, "Person", []any{"p2"}, map[string]any{"name": "Bob"},
+			"EMPLOYER", [][]any{{"c1"}}),
+		mustValidInstanceWithEdge(t, s, "Person", []any{"p3"}, map[string]any{"name": "Cara"},
+			"EMPLOYER", [][]any{{"c-missing"}}),
+	)
+
+	data, res := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
+	require.NoError(t, res.Err())
+	yammmtest.Golden(t, "marshal_representative.ys", data)
 }

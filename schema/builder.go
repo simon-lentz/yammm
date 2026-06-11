@@ -2,12 +2,28 @@ package schema
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
+)
+
+// Name productions mirrored from the grammar's lexer rules. The Builder and
+// the parser are two front doors to the same object model: a Builder-built
+// schema must remain expressible in the DSL, so declared names are held to
+// the same productions the parser enforces structurally. Schema names and
+// invariant names are quoted strings in the DSL and stay free-form.
+var (
+	// builderTypeNameRE mirrors UC_WORD (type and datatype names).
+	builderTypeNameRE = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
+	// builderPropertyNameRE mirrors LC_WORD, which subsumes the lc_keyword
+	// alternatives the property_name production also admits.
+	builderPropertyNameRE = regexp.MustCompile(`^[a-z][A-Za-z0-9_]*$`)
+	// builderRelationNameRE mirrors any_name (UC_WORD | LC_WORD).
+	builderRelationNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 )
 
 // ImportResolver resolves import paths to SourceIDs for synthetic sources.
@@ -27,6 +43,15 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // >= 2 values, bounds are ordered correctly), the Builder accepts constraints
 // as-is. Callers are responsible for constructing valid constraints using
 // the schema.New*Constraint constructors.
+//
+// Declared names, however, are validated: Build rejects (E_INVALID_NAME)
+// type, datatype, property, and relation names that do not match the DSL's
+// own name productions, so every Builder-built schema remains expressible
+// in the DSL. Type and datatype names start with an uppercase letter;
+// property names start with a lowercase letter; relation names start with
+// a letter of either case; all continue with letters, digits, or
+// underscores. Schema names and invariant names are quoted strings in the
+// DSL and stay free-form. Import aliases are validated during completion.
 //
 // # Import Requirements
 //
@@ -297,7 +322,11 @@ func (b *Builder) convertTypes() []*typeDecl {
 	return result
 }
 
-// validateInput performs shallow validation of builder input before completion.
+// validateInput performs shallow validation of builder input before completion:
+// nil-checks, and grammar-conformance of declared names against the DSL's
+// productions (type/datatype names UC_WORD, property names LC_WORD, relation
+// names UC_WORD|LC_WORD). Invariant names map to the DSL's quoted failure
+// message, so only emptiness is checked.
 // Returns true if validation passes, false otherwise (with diagnostics collected).
 //
 // Uses semantic diagnostic codes per:
@@ -308,19 +337,33 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 	hasErrors := false
 
 	for _, t := range b.types {
-		if t.name == "" {
+		switch {
+		case t.name == "":
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
 				"type name cannot be empty").
 				WithDetail(diag.DetailKeyName, "").
 				WithDetail(diag.DetailKeyContext, "Builder").Build())
 			hasErrors = true
+		case !builderTypeNameRE.MatchString(t.name):
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+				fmt.Sprintf("type name %q is not a valid DSL type name: type names start with an uppercase letter, followed by letters, digits, or underscores", t.name)).
+				WithDetail(diag.DetailKeyName, t.name).
+				WithDetail(diag.DetailKeyContext, "Builder").Build())
+			hasErrors = true
 		}
 
 		for _, p := range t.properties {
-			if p.Name == "" {
+			switch {
+			case p.Name == "":
 				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
 					fmt.Sprintf("property name cannot be empty in type %q", t.name)).
 					WithDetail(diag.DetailKeyName, "").
+					WithDetail(diag.DetailKeyTypeName, t.name).Build())
+				hasErrors = true
+			case !builderPropertyNameRE.MatchString(p.Name):
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+					fmt.Sprintf("property name %q in type %q is not a valid DSL property name: property names start with a lowercase letter, followed by letters, digits, or underscores", p.Name, t.name)).
+					WithDetail(diag.DetailKeyName, p.Name).
 					WithDetail(diag.DetailKeyTypeName, t.name).Build())
 				hasErrors = true
 			}
@@ -334,10 +377,17 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 		}
 
 		for _, r := range t.relations {
-			if r.Name == "" {
+			switch {
+			case r.Name == "":
 				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
 					fmt.Sprintf("relation name cannot be empty in type %q", t.name)).
 					WithDetail(diag.DetailKeyName, "").
+					WithDetail(diag.DetailKeyTypeName, t.name).Build())
+				hasErrors = true
+			case !builderRelationNameRE.MatchString(r.Name):
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+					fmt.Sprintf("relation name %q in type %q is not a valid DSL relation name: relation names start with a letter, followed by letters, digits, or underscores", r.Name, t.name)).
+					WithDetail(diag.DetailKeyName, r.Name).
 					WithDetail(diag.DetailKeyTypeName, t.name).Build())
 				hasErrors = true
 			}
@@ -362,10 +412,17 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 	}
 
 	for _, dt := range b.dataTypes {
-		if dt.Name == "" {
+		switch {
+		case dt.Name == "":
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
 				"datatype name cannot be empty").
 				WithDetail(diag.DetailKeyName, "").
+				WithDetail(diag.DetailKeyContext, "Builder").Build())
+			hasErrors = true
+		case !builderTypeNameRE.MatchString(dt.Name):
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+				fmt.Sprintf("datatype name %q is not a valid DSL type name: type names start with an uppercase letter, followed by letters, digits, or underscores", dt.Name)).
+				WithDetail(diag.DetailKeyName, dt.Name).
 				WithDetail(diag.DetailKeyContext, "Builder").Build())
 			hasErrors = true
 		}

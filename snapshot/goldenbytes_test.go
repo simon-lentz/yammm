@@ -29,9 +29,9 @@ type fixtureFile struct {
 	Edges []fixtureEdge `json:"edges"`
 }
 
-// loadFixture reads the committed fixture. Missing fixture fails the test;
-// regeneration is handled by TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes
-// under the -update flag.
+// loadFixture reads the committed fixture; a missing fixture fails the
+// test. The fixture is hand-curated input data (encoder-drift classes),
+// not a generated golden — there is no regeneration path.
 func loadFixture(t *testing.T) fixtureFile {
 	t.Helper()
 	path := filepath.Join("testdata", "unresolved_edge_props", "fixture.json")
@@ -49,8 +49,8 @@ func loadFixture(t *testing.T) fixtureFile {
 	return ff
 }
 
-// TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes is the §6 resolved-
-// vs-unresolved wire-format parity test. For each edge in the committed
+// TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes pins resolved-
+// vs-unresolved wire-format parity for edge properties. For each edge in the committed
 // fixture, it builds two snapshots — one where the edge resolves (target
 // present, Edge.Properties() path) and one where the edge remains
 // unresolved (target absent, UnresolvedEdge.Properties() path) — marshals

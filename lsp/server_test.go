@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	lsp "github.com/simon-lentz/yammm/lsp"
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
@@ -24,28 +26,25 @@ import (
 )
 
 // newTestHarness creates a harness for integration testing with a real LSP server.
-func newTestHarness(t *testing.T, root string) *testutil.Harness {
-	t.Helper()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := lsp.NewServer(logger, lsp.Config{
-		ModuleRoot: root,
-	})
-
-	ctx := t.Context()
-	h := testutil.NewHarness(t, server.Mux(), root)
-	server.Workspace().SetNotifier(func(method string, params any) {
-		_ = h.JRPCServer().Notify(ctx, method, params)
-	})
-	return h
-}
-
-// newTestHarnessWithServer creates a harness with an initialized LSP server,
-// returning both the harness and server for tests that need direct workspace access.
+// newTestHarnessWithServer is the single harness constructor: it wires a
+// fresh server to an in-process client, connects diagnostics notification
+// push, runs the LSP initialize handshake, and returns both the harness and
+// the server for tests that need direct workspace access.
 func newTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *lsp.Server) {
 	t.Helper()
+	return newTestHarnessWithServerConfig(t, root, lsp.Config{ModuleRoot: root})
+}
+
+// newTestHarnessWithServerConfig is newTestHarnessWithServer with explicit
+// server configuration, for tests that tune Config knobs (e.g., a short
+// DebounceDelay for temporal tests). cfg.ModuleRoot should normally be root.
+func newTestHarnessWithServerConfig(t *testing.T, root string, cfg lsp.Config) (*testutil.Harness, *lsp.Server) {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := lsp.NewServer(logger, lsp.Config{ModuleRoot: root})
+	server := lsp.NewServer(logger, cfg)
+	// Shut the server down at test end so workspace scheduler goroutines
+	// and debounce timers do not outlive the test. Close is idempotent.
+	t.Cleanup(func() { _ = server.Close() })
 	ctx := t.Context()
 	h := testutil.NewHarness(t, server.Mux(), root)
 	server.Workspace().SetNotifier(func(method string, params any) {
@@ -55,48 +54,12 @@ func newTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *ls
 	return h, server
 }
 
-// newMarkdownTestHarness creates a harness for markdown integration testing.
-// Initializes the server with the given root directory.
-func newMarkdownTestHarness(t *testing.T, root string) *testutil.Harness {
+// newTestHarness returns just the initialized harness for tests that never
+// touch the server side.
+func newTestHarness(t *testing.T, root string) *testutil.Harness {
 	t.Helper()
-	h := newTestHarness(t, root)
-	err := h.Initialize()
-	require.NoError(t, err, "harness initialization failed")
+	h, _ := newTestHarnessWithServer(t, root)
 	return h
-}
-
-// notificationCollector captures LSP notifications for testing.
-type notificationCollector struct {
-	mu      sync.Mutex
-	entries []notificationEntry
-}
-
-type notificationEntry struct {
-	Method string
-	Params any
-}
-
-func (c *notificationCollector) notify(method string, params any) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.entries = append(c.entries, notificationEntry{Method: method, Params: params})
-}
-
-func (c *notificationCollector) diagnosticsFor(uri string) []protocol.Diagnostic {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for i := len(c.entries) - 1; i >= 0; i-- {
-		e := c.entries[i]
-		if e.Method != protocol.ServerTextDocumentPublishDiagnostics {
-			continue
-		}
-		p, ok := e.Params.(protocol.PublishDiagnosticsParams)
-		if ok && p.URI == uri {
-			return p.Diagnostics
-		}
-	}
-	return nil
 }
 
 func TestNewServer(t *testing.T) {
@@ -168,9 +131,6 @@ func TestIntegration_InitializeSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err := h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 }
 
 func TestIntegration_FormattingWithoutOpen(t *testing.T) {
@@ -185,9 +145,6 @@ func TestIntegration_FormattingWithoutOpen(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	edits, err := h.Formatting("main.yammm")
 	require.NoError(t, err, "Formatting failed")
@@ -207,9 +164,6 @@ func TestIntegration_HoverWithoutOpen(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	hover, err := h.Hover("main.yammm", 2, 5)
 	require.NoError(t, err, "Hover returned error")
@@ -235,9 +189,6 @@ func TestIntegration_DefinitionWithoutOpen(t *testing.T) {
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
-
 	result, err := h.Definition("main.yammm", 5, 22)
 	require.NoError(t, err, "Definition returned error")
 
@@ -256,9 +207,6 @@ func TestIntegration_OverlayOverridesDisk(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	overlayContent := "schema \"test\"\n\ntype Person {\n\toverlayField String primary\n}\n"
 	err = h.OpenDocument("main.yammm", overlayContent)
@@ -294,9 +242,6 @@ func TestIntegration_DiskFallbackForUnopened(t *testing.T) {
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
-
 	err = h.OpenDocument("main.yammm", mainContent)
 	require.NoError(t, err, "OpenDocument failed")
 
@@ -305,17 +250,7 @@ func TestIntegration_DiskFallbackForUnopened(t *testing.T) {
 
 	require.NotNil(t, result, "Definition returned nil - schema may be invalid or symbol index missing")
 
-	switch v := result.(type) {
-	case protocol.Location:
-		testutil.AssertLocationURI(t, v, "parts.yammm")
-	case *protocol.Location:
-		testutil.AssertLocationURI(t, *v, "parts.yammm")
-	case []protocol.Location:
-		require.NotEmpty(t, v, "Definition returned empty location array")
-		testutil.AssertLocationURI(t, v[0], "parts.yammm")
-	default:
-		require.Failf(t, "Unexpected definition result type", "got type %T", result)
-	}
+	testutil.AssertLocationURI(t, *result, "parts.yammm")
 }
 
 func TestIntegration_OpenedImportOverridesDisk(t *testing.T) {
@@ -330,9 +265,6 @@ func TestIntegration_OpenedImportOverridesDisk(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	partsContentOverlay := "schema \"parts\"\n\ntype OverlayWheel {\n\tid String primary\n\toverlayDiameter Integer\n}\n"
 	err = h.OpenDocument("parts.yammm", partsContentOverlay)
@@ -405,9 +337,6 @@ func TestIntegration_MultiDocumentWorkflow(t *testing.T) {
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
-
 	err = h.OpenDocument(typesPath, typesContent)
 	require.NoError(t, err, "OpenDocument types.yammm failed")
 	err = h.OpenDocument(mainPath, mainContent)
@@ -426,17 +355,7 @@ func TestIntegration_MultiDocumentWorkflow(t *testing.T) {
 
 	require.NotNil(t, result, "Definition returned nil - schema may be invalid or symbol index missing")
 
-	switch v := result.(type) {
-	case protocol.Location:
-		testutil.AssertLocationURI(t, v, "types.yammm")
-	case *protocol.Location:
-		testutil.AssertLocationURI(t, *v, "types.yammm")
-	case []protocol.Location:
-		require.NotEmpty(t, v, "Definition returned empty location array")
-		testutil.AssertLocationURI(t, v[0], "types.yammm")
-	default:
-		require.Failf(t, "Unexpected definition result type", "got type %T", result)
-	}
+	testutil.AssertLocationURI(t, *result, "types.yammm")
 }
 
 func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
@@ -444,8 +363,6 @@ func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 
 	unformatted, err := os.ReadFile("testdata/lsp/formatting/unformatted.yammm")
 	require.NoError(t, err, "failed to read unformatted fixture")
-	golden, err := os.ReadFile("testdata/lsp/formatting/formatted.yammm.golden")
-	require.NoError(t, err, "failed to read golden fixture")
 
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "main.yammm")
@@ -454,9 +371,6 @@ func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	err = h.OpenDocument("main.yammm", string(unformatted))
 	require.NoError(t, err, "OpenDocument failed")
@@ -467,7 +381,7 @@ func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 	testutil.AssertFormattingApplied(t, edits)
 
 	result := testutil.ApplyEdits(string(unformatted), edits, "utf-16")
-	assert.Equal(t, string(golden), result, "round-trip result != golden")
+	yammmtest.Golden(t, "lsp/formatting/formatted.yammm", []byte(result))
 }
 
 func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
@@ -481,9 +395,6 @@ func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
 
 	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	err = h.Initialize()
-	require.NoError(t, err, "Initialize failed")
 
 	err = h.OpenDocument("test.yammm", content)
 	require.NoError(t, err, "OpenDocument failed")
@@ -629,14 +540,8 @@ func TestCompletion_UTF8Mode_Integration(t *testing.T) {
 			result, err := h.Completion(filePath, tt.line, tt.char)
 			require.NoError(t, err, "completion failed")
 
-			switch v := result.(type) {
-			case nil:
-				// No completions is valid.
-			case []protocol.CompletionItem:
-				t.Logf("got %d completion items", len(v))
-			default:
-				assert.Failf(t, "unexpected result type", "got type %T", result)
-			}
+			// A nil slice (no completions) is valid for some positions.
+			t.Logf("got %d completion items", len(result))
 		})
 	}
 }
@@ -661,12 +566,7 @@ func TestCompletion_UTF8Mode_NoPanic(t *testing.T) {
 	result, err := h.Completion(filePath, 3, 0)
 	require.NoError(t, err, "completion failed")
 
-	items, ok := result.([]protocol.CompletionItem)
-	if !ok {
-		t.Skipf("no completion items returned (result type: %T)", result)
-	}
-
-	assert.NotEmpty(t, items, "expected completion items for type body context")
+	assert.NotEmpty(t, result, "expected completion items for type body context")
 }
 
 const (
@@ -678,9 +578,9 @@ func TestTemporal_DebouncePipeline(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h, server := newTestHarnessWithServer(t, tmpDir)
+	h, _ := newTestHarnessWithServerConfig(t, tmpDir,
+		lsp.Config{ModuleRoot: tmpDir, DebounceDelay: testDebounceDelay})
 	defer h.Close()
-	server.Workspace().SetDebounceDelayForTest(testDebounceDelay)
 
 	contentA := "schema \"test\"\n\ntype Alpha {\n\tname String primary\n}\n"
 	require.NoError(t, h.OpenDocument("test.yammm", contentA))
@@ -693,22 +593,20 @@ func TestTemporal_DebouncePipeline(t *testing.T) {
 	contentB := "schema \"test\"\n\ntype Beta {\n\tid String primary\n\tage Integer\n}\n"
 	require.NoError(t, h.ChangeDocument("test.yammm", contentB, 2))
 
-	require.True(t, server.Workspace().WaitForAnalysis(analysisTimeout),
-		"timed out waiting for analysis")
-	h.Sync()
-
-	symbols, err = h.DocumentSymbols("test.yammm")
-	require.NoError(t, err)
-	testutil.AssertDocumentSymbolExists(t, symbols, "Beta")
+	require.Eventually(t, func() bool {
+		h.Sync()
+		syms, symErr := h.DocumentSymbols("test.yammm")
+		return symErr == nil && testutil.HasDocumentSymbol(syms, "Beta")
+	}, analysisTimeout, 10*time.Millisecond, "expected Beta symbol after change is analyzed")
 }
 
 func TestTemporal_RapidEditsSettle(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h, server := newTestHarnessWithServer(t, tmpDir)
+	h, _ := newTestHarnessWithServerConfig(t, tmpDir,
+		lsp.Config{ModuleRoot: tmpDir, DebounceDelay: testDebounceDelay})
 	defer h.Close()
-	server.Workspace().SetDebounceDelayForTest(testDebounceDelay)
 
 	require.NoError(t, h.OpenDocument("test.yammm", "schema \"test\"\n"))
 	h.Sync()
@@ -722,7 +620,6 @@ func TestTemporal_RapidEditsSettle(t *testing.T) {
 	require.NoError(t, h.ChangeDocument("test.yammm", finalContent, 11))
 
 	require.Eventually(t, func() bool {
-		server.Workspace().WaitForAnalysis(100 * time.Millisecond)
 		h.Sync()
 		syms, err := h.DocumentSymbols("test.yammm")
 		if err != nil {
@@ -732,42 +629,48 @@ func TestTemporal_RapidEditsSettle(t *testing.T) {
 	}, analysisTimeout, 10*time.Millisecond, "expected Final symbol after rapid edits settle")
 }
 
+// TestTemporal_CloseCancelsPendingAnalysis pins the close-cancels contract
+// under synctest's fake clock: a change schedules a debounced re-analysis,
+// the close cancels it, and sleeping past the full debounce window proves
+// the cancelled analysis never fires — the stale snapshot and diagnostics
+// stay cleared. (Real-time sleeps cannot catch this: the default debounce
+// outlives any tolerable sleep.)
 func TestTemporal_CloseCancelsPendingAnalysis(t *testing.T) {
-	t.Parallel()
-
 	tmpDir := t.TempDir()
-	h, server := newTestHarnessWithServer(t, tmpDir)
-	defer h.Close()
+	synctest.Test(t, func(t *testing.T) {
+		h, server := newTestHarnessWithServer(t, tmpDir)
+		defer h.Close()
 
-	require.NoError(t, h.OpenDocument("test.yammm",
-		"schema \"test\"\n\ntype Alpha {\n\tname String primary\n}\n"))
-	h.Sync()
+		require.NoError(t, h.OpenDocument("test.yammm",
+			"schema \"test\"\n\ntype Alpha {\n\tname String primary\n}\n"))
+		h.Sync()
+		synctest.Wait()
 
-	uri := testutil.PathToURI(filepath.Join(tmpDir, "test.yammm"))
-	snap := server.Workspace().LatestSnapshot(uri)
-	require.NotNil(t, snap, "snapshot should exist after open")
+		uri := testutil.PathToURI(filepath.Join(tmpDir, "test.yammm"))
+		require.Eventually(t, func() bool {
+			return server.Workspace().LatestSnapshot(uri) != nil
+		}, time.Second, 10*time.Millisecond, "snapshot should exist after open")
 
-	require.NoError(t, h.ChangeDocument("test.yammm", "not valid!!!", 2))
+		// Schedule a re-analysis, then close before the debounce elapses.
+		require.NoError(t, h.ChangeDocument("test.yammm", "not valid!!!", 2))
+		require.NoError(t, h.CloseDocument("test.yammm"))
+		h.Sync()
 
-	require.NoError(t, h.CloseDocument("test.yammm"))
-	h.Sync()
+		// Sleep past the entire debounce window in fake time: a cancelled
+		// analysis must not resurrect the snapshot or publish diagnostics.
+		time.Sleep(2 * workspace.DefaultDebounceDelay)
+		synctest.Wait()
 
-	time.Sleep(50 * time.Millisecond)
-	h.Sync()
-
-	snap = server.Workspace().LatestSnapshot(uri)
-	assert.Nil(t, snap, "snapshot should be nil after close")
-
-	diags := h.Diagnostics(uri)
-	assert.Empty(t, diags, "diagnostics should be cleared after close")
+		assert.Nil(t, server.Workspace().LatestSnapshot(uri), "snapshot should be nil after close")
+		assert.Empty(t, h.Diagnostics(uri), "diagnostics should be cleared after close")
+	})
 }
 
 func TestTemporal_ConcurrentOpenChangeClose(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := workspace.NewWorkspace(logger, workspace.Config{})
-	ws.SetDebounceDelayForTest(testDebounceDelay)
+	ws := workspace.NewWorkspace(logger, workspace.Config{DebounceDelay: testDebounceDelay})
 
 	const numURIs = 10
 	const iterations = 20
@@ -808,8 +711,7 @@ func TestTemporal_ConcurrentOpenCloseRace(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := workspace.NewWorkspace(logger, workspace.Config{})
-	ws.SetDebounceDelayForTest(testDebounceDelay)
+	ws := workspace.NewWorkspace(logger, workspace.Config{DebounceDelay: testDebounceDelay})
 
 	const iterations = 50
 	uri := "file:///test/race.yammm"
@@ -846,11 +748,11 @@ func TestMarkdownIntegration_DiagnosticsInCodeBlock(t *testing.T) {
 	uri := testutil.PathToURI(mdPath)
 	server.Workspace().MarkdownDocumentOpenedForTest(uri, 1, content)
 
-	collector := &notificationCollector{}
-	server.Workspace().SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	server.Workspace().SetNotifier(collector.Notify)
 	server.Workspace().AnalyzeMarkdownAndPublish(t.Context(), uri)
 
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	assert.NotEmpty(t, diags, "expected diagnostics for syntax error in code block")
 
 	var hasMarkdownCoords bool
@@ -868,7 +770,7 @@ func TestMarkdownIntegration_HoverInCodeBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
@@ -892,7 +794,7 @@ func TestMarkdownIntegration_OutsideCodeBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\nSome prose here.\n\n```yammm\nschema \"test\"\n```\n"
@@ -911,7 +813,7 @@ func TestMarkdownIntegration_CompletionOutsideCodeBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\nSome prose here.\n\n```yammm\nschema \"test\"\n```\n"
@@ -930,7 +832,7 @@ func TestMarkdownIntegration_DefinitionOutsideCodeBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\nSome prose here.\n\n```yammm\nschema \"test\"\n```\n"
@@ -949,7 +851,7 @@ func TestMarkdownIntegration_SymbolsNoCodeBlocks(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Just Prose\n\nNo code blocks here.\n\nMore text.\n"
@@ -968,7 +870,7 @@ func TestMarkdownIntegration_MultipleBlocks(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Block One\n\n```yammm\nschema \"block_one\"\n\ntype Alpha {\n    id String primary\n}\n```\n\n# Block Two\n\n```yammm\nschema \"block_two\"\n\ntype Beta {\n    name String primary\n}\n```\n"
@@ -990,16 +892,14 @@ func TestMarkdownIntegration_MultipleBlocks(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, symbols, "expected symbols from both blocks")
 
-	syms, ok := symbols.([]protocol.DocumentSymbol)
-	require.True(t, ok, "expected []protocol.DocumentSymbol")
-	assert.GreaterOrEqual(t, len(syms), 2, "expected symbols from both blocks")
+	assert.GreaterOrEqual(t, len(symbols), 2, "expected symbols from both blocks")
 }
 
 func TestMarkdownIntegration_CompletionInBlock(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    \n}\n```\n"
@@ -1013,9 +913,7 @@ func TestMarkdownIntegration_CompletionInBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result, "expected completion items inside code block")
 
-	if items, ok := result.([]protocol.CompletionItem); ok {
-		assert.NotEmpty(t, items, "expected completion items")
-	}
+	assert.NotEmpty(t, result, "expected completion items")
 }
 
 func TestMarkdownIntegration_ImportRejection(t *testing.T) {
@@ -1032,11 +930,11 @@ func TestMarkdownIntegration_ImportRejection(t *testing.T) {
 	uri := testutil.PathToURI(mdPath)
 	server.Workspace().MarkdownDocumentOpenedForTest(uri, 1, content)
 
-	collector := &notificationCollector{}
-	server.Workspace().SetNotifier(collector.notify)
+	collector := &testutil.NotificationCollector{}
+	server.Workspace().SetNotifier(collector.Notify)
 	server.Workspace().AnalyzeMarkdownAndPublish(t.Context(), uri)
 
-	diags := collector.diagnosticsFor(uri)
+	diags := collector.DiagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")
 
 	var found bool
@@ -1069,7 +967,7 @@ func TestMarkdownIntegration_CloseCleansDiagnostics(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
@@ -1124,7 +1022,7 @@ func TestMarkdownIntegration_FormattingReturnsEmpty(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
@@ -1143,7 +1041,7 @@ func TestMarkdownIntegration_IgnoreNonMarkdownExtension(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
@@ -1163,7 +1061,7 @@ func TestMarkdownIntegration_SnippetBlockNoSchema(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Snippet Example\n\n```yammm\ntype Foo {\n    id String primary\n    name String required\n}\n```\n"
@@ -1186,9 +1084,9 @@ func TestMarkdownIntegration_SnippetBlockNoSchema(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, symbols, "expected document symbols for snippet block")
 
-	if syms, ok := symbols.([]protocol.DocumentSymbol); ok {
+	{
 		var foundFoo bool
-		for _, sym := range syms {
+		for _, sym := range symbols {
 			if sym.Name == "Foo" {
 				foundFoo = true
 				assert.GreaterOrEqual(t, int(sym.Range.Start.Line), 3,
@@ -1210,7 +1108,7 @@ func TestMarkdownIntegration_FeaturesWithMarkdownOnly(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h := newMarkdownTestHarness(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
 
 	content := "# Only Markdown\n\n```yammm\nschema \"md_only\"\n\ntype Solo {\n    id String primary\n}\n```\n"
@@ -1262,7 +1160,7 @@ func TestMarkdownIntegration_Fixtures(t *testing.T) {
 			t.Parallel()
 
 			tmpDir := t.TempDir()
-			h := newMarkdownTestHarness(t, tmpDir)
+			h := newTestHarness(t, tmpDir)
 			defer h.Close()
 
 			data, err := os.ReadFile(filepath.Join(fixtureDir, tt.file))
@@ -1318,9 +1216,7 @@ func TestMarkdownIntegration_CompletionNilSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result, "completion should return items even with nil snapshot (graceful degradation)")
 
-	items, ok := result.([]protocol.CompletionItem)
-	require.True(t, ok, "expected []CompletionItem")
-	assert.NotEmpty(t, items, "expected keyword/snippet completions")
+	assert.NotEmpty(t, result, "expected keyword/snippet completions")
 }
 
 func TestMarkdownIntegration_DefinitionRemapsURI(t *testing.T) {
@@ -1328,7 +1224,9 @@ func TestMarkdownIntegration_DefinitionRemapsURI(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n\ntype Bar {\n    --> OWNS (one) Foo\n}\n```\n"
+	// Lines (0-based): 5 = "type Foo {", 11 = "    --> OWNS (one) Foo"
+	// with the Foo reference starting at character 19.
+	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n\ntype Bar {\n    id String primary\n    --> OWNS (one) Foo\n}\n```\n"
 	mdPath := filepath.Join(tmpDir, "definition.md")
 	require.NoError(t, os.WriteFile(mdPath, []byte(content), 0o600))
 
@@ -1342,18 +1240,17 @@ func TestMarkdownIntegration_DefinitionRemapsURI(t *testing.T) {
 	require.NoError(t, h.OpenMarkdownDocument(mdPath, content))
 	h.Sync()
 
-	result, err := h.Definition(mdPath, 10, 19)
+	// Definition on the association target Foo inside the code block.
+	result, err := h.Definition(mdPath, 11, 19)
 	require.NoError(t, err)
+	require.NotNil(t, result, "definition on an association target inside a code block should resolve")
 
-	if result != nil {
-		loc, ok := result.(*protocol.Location)
-		if ok && loc != nil {
-			assert.Contains(t, loc.URI, "definition.md",
-				"definition URI should reference the markdown file")
-			assert.GreaterOrEqual(t, int(loc.Range.Start.Line), 3,
-				"definition range should be in markdown coordinates")
-		}
-	}
+	assert.Contains(t, result.URI, "definition.md",
+		"definition URI should be remapped to the markdown file")
+	assert.Equal(t, 5, int(result.Range.Start.Line),
+		"definition range should land on `type Foo` in markdown coordinates")
+	assert.Equal(t, 5, int(result.Range.Start.Character),
+		"definition range should select the Foo name")
 }
 
 func TestMarkdownIntegration_DocumentSymbolsNilSnapshots(t *testing.T) {

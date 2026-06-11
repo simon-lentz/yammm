@@ -1,0 +1,9 @@
+CREATE CONSTRAINT alias_test__Product_id_unique IF NOT EXISTS FOR (n:alias_test__Product) REQUIRE n.id IS UNIQUE
+CREATE CONSTRAINT alias_test__Product_id_not_null IF NOT EXISTS FOR (n:alias_test__Product) REQUIRE n.id IS NOT NULL
+CREATE CONSTRAINT alias_test__Product_email_not_null IF NOT EXISTS FOR (n:alias_test__Product) REQUIRE n.email IS NOT NULL
+CREATE CONSTRAINT alias_test__Product_price_not_null IF NOT EXISTS FOR (n:alias_test__Product) REQUIRE n.price IS NOT NULL
+CREATE CONSTRAINT alias_test__Product_id_type IF NOT EXISTS FOR (n:alias_test__Product) REQUIRE n.id IS :: STRING
+CREATE CONSTRAINT alias_test__Product_email_type IF NOT EXISTS FOR (n:alias_test__Product) REQUIRE n.email IS :: STRING
+CREATE CONSTRAINT alias_test__Product_price_type IF NOT EXISTS FOR (n:alias_test__Product) REQUIRE n.price IS :: FLOAT
+CREATE CONSTRAINT alias_test__Product_code_type IF NOT EXISTS FOR (n:alias_test__Product) REQUIRE n.code IS :: STRING
+CREATE CONSTRAINT alias_test__Product_priority_type IF NOT EXISTS FOR (n:alias_test__Product) REQUIRE n.priority IS :: STRING

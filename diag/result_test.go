@@ -27,6 +27,27 @@ func TestOK(t *testing.T) {
 	}
 }
 
+func TestResult_HasCode(t *testing.T) {
+	issues := []Issue{
+		NewIssue(Error, E_SYNTAX, "error").Build(),
+		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
+	}
+	r := newResult(issues, 0, false, 0)
+
+	if !r.HasCode(E_SYNTAX) {
+		t.Error("HasCode(E_SYNTAX) = false; want true")
+	}
+	if !r.HasCode(E_INVALID_NAME) {
+		t.Error("HasCode(E_INVALID_NAME) = false; want true (any severity matches)")
+	}
+	if r.HasCode(E_INTERNAL) {
+		t.Error("HasCode(E_INTERNAL) = true; want false")
+	}
+	if OK().HasCode(E_SYNTAX) {
+		t.Error("empty result HasCode(E_SYNTAX) = true; want false")
+	}
+}
+
 func TestResult_SeverityQueries(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Fatal, E_LIMIT_REACHED, "limit").Build(),

@@ -6,61 +6,31 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/internal/source"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func TestSchema_Seal_PreventsSetTypes(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.TestSetSchemaTypes(s, []*schema.Type{})
-	schema.TestSealSchema(s)
+// TestSchema_Seal_PreventsMutation drives every post-seal mutation through
+// one panic table: a sealed Schema must reject each setter.
+func TestSchema_Seal_PreventsMutation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(s *schema.Schema)
+	}{
+		{"SetTypes", func(s *schema.Schema) { schema.TestSetSchemaTypes(s, []*schema.Type{}) }},
+		{"SetDataTypes", func(s *schema.Schema) { schema.TestSetSchemaDataTypes(s, []*schema.DataType{}) }},
+		{"SetImports", func(s *schema.Schema) { schema.TestSetSchemaImports(s, []*schema.Import{}) }},
+		{"SetSources", func(s *schema.Schema) { schema.TestSetSchemaSources(s, nil) }},
+	}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetTypes after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetSchemaTypes(s, []*schema.Type{})
-}
-
-func TestSchema_Seal_PreventsSetDataTypes(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.TestSealSchema(s)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetDataTypes after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetSchemaDataTypes(s, []*schema.DataType{})
-}
-
-func TestSchema_Seal_PreventsSetImports(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.TestSealSchema(s)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetImports after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetSchemaImports(s, []*schema.Import{})
-}
-
-func TestSchema_Seal_PreventsSetSources(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	schema.TestSealSchema(s)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic on SetSources after Seal, but no panic occurred")
-		}
-	}()
-
-	schema.TestSetSchemaSources(s, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
+			schema.TestSealSchema(s)
+			yammmtest.AssertPanics(t, func() { tt.mutate(s) })
+		})
+	}
 }
 
 func TestSchema_SettersWorkBeforeSeal(t *testing.T) {
@@ -419,7 +389,7 @@ func TestSchema_FindImportAlias_NotFound(t *testing.T) {
 
 	result := s.FindImportAlias(location.MustNewSourceID("test://unknown"))
 
-	assert.Equal(t, "", result)
+	assert.Empty(t, result)
 }
 
 func TestSchema_FindImportAlias_OwnPath(t *testing.T) {
@@ -428,7 +398,7 @@ func TestSchema_FindImportAlias_OwnPath(t *testing.T) {
 
 	result := s.FindImportAlias(sourceID)
 
-	assert.Equal(t, "", result)
+	assert.Empty(t, result)
 }
 
 func TestSchema_Sources_Nil(t *testing.T) {

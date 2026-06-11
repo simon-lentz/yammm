@@ -1,0 +1,24 @@
+[
+  {
+    "Code": "E_TYPE_MISMATCH",
+    "Details": [
+      {
+        "Key": "relation",
+        "Value": "employer"
+      },
+      {
+        "Key": "field",
+        "Value": "_target_id"
+      },
+      {
+        "Key": "expected",
+        "Value": "string"
+      },
+      {
+        "Key": "got",
+        "Value": "null"
+      }
+    ],
+    "Severity": "error"
+  }
+]

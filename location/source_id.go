@@ -76,7 +76,7 @@ func ValidateSyntheticSourceID(identifier string) error {
 	if identifier == "" {
 		return ErrEmptySourceID
 	}
-	if looksLikeAbsolutePath(identifier) {
+	if looksLikeAbsolute(identifier) {
 		return fmt.Errorf("%w: %q; use a scheme prefix (e.g., test://, inline:) to avoid collision with file-backed sources", ErrAbsolutePathSourceID, identifier)
 	}
 	return nil

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -940,20 +941,13 @@ func TestRegistry_ConcurrentRegister(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	const numGoroutines = 100
 
-	var wg sync.WaitGroup
-
-	for range numGoroutines {
-		wg.Go(func() {
-			sourceID := location.MustNewSourceID("test://concurrent.yammm")
-			// All goroutines register the same content
-			content := []byte("type Test {}")
-			_ = reg.Register(sourceID, content)
-		})
-	}
-
-	wg.Wait()
+	yammmtest.RunConcurrent(100, 1, func() {
+		sourceID := location.MustNewSourceID("test://concurrent.yammm")
+		// All goroutines register the same content
+		content := []byte("type Test {}")
+		_ = reg.Register(sourceID, content)
+	})
 
 	// Verify content was registered
 	sourceID := location.MustNewSourceID("test://concurrent.yammm")
@@ -977,23 +971,16 @@ func TestRegistry_ConcurrentRead(t *testing.T) {
 		t.Fatalf("Register() error: %v", err)
 	}
 
-	const numGoroutines = 100
-	var wg sync.WaitGroup
-
-	for range numGoroutines {
-		wg.Go(func() {
-			// All these reads should succeed without data races
-			_, _ = reg.ContentBySource(sourceID)
-			_ = reg.PositionAt(sourceID, 5)
-			_, _ = reg.LineStartByte(sourceID, 2)
-			_, _ = reg.RuneToByteOffset(sourceID, 3)
-			_ = reg.Has(sourceID)
-			_ = reg.Len()
-			_ = reg.Keys()
-		})
-	}
-
-	wg.Wait()
+	yammmtest.RunConcurrent(100, 1, func() {
+		// All these reads should succeed without data races
+		_, _ = reg.ContentBySource(sourceID)
+		_ = reg.PositionAt(sourceID, 5)
+		_, _ = reg.LineStartByte(sourceID, 2)
+		_, _ = reg.RuneToByteOffset(sourceID, 3)
+		_ = reg.Has(sourceID)
+		_ = reg.Len()
+		_ = reg.Keys()
+	})
 }
 
 func TestRegistry_ConcurrentRegisterAndRead(t *testing.T) {

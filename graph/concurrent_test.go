@@ -1,10 +1,11 @@
-package graph
+package graph_test
 
 import (
 	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
@@ -36,7 +37,7 @@ func testConcurrentSchema(t *testing.T) *schema.Schema {
 
 func TestGraph_Concurrent_Add(t *testing.T) {
 	s := testConcurrentSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -77,7 +78,7 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 
 func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 	s := testConcurrentSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -134,7 +135,7 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 
 func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 	s := testConcurrentSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -204,7 +205,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 
 func TestGraph_Concurrent_Snapshot(t *testing.T) {
 	s := testConcurrentSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -266,7 +267,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 
 func TestGraph_Concurrent_Check(t *testing.T) {
 	s := testConcurrentSchema(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -313,7 +314,7 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 	var previousOrder []string
 
 	for run := range runs {
-		g := New(s)
+		g := graph.New(s)
 
 		var wg sync.WaitGroup
 
@@ -381,7 +382,7 @@ func BenchmarkGraph_Add_Concurrent(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
-			g := New(s)
+			g := graph.New(s)
 			for j := range 100 {
 				pk := fmt.Sprintf("person-%d-%d", i, j)
 				inst := instance.NewValidInstance(
@@ -405,7 +406,7 @@ func BenchmarkGraph_Add_Concurrent(b *testing.B) {
 func TestIntegration_ComplexMultiSchema(t *testing.T) {
 	// 3-schema hierarchy with cross-references
 	schemaA, schemaB, schemaC, _ := testTripleSchemaSetup(t)
-	g := New(schemaA)
+	g := graph.New(schemaA)
 	ctx := t.Context()
 
 	// Add instances at each level
@@ -465,7 +466,7 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 func TestIntegration_ForwardRefChain(t *testing.T) {
 	// Chain of forward references that all resolve
 	s := testSchemaWithChainedAssociations(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add in order: A → B → C (all forward refs)
@@ -511,7 +512,7 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 func TestIntegration_MixedInlineStreamed(t *testing.T) {
 	// Test mixing inline compositions with AddComposed
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add parent without inline children
@@ -525,7 +526,7 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 		child := mustValidPartInstance(t, s, "Child",
 			[]any{fmt.Sprintf("c%d", i)}, map[string]any{"name": fmt.Sprintf("Child %d", i)})
 
-		result := g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
+		result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed child %d should succeed: %v", i, err)
 		}
@@ -553,7 +554,7 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 	// Concurrent Add + Check + Snapshot operations
 	s := testSchemaWithAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	personType, _ := s.Type("Person")
@@ -634,7 +635,7 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 	// Multiple goroutines add instances with forward references to same target
 	// Verifies that all pending edges are tracked and resolved atomically
 	s := testSchemaWithAssociation(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	const numWorkers = 50
@@ -690,11 +691,11 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 // This test should be run with: go test -race ./graph -run TestConcurrent_SnapshotAndAddComposed_Race
 //
 // Before the deep-copy snapshot fix, this test would detect a race condition
-// because AddComposed() mutated Instance.composed while Snapshot() readers
+// because AddComposed() mutated graph.Instance.composed while Snapshot() readers
 // were accessing the same Instance pointers.
 func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 	s := testSchemaWithComposition(t)
-	g := New(s)
+	g := graph.New(s)
 	ctx := t.Context()
 
 	// Add parent
@@ -715,7 +716,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 				child := mustValidPartInstance(t, s, "Child",
 					[]any{fmt.Sprintf("c-%d-%d", w, i)},
 					map[string]any{"name": fmt.Sprintf("Child %d-%d", w, i)})
-				g.AddComposed(ctx, "Parent", FormatKey("p1"), "children", child)
+				g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
 			}
 		})
 	}

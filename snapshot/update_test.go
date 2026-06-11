@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -265,7 +268,7 @@ func TestUpdateMetadata_MalformedInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, res := snapshot.UpdateMetadata(ctx, tc.data, map[string]string{"k": "v"})
 			assert.True(t, res.HasErrors(), "malformed input must produce diagnostics")
-			assert.True(t, hasCodeUpdate(res, diag.E_SNAPSHOT_MALFORMED),
+			assert.True(t, res.HasCode(diag.E_SNAPSHOT_MALFORMED),
 				"expected E_SNAPSHOT_MALFORMED, got: %v", res)
 		})
 	}
@@ -278,7 +281,7 @@ func TestUpdateMetadata_Cancellation(t *testing.T) {
 
 	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
 	require.True(t, res.HasErrors())
-	assert.True(t, hasCodeUpdate(res, diag.E_CONTEXT_CANCELLED))
+	assert.True(t, res.HasCode(diag.E_CONTEXT_CANCELLED))
 }
 
 func TestUpdateMetadata_ConcurrentAccess(t *testing.T) {
@@ -329,8 +332,8 @@ func TestUpdateMetadata_BodyOffsetFailure(t *testing.T) {
 	data := []byte(`{"yammm_snapshot":{"version":1,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":1,"integrity_hash":"","features":[]}}`)
 	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"k": "v"})
 	require.True(t, res.HasErrors(), "expected error on shape mismatch")
-	gotMalformed := hasCodeUpdate(res, diag.E_SNAPSHOT_MALFORMED)
-	gotBodyOffset := hasCodeUpdate(res, diag.E_UPDATE_METADATA_BODY_OFFSET)
+	gotMalformed := res.HasCode(diag.E_SNAPSHOT_MALFORMED)
+	gotBodyOffset := res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET)
 	assert.True(t, gotMalformed || gotBodyOffset,
 		"expected E_SNAPSHOT_MALFORMED or E_UPDATE_METADATA_BODY_OFFSET; got: %v", res)
 }
@@ -501,7 +504,7 @@ func TestUpdateMetadataOrReMarshal_CancellationPropagates(t *testing.T) {
 
 	_, res := snapshot.UpdateMetadataOrReMarshal(ctx, data, map[string]string{"k": "v"}, s)
 	require.True(t, res.HasErrors())
-	assert.True(t, hasCodeUpdate(res, diag.E_CONTEXT_CANCELLED))
+	assert.True(t, res.HasCode(diag.E_CONTEXT_CANCELLED))
 	assert.False(t, res.HasWarnings(),
 		"cancellation must not fire W_UPDATE_METADATA_FALLBACK")
 }
@@ -526,17 +529,6 @@ func bodyOffsetOf(t *testing.T, data []byte) int64 {
 	return dec.InputOffset()
 }
 
-// hasCodeUpdate reports whether the result carries the given code at any
-// severity.
-func hasCodeUpdate(r diag.Result, code diag.Code) bool {
-	for iss := range r.Issues() {
-		if iss.Code() == code {
-			return true
-		}
-	}
-	return false
-}
-
 // goldenDir returns the filesystem path to the UpdateMetadata golden
 // corpus directory, computed relative to the package dir.
 func goldenDir(t *testing.T) string {
@@ -546,24 +538,24 @@ func goldenDir(t *testing.T) string {
 	return filepath.Join(wd, "testdata", "updatemetadata")
 }
 
-// TestMain seeds the golden corpus before any test runs. The corpus is
-// generated deterministically so the on-disk fixtures can be committed
-// once and reused; re-running TestMain is a no-op.
+// TestMain seeds the golden corpus before any test runs and fails loudly
+// when the committed fixtures no longer match the deterministic generator:
+// silent drift here would let TestUpdateMetadata_GoldenCorpus validate
+// against stale bytes.
 func TestMain(m *testing.M) {
 	wd, _ := os.Getwd()
 	corpusDir := filepath.Join(wd, "testdata", "updatemetadata")
 	if err := seedCorpus(corpusDir); err != nil {
-		_, _ = os.Stderr.WriteString("warning: seedCorpus failed: " + err.Error() + "\n")
+		_, _ = os.Stderr.WriteString("seedCorpus: " + err.Error() + "\n")
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
 
-// seedCorpus generates the four golden fixtures if missing.
+// seedCorpus generates the four golden fixtures, writing any that are
+// missing and returning an error if a committed fixture differs from the
+// generator's output (fixture drift).
 func seedCorpus(dir string) error {
-	if _, err := os.Stat(dir); err == nil {
-		// Already present; do not regenerate (files may be hand-curated).
-		return nil
-	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
@@ -617,8 +609,17 @@ func seedCorpus(dir string) error {
 		if res.HasErrors() {
 			return res.Err()
 		}
-		if err := os.WriteFile(filepath.Join(dir, f.name), data, 0o600); err != nil {
+		path := filepath.Join(dir, f.name)
+		committed, err := os.ReadFile(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				return err
+			}
+		case err != nil:
 			return err
+		case !bytes.Equal(committed, data):
+			return fmt.Errorf("fixture drift: %s no longer matches the generator output; delete the file to regenerate or fix the generator", path)
 		}
 	}
 	return nil

@@ -22,9 +22,7 @@ func TestProperties_WrapProperties(t *testing.T) {
 	if !ok {
 		t.Fatal("expected Get('name') ok to be true")
 	}
-	if s, ok := name.String(); !ok || s != "Alice" {
-		t.Errorf("expected name 'Alice', got %v", name.Unwrap())
-	}
+	wantString(t, name, "Alice")
 }
 
 func TestProperties_WrapNil(t *testing.T) {
@@ -59,9 +57,7 @@ func TestProperties_GetFold_CaseInsensitive(t *testing.T) {
 			if !ok {
 				t.Errorf("expected GetFold(%q) to find value", name)
 			}
-			if s, ok := v.String(); !ok || s != "Alice" {
-				t.Errorf("expected value 'Alice', got %v", v.Unwrap())
-			}
+			wantString(t, v, "Alice")
 		})
 	}
 }
@@ -78,9 +74,7 @@ func TestProperties_GetFold_ExactMatchFirst(t *testing.T) {
 	if !ok {
 		t.Fatal("expected GetFold to find value")
 	}
-	if s, ok := v.String(); !ok || s != "exact" {
-		t.Errorf("expected 'exact', got %v", v.Unwrap())
-	}
+	wantString(t, v, "exact")
 }
 
 func TestProperties_GetFold_ASCIIOnly(t *testing.T) {
@@ -101,9 +95,7 @@ func TestProperties_GetFold_ASCIIOnly(t *testing.T) {
 	if !ok {
 		t.Fatal("expected exact match to work")
 	}
-	if s, ok := v.String(); !ok || s != "value" {
-		t.Errorf("expected 'value', got %v", v.Unwrap())
-	}
+	wantString(t, v, "value")
 }
 
 func TestProperties_GetFold_NotFound(t *testing.T) {
@@ -143,63 +135,31 @@ func TestProperties_Keys(t *testing.T) {
 	}
 }
 
+// TestProperties_SortedKeys covers ordering and the empty case; each input
+// is iterated twice so the sorted sequence is also proven repeatable.
 func TestProperties_SortedKeys(t *testing.T) {
-	input := map[string]any{
-		"z": 26,
-		"a": 1,
-		"m": 13,
-		"b": 2,
+	tests := []struct {
+		name  string
+		input map[string]any
+		want  []string
+	}{
+		{"sorted order", map[string]any{"z": 26, "a": 1, "m": 13, "b": 2}, []string{"a", "b", "m", "z"}},
+		{"empty", map[string]any{}, nil},
 	}
 
-	p := WrapProperties(input)
-
-	var keys []string
-	for k := range p.SortedKeys() {
-		keys = append(keys, k)
-	}
-
-	expected := []string{"a", "b", "m", "z"}
-	if !slices.Equal(keys, expected) {
-		t.Errorf("expected sorted keys %v, got %v", expected, keys)
-	}
-}
-
-func TestProperties_SortedKeys_Repeatability(t *testing.T) {
-	input := map[string]any{
-		"z": 26,
-		"a": 1,
-		"m": 13,
-	}
-
-	p := WrapProperties(input)
-
-	// First iteration
-	var first []string
-	for k := range p.SortedKeys() {
-		first = append(first, k)
-	}
-
-	// Second iteration
-	var second []string
-	for k := range p.SortedKeys() {
-		second = append(second, k)
-	}
-
-	if !slices.Equal(first, second) {
-		t.Errorf("expected same order, got %v and %v", first, second)
-	}
-}
-
-func TestProperties_SortedKeys_Empty(t *testing.T) {
-	p := WrapProperties(map[string]any{})
-
-	var keys []string
-	for k := range p.SortedKeys() {
-		keys = append(keys, k)
-	}
-
-	if len(keys) != 0 {
-		t.Errorf("expected 0 keys for empty, got %d", len(keys))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := WrapProperties(tt.input)
+			for pass := range 2 {
+				var keys []string
+				for k := range p.SortedKeys() {
+					keys = append(keys, k)
+				}
+				if !slices.Equal(keys, tt.want) {
+					t.Errorf("pass %d: SortedKeys() = %v, want %v", pass, keys, tt.want)
+				}
+			}
+		})
 	}
 }
 
@@ -305,9 +265,7 @@ func TestProperties_WrapProperties_WithClone_Isolation(t *testing.T) {
 	if !ok {
 		t.Fatal("expected key in nested")
 	}
-	if str, ok := keyVal.String(); !ok || str != "original" {
-		t.Errorf("expected 'original', got %v", keyVal.Unwrap())
-	}
+	wantString(t, keyVal, "original")
 }
 
 func TestProperties_NestedProperties(t *testing.T) {
@@ -346,52 +304,41 @@ func TestProperties_NestedProperties(t *testing.T) {
 		t.Fatal("expected value")
 	}
 
-	if s, ok := value.String(); !ok || s != "deep" {
-		t.Errorf("expected 'deep', got %v", value.Unwrap())
-	}
+	wantString(t, value, "deep")
 }
 
+// TestProperties_SortedRange covers key-sorted pairs and the empty case;
+// each input is iterated twice so the order is also proven repeatable.
 func TestProperties_SortedRange(t *testing.T) {
-	input := map[string]any{
-		"z": 26,
-		"a": 1,
-		"m": 13,
-		"b": 2,
+	tests := []struct {
+		name       string
+		input      map[string]any
+		wantKeys   []string
+		wantValues []int64
+	}{
+		{"sorted pairs", map[string]any{"z": 26, "a": 1, "m": 13, "b": 2}, []string{"a", "b", "m", "z"}, []int64{1, 2, 13, 26}},
+		{"empty", map[string]any{}, nil, nil},
 	}
 
-	p := WrapProperties(input)
-
-	var keys []string
-	var values []int64
-	for k, v := range p.SortedRange() {
-		keys = append(keys, k)
-		n, _ := v.Int()
-		values = append(values, n)
-	}
-
-	// Keys should be in sorted order
-	expectedKeys := []string{"a", "b", "m", "z"}
-	if !slices.Equal(keys, expectedKeys) {
-		t.Errorf("expected sorted keys %v, got %v", expectedKeys, keys)
-	}
-
-	// Values should match their keys
-	expectedValues := []int64{1, 2, 13, 26}
-	if !slices.Equal(values, expectedValues) {
-		t.Errorf("expected values %v, got %v", expectedValues, values)
-	}
-}
-
-func TestProperties_SortedRange_Empty(t *testing.T) {
-	p := WrapProperties(map[string]any{})
-
-	count := 0
-	for range p.SortedRange() {
-		count++
-	}
-
-	if count != 0 {
-		t.Errorf("expected 0 iterations for empty properties, got %d", count)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := WrapProperties(tt.input)
+			for pass := range 2 {
+				var keys []string
+				var values []int64
+				for k, v := range p.SortedRange() {
+					keys = append(keys, k)
+					n, _ := v.Int()
+					values = append(values, n)
+				}
+				if !slices.Equal(keys, tt.wantKeys) {
+					t.Errorf("pass %d: keys = %v, want %v", pass, keys, tt.wantKeys)
+				}
+				if !slices.Equal(values, tt.wantValues) {
+					t.Errorf("pass %d: values = %v, want %v", pass, values, tt.wantValues)
+				}
+			}
+		})
 	}
 }
 
@@ -415,32 +362,6 @@ func TestProperties_SortedRange_EarlyExit(t *testing.T) {
 
 	if count != 2 {
 		t.Errorf("expected early exit after 2 iterations, got %d", count)
-	}
-}
-
-func TestProperties_SortedRange_Repeatability(t *testing.T) {
-	input := map[string]any{
-		"z": 26,
-		"a": 1,
-		"m": 13,
-	}
-
-	p := WrapProperties(input)
-
-	// First iteration
-	var first []string
-	for k := range p.SortedRange() {
-		first = append(first, k)
-	}
-
-	// Second iteration
-	var second []string
-	for k := range p.SortedRange() {
-		second = append(second, k)
-	}
-
-	if !slices.Equal(first, second) {
-		t.Errorf("expected same order across iterations, got %v and %v", first, second)
 	}
 }
 

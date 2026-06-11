@@ -1,0 +1,12 @@
+{
+  "Car": [
+    {
+      "engine": {
+        "displacement": 2000,
+        "serial": "ENG001"
+      },
+      "model": "Sedan",
+      "vin": "VIN123"
+    }
+  ]
+}

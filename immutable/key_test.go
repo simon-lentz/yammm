@@ -18,14 +18,10 @@ func TestKey_WrapKey(t *testing.T) {
 	}
 
 	first := k.Get(0)
-	if s, ok := first.String(); !ok || s != "us" {
-		t.Errorf("expected first component 'us', got %v", first.Unwrap())
-	}
+	wantString(t, first, "us")
 
 	second := k.Get(1)
-	if n, ok := second.Int(); !ok || n != 12345 {
-		t.Errorf("expected second component 12345, got %v", second.Unwrap())
-	}
+	wantInt(t, second, 12345)
 }
 
 func TestKey_WrapNil(t *testing.T) {
@@ -396,9 +392,7 @@ func TestKey_Clone(t *testing.T) {
 	cloned[0] = "eu"
 
 	first := k.Get(0)
-	if s, ok := first.String(); !ok || s != "us" {
-		t.Error("clone modification affected original")
-	}
+	wantString(t, first, "us")
 }
 
 func TestKey_CloneNil(t *testing.T) {
@@ -420,9 +414,7 @@ func TestKey_WrapKey_WithClone_Isolation(t *testing.T) {
 
 	// Wrapped key should be isolated
 	first := k.Get(0)
-	if s, ok := first.String(); !ok || s != "original" {
-		t.Errorf("expected 'original', got %v", first.Unwrap())
-	}
+	wantString(t, first, "original")
 }
 
 func TestKey_IteratorEarlyExit(t *testing.T) {
@@ -484,9 +476,7 @@ func TestKey_NestedValues(t *testing.T) {
 	if !ok {
 		t.Fatal("expected nested key")
 	}
-	if s, ok := nested.String(); !ok || s != "value" {
-		t.Errorf("expected 'value', got %v", nested.Unwrap())
-	}
+	wantString(t, nested, "value")
 }
 
 func TestKey_String_WithNestedStructures(t *testing.T) {

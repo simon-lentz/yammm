@@ -12,7 +12,7 @@ type DistrictCode = String[3,3]
 
 type Person   {
     name String  required
-    age Integer
+    age Integer  
     bio String   // personal bio
 
 
@@ -21,7 +21,7 @@ type Person   {
 
 type   Address{
     street String  required  // street address
-    city   String required
+    city   String required	
     zip String
     region_code RegionCode required
     --> IN_REGION (one) other.Region
