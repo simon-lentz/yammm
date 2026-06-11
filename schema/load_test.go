@@ -1844,3 +1844,152 @@ func TestLoad_SharedRegistry_TopLevelReparse(t *testing.T) {
 	assert.Same(t, s1, regStored,
 		"registry must retain the first Load's pointer; idempotent Register must not overwrite")
 }
+
+// canonicalPath mirrors the loader's path canonicalization (absolute,
+// cleaned, symlinks resolved) so ModuleRoot expectations compare equal on
+// systems where TempDir rides a symlink (e.g. macOS /var -> /private/var).
+func canonicalPath(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	require.NoError(t, err)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	return filepath.Clean(abs)
+}
+
+// writeModuleTree writes a two-file module-style layout under a fresh
+// temp root: sub/entry.yammm imports lib/dep.yammm by module path.
+// Returns (root, entryPath).
+func writeModuleTree(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sub"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o750))
+	entry := filepath.Join(root, "sub", "entry.yammm")
+	require.NoError(t, os.WriteFile(entry, []byte("schema \"entry\"\n\nimport \"lib/dep\" as dep\n\ntype Thing {\n\tid String primary\n\t--> USES (one) dep.Part\n}\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "dep.yammm"), []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n}\n"), 0o600))
+	return root, entry
+}
+
+// TestModuleRoot_Recorded pins Schema.ModuleRoot across every load form:
+// the canonicalized WithModuleRoot value when given, the entry directory
+// for a plain Load, the canonicalized root for the in-memory loaders
+// (including the "." form), and "" for LoadString. Imported sub-schemas
+// record the same root as their entry.
+func TestModuleRoot_Recorded(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("load default is entry dir", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "solo.yammm")
+		require.NoError(t, os.WriteFile(path, []byte("schema \"solo\"\n\ntype T {\n\tid String primary\n}\n"), 0o600))
+		s, res := schema.Load(ctx, path)
+		requireOK(t, res)
+		assert.Equal(t, canonicalPath(t, dir), s.ModuleRoot())
+	})
+
+	t.Run("with module root, entry and import record it", func(t *testing.T) {
+		t.Parallel()
+		root, entry := writeModuleTree(t)
+		s, res := schema.Load(ctx, entry, schema.WithModuleRoot(root))
+		requireOK(t, res)
+		want := canonicalPath(t, root)
+		assert.Equal(t, want, s.ModuleRoot())
+		require.Len(t, s.ImportsSlice(), 1)
+		sub := s.ImportsSlice()[0].Schema()
+		require.NotNil(t, sub)
+		assert.Equal(t, want, sub.ModuleRoot(), "imported sub-schema records the same root")
+	})
+
+	t.Run("load string records none", func(t *testing.T) {
+		t.Parallel()
+		s, res := schema.LoadString(ctx, "schema \"s\"\n\ntype T {\n\tid String primary\n}\n", "inline.yammm")
+		requireOK(t, res)
+		assert.Empty(t, s.ModuleRoot())
+	})
+
+	t.Run("sources with entry records canonicalized dot", func(t *testing.T) {
+		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+			"x.yammm": []byte("schema \"x\"\n\ntype T {\n\tid String primary\n}\n"),
+		}, "x.yammm", ".")
+		requireOK(t, res)
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		assert.Equal(t, canonicalPath(t, cwd), s.ModuleRoot())
+	})
+}
+
+// TestWithSourcesOnly pins the hermetic-load contract: with the option, an
+// import that misses the pre-registered set fails with E_IMPORT_RESOLVE even
+// when a matching file exists on disk under the module root — the filesystem
+// fallback is structurally skipped. Without the option the same layout loads
+// via the disk fallback; with the full set pre-registered the option is
+// satisfied entirely in memory.
+func TestWithSourcesOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	entrySrc := []byte("schema \"entry\"\n\nimport \"lib/dep\" as dep\n\ntype Thing {\n\tid String primary\n\t--> USES (one) dep.Part\n}\n")
+	depSrc := []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n}\n")
+
+	t.Run("miss fails instead of reading disk", func(t *testing.T) {
+		t.Parallel()
+		root, _ := writeModuleTree(t) // dep exists ON DISK under root
+		_, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+			"sub/entry.yammm": entrySrc,
+		}, "sub/entry.yammm", root, schema.WithSourcesOnly())
+		require.True(t, res.HasErrors(), "expected the import miss to fail under WithSourcesOnly")
+		assert.Contains(t, res.Err().Error(), "not found in pre-registered sources")
+	})
+
+	t.Run("same layout loads via disk without the option", func(t *testing.T) {
+		t.Parallel()
+		root, _ := writeModuleTree(t)
+		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+			"sub/entry.yammm": entrySrc,
+		}, "sub/entry.yammm", root)
+		requireOK(t, res)
+		assert.Equal(t, "entry", s.Name())
+	})
+
+	t.Run("complete in-memory set satisfies the option", func(t *testing.T) {
+		t.Parallel()
+		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+			"sub/entry.yammm": entrySrc,
+			"lib/dep.yammm":   depSrc,
+		}, "sub/entry.yammm", t.TempDir(), schema.WithSourcesOnly())
+		requireOK(t, res)
+		assert.Equal(t, "entry", s.Name())
+	})
+}
+
+// TestSharedRegistry_CacheHitSourcesComplete pins that a cross-Load
+// registry cache hit still yields a complete Sources() on the new load:
+// the cached import's content is copied into the load's source registry,
+// so closure-content consumers (diagnostics rendering, gogen's embedded
+// SerializedModel) see every source even when the read+parse pipeline was
+// short-circuited.
+func TestSharedRegistry_CacheHitSourcesComplete(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	root, entry := writeModuleTree(t)
+	registry := schema.NewRegistry()
+
+	first, res := schema.Load(ctx, entry, schema.WithModuleRoot(root), schema.WithRegistry(registry))
+	requireOK(t, res)
+	second, res := schema.Load(ctx, entry, schema.WithModuleRoot(root), schema.WithRegistry(registry))
+	requireOK(t, res)
+
+	require.Len(t, second.ImportsSlice(), 1)
+	imp := second.ImportsSlice()[0]
+	assert.Same(t, first.ImportsSlice()[0].Schema(), imp.Schema(), "second load should cache-hit the import")
+
+	srcs := second.Sources()
+	require.NotNil(t, srcs)
+	if _, ok := srcs.ContentBySource(imp.ResolvedSourceID()); !ok {
+		t.Error("cache-hit import content missing from the new load's Sources()")
+	}
+}

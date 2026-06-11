@@ -1,0 +1,6 @@
+schema "deplib"
+
+type Vendor {
+	vendor_id String primary
+	name String required
+}

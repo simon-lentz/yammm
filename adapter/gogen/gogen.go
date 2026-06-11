@@ -118,17 +118,21 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 // verifyRoundTrip re-loads the embedded SerializedModel and confirms it produces a
 // schema with the same StructuralHash, making the embedded provenance a guaranteed
 // re-loadable model rather than an unverified claim. It re-loads EXACTLY what
-// emitSerializedModel embeds — the SAME module-root-relative keys (via sourceKey):
-// single source via LoadString; multi-source via LoadSourcesWithEntry with the
-// relative entry key and moduleRoot "." (a bare `import "x.yammm"` is module-style and
-// requires a module root; "." matches the relative keys). Re-load is in-memory —
-// readImportFile checks pre-registered sources before any disk access — so it needs no
-// filesystem. StructuralHash is path-independent, so the re-load's SourceIDs do not
+// emitSerializedModel embeds — the SAME module-root-relative keys (via sourceKey
+// against the schema's recorded ModuleRoot): single source via LoadString;
+// multi-source via LoadSourcesWithEntry with the relative entry key, moduleRoot "."
+// (a bare `import "x.yammm"` is module-style and requires a module root; the keys
+// are root-relative, so registration and import resolution join them against the
+// same canonicalized "." regardless of what cwd is), and WithSourcesOnly — the
+// re-load is HERMETIC by construction: an import that misses the embedded map
+// fails the load rather than being silently satisfied by a same-named file on
+// disk. StructuralHash is path-independent, so the re-load's SourceIDs do not
 // affect the comparison. A failure is a generator bug surfaced as an error.
 func verifyRoundTrip(s *schema.Schema) error {
 	srcs := s.Sources()
 	ids := srcs.SourceIDs()
 	entry := s.SourceID()
+	root := s.ModuleRoot()
 	want := schema.StructuralHash(s)
 	ctx := context.Background()
 	switch len(ids) {
@@ -139,7 +143,7 @@ func verifyRoundTrip(s *schema.Schema) error {
 		if !ok {
 			return errors.New("gogen: schema source content unavailable")
 		}
-		got, res := schema.LoadString(ctx, string(content), sourceKey(entry, ids[0]))
+		got, res := schema.LoadString(ctx, string(content), sourceKey(root, entry, ids[0]))
 		if res.HasErrors() {
 			return fmt.Errorf("gogen: embedded SerializedModel does not re-load: %w", res.Err())
 		}
@@ -153,9 +157,9 @@ func verifyRoundTrip(s *schema.Schema) error {
 			if !ok {
 				return fmt.Errorf("gogen: source %s content unavailable", id)
 			}
-			m[sourceKey(entry, id)] = content
+			m[sourceKey(root, entry, id)] = content
 		}
-		got, res := schema.LoadSourcesWithEntry(ctx, m, sourceKey(entry, entry), ".")
+		got, res := schema.LoadSourcesWithEntry(ctx, m, sourceKey(root, entry, entry), ".", schema.WithSourcesOnly())
 		if res.HasErrors() {
 			return fmt.Errorf("gogen: embedded SerializedModel does not re-load: %w", res.Err())
 		}

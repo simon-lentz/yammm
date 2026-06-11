@@ -19,6 +19,19 @@ stdout 'package custompkg'
 exec yammm gen --to go --initialisms JWT session.yammm
 stdout 'JWTToken'
 
+# --module-root resolves module-style imports against a root other than the
+# schema's own directory, and embedded SerializedModel keys are root-relative.
+exec yammm gen --to go --module-root registry registry/a/b/entry.yammm
+stdout 'type Contract struct'
+stdout 'type Vendor struct'
+stdout '"a/b/entry.yammm":'
+stdout '"lib/dep.yammm":'
+
+# Without --module-root the module-style import cannot resolve (the default
+# root is the schema's own directory).
+! exec yammm gen --to go registry/a/b/entry.yammm
+stderr 'lib/dep'
+
 -- county.yammm --
 schema "geo"
 
@@ -32,4 +45,20 @@ schema "auth"
 type Session {
 	id UUID primary
 	jwt_token String required
+}
+-- registry/a/b/entry.yammm --
+schema "registry"
+
+import "lib/dep" as dep
+
+type Contract {
+	contract_id String primary
+	--> SUPPLIED_BY (one) dep.Vendor
+}
+-- registry/lib/dep.yammm --
+schema "deplib"
+
+type Vendor {
+	vendor_id String primary
+	name String required
 }

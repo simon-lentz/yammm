@@ -44,6 +44,7 @@ s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, op
 | `WithSourceRegistry` | Source registry for position tracking |
 | `WithLogger` | Structured logger for load diagnostics |
 | `WithDisallowImports` | Prevent import declarations from being processed |
+| `WithSourcesOnly` | Restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources) |
 
 ### Error Handling Pattern
 
@@ -1240,7 +1241,7 @@ A named DataType is rendered faithfully in every position — scalar field, list
 
 ### Imports
 
-gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded `SerializedModel` keys are module-root-relative, so generated output is byte-reproducible across checkouts and CI runners.
+gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded `SerializedModel` keys are relative to the load's recorded module root (`Schema.ModuleRoot()` — the `WithModuleRoot` value when given, else the entry's directory), so generated output is byte-reproducible across checkouts and CI runners and the keys match the sources' module-style import statements on re-load. `Marshal` verifies the embedded model re-loads hermetically (`schema.WithSourcesOnly` — no filesystem participation) before returning; re-load the multi-source form the same way: `schema.LoadSourcesWithEntry(ctx, toBytes(SerializedModel), SerializedModelEntry, ".", schema.WithSourcesOnly())`.
 
 ### Validation
 
@@ -1249,7 +1250,7 @@ Generated source is run through `go/format` and then type-checked with `go/types
 ### CLI
 
 ```text
-yammm gen --to go <schema.yammm> [--package <name>] [--output <path>] [--initialisms GUID,JWT]
+yammm gen --to go <schema.yammm> [--package <name>] [--output <path>] [--initialisms GUID,JWT] [--module-root <dir>]
 ```
 
 The `gen` command loads the schema (resolving imports), generates Go, and writes it to stdout or the `--output` path.

@@ -17,6 +17,7 @@ type loadConfig struct {
 	sourceRegistry  *source.Registry
 	logger          *slog.Logger
 	disallowImports bool
+	sourcesOnly     bool
 }
 
 // defaultLoadConfig returns a loadConfig with sensible defaults.
@@ -88,6 +89,22 @@ func WithIssueLimit(limit int) LoadOption {
 func WithSourceRegistry(reg *source.Registry) LoadOption {
 	return func(c *loadConfig) {
 		c.sourceRegistry = reg
+	}
+}
+
+// WithSourcesOnly restricts import resolution to the pre-registered
+// in-memory sources: an import that misses the registered set fails with
+// E_IMPORT_RESOLVE instead of falling back to a filesystem read under the
+// module root. Use it when loading embedded sources (e.g. a generated
+// package's SerializedModel via LoadSourcesWithEntry) to guarantee the
+// load is hermetic — the filesystem never participates, so a missing or
+// mis-keyed source surfaces as an error rather than being silently
+// satisfied by an on-disk file that happens to be reachable. Meaningful
+// for LoadSources/LoadSourcesWithEntry; a plain Load resolves its entry
+// from disk by definition (its imports would still be restricted).
+func WithSourcesOnly() LoadOption {
+	return func(c *loadConfig) {
+		c.sourcesOnly = true
 	}
 }
 

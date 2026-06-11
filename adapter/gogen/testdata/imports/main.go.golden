@@ -30,7 +30,8 @@ type Graph struct {
 //
 //	schema.LoadSourcesWithEntry(ctx, toBytes(SerializedModel), SerializedModelEntry, ".")
 //
-// where toBytes converts each map value to []byte.
+// where toBytes converts each map value to []byte. Add schema.WithSourcesOnly()
+// to guarantee the re-load never reads the filesystem.
 var SerializedModel = map[string]string{
 	"common.yammm": "schema \"common\"\n\ntype RegionCode = String [5, 5]\n\ntype Region {\n\tcode RegionCode primary\n\tname String required\n}\n",
 	"main.yammm":   "schema \"geo\"\n\nimport \"common.yammm\" as common\n\ntype County {\n\tfips String primary\n\t--> IN_REGION (one) common.Region\n}\n",

@@ -704,8 +704,11 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 		return nil, l.collector.Result(), nil
 	}
 
-	// Attach sources for diagnostics rendering
+	// Attach sources for diagnostics rendering and record the load's
+	// module root (the basis for module-root-relative source keys, e.g.
+	// gogen's embedded SerializedModel).
 	s.setSources(NewSources(l.sourceRegistry))
+	s.setModuleRoot(l.moduleRoot)
 
 	// Seal the schema to prevent further mutation
 	s.seal()
@@ -898,6 +901,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	for _, cand := range l.candidateImportSourceIDs(relativePath) {
 		l.mu.Lock()
 		if loadedSchema, ok := l.loadedSchemas[cand]; ok {
+			l.registerCachedClosureSources(loadedSchema)
 			l.resolvedImports[imp.Alias] = resolvedImport{
 				sourceID: cand,
 				schema:   loadedSchema,
@@ -908,6 +912,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 		}
 		if existing, ok := l.registry.LookupBySourceID(cand); ok {
 			l.loadedSchemas[cand] = existing
+			l.registerCachedClosureSources(existing)
 			l.resolvedImports[imp.Alias] = resolvedImport{
 				sourceID: cand,
 				schema:   existing,
@@ -944,6 +949,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	// derivation above doesn't anticipate).
 	l.mu.Lock()
 	if loadedSchema, ok := l.loadedSchemas[importSourceID]; ok {
+		l.registerCachedClosureSources(loadedSchema)
 		l.resolvedImports[imp.Alias] = resolvedImport{
 			sourceID: importSourceID,
 			schema:   loadedSchema,
@@ -954,6 +960,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	}
 	if existing, ok := l.registry.LookupBySourceID(importSourceID); ok {
 		l.loadedSchemas[importSourceID] = existing
+		l.registerCachedClosureSources(existing)
 		l.resolvedImports[imp.Alias] = resolvedImport{
 			sourceID: importSourceID,
 			schema:   existing,
@@ -1093,6 +1100,36 @@ func (l *loader) candidateImportSourceIDs(relativePath string) []location.Source
 	return ids
 }
 
+// registerCachedClosureSources copies the source content of a
+// registry-cached schema and its transitive imports into this load's
+// source registries, so the current load's Sources() carries the full
+// import closure even when the cross-Load short-circuit skipped the
+// read+parse pipeline. Without it a cache-hit import is absent from
+// Sources(), breaking consumers that need the closure's content —
+// diagnostics rendering across imports, and gogen's embedded
+// SerializedModel (whose round-trip check would see a single source
+// that still declares imports). Same-content re-registration is a
+// no-op, so revisiting a schema is harmless; callers hold l.mu.
+func (l *loader) registerCachedClosureSources(s *Schema) {
+	srcs := s.Sources()
+	if srcs == nil {
+		return
+	}
+	id := s.SourceID()
+	if _, ok := l.sourceContent[id]; !ok {
+		if content, ok := srcs.ContentBySource(id); ok {
+			if err := l.sourceRegistry.Register(id, content); err == nil {
+				l.sourceContent[id] = content
+			}
+		}
+	}
+	for _, imp := range s.ImportsSlice() {
+		if sub := imp.Schema(); sub != nil {
+			l.registerCachedClosureSources(sub)
+		}
+	}
+}
+
 // readImportFile reads an import file using sandboxed access via rootLoader.
 // Falls back to in-memory sources if available.
 func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, location.SourceID, error) {
@@ -1117,6 +1154,12 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 		if content, ok := l.sourceContent[testID]; ok {
 			return content, testID, nil
 		}
+	}
+
+	// Under WithSourcesOnly the in-memory set is the whole universe:
+	// a miss is an error, never a filesystem read.
+	if l.cfg.sourcesOnly {
+		return nil, location.SourceID{}, fmt.Errorf("import file %q not found in pre-registered sources", relativePath)
 	}
 
 	// Use rootLoader for sandboxed file access
