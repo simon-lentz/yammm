@@ -1,0 +1,55 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": true,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        },
+        {
+          "Constraint": "Integer[0, 150]",
+          "Name": "age",
+          "Optional": true,
+          "PrimaryKey": false
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Entity",
+      "Part": false,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "Integer[18, 150]",
+          "Name": "age",
+          "Optional": true,
+          "PrimaryKey": false
+        },
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Adult",
+      "Part": false,
+      "SuperTypes": [
+        "Entity"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        },
+        {
+          "Constraint": "Integer",
+          "Name": "min",
+          "Optional": false,
+          "PrimaryKey": false
+        },
+        {
+          "Constraint": "Integer",
+          "Name": "max",
+          "Optional": false,
+          "PrimaryKey": false
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": [
+        "min_valid",
+        "max_valid"
+      ],
+      "Name": "Person",
+      "Part": false,
+      "SuperTypes": null
+    }
+  ]
+}

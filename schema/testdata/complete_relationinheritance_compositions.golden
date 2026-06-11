@@ -1,0 +1,89 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": false,
+      "AllProperties": [],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "PartA",
+      "Part": true,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "PartB",
+      "Part": true,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [
+        {
+          "EdgeProps": [],
+          "FieldName": "part_a",
+          "Many": false,
+          "Name": "partA",
+          "Optional": false,
+          "Target": "PartA"
+        }
+      ],
+      "Invariants": null,
+      "Name": "Base",
+      "Part": false,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [
+        {
+          "EdgeProps": [],
+          "FieldName": "part_b",
+          "Many": false,
+          "Name": "partB",
+          "Optional": false,
+          "Target": "PartB"
+        },
+        {
+          "EdgeProps": [],
+          "FieldName": "part_a",
+          "Many": false,
+          "Name": "partA",
+          "Optional": false,
+          "Target": "PartA"
+        }
+      ],
+      "Invariants": null,
+      "Name": "Derived",
+      "Part": false,
+      "SuperTypes": [
+        "Base"
+      ]
+    }
+  ]
+}

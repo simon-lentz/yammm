@@ -1,0 +1,43 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": false,
+      "AllProperties": [],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "PartType",
+      "Part": true,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [
+        {
+          "EdgeProps": [],
+          "FieldName": "my_part",
+          "Many": false,
+          "Name": "MyPart",
+          "Optional": false,
+          "Target": "PartType"
+        }
+      ],
+      "Invariants": null,
+      "Name": "Container",
+      "Part": false,
+      "SuperTypes": null
+    }
+  ]
+}

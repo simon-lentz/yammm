@@ -1,0 +1,11 @@
+{
+  "DataTypes": [
+    {
+      "Constraint": "String",
+      "Name": "Email"
+    }
+  ],
+  "Imports": [],
+  "Name": "test",
+  "Types": []
+}

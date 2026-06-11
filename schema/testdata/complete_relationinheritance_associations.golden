@@ -1,0 +1,86 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Target",
+      "Part": false,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [
+        {
+          "EdgeProps": [],
+          "FieldName": "parent",
+          "Many": false,
+          "Name": "parent",
+          "Optional": false,
+          "Target": "Target"
+        }
+      ],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Base",
+      "Part": false,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        }
+      ],
+      "Associations": [
+        {
+          "EdgeProps": [],
+          "FieldName": "child",
+          "Many": false,
+          "Name": "child",
+          "Optional": false,
+          "Target": "Target"
+        },
+        {
+          "EdgeProps": [],
+          "FieldName": "parent",
+          "Many": false,
+          "Name": "parent",
+          "Optional": false,
+          "Target": "Target"
+        }
+      ],
+      "Compositions": [],
+      "Invariants": null,
+      "Name": "Derived",
+      "Part": false,
+      "SuperTypes": [
+        "Base"
+      ]
+    }
+  ]
+}
