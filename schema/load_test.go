@@ -29,16 +29,31 @@ func requireOK(t *testing.T, result diag.Result) {
 	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
 }
 
+// loadOK loads source from a string and requires success: a non-nil
+// schema with no error diagnostics (each issue logged on failure).
+func loadOK(t *testing.T, source string) *schema.Schema {
+	t.Helper()
+	s, result := schema.LoadString(t.Context(), source, "test.yammm")
+	requireOK(t, result)
+	require.NotNil(t, s)
+	return s
+}
+
+// loadErr loads source from a string and requires failure: a nil schema
+// with error diagnostics. Returns the result for code-level assertions.
+func loadErr(t *testing.T, source string) diag.Result {
+	t.Helper()
+	s, result := schema.LoadString(t.Context(), source, "test.yammm")
+	require.Nil(t, s, "load should fail")
+	require.True(t, result.HasErrors(), "load should produce error diagnostics")
+	return result
+}
+
 func TestString_SimpleSchema(t *testing.T) {
 	// Note: YAMMM grammar uses `name Type` syntax, not `name: Type`
 	source := `schema "test" type Person { name String primary }`
-	ctx := t.Context()
-
-	s, result := schema.LoadString(ctx, source, "test.yammm")
-
-	require.NotNil(t, s)
+	s := loadOK(t, source)
 	assert.Equal(t, "test", s.Name())
-	requireOK(t, result)
 
 	typ, ok := s.Type("Person")
 	require.True(t, ok)
@@ -47,24 +62,14 @@ func TestString_SimpleSchema(t *testing.T) {
 
 func TestString_EmptySchema(t *testing.T) {
 	source := `schema "empty"`
-	ctx := t.Context()
-
-	s, result := schema.LoadString(ctx, source, "empty.yammm")
-
-	require.NotNil(t, s)
+	s := loadOK(t, source)
 	assert.Equal(t, "empty", s.Name())
-	assert.False(t, result.HasErrors())
 }
 
 func TestString_SyntaxError(t *testing.T) {
 	// Completely invalid syntax that can't be recovered
 	source := `not a valid schema at all!!!`
-	ctx := t.Context()
-
-	s, result := schema.LoadString(ctx, source, "syntax.yammm")
-
-	assert.Nil(t, s) // No valid schema could be produced
-	assert.True(t, result.HasErrors())
+	loadErr(t, source)
 }
 
 func TestString_NilContextPanics(t *testing.T) {
@@ -77,12 +82,7 @@ func TestString_NilContextPanics(t *testing.T) {
 
 func TestString_DisallowsImports(t *testing.T) {
 	source := `schema "test" import "./other"`
-	ctx := t.Context()
-
-	s, result := schema.LoadString(ctx, source, "test.yammm")
-
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	loadErr(t, source)
 }
 
 func TestWithDisallowImports_SourcesWithEntry(t *testing.T) {

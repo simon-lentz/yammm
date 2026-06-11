@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -472,6 +473,28 @@ func TestInfo_Basic(t *testing.T) {
 	}
 }
 
+// sharedFields projects two structs' exported fields onto name-keyed maps
+// restricted to the field names they share, so cross-type parity tests
+// compare every common field without a hand-maintained list.
+func sharedFields(t *testing.T, a, b any) (av, bv map[string]any) {
+	t.Helper()
+	ra, rb := reflect.ValueOf(a), reflect.ValueOf(b)
+	names := make(map[string]bool)
+	for i := range ra.NumField() {
+		names[ra.Type().Field(i).Name] = true
+	}
+	av, bv = make(map[string]any), make(map[string]any)
+	for i := range rb.NumField() {
+		name := rb.Type().Field(i).Name
+		if names[name] {
+			av[name] = ra.FieldByName(name).Interface()
+			bv[name] = rb.Field(i).Interface()
+		}
+	}
+	require.NotEmpty(t, av, "structs share no fields — parity test is vacuous")
+	return av, bv
+}
+
 func TestHeaderOnly_Basic(t *testing.T) {
 	s := testSchema(t)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
@@ -554,18 +577,11 @@ func TestHeaderOnly_ConsistentWithInfo(t *testing.T) {
 	header, headerRes := snapshot.HeaderOnly(ctx, data)
 	require.NoError(t, headerRes.Err())
 
-	// Every field common to both APIs must match byte-for-byte.
-	assert.Equal(t, info.Version, header.Version)
-	assert.Equal(t, info.Features, header.Features)
-	assert.Equal(t, info.SchemaName, header.SchemaName)
-	assert.Equal(t, info.SchemaSource, header.SchemaSource)
-	assert.Equal(t, info.SchemaHash, header.SchemaHash)
-	assert.Equal(t, info.SchemaHashAlgorithm, header.SchemaHashAlgorithm)
-	assert.Equal(t, info.IntegrityHash, header.IntegrityHash)
-	assert.Equal(t, info.CreatedAt, header.CreatedAt)
-	assert.Equal(t, info.Metadata, header.Metadata)
-	assert.Equal(t, info.Types, header.Types)
-	assert.Equal(t, info.FileSize, header.FileSize)
+	// Every field common to both APIs must match byte-for-byte. The
+	// reflected projection keys on shared field names, so fields added to
+	// both structs later are parity-checked automatically.
+	infoFields, headerFields := sharedFields(t, *info, *header)
+	assert.Equal(t, infoFields, headerFields)
 }
 
 func TestHeaderOnly_IntegrityNotVerified(t *testing.T) {
@@ -690,20 +706,15 @@ func TestHeaderOnlyRead_ParityWithHeaderOnly(t *testing.T) {
 	require.NoError(t, readerRes.Err())
 
 	// Every HeaderInfo field equal EXCEPT FileSize — the single
-	// documented structural delta between the two entry points.
-	assert.Equal(t, fromBytes.Version, fromReader.Version)
-	assert.Equal(t, fromBytes.Features, fromReader.Features)
-	assert.Equal(t, fromBytes.SchemaName, fromReader.SchemaName)
-	assert.Equal(t, fromBytes.SchemaSource, fromReader.SchemaSource)
-	assert.Equal(t, fromBytes.SchemaHash, fromReader.SchemaHash)
-	assert.Equal(t, fromBytes.SchemaHashAlgorithm, fromReader.SchemaHashAlgorithm)
-	assert.Equal(t, fromBytes.IntegrityHash, fromReader.IntegrityHash)
-	assert.Equal(t, fromBytes.CreatedAt, fromReader.CreatedAt)
-	assert.Equal(t, fromBytes.Metadata, fromReader.Metadata)
-	assert.Equal(t, fromBytes.Types, fromReader.Types)
-
+	// documented structural delta between the two entry points. Pin the
+	// delta explicitly, then zero it and compare whole structs so fields
+	// added to HeaderInfo later are parity-checked automatically.
 	assert.Equal(t, int64(len(data)), fromBytes.FileSize)
 	assert.Equal(t, int64(0), fromReader.FileSize)
+
+	fb, fr := *fromBytes, *fromReader
+	fb.FileSize, fr.FileSize = 0, 0
+	assert.Equal(t, fb, fr)
 }
 
 func TestHeaderOnlyRead_ExceedsMaxHeaderSize(t *testing.T) {

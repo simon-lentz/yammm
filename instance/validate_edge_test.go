@@ -1,7 +1,6 @@
 package instance_test
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,20 +8,65 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func TestValidateEdges_SingleFK(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
+// fkSchema builds the canonical two-type FK schema — Company(id) plus
+// Person(id) with an "employer" relation to Company — parameterized on the
+// relation's (optional, many) multiplicity.
+func fkSchema(t *testing.T, optional, many bool) *schema.Schema {
+	t.Helper()
+	return mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Company").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
+		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), optional, many).
 		Done())
+}
+
+// compositeFKSchema builds the canonical composite-PK FK schema —
+// Enrollment(region, studentId) plus Person(id) with an optional-one
+// "enrollment" relation to Enrollment.
+func compositeFKSchema(t *testing.T) *schema.Schema {
+	t.Helper()
+	return mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		AddType("Enrollment").
+		WithPrimaryKey("region", schema.NewStringConstraint()).
+		WithPrimaryKey("studentId", schema.NewStringConstraint()).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
+		Done())
+}
+
+// issueProjection renders a result's issues as a stable, JSON-serializable
+// shape — code, severity, and structured details; messages are presentation
+// and deliberately excluded.
+func issueProjection(result diag.Result) []map[string]any {
+	out := make([]map[string]any, 0)
+	for issue := range result.Issues() {
+		details := make([]map[string]string, 0, len(issue.Details()))
+		for _, d := range issue.Details() {
+			details = append(details, map[string]string{"Key": d.Key, "Value": d.Value})
+		}
+		out = append(out, map[string]any{
+			"Code":     issue.Code().String(),
+			"Severity": issue.Severity().String(),
+			"Details":  details,
+		})
+	}
+	return out
+}
+
+func TestValidateEdges_SingleFK(t *testing.T) {
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s)
 
@@ -46,22 +90,14 @@ func TestValidateEdges_SingleFK(t *testing.T) {
 }
 
 func TestValidateEdges_Many(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Tag").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Item").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true).
-		Done())
+	s := fkSchema(t, true, true)
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
 			"id": "1",
-			"tags": []any{
+			"employer": []any{
 				map[string]any{"_target_id": "10"},
 				map[string]any{"_target_id": "20"},
 				map[string]any{"_target_id": "30"},
@@ -69,27 +105,19 @@ func TestValidateEdges_Many(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Item", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
-	edge, ok := valid.Edge("tags")
+	edge, ok := valid.Edge("employer")
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.Equal(t, 3, edge.TargetCount())
 }
 
 func TestValidateEdges_Optional_Nil(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
-		Done())
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s)
 
@@ -115,15 +143,7 @@ func TestValidateEdges_Required_Absent(t *testing.T) {
 	// Per architecture spec: association presence is a graph-layer concern.
 	// Absent required associations are valid at instance layer; validated at graph.Check()
 	// via E_UNRESOLVED_REQUIRED.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), false, false). // NOT optional
-		Done())
+	s := fkSchema(t, false, false)
 
 	validator := instance.NewValidator(s)
 
@@ -146,15 +166,7 @@ func TestValidateEdges_Required_Absent(t *testing.T) {
 }
 
 func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false). // many=false
-		Done())
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s)
 
@@ -173,26 +185,18 @@ func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
 }
 
 func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Tag").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Item").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true). // many=true
-		Done())
+	s := fkSchema(t, true, true)
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   "1",
-			"tags": map[string]any{"_target_id": "10"}, // Object when expecting array
+			"id":       "1",
+			"employer": map[string]any{"_target_id": "10"}, // Object when expecting array
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Item", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
@@ -200,15 +204,7 @@ func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
 }
 
 func TestValidateEdges_MissingFK(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
-		Done())
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s)
 
@@ -227,15 +223,7 @@ func TestValidateEdges_MissingFK(t *testing.T) {
 }
 
 func TestValidateEdges_UnknownField(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
-		Done())
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s) // Default: don't allow unknown fields
 
@@ -257,15 +245,7 @@ func TestValidateEdges_UnknownField(t *testing.T) {
 }
 
 func TestValidateEdges_UnknownField_Allowed(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
-		Done())
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s, instance.WithAllowUnknownFields(true))
 
@@ -393,15 +373,7 @@ type Person {
 }
 
 func TestValidateEdges_FKTypeMismatch(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()). // id is string
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
-		Done())
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s)
 
@@ -422,28 +394,20 @@ func TestValidateEdges_FKTypeMismatch(t *testing.T) {
 }
 
 func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Tag").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Item").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true).
-		Done())
+	s := fkSchema(t, true, true)
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
 			"id": "1",
-			"tags": []any{
+			"employer": []any{
 				"not an object", // Invalid element
 			},
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Item", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
@@ -451,32 +415,24 @@ func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
 }
 
 func TestValidateEdges_OptionalEdgeWithEmptyArray(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Tag").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Item").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true). // Optional, many
-		Done())
+	s := fkSchema(t, true, true)
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   "1",
-			"tags": []any{}, // Empty array - valid for optional
+			"id":       "1",
+			"employer": []any{}, // Empty array - valid for optional
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Item", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Edge should be present but empty
-	edge, ok := valid.Edge("tags")
+	edge, ok := valid.Edge("employer")
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.True(t, edge.IsEmpty())
@@ -486,48 +442,31 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 	// Per architecture spec: association empty-array validation is a graph-layer concern.
 	// Empty arrays for required associations are valid at instance layer; validated at graph.Check()
 	// via E_UNRESOLVED_REQUIRED with reason="empty".
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Tag").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Item").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), false, true). // NOT optional, many
-		Done())
+	s := fkSchema(t, false, true)
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   "1",
-			"tags": []any{}, // Empty array - valid at instance layer
+			"id":       "1",
+			"employer": []any{}, // Empty array - valid at instance layer
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Item", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
 	// Edge should be present but empty
-	edge, ok := valid.Edge("tags")
+	edge, ok := valid.Edge("employer")
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.True(t, edge.IsEmpty())
 }
 
 func TestValidateEdges_CompositeFK(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Enrollment").
-		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
-		Done())
+	s := compositeFKSchema(t)
 
 	validator := instance.NewValidator(s)
 
@@ -555,16 +494,7 @@ func TestValidateEdges_CompositeFK(t *testing.T) {
 }
 
 func TestValidateEdges_PartialCompositeFK(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Enrollment").
-		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
-		Done())
+	s := compositeFKSchema(t)
 
 	validator := instance.NewValidator(s)
 
@@ -589,15 +519,7 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 // regardless of the StrictPropertyNames setting.
 // Per architecture spec: "_target_ID" does NOT match expected "_target_id".
 func TestValidateEdges_FKCaseSensitive(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
-		Done())
+	s := fkSchema(t, true, false)
 
 	t.Run("wrong_case_fails_even_without_strict_mode", func(t *testing.T) {
 		// Default: StrictPropertyNames = false, but FK fields are ALWAYS case-sensitive
@@ -656,15 +578,7 @@ func TestValidateEdges_FKCaseSensitive(t *testing.T) {
 
 func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 	// Per architecture spec: null is always a shape error, even for optional associations.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false). // optional
-		Done())
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s)
 
@@ -681,39 +595,12 @@ func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid edge value")
 
-	// Verify error code is E_EDGE_SHAPE_MISMATCH
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 1)
-	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
-
-	// Verify expected/got details
-	details := issues[0].Details()
-	var hasExpected, hasGot bool
-	for _, d := range details {
-		if d.Key == diag.DetailKeyExpected {
-			hasExpected = true
-			assert.Equal(t, "object", d.Value)
-		}
-		if d.Key == diag.DetailKeyGot {
-			hasGot = true
-			assert.Equal(t, "null", d.Value)
-		}
-	}
-	assert.True(t, hasExpected, "should have 'expected' detail")
-	assert.True(t, hasGot, "should have 'got' detail")
+	yammmtest.GoldenJSON(t, "edge_diag_null_optional", issueProjection(result))
 }
 
 func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 	// Per architecture spec: null is always a shape error.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), false, false). // NOT optional
-		Done())
+	s := fkSchema(t, false, false)
 
 	validator := instance.NewValidator(s)
 
@@ -730,62 +617,34 @@ func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid edge value")
 
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 1)
-	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
+	yammmtest.GoldenJSON(t, "edge_diag_null_required", issueProjection(result))
 }
 
 func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 	// Per architecture spec: null is always a shape error (expects array).
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Tag").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Item").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("tags", schema.NewTypeRef("", "Tag", location.Span{}), true, true). // optional, many
-		Done())
+	s := fkSchema(t, true, true)
 
 	validator := instance.NewValidator(s)
 
 	raw := instance.RawInstance{
 		Properties: map[string]any{
-			"id":   "1",
-			"tags": nil, // Explicit null - expects array
+			"id":       "1",
+			"employer": nil, // Explicit null - expects array
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Item", raw)
+	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid edge value")
 
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 1)
-	assert.Equal(t, instance.ErrEdgeShapeMismatch, issues[0].Code())
-
-	// Verify expected shape is "array" for many relation
-	details := issues[0].Details()
-	for _, d := range details {
-		if d.Key == diag.DetailKeyExpected {
-			assert.Equal(t, "array", d.Value)
-		}
-	}
+	yammmtest.GoldenJSON(t, "edge_diag_null_many", issueProjection(result))
 }
 
 func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 	// Verify E_MISSING_FK_TARGET includes 'relation' and 'expected' details.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
-		Done())
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s)
 
@@ -801,48 +660,12 @@ func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := slices.Collect(result.Issues())
-	require.GreaterOrEqual(t, len(issues), 1)
-
-	// Find the E_MISSING_FK_TARGET issue
-	var fkIssue diag.Issue
-	for _, iss := range issues {
-		if iss.Code() == instance.ErrMissingFKTarget {
-			fkIssue = iss
-			break
-		}
-	}
-	require.False(t, fkIssue.IsZero(), "should have E_MISSING_FK_TARGET issue")
-
-	// Verify required details
-	details := fkIssue.Details()
-	var hasRelation, hasExpected bool
-	for _, d := range details {
-		if d.Key == diag.DetailKeyRelationName {
-			hasRelation = true
-			assert.Equal(t, "employer", d.Value)
-		}
-		if d.Key == diag.DetailKeyExpected {
-			hasExpected = true
-			assert.Equal(t, "_target_id", d.Value)
-		}
-	}
-	assert.True(t, hasRelation, "should have 'relation' detail")
-	assert.True(t, hasExpected, "should have 'expected' detail")
+	yammmtest.GoldenJSON(t, "edge_diag_fk_missing_all", issueProjection(result))
 }
 
 func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 	// Verify E_PARTIAL_COMPOSITE_FK includes 'relation', 'expected', and 'got' details.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Enrollment").
-		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
-		Done())
+	s := compositeFKSchema(t)
 
 	validator := instance.NewValidator(s)
 
@@ -860,53 +683,13 @@ func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := slices.Collect(result.Issues())
-	require.GreaterOrEqual(t, len(issues), 1)
-
-	// Find the E_PARTIAL_COMPOSITE_FK issue
-	var fkIssue diag.Issue
-	for _, iss := range issues {
-		if iss.Code() == instance.ErrPartialCompositeFK {
-			fkIssue = iss
-			break
-		}
-	}
-	require.False(t, fkIssue.IsZero(), "should have E_PARTIAL_COMPOSITE_FK issue")
-
-	// Verify required details
-	details := fkIssue.Details()
-	var hasRelation, hasExpected, hasGot bool
-	for _, d := range details {
-		if d.Key == diag.DetailKeyRelationName {
-			hasRelation = true
-			assert.Equal(t, "enrollment", d.Value)
-		}
-		if d.Key == diag.DetailKeyExpected {
-			hasExpected = true
-			assert.Equal(t, "_target_region, _target_studentId", d.Value)
-		}
-		if d.Key == diag.DetailKeyGot {
-			hasGot = true
-			assert.Equal(t, "_target_region", d.Value)
-		}
-	}
-	assert.True(t, hasRelation, "should have 'relation' detail")
-	assert.True(t, hasExpected, "should have 'expected' detail")
-	assert.True(t, hasGot, "should have 'got' detail")
+	yammmtest.GoldenJSON(t, "edge_diag_fk_partial", issueProjection(result))
 }
 
 func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 	// Single-PK + _target_id: null
 	// Spec: present=1 -> E_TYPE_MISMATCH for the null field (not E_MISSING_FK_TARGET)
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), true, false).
-		Done())
+	s := fkSchema(t, true, false)
 
 	validator := instance.NewValidator(s)
 
@@ -924,42 +707,14 @@ func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 1, "should have exactly one issue")
-	assert.Equal(t, instance.ErrTypeMismatch, issues[0].Code(),
-		"should be E_TYPE_MISMATCH, not E_MISSING_FK_TARGET")
-	assert.Contains(t, issues[0].Message(), "null")
-
-	// Verify expected/got details
-	details := issues[0].Details()
-	var hasExpected, hasGot bool
-	for _, d := range details {
-		if d.Key == diag.DetailKeyExpected {
-			hasExpected = true
-			assert.Equal(t, "string", d.Value)
-		}
-		if d.Key == diag.DetailKeyGot {
-			hasGot = true
-			assert.Equal(t, "null", d.Value)
-		}
-	}
-	assert.True(t, hasExpected, "should have 'expected' detail")
-	assert.True(t, hasGot, "should have 'got' detail")
+	assert.Contains(t, result.String(), "null")
+	yammmtest.GoldenJSON(t, "edge_diag_single_fk_null", issueProjection(result))
 }
 
 func TestValidateEdges_CompositeFK_OneNullOneValid(t *testing.T) {
 	// Composite PK: all present, one null
 	// Spec: present==expected -> E_TYPE_MISMATCH for null field only (not E_PARTIAL_COMPOSITE_FK)
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Enrollment").
-		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
-		Done())
+	s := compositeFKSchema(t)
 
 	validator := instance.NewValidator(s)
 
@@ -978,28 +733,14 @@ func TestValidateEdges_CompositeFK_OneNullOneValid(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := slices.Collect(result.Issues())
-	// Should have exactly one E_TYPE_MISMATCH for the null field
-	// Should NOT have E_PARTIAL_COMPOSITE_FK (both keys present)
-	require.Len(t, issues, 1, "should have exactly one issue")
-	assert.Equal(t, instance.ErrTypeMismatch, issues[0].Code(),
-		"should be E_TYPE_MISMATCH, not E_PARTIAL_COMPOSITE_FK")
-	assert.Contains(t, issues[0].Message(), "_target_region")
+	assert.Contains(t, result.String(), "_target_region")
+	yammmtest.GoldenJSON(t, "edge_diag_composite_one_null_one_valid", issueProjection(result))
 }
 
 func TestValidateEdges_CompositeFK_OneNullOneMissing(t *testing.T) {
 	// Composite PK: one present (null), one missing
 	// Spec: present=1 -> E_PARTIAL_COMPOSITE_FK + E_TYPE_MISMATCH for null
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Enrollment").
-		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
-		Done())
+	s := compositeFKSchema(t)
 
 	validator := instance.NewValidator(s)
 
@@ -1018,45 +759,14 @@ func TestValidateEdges_CompositeFK_OneNullOneMissing(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := slices.Collect(result.Issues())
-	// Should have:
-	// 1. E_TYPE_MISMATCH for the null field
-	// 2. E_PARTIAL_COMPOSITE_FK (present=1, expected=2)
-	require.Len(t, issues, 2, "should have two issues")
-
-	var hasPartialFK, hasTypeMismatch bool
-	for _, iss := range issues {
-		if iss.Code() == instance.ErrPartialCompositeFK {
-			hasPartialFK = true
-			// Verify 'got' includes _target_region (the present key)
-			for _, d := range iss.Details() {
-				if d.Key == diag.DetailKeyGot {
-					assert.Equal(t, "_target_region", d.Value)
-				}
-			}
-		}
-		if iss.Code() == instance.ErrTypeMismatch {
-			hasTypeMismatch = true
-			assert.Contains(t, iss.Message(), "_target_region")
-		}
-	}
-	assert.True(t, hasPartialFK, "should have E_PARTIAL_COMPOSITE_FK")
-	assert.True(t, hasTypeMismatch, "should have E_TYPE_MISMATCH for null")
+	assert.Contains(t, result.String(), "_target_region")
+	yammmtest.GoldenJSON(t, "edge_diag_composite_one_null_one_missing", issueProjection(result))
 }
 
 func TestValidateEdges_CompositeFK_OneNullOneInvalidType(t *testing.T) {
 	// Composite PK: both present, both invalid (one null, one wrong type)
 	// Spec: present==expected -> E_TYPE_MISMATCH for each invalid field (not E_PARTIAL_COMPOSITE_FK)
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Enrollment").
-		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
-		Done())
+	s := compositeFKSchema(t)
 
 	validator := instance.NewValidator(s)
 
@@ -1075,31 +785,14 @@ func TestValidateEdges_CompositeFK_OneNullOneInvalidType(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := slices.Collect(result.Issues())
-	// Should have two E_TYPE_MISMATCH issues, one for each invalid field
-	// Should NOT have E_PARTIAL_COMPOSITE_FK (both keys present)
-	require.Len(t, issues, 2, "should have two type mismatch issues")
-
-	for _, iss := range issues {
-		assert.Equal(t, instance.ErrTypeMismatch, iss.Code(),
-			"all issues should be E_TYPE_MISMATCH")
-	}
+	yammmtest.GoldenJSON(t, "edge_diag_composite_both_invalid", issueProjection(result))
 }
 
 func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 	// Composite PK: one present (invalid type), one missing
 	// Spec: present=1 -> E_PARTIAL_COMPOSITE_FK + E_TYPE_MISMATCH
 	// This tests that 'got' includes present keys even if invalid
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Enrollment").
-		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
-		Done())
+	s := compositeFKSchema(t)
 
 	validator := instance.NewValidator(s)
 
@@ -1118,27 +811,7 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 2, "should have two issues")
-
-	var hasPartialFK, hasTypeMismatch bool
-	for _, iss := range issues {
-		if iss.Code() == instance.ErrPartialCompositeFK {
-			hasPartialFK = true
-			// Verify 'got' includes _target_region (present even though invalid)
-			for _, d := range iss.Details() {
-				if d.Key == diag.DetailKeyGot {
-					assert.Equal(t, "_target_region", d.Value,
-						"'got' should list present keys even if invalid")
-				}
-			}
-		}
-		if iss.Code() == instance.ErrTypeMismatch {
-			hasTypeMismatch = true
-		}
-	}
-	assert.True(t, hasPartialFK, "should have E_PARTIAL_COMPOSITE_FK")
-	assert.True(t, hasTypeMismatch, "should have E_TYPE_MISMATCH")
+	yammmtest.GoldenJSON(t, "edge_diag_composite_one_invalid_one_missing", issueProjection(result))
 }
 
 // Tests all 4 combinations of (optional/required) x (one/many) multiplicity.
@@ -1312,22 +985,14 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create schema with the specific multiplicity configuration
-			s := mustBuild(t, schema.NewBuilder().
-				WithName("test").
-				AddType("Item").
-				WithPrimaryKey("id", schema.NewStringConstraint()).
-				Done().
-				AddType("Source").
-				WithPrimaryKey("id", schema.NewStringConstraint()).
-				WithRelation("items", schema.NewTypeRef("", "Item", location.Span{}), tc.optional, tc.many).
-				Done())
+			s := fkSchema(t, tc.optional, tc.many)
 
 			validator := instance.NewValidator(s)
 
 			// Build raw instance
 			props := map[string]any{"id": "1"}
 			if tc.input != nil {
-				props["items"] = tc.input
+				props["employer"] = tc.input
 			}
 			// Note: absent means not in props at all, handled by not adding to props
 
@@ -1335,13 +1000,13 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 				Properties: props,
 			}
 
-			valid, result := validator.ValidateOne(t.Context(), "Source", raw)
+			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tc.expectSuccess {
 				require.True(t, result.OK(), "%s: should succeed but got failure", tc.description)
 				require.NotNil(t, valid, "%s: should have valid instance", tc.description)
 
-				edge, ok := valid.Edge("items")
+				edge, ok := valid.Edge("employer")
 				if tc.expectEdges > 0 {
 					require.True(t, ok, "%s: should have edge", tc.description)
 					assert.Equal(t, tc.expectEdges, edge.TargetCount(), "%s: edge count", tc.description)

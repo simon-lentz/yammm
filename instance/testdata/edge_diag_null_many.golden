@@ -1,0 +1,20 @@
+[
+  {
+    "Code": "E_EDGE_SHAPE_MISMATCH",
+    "Details": [
+      {
+        "Key": "expected",
+        "Value": "array"
+      },
+      {
+        "Key": "got",
+        "Value": "null"
+      },
+      {
+        "Key": "json_field",
+        "Value": "employer"
+      }
+    ],
+    "Severity": "error"
+  }
+]
