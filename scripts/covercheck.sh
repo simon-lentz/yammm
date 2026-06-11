@@ -26,7 +26,23 @@ pkg="${2:-}"
 [[ "$mode" == "before" || "$mode" == "after" ]] || usage
 [[ -n "$pkg" ]] || usage
 
-slug="$(printf '%s' "$pkg" | tr './ ' '___')"
+# Accept exactly the documented input shape: a ./-prefixed package directory
+# without a /... suffix (the script appends /... itself). Anything else is
+# rejected here rather than producing a confusing go-test pattern error or —
+# worse — silently measuring the wrong package set ('./x/.../...' matches
+# only subpackages, not ./x itself).
+case "$pkg" in
+*/...) echo "covercheck: pass a package directory without '/...' (got $pkg)" >&2; usage ;;
+./*) ;;
+*) echo "covercheck: package must be ./-prefixed (got $pkg)" >&2; usage ;;
+esac
+
+# One '_' per path segment separator and a distinct '-' for '.', so distinct
+# subtree arguments cannot collide on one baseline filename (tr's set-to-set
+# mapping would fold './a/b' and './a_b' together).
+slug="${pkg#./}"
+slug="${slug//\//_}"
+slug="${slug//./-}"
 dir="${COVERCHECK_DIR:-/tmp/covercheck}"
 mkdir -p "$dir"
 profile="$dir/$slug.$mode.out"

@@ -3,7 +3,6 @@ package testutil
 
 import (
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/creachadair/jrpc2"
@@ -31,9 +30,9 @@ type Harness struct {
 	// Root path for the test workspace
 	Root string
 
-	// Captured diagnostics from server notifications
-	diagMu      sync.Mutex
-	diagnostics map[string][]protocol.Diagnostic // URI -> diagnostics
+	// notifications records server pushes decoded off the wire, in the
+	// same typed shape NotificationCollector records in-process.
+	notifications NotificationCollector
 }
 
 // NewHarness creates a new test harness with the given handler map.
@@ -41,9 +40,8 @@ func NewHarness(t *testing.T, mux handler.Map, root string) *Harness {
 	t.Helper()
 
 	h := &Harness{
-		t:           t,
-		Root:        root,
-		diagnostics: make(map[string][]protocol.Diagnostic),
+		t:    t,
+		Root: root,
 	}
 
 	opts := &jrpc2server.LocalOptions{
@@ -53,9 +51,7 @@ func NewHarness(t *testing.T, mux handler.Map, root string) *Harness {
 				if req.Method() == "textDocument/publishDiagnostics" {
 					var params protocol.PublishDiagnosticsParams
 					if err := req.UnmarshalParams(&params); err == nil {
-						h.diagMu.Lock()
-						h.diagnostics[params.URI] = params.Diagnostics
-						h.diagMu.Unlock()
+						h.notifications.Notify(req.Method(), params)
 					}
 				}
 			},
@@ -205,7 +201,10 @@ func (h *Harness) CloseDocument(path string) error {
 	})
 }
 
-// Hover requests hover information at the given position.
+// Hover requests hover information at the given position. A nil Hover with
+// nil error means the server returned null (no hover): jrpc2 unmarshals a
+// null result into a nil pointer without error, so a non-nil error is a
+// genuine server or transport failure.
 func (h *Harness) Hover(path string, line, char int) (*protocol.Hover, error) {
 	h.t.Helper()
 
@@ -229,14 +228,14 @@ func (h *Harness) Hover(path string, line, char int) (*protocol.Hover, error) {
 		},
 	}, &result)
 	if err != nil {
-		// jrpc2 returns an error for null results; treat as nil hover
-		return nil, nil //nolint:nilerr,nilnil // LSP protocol: null result = no hover
+		return nil, err //nolint:wrapcheck // test utility
 	}
 	return result, nil
 }
 
 // Definition requests go-to-definition at the given position. A nil
-// Location with nil error means the server returned null (no definition).
+// Location with nil error means the server returned null (no definition);
+// a non-nil error is a genuine server or transport failure.
 func (h *Harness) Definition(path string, line, char int) (*protocol.Location, error) {
 	h.t.Helper()
 
@@ -260,16 +259,14 @@ func (h *Harness) Definition(path string, line, char int) (*protocol.Location, e
 		},
 	}, &result)
 	if err != nil {
-		return nil, nil //nolint:nilerr,nilnil // LSP protocol: null result = no definition
-	}
-	if result == nil {
-		return nil, nil //nolint:nilnil // LSP protocol: null result = no definition
+		return nil, err //nolint:wrapcheck // test utility
 	}
 	return result, nil
 }
 
 // Completion requests completion items at the given position. A nil slice
-// with nil error means the server returned null (no completions).
+// with nil error means the server returned null (no completions); a non-nil
+// error is a genuine server or transport failure.
 func (h *Harness) Completion(path string, line, char int) ([]protocol.CompletionItem, error) {
 	h.t.Helper()
 
@@ -293,13 +290,14 @@ func (h *Harness) Completion(path string, line, char int) ([]protocol.Completion
 		},
 	}, &result)
 	if err != nil {
-		return nil, nil //nolint:nilerr // LSP protocol: null result = no completions
+		return nil, err //nolint:wrapcheck // test utility
 	}
 	return result, nil
 }
 
 // DocumentSymbols requests document symbols. A nil slice with nil error
-// means the server returned null (no symbols).
+// means the server returned null (no symbols); a non-nil error is a genuine
+// server or transport failure.
 func (h *Harness) DocumentSymbols(path string) ([]protocol.DocumentSymbol, error) {
 	h.t.Helper()
 
@@ -317,7 +315,7 @@ func (h *Harness) DocumentSymbols(path string) ([]protocol.DocumentSymbol, error
 		},
 	}, &result)
 	if err != nil {
-		return nil, nil //nolint:nilerr // LSP protocol: null result = no symbols
+		return nil, err //nolint:wrapcheck // test utility
 	}
 	return result, nil
 }
@@ -366,11 +364,10 @@ func (h *Harness) Sync() {
 	}, &result)
 }
 
-// Diagnostics returns captured diagnostics for the given URI.
+// Diagnostics returns the most recently published diagnostics for the
+// given URI, or nil if none were published.
 func (h *Harness) Diagnostics(uri string) []protocol.Diagnostic {
-	h.diagMu.Lock()
-	defer h.diagMu.Unlock()
-	return h.diagnostics[uri]
+	return h.notifications.DiagnosticsFor(uri)
 }
 
 // OpenDocumentRaw opens a document with a custom languageID. This is useful

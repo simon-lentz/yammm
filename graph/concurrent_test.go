@@ -245,7 +245,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 					instances := snap.InstancesOf(typeName)
 					for _, inst := range instances {
 						if inst.TypeName() != typeName {
-							t.Errorf("graph.Instance type mismatch: %q vs %q", inst.TypeName(), typeName)
+							t.Errorf("Instance type mismatch: %q vs %q", inst.TypeName(), typeName)
 						}
 					}
 				}
@@ -552,7 +552,7 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 }
 
 func TestIntegration_ConcurrentAddCheck(t *testing.T) {
-	// Concurrent Add + Check + graph.Snapshot operations
+	// Concurrent Add + Check + Snapshot operations
 	s := testSchemaWithAssociation(t)
 	g := graph.New(s)
 	ctx := t.Context()
@@ -686,13 +686,13 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 }
 
 // TestConcurrent_SnapshotAndAddComposed_Race tests for data races between
-// concurrent graph.Snapshot() and AddComposed() calls.
+// concurrent Snapshot() and AddComposed() calls.
 //
 // This test should be run with: go test -race ./graph -run TestConcurrent_SnapshotAndAddComposed_Race
 //
 // Before the deep-copy snapshot fix, this test would detect a race condition
-// because AddComposed() mutated graph.Instance.composed while graph.Snapshot() readers
-// were accessing the same graph.Instance pointers.
+// because AddComposed() mutated graph.Instance.composed while Snapshot() readers
+// were accessing the same Instance pointers.
 func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)

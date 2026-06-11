@@ -128,7 +128,7 @@ func TestAddComposed_ManyWithPK_Duplicate(t *testing.T) {
 
 	// Try to add child with same PK
 	child2 := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1 graph.Duplicate"})
+		[]any{"c1"}, map[string]any{"name": "Child 1 Duplicate"})
 
 	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
 
@@ -366,7 +366,7 @@ func TestAddComposed_NilReceiver(t *testing.T) {
 
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("AddComposed on nil graph.Graph should panic")
+			t.Error("AddComposed on nil Graph should panic")
 		}
 	}()
 	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
@@ -487,10 +487,10 @@ func TestResult_Duplicates_IncludesComposedDuplicates_OneCardinality(t *testing.
 		t.Errorf("Expected E_DUPLICATE_COMPOSED_PK, got %s", dup.Diagnostic.Code())
 	}
 	if dup.Instance == nil {
-		t.Error("graph.Duplicate.Instance should not be nil")
+		t.Error("Duplicate.Instance should not be nil")
 	}
 	if dup.Conflict == nil {
-		t.Error("graph.Duplicate.Conflict should not be nil")
+		t.Error("Duplicate.Conflict should not be nil")
 	}
 }
 
@@ -512,7 +512,7 @@ func TestResult_Duplicates_IncludesComposedDuplicates_ManyWithPK(t *testing.T) {
 
 	// Try to add child with same PK
 	child2 := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1 graph.Duplicate"})
+		[]any{"c1"}, map[string]any{"name": "Child 1 Duplicate"})
 	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
 
 	if result.OK() {
@@ -532,13 +532,13 @@ func TestResult_Duplicates_IncludesComposedDuplicates_ManyWithPK(t *testing.T) {
 		t.Errorf("Expected E_DUPLICATE_COMPOSED_PK, got %s", dup.Diagnostic.Code())
 	}
 	if dup.Instance == nil {
-		t.Error("graph.Duplicate.Instance should not be nil")
+		t.Error("Duplicate.Instance should not be nil")
 	}
 	if dup.Conflict == nil {
-		t.Error("graph.Duplicate.Conflict should not be nil")
+		t.Error("Duplicate.Conflict should not be nil")
 	}
-	// Verify graph.Instance and Conflict are different instances
+	// Verify Instance and Conflict are different instances
 	if dup.Instance.PrimaryKey().String() != dup.Conflict.PrimaryKey().String() {
-		t.Errorf("graph.Instance and Conflict should have same PK for this test")
+		t.Errorf("Instance and Conflict should have same PK for this test")
 	}
 }

@@ -634,10 +634,9 @@ func TestCanonicalizeAbsolutePath(t *testing.T) {
 	}
 }
 
-// TestLooksLikeAbsolute drives looksLikeAbsoluteElement (Join's guard) and
-// looksLikeAbsolutePath (the SourceID-side check) through one shared table:
-// the two are intentionally behaviorally identical, and every row asserts
-// both so any future divergence fails loudly.
+// TestLooksLikeAbsolute drives the shared absolute-path predicate behind
+// Join's element guard and ValidateSyntheticSourceID's collision check
+// through every path family it distinguishes.
 func TestLooksLikeAbsolute(t *testing.T) {
 	tests := []struct {
 		input string
@@ -684,11 +683,8 @@ func TestLooksLikeAbsolute(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := looksLikeAbsoluteElement(tt.input); got != tt.want {
-				t.Errorf("looksLikeAbsoluteElement(%q) = %v; want %v", tt.input, got, tt.want)
-			}
-			if got := looksLikeAbsolutePath(tt.input); got != tt.want {
-				t.Errorf("looksLikeAbsolutePath(%q) = %v; want %v", tt.input, got, tt.want)
+			if got := looksLikeAbsolute(tt.input); got != tt.want {
+				t.Errorf("looksLikeAbsolute(%q) = %v; want %v", tt.input, got, tt.want)
 			}
 		})
 	}

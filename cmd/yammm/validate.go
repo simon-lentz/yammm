@@ -38,7 +38,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	s, result := schema.Load(cmd.Context(), absPath)
 
-	renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absPath), result)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absPath), result)
 
 	exitCode := cli.ExitForResult(result)
 	if exitCode != cli.ExitOK {

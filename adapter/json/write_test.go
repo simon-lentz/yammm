@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -156,20 +157,23 @@ func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
 
 // Instance creation helpers
 
-func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+// mustTypeID resolves a schema type's ID, failing the test if absent.
+func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
-
 	typ, ok := s.Type(typeName)
 	if !ok {
 		t.Fatalf("Type %q not found in schema", typeName)
 	}
+	return typ.ID()
+}
 
-	return instance.NewValidInstance(
+func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+	t.Helper()
+	return instancetest.VI(
 		typeName,
-		typ.ID(),
-		immutable.WrapKey(pk),
-		immutable.WrapProperties(props),
-		nil, nil, nil,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
 	)
 }
 
@@ -183,32 +187,19 @@ func mustValidInstanceWithEdge(
 	targetKeys [][]any,
 ) *instance.ValidInstance {
 	t.Helper()
-
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("Type %q not found in schema", typeName)
-	}
-
 	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
 	for i, targetKey := range targetKeys {
 		targets[i] = instance.NewValidEdgeTarget(
 			immutable.WrapKey(targetKey),
-			immutable.Properties{},
+			immutable.WrapProperties(nil),
 		)
 	}
-
-	edges := map[string]*instance.ValidEdgeData{
-		relationName: instance.NewValidEdgeData(targets),
-	}
-
-	return instance.NewValidInstance(
+	return instancetest.VI(
 		typeName,
-		typ.ID(),
-		immutable.WrapKey(pk),
-		immutable.WrapProperties(props),
-		edges,
-		nil,
-		nil,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+		instancetest.Edges(map[string]*instance.ValidEdgeData{relationName: instance.NewValidEdgeData(targets)}),
 	)
 }
 

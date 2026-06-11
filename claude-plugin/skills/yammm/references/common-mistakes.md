@@ -53,7 +53,7 @@ type Person {
 
 ## 3. Missing Nil Guard in Invariants
 
-Optional fields can be nil. Invariants that compare optional fields without a nil check fail at evaluation time.
+Optional fields can be nil. An unguarded comparison against a nil field evaluates to false, tripping the invariant (`E_INVARIANT_FAIL`) on every instance where the optional field is absent.
 
 ```yammm-snippet
 // WRONG -- fails when end_date is nil
@@ -238,28 +238,31 @@ type Order {
 
 ---
 
-## 12. Abstract Type Declaring a Primary Field
+## 12. Concrete Type Without a Primary Key (Declared or Inherited)
 
-Abstract types are not instantiable. The concrete child type supplies the primary key.
+Every concrete type must declare or inherit at least one `primary` field (`E_NO_PRIMARY_KEY`). Abstract types MAY declare a primary field — concrete subtypes inherit it — but are not required to; when no ancestor declares one, the concrete type must.
 
 ```yammm-snippet
-// WRONG
+// WRONG -- Document neither declares nor inherits a primary key
 abstract type Auditable {
-    id UUID primary
     created_at Timestamp required
+}
+
+type Document extends Auditable {
+    content String required
 }
 ```
 
 ```yammm-snippet
-// RIGHT
-abstract type Auditable {
-    created_at Timestamp required
-    updated_at Timestamp
-}
-
+// RIGHT -- declare on the concrete type...
 type Document extends Auditable {
     id UUID primary
     content String required
+}
+
+// ...or declare on an abstract ancestor (inherited by all subtypes)
+abstract type Identified {
+    id UUID primary
 }
 ```
 

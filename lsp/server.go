@@ -44,6 +44,12 @@ type Config struct {
 	// Version is the server version reported during LSP initialization.
 	// Injected from -ldflags at build time. Falls back to "dev" when empty.
 	Version string
+
+	// DebounceDelay is the delay between a document change and the analysis
+	// it triggers. Zero or negative means the workspace default
+	// (150ms). Tests use a small value to make temporal behavior
+	// deterministic.
+	DebounceDelay time.Duration
 }
 
 // Validate canonicalizes and validates the Config. It applies defaults
@@ -83,7 +89,7 @@ func (c *Config) Validate(logger *slog.Logger) error {
 type Option func(*Server)
 
 // WithLogger overrides the server's logger. Useful for injecting a test
-// logger that writes to a [testutil.LockBuffer].
+// logger that captures records for assertions.
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Server) {
 		s.logger = logger.With(slog.String("component", "server"))
@@ -151,7 +157,8 @@ func NewServer(logger *slog.Logger, cfg Config, opts ...Option) *Server {
 		config:      cfg,
 		posEncoding: PositionEncodingUTF16, // default; overridden by initialize
 		workspace: workspace.NewWorkspace(logger, workspace.Config{
-			ModuleRoot: cfg.ModuleRoot,
+			ModuleRoot:    cfg.ModuleRoot,
+			DebounceDelay: cfg.DebounceDelay,
 		}),
 	}
 

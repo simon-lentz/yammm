@@ -166,10 +166,17 @@ SL_COMMENT : '//' ~('\n'|'\r')* -> channel(HIDDEN);
 REGEXP: '/' ('\\' ('\\' | '/' | .) | ~('\\'|'/'|'\r'|'\n'))* '/' ;
 WS : (' '|'\t'|'\r'|'\n')+ -> channel(HIDDEN);
 fragment DIGITS : [0-9]+ ;
-fragment EDIGITS: DIGITS ('e'|'E')('-'|'+') DIGITS;
+// Exponent sign is optional, matching the documented numeric-literal grammar.
+fragment EDIGITS: DIGITS ('e'|'E')('-'|'+')? DIGITS;
 VARIABLE: '$' (DIGITS | LC_WORD);
 INTEGER: DIGITS;
 FLOAT: DIGITS '.' (EDIGITS | DIGITS);
+// A numeric literal running straight into identifier characters is
+// malformed (hex prefixes, unit suffixes, broken exponents): one token so
+// the parser reports the literal itself instead of a confusing error at
+// whatever follows. Declared after FLOAT so a valid float wins the
+// equal-length tie under ANTLR's first-rule precedence.
+INVALID_NUMBER: DIGITS ('.' DIGITS (('e'|'E')('-'|'+')? DIGITS)?)? [a-zA-Z_] [a-zA-Z0-9_]* ;
 BOOLEAN: 'true' | 'false' ;
 UC_WORD: [A-Z]([A-Z]|[a-z]|[0-9]|'_')* ;
 LC_WORD: [a-z]([A-Z]|[a-z]|[0-9]|'_')* ;

@@ -45,13 +45,16 @@ func TestCompileString_Ops(t *testing.T) {
 		// Unknown functions compile successfully — validation is deferred
 		// to the eval layer, supporting runtime builtin registration.
 		{"unknown function", "items->UnknownFunc()", "UnknownFunc", -1},
-		{"lambda parameter", "items->Filter(|x| x > 0)", "Filter", -1},
+		{"lambda parameter", "items->Filter |$x| { $x > 0 }", "Filter", -1},
 		{"function arguments", "str->Substring(0, 5)", "Substring", -1},
 		{"multiple arguments", `str->Replace("old", "new")`, "Replace", -1},
-		{"chained calls root at first", "items->Filter(|x| x > 0)->Count()", "Filter", -1},
-		{"chained map sum roots at first", "items->Map(|x| x * 2)->Sum()", "Map", -1},
-		{"ternary", "a ? b : c", "?", 3},
-		{"nested ternary", "a ? b : c ? d : e", "?", -1},
+		// The pipeline operator is left-associative, so a chain roots at
+		// the LAST call: items->Filter…->Count() is Count(Filter(items)).
+		{"chained calls root at last", "items->Filter |$x| { $x > 0 }->Count()", "Count", -1},
+		{"chained map sum roots at last", "items->Map |$x| { $x * 2 }->Sum()", "Sum", -1},
+		// Ternary branches are braced: cond ? { then : else }.
+		{"ternary", "a ? { b : c }", "?", 3},
+		{"nested ternary", "a ? { b : c ? { d : e } }", "?", -1},
 		{"unary minus", "-x", "-x", -1},
 		{"negative number", "-42", "-x", -1},
 		{"not", "!done", "!", -1},
@@ -90,7 +93,7 @@ func TestCompileString_Ops(t *testing.T) {
 }
 
 // TestCompileString_Literals pins the literal value (and Go type) each
-// literal form compiles to; hex integers compile as literals too.
+// literal form compiles to.
 func TestCompileString_Literals(t *testing.T) {
 	tests := []struct {
 		name string
@@ -99,10 +102,9 @@ func TestCompileString_Literals(t *testing.T) {
 	}{
 		{"string", `"hello"`, "hello"},
 		{"integer", "42", int64(42)},
-		// Hex is NOT supported: the lexer takes the leading 0 as the whole
-		// literal and CompileString accepts the trailing "x10" silently.
-		{"hex prefix takes leading zero only", "0x10", int64(0)},
 		{"float", "3.14", 3.14},
+		{"float signless exponent", "2.5e10", 2.5e10},
+		{"float signed exponent", "1.0e-5", 1.0e-5},
 		{"boolean true", "true", true},
 		{"boolean false", "false", false},
 		{"nil", "nil", nil},
@@ -114,9 +116,41 @@ func TestCompileString_Literals(t *testing.T) {
 			collector := diag.NewCollector(0)
 
 			result := exprcomp.CompileString(tt.src, collector, sourceID)
-			require.False(t, collector.HasErrors(), "compile %q", tt.src)
+			require.False(t, collector.HasErrors(), "compile %q: %s", tt.src, collector.Result().String())
 			require.NotNil(t, result)
 			assert.Equal(t, tt.want, result.Literal())
+		})
+	}
+}
+
+// TestCompileString_RejectsInvalidSource pins that an expression source
+// that does not parse cleanly fails compilation instead of silently
+// compiling whatever prefix the parser recovered: syntax errors land in
+// the collector and the result is nil. Hexadecimal is the canonical case —
+// numeric literals are decimal, so the lexer marks "0x10" malformed rather
+// than taking the leading zero and dropping the rest.
+func TestCompileString_RejectsInvalidSource(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		wantInMsg string
+	}{
+		{"hex literal", "0x10", "malformed numeric literal"},
+		{"integer with suffix", "42abc", "malformed numeric literal"},
+		{"trailing garbage after expression", "1 + 2 )", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sourceID := location.MustNewSourceID("test://invalid.yammm")
+			collector := diag.NewCollector(0)
+
+			result := exprcomp.CompileString(tt.src, collector, sourceID)
+			assert.Nil(t, result, "invalid source %q must not compile", tt.src)
+			require.True(t, collector.HasErrors(), "invalid source %q must collect a syntax error", tt.src)
+			if tt.wantInMsg != "" {
+				assert.Contains(t, collector.Result().Err().Error(), tt.wantInMsg)
+			}
 		})
 	}
 }

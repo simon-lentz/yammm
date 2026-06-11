@@ -927,7 +927,10 @@ func TestWrapLongLines_ExactlyAtThreshold(t *testing.T) {
 
 // TestTokenStream_Fixtures formats every input/golden fixture pair and
 // compares against the committed golden, which regenerates under -update.
-// Each fixture name documents the formatting behavior it pins.
+// Each fixture name documents the formatting behavior it pins. Every
+// fixture's output is also formatted a second time and must be a fixed
+// point: format(format(x)) == format(x), so editors running format-on-save
+// never oscillate.
 func TestTokenStream_Fixtures(t *testing.T) {
 	t.Parallel()
 
@@ -959,6 +962,10 @@ func TestTokenStream_Fixtures(t *testing.T) {
 			result, err := TokenStream(string(input))
 			require.NoError(t, err, "TokenStream returned error")
 			yammmtest.Golden(t, name+".yammm", []byte(result))
+
+			second, err := TokenStream(result)
+			require.NoError(t, err, "TokenStream returned error on its own output")
+			assert.Equal(t, result, second, "formatting must be idempotent")
 		})
 	}
 }

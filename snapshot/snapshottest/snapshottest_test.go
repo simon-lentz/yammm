@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/instance/instancetest"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
@@ -33,22 +34,46 @@ func testSchema(t *testing.T) *schema.Schema {
 	return s
 }
 
+// buildSnapshot is a local alias for the exported helper under test.
 func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	t.Helper()
-	g := graph.New(s)
-	for _, inst := range instances {
-		g.Add(context.Background(), inst)
-	}
-	return g.Snapshot()
+	return snapshottest.BuildSnapshot(t, s, instances...)
 }
 
-func personType(t *testing.T, s *schema.Schema) schema.TypeID {
+func typeID(t *testing.T, s *schema.Schema, name string) schema.TypeID {
 	t.Helper()
-	typ, ok := s.Type("Person")
+	typ, ok := s.Type(name)
 	if !ok {
-		t.Fatal("Person type missing")
+		t.Fatalf("%s type missing", name)
 	}
 	return typ.ID()
+}
+
+// compositionSchema declares a two-level composition (Holder -> Account ->
+// Card) so projection depth is observable.
+func compositionSchema(t *testing.T) *schema.Schema {
+	t.Helper()
+	const src = `schema "snaptest"
+
+part type Card {
+	last4 String primary
+}
+
+part type Account {
+	number String primary
+	*-> CARDS (_:many) Card
+}
+
+type Holder {
+	id String primary
+	*-> ACCOUNTS (_:many) Account
+}
+`
+	s, res := schema.LoadString(context.Background(), src, "snaptest.yammm")
+	if res.HasErrors() {
+		t.Fatalf("compositionSchema: %v", res.Err())
+	}
+	return s
 }
 
 // TestRoundTripHelpers exercises the live helper surface end-to-end on a
@@ -64,7 +89,7 @@ func TestRoundTripHelpers(t *testing.T) {
 		t, s,
 		instancetest.VI(
 			"Person",
-			instancetest.TypeID(personType(t, s)),
+			instancetest.TypeID(typeID(t, s, "Person")),
 			instancetest.PK("p1"),
 			instancetest.Props(map[string]any{"id": "p1", "name": "Alice"}),
 			instancetest.Edges(edges),
@@ -72,7 +97,7 @@ func TestRoundTripHelpers(t *testing.T) {
 	)
 
 	snapshottest.AssertRoundTrip(t, snap, s)
-	snapshottest.AssertDeterministic(t, snap, s)
+	snapshottest.AssertDeterministic(t, snap)
 	snapshottest.DiffSnapshots(t, snap, snap)
 }
 
@@ -82,13 +107,13 @@ func TestDiffSnapshots_DetectsDifference(t *testing.T) {
 	s := testSchema(t)
 	a := buildSnapshot(t, s, instancetest.VI(
 		"Person",
-		instancetest.TypeID(personType(t, s)),
+		instancetest.TypeID(typeID(t, s, "Person")),
 		instancetest.PK("p1"),
 		instancetest.Props(map[string]any{"id": "p1", "name": "Alice"}),
 	))
 	b := buildSnapshot(t, s, instancetest.VI(
 		"Person",
-		instancetest.TypeID(personType(t, s)),
+		instancetest.TypeID(typeID(t, s, "Person")),
 		instancetest.PK("p1"),
 		instancetest.Props(map[string]any{"id": "p1", "name": "Bob"}),
 	))
@@ -97,5 +122,104 @@ func TestDiffSnapshots_DetectsDifference(t *testing.T) {
 	snapshottest.DiffSnapshots(probe, a, b)
 	if !probe.Failed() {
 		t.Error("DiffSnapshots did not fail on differing snapshots")
+	}
+}
+
+// TestDiffSnapshots_DetectsBigIntegerCorruption pins exact comparison of
+// same-typed integer properties: two int64 values differing by 1 above 2^53
+// collapse to the same float64, so a float-coercing comparer would miss
+// exactly the corruption class a wire round trip could introduce. Mixed
+// int64/float64 pairs of equal value must still compare equal — the wire
+// narrows whole float64 values to int64 on load.
+func TestDiffSnapshots_DetectsBigIntegerCorruption(t *testing.T) {
+	s := testSchema(t)
+	person := func(code any) *graph.Snapshot {
+		return buildSnapshot(t, s, instancetest.VI(
+			"Person",
+			instancetest.TypeID(typeID(t, s, "Person")),
+			instancetest.PK("p1"),
+			instancetest.Props(map[string]any{"id": "p1", "code": code}),
+		))
+	}
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, person(int64(1<<53+1)), person(int64(1<<53)))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must detect a ±1 corruption of an int64 property above 2^53")
+	}
+
+	// Tolerated representation change: int64(1) vs float64(1).
+	snapshottest.DiffSnapshots(t, person(int64(1)), person(float64(1)))
+}
+
+// TestDiffSnapshots_DistinguishesProvenancePresence pins that an instance
+// carrying provenance with an empty source name and an instance carrying no
+// provenance do not compare equal: a round trip dropping provenance objects
+// is data loss even when the source name is empty.
+func TestDiffSnapshots_DistinguishesProvenancePresence(t *testing.T) {
+	s := testSchema(t)
+	person := func(opts ...instancetest.VIOption) *graph.Snapshot {
+		base := []instancetest.VIOption{
+			instancetest.TypeID(typeID(t, s, "Person")),
+			instancetest.PK("p1"),
+			instancetest.Props(map[string]any{"id": "p1"}),
+		}
+		return buildSnapshot(t, s, instancetest.VI("Person", append(base, opts...)...))
+	}
+
+	with := person(instancetest.Provenance(location.NewProvenance("", path.Root(), location.Span{})))
+	without := person()
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, with, without)
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must distinguish empty-named provenance from no provenance")
+	}
+}
+
+// TestDiffSnapshots_ComparesComposedTreesRecursively pins that composition
+// comparison descends past one level: snapshots differing only in a composed
+// child's own children, or only in a composed child's provenance, must not
+// compare equal.
+func TestDiffSnapshots_ComparesComposedTreesRecursively(t *testing.T) {
+	s := compositionSchema(t)
+	holder := func(withCard bool, accountProv *location.Provenance) *graph.Snapshot {
+		var cards []*instance.ValidInstance
+		if withCard {
+			cards = append(cards, instancetest.VI(
+				"Card",
+				instancetest.TypeID(typeID(t, s, "Card")),
+				instancetest.PK("4242"),
+				instancetest.Props(map[string]any{"last4": "4242"}),
+			))
+		}
+		account := instancetest.VI(
+			"Account",
+			instancetest.TypeID(typeID(t, s, "Account")),
+			instancetest.PK("a1"),
+			instancetest.Props(map[string]any{"number": "a1"}),
+			instancetest.Composed(map[string]immutable.Value{"CARDS": immutable.Wrap(cards)}),
+			instancetest.Provenance(accountProv),
+		)
+		return buildSnapshot(t, s, instancetest.VI(
+			"Holder",
+			instancetest.TypeID(typeID(t, s, "Holder")),
+			instancetest.PK("h1"),
+			instancetest.Props(map[string]any{"id": "h1"}),
+			instancetest.Composed(map[string]immutable.Value{"ACCOUNTS": immutable.Wrap([]*instance.ValidInstance{account})}),
+		))
+	}
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, holder(true, nil), holder(false, nil))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must detect loss of a composed child's own children")
+	}
+
+	probe = &testing.T{}
+	prov := location.NewProvenance("feed", path.Root(), location.Span{})
+	snapshottest.DiffSnapshots(probe, holder(false, prov), holder(false, nil))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must detect loss of a composed child's provenance")
 	}
 }

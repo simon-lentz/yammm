@@ -43,6 +43,20 @@ func TestRun_InvalidLogLevel(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid log level")
 }
 
+func TestRun_DebounceDelayFlag(t *testing.T) {
+	t.Parallel()
+
+	// --version short-circuits before the server starts, so success here
+	// proves the duration flag parses and is accepted.
+	var buf bytes.Buffer
+	err := run(&buf, []string{"--debounce-delay", "5ms", "--version"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "yammm-lsp")
+
+	err = run(io.Discard, []string{"--debounce-delay", "not-a-duration"})
+	assert.Error(t, err, "a malformed duration must fail flag parsing")
+}
+
 func TestSetupLogger_ValidLevels(t *testing.T) {
 	t.Parallel()
 

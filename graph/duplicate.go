@@ -19,7 +19,7 @@ import (
 // to inspect composed children from duplicate data, access them from the original
 // [instance.ValidInstance] passed to [Graph.Add].
 //
-// Duplicates are accessed via [Result.Duplicates].
+// Duplicates are accessed via [Snapshot.Duplicates].
 type Duplicate struct {
 	// Instance is the instance that was rejected due to duplicate PK.
 	// This is the instance passed to Add() that was not added to the graph.
@@ -61,7 +61,7 @@ func (d *Duplicate) HasDiagnostic() bool {
 // to report E_UNRESOLVED_REQUIRED diagnostics. Optional associations (Required: false)
 // may remain unresolved without error.
 //
-// Unresolved edges are accessed via [Result.Unresolved].
+// Unresolved edges are accessed via [Snapshot.Unresolved].
 type UnresolvedEdge struct {
 	// Source is the instance that declares the unresolved reference.
 	Source *Instance

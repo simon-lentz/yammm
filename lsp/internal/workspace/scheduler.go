@@ -49,7 +49,8 @@ type analysisScheduler struct {
 	logger *slog.Logger
 
 	// debounceDelay controls the debounce timer duration.
-	// Defaults to DefaultDebounceDelay; overridden in tests via SetDebounceDelayForTest.
+	// Set from [Config.DebounceDelay] at construction; zero or negative
+	// falls back to DefaultDebounceDelay.
 	debounceDelay time.Duration
 
 	// sem bounds concurrent analysis goroutines.
@@ -66,14 +67,18 @@ type analysisScheduler struct {
 }
 
 // newAnalysisScheduler creates an analysisScheduler with all fields initialized.
-func newAnalysisScheduler(logger *slog.Logger, bgCtx context.Context, bgCancel context.CancelFunc) *analysisScheduler {
+// A zero or negative debounceDelay falls back to DefaultDebounceDelay.
+func newAnalysisScheduler(logger *slog.Logger, bgCtx context.Context, bgCancel context.CancelFunc, debounceDelay time.Duration) *analysisScheduler {
+	if debounceDelay <= 0 {
+		debounceDelay = DefaultDebounceDelay
+	}
 	s := &analysisScheduler{
 		debounces:     make(map[string]*debounceEntry),
 		bgCtx:         bgCtx,
 		bgCancel:      bgCancel,
 		analyzer:      analysis.NewAnalyzer(logger),
 		logger:        logger,
-		debounceDelay: DefaultDebounceDelay,
+		debounceDelay: debounceDelay,
 		sem:           make(chan struct{}, maxConcurrentAnalysis),
 	}
 	return s

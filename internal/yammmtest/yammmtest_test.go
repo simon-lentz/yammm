@@ -75,6 +75,11 @@ func TestGolden_MismatchReportsDiff(t *testing.T) {
 func TestGolden_MissingFileIsFatalWithHint(t *testing.T) {
 	t.Chdir(t.TempDir())
 
+	// Pin the flag: under a real `go test -update` run the update path
+	// would create the missing golden instead of fataling, and this probe
+	// asserts the non-update behavior.
+	withUpdate(t, false)
+
 	probe := &probeTB{TB: t}
 	Golden(probe, "absent", []byte("x"))
 	if !probe.fataled {

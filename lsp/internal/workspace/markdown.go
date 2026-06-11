@@ -111,12 +111,6 @@ func (w *Workspace) scheduleMarkdownAnalysis(uri string) {
 	w.sched.schedule(uri, w.AnalyzeMarkdownAndPublish)
 }
 
-// markdownAnalysisCompletedHook, when non-nil, runs after block analysis
-// completes and before the version gate re-checks the document. It exists
-// so tests can deterministically interleave a document change into the
-// window the gate protects; production leaves it nil.
-var markdownAnalysisCompletedHook func(uri string)
-
 // AnalyzeMarkdownAndPublish analyzes a markdown document's code blocks and publishes diagnostics.
 func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri string) {
 	// Read text and version under lock
@@ -190,8 +184,8 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 		return
 	}
 
-	if markdownAnalysisCompletedHook != nil {
-		markdownAnalysisCompletedHook(uri)
+	if hook := w.analysisCompletedHookFn(); hook != nil {
+		hook(uri)
 	}
 
 	// Version-gate and store results atomically

@@ -374,6 +374,45 @@ func TestMarshal_ModuleRoot_HermeticReload(t *testing.T) {
 	}
 }
 
+// TestMarshal_SymlinkedImportDir pins that the embedded-model round-trip
+// check is independent of working-directory contents: a schema whose import
+// path traverses a symlinked directory (lib -> real) marshals successfully
+// even when the cwd is the module root itself, where every embedded key
+// resolves to an existing file through the symlink. The re-load must match
+// pre-registered keys textually rather than resolving them against disk.
+func TestMarshal_SymlinkedImportDir(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(root, "a", "b"),
+		filepath.Join(root, "real"),
+	} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("real", filepath.Join(root, "lib")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	entry := filepath.Join(root, "a", "b", "entry.yammm")
+	entrySrc := []byte("schema \"registry\"\n\nimport \"lib/dep\" as dep\n\ntype Contract {\n\tcontract_id String primary\n\t--> SUPPLIED_BY (one) dep.Vendor\n}\n")
+	depSrc := []byte("schema \"deplib\"\n\ntype Vendor {\n\tvendor_id String primary\n}\n")
+	if err := os.WriteFile(entry, entrySrc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "real", "dep.yammm"), depSrc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s, res := schema.Load(context.Background(), entry, schema.WithModuleRoot(root))
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	t.Chdir(root) // embedded keys now join the cwd to paths that exist through the symlink
+	if _, err := gogen.Marshal(s); err != nil {
+		t.Fatalf("Marshal with the module root as cwd: %v", err)
+	}
+}
+
 // TestMarshal_ModuleRoot_SharedRegistryDeterministic pins that a shared
 // Registry does not perturb the embedded keys: a second load of the same
 // entry cache-hits the import (the registry returns the first load's

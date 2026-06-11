@@ -33,7 +33,7 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 		t.Errorf("Add person should succeed: %v", err)
 	}
 
-	// graph.Snapshot should show unresolved edge
+	// Snapshot should show unresolved edge
 	snap := g.Snapshot()
 	assertUnresolvedCount(t, snap, 1)
 	assertEdgeCount(t, snap, 0)
@@ -47,7 +47,7 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 		t.Errorf("Add company should succeed: %v", err)
 	}
 
-	// graph.Snapshot should now show resolved edge
+	// Snapshot should now show resolved edge
 	snap = g.Snapshot()
 	assertUnresolvedCount(t, snap, 0)
 	assertEdgeCount(t, snap, 1)
@@ -55,13 +55,13 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 	// Verify edge details
 	edges := snap.Edges()
 	if edges[0].Source().TypeName() != "Person" {
-		t.Errorf("graph.Edge source should be Person, got %s", edges[0].Source().TypeName())
+		t.Errorf("Edge source should be Person, got %s", edges[0].Source().TypeName())
 	}
 	if edges[0].Target().TypeName() != "Company" {
-		t.Errorf("graph.Edge target should be Company, got %s", edges[0].Target().TypeName())
+		t.Errorf("Edge target should be Company, got %s", edges[0].Target().TypeName())
 	}
 	if edges[0].Relation() != "employer" {
-		t.Errorf("graph.Edge relation should be employer, got %s", edges[0].Relation())
+		t.Errorf("Edge relation should be employer, got %s", edges[0].Relation())
 	}
 }
 
@@ -106,10 +106,10 @@ func TestGraph_ForwardReference_Multiple(t *testing.T) {
 	for _, edge := range edges {
 		sources[edge.Source().PrimaryKey().String()] = true
 		if edge.Target().PrimaryKey().String() != `["acme"]` {
-			t.Errorf("graph.Edge target should be [\"acme\"], got %s", edge.Target().PrimaryKey().String())
+			t.Errorf("Edge target should be [\"acme\"], got %s", edge.Target().PrimaryKey().String())
 		}
 		if edge.Relation() != "employer" {
-			t.Errorf("graph.Edge relation should be employer, got %s", edge.Relation())
+			t.Errorf("Edge relation should be employer, got %s", edge.Relation())
 		}
 	}
 	for _, name := range []string{`["alice"]`, `["bob"]`, `["carol"]`} {
@@ -474,10 +474,10 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 	// The key invariant is that Check doesn't change graph state
 }
 
-// graph.Edge Properties Tests
+// Edge Properties Tests
 
 func TestGraph_Edge_Properties(t *testing.T) {
-	// graph.Edge with properties captured correctly
+	// Edge with properties captured correctly
 	s := testSchemaWithAssociation(t)
 	g := graph.New(s)
 	ctx := t.Context()
@@ -504,26 +504,26 @@ func TestGraph_Edge_Properties(t *testing.T) {
 
 	edge := edges[0]
 	if !edge.HasProperties() {
-		t.Error("graph.Edge should have properties")
+		t.Error("Edge should have properties")
 	}
 
 	role, ok := edge.Property("role")
 	if !ok {
-		t.Error("graph.Edge should have 'role' property")
+		t.Error("Edge should have 'role' property")
 	} else {
 		roleStr, _ := role.String()
 		if roleStr != "Engineer" {
-			t.Errorf("graph.Edge role should be 'Engineer', got %q", roleStr)
+			t.Errorf("Edge role should be 'Engineer', got %q", roleStr)
 		}
 	}
 
 	since, ok := edge.Property("since")
 	if !ok {
-		t.Error("graph.Edge should have 'since' property")
+		t.Error("Edge should have 'since' property")
 	} else {
 		sinceInt, _ := since.Int()
 		if sinceInt != 2020 {
-			t.Errorf("graph.Edge since should be 2020, got %d", sinceInt)
+			t.Errorf("Edge since should be 2020, got %d", sinceInt)
 		}
 	}
 }
@@ -539,7 +539,7 @@ func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 	ctx := t.Context()
 
 	// Add Person with a forward reference to a Company that is NEVER added —
-	// the edge remains unresolved when graph.Snapshot() is called.
+	// the edge remains unresolved when Snapshot() is called.
 	person := mustValidInstanceWithEdgeProps(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"employer", []any{"missing-acme"},
@@ -805,7 +805,7 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 		t.Errorf("Add company should succeed: %v", err)
 	}
 
-	// graph.Snapshot should have no edges and no unresolved
+	// Snapshot should have no edges and no unresolved
 	snap := g.Snapshot()
 	assertUnresolvedCount(t, snap, 0)
 	assertEdgeCount(t, snap, 0)
@@ -820,7 +820,7 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 		t.Errorf("Add person should succeed: %v", err)
 	}
 
-	// graph.Edge should be immediately resolved (no pending)
+	// Edge should be immediately resolved (no pending)
 	snap = g.Snapshot()
 	assertUnresolvedCount(t, snap, 0)
 	assertEdgeCount(t, snap, 1)
@@ -828,10 +828,10 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 	// Verify edge details
 	edges := snap.Edges()
 	if edges[0].Source().TypeName() != "Person" {
-		t.Errorf("graph.Edge source should be Person, got %s", edges[0].Source().TypeName())
+		t.Errorf("Edge source should be Person, got %s", edges[0].Source().TypeName())
 	}
 	if edges[0].Target().TypeName() != "Company" {
-		t.Errorf("graph.Edge target should be Company, got %s", edges[0].Target().TypeName())
+		t.Errorf("Edge target should be Company, got %s", edges[0].Target().TypeName())
 	}
 }
 
@@ -866,7 +866,7 @@ func TestGraph_BackwardReference_Multiple(t *testing.T) {
 	for _, edge := range snap.Edges() {
 		sources[edge.Source().PrimaryKey().String()] = true
 		if edge.Target().PrimaryKey().String() != `["acme"]` {
-			t.Errorf("graph.Edge target should be [\"acme\"], got %s", edge.Target().PrimaryKey().String())
+			t.Errorf("Edge target should be [\"acme\"], got %s", edge.Target().PrimaryKey().String())
 		}
 	}
 	for _, name := range []string{`["alice"]`, `["bob"]`, `["carol"]`} {

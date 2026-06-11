@@ -7,18 +7,18 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 )
 
-// Ownership Isolation Tests for graph.Graph Package
+// Ownership Isolation Tests for the graph package
 //
-// These tests verify that the graph.Graph maintains proper ownership semantics
+// These tests verify that the Graph maintains proper ownership semantics
 // for ValidInstance data. Since ValidInstance is immutable by design
 // (via immutable.WrapProperties with WithClone in the validator), these tests verify:
 //
-// 1. Each graph.Snapshot returns independent, deep-copied instances (isolation)
+// 1. Each Snapshot returns independent, deep-copied instances (isolation)
 // 2. Within a single snapshot, references are consistent
 // 3. Composed children added via AddComposed are correctly accessible
-// 4. graph.Instance data is preserved through graph operations
+// 4. Instance data is preserved through graph operations
 
-// TestGraph_SnapshotIsolation verifies that each call to graph.Snapshot() returns
+// TestGraph_SnapshotIsolation verifies that each call to Snapshot() returns
 // an independent, isolated copy of the graph's instances.
 func TestGraph_SnapshotIsolation(t *testing.T) {
 	s := testSchemaWithComposition(t)
@@ -228,7 +228,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 }
 
 // TestGraph_InstanceReferencePreservation verifies that within a single snapshot,
-// the same graph.Instance reference is returned when accessing the same instance multiple times.
+// the same Instance reference is returned when accessing the same instance multiple times.
 // Different snapshots should return independent copies.
 func TestGraph_InstanceReferencePreservation(t *testing.T) {
 	s := testSchema(t)
@@ -279,7 +279,7 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 }
 
 // TestSnapshot_EdgeInstanceConsistency verifies that graph.Edge.Source() and graph.Edge.Target()
-// are the same pointers as returned by Result.InstanceByKey() within the same snapshot.
+// are the same pointers as returned by Snapshot.InstanceByKey() within the same snapshot.
 func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 	g := graph.New(s)
@@ -317,12 +317,12 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	edge := edges[0]
 
 	// graph.Edge.Source() and graph.Edge.Target() should be the same pointers
-	// as Result.InstanceByKey() returns (within same snapshot)
+	// as Snapshot.InstanceByKey() returns (within same snapshot)
 	if edge.Source() != person1 {
-		t.Error("graph.Edge source should be same pointer as InstanceByKey result")
+		t.Error("Edge source should be same pointer as InstanceByKey result")
 	}
 	if edge.Target() != company1 {
-		t.Error("graph.Edge target should be same pointer as InstanceByKey result")
+		t.Error("Edge target should be same pointer as InstanceByKey result")
 	}
 
 	// Also verify edges from a different snapshot have different pointers

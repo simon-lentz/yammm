@@ -48,7 +48,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 
 	g.Add(ctx, entity)
 
-	// graph.Snapshot should have User but the Entity add should have triggered diagnostics
+	// Snapshot should have User but the Entity add should have triggered diagnostics
 	// because the type name lookup would fail with unqualified "Entity"
 	snap := g.Snapshot()
 	if len(snap.InstancesOf("User")) != 1 {
@@ -86,7 +86,7 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 }
 
 func TestGraph_StrictResolution_UnknownAlias(t *testing.T) {
-	// graph.Instance from completely unknown schema should panic
+	// Instance from completely unknown schema should panic
 	mainSchema, _ := testMultiSchemaSetup(t)
 	g := graph.New(mainSchema)
 	ctx := t.Context()
@@ -135,7 +135,7 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 		t.Error("InstanceByKey should find c.Entity")
 	}
 	if found.TypeName() != "c.Entity" {
-		t.Errorf("graph.Instance type should be c.Entity, got %s", found.TypeName())
+		t.Errorf("Instance type should be c.Entity, got %s", found.TypeName())
 	}
 
 	// Lookup by unqualified name should NOT work
@@ -245,13 +245,13 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 
 	edge := edgeList[0]
 	if edge.Source().TypeName() != "User" {
-		t.Errorf("graph.Edge source should be User, got %s", edge.Source().TypeName())
+		t.Errorf("Edge source should be User, got %s", edge.Source().TypeName())
 	}
 	if edge.Target().TypeName() != "c.Entity" {
-		t.Errorf("graph.Edge target should be c.Entity, got %s", edge.Target().TypeName())
+		t.Errorf("Edge target should be c.Entity, got %s", edge.Target().TypeName())
 	}
 	if edge.Relation() != "entity" {
-		t.Errorf("graph.Edge relation should be entity, got %s", edge.Relation())
+		t.Errorf("Edge relation should be entity, got %s", edge.Relation())
 	}
 }
 

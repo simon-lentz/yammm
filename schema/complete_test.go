@@ -696,7 +696,7 @@ func TestComplete_Errors(t *testing.T) {
 			assert.Nil(t, s, "completion must fail")
 			require.True(t, result.HasErrors(), "completion must produce error diagnostics")
 			if tt.wantCode != (diag.Code{}) {
-				assert.True(t, hasCode(result, tt.wantCode), "expected %v in: %s", tt.wantCode, result.String())
+				assert.True(t, result.HasCode(tt.wantCode), "expected %v in: %s", tt.wantCode, result.String())
 			}
 			if len(tt.wantMsgParts) > 0 {
 				issues := slices.Collect(result.Issues())

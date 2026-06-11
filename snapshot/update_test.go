@@ -268,7 +268,7 @@ func TestUpdateMetadata_MalformedInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, res := snapshot.UpdateMetadata(ctx, tc.data, map[string]string{"k": "v"})
 			assert.True(t, res.HasErrors(), "malformed input must produce diagnostics")
-			assert.True(t, hasCodeUpdate(res, diag.E_SNAPSHOT_MALFORMED),
+			assert.True(t, res.HasCode(diag.E_SNAPSHOT_MALFORMED),
 				"expected E_SNAPSHOT_MALFORMED, got: %v", res)
 		})
 	}
@@ -281,7 +281,7 @@ func TestUpdateMetadata_Cancellation(t *testing.T) {
 
 	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
 	require.True(t, res.HasErrors())
-	assert.True(t, hasCodeUpdate(res, diag.E_CONTEXT_CANCELLED))
+	assert.True(t, res.HasCode(diag.E_CONTEXT_CANCELLED))
 }
 
 func TestUpdateMetadata_ConcurrentAccess(t *testing.T) {
@@ -332,8 +332,8 @@ func TestUpdateMetadata_BodyOffsetFailure(t *testing.T) {
 	data := []byte(`{"yammm_snapshot":{"version":1,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":1,"integrity_hash":"","features":[]}}`)
 	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"k": "v"})
 	require.True(t, res.HasErrors(), "expected error on shape mismatch")
-	gotMalformed := hasCodeUpdate(res, diag.E_SNAPSHOT_MALFORMED)
-	gotBodyOffset := hasCodeUpdate(res, diag.E_UPDATE_METADATA_BODY_OFFSET)
+	gotMalformed := res.HasCode(diag.E_SNAPSHOT_MALFORMED)
+	gotBodyOffset := res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET)
 	assert.True(t, gotMalformed || gotBodyOffset,
 		"expected E_SNAPSHOT_MALFORMED or E_UPDATE_METADATA_BODY_OFFSET; got: %v", res)
 }
@@ -504,7 +504,7 @@ func TestUpdateMetadataOrReMarshal_CancellationPropagates(t *testing.T) {
 
 	_, res := snapshot.UpdateMetadataOrReMarshal(ctx, data, map[string]string{"k": "v"}, s)
 	require.True(t, res.HasErrors())
-	assert.True(t, hasCodeUpdate(res, diag.E_CONTEXT_CANCELLED))
+	assert.True(t, res.HasCode(diag.E_CONTEXT_CANCELLED))
 	assert.False(t, res.HasWarnings(),
 		"cancellation must not fire W_UPDATE_METADATA_FALLBACK")
 }
@@ -527,17 +527,6 @@ func bodyOffsetOf(t *testing.T, data []byte) int64 {
 	var headerRaw json.RawMessage
 	require.NoError(t, dec.Decode(&headerRaw))
 	return dec.InputOffset()
-}
-
-// hasCodeUpdate reports whether the result carries the given code at any
-// severity.
-func hasCodeUpdate(r diag.Result, code diag.Code) bool {
-	for iss := range r.Issues() {
-		if iss.Code() == code {
-			return true
-		}
-	}
-	return false
 }
 
 // goldenDir returns the filesystem path to the UpdateMetadata golden

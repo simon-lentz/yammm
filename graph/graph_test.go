@@ -106,7 +106,7 @@ func TestGraph_Add_NilInstance(t *testing.T) {
 }
 
 func TestGraph_Add_SchemaMismatch(t *testing.T) {
-	// graph.Instance validated against a completely different schema should fail
+	// Instance validated against a completely different schema should fail
 	schemaA, _ := schema.NewBuilder().
 		WithName("schema_a").
 		WithSourceID(location.MustNewSourceID("test://a.yammm")).
@@ -145,7 +145,7 @@ func TestGraph_Add_SchemaMismatch(t *testing.T) {
 }
 
 func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
-	// graph.Instance from an imported schema should be allowed
+	// Instance from an imported schema should be allowed
 	mainSchema, importedSchema := testMultiSchemaSetup(t)
 	g := graph.New(mainSchema)
 	ctx := t.Context()
@@ -229,10 +229,10 @@ func TestGraph_Add_Success(t *testing.T) {
 		t.Fatalf("InstancesOf(\"Person\") returned %d instances, want 1", len(instances))
 	}
 	if instances[0].TypeName() != "Person" {
-		t.Errorf("graph.Instance.TypeName() = %q, want \"Person\"", instances[0].TypeName())
+		t.Errorf("Instance.TypeName() = %q, want \"Person\"", instances[0].TypeName())
 	}
 	if instances[0].PrimaryKey().String() != `["alice"]` {
-		t.Errorf("graph.Instance.PrimaryKey() = %q, want [\"alice\"]", instances[0].PrimaryKey().String())
+		t.Errorf("Instance.PrimaryKey() = %q, want [\"alice\"]", instances[0].PrimaryKey().String())
 	}
 }
 
@@ -275,7 +275,7 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 	snap := g.Snapshot()
 	dups := snap.Duplicates()
 	if len(dups) != 1 {
-		t.Errorf("graph.Snapshot.Duplicates() returned %d, want 1", len(dups))
+		t.Errorf("Snapshot.Duplicates() returned %d, want 1", len(dups))
 	}
 }
 
@@ -334,7 +334,7 @@ func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 	expected := []string{`["alice"]`, `["bob"]`, `["charlie"]`}
 	for i, inst := range instances {
 		if inst.PrimaryKey().String() != expected[i] {
-			t.Errorf("graph.Instance[%d].PrimaryKey() = %q, want %q",
+			t.Errorf("Instance[%d].PrimaryKey() = %q, want %q",
 				i, inst.PrimaryKey().String(), expected[i])
 		}
 	}
@@ -604,7 +604,7 @@ func TestGraph_NestedComposition(t *testing.T) {
 	}
 }
 
-// Ordering and graph.Edge Case Tests
+// Ordering and Edge Case Tests
 
 func TestGraph_Duplicates_Ordering(t *testing.T) {
 	// Duplicates should be sorted by (type, pk)
@@ -904,7 +904,7 @@ func TestGraph_CompositeKey_Large(t *testing.T) {
 }
 
 func TestGraph_EmptyProperties(t *testing.T) {
-	// graph.Instance with no properties beyond PK
+	// Instance with no properties beyond PK
 	s := testSchema(t)
 	g := graph.New(s)
 	ctx := t.Context()
@@ -1044,7 +1044,7 @@ func TestContract2_PKRequiredForTopLevel(t *testing.T) {
 
 	result := g.Add(ctx, inst)
 	if result.OK() {
-		t.Error(" violation: PK-less top-level instance should be rejected")
+		t.Error("PK-less top-level instance should be rejected")
 	}
 
 	assertHasCode(t, result, diag.E_GRAPH_MISSING_PK)
@@ -1101,25 +1101,25 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 		}
 	}
 	if !hasUser || !hasCEntity {
-		t.Errorf(" violation: Types() should return instance tag form, got %v", types)
+		t.Errorf("Types() should return instance tag form, got %v", types)
 	}
 
 	// Verify InstancesOf() works with instance tag form
 	if snap.InstancesOf("User") == nil {
-		t.Error(" violation: InstancesOf(\"User\") should find local type")
+		t.Error("InstancesOf(\"User\") should find local type")
 	}
 	if snap.InstancesOf("c.Entity") == nil {
-		t.Error(" violation: InstancesOf(\"c.Entity\") should find imported type")
+		t.Error("InstancesOf(\"c.Entity\") should find imported type")
 	}
 
 	// Verify graph.Instance.TypeName() returns instance tag form
 	users := snap.InstancesOf("User")
 	if users[0].TypeName() != "User" {
-		t.Errorf(" violation: graph.Instance.TypeName() should be \"User\", got %q", users[0].TypeName())
+		t.Errorf("Instance.TypeName() should be \"User\", got %q", users[0].TypeName())
 	}
 	entities := snap.InstancesOf("c.Entity")
 	if entities[0].TypeName() != "c.Entity" {
-		t.Errorf(" violation: graph.Instance.TypeName() should be \"c.Entity\", got %q", entities[0].TypeName())
+		t.Errorf("Instance.TypeName() should be \"c.Entity\", got %q", entities[0].TypeName())
 	}
 }
 
@@ -1191,16 +1191,16 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 
 	result := g.Add(ctx, instC)
 	if err := result.Err(); err != nil {
-		t.Errorf(" violation: Same PK with different TypeID should not be duplicate: %v", err)
+		t.Errorf("Same PK with different TypeID should not be duplicate: %v", err)
 	}
 
 	// Verify both exist
 	snap := g.Snapshot()
 	if len(snap.InstancesOf("b.Product")) != 1 {
-		t.Error(" violation: b.Product should exist")
+		t.Error("b.Product should exist")
 	}
 	if len(snap.InstancesOf("c.Product")) != 1 {
-		t.Error(" violation: c.Product should exist")
+		t.Error("c.Product should exist")
 	}
 }
 
@@ -1233,7 +1233,7 @@ func TestContract14_ComposedKeyFormat(t *testing.T) {
 
 	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
 	if result.OK() {
-		t.Error(" violation: graph.Duplicate child PK should be rejected")
+		t.Error("Duplicate child PK should be rejected")
 	}
 
 	hasCode := false
@@ -1278,7 +1278,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	)
 	inst2 := instance.NewValidInstance(
 		"Person", personType.ID(),
-		immutable.WrapKey([]any{"alice"}), // graph.Duplicate
+		immutable.WrapKey([]any{"alice"}), // Duplicate
 		immutable.WrapProperties(map[string]any{"name": "Alice 2"}),
 		nil, nil, nil,
 	)
@@ -1290,7 +1290,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 
 	result2 := g.Add(ctx, inst2)
 	if result2.OK() {
-		t.Error(" violation: graph.Duplicate PK result should not be OK")
+		t.Error("Duplicate PK result should not be OK")
 	}
 
 	// Test case 2: Nil instance → panic
@@ -1304,7 +1304,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 		g.Add(ctx, nil)
 	}()
 	if !panicked {
-		t.Error(" violation: Nil instance should panic")
+		t.Error("Nil instance should panic")
 	}
 
 	// Test case 3: Context cancellation → Fatal diagnostic in result
@@ -1313,7 +1313,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 
 	result4 := g.Add(cancelCtx, inst1)
 	if result4.OK() {
-		t.Error(" violation: Cancelled context result should not be OK")
+		t.Error("Cancelled context result should not be OK")
 	}
 
 	hasFatal := false
@@ -1324,7 +1324,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 		}
 	}
 	if !hasFatal {
-		t.Error(" violation: Cancelled context should produce a Fatal diagnostic")
+		t.Error("Cancelled context should produce a Fatal diagnostic")
 	}
 }
 
@@ -1591,7 +1591,7 @@ func TestGraph_resolveTypeName_QualifiedTypeNotFound(t *testing.T) {
 }
 
 func TestGraph_resolveTypeName_QualifiedImportAliasNotFound(t *testing.T) {
-	// graph.Instance from completely unknown schema panics (schema mismatch)
+	// Instance from completely unknown schema panics (schema mismatch)
 	mainSchema, _ := testMultiSchemaSetup(t)
 	g := graph.New(mainSchema)
 	ctx := t.Context()
@@ -1862,11 +1862,11 @@ func TestAdd_PerOperationDiagnostics(t *testing.T) {
 	// graph.Snapshot.Diagnostics() should still contain the first error (cumulative)
 	snap := g.Snapshot()
 	if snap.Diagnostics().OK() {
-		t.Error("graph.Snapshot.Diagnostics() should NOT be OK (cumulative)")
+		t.Error("Snapshot.Diagnostics() should NOT be OK (cumulative)")
 	}
 	snapIssueCount := countIssues(snap.Diagnostics())
 	if snapIssueCount != 1 {
-		t.Errorf("graph.Snapshot.Diagnostics() should have 1 issue, got %d", snapIssueCount)
+		t.Errorf("Snapshot.Diagnostics() should have 1 issue, got %d", snapIssueCount)
 	}
 }
 
@@ -1909,7 +1909,7 @@ func TestCheck_Idempotent_IssueCount(t *testing.T) {
 	// graph.Snapshot.Diagnostics() should NOT include Check() issues
 	snap := g.Snapshot()
 	if !snap.Diagnostics().OK() {
-		t.Error("graph.Snapshot.Diagnostics() should be OK (Check doesn't merge)")
+		t.Error("Snapshot.Diagnostics() should be OK (Check doesn't merge)")
 	}
 }
 
@@ -2039,7 +2039,7 @@ func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 
 	result2 := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
 	if result2.OK() {
-		t.Fatal("graph.Duplicate AddComposed should fail")
+		t.Fatal("Duplicate AddComposed should fail")
 	}
 
 	var issue diag.Issue
@@ -2151,63 +2151,6 @@ func TestNilContext_Panics(t *testing.T) {
 			tc.fn()
 		})
 	}
-}
-
-// hasOpName checks if any record has the given operation name.
-func hasOpName(records []slog.Record, opName string) bool {
-	for _, r := range records {
-		var found bool
-		r.Attrs(func(a slog.Attr) bool {
-			if a.Key == "op" && a.Value.String() == opName {
-				found = true
-				return false
-			}
-			return true
-		})
-		if found {
-			return true
-		}
-	}
-	return false
-}
-
-// hasMessage checks if any record has the given message.
-func hasMessage(records []slog.Record, msg string) bool {
-	for _, r := range records {
-		if r.Message == msg {
-			return true
-		}
-	}
-	return false
-}
-
-// hasAttr checks if any record has the given attribute key/value.
-func hasAttr(records []slog.Record, key, value string) bool {
-	for _, r := range records {
-		var found bool
-		r.Attrs(func(a slog.Attr) bool {
-			if a.Key == key && a.Value.String() == value {
-				found = true
-				return false
-			}
-			return true
-		})
-		if found {
-			return true
-		}
-	}
-	return false
-}
-
-// countLevel counts records at the given level.
-func countLevel(records []slog.Record, level slog.Level) int {
-	count := 0
-	for _, r := range records {
-		if r.Level == level {
-			count++
-		}
-	}
-	return count
 }
 
 // TestGraph_Logging drives every logged operation through one scenario
@@ -2371,21 +2314,21 @@ func TestGraph_Logging(t *testing.T) {
 
 			records := h.Records()
 			for _, op := range tt.wantOps {
-				if !hasOpName(records, op) {
+				if !yammmtest.HasAttr(records, "op", op) {
 					t.Errorf("expected %s operation to be logged", op)
 				}
 			}
 			for _, attr := range tt.wantAttrs {
-				if !hasAttr(records, attr[0], attr[1]) {
+				if !yammmtest.HasAttr(records, attr[0], attr[1]) {
 					t.Errorf("expected %s=%s attribute", attr[0], attr[1])
 				}
 			}
 			for _, msg := range tt.wantMsgs {
-				if !hasMessage(records, msg) {
+				if !yammmtest.HasMessage(records, msg) {
 					t.Errorf("expected %q message", msg)
 				}
 			}
-			if tt.wantWarn && countLevel(records, slog.LevelWarn) == 0 {
+			if tt.wantWarn && yammmtest.CountLevel(records, slog.LevelWarn) == 0 {
 				t.Error("expected a Warn-level record")
 			}
 		})

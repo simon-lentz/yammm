@@ -908,9 +908,9 @@ type Money = Float[0, _]
 Aliases are:
 
 - Declared with an upper-case identifier
-- Stored internally as lower-case
+- Case-preserved: the declared name is canonical (not lowercased internally)
 - Referenced by name in property declarations
-- Able to chain (A -> B -> built-in); cycles are rejected during parsing
+- Able to chain (A -> B -> built-in); cycles are detected and rejected during schema completion
 
 Using aliases:
 
@@ -1177,7 +1177,7 @@ Parentheses group as usual.
 >=   greater than or equal
 ```
 
-Unsupported comparison operands raise evaluation errors instead of returning false. `==`/`!=`/`in` reject mismatched types.
+Comparisons across mismatched operand types do not raise evaluation errors: `==` evaluates to not-equal (false) and `!=` to true, `in` evaluates to false when element types do not match, and ordered comparisons (`<`, `<=`, `>`, `>=`) evaluate to false for incomparable operands.
 
 #### Logical Operators
 

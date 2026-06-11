@@ -6,8 +6,6 @@
 package workspace
 
 import (
-	"time"
-
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/markdown"
 )
@@ -32,10 +30,4 @@ func (w *Workspace) SetMarkdownBlocksForTest(uri string, blocks []markdown.CodeB
 	}
 	md.Blocks = blocks
 	md.Snapshots = snapshots
-}
-
-// SetDebounceDelayForTest overrides the debounce delay for testing.
-// Use a small value (e.g., 1ms) to make temporal tests deterministic.
-func (w *Workspace) SetDebounceDelayForTest(d time.Duration) {
-	w.sched.debounceDelay = d
 }

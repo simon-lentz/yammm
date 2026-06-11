@@ -854,12 +854,12 @@ type Record {
 
 func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 	// Property paths should use schema property names, not input field names.
-	// When input uses different case (e.g., "firstname"), path should still use "FirstName".
+	// When input uses different case (e.g., "firstname"), path should still use "firstName".
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("FirstName", schema.NewIntegerConstraint()). // Integer type to cause mismatch
+		WithProperty("firstName", schema.NewIntegerConstraint()). // Integer type to cause mismatch
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -877,7 +877,7 @@ func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	// Check that the path uses schema property name "FirstName", not input name "firstname"
+	// Check that the path uses schema property name "firstName", not input name "firstname"
 	var foundPath string
 	for issue := range result.Issues() {
 		if issue.Path() != "" {
@@ -886,7 +886,7 @@ func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 		}
 	}
 
-	assert.Contains(t, foundPath, "FirstName", "path should use schema property name")
+	assert.Contains(t, foundPath, "firstName", "path should use schema property name")
 	assert.NotContains(t, foundPath, "firstname", "path should not use input field name")
 }
 
@@ -897,7 +897,7 @@ func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
 		WithName("test").
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("FirstName", schema.NewIntegerConstraint()). // Integer to cause type error
+		WithProperty("firstName", schema.NewIntegerConstraint()). // Integer to cause type error
 		Done())
 
 	validator := instance.NewValidator(s)

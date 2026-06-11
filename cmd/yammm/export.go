@@ -69,7 +69,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	// Load schema
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
 	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), schemaResult)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), schemaResult)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -92,7 +92,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 
 	if result.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), result)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -271,7 +271,7 @@ func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, dataPath string, o
 
 	// Render warnings (e.g., unsupported hash algorithm).
 	if !result.OK() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), result)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 	}
 	if result.HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}

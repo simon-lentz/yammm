@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
 func TestBegin_NilLogger(t *testing.T) {
@@ -29,7 +31,7 @@ func TestEnd_NilOp(t *testing.T) {
 }
 
 func TestBeginEnd_EnabledLogger(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -79,7 +81,7 @@ func TestBeginEnd_EnabledLogger(t *testing.T) {
 }
 
 func TestBeginEnd_WithRequestID(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx := WithRequestID(t.Context(), "req-456")
 
@@ -97,7 +99,7 @@ func TestBeginEnd_WithRequestID(t *testing.T) {
 }
 
 func TestBeginEnd_NoRequestID(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -115,7 +117,7 @@ func TestBeginEnd_NoRequestID(t *testing.T) {
 }
 
 func TestEnd_WithError(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -131,7 +133,7 @@ func TestEnd_WithError(t *testing.T) {
 }
 
 func TestEnd_NoError(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -148,7 +150,7 @@ func TestEnd_NoError(t *testing.T) {
 }
 
 func TestEnd_ContextCancelled(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx, cancel := context.WithCancel(t.Context())
 
@@ -165,7 +167,7 @@ func TestEnd_ContextCancelled(t *testing.T) {
 }
 
 func TestEnd_DoubleCalling(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -181,7 +183,7 @@ func TestEnd_DoubleCalling(t *testing.T) {
 }
 
 func TestBeginEnd_DisabledLevel(t *testing.T) {
-	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
+	h := yammmtest.NewRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 	ctx := t.Context()
 
@@ -202,7 +204,7 @@ func TestBeginEnd_DisabledLevel(t *testing.T) {
 }
 
 func TestEnd_ContextDeadlineExceeded(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-1*time.Second))
 	defer cancel()
@@ -219,7 +221,7 @@ func TestEnd_ContextDeadlineExceeded(t *testing.T) {
 }
 
 func TestEnd_BothErrorAndContextError(t *testing.T) {
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

@@ -3,6 +3,8 @@ package trace
 import (
 	"log/slog"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
 // These benchmarks verify the near-zero cost when logging is disabled.
@@ -113,7 +115,7 @@ func BenchmarkOpBeginEnd_NilLoggerWithRequestID(b *testing.B) {
 
 func BenchmarkDebug_DisabledLevel(b *testing.B) {
 	ctx := b.Context()
-	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
+	h := yammmtest.NewRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -124,7 +126,7 @@ func BenchmarkDebug_DisabledLevel(b *testing.B) {
 
 func BenchmarkDebugLazy_DisabledLevel(b *testing.B) {
 	ctx := b.Context()
-	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
+	h := yammmtest.NewRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 	fn := func() []slog.Attr {
 		return []slog.Attr{slog.String("key", "value")}
@@ -138,7 +140,7 @@ func BenchmarkDebugLazy_DisabledLevel(b *testing.B) {
 
 func BenchmarkOpBeginEnd_DisabledLevel(b *testing.B) {
 	ctx := b.Context()
-	h := newRecordHandler(slog.LevelInfo) // Debug not enabled
+	h := yammmtest.NewRecordHandler(slog.LevelInfo) // Debug not enabled
 	logger := slog.New(h)
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -152,7 +154,7 @@ func BenchmarkOpBeginEnd_DisabledLevel(b *testing.B) {
 
 func BenchmarkDebug_EnabledLevel(b *testing.B) {
 	ctx := b.Context()
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -163,7 +165,7 @@ func BenchmarkDebug_EnabledLevel(b *testing.B) {
 
 func BenchmarkOpBeginEnd_EnabledLevel(b *testing.B) {
 	ctx := b.Context()
-	h := newRecordHandler(slog.LevelDebug)
+	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	logger := slog.New(h)
 	b.ReportAllocs()
 	b.ResetTimer()

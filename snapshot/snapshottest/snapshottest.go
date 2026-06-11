@@ -11,9 +11,24 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
+
+// BuildSnapshot adds the given pre-validated instances to a fresh graph
+// over s and returns its snapshot — the shared constructor for round-trip
+// fixtures. Add diagnostics are intentionally not asserted: fixtures may
+// deliberately construct duplicate or unresolved shapes; assert on the
+// snapshot instead.
+func BuildSnapshot(tb testing.TB, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
+	tb.Helper()
+	g := graph.New(s)
+	for _, inst := range instances {
+		g.Add(context.Background(), inst)
+	}
+	return g.Snapshot()
+}
 
 // AssertRoundTrip marshals a snapshot, loads it back, and verifies
 // structural equivalence via [DiffSnapshots]. Fails the test with a
@@ -37,7 +52,7 @@ func AssertRoundTrip(tb testing.TB, snap *graph.Snapshot, s *schema.Schema, opts
 
 // AssertDeterministic marshals a snapshot twice with the same options and
 // verifies byte-level equality.
-func AssertDeterministic(tb testing.TB, snap *graph.Snapshot, _ *schema.Schema, opts ...snapshot.Option) {
+func AssertDeterministic(tb testing.TB, snap *graph.Snapshot, opts ...snapshot.Option) {
 	tb.Helper()
 	ctx := context.Background()
 
@@ -71,7 +86,16 @@ type instProjection struct {
 	Properties map[string]any
 	Edges      []edgeProjection
 	Composed   map[string][]instProjection
+	Provenance *provProjection
+}
+
+// provProjection distinguishes an instance carrying provenance from one
+// without: a nil pointer means no provenance, a zero-valued one means
+// provenance whose fields are empty — a distinction a round trip must
+// preserve.
+type provProjection struct {
 	SourceName string
+	Path       string
 }
 
 type edgeProjection struct {
@@ -92,9 +116,11 @@ type unresProjection struct {
 }
 
 // DiffSnapshots compares two snapshots structurally with go-cmp and fails
-// the test with a (-want +got) diff on mismatch. Numeric property values
-// compare by float64 value, tolerating the wire format's int64↔float64
-// representations across a marshal/load boundary.
+// the test with a (-want +got) diff on mismatch. Mixed int64/float64
+// property pairs compare by float64 value, tolerating the wire format's
+// whole-float narrowing across a marshal/load boundary; same-typed pairs
+// compare exactly, so integer corruption above 2^53 is not masked by a
+// float64 collapse.
 func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 	tb.Helper()
 	numericCoercion := cmp.FilterValues(func(a, b any) bool {
@@ -102,7 +128,7 @@ func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 		_, aFloat := a.(float64)
 		_, bInt := b.(int64)
 		_, bFloat := b.(float64)
-		return (aInt || aFloat) && (bInt || bFloat)
+		return (aInt && bFloat) || (aFloat && bInt)
 	}, cmp.Transformer("toFloat64", func(v any) float64 {
 		switch n := v.(type) {
 		case int64:
@@ -127,10 +153,7 @@ func project(s *graph.Snapshot) snapProjection {
 	}
 	for _, typeName := range s.Types() {
 		for _, inst := range s.InstancesOf(typeName) {
-			ip := instProjection{
-				PK:         inst.PrimaryKey().String(),
-				Properties: inst.Properties().Clone(),
-			}
+			ip := projectInstanceTree(inst)
 			for _, e := range s.EdgesFrom(inst) {
 				ip.Edges = append(ip.Edges, edgeProjection{
 					Relation:   e.Relation(),
@@ -138,20 +161,6 @@ func project(s *graph.Snapshot) snapProjection {
 					TargetPK:   e.Target().PrimaryKey().String(),
 					Properties: e.Properties().Clone(),
 				})
-			}
-			if rels := inst.ComposedRelations(); len(rels) > 0 {
-				ip.Composed = make(map[string][]instProjection, len(rels))
-				for _, rel := range rels {
-					for _, child := range inst.Composed(rel) {
-						ip.Composed[rel] = append(ip.Composed[rel], instProjection{
-							PK:         child.PrimaryKey().String(),
-							Properties: child.Properties().Clone(),
-						})
-					}
-				}
-			}
-			if prov := inst.Provenance(); prov != nil {
-				ip.SourceName = prov.SourceName()
 			}
 			p.Instances[typeName] = append(p.Instances[typeName], ip)
 		}
@@ -171,4 +180,31 @@ func project(s *graph.Snapshot) snapProjection {
 		})
 	}
 	return p
+}
+
+// projectInstanceTree projects an instance and its full composition tree —
+// the wire format is recursive (composed children carry their own composed
+// children and provenance), so the comparison descends to match. Edges are
+// appended by the caller for root instances only; composed children cannot
+// carry edges.
+func projectInstanceTree(inst *graph.Instance) instProjection {
+	ip := instProjection{
+		PK:         inst.PrimaryKey().String(),
+		Properties: inst.Properties().Clone(),
+	}
+	if rels := inst.ComposedRelations(); len(rels) > 0 {
+		ip.Composed = make(map[string][]instProjection, len(rels))
+		for _, rel := range rels {
+			for _, child := range inst.Composed(rel) {
+				ip.Composed[rel] = append(ip.Composed[rel], projectInstanceTree(child))
+			}
+		}
+	}
+	if prov := inst.Provenance(); prov != nil {
+		ip.Provenance = &provProjection{
+			SourceName: prov.SourceName(),
+			Path:       prov.RawPath(),
+		}
+	}
+	return ip
 }

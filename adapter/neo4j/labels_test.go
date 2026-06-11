@@ -211,30 +211,22 @@ func TestDetectLabelCollisions_NoCollision(t *testing.T) {
 	}
 }
 
-func TestDetectLabelCollisions_Collision(t *testing.T) {
+// TestLabel_SanitizationCollision pins the collision mechanism that
+// [Adapter.DetectLabelCollisions] guards against: distinct raw names whose
+// sanitized forms coincide. Such names can no longer enter a schema — both
+// the parser and [schema.NewBuilder] enforce the DSL name productions, on
+// which [SanitizeIdentifier] is the identity function — so the detector's
+// collision branch is defense-in-depth for construction paths that bypass
+// both front doors.
+func TestLabel_SanitizationCollision(t *testing.T) {
 	t.Parallel()
-	// "Foo-Bar" and "Foo_Bar" both sanitize to label "collide__Foo_Bar".
-	s := collidingSchema(t)
 
-	result := New().DetectLabelCollisions(context.Background(), s)
-	if !result.HasErrors() {
-		t.Fatal("expected a collision error for types Foo-Bar and Foo_Bar")
-	}
-
-	found := false
-	for issue := range result.Errors() {
-		if issue.Code() != E_NEO4J_LABEL_COLLISION {
-			continue
-		}
-		found = true
-		for _, typeName := range []string{"Foo-Bar", "Foo_Bar"} {
-			if !strings.Contains(issue.Message(), typeName) {
-				t.Errorf("collision message should name type %q: %s", typeName, issue.Message())
-			}
-		}
-	}
-	if !found {
-		t.Error("expected an E_NEO4J_LABEL_COLLISION issue")
+	a := New()
+	ctx := context.Background()
+	got := a.Label(ctx, "collide", "Foo-Bar")
+	want := a.Label(ctx, "collide", "Foo_Bar")
+	if got != want {
+		t.Fatalf("Label(Foo-Bar) = %q, Label(Foo_Bar) = %q; sanitization should map both to one label", got, want)
 	}
 }
 

@@ -215,9 +215,13 @@ func (s *Schema) HasSourceProvider() bool {
 // entry file's directory for a plain Load, and the canonicalized root
 // argument for LoadSources/LoadSourcesWithEntry (including the "." form).
 // Returns "" when no module root was in play — LoadString sources, an
-// empty root passed to LoadSources, or a Builder-built schema. Every
-// schema produced by one load (the entry and its imports) records the
-// same value.
+// empty root passed to LoadSources, or a Builder-built schema.
+//
+// The entry schema and every import compiled by the same load record that
+// load's root. An import reused from a shared Registry cache (see
+// [WithRegistry]) instead retains the root of the load that originally
+// compiled it: sealed schemas are immutable, and the cache hands the same
+// pointer to every load that hits it.
 func (s *Schema) ModuleRoot() string {
 	return s.moduleRoot
 }

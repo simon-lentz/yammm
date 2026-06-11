@@ -3,14 +3,15 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-      # Golden files are byte-exact test fixtures: their content (including
-      # the presence or absence of a trailing newline and any trailing
-      # whitespace) is the contract under test, so the text-rewriting hooks
-      # must never touch them.
+      # Golden files, testscript archives, and formatter-input fixtures are
+      # byte-exact test fixtures: their content (including the presence or
+      # absence of a trailing newline and any trailing whitespace) is the
+      # contract under test, so the text-rewriting hooks must never touch
+      # them.
       - id: trailing-whitespace
-        exclude: '\.(golden|ys)$'
+        exclude: '(\.(golden|ys|txtar)$|^format/testdata/)'
       - id: end-of-file-fixer
-        exclude: '\.(golden|ys)$'
+        exclude: '(\.(golden|ys|txtar)$|^format/testdata/)'
       - id: check-added-large-files
       - id: check-yaml
       - id: check-json

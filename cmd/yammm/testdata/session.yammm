@@ -1,6 +1,0 @@
-schema "auth"
-
-type Session {
-	id UUID primary
-	jwt_token String required
-}

@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	"io"
 	"log/slog"
 	"sync"
 
@@ -60,9 +59,4 @@ func (c *NotificationCollector) Entries() []NotificationEntry {
 // tests that exercise behavior, not logging.
 func DiscardLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
-}
-
-// ErrorLogger returns a logger that writes only error-level records to w.
-func ErrorLogger(w io.Writer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelError}))
 }

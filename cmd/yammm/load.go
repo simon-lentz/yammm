@@ -51,7 +51,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	// Load schema
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
 	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), schemaResult)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), schemaResult)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -63,7 +63,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	}
 
 	// Render diagnostics
-	renderDiagnostics(cmd, outputFormat, noColor, s, filepath.Dir(absSchemaPath), result)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 
 	exitCode := cli.ExitForResult(result)
 	if exitCode != cli.ExitOK {
@@ -73,8 +73,9 @@ func runLoad(cmd *cobra.Command, args []string) error {
 }
 
 // renderDiagnostics renders a diagnostic result to cobra's error writer.
-// Pass moduleRoot as filepath.Dir(absSchemaPath) for schema-sourced diagnostics,
-// or "" for diagnostics without source locations (e.g., constraint generation errors).
+// Derive moduleRoot via [diagRootFor] for schema-sourced diagnostics, or
+// pass "" for diagnostics without source locations (e.g., constraint
+// generation errors).
 func renderDiagnostics(cmd *cobra.Command, outputFormat cli.OutputFormat, noColor bool, s *schema.Schema, moduleRoot string, result diag.Result) {
 	w := cmd.ErrOrStderr()
 	isTTY := cli.IsTTY(os.Stderr.Fd())
@@ -84,4 +85,28 @@ func renderDiagnostics(cmd *cobra.Command, outputFormat cli.OutputFormat, noColo
 	}
 	renderer := cli.NewRenderer(outputFormat, isTTY, noColor, provider, moduleRoot)
 	_ = cli.RenderResult(w, renderer, outputFormat, result)
+}
+
+// diagRootFor selects the root that rendered diagnostic locations are
+// relativized against. A completed load is authoritative: the schema's
+// recorded ModuleRoot is canonical (symlink-resolved), so it textually
+// prefixes every file-backed SourceID the load produced. When no schema is
+// available (the load failed before producing one), the explicit module
+// root — for commands that accept one — or the schema file's directory is
+// canonicalized the same way the loader canonicalizes its module root, so
+// locations still relativize.
+func diagRootFor(s *schema.Schema, explicitRoot, absSchemaPath string) string {
+	if s != nil {
+		if root := s.ModuleRoot(); root != "" {
+			return root
+		}
+	}
+	base := explicitRoot
+	if base == "" {
+		base = filepath.Dir(absSchemaPath)
+	}
+	if resolved, err := filepath.EvalSymlinks(base); err == nil {
+		return resolved
+	}
+	return filepath.Clean(base)
 }

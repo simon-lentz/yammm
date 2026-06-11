@@ -49,7 +49,6 @@
 //   - [WithRegistry]: schema registry for cross-schema type resolution
 //   - [WithModuleRoot]: root directory for module-style imports
 //   - [WithIssueLimit]: maximum diagnostic issues to collect (default 100)
-//   - [WithSourceRegistry]: source registry for position tracking
 //   - [WithDisallowImports]: prevent import processing
 //   - [WithLogger]: structured logger for diagnostics
 //

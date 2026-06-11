@@ -108,3 +108,6 @@ type (
 	TestResolvedImportMap   = resolvedImportMap
 	TestCrossSchemaRegistry = crossSchemaRegistry
 )
+
+// Load options whose parameter types live in internal packages.
+var TestWithSourceRegistry = withSourceRegistry

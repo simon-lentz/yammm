@@ -780,28 +780,6 @@ func TestInt64Compare(t *testing.T) {
 	}
 }
 
-func TestMin(t *testing.T) {
-	assertEqual(t, 1, value.Min(1, 2))
-	assertEqual(t, 1, value.Min(2, 1))
-	assertEqual(t, -5, value.Min(-5, 5))
-	assertEqual(t, int64(-100), value.Min(int64(-100), int64(100)))
-	// Unsigned instantiation: a distinct type class for the generic body
-	// that signed cases cannot witness.
-	assertEqual(t, uint64(1<<61), value.Min(uint64(1<<62), uint64(1<<61)))
-	assertEqual(t, uint64(100), value.Min(uint64(100), uint64(100)))
-}
-
-func TestMax(t *testing.T) {
-	assertEqual(t, 2, value.Max(1, 2))
-	assertEqual(t, 2, value.Max(2, 1))
-	assertEqual(t, 5, value.Max(-5, 5))
-	assertEqual(t, int64(100), value.Max(int64(-100), int64(100)))
-	// Unsigned instantiation: a distinct type class for the generic body
-	// that signed cases cannot witness.
-	assertEqual(t, uint64(1<<62), value.Max(uint64(1<<62), uint64(1<<61)))
-	assertEqual(t, uint64(100), value.Max(uint64(100), uint64(100)))
-}
-
 func FuzzOrder_Ints(f *testing.F) {
 	f.Add(int64(0), int64(1))
 	f.Add(int64(-5), int64(-5))

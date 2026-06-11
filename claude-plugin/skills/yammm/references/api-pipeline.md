@@ -84,8 +84,8 @@ schema.Load(ctx, path,
     schema.WithIssueLimit(100),
     schema.WithLogger(logger),
     schema.WithDisallowImports(),
-    schema.WithSourceRegistry(reg),
     schema.WithRegistry(registry),
+    schema.WithSourcesOnly(), // hermetic: imports resolve only against in-memory sources — pair with LoadSources/LoadSourcesWithEntry, which seed them
 )
 ```
 
@@ -107,6 +107,8 @@ s, result := schema.NewBuilder().
         Done().
     Build()
 ```
+
+`Build()` validates declared names against the DSL's own productions (`E_INVALID_NAME`): type and datatype names start with an uppercase letter, property names with a lowercase letter, relation names with a letter of either case — all continuing with letters, digits, or underscores. Schema names and invariant names are free-form strings.
 
 ### Schema Type (Read API)
 

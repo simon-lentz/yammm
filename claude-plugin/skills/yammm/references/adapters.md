@@ -1,8 +1,8 @@
 # Adapter Reference
 
-Adapters parse raw data into `RawInstance` values for validation and serialize validated data for export. Three adapters are provided: JSON, CSV, and Neo4j.
+Adapters parse raw data into `RawInstance` values for validation and serialize validated data for export. Four adapters are provided: JSON, CSV, Neo4j, and gogen (Go code generation).
 
-All adapters live in `adapter/{json,csv,neo4j}` packages. The library never imports adapters -- adapters import the library.
+All adapters live in `adapter/{json,csv,neo4j,gogen}` packages. The library never imports adapters -- adapters import the library. The three data adapters parse and serialize instance data; gogen is schema-in/bytes-out and never touches instance data.
 
 ---
 
@@ -187,6 +187,15 @@ label := adapter.Label(ctx, "inventory", "Product")  // "inventory__Product"
 result := adapter.DetectLabelCollisions(ctx, s)
 ```
 
+**Cypher reserved words:** the DSL does not reserve them. A property named
+`match` is valid yammm (and fine for JSON/CSV export) but is rejected at
+Neo4j constraint/shape generation with `ErrReservedKeyword`, because
+property names appear unquoted in generated Cypher; the check is
+case-insensitive. Namespaced labels usually absorb reserved type names
+(`inventory__MATCH` is fine). Check early with
+`ValidateIdentifier(name, context)` or by running `ConstraintsForSchema`
+before write time.
+
 ### Constraint Diffing
 
 ```go
@@ -200,6 +209,20 @@ diff := adapter.DiffConstraints(desired, actual, "inventory")
 schema, err := adapter.InferSchema(constraints, relationships, "inventory")
 // Returns .yammm source code inferred from Neo4j metadata
 ```
+
+---
+
+## gogen Adapter (Go Code Generation)
+
+```go
+import "github.com/simon-lentz/yammm/adapter/gogen"
+```
+
+Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, `EDGE_` association structs, a Graph aggregate, and an embedded `SerializedModel` that re-loads hermetically (`schema.WithSourcesOnly`, no filesystem participation). Generated output is stdlib-only (imports at most `time`) and byte-reproducible across checkouts. Unlike the data adapters it has no instance-data path and returns a plain `error` rather than a `diag.Result`.
+
+Schemas with imports are flattened into one self-contained package; cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` becomes `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error.
+
+Full API semantics: the gogen section of `docs/API.md`. CLI form: `yammm gen --to go` (see `cli.md`).
 
 ---
 

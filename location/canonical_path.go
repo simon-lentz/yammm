@@ -168,7 +168,7 @@ func (c CanonicalPath) Join(elem ...string) (CanonicalPath, error) {
 	for _, e := range elem {
 		// Reject absolute elements - this is almost always a caller bug.
 		// If the caller has an absolute path, they should use NewCanonicalPath.
-		if looksLikeAbsoluteElement(e) {
+		if looksLikeAbsolute(e) {
 			return CanonicalPath{}, fmt.Errorf("%w: %s; use relative path or NewCanonicalPath for absolute paths", ErrAbsoluteJoinElement, e)
 		}
 		e = strings.ReplaceAll(e, "\\", "/")
@@ -184,27 +184,28 @@ func (c CanonicalPath) Join(elem ...string) (CanonicalPath, error) {
 	return CanonicalPath{path: normalized}, nil
 }
 
-// looksLikeAbsoluteElement checks if a path element looks like an absolute path.
-// Used by Join to reject elements that would produce nonsensical paths.
+// looksLikeAbsolute reports whether s looks like an absolute filesystem
+// path: Unix absolute (a leading '/', which also covers forward-slash UNC),
+// UNC with backslashes, or a Windows volume root (C:/ or C:\).
 //
-// Examples of absolute elements:
-//   - "/etc/passwd" (Unix absolute)
-//   - "C:/Windows" or "C:\Windows" (Windows volume)
-//   - "//server/share" or "\\server\share" (UNC)
-func looksLikeAbsoluteElement(e string) bool {
-	if len(e) == 0 {
+// Two guards share this predicate: [CanonicalPath.Join] rejects absolute
+// elements (joining one would produce a nonsensical path — the caller
+// should use NewCanonicalPath), and [ValidateSyntheticSourceID] rejects
+// synthetic identifiers that could collide with file-backed SourceIDs.
+func looksLikeAbsolute(s string) bool {
+	if len(s) == 0 {
 		return false
 	}
 	// Unix absolute or UNC with forward slashes
-	if e[0] == '/' {
+	if s[0] == '/' {
 		return true
 	}
 	// UNC with backslashes
-	if len(e) >= 2 && e[0] == '\\' && e[1] == '\\' {
+	if len(s) >= 2 && s[0] == '\\' && s[1] == '\\' {
 		return true
 	}
 	// Windows volume: C:/ or C:\
-	if len(e) >= 3 && isLetter(e[0]) && e[1] == ':' && (e[2] == '/' || e[2] == '\\') {
+	if len(s) >= 3 && isLetter(s[0]) && s[1] == ':' && (s[2] == '/' || s[2] == '\\') {
 		return true
 	}
 	return false
@@ -308,31 +309,4 @@ func fixWindowsPath(input, output string) string {
 	}
 
 	return output
-}
-
-// looksLikeAbsolutePath checks if an identifier looks like an absolute file path.
-// Used by ValidateSyntheticSourceID to reject synthetic identifiers that could
-// collide with file-backed SourceIDs.
-func looksLikeAbsolutePath(identifier string) bool {
-	if len(identifier) == 0 {
-		return false
-	}
-	// Unix absolute path
-	if identifier[0] == '/' {
-		return true
-	}
-	// Windows absolute path with forward or back slashes: C:\ or C:/
-	if len(identifier) >= 3 && isLetter(identifier[0]) && identifier[1] == ':' {
-		if identifier[2] == '/' || identifier[2] == '\\' {
-			return true
-		}
-	}
-	// Windows UNC path: \\server or //server
-	if len(identifier) >= 2 {
-		if (identifier[0] == '\\' && identifier[1] == '\\') ||
-			(identifier[0] == '/' && identifier[1] == '/') {
-			return true
-		}
-	}
-	return false
 }

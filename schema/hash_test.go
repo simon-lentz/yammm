@@ -242,6 +242,7 @@ func TestStructuralHash_ConstraintSensitivity(t *testing.T) {
 		{"integer between vs single bound", schema.IntegerBetween(0, 100), schema.IntegerMin(0), false},
 		{"float unbounded vs min", schema.NewFloatConstraint(), schema.FloatMin(0.0), false},
 		{"float different min", schema.FloatMin(1.5), schema.FloatMin(2.5), false},
+		{"float different max", schema.FloatMax(100.0), schema.FloatMax(200.0), false},
 		{"enum different values", schema.NewEnumConstraint([]string{"ACTIVE", "INACTIVE"}), schema.NewEnumConstraint([]string{"ACTIVE", "DELETED"}), false},
 		// Enum values are sorted before hashing, so order must not matter.
 		{"enum order insensitive", schema.NewEnumConstraint([]string{"B", "A"}), schema.NewEnumConstraint([]string{"A", "B"}), true},
@@ -260,6 +261,7 @@ func TestStructuralHash_ConstraintSensitivity(t *testing.T) {
 		{"date vs uuid kind", schema.NewDateConstraint(), schema.NewUUIDConstraint(), false},
 		{"list different element types", schema.NewListConstraint(schema.NewStringConstraint()), schema.NewListConstraint(schema.NewIntegerConstraint()), false},
 		{"list unbounded vs bounded", schema.NewListConstraint(schema.NewStringConstraint()), schema.ListMinLen(schema.NewStringConstraint(), 1), false},
+		{"list different max", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), schema.ListLenBetween(schema.NewStringConstraint(), 1, 20), false},
 		{"list same bounds match", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), true},
 	}
 
@@ -447,43 +449,43 @@ func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 	// not hashed separately — the hash uses Patterns() which returns the source strings.
 	hashedFields := map[string]map[string]bool{
 		"StringConstraint": {
-			"minLen": true, // TestStructuralHash_StringConstraintMinMax
-			"maxLen": true, // TestStructuralHash_StringConstraintMinMax
+			"minLen": true, // TestStructuralHash_ConstraintSensitivity ("string unbounded vs min")
+			"maxLen": true, // TestStructuralHash_ConstraintSensitivity ("string unbounded vs max")
 			"hasMin": true, // implied by minLen presence
 			"hasMax": true, // implied by maxLen presence
 		},
 		"IntegerConstraint": {
-			"min":    true, // TestStructuralHash_IntegerConstraintMinMax
-			"max":    true, // TestStructuralHash_IntegerConstraintMinMax
+			"min":    true, // TestStructuralHash_ConstraintSensitivity ("integer unbounded vs min")
+			"max":    true, // TestStructuralHash_ConstraintSensitivity ("integer different max")
 			"hasMin": true,
 			"hasMax": true,
 		},
 		"FloatConstraint": {
-			"min":    true, // TestStructuralHash_FloatConstraintMinMax
-			"max":    true, // TestStructuralHash_FloatConstraintMinMax
+			"min":    true, // TestStructuralHash_ConstraintSensitivity ("float unbounded vs min")
+			"max":    true, // TestStructuralHash_ConstraintSensitivity ("float different max")
 			"hasMin": true,
 			"hasMax": true,
 		},
 		"BooleanConstraint": {}, // no fields
 		"TimestampConstraint": {
-			"format": true, // TestStructuralHash_TimestampFormat
+			"format": true, // TestStructuralHash_ConstraintSensitivity ("timestamp default vs formatted")
 		},
 		"DateConstraint": {}, // no fields
 		"UUIDConstraint": {}, // no fields
 		"EnumConstraint": {
-			"values": true, // TestStructuralHash_EnumValues
+			"values": true, // TestStructuralHash_ConstraintSensitivity ("enum different values")
 		},
 		"PatternConstraint": {
-			"patterns": true, // TestStructuralHash_PatternStrings
+			"patterns": true, // TestStructuralHash_ConstraintSensitivity ("pattern different patterns")
 			"compiled": true, // derived from patterns, not hashed independently
 		},
 		"VectorConstraint": {
-			"dimension": true, // TestStructuralHash_VectorDimension
+			"dimension": true, // TestStructuralHash_ConstraintSensitivity ("vector dimension")
 		},
 		"ListConstraint": {
-			"element": true, // TestStructuralHash_ListConstraint (different element types)
-			"minLen":  true, // TestStructuralHash_ListConstraint (unbounded vs bounded)
-			"maxLen":  true, // TestStructuralHash_ListConstraint (unbounded vs bounded)
+			"element": true, // TestStructuralHash_ConstraintSensitivity ("list different element types")
+			"minLen":  true, // TestStructuralHash_ConstraintSensitivity ("list unbounded vs bounded")
+			"maxLen":  true, // TestStructuralHash_ConstraintSensitivity ("list different max")
 			"hasMin":  true,
 			"hasMax":  true,
 		},

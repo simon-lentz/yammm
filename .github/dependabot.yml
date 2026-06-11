@@ -20,3 +20,15 @@ updates:
     commit-message:
       prefix: "build(deps)"
       include: scope
+  # The vscode extension has its own npm manifest; the npm ecosystem does
+  # not recurse from the repo root, so the directory must be named.
+  - package-ecosystem: npm
+    directory: /lsp/editors/vscode
+    schedule:
+      interval: monthly
+    groups:
+      vscode-minor-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "build(deps)"
+      include: scope

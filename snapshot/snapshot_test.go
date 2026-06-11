@@ -24,6 +24,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -74,67 +75,70 @@ func testSchemaWithComposition(t *testing.T) *schema.Schema {
 	return s
 }
 
-func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+// mustTypeID resolves a schema type's ID, failing the test if absent.
+func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
 		t.Fatalf("type %q not found", typeName)
 	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), nil, nil, nil)
+	return typ.ID()
+}
+
+func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+	t.Helper()
+	return instancetest.VI(
+		typeName,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+	)
 }
 
 func mustValidInstanceWithEdge(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKeys [][]any) *instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
 	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
 	for i, tk := range targetKeys {
-		targets[i] = instance.NewValidEdgeTarget(immutable.WrapKey(tk), immutable.Properties{})
+		targets[i] = instance.NewValidEdgeTarget(immutable.WrapKey(tk), immutable.WrapProperties(nil))
 	}
-	edges := map[string]*instance.ValidEdgeData{
-		relName: instance.NewValidEdgeData(targets),
-	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), edges, nil, nil)
+	return instancetest.VI(
+		typeName,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
+	)
 }
 
 func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
 	t.Helper()
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), nil, nil, nil)
+	return instancetest.VI(
+		typeName,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+	)
 }
 
-// mustValidInstanceWithEdgeProps mirrors the graph-package helper of the same
-// name (graph/testhelpers_test.go:391) but is available to snapshot tests.
-// Builds a ValidInstance with a single edge that carries schema-declared edge
-// properties. Used by PR-6's unresolved-edge-properties round-trip tests.
+// mustValidInstanceWithEdgeProps builds a ValidInstance with a single edge
+// that carries schema-declared edge properties.
 func mustValidInstanceWithEdgeProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKey []any, edgeProps map[string]any) *instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
 	targets := []instance.ValidEdgeTarget{
 		instance.NewValidEdgeTarget(immutable.WrapKey(targetKey), immutable.WrapProperties(edgeProps)),
 	}
-	edges := map[string]*instance.ValidEdgeData{
-		relName: instance.NewValidEdgeData(targets),
-	}
-	return instance.NewValidInstance(typeName, typ.ID(), immutable.WrapKey(pk), immutable.WrapProperties(props), edges, nil, nil)
+	return instancetest.VI(
+		typeName,
+		instancetest.TypeID(mustTypeID(t, s, typeName)),
+		instancetest.PK(pk...),
+		instancetest.Props(props),
+		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
+	)
 }
 
 func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	t.Helper()
-	g := graph.New(s)
-	ctx := context.Background()
-	for _, inst := range instances {
-		g.Add(ctx, inst)
-	}
-	return g.Snapshot()
+	return snapshottest.BuildSnapshot(t, s, instances...)
 }
 
 func TestMarshal_NilPanics(t *testing.T) {
@@ -206,7 +210,7 @@ func TestMarshal_Deterministic(t *testing.T) {
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	snap := buildSnapshot(t, s, company, person)
-	snapshottest.AssertDeterministic(t, snap, s)
+	snapshottest.AssertDeterministic(t, snap)
 }
 
 func TestMarshalLoad_RoundTrip_Basic(t *testing.T) {

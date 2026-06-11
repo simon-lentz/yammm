@@ -317,12 +317,3 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 		t.Error("source should be resolved")
 	}
 }
-
-func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
-	t.Helper()
-	typ, ok := s.Type(typeName)
-	if !ok {
-		t.Fatalf("type %q not found", typeName)
-	}
-	return typ.ID()
-}

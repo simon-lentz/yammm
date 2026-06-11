@@ -744,34 +744,6 @@ func TestEvaluator_SliceConversion(t *testing.T) {
 
 // --- Logging ---
 
-// hasOpName checks if any record has the given operation name.
-func hasOpName(records []slog.Record, opName string) bool {
-	for _, r := range records {
-		var found bool
-		r.Attrs(func(a slog.Attr) bool {
-			if a.Key == "op" && a.Value.String() == opName {
-				found = true
-				return false
-			}
-			return true
-		})
-		if found {
-			return true
-		}
-	}
-	return false
-}
-
-// hasMessage checks if any record has the given message.
-func hasMessage(records []slog.Record, msg string) bool {
-	for _, r := range records {
-		if r.Message == msg {
-			return true
-		}
-	}
-	return false
-}
-
 func TestEvaluator_Logging(t *testing.T) {
 	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
@@ -782,10 +754,10 @@ func TestEvaluator_Logging(t *testing.T) {
 	}
 
 	records := h.Records()
-	if !hasOpName(records, "yammm.eval.expr") {
+	if !yammmtest.HasAttr(records, "op", "yammm.eval.expr") {
 		t.Error("expected yammm.eval.expr operation to be logged")
 	}
-	if !hasMessage(records, "evaluating s-expression") {
+	if !yammmtest.HasMessage(records, "evaluating s-expression") {
 		t.Error("expected 'evaluating s-expression' message")
 	}
 }
@@ -799,17 +771,7 @@ func TestEvaluator_Logging_SExprOp(t *testing.T) {
 		t.Fatalf("Evaluate failed: %v", err)
 	}
 
-	var foundOp bool
-	for _, r := range h.Records() {
-		r.Attrs(func(a slog.Attr) bool {
-			if a.Key == "op" && a.Value.String() == "*" {
-				foundOp = true
-				return false
-			}
-			return true
-		})
-	}
-	if !foundOp {
+	if !yammmtest.HasAttr(h.Records(), "op", "*") {
 		t.Error("expected op=* attribute in s-expression log")
 	}
 }
@@ -828,7 +790,7 @@ func TestEvaluator_Logging_NilExpression(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate failed: %v", err)
 	}
-	if hasOpName(h.Records(), "yammm.eval.expr") {
+	if yammmtest.HasAttr(h.Records(), "op", "yammm.eval.expr") {
 		t.Error("expected no logging for nil expression")
 	}
 }

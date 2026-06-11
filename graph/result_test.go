@@ -97,7 +97,7 @@ func TestEdgesFrom_InstanceFromDifferentSnapshot(t *testing.T) {
 	g2.Add(context.Background(), person)
 	snap2 := g2.Snapshot()
 
-	// graph.Instance from snap1 should not be found in snap2's index (pointer identity)
+	// Instance from snap1 should not be found in snap2's index (pointer identity)
 	personFromSnap1 := snap1.InstancesOf("Person")[0]
 	assert.Nil(t, snap2.EdgesFrom(personFromSnap1))
 }

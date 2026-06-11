@@ -89,6 +89,9 @@ func (e *errorListener) SyntaxError(
 	// should have byte offsets for LSP conversion.
 	if token, ok := offendingSymbol.(antlr.Token); ok && token != nil {
 		span = e.spans.FromToken(token)
+		if token.GetTokenType() == grammar.YammmGrammarLexerINVALID_NUMBER {
+			msg = exprcomp.InvalidNumberMessage(token.GetText())
+		}
 	} else {
 		// Fallback: ANTLR provides line/column but no token (rare edge case).
 		// Use Byte=-1 to signal unknown byte offset.

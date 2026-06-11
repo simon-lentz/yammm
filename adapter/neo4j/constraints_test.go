@@ -205,28 +205,6 @@ func TestConstraints_DeterministicOrder(t *testing.T) {
 	}
 }
 
-func TestConstraints_LabelCollision(t *testing.T) {
-	t.Parallel()
-	// DetectLabelCollisions runs inside ConstraintsForSchema; a schema whose
-	// type names sanitize to the same label must surface the collision as an
-	// error rather than emitting constraints for an ambiguous label.
-	s := collidingSchema(t)
-
-	_, result := New().ConstraintsForSchema(context.Background(), s)
-	if !result.HasErrors() {
-		t.Fatal("ConstraintsForSchema should report the label collision")
-	}
-	found := false
-	for issue := range result.Errors() {
-		if issue.Code() == E_NEO4J_LABEL_COLLISION {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected an E_NEO4J_LABEL_COLLISION issue")
-	}
-}
-
 // TestConstraintsStructured_Golden pins the full structured form — Name,
 // Kind, Label, Properties, TypeExpr, and the complete Statement — for the
 // default options over the basic fixture.

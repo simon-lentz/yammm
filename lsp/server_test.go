@@ -32,8 +32,19 @@ import (
 // the server for tests that need direct workspace access.
 func newTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *lsp.Server) {
 	t.Helper()
+	return newTestHarnessWithServerConfig(t, root, lsp.Config{ModuleRoot: root})
+}
+
+// newTestHarnessWithServerConfig is newTestHarnessWithServer with explicit
+// server configuration, for tests that tune Config knobs (e.g., a short
+// DebounceDelay for temporal tests). cfg.ModuleRoot should normally be root.
+func newTestHarnessWithServerConfig(t *testing.T, root string, cfg lsp.Config) (*testutil.Harness, *lsp.Server) {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := lsp.NewServer(logger, lsp.Config{ModuleRoot: root})
+	server := lsp.NewServer(logger, cfg)
+	// Shut the server down at test end so workspace scheduler goroutines
+	// and debounce timers do not outlive the test. Close is idempotent.
+	t.Cleanup(func() { _ = server.Close() })
 	ctx := t.Context()
 	h := testutil.NewHarness(t, server.Mux(), root)
 	server.Workspace().SetNotifier(func(method string, params any) {
@@ -567,9 +578,9 @@ func TestTemporal_DebouncePipeline(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h, server := newTestHarnessWithServer(t, tmpDir)
+	h, _ := newTestHarnessWithServerConfig(t, tmpDir,
+		lsp.Config{ModuleRoot: tmpDir, DebounceDelay: testDebounceDelay})
 	defer h.Close()
-	server.Workspace().SetDebounceDelayForTest(testDebounceDelay)
 
 	contentA := "schema \"test\"\n\ntype Alpha {\n\tname String primary\n}\n"
 	require.NoError(t, h.OpenDocument("test.yammm", contentA))
@@ -593,9 +604,9 @@ func TestTemporal_RapidEditsSettle(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	h, server := newTestHarnessWithServer(t, tmpDir)
+	h, _ := newTestHarnessWithServerConfig(t, tmpDir,
+		lsp.Config{ModuleRoot: tmpDir, DebounceDelay: testDebounceDelay})
 	defer h.Close()
-	server.Workspace().SetDebounceDelayForTest(testDebounceDelay)
 
 	require.NoError(t, h.OpenDocument("test.yammm", "schema \"test\"\n"))
 	h.Sync()
@@ -659,8 +670,7 @@ func TestTemporal_ConcurrentOpenChangeClose(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := workspace.NewWorkspace(logger, workspace.Config{})
-	ws.SetDebounceDelayForTest(testDebounceDelay)
+	ws := workspace.NewWorkspace(logger, workspace.Config{DebounceDelay: testDebounceDelay})
 
 	const numURIs = 10
 	const iterations = 20
@@ -701,8 +711,7 @@ func TestTemporal_ConcurrentOpenCloseRace(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := workspace.NewWorkspace(logger, workspace.Config{})
-	ws.SetDebounceDelayForTest(testDebounceDelay)
+	ws := workspace.NewWorkspace(logger, workspace.Config{DebounceDelay: testDebounceDelay})
 
 	const iterations = 50
 	uri := "file:///test/race.yammm"
@@ -1215,7 +1224,9 @@ func TestMarkdownIntegration_DefinitionRemapsURI(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n\ntype Bar {\n    --> OWNS (one) Foo\n}\n```\n"
+	// Lines (0-based): 5 = "type Foo {", 11 = "    --> OWNS (one) Foo"
+	// with the Foo reference starting at character 19.
+	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n\ntype Bar {\n    id String primary\n    --> OWNS (one) Foo\n}\n```\n"
 	mdPath := filepath.Join(tmpDir, "definition.md")
 	require.NoError(t, os.WriteFile(mdPath, []byte(content), 0o600))
 
@@ -1229,15 +1240,17 @@ func TestMarkdownIntegration_DefinitionRemapsURI(t *testing.T) {
 	require.NoError(t, h.OpenMarkdownDocument(mdPath, content))
 	h.Sync()
 
-	result, err := h.Definition(mdPath, 10, 19)
+	// Definition on the association target Foo inside the code block.
+	result, err := h.Definition(mdPath, 11, 19)
 	require.NoError(t, err)
+	require.NotNil(t, result, "definition on an association target inside a code block should resolve")
 
-	if result != nil {
-		assert.Contains(t, result.URI, "definition.md",
-			"definition URI should reference the markdown file")
-		assert.GreaterOrEqual(t, int(result.Range.Start.Line), 3,
-			"definition range should be in markdown coordinates")
-	}
+	assert.Contains(t, result.URI, "definition.md",
+		"definition URI should be remapped to the markdown file")
+	assert.Equal(t, 5, int(result.Range.Start.Line),
+		"definition range should land on `type Foo` in markdown coordinates")
+	assert.Equal(t, 5, int(result.Range.Start.Character),
+		"definition range should select the Foo name")
 }
 
 func TestMarkdownIntegration_DocumentSymbolsNilSnapshots(t *testing.T) {

@@ -1290,10 +1290,9 @@ func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 	canonicalParts, err := filepath.EvalSymlinks(actualParts)
 	require.NoError(t, err, "failed to resolve parts path")
 
-	ws := newTestWorkspace(t, nil, Config{})
 	// Keep the scheduled debounce pending so the real analyzeAndPublish
 	// (disk I/O) never fires; the assertion is on scheduling itself.
-	ws.SetDebounceDelayForTest(time.Hour)
+	ws := newTestWorkspace(t, nil, Config{DebounceDelay: time.Hour})
 
 	mainURI := "file:///main.yammm"
 	ws.documentOpened(mainURI, 1, "import parts")
@@ -2680,6 +2679,8 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlockWithSchemaSkipsPrefix(t *testing.
 // re-checking, so the gate must discard the stale results — no blocks or
 // snapshots stored, no diagnostics published.
 func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
+	t.Parallel()
+
 	w := newTestWorkspace(t, slog.Default(), Config{})
 	uri := "file:///test/doc.md"
 	collector := &testutil.NotificationCollector{}
@@ -2690,12 +2691,11 @@ func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Broken {\n\tid Unknown primary\n}\n```\n"
 	w.markdownDocumentOpened(uri, 1, content)
 
-	markdownAnalysisCompletedHook = func(hookURI string) {
+	w.setAnalysisCompletedHook(func(hookURI string) {
 		if hookURI == uri {
 			w.markdownDocumentChanged(uri, 2, content)
 		}
-	}
-	defer func() { markdownAnalysisCompletedHook = nil }()
+	})
 
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 
@@ -2709,13 +2709,57 @@ func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	assert.Empty(t, collector.DiagnosticsFor(uri), "stale analysis must not publish diagnostics")
 
 	// A re-run at the current version stores and publishes normally.
-	markdownAnalysisCompletedHook = nil
+	w.setAnalysisCompletedHook(nil)
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
 	assert.Equal(t, 2, snap.Version)
 	assert.NotEmpty(t, snap.Blocks, "current-version analysis must store blocks")
 	assert.NotEmpty(t, collector.DiagnosticsFor(uri), "invalid block must publish diagnostics once current")
+}
+
+// TestAnalyzeAndPublish_VersionGate exercises the version-discard path on
+// the .yammm analysis pipeline, mirroring the markdown gate test: the
+// completion hook changes the document to a newer version inside the window
+// between analysis finishing and the gate re-checking, so the gate must
+// discard the stale snapshot — nothing stored, no diagnostics published.
+func TestAnalyzeAndPublish_VersionGate(t *testing.T) {
+	t.Parallel()
+
+	w := newTestWorkspace(t, slog.Default(), Config{})
+	uri := "file:///test/doc.yammm"
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
+
+	// An INVALID schema, so a non-discarded publish would carry error
+	// diagnostics — making a gate failure observable.
+	content := "schema \"test\"\n\ntype Broken {\n\tid Unknown primary\n}\n"
+	w.documentOpened(uri, 1, content)
+
+	w.setAnalysisCompletedHook(func(hookURI string) {
+		if hookURI == uri {
+			w.documentChanged(uri, 2, content)
+		}
+	})
+
+	w.analyzeAndPublish(t.Context(), uri)
+
+	// The gate saw version 2 != entry version 1: results discarded.
+	w.mu.RLock()
+	_, stored := w.snapshots[uri]
+	w.mu.RUnlock()
+	assert.False(t, stored, "stale analysis must not store a snapshot")
+	assert.Empty(t, collector.DiagnosticsFor(uri), "stale analysis must not publish diagnostics")
+
+	// A re-run at the current version stores and publishes normally.
+	w.setAnalysisCompletedHook(nil)
+	w.analyzeAndPublish(t.Context(), uri)
+	w.mu.RLock()
+	snap := w.snapshots[uri]
+	w.mu.RUnlock()
+	require.NotNil(t, snap, "current-version analysis must store a snapshot")
+	assert.Equal(t, 2, snap.EntryVersion)
+	assert.NotEmpty(t, collector.DiagnosticsFor(uri), "invalid schema must publish diagnostics once current")
 }
 
 func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {

@@ -89,7 +89,7 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 	}
 
 	for range numOps {
-		op := r.Intn(4) // 0=Add, 1=graph.Snapshot, 2=Check, 3=InstanceByKey
+		op := r.Intn(4) // 0=Add, 1=Snapshot, 2=Check, 3=InstanceByKey
 
 		switch op {
 		case 0: // Add
@@ -105,7 +105,7 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 			// Ignore results - we just want to test for races/panics
 			g.Add(ctx, inst)
 
-		case 1: // graph.Snapshot
+		case 1: // Snapshot
 			snap := g.Snapshot()
 			// Read from snapshot to ensure no concurrent modification issues
 			_ = snap.Types()
@@ -145,7 +145,7 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 		for _, inst := range instances {
 			_, ok := snap.InstanceByKey(typeName, inst.PrimaryKey().String())
 			if !ok {
-				t.Errorf("graph.Instance %s/%s not retrievable by key", typeName, inst.PrimaryKey())
+				t.Errorf("Instance %s/%s not retrievable by key", typeName, inst.PrimaryKey())
 			}
 		}
 	}
@@ -156,7 +156,7 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 		srcKey := edge.Source().PrimaryKey().String()
 		_, ok := snap.InstanceByKey(srcType, srcKey)
 		if !ok {
-			t.Errorf("graph.Edge source %s/%s not in graph", srcType, srcKey)
+			t.Errorf("Edge source %s/%s not in graph", srcType, srcKey)
 		}
 	}
 }
@@ -201,7 +201,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 			uniqueIDs[id] = true
 		}
 
-		// graph.Graph should have exactly the unique instances (duplicates ignored)
+		// Graph should have exactly the unique instances (duplicates ignored)
 		snap := g.Snapshot()
 		instanceCount := len(snap.InstancesOf("Person"))
 		if instanceCount != len(uniqueIDs) {

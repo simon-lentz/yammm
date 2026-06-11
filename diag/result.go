@@ -118,6 +118,17 @@ func (r Result) HasHints() bool {
 	return r.hintCount > 0
 }
 
+// HasCode reports whether any issue carries the given code, at any
+// severity.
+func (r Result) HasCode(code Code) bool {
+	for _, issue := range r.issues {
+		if issue.Code() == code {
+			return true
+		}
+	}
+	return false
+}
+
 // Len returns the number of issues.
 func (r Result) Len() int {
 	return len(r.issues)

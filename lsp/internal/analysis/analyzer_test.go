@@ -223,13 +223,13 @@ func TestSources_PopulatesSourceRegistry(t *testing.T) {
 
 	// Create imported file on disk
 	partsPath := filepath.Join(tmpDir, "parts.yammm")
-	partsContent := `schema "parts" type Wheel { diameter Integer }`
+	partsContent := `schema "parts" type Wheel { id String primary diameter Integer }`
 	err := os.WriteFile(partsPath, []byte(partsContent), 0o600)
 	require.NoError(t, err, "failed to write parts file")
 
 	// Create main file on disk too (for reference)
 	mainPath := filepath.Join(tmpDir, "main.yammm")
-	mainContent := `schema "main" import "./parts" type Car { *-> WHEELS (many) parts.Wheel }`
+	mainContent := `schema "main" import "./parts" type Car { vin String primary --> WHEELS (many) parts.Wheel }`
 	err = os.WriteFile(mainPath, []byte(mainContent), 0o600)
 	require.NoError(t, err, "failed to write main file")
 
@@ -246,6 +246,11 @@ func TestSources_PopulatesSourceRegistry(t *testing.T) {
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 	require.NotNil(t, snapshot.Sources, "snapshot.Sources is nil")
+	// The closure-population contract below holds for completed loads; a
+	// fixture invalidated by a future schema-contract tightening must fail
+	// here rather than weaken the registry assertions.
+	require.False(t, snapshot.Result.HasErrors(),
+		"fixture must load cleanly: %v", snapshot.Result.Err())
 
 	// Canonicalize paths to match loader behavior (symlink resolution)
 	mainCanonical, _ := filepath.EvalSymlinks(mainPath)
@@ -265,6 +270,44 @@ func TestSources_PopulatesSourceRegistry(t *testing.T) {
 	offset, ok := snapshot.Sources.LineStartByte(partsSourceID, 1)
 	assert.True(t, ok, "LineStartByte() should return true for imported file")
 	assert.Equal(t, 0, offset, "LineStartByte(1) should be 0 (first line starts at byte 0)")
+}
+
+// TestSources_FailedLoadKeepsOverlays pins the failure-path registry
+// contract: when the load produces no schema, the registry holds exactly
+// the pre-registered overlays — disk-read sources from the aborted load do
+// not appear. Diagnostic spans carry line/column positions natively, so
+// rendering still works; only sub-column UTF-16 precision for sources
+// outside the overlay set is unavailable on this path.
+func TestSources_FailedLoadKeepsOverlays(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// The imported file is INVALID (no primary key), so the load fails
+	// after reading it from disk.
+	partsPath := filepath.Join(tmpDir, "parts.yammm")
+	partsContent := `schema "parts" type Wheel { diameter Integer }`
+	require.NoError(t, os.WriteFile(partsPath, []byte(partsContent), 0o600))
+
+	mainPath := filepath.Join(tmpDir, "main.yammm")
+	mainContent := `schema "main" import "./parts" type Car { vin String primary --> WHEELS (many) parts.Wheel }`
+	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	analyzer := NewAnalyzer(logger)
+
+	snapshot, err := analyzer.Analyze(t.Context(), mainPath, map[string][]byte{
+		mainPath: []byte(mainContent),
+	}, tmpDir, lsputil.PositionEncodingUTF16)
+	require.NoError(t, err, "a semantic load failure is not an Analyze error")
+	require.NotNil(t, snapshot)
+	require.Nil(t, snapshot.Schema, "the load must fail for this contract to apply")
+	require.True(t, snapshot.Result.HasErrors())
+
+	mainSourceID, err := location.SourceIDFromAbsolutePath(mainPath)
+	require.NoError(t, err)
+	assert.True(t, snapshot.Sources.Has(mainSourceID), "overlay content stays available")
+	assert.Equal(t, 1, snapshot.Sources.Len(), "no partially-loaded sources beyond the overlays")
 }
 
 func TestSources_DiskFallback(t *testing.T) {

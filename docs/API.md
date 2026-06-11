@@ -41,7 +41,6 @@ s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, op
 | `WithRegistry` | Schema registry for cross-schema type resolution |
 | `WithModuleRoot` | Root directory for module-style imports |
 | `WithIssueLimit` | Maximum diagnostic issues to collect (default: 100) |
-| `WithSourceRegistry` | Source registry for position tracking |
 | `WithLogger` | Structured logger for load diagnostics |
 | `WithDisallowImports` | Prevent import declarations from being processed |
 | `WithSourcesOnly` | Restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources) |
@@ -123,6 +122,14 @@ s, result := schema.NewBuilder().
 | `AddType(name)` | Begin building a type definition (returns `TypeBuilder`) |
 | `AddDataType(name, constraint)` | Add a named data type alias |
 | `Build()` | Construct the final `*Schema` from builder state |
+
+`Build()` validates declared names against the DSL's own productions, so every
+builder-built schema remains expressible in `.yammm` form: type and datatype
+names start with an uppercase letter, property names with a lowercase letter,
+and relation names with a letter of either case — all continuing with letters,
+digits, or underscores. Violations fail the build with `E_INVALID_NAME`.
+Schema names and invariant names are quoted strings in the DSL and stay
+free-form; import aliases are validated during completion (`E_INVALID_ALIAS`).
 
 ### TypeBuilder Methods
 
@@ -370,7 +377,7 @@ finRes, err := ba.Finalize(ctx)
 
 New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK`, and `Finalize`'s check covers the union — a required association imported from the seed and still unresolved fails the batch with `E_UNRESOLVED_REQUIRED`. `Count()` reflects only records added through the assembler (seeded instances are not counted), and construction diagnostics are not carried over from the seed (`.ys`-loaded snapshots carry none by design; `Duplicates` and `Unresolved` are the persistent structural records, and both import). The seed snapshot must originate from the same schema — taken from a `Graph` bound to it, or loaded via `snapshot.Load` against it, which verifies structural compatibility. Every other contract — lifecycle, finalize barrier, validator-access modes, `FinalizeResult` — is identical to `NewBatchAssembler`.
 
-**Test fixtures.** `snapshot/snapshottest.BuildTestSnapshot(t, s, records...)` is the test-helper convenience wrapper around `BatchAssembler` for happy-path snapshot construction; pass `[]Record{{TypeName, Raw}, ...}` and the helper handles validate + add + finalize, fataling on any failure.
+**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `instance/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees, provenance-presence-aware, and exact for same-typed numeric properties (only mixed `int64`/`float64` pairs coerce, matching the wire's whole-float narrowing).
 
 ### Seeding from a Snapshot
 
@@ -707,8 +714,6 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 **CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (3) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic via `snapshot.WriteFile`.
 
-**Test helper.** `snapshot/snapshottest.ExpectMetadataPreserved(tb, before, after, preservedKeys...)` asserts that a named set of metadata keys survived a rewrite unchanged. Intended for tests exercising metadata-rewrite primitives or any workflow that must preserve an invariant key set across a transition.
-
 ### Wire Format Versions
 
 The `.ys` wire format uses an integer version field in the header for forward evolution. yammm v0.3.0 introduced the v1 → v2 bump paired with [`UnresolvedEdge.Properties`](#graph) — the new persisted `"properties"` field on unresolved-edge wire entries cannot be `omitempty`-safe alone (a pre-v0.3.0 reader would silently drop the field), so the version bump pairs with the existing unknown-version-rejection path to force older readers to error cleanly instead.
@@ -735,6 +740,7 @@ result.HasFatal()       // Has fatal issues
 result.HasWarnings()    // Has warning issues
 result.HasInfo()        // Has info issues
 result.HasHints()       // Has hint issues
+result.HasCode(code)    // Has an issue with the given code, at any severity
 result.LimitReached()   // Issue collection limit was reached
 
 // Issue access (returns iter.Seq[Issue]; use slices.Collect for a []Issue)
@@ -1109,6 +1115,16 @@ The introspection types are:
 | `SanitizeIdentifier(s)` | Escape a string for use as a Neo4j label or property name |
 | `ValidateIdentifier(name, context)` | Validate that a name is a legal Neo4j identifier |
 | `CypherReservedKeywords()` | Return the set of Cypher reserved keywords |
+
+Cypher reserved words are not reserved by the DSL: a property named `match` or a
+type named `MATCH` is valid yammm and exports cleanly through the JSON and CSV
+adapters, but identifiers that appear unquoted in generated Cypher (property
+names, primary keys, assembled labels) are validated during constraint and shape
+generation and rejected with `ErrReservedKeyword` — the check is
+case-insensitive. Namespaced labels usually absorb reserved type names
+(`app__MATCH` is not a keyword); a reserved property name always fails. For
+export-compatibility feedback before write time, run `ConstraintsForSchema` or
+call `ValidateIdentifier` on names directly.
 
 ## CSV Adapter
 

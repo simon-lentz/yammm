@@ -33,15 +33,7 @@ func TestCodeEmission_AllCodes(t *testing.T) {
 
 			result := collector.Result()
 			assert.True(t, result.HasErrors())
-
-			foundCode := false
-			for i := range result.Issues() {
-				if i.Code() == code {
-					foundCode = true
-					break
-				}
-			}
-			assert.True(t, foundCode, "Code %s should be present in result", code.String())
+			assert.True(t, result.HasCode(code), "Code %s should be present in result", code.String())
 		})
 	}
 }

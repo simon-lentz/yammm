@@ -12,6 +12,14 @@ import (
 
 func executeCmd(t *testing.T, args ...string) int {
 	t.Helper()
+	code, _ := executeCmdStderr(t, args...)
+	return code
+}
+
+// executeCmdStderr runs the CLI in-process and returns the exit code plus
+// captured stderr, for assertions on rendered diagnostics.
+func executeCmdStderr(t *testing.T, args ...string) (int, string) {
+	t.Helper()
 
 	var outBuf, errBuf bytes.Buffer
 	cmd := newRootCmd("test")
@@ -32,12 +40,12 @@ func executeCmd(t *testing.T, args ...string) int {
 
 	if err := cmd.Execute(); err != nil {
 		if exitErr, ok := errors.AsType[*cli.ExitError](err); ok {
-			return exitErr.Code
+			return exitErr.Code, errBuf.String()
 		}
-		return cli.ExitUsage
+		return cli.ExitUsage, errBuf.String()
 	}
 
-	return cli.ExitOK
+	return cli.ExitOK, errBuf.String()
 }
 
 // TestExitCodes pins the exact exit-code contract — usage(2) vs

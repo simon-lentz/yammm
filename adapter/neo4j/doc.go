@@ -41,6 +41,21 @@
 // [SanitizeIdentifier] and [ValidateIdentifier] apply Neo4j naming rules,
 // and [CypherReservedKeywords] returns the set of reserved keywords.
 //
+// # Cypher Reserved Words
+//
+// The DSL does not reserve Cypher keywords: a property named "match" or a
+// type named "MATCH" is valid yammm and exports cleanly through the JSON
+// and CSV adapters, but can fail Neo4j export. Identifiers that appear
+// unquoted in generated Cypher — property names, primary keys, and the
+// assembled labels — are checked with [ValidateIdentifier] during
+// constraint and shape generation and rejected with [ErrReservedKeyword]
+// (the check is case-insensitive). Namespaced labels usually absorb
+// reserved type names — the label "app__MATCH" is not a keyword — but a
+// reserved property name always fails, and a reserved type name fails in
+// unscoped (empty schema name) label mode. For export-compatibility
+// feedback before write time, run [Adapter.ConstraintsForSchema] or call
+// [ValidateIdentifier] on names directly.
+//
 // # Graph Shape
 //
 // [Adapter.ShapeForSchema] converts a schema into a [GraphShape] describing

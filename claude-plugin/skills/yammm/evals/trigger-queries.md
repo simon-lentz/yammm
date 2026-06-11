@@ -1,6 +1,6 @@
 # Trigger Evaluation Queries -- yammm
 
-## Should Trigger (10)
+## Should Trigger (11)
 
 1. "What types does yammm support for primary keys?"
 2. "Write Go code to load a .yammm schema and validate instance data"
@@ -12,6 +12,7 @@
 8. "I need to import types from another .yammm schema file"
 9. "How does constraint narrowing work in yammm type inheritance?"
 10. "Walk me through the yammm pipeline: schema load, instance validate, graph build, export"
+11. "Generate Go types from my yammm schema"
 
 ## Should NOT Trigger (10)
 

@@ -159,7 +159,7 @@ linters:
       - path: "^adapter/neo4j/(diff|infer|introspect)_test\\.go$"
         linters:
           - depguard
-      - path: "^cmd/yammm/(check|export|fmt|load|neo4j_constraints|neo4j_diff|snapshot_info|snapshot_save|snapshot_update_metadata|snapshot_verify|validate)_test\\.go$"
+      - path: "^cmd/yammm/(check|export|neo4j_diff|snapshot_info|snapshot_save|snapshot_update_metadata|snapshot_verify|validate)_test\\.go$"
         linters:
           - depguard
       - path: "^cmd/yammm-lsp/(main)_test\\.go$"
@@ -171,7 +171,7 @@ linters:
       - path: "^diag/(code_emission)_test\\.go$"
         linters:
           - depguard
-      - path: "^format/(format|helpers)_test\\.go$"
+      - path: "^format/(format)_test\\.go$"
         linters:
           - depguard
       - path: "^graph/(duplicate|import|result)_test\\.go$"
@@ -232,9 +232,6 @@ linters:
         linters:
           - depguard
       - path: "^snapshot/(goldenbytes|scan|snapshot|update|version|wire)_test\\.go$"
-        linters:
-          - depguard
-      - path: "^snapshot/snapshottest/(build|snapshottest)_test\\.go$"
         linters:
           - depguard
   settings:

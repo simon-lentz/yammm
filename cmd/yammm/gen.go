@@ -65,7 +65,7 @@ func runGen(cmd *cobra.Command, args []string) error {
 	}
 
 	var loadOpts []schema.LoadOption
-	diagRoot := filepath.Dir(absSchemaPath)
+	moduleRootAbs := ""
 	if moduleRoot != "" {
 		absRoot, err := filepath.Abs(moduleRoot)
 		if err != nil {
@@ -73,11 +73,11 @@ func runGen(cmd *cobra.Command, args []string) error {
 			return &cli.ExitError{Code: cli.ExitUsage}
 		}
 		loadOpts = append(loadOpts, schema.WithModuleRoot(absRoot))
-		diagRoot = absRoot
+		moduleRootAbs = absRoot
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
 	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRoot, schemaResult)
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRootAbs, absSchemaPath), schemaResult)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
