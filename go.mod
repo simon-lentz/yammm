@@ -7,14 +7,14 @@ require (
 	github.com/creachadair/jrpc2 v1.3.5
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
-	github.com/neo4j/neo4j-go-driver/v6 v6.0.0
-	github.com/rogpeppe/go-internal v1.14.1
+	github.com/neo4j/neo4j-go-driver/v6 v6.1.0
+	github.com/rogpeppe/go-internal v1.15.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/jsonc v0.3.3
-	golang.org/x/term v0.41.0
-	golang.org/x/text v0.35.0
+	golang.org/x/term v0.44.0
+	golang.org/x/text v0.38.0
 )
 
 require (
@@ -207,10 +207,10 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260209203927-2842357ff358 // indirect
-	golang.org/x/mod v0.33.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/tools v0.42.0 // indirect
+	golang.org/x/mod v0.36.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/tools v0.45.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/tools v0.7.0 // indirect
