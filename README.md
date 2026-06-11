@@ -303,13 +303,16 @@ The `yammm` binary ([`cmd/yammm/`](cmd/yammm/)) provides commands for working wi
 yammm validate <schema>                                  # validate a schema, report diagnostics
 yammm fmt <schema> [-w]                                  # canonical formatting (stdout; -w rewrites in place)
 yammm check <schema> <data>                              # validate JSON/CSV data against a schema
+yammm load <schema> <data>                               # build an in-memory graph, report diagnostics
 yammm gen --to go <schema>                               # generate Go source from a schema
 yammm export <schema> <data> --to <json|csv|cypher>      # export a validated graph
 yammm snapshot save <schema> <data...> -o <file.ys>      # build graph, persist
 yammm snapshot save <schema> <data...> --into <file.ys>  # merge into an existing snapshot
 yammm snapshot info <file.ys>                            # metadata + stats
 yammm snapshot verify <schema> <file.ys>                 # schema-compatibility check
+yammm snapshot update-metadata --set k=v <file.ys>       # rewrite metadata keys in place (--set/--unset)
 yammm neo4j constraints <schema>                         # generate Neo4j constraint statements
+yammm neo4j diff <schema>                                # compare schema constraints against a live database
 yammm neo4j introspect                                   # inspect a live database's schema
 ```
 
