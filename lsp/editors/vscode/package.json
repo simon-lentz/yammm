@@ -2,7 +2,7 @@
   "name": "yammm",
   "displayName": "YAMMM",
   "description": "Language support for YAMMM schema files",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "publisher": "simon-lentz",
   "license": "MIT",
   "icon": "icon.png",
@@ -11,13 +11,15 @@
     "url": "https://github.com/simon-lentz/yammm"
   },
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
     "Programming Languages"
   ],
   "main": "./out/extension.js",
-  "activationEvents": ["onLanguage:markdown"],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
   "contributes": {
     "languages": [
       {
@@ -41,7 +43,9 @@
       {
         "scopeName": "markdown.yammm.codeblock",
         "path": "./syntaxes/yammm.markdown.injection.json",
-        "injectTo": ["text.html.markdown"],
+        "injectTo": [
+          "text.html.markdown"
+        ],
         "embeddedLanguages": {
           "meta.embedded.block.yammm": "yammm"
         }
@@ -101,11 +105,13 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile:prod",
+    "vscode:prepublish": "npm run check && npm run compile:prod",
+    "check": "tsc --noEmit",
     "compile": "node esbuild.mjs",
     "compile:prod": "node esbuild.mjs --production",
     "watch": "node esbuild.mjs --watch",
     "lint": "eslint",
+    "test:integration": "node tests/integration/runTest.mjs",
     "test:grammar": "npm run test:grammar:yammm && npm run test:grammar:injection",
     "test:grammar:yammm": "vscode-tmgrammar-snap tests/snapshot/*.yammm",
     "test:grammar:injection": "vscode-tmgrammar-snap -s text.html.markdown -g syntaxes/vendor/markdown.tmLanguage.json -g syntaxes/yammm.tmLanguage.json -g syntaxes/yammm.markdown.injection.json tests/snapshot/*.md",
@@ -118,11 +124,14 @@
     "vscode-languageclient": "^10.0.0"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^25.9.3",
-    "@types/vscode": "^1.75.0",
+    "@types/vscode": "~1.91.0",
+    "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.7.0",
     "esbuild": "^0.25.0",
     "eslint": "^10.4.1",
+    "mocha": "^11.7.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.0.0",
     "vscode-tmgrammar-test": "^0.1.3"
