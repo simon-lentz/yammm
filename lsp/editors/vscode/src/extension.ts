@@ -5,7 +5,7 @@ import {
     workspace,
     ExtensionContext,
     window,
-    OutputChannel,
+    LogOutputChannel,
 } from 'vscode';
 import {
     LanguageClient,
@@ -16,12 +16,14 @@ import {
 } from 'vscode-languageclient/node';
 
 let client: LanguageClient | undefined;
-let outputChannel: OutputChannel;
+let outputChannel: LogOutputChannel;
 
 export function activate(context: ExtensionContext) {
-    outputChannel = window.createOutputChannel('YAMMM');
+    // vscode-languageclient v10 requires LogOutputChannel for the
+    // outputChannel/traceOutputChannel client options ({ log: true }).
+    outputChannel = window.createOutputChannel('YAMMM', { log: true });
     context.subscriptions.push(outputChannel);
-    outputChannel.appendLine('YAMMM extension activating...');
+    outputChannel.info('YAMMM extension activating...');
 
     const serverPath = getServerPath(context);
     if (!serverPath) {
@@ -31,7 +33,7 @@ export function activate(context: ExtensionContext) {
         return;
     }
 
-    outputChannel.appendLine(`Using server: ${serverPath}`);
+    outputChannel.info(`Using server: ${serverPath}`);
 
     // Verify the binary exists
     if (!fs.existsSync(serverPath)) {
@@ -94,8 +96,8 @@ function getServerPath(context: ExtensionContext): string | undefined {
         let resolvedPath: string | undefined;
         if (configuredPath === '~') {
             // Bare ~ is a directory, not a binary - warn and fall through
-            outputChannel.appendLine(
-                'Warning: serverPath "~" is a directory, not a binary path. Falling back to bundled/PATH lookup.'
+            outputChannel.warn(
+                'serverPath "~" is a directory, not a binary path. Falling back to bundled/PATH lookup.'
             );
             resolvedPath = undefined;
         } else if (configuredPath.startsWith('~/')) {
@@ -111,8 +113,8 @@ function getServerPath(context: ExtensionContext): string | undefined {
             if (!path.isAbsolute(resolvedPath)) {
                 const folders = workspace.workspaceFolders;
                 if (folders && folders.length > 1) {
-                    outputChannel.appendLine(
-                        `Warning: serverPath is relative and multiple workspace folders detected. ` +
+                    outputChannel.warn(
+                        `serverPath is relative and multiple workspace folders detected. ` +
                             `Using first folder: ${folders[0].uri.fsPath}. Consider using an absolute path.`
                     );
                 }
@@ -120,8 +122,8 @@ function getServerPath(context: ExtensionContext): string | undefined {
                 if (workspaceRoot) {
                     resolvedPath = path.resolve(workspaceRoot, resolvedPath);
                 } else {
-                    outputChannel.appendLine(
-                        `Warning: serverPath is relative but no workspace folder is open. Falling back to bundled/PATH lookup.`
+                    outputChannel.warn(
+                        `serverPath is relative but no workspace folder is open. Falling back to bundled/PATH lookup.`
                     );
                     resolvedPath = undefined;
                 }
@@ -130,8 +132,8 @@ function getServerPath(context: ExtensionContext): string | undefined {
 
         if (resolvedPath) {
             if (!fs.existsSync(resolvedPath)) {
-                outputChannel.appendLine(
-                    `Warning: Configured serverPath does not exist: ${resolvedPath}. Falling back to bundled/PATH lookup.`
+                outputChannel.warn(
+                    `Configured serverPath does not exist: ${resolvedPath}. Falling back to bundled/PATH lookup.`
                 );
             } else {
                 // Verify it's a file, not a directory (directories can pass X_OK on Unix)
@@ -139,8 +141,8 @@ function getServerPath(context: ExtensionContext): string | undefined {
                 try {
                     const stat = fs.statSync(resolvedPath);
                     if (!stat.isFile()) {
-                        outputChannel.appendLine(
-                            `Warning: Configured serverPath is a directory, not a file: ${resolvedPath}. Falling back to bundled/PATH lookup.`
+                        outputChannel.warn(
+                            `Configured serverPath is a directory, not a file: ${resolvedPath}. Falling back to bundled/PATH lookup.`
                         );
                     } else if (process.platform !== 'win32') {
                         // On Unix, verify execute permission (matching PATH lookup behavior)
@@ -148,8 +150,8 @@ function getServerPath(context: ExtensionContext): string | undefined {
                             fs.accessSync(resolvedPath, fs.constants.X_OK);
                             return resolvedPath;
                         } catch {
-                            outputChannel.appendLine(
-                                `Warning: Configured serverPath is not executable: ${resolvedPath}. Falling back to bundled/PATH lookup.`
+                            outputChannel.warn(
+                                `Configured serverPath is not executable: ${resolvedPath}. Falling back to bundled/PATH lookup.`
                             );
                         }
                     } else {
@@ -157,8 +159,8 @@ function getServerPath(context: ExtensionContext): string | undefined {
                         return resolvedPath;
                     }
                 } catch {
-                    outputChannel.appendLine(
-                        `Warning: Could not stat serverPath (file may have been removed): ${resolvedPath}. Falling back to bundled/PATH lookup.`
+                    outputChannel.warn(
+                        `Could not stat serverPath (file may have been removed): ${resolvedPath}. Falling back to bundled/PATH lookup.`
                     );
                 }
             }
@@ -188,7 +190,7 @@ function getServerPath(context: ExtensionContext): string | undefined {
             platformDir = arch === 'arm64' ? 'windows-arm64' : 'windows-amd64';
             break;
         default:
-            outputChannel.appendLine(`Unsupported platform: ${platform}`);
+            outputChannel.error(`Unsupported platform: ${platform}`);
             return undefined;
     }
 
@@ -205,9 +207,9 @@ function getServerPath(context: ExtensionContext): string | undefined {
                 // Not executable, try to fix it
                 try {
                     fs.chmodSync(bundledPath, 0o755);
-                    outputChannel.appendLine(`Set executable permission on ${bundledPath}`);
+                    outputChannel.info(`Set executable permission on ${bundledPath}`);
                 } catch (chmodErr) {
-                    outputChannel.appendLine(`Warning: Could not set executable permission: ${chmodErr}`);
+                    outputChannel.warn(`Could not set executable permission: ${chmodErr}`);
                 }
             }
         }
@@ -272,8 +274,8 @@ function startLanguageServer(context: ExtensionContext, serverPath: string) {
         if (moduleRoot && !path.isAbsolute(moduleRoot)) {
             const folders = workspace.workspaceFolders;
             if (folders && folders.length > 1) {
-                outputChannel.appendLine(
-                    `Warning: moduleRoot is relative with multiple workspace folders. ` +
+                outputChannel.warn(
+                    `moduleRoot is relative with multiple workspace folders. ` +
                     `Using first folder: ${folders[0].uri.fsPath}.`
                 );
             }
@@ -281,8 +283,8 @@ function startLanguageServer(context: ExtensionContext, serverPath: string) {
             if (workspaceRoot) {
                 moduleRoot = path.resolve(workspaceRoot, moduleRoot);
             } else {
-                outputChannel.appendLine(
-                    `Warning: moduleRoot is relative but no workspace folder is open. Ignoring.`
+                outputChannel.warn(
+                    `moduleRoot is relative but no workspace folder is open. Ignoring.`
                 );
                 moduleRoot = undefined;
             }
@@ -291,22 +293,22 @@ function startLanguageServer(context: ExtensionContext, serverPath: string) {
         // Verify path exists and is a directory
         if (moduleRoot) {
             if (!fs.existsSync(moduleRoot)) {
-                outputChannel.appendLine(
-                    `Warning: moduleRoot does not exist: ${moduleRoot}. Ignoring.`
+                outputChannel.warn(
+                    `moduleRoot does not exist: ${moduleRoot}. Ignoring.`
                 );
                 moduleRoot = undefined;
             } else {
                 try {
                     const stat = fs.statSync(moduleRoot);
                     if (!stat.isDirectory()) {
-                        outputChannel.appendLine(
-                            `Warning: moduleRoot is not a directory: ${moduleRoot}. Ignoring.`
+                        outputChannel.warn(
+                            `moduleRoot is not a directory: ${moduleRoot}. Ignoring.`
                         );
                         moduleRoot = undefined;
                     }
                 } catch {
-                    outputChannel.appendLine(
-                        `Warning: Could not stat moduleRoot: ${moduleRoot}. Ignoring.`
+                    outputChannel.warn(
+                        `Could not stat moduleRoot: ${moduleRoot}. Ignoring.`
                     );
                     moduleRoot = undefined;
                 }
@@ -327,8 +329,8 @@ function startLanguageServer(context: ExtensionContext, serverPath: string) {
         if (logFile && !path.isAbsolute(logFile)) {
             const folders = workspace.workspaceFolders;
             if (folders && folders.length > 1) {
-                outputChannel.appendLine(
-                    `Warning: logFile is relative with multiple workspace folders. ` +
+                outputChannel.warn(
+                    `logFile is relative with multiple workspace folders. ` +
                     `Using first folder: ${folders[0].uri.fsPath}.`
                 );
             }
@@ -336,8 +338,8 @@ function startLanguageServer(context: ExtensionContext, serverPath: string) {
             if (workspaceRoot) {
                 logFile = path.resolve(workspaceRoot, logFile);
             } else {
-                outputChannel.appendLine(
-                    `Warning: logFile is relative but no workspace folder is open. Ignoring.`
+                outputChannel.warn(
+                    `logFile is relative but no workspace folder is open. Ignoring.`
                 );
                 logFile = undefined;
             }
@@ -347,15 +349,15 @@ function startLanguageServer(context: ExtensionContext, serverPath: string) {
         if (logFile) {
             const logDir = path.dirname(logFile);
             if (!fs.existsSync(logDir)) {
-                outputChannel.appendLine(
-                    `Warning: logFile parent directory does not exist: ${logDir}. Ignoring.`
+                outputChannel.warn(
+                    `logFile parent directory does not exist: ${logDir}. Ignoring.`
                 );
                 logFile = undefined;
             }
         }
 
         if (logFile) {
-            outputChannel.appendLine(`Using log file: ${logFile}`);
+            outputChannel.info(`Using log file: ${logFile}`);
         }
     }
 
@@ -409,9 +411,9 @@ function startLanguageServer(context: ExtensionContext, serverPath: string) {
     // - deactivate() when the extension is deactivated
     // This avoids accumulating disposables on each restart.
     client.start().then(() => {
-        outputChannel.appendLine('YAMMM Language Server started');
+        outputChannel.info('YAMMM Language Server started');
     }).catch((error) => {
-        outputChannel.appendLine(`Failed to start language server: ${error}`);
+        outputChannel.error(`Failed to start language server: ${error}`);
         window.showErrorMessage(`YAMMM: Failed to start language server: ${error}`);
     });
 }

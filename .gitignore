@@ -35,6 +35,8 @@ go.work.sum
 
 # VS Code extension build artifacts
 lsp/editors/vscode/out/
+lsp/editors/vscode/out-test/
+lsp/editors/vscode/.vscode-test/
 lsp/editors/vscode/node_modules/
 lsp/editors/vscode/*.vsix
 

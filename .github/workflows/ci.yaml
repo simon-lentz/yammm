@@ -27,6 +27,45 @@ jobs:
         run: pip install pre-commit
       - name: Run all checks
         run: pre-commit run --all-files
+  extension-checks:
+    name: Extension Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: lsp/editors/vscode/.nvmrc
+      - name: Install dependencies
+        working-directory: lsp/editors/vscode
+        run: npm ci
+      - name: Typecheck
+        working-directory: lsp/editors/vscode
+        run: npm run check
+      - name: Lint
+        working-directory: lsp/editors/vscode
+        run: npm run lint
+      - name: Grammar tests
+        working-directory: lsp/editors/vscode
+        run: npm run test:grammar
+      # The same endpoint @vscode/test-electron resolves 'stable' from, so the
+      # cache key tracks exactly what the integration harness will download.
+      - name: Resolve stable VS Code version
+        id: vscode-version
+        run: |
+          version="$(curl -fsSL https://update.code.visualstudio.com/api/releases/stable | jq -r '.[0]')"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache VS Code test install
+        uses: actions/cache@v5
+        with:
+          path: lsp/editors/vscode/.vscode-test
+          key: vscode-test-${{ runner.os }}-${{ steps.vscode-version.outputs.version }}
+      - name: Integration tests
+        working-directory: lsp/editors/vscode
+        run: xvfb-run -a npm run test:integration
   build-extension:
     name: Build Extension ${{ matrix.target }}
     runs-on: ubuntu-latest
