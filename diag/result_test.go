@@ -7,6 +7,22 @@ import (
 	"testing"
 )
 
+func TestResult_TruncationNote(t *testing.T) {
+	c := NewCollector(2)
+	c.Collect(NewIssue(Error, E_SYNTAX, "a").Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "b").Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "c").Build()) // dropped past the limit
+
+	note := c.Result().TruncationNote()
+	if !strings.Contains(note, "1 more issue(s) dropped after reaching the 2-issue limit") {
+		t.Errorf("TruncationNote() = %q; want the dropped-count/limit summary", note)
+	}
+
+	if got := OK().TruncationNote(); got != "" {
+		t.Errorf("TruncationNote() on a non-truncated result = %q; want empty", got)
+	}
+}
+
 func TestOK(t *testing.T) {
 	r := OK()
 

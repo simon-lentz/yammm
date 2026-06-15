@@ -1,5 +1,7 @@
 package schema
 
+import "github.com/simon-lentz/yammm/location"
+
 // Test-only exports for schema_test files in this directory.
 // These are compiled only during `go test ./schema/...` and do not
 // appear in go doc or the production binary.
@@ -108,6 +110,15 @@ type (
 	TestResolvedImportMap   = resolvedImportMap
 	TestCrossSchemaRegistry = crossSchemaRegistry
 )
+
+// TestResolvedImport builds a resolved (non-deferred) entry for a
+// [TestResolvedImportMap] passed to the completeModel bridge. The
+// importResolution fields are unexported, so tests construct entries through
+// this helper rather than a struct literal. It is a var (not a func) so the
+// Test-prefixed name is not mistaken for a test function.
+var TestResolvedImport = func(sourceID location.SourceID) importResolution {
+	return importResolution{sourceID: sourceID}
+}
 
 // Load options whose parameter types live in internal packages.
 var TestWithSourceRegistry = withSourceRegistry

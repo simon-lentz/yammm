@@ -144,6 +144,20 @@ func (r Result) DroppedCount() int {
 	return r.droppedCount
 }
 
+// TruncationNote returns a one-line, human-readable summary of how many issues
+// were dropped at the collection limit, or "" when the limit was not reached.
+// It is the single source of the dropped-issues wording for text-rendering
+// consumers (e.g. the CLI); the structured LSP log and the compact
+// [Result.String] suffix surface the same fact in formats suited to their own
+// audiences.
+func (r Result) TruncationNote() string {
+	if !r.limitReached {
+		return ""
+	}
+	return fmt.Sprintf("%d more issue(s) dropped after reaching the %d-issue limit; resolve issues and re-run to see the rest",
+		r.droppedCount, r.limit)
+}
+
 // Limit returns the configured issue limit (0 means unlimited).
 // Use [LimitReached] to check if the limit was actually reached.
 func (r Result) Limit() int {

@@ -534,6 +534,17 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 	seenSourceIDs := make(map[location.SourceID]*importDecl)
 	hasErrors := false
 	for _, imp := range b.imports {
+		// Keep-first: once an alias has resolved, a later declaration of the
+		// same alias is skipped (not re-resolved, not dedup-tracked), so the
+		// kept Import is never rebound to a later declaration's schema. A
+		// declaration whose path fails to resolve is not recorded here, so a
+		// later same-alias declaration is still attempted — harmless, because
+		// any resolution failure sets hasErrors and Build returns before
+		// completeModel, discarding this map. The completer's duplicate-alias
+		// check is the report either way.
+		if _, bound := resolved[imp.Alias]; bound {
+			continue
+		}
 		resolvedID, ok := b.resolveImportPath(imp.Path)
 		if !ok {
 			// Provide helpful error message based on path type
@@ -570,7 +581,7 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 			continue
 		}
 		seenSourceIDs[resolvedID] = imp
-		resolved[imp.Alias] = resolvedID
+		resolved[imp.Alias] = importResolution{sourceID: resolvedID}
 	}
 
 	if hasErrors {

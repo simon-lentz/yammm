@@ -10,22 +10,16 @@ import (
 const reservedPrefix = "_target_"
 
 // detectCollisions checks for naming collisions in all types.
-func (c *completer) detectCollisions() bool {
-	ok := true
-
+func (c *completer) detectCollisions() {
 	for _, t := range c.schema.TypesSlice() {
-		if !c.detectTypeCollisions(t) {
-			ok = false
-		}
+		c.detectTypeCollisions(t)
 	}
-
-	return ok
 }
 
-// detectTypeCollisions checks for collisions within a single type.
-func (c *completer) detectTypeCollisions(t *Type) bool {
-	ok := true
-
+// detectTypeCollisions checks for collisions within a single type. Findings
+// are collected; there is no failure signal — the completer's final error
+// gate decides whether a schema is produced.
+func (c *completer) detectTypeCollisions(t *Type) {
 	// Check reserved prefixes on own properties.
 	// We intentionally check PropertiesSlice() (own) not AllPropertiesSlice() (all)
 	// because inherited properties are validated when their declaring type is checked,
@@ -34,7 +28,6 @@ func (c *completer) detectTypeCollisions(t *Type) bool {
 		if strings.HasPrefix(strings.ToLower(p.Name()), reservedPrefix) {
 			c.errorf(p.Span(), diag.E_RESERVED_PREFIX,
 				"property %q uses reserved prefix %q", p.Name(), reservedPrefix)
-			ok = false
 		}
 	}
 
@@ -43,38 +36,22 @@ func (c *completer) detectTypeCollisions(t *Type) bool {
 		if strings.HasPrefix(strings.ToLower(r.FieldName()), reservedPrefix) {
 			c.errorf(r.Span(), diag.E_RESERVED_PREFIX,
 				"relation %q uses reserved prefix %q", r.Name(), reservedPrefix)
-			ok = false
 		}
 	}
 	for _, r := range t.CompositionsSlice() {
 		if strings.HasPrefix(strings.ToLower(r.FieldName()), reservedPrefix) {
 			c.errorf(r.Span(), diag.E_RESERVED_PREFIX,
 				"relation %q uses reserved prefix %q", r.Name(), reservedPrefix)
-			ok = false
 		}
 	}
 
-	// Check case-insensitive property collisions
-	if !c.checkPropertyCaseCollisions(t) {
-		ok = false
-	}
-
-	// Check property-relation collisions
-	if !c.checkPropertyRelationCollisions(t) {
-		ok = false
-	}
-
-	// Check relation name collisions (after normalization)
-	if !c.checkRelationCollisions(t) {
-		ok = false
-	}
-
-	return ok
+	c.checkPropertyCaseCollisions(t)
+	c.checkPropertyRelationCollisions(t)
+	c.checkRelationCollisions(t)
 }
 
 // checkPropertyCaseCollisions detects case-insensitive property name collisions.
-func (c *completer) checkPropertyCaseCollisions(t *Type) bool {
-	ok := true
+func (c *completer) checkPropertyCaseCollisions(t *Type) {
 	seen := make(map[string]*Property) // lowercase -> first property
 
 	for _, p := range t.AllPropertiesSlice() {
@@ -85,21 +62,16 @@ func (c *completer) checkPropertyCaseCollisions(t *Type) bool {
 				c.errorf(p.Span(), diag.E_CASE_COLLISION,
 					"property %q in type %q collides with %q (case-insensitive)",
 					p.Name(), t.Name(), existing.Name())
-				ok = false
 			}
 			// Same exact name is OK (might be inherited from same ancestor)
 		} else {
 			seen[lower] = p
 		}
 	}
-
-	return ok
 }
 
 // checkPropertyRelationCollisions detects collisions between property names and relation field names.
-func (c *completer) checkPropertyRelationCollisions(t *Type) bool {
-	ok := true
-
+func (c *completer) checkPropertyRelationCollisions(t *Type) {
 	// Build property name set (lowercase for case-insensitive check)
 	propNames := make(map[string]*Property)
 	for _, p := range t.AllPropertiesSlice() {
@@ -113,7 +85,6 @@ func (c *completer) checkPropertyRelationCollisions(t *Type) bool {
 			c.errorf(r.Span(), diag.E_PROPERTY_RELATION_COLLISION,
 				"relation %q (field: %q) in type %q collides with property %q",
 				r.Name(), r.FieldName(), t.Name(), prop.Name())
-			ok = false
 		}
 	}
 
@@ -124,16 +95,12 @@ func (c *completer) checkPropertyRelationCollisions(t *Type) bool {
 			c.errorf(r.Span(), diag.E_PROPERTY_RELATION_COLLISION,
 				"relation %q (field: %q) in type %q collides with property %q",
 				r.Name(), r.FieldName(), t.Name(), prop.Name())
-			ok = false
 		}
 	}
-
-	return ok
 }
 
 // checkRelationCollisions detects relation name collisions after normalization.
-func (c *completer) checkRelationCollisions(t *Type) bool {
-	ok := true
+func (c *completer) checkRelationCollisions(t *Type) {
 	seen := make(map[string]*Relation) // fieldName -> first relation
 
 	// Check associations
@@ -145,7 +112,6 @@ func (c *completer) checkRelationCollisions(t *Type) bool {
 				c.errorf(r.Span(), diag.E_RELATION_NORMALIZATION_COLLISION,
 					"association %q in type %q collides with existing relation %q (both normalize to %q)",
 					r.Name(), t.Name(), existing.Name(), r.FieldName())
-				ok = false
 			}
 		} else {
 			seen[r.FieldName()] = r
@@ -161,56 +127,40 @@ func (c *completer) checkRelationCollisions(t *Type) bool {
 				c.errorf(r.Span(), diag.E_RELATION_NORMALIZATION_COLLISION,
 					"composition %q in type %q collides with existing relation %q (both normalize to %q)",
 					r.Name(), t.Name(), existing.Name(), r.FieldName())
-				ok = false
 			}
 		} else {
 			seen[r.FieldName()] = r
 		}
 	}
-
-	return ok
 }
 
 // validateRelationTargets checks that all relation targets exist.
-func (c *completer) validateRelationTargets() bool {
-	ok := true
-
+func (c *completer) validateRelationTargets() {
 	for _, t := range c.schema.TypesSlice() {
 		// Check associations
 		for _, r := range t.AssociationsSlice() {
-			if !c.validateRelationTarget(t, r, "association") {
-				ok = false
-			}
+			c.validateRelationTarget(t, r, "association")
 		}
 
 		// Check compositions - must target a concrete part type
 		for _, r := range t.CompositionsSlice() {
-			if !c.validateCompositionTarget(t, r) {
-				ok = false
-			}
+			c.validateCompositionTarget(t, r)
 		}
 	}
 
 	// Validate association constraints on part types
-	if !c.validateAssociationTargets() {
-		ok = false
-	}
-
-	return ok
+	c.validateAssociationTargets()
 }
 
 // validateAssociationTargets checks that part types don't declare associations
 // and that associations target a concrete type (not a part or abstract type).
-func (c *completer) validateAssociationTargets() bool {
-	ok := true
-
+func (c *completer) validateAssociationTargets() {
 	for _, t := range c.schema.TypesSlice() {
 		// Part types cannot declare associations
 		if t.IsPart() {
 			for _, r := range t.AssociationsSlice() {
 				c.errorf(r.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
 					"part type %q cannot declare association %q", t.Name(), r.Name())
-				ok = false
 			}
 		}
 
@@ -230,58 +180,59 @@ func (c *completer) validateAssociationTargets() bool {
 				c.errorf(r.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
 					"association %q in type %q cannot target part type %q",
 					r.Name(), t.Name(), target.Name())
-				ok = false
 			case target.IsAbstract():
 				c.errorf(r.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
 					"association %q in type %q cannot target abstract type %q (associations must reference a concrete type)",
 					r.Name(), t.Name(), target.Name())
-				ok = false
 			}
 		}
 	}
-
-	return ok
 }
 
-// validateRelationTarget checks that a relation target exists.
-func (c *completer) validateRelationTarget(_ *Type, r *Relation, kind string) bool {
+// validateRelationTarget checks that a relation target exists and, when it
+// resolves, records the target's semantic identity on the relation.
+func (c *completer) validateRelationTarget(_ *Type, r *Relation, kind string) {
 	target := c.resolveTypeRef(r.Target())
 	if target == nil {
-		// Check if it's a qualified ref that we can't resolve yet
-		if r.Target().Qualifier() != "" && c.registry == nil {
-			// Deferred - will be checked when registry is available
-			return true
+		// Deferred: either no registry is available to resolve qualified
+		// refs (checked when one is), or the qualifier names an import the
+		// loader saw but could not resolve — the import failure already
+		// carries the root-cause diagnostic, so the reference is skipped
+		// rather than re-blamed.
+		if r.Target().Qualifier() != "" && (c.registry == nil || c.qualifierDeferred(r.Target().Qualifier())) {
+			return
 		}
 
 		// Target not found
 		c.errorf(r.Span(), diag.E_UNKNOWN_TYPE,
 			"type %q referenced in %s %q does not exist",
 			r.Target().String(), kind, r.Name())
-		return false
+		return
 	}
 
 	// Resolve the semantic identity
 	r.setTargetID(target.ID())
-
-	return true
 }
 
 // validateCompositionTarget checks that a composition target is a concrete part type.
 // NOTE: When the target is a cross-schema ref and registry is nil, the IsPart and
 // IsAbstract checks are deferred. These constraints should be re-validated when
 // the schema is linked with a registry that can resolve cross-schema references.
-func (c *completer) validateCompositionTarget(t *Type, r *Relation) bool {
+func (c *completer) validateCompositionTarget(t *Type, r *Relation) {
 	target := c.resolveTypeRef(r.Target())
 	if target == nil {
-		// Cross-schema ref without registry: defer validation to linking phase.
-		if r.Target().Qualifier() != "" && c.registry == nil {
-			return true
+		// Deferred: no registry to resolve cross-schema refs (validated at
+		// linking), or the qualifier names an import the loader saw but
+		// could not resolve — the import failure is the root-cause
+		// diagnostic, so the reference is skipped rather than re-blamed.
+		if r.Target().Qualifier() != "" && (c.registry == nil || c.qualifierDeferred(r.Target().Qualifier())) {
+			return
 		}
 
 		c.errorf(r.Span(), diag.E_UNKNOWN_TYPE,
 			"type %q referenced in composition %q does not exist",
 			r.Target().String(), r.Name())
-		return false
+		return
 	}
 
 	// Composition targets must be part types
@@ -289,7 +240,7 @@ func (c *completer) validateCompositionTarget(t *Type, r *Relation) bool {
 		c.errorf(r.Span(), diag.E_INVALID_COMPOSITION_TARGET,
 			"composition %q in type %q must reference a part type, but %q is not a part",
 			r.Name(), t.Name(), target.Name())
-		return false
+		return
 	}
 
 	// Composition targets cannot be abstract
@@ -297,11 +248,9 @@ func (c *completer) validateCompositionTarget(t *Type, r *Relation) bool {
 		c.errorf(r.Span(), diag.E_INVALID_COMPOSITION_TARGET,
 			"composition %q in type %q must reference a concrete type, but %q is abstract",
 			r.Name(), t.Name(), target.Name())
-		return false
+		return
 	}
 
 	// Resolve the semantic identity
 	r.setTargetID(target.ID())
-
-	return true
 }

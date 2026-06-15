@@ -121,8 +121,10 @@ func (c *completer) resolveTypeRefName(ref TypeRef) string {
 }
 
 // completeTypes linearizes inheritance and merges members for each type.
-func (c *completer) completeTypes() bool {
-	ok := true
+// Per-type findings (unknown supertypes, rejected primary-key types,
+// inheritance conflicts) are collected; every type is completed so each
+// carries its merged member view for the downstream phases.
+func (c *completer) completeTypes() {
 	completed := make(map[string]bool)
 
 	// Set schema name on each type for cross-schema display.
@@ -131,10 +133,10 @@ func (c *completer) completeTypes() bool {
 		t.setSchemaName(schemaName)
 	}
 
-	var completeType func(t *Type) bool
-	completeType = func(t *Type) bool {
+	var completeType func(t *Type)
+	completeType = func(t *Type) {
 		if completed[t.Name()] {
-			return true
+			return
 		}
 
 		// Mark early to handle re-entry during recursion
@@ -158,20 +160,22 @@ func (c *completer) completeTypes() bool {
 		linearize = func(ref TypeRef) {
 			resolved := c.resolveTypeRef(ref)
 			if resolved == nil {
-				// Defer a qualified ref only when no registry is present to resolve it
+				// Defer a qualified ref when no registry is present to resolve it
 				// (a schema.Builder schema built without WithRegistry, or a direct
-				// completeModel caller). With a registry — which every
-				// Load/LoadString/LoadSources path supplies, including the LSP via
-				// LoadSourcesWithEntry — a qualified supertype that still does not resolve
-				// is a genuine error (an undefined alias, or a type absent from the
-				// imported schema), mirroring validateRelationTarget; silently dropping it
-				// would strip the child of every inherited member with no diagnostic.
-				if ref.Qualifier() != "" && c.registry == nil {
+				// completeModel caller), or when its qualifier names an import the
+				// loader saw but could not resolve — the import failure already
+				// carries the root-cause diagnostic, and blaming every reference
+				// through the alias would bury it in noise. With a registry and a
+				// resolved import, a qualified supertype that still does not
+				// resolve is a genuine error (an undefined alias, or a type absent
+				// from the imported schema), mirroring validateRelationTarget;
+				// silently dropping it would strip the child of every inherited
+				// member with no diagnostic.
+				if ref.Qualifier() != "" && (c.registry == nil || c.qualifierDeferred(ref.Qualifier())) {
 					return
 				}
 				c.errorf(t.Span(), diag.E_UNKNOWN_TYPE,
 					"unknown type %q in extends clause of type %q", ref.String(), t.Name())
-				ok = false
 				return
 			}
 
@@ -186,9 +190,7 @@ func (c *completer) completeTypes() bool {
 			// are declared before their base types in the source file.
 			if ref.Qualifier() == "" {
 				if st, exists := c.typeIndex[ref.Name()]; exists {
-					if !completeType(st) {
-						ok = false
-					}
+					completeType(st)
 				}
 			}
 
@@ -215,22 +217,44 @@ func (c *completer) completeTypes() bool {
 		allProps := c.mergeProperties(t, supers)
 		t.setAllProperties(allProps)
 
+		// Own (declared-in-t) properties. A rejected primary's root cause is
+		// the type that DECLARES it; that type reports it when completed
+		// (supertypes complete before their subtypes). Re-checking the same
+		// inherited *Property at every descendant would duplicate the
+		// identical diagnostic at the identical span once per subtype.
+		ownProps := make(map[*Property]bool, len(t.PropertiesSlice()))
+		for _, p := range t.PropertiesSlice() {
+			ownProps[p] = true
+		}
+
 		// Extract primary keys
 		pks := make([]*Property, 0)
 		for _, p := range allProps {
 			if p.IsPrimaryKey() {
+				// A primary whose type bottoms out in an already-diagnosed
+				// unresolvable alias (deferred import, cyclic local chain)
+				// is kept as a key without the type check: the declaration
+				// IS a primary key — only its type is unknowable here — and
+				// the root cause carries its own diagnostic.
+				if c.primaryKeyTypeDeferred(p.Constraint()) {
+					pks = append(pks, p)
+					continue
+				}
 				if !isPrimaryKeyAllowed(p.Constraint()) {
-					// The constraint is nil when parse-error recovery kept a
-					// property that never received a type; describe that
-					// rather than dereferencing it.
-					kind := "missing type"
-					if pc := p.Constraint(); pc != nil {
-						kind = pc.Kind().String()
+					// Report only at the declaring type; an inherited rejected
+					// primary was already reported when its ancestor completed.
+					if ownProps[p] {
+						// The constraint is nil when parse-error recovery kept a
+						// property that never received a type; describe that
+						// rather than dereferencing it.
+						kind := "missing type"
+						if pc := p.Constraint(); pc != nil {
+							kind = pc.Kind().String()
+						}
+						c.errorf(p.Span(), diag.E_INVALID_PRIMARY_KEY_TYPE,
+							"property %q: %s cannot be used as a primary key (allowed: String, UUID, Date, Timestamp)",
+							p.Name(), kind)
 					}
-					c.errorf(p.Span(), diag.E_INVALID_PRIMARY_KEY_TYPE,
-						"property %q: %s cannot be used as a primary key (allowed: String, UUID, Date, Timestamp)",
-						p.Name(), kind)
-					ok = false
 					continue
 				}
 				pks = append(pks, p)
@@ -249,14 +273,10 @@ func (c *completer) completeTypes() bool {
 		// Merge invariants from ancestors
 		allInvs := c.mergeInvariants(t, supers)
 		t.setAllInvariants(allInvs)
-
-		return ok
 	}
 
 	for _, t := range c.schema.TypesSlice() {
-		if !completeType(t) {
-			ok = false
-		}
+		completeType(t)
 	}
 
 	// Set subtypes after all types are completed.
@@ -276,8 +296,6 @@ func (c *completer) completeTypes() bool {
 			}
 		}
 	}
-
-	return ok
 }
 
 // resolveTypeRef resolves a TypeRef to a Type.

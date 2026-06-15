@@ -213,6 +213,20 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 	w.publishMarkdownDiagnostics(snap)
 }
 
+// isImportDeclarationCode reports whether a diagnostic code concerns an import
+// declaration — the family downgraded to Hint in markdown blocks, where
+// imports are categorically not processed. Codes are matched by string to
+// avoid importing diag here (the diag package name is shadowed by the local
+// diagnostic variable in publishMarkdownDiagnostics).
+func isImportDeclarationCode(code string) bool {
+	switch code {
+	case "E_IMPORT_NOT_ALLOWED", "E_DUPLICATE_IMPORT", "E_IMPORT_ALIAS_COLLISION", "E_INVALID_ALIAS":
+		return true
+	default:
+		return false
+	}
+}
+
 // publishMarkdownDiagnostics collects diagnostics from all block snapshots,
 // remaps positions from block-local to markdown coordinates, and publishes.
 func (w *Workspace) publishMarkdownDiagnostics(snap *MarkdownDocumentSnapshot) {
@@ -231,9 +245,13 @@ func (w *Workspace) publishMarkdownDiagnostics(snap *MarkdownDocumentSnapshot) {
 				continue
 			}
 
-			// Downgrade E_IMPORT_NOT_ALLOWED to Hint in markdown blocks
+			// Import-declaration diagnostics are soft hints in markdown blocks:
+			// a snippet's imports are categorically not processed, so a
+			// rejected, duplicated, or colliding import alias is informational
+			// here, not an error in the example. The block's own semantic
+			// diagnostics keep their severity.
 			if diag.Code != nil {
-				if codeVal, ok := diag.Code.Value.(string); ok && codeVal == "E_IMPORT_NOT_ALLOWED" {
+				if codeVal, ok := diag.Code.Value.(string); ok && isImportDeclarationCode(codeVal) {
 					hint := protocol.DiagnosticSeverityHint
 					diag.Severity = &hint
 				}

@@ -63,23 +63,32 @@ func (s *staticScope) child(varName string, targetType *Type) *staticScope {
 // This runs after completeTypes (inheritance merged) and validateRelationTargets
 // (relation targets resolved), so AllPropertiesSlice/AllAssociationsSlice/
 // AllCompositionsSlice are fully populated.
-func (c *completer) validateInvariantExpressions() bool {
-	ok := true
-
+func (c *completer) validateInvariantExpressions() {
 	for _, t := range c.schema.TypesSlice() {
+		// Nothing to validate for a type with no invariants — skip the per-type
+		// supertype-resolution check and scope build, whose only product is
+		// invariant diagnostics. (Common shape; this phase runs on every LSP
+		// analyze, so the skip matters for editor responsiveness on large schemas.)
+		if len(t.AllInvariantsSlice()) == 0 {
+			continue
+		}
+		// A type whose supertype chain has an unresolved link has an
+		// incomplete merged member set, so invariants referencing inherited
+		// members would false-positive E_UNKNOWN_PROPERTY. The unresolved
+		// reference already carries its own diagnostic; a genuinely bogus
+		// reference on such a type surfaces once the root cause is fixed.
+		if c.hasUnresolvedSupertype(t) {
+			continue
+		}
 		scope := buildStaticScope(t)
 
 		for _, inv := range t.AllInvariantsSlice() {
 			if inv.Expression() == nil {
 				continue
 			}
-			if !c.walkExpr(inv.Expression(), scope, t, inv) {
-				ok = false
-			}
+			c.walkExpr(inv.Expression(), scope, t, inv)
 		}
 	}
-
-	return ok
 }
 
 // walkExpr recursively validates property/variable references in an expression.

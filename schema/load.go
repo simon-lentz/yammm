@@ -211,6 +211,10 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 //
 // Imports are not supported when loading from a string.
 // The loader always disallows imports for string sources, regardless of other options.
+// The rejection (a single E_IMPORT_NOT_ALLOWED at the first import
+// declaration) does not suppress the source's other diagnostics: analysis
+// continues with the rejected aliases deferred, and the rejected imports
+// are never probed or resolved.
 //
 // ctx must not be nil. Passing nil will panic.
 // A non-OK result with a nil Schema indicates failure. Check result.HasFatal() for I/O or cancellation errors.
@@ -434,11 +438,18 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	return s, result
 }
 
-// resolvedImport holds the resolved identity and schema for an import.
-type resolvedImport struct {
-	sourceID location.SourceID
-	schema   *Schema
+// importBinding records one import alias's resolution within a single schema
+// load: a success carries the resolved sourceID and loaded schema; a failure
+// has failed=true (unresolvable path, escape, registration failure, or a
+// nested compile failure). A compile failure keeps its sourceID — the file
+// resolved, then failed to compile — so validateResolvedImports can still
+// detect two aliases that name the same file; a path-resolution failure has a
+// zero sourceID.
+type importBinding struct {
 	decl     *importDecl // original declaration for diagnostics
+	failed   bool
+	sourceID location.SourceID
+	schema   *Schema // resolved schema; nil for failures
 }
 
 // loader handles the schema loading process.
@@ -453,12 +464,13 @@ type loader struct {
 	disallowImports bool
 
 	// Tracking state
-	mu              sync.Mutex
-	sourceContent   map[location.SourceID][]byte
-	loadedSchemas   map[location.SourceID]*Schema
-	loadingSchemas  map[location.SourceID]bool // For cycle detection
-	resolvedImports map[string]resolvedImport  // alias -> resolved import for current schema
-	closureSeen     map[*Schema]struct{}       // schemas whose cached closures are already registered
+	mu             sync.Mutex
+	sourceContent  map[location.SourceID][]byte
+	loadedSchemas  map[location.SourceID]*Schema
+	loadingSchemas map[location.SourceID]bool     // For cycle detection
+	imports        map[string]importBinding       // alias -> binding (resolved or failed) for current schema
+	failedCompiles map[location.SourceID]struct{} // sources whose nested compile failed (memo, per Load call)
+	closureSeen    map[*Schema]struct{}           // schemas whose cached closures are already registered
 }
 
 // registryAdapter adapts *Registry to the completionRegistry interface.
@@ -501,7 +513,8 @@ func newLoader(cfg *loadConfig, moduleRoot string) *loader {
 		sourceContent:   make(map[location.SourceID][]byte),
 		loadedSchemas:   make(map[location.SourceID]*Schema),
 		loadingSchemas:  make(map[location.SourceID]bool),
-		resolvedImports: make(map[string]resolvedImport),
+		imports:         make(map[string]importBinding),
+		failedCompiles:  make(map[location.SourceID]struct{}),
 		closureSeen:     make(map[*Schema]struct{}),
 	}
 }
@@ -586,13 +599,26 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 		return nil, l.collector.Result(), fmt.Errorf("load cancelled: %w", err)
 	}
 
-	// Save parent's resolvedImports and create fresh map for this invocation.
-	// This stack-based approach ensures each schema load has its own isolated
-	// import resolution map, while preserving the parent's map across recursive calls.
-	parentResolvedImports := l.resolvedImports
-	l.resolvedImports = make(map[string]resolvedImport)
+	// The collector is shared across the whole Load call, so "any errors
+	// collected" conflates this schema's failures with failures collected
+	// earlier (a sibling import that failed before this one was attempted).
+	// Snapshot the error count at entry: this schema is judged on the
+	// errors IT contributes — its own parse/completion findings and those
+	// of imports loaded on its behalf — so a clean import loaded after a
+	// broken sibling still compiles, registers, and draws no false
+	// E_UPSTREAM_FAIL. For the entry schema the snapshot is zero, which
+	// preserves the public all-or-nothing contract exactly.
+	errorsAtEntry := l.collector.ErrorCount()
+
+	// Save the parent's per-schema import bindings and create a fresh map for
+	// this invocation. This stack-based approach gives each schema load its own
+	// isolated resolution state while preserving the parent's across recursive
+	// calls — a nested load leaking its aliases into the parent would corrupt
+	// the parent's bindings.
+	parentImports := l.imports
+	l.imports = make(map[string]importBinding)
 	defer func() {
-		l.resolvedImports = parentResolvedImports
+		l.imports = parentImports
 	}()
 
 	l.logger.Debug("loading schema", "source", sourceID.String())
@@ -615,24 +641,36 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 		return nil, l.collector.Result(), nil
 	}
 
-	// Validate imports and check for duplicates
-	if !l.validateImports(sourceID, m) {
-		return nil, l.collector.Result(), nil
-	}
-
-	// Load imported schemas first
-	ok, err := l.loadImports(ctx, sourceID, m)
-	if err != nil {
+	// When the load context structurally disallows imports, the rejection
+	// is collected once (at the first declaration) and every declared alias
+	// is marked failed: categorically rejected imports are never probed —
+	// no resolution, no read, no E_IMPORT_RESOLVE noise — but analysis
+	// still proceeds so the source's other findings surface alongside the
+	// rejection. Duplicate aliases collapse to one failed binding
+	// (keep-first); the completer's duplicate-alias check reports the
+	// extra declarations. Otherwise imports load normally; content
+	// failures are collected at their declarations and analysis continues
+	// with the failed aliases deferred. Either way the error-delta gate
+	// below keeps the returned schema nil whenever anything failed.
+	if l.rejectDisallowedImports(m) {
+		l.markUnboundImportsFailed(m.Imports)
+	} else if err := l.loadImports(ctx, sourceID, m); err != nil {
 		return nil, l.collector.Result(), err // propagate cancellation
 	}
-	if !ok {
-		return nil, l.collector.Result(), nil // content failure
-	}
 
-	// Build resolved imports map for completion
-	resolvedImports := make(resolvedImportMap, len(l.resolvedImports))
-	for alias, resolved := range l.resolvedImports {
-		resolvedImports[alias] = resolved.sourceID
+	// Build the completion map from the loader's bindings: a successful import
+	// carries its resolved SourceID; a failed one becomes a deferred entry,
+	// telling the completer "the loader saw and reported this alias" so
+	// references through it defer rather than re-blaming. An alias absent from
+	// the completion map was never bound — a loader bug, which the completer
+	// reports as such.
+	resolvedImports := make(resolvedImportMap, len(l.imports))
+	for alias, binding := range l.imports {
+		if binding.failed {
+			resolvedImports[alias] = importResolution{deferred: true}
+		} else {
+			resolvedImports[alias] = importResolution{sourceID: binding.sourceID}
+		}
 	}
 
 	// Complete the schema (resolve types, validate, etc.)
@@ -642,10 +680,11 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 		return nil, l.collector.Result(), nil
 	}
 
-	// Wire resolved schema references (SourceID already set during completion)
+	// Wire resolved schema references (SourceID already set during completion).
+	// A failed binding has a nil schema and is skipped — its Import is deferred.
 	for _, imp := range s.ImportsSlice() {
-		if resolved, ok := l.resolvedImports[imp.Alias()]; ok {
-			imp.setSchema(resolved.schema)
+		if binding, ok := l.imports[imp.Alias()]; ok && !binding.failed {
+			imp.setSchema(binding.schema)
 		}
 	}
 
@@ -654,9 +693,12 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 		imp.seal()
 	}
 
-	// Schema must be nil if any errors exist.
+	// Schema must be nil if this schema's load contributed any errors —
+	// its own findings or those of imports loaded on its behalf (the
+	// error-delta against the entry snapshot; errors collected before this
+	// schema began belong to siblings and do not poison it).
 	// Check BEFORE registration to avoid registering schemas we'll discard.
-	if l.collector.HasErrors() {
+	if l.collector.ErrorCount() > errorsAtEntry {
 		return nil, l.collector.Result(), nil
 	}
 
@@ -689,8 +731,17 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	return s, l.collector.Result(), nil
 }
 
-// validateImports checks for import issues.
-func (l *loader) validateImports(sourceID location.SourceID, m *model) bool {
+// rejectDisallowedImports reports whether the load context structurally
+// disallows imports (string sources, isolated analysis blocks) and the source
+// declares any: it collects the single E_IMPORT_NOT_ALLOWED rejection and
+// returns true, so the caller marks the declared aliases deferred and skips
+// loading. It returns false when imports may load normally. All other
+// declaration-level validation — duplicate aliases, reserved keywords,
+// collisions with local names — is owned by the completer, the one layer both
+// front doors (parsed sources and the Builder) share; resolution-level
+// validation (duplicate resolved SourceIDs) is owned by the resolver, in
+// validateResolvedImports.
+func (l *loader) rejectDisallowedImports(m *model) bool {
 	if l.disallowImports && len(m.Imports) > 0 {
 		// Per spec: single E_IMPORT_NOT_ALLOWED issue with import_count detail,
 		// positioned at the first import declaration.
@@ -698,84 +749,27 @@ func (l *loader) validateImports(sourceID location.SourceID, m *model) bool {
 			"import declarations are not allowed in this context").
 			WithSpan(m.Imports[0].Span).
 			WithDetail(diag.DetailKeyImportCount, strconv.Itoa(len(m.Imports))).Build())
-		return false
+		return true
 	}
-
-	// Check for duplicate imports (same path or alias)
-	seenPaths := make(map[string]*importDecl)
-	seenAliases := make(map[string]*importDecl)
-
-	for _, imp := range m.Imports {
-		// Check for duplicate path
-		if existing, ok := seenPaths[imp.Path]; ok {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_IMPORT,
-				fmt.Sprintf("duplicate import of %q", imp.Path)).
-				WithSpan(imp.Span).
-				WithRelated(location.RelatedInfo{
-					Span:    existing.Span,
-					Message: "first imported here",
-				}).Build())
-			return false
-		}
-		seenPaths[imp.Path] = imp
-
-		// Check for duplicate alias
-		if existing, ok := seenAliases[imp.Alias]; ok {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_IMPORT,
-				fmt.Sprintf("duplicate import alias %q", imp.Alias)).
-				WithSpan(imp.Span).
-				WithRelated(location.RelatedInfo{
-					Span:    existing.Span,
-					Message: "alias first used here",
-				}).Build())
-			return false
-		}
-		seenAliases[imp.Alias] = imp
-
-		// Check for reserved keyword alias
-		if isReservedKeyword(imp.Alias) {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
-				fmt.Sprintf("import alias %q is a reserved keyword", imp.Alias)).
-				WithSpan(imp.Span).Build())
-			return false
-		}
-	}
-
-	// Check for alias collision with local type names and datatype aliases
-	localNames := make(map[string]location.Span)
-	for _, t := range m.Types {
-		localNames[t.Name] = t.Span
-	}
-	for _, dt := range m.DataTypes {
-		localNames[dt.Name] = dt.Span
-	}
-
-	for _, imp := range m.Imports {
-		if existingSpan, ok := localNames[imp.Alias]; ok {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_ALIAS_COLLISION,
-				fmt.Sprintf("import alias %q collides with local type or datatype", imp.Alias)).
-				WithSpan(imp.Span).
-				WithRelated(location.RelatedInfo{
-					Span:    existingSpan,
-					Message: "defined here",
-				}).Build())
-			return false
-		}
-	}
-
-	_ = sourceID // Unused but may be needed for future enhancements
-	return true
+	return false
 }
 
-// loadImports loads all imported schemas.
-func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, m *model) (bool, error) {
+// loadImports loads all imported schemas. Content failures (unresolvable
+// paths, escapes, failed compiles) are collected as diagnostics at their
+// declarations and recorded per-alias — every independent failure is
+// reported in one pass — so the error return carries only cancellation.
+func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, m *model) error {
 	if l.moduleRoot == "" && len(m.Imports) > 0 {
 		// Without a module root, we can only resolve relative imports
 		// from file-based sources
 		if !sourceID.IsFilePath() {
 			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
 				"cannot resolve imports without a module root").Build())
-			return false, nil
+			// Nothing can be probed; mark every alias failed so completion
+			// defers references through them instead of re-reporting the
+			// same root cause per declaration.
+			l.markUnboundImportsFailed(m.Imports)
+			return nil
 		}
 	}
 
@@ -783,56 +777,129 @@ func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, m 
 		// Check for cancellation before each import (/19)
 		// Per, cancellation is returned as error, not collected as diagnostic.
 		if err := ctx.Err(); err != nil {
-			return false, fmt.Errorf("load cancelled: %w", err)
+			return fmt.Errorf("load cancelled: %w", err)
 		}
-		ok, err := l.loadImport(ctx, sourceID, imp)
-		if err != nil {
-			return false, err // propagate cancellation
+		// An alias binds once (keep-first): a later declaration of an
+		// already-bound alias is skipped entirely — not loaded, not resolved,
+		// not tracked. The completer's duplicate-alias diagnostic is the sole
+		// report for it. A broken path on a skipped declaration is
+		// intentionally not probed: its root cause is the duplicate alias,
+		// not the path.
+		if l.aliasBound(imp.Alias) {
+			continue
 		}
-		if !ok {
-			return false, nil // content failure
+		if err := l.loadImport(ctx, sourceID, imp); err != nil {
+			return err // propagate cancellation
 		}
 	}
 
-	// Check for duplicate imports by resolved SourceID (not raw path)
-	// Two different import paths may resolve to the same canonical file
-	if !l.validateResolvedImports() {
-		return false, nil
-	}
+	// Check for duplicate imports by resolved SourceID (not raw path):
+	// two different import paths may resolve to the same canonical file.
+	// Runs even when some imports failed — it validates the ones that did
+	// resolve.
+	l.validateResolvedImports(m.Imports)
 
-	return true, nil
+	return nil
 }
 
-// validateResolvedImports checks for duplicate resolved SourceIDs.
-// Two different import paths that resolve to the same canonical file are an error.
-func (l *loader) validateResolvedImports() bool {
+// aliasBound reports whether an import alias already has a binding (resolved or
+// failed) for the current schema. loadImport routes each attempted declaration
+// into exactly one binding, and aliasBound gates re-attempts of an already-bound
+// alias before they reach loadImport (keep-first).
+func (l *loader) aliasBound(alias string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_, ok := l.imports[alias]
+	return ok
+}
+
+// markImportFailed records a declaration whose import failed before resolving
+// to a file (unresolvable path, escape, or registration failure) — so it has no
+// SourceID. The alias stays bound, keeping later declarations of the same alias
+// inert and surfacing to the completer as a deferred entry. A compile failure,
+// which does have a resolved SourceID, uses [loader.reportFailedCompile].
+func (l *loader) markImportFailed(imp *importDecl) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.imports[imp.Alias] = importBinding{decl: imp, failed: true}
+}
+
+// markUnboundImportsFailed marks every not-yet-bound alias failed (keep-first:
+// an already-bound alias is left as-is). Used when imports are categorically
+// rejected (disallowed) or unresolvable as a group (no module root), so the
+// completer defers references through them instead of re-reporting per site.
+func (l *loader) markUnboundImportsFailed(imports []*importDecl) {
+	for _, imp := range imports {
+		if !l.aliasBound(imp.Alias) {
+			l.markImportFailed(imp)
+		}
+	}
+}
+
+// reportFailedCompile records an alias as failed-with-SourceID and collects the
+// importer's own E_UPSTREAM_FAIL at its declaration: each importer of a broken
+// source reports its own failure, while the broken source's own diagnostics
+// were collected once (by the first attempt — see the failedCompiles memo).
+// The retained sourceID lets validateResolvedImports still see that two aliases
+// name the same (broken) file. The caller must NOT hold l.mu.
+func (l *loader) reportFailedCompile(imp *importDecl, sourceID location.SourceID) {
+	l.mu.Lock()
+	l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: sourceID}
+	l.mu.Unlock()
+	l.collector.Collect(diag.NewIssue(diag.Error, diag.E_UPSTREAM_FAIL,
+		fmt.Sprintf("import %q failed to compile", imp.Path)).
+		WithSpan(imp.Span).
+		WithDetail(diag.DetailKeyImportPath, imp.Path).
+		WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
+}
+
+// validateResolvedImports checks for two declarations that resolve to the same
+// canonical file. Both successful imports and compile-failed ones participate
+// (a compile failure retains its resolved SourceID), so a file imported twice
+// is reported as a duplicate even when that file is itself broken; only a
+// path-resolution failure (no SourceID) is skipped. Declarations are visited in
+// source order — the alias-keyed binding map is consulted, never iterated — so
+// the blamed declaration, its span, and the first/duplicate detail pair are
+// deterministically the later declaration's, independent of map iteration
+// order. All duplicates are reported; findings are diagnostics, so there is
+// nothing to return.
+func (l *loader) validateResolvedImports(imports []*importDecl) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	seenSourceIDs := make(map[location.SourceID]resolvedImport)
-	for _, resolved := range l.resolvedImports {
-		if existing, ok := seenSourceIDs[resolved.sourceID]; ok {
+	seenSourceIDs := make(map[location.SourceID]importBinding)
+	for _, imp := range imports {
+		binding, found := l.imports[imp.Alias]
+		if !found || binding.decl != imp || binding.sourceID.IsZero() {
+			// Not bound to this declaration (a duplicate alias's later
+			// declaration maps to the kept first binding — the completer's
+			// duplicate-alias check is its report), or a path-resolution
+			// failure with no SourceID to compare.
+			continue
+		}
+		if existing, dup := seenSourceIDs[binding.sourceID]; dup {
 			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_IMPORT,
-				fmt.Sprintf("schema %q imported multiple times", resolved.sourceID.String())).
-				WithSpan(resolved.decl.Span).
-				WithDetail(diag.DetailKeyImportPath, resolved.sourceID.String()).
+				fmt.Sprintf("schema %q imported multiple times", binding.sourceID.String())).
+				WithSpan(binding.decl.Span).
+				WithDetail(diag.DetailKeyImportPath, binding.sourceID.String()).
 				WithDetail(diag.DetailKeyFirstAlias, existing.decl.Alias).
 				WithDetail(diag.DetailKeyFirstLine, strconv.Itoa(existing.decl.Span.Start.Line)).
-				WithDetail(diag.DetailKeyDuplicateAlias, resolved.decl.Alias).
-				WithDetail(diag.DetailKeyDuplicateLine, strconv.Itoa(resolved.decl.Span.Start.Line)).
+				WithDetail(diag.DetailKeyDuplicateAlias, binding.decl.Alias).
+				WithDetail(diag.DetailKeyDuplicateLine, strconv.Itoa(binding.decl.Span.Start.Line)).
 				WithRelated(location.RelatedInfo{
 					Span:    existing.decl.Span,
 					Message: fmt.Sprintf("first imported here as %q", existing.decl.Alias),
 				}).Build())
-			return false
+			continue
 		}
-		seenSourceIDs[resolved.sourceID] = resolved
+		seenSourceIDs[binding.sourceID] = binding
 	}
-	return true
 }
 
-// loadImport loads a single imported schema.
-func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp *importDecl) (bool, error) {
+// loadImport loads a single imported schema. A content failure is
+// collected at the declaration and the alias recorded as failed; the
+// error return carries only cancellation.
+func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp *importDecl) error {
 	l.logger.Debug("loading import", "path", imp.Path, "alias", imp.Alias)
 
 	// Resolve the import path to a relative path (relative to module root)
@@ -843,7 +910,8 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 			WithSpan(imp.Span).
 			WithDetail(diag.DetailKeyImportPath, imp.Path).
 			WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
-		return false, nil
+		l.markImportFailed(imp)
+		return nil
 	}
 
 	// Cross-Load short-circuit: derive the candidate SourceIDs without
@@ -860,26 +928,37 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	}
 	for _, cand := range l.candidateImportSourceIDs(relativePath) {
 		l.mu.Lock()
+		// A source that already failed to compile in this load is not
+		// re-attempted: each importer gets its own E_UPSTREAM_FAIL at its
+		// own declaration, but the failed source's diagnostics were
+		// collected once, by the first attempt. Without the memo a
+		// diamond-shaped graph over a broken import would re-parse the
+		// import per importer and collect its diagnostics once per path.
+		if _, failed := l.failedCompiles[cand]; failed {
+			l.mu.Unlock()
+			l.reportFailedCompile(imp, cand)
+			return nil
+		}
 		if loadedSchema, ok := l.loadedSchemas[cand]; ok {
 			l.registerCachedClosureSources(loadedSchema)
-			l.resolvedImports[imp.Alias] = resolvedImport{
+			l.imports[imp.Alias] = importBinding{
 				sourceID: cand,
 				schema:   loadedSchema,
 				decl:     imp,
 			}
 			l.mu.Unlock()
-			return true, nil
+			return nil
 		}
 		if existing, ok := l.registry.LookupBySourceID(cand); ok {
 			l.loadedSchemas[cand] = existing
 			l.registerCachedClosureSources(existing)
-			l.resolvedImports[imp.Alias] = resolvedImport{
+			l.imports[imp.Alias] = importBinding{
 				sourceID: cand,
 				schema:   existing,
 				decl:     imp,
 			}
 			l.mu.Unlock()
-			return true, nil
+			return nil
 		}
 		l.mu.Unlock()
 	}
@@ -892,42 +971,50 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 				fmt.Sprintf("import %q escapes module root", imp.Path)).
 				WithSpan(imp.Span).
 				WithDetail(diag.DetailKeyImportPath, imp.Path).Build())
-			return false, nil
+			l.markImportFailed(imp)
+			return nil
 		}
 		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
 			fmt.Sprintf("cannot read import %q: %v", imp.Path, err)).
 			WithSpan(imp.Span).
 			WithDetail(diag.DetailKeyImportPath, imp.Path).
 			WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
-		return false, nil
+		l.markImportFailed(imp)
+		return nil
 	}
 
 	// Post-read within-Load belt-and-braces check. The pre-read candidate
 	// SourceIDs above cover the typical path-resolution cases, but retaining
 	// this check preserves the existing within-Load cache invariant (and
 	// survives any future path-resolution edge case that the candidate
-	// derivation above doesn't anticipate).
+	// derivation above doesn't anticipate). The failed-compile memo gets the
+	// same treatment for the same reason.
 	l.mu.Lock()
+	if _, failed := l.failedCompiles[importSourceID]; failed {
+		l.mu.Unlock()
+		l.reportFailedCompile(imp, importSourceID)
+		return nil
+	}
 	if loadedSchema, ok := l.loadedSchemas[importSourceID]; ok {
 		l.registerCachedClosureSources(loadedSchema)
-		l.resolvedImports[imp.Alias] = resolvedImport{
+		l.imports[imp.Alias] = importBinding{
 			sourceID: importSourceID,
 			schema:   loadedSchema,
 			decl:     imp,
 		}
 		l.mu.Unlock()
-		return true, nil
+		return nil
 	}
 	if existing, ok := l.registry.LookupBySourceID(importSourceID); ok {
 		l.loadedSchemas[importSourceID] = existing
 		l.registerCachedClosureSources(existing)
-		l.resolvedImports[imp.Alias] = resolvedImport{
+		l.imports[imp.Alias] = importBinding{
 			sourceID: importSourceID,
 			schema:   existing,
 			decl:     imp,
 		}
 		l.mu.Unlock()
-		return true, nil
+		return nil
 	}
 	l.mu.Unlock()
 
@@ -936,7 +1023,8 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 		if err := l.sourceRegistry.Register(importSourceID, content); err != nil {
 			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
 				fmt.Sprintf("register import source: %v", err)).Build())
-			return false, nil
+			l.markImportFailed(imp)
+			return nil
 		}
 		l.sourceContent[importSourceID] = content
 	}
@@ -944,27 +1032,26 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	// Recursively load the imported schema
 	s, _, err := l.loadSource(ctx, importSourceID, content)
 	if err != nil {
-		return false, err // propagate cancellation
+		return err // propagate cancellation
 	}
 	if s == nil {
-		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_UPSTREAM_FAIL,
-			fmt.Sprintf("import %q failed to compile", imp.Path)).
-			WithSpan(imp.Span).
-			WithDetail(diag.DetailKeyImportPath, imp.Path).
-			WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
-		return false, nil
+		l.mu.Lock()
+		l.failedCompiles[importSourceID] = struct{}{}
+		l.mu.Unlock()
+		l.reportFailedCompile(imp, importSourceID)
+		return nil
 	}
 
 	// Store the resolved import information for later wiring to the schema's Import objects
 	l.mu.Lock()
-	l.resolvedImports[imp.Alias] = resolvedImport{
+	l.imports[imp.Alias] = importBinding{
 		sourceID: importSourceID,
 		schema:   s,
 		decl:     imp,
 	}
 	l.mu.Unlock()
 
-	return true, nil
+	return nil
 }
 
 // resolveImportToRelative resolves an import path to a path relative to the module root.

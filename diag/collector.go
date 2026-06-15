@@ -140,16 +140,12 @@ func (c *Collector) collectLocked(issue Issue) {
 	// Invalidate cached result
 	c.cachedResult = nil
 
-	// Check limit
-	if c.limit > 0 && len(c.issues) >= c.limit {
-		c.limitReached = true
-		c.droppedCount++
-		return
-	}
-
-	c.issues = append(c.issues, issue)
-
-	// Update severity counts
+	// Severity counts reflect every issue SEEN, not just those stored under the
+	// limit, so HasErrors/OK/ErrorCount stay truthful when collection is
+	// truncated. The loader and completer gate on ErrorCount deltas to decide
+	// whether a schema failed; an error dropped at the cap that left these
+	// counts untouched would read as success and let a broken schema escape the
+	// all-or-nothing contract. Len() remains the stored count.
 	switch issue.Severity() {
 	case Fatal:
 		c.fatalCount++
@@ -162,6 +158,15 @@ func (c *Collector) collectLocked(issue Issue) {
 	case Hint:
 		c.hintCount++
 	}
+
+	// At the limit, the issue is counted (above) but not stored.
+	if c.limit > 0 && len(c.issues) >= c.limit {
+		c.limitReached = true
+		c.droppedCount++
+		return
+	}
+
+	c.issues = append(c.issues, issue)
 }
 
 // Result produces a sorted, immutable snapshot.
@@ -185,7 +190,22 @@ func (c *Collector) Result() Result {
 	// Sort by source, position, code
 	slices.SortFunc(sorted, compareIssues)
 
-	result := newResult(sorted, c.limit, c.limitReached, c.droppedCount)
+	// Carry the collector's SEEN severity counts rather than recomputing from
+	// the stored slice (what newResult does): under truncation the dropped
+	// issues are absent from sorted, and recomputing would make Result.OK /
+	// HasErrors blind to a dropped error exactly as the gates would be. In the
+	// non-truncated case the two are identical (every collected issue is stored).
+	result := Result{
+		issues:       sorted,
+		limit:        c.limit,
+		limitReached: c.limitReached,
+		droppedCount: c.droppedCount,
+		fatalCount:   c.fatalCount,
+		errorCount:   c.errorCount,
+		warningCount: c.warningCount,
+		infoCount:    c.infoCount,
+		hintCount:    c.hintCount,
+	}
 	c.cachedResult = &result
 	return result
 }
@@ -317,6 +337,19 @@ func (c *Collector) OK() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.fatalCount == 0 && c.errorCount == 0
+}
+
+// ErrorCount returns the number of Fatal and Error issues collected so far.
+//
+// This is an O(1) operation using precomputed counts. Callers that share
+// one collector across nested operations can compare counts taken before
+// and after an operation to determine whether that specific operation
+// contributed errors — [Collector.HasErrors] only answers whether any
+// operation has.
+func (c *Collector) ErrorCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.fatalCount + c.errorCount
 }
 
 // Len returns the number of collected issues.

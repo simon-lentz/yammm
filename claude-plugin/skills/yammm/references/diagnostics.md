@@ -44,6 +44,20 @@ Each issue contains:
 
 ---
 
+## Diagnostic Completeness
+
+One load pass reports every *independent* error in a schema and its import closure -- each exactly once:
+
+- **All import failures are reported**, each at its own declaration; a broken import does not hide its siblings or the schema's own semantic errors. A shared broken import (diamond graphs) is compiled once: its own errors appear once, plus one `E_UPSTREAM_FAIL` per importer.
+- **References through a failed import are deferred, not re-blamed.** The import failure is the single root-cause diagnostic; `extends`, relation targets, and property datatypes reached through that alias stay silent until the import is fixed. A qualifier that names no declared import at all is a genuine `E_UNKNOWN_TYPE`.
+- **An alias binds once (keep-first).** A repeated alias is reported once (`E_DUPLICATE_IMPORT`) and the later declaration is inert; references resolve against the first binding.
+- **`LoadString` / markdown blocks**: the imports-not-allowed rejection (`E_IMPORT_NOT_ALLOWED`) no longer suppresses the source's other diagnostics.
+- **Truncation is visible**: past the issue limit (default 100), the CLI's text output appends a dropped-issues note, and the JSON output carries `limit` / `limitReached` / `droppedCount`.
+
+The all-or-nothing contract is unchanged: any error still yields a nil schema.
+
+---
+
 ## Decision Tree: "I Got an Error"
 
 1. **Parse/syntax error** -- See `E_SYNTAX` in the Syntax section below.
@@ -107,7 +121,7 @@ Each issue contains:
 | `E_INVALID_NAME` | Identifier has invalid format |
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
-| `E_UNKNOWN_TYPE` | Referenced type not found |
+| `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, or property datatype) |
 | `E_DUPLICATE_TYPE` | Type name defined multiple times |
 | `E_RELATION_COLLISION` | Relations collide after normalization |
 | `E_MISSING_SOURCE_ID` | Required SourceID is missing |
