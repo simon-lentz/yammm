@@ -36,19 +36,22 @@ type resolvedImportMap map[string]importResolution
 
 // completeModel transforms a parsed AST model into a completed Schema.
 //
-// The completion process:
-//  1. Creates the Schema and indexes types/datatypes
-//  2. Validates imports against alias rules
-//  3. Detects inheritance cycles
-//  4. Linearizes inheritance (DFS, keep-first)
-//  5. Merges inherited properties and relations
-//  6. Detects collisions (case-insensitive, normalized names)
-//  7. Validates relation targets
+// Completion runs a fixed sequence of phases: it indexes the declared types and
+// datatypes, validates and indexes imports, resolves datatype-alias constraints,
+// and linearizes inheritance to merge inherited members; it then validates
+// primary keys, relation edge properties, name collisions, relation targets, and
+// invariant expressions. Inheritance-cycle detection is the one hard gate — it
+// aborts completion, because the downstream phases cannot run on a cyclic graph;
+// every other phase collects its diagnostics and continues, so one schema reports
+// every independent error in a single pass.
 //
-// Errors are collected in the provided collector. Returns nil if completion
-// fails with fatal errors. The registry is optional; when nil, cross-schema
-// references are deferred. The resolvedImports map provides pre-resolved
-// import alias to SourceID mappings from the loader.
+// Errors are collected in the provided collector. completeModel returns the
+// completed *Schema, or nil if this completion contributed any Fatal or Error
+// issue — a per-completion error gate, so when the collector is shared across a
+// multi-schema load each schema is judged by its own error delta. The registry
+// is optional; when nil, cross-schema references are deferred to link time. The
+// resolvedImports map carries each import alias's resolution (or deferral) from
+// the loader.
 func completeModel(
 	m *model,
 	sourceID location.SourceID,
@@ -790,29 +793,34 @@ func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, v
 			return nil, false
 		}
 	} else {
-		// Cross-schema reference. Defer silently in exactly the cases the
-		// resolveTypeRef sites do — [completer.referenceDeferred] is the shared
-		// predicate (no registry to resolve against, or a declared-but-failed
-		// import whose failure already carries the root cause), so datatype
-		// references and extends/relation references cannot diverge on the
-		// registry/nil-map interaction the way they once did.
-		if c.referenceDeferred(qualifier) {
+		// Cross-schema reference. This site needs the full alias state — the
+		// absent/resolved split and the resolved SourceID — so it reads the
+		// tri-state [completer.classifyQualifier] directly rather than the bool
+		// [completer.referenceDeferred] the resolveTypeRef sites use. The two
+		// defer on the same conditions (no registry to resolve against, or a
+		// declared-but-failed import whose failure already carries the root
+		// cause), so datatype references and extends/relation references cannot
+		// diverge on the registry/nil-map interaction the way they once did.
+		if c.registry == nil {
+			// No registry to resolve the cross-schema ref; defer to link time.
 			return NewAliasConstraint(dataTypeName, nil), true
 		}
-		// Not deferred, and a registry is present: the qualifier either names no
-		// import (a genuine unknown) or resolves to one.
 		state, sourceID := c.classifyQualifier(qualifier)
-		if state != aliasResolved {
-			// aliasAbsent: the qualifier names no declared import (a nil
-			// resolution map — a Builder schema or bridge with zero imports — is
-			// classified absent, and is reached here only with a registry
-			// present). aliasDeferred was already handled by referenceDeferred
-			// above, so this is a genuine unknown.
+		switch state {
+		case aliasDeferred:
+			// A declared import whose load/declaration failed; its failure
+			// already carries the root cause, so defer rather than re-blame.
+			return NewAliasConstraint(dataTypeName, nil), true
+		case aliasAbsent:
+			// The qualifier names no declared import (a nil resolution map — a
+			// Builder schema or bridge with zero imports — classifies absent, and
+			// is reached here only with a registry present): a genuine unknown.
 			c.reportUnknownAlias(suppressUnknown, span,
 				"unknown type %q in datatype reference: no import declared with alias %q",
 				dataTypeName, qualifier)
 			return nil, false
 		}
+		// aliasResolved: the import resolved to sourceID.
 		importedSchema, ok := c.registry.LookupBySourceID(sourceID)
 		if !ok {
 			// The import resolved to a SourceID but its schema is absent from the
@@ -1041,46 +1049,41 @@ func hasDeclaredPrimary(t *Type) bool {
 // an unknown type already reported elsewhere. The walk is transitive, not just over t's
 // direct supertypes: a primary key may be inherited through a local parent that itself
 // extends an unresolved root, so the presence check must skip the whole chain, not only
-// types that declare the unresolved reference directly.
+// types that declare the unresolved reference directly. Recursion follows local
+// supertypes only — a resolved cross-schema supertype is already linearized and its
+// members merged, so it is a leaf here.
 //
-// The result is memoized per type. Both phases that query it (validatePrimaryKeys and
-// validateInvariantExpressions) run after inheritance and resolution are fixed, so a
-// type's answer cannot change between calls — and a type reachable from both phases, or
-// shared as a local supertype of several types, is walked once.
+// Every type reached is memoized, not just the entry: the recursion routes back through
+// this method, so each supertype's answer is recorded as it is determined and a chain is
+// walked once across all queries rather than re-walked per query. The two phases that
+// call this (validatePrimaryKeys and validateInvariantExpressions) run after inheritance
+// and resolution are fixed, so a type's answer cannot change between calls.
+//
+// detectCycles rejects inheritance cycles before this runs, so the graph is acyclic; the
+// memo is seeded false before recursing purely so the walk still terminates should that
+// ever cease to hold, then overwritten with the real answer.
 func (c *completer) hasUnresolvedSupertype(t *Type) bool {
 	if cached, ok := c.unresolvedSupertypeMemo[t]; ok {
 		return cached
 	}
-	result := c.computeUnresolvedSupertype(t)
-	c.unresolvedSupertypeMemo[t] = result
-	return result
-}
+	c.unresolvedSupertypeMemo[t] = false // cycle-termination guard; overwritten below
 
-// computeUnresolvedSupertype performs the transitive inheritance-closure walk behind
-// [completer.hasUnresolvedSupertype]. Recursion follows local supertypes only — a
-// resolved cross-schema supertype is already linearized and its members merged, so it
-// is a leaf here. Inheritance cycles are rejected earlier (detectCycles), so visited
-// bounds the walk rather than guarding correctness.
-func (c *completer) computeUnresolvedSupertype(t *Type) bool {
-	visited := map[string]bool{t.Name(): true}
-	queue := []*Type{t}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for ref := range cur.Inherits() {
-			super := c.resolveTypeRef(ref)
-			if super == nil {
-				return true
-			}
-			// Recurse only into local supertypes; a resolved cross-schema supertype is
-			// a fully-merged leaf. A qualified ref that resolved cannot be local.
-			if ref.Qualifier() == "" && !visited[ref.Name()] {
-				visited[ref.Name()] = true
-				queue = append(queue, super)
-			}
+	result := false
+	for ref := range t.Inherits() {
+		super := c.resolveTypeRef(ref)
+		if super == nil {
+			result = true
+			break
+		}
+		// Recurse only into local supertypes; a resolved cross-schema supertype is a
+		// fully-merged leaf. A qualified ref that resolved cannot be local.
+		if ref.Qualifier() == "" && c.hasUnresolvedSupertype(super) {
+			result = true
+			break
 		}
 	}
-	return false
+	c.unresolvedSupertypeMemo[t] = result
+	return result
 }
 
 // errorf reports an error at the given span.

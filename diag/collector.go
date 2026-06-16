@@ -119,6 +119,12 @@ func (c *Collector) CollectAll(issues []Issue) {
 // ([Result.LimitReached] / [Result.DroppedCount]) are carried into the
 // receiver. So a dropped error in res cannot flip the merged result to OK — the
 // same guarantee [Collector] already gives for directly-collected issues.
+//
+// The receiver's own configured limit is unchanged: merging a truncated res
+// into an unlimited collector yields LimitReached()==true with Limit()==0.
+// [Result.LimitReached] and [Result.DroppedCount] are the authoritative
+// truncation facts after a merge; Limit() remains the receiver's local cap, not
+// the cap that produced res's drops.
 func (c *Collector) Merge(res Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

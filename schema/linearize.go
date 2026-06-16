@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -218,9 +217,13 @@ func (c *completer) completeTypes() {
 		allProps := c.mergeProperties(t, supers)
 		t.setAllProperties(allProps)
 
-		// Extract primary keys
+		// Extract primary keys. mergeProperties emits t's own properties first
+		// (unmodified) and inherited ones after, so allProps[:ownPropCount] are
+		// exactly t's own — an O(1), pointer-exact "declared on t?" test for the
+		// rejection branch below, without a clone or a per-type set.
+		ownPropCount := len(t.properties)
 		pks := make([]*Property, 0)
-		for _, p := range allProps {
+		for i, p := range allProps {
 			if p.IsPrimaryKey() {
 				// A primary whose type bottoms out in an already-diagnosed
 				// unresolvable alias (deferred import, cyclic local chain)
@@ -236,11 +239,9 @@ func (c *completer) completeTypes() {
 					// primary was already reported when its ancestor completed
 					// (supertypes complete before their subtypes); re-checking the
 					// same inherited *Property at every descendant would duplicate
-					// the identical diagnostic at the identical span. Membership is
-					// tested against the type's own-property slice (t.properties)
-					// directly on this rare rejection path — no clone, no per-type
-					// set.
-					if slices.Contains(t.properties, p) {
+					// the identical diagnostic at the identical span. i < ownPropCount
+					// holds exactly for t's own properties (see above).
+					if i < ownPropCount {
 						// The constraint is nil when parse-error recovery kept a
 						// property that never received a type; describe that
 						// rather than dereferencing it.

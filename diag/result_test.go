@@ -23,6 +23,30 @@ func TestResult_TruncationNote(t *testing.T) {
 	}
 }
 
+func TestResult_TruncationNote_MergedIntoUnlimited_OmitsBogusLimit(t *testing.T) {
+	// Merging a truncated result into an unlimited collector carries the
+	// truncation state forward but not a positive limit, so the note must
+	// report the dropped count without naming a nonsensical "0-issue limit".
+	src := NewCollector(1)
+	src.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
+	src.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
+
+	dst := NewCollectorUnlimited()
+	dst.Merge(src.Result())
+	r := dst.Result()
+
+	if !r.LimitReached() || r.DroppedCount() != 1 {
+		t.Fatalf("setup: LimitReached=%v DroppedCount=%d; want true/1", r.LimitReached(), r.DroppedCount())
+	}
+	note := r.TruncationNote()
+	if strings.Contains(note, "0-issue") {
+		t.Errorf("TruncationNote() = %q; must not name a 0-issue limit after merge into an unlimited collector", note)
+	}
+	if !strings.Contains(note, "1 more issue(s) dropped") {
+		t.Errorf("TruncationNote() = %q; want the dropped-count summary", note)
+	}
+}
+
 func TestOK(t *testing.T) {
 	r := OK()
 
