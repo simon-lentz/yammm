@@ -15,6 +15,37 @@ type SeverityCounts struct {
 	Hints    int
 }
 
+// add increments the counter for sev. It is the single Severity-to-counter
+// mapping in the package — [Collector.collectLocked] (the live collection path)
+// and [newResult] (recompute from a slice) both route through it, so the two
+// cannot disagree on how a severity is counted and a new Severity is handled in
+// exactly one switch.
+func (c *SeverityCounts) add(sev Severity) {
+	//exhaustive:enforce
+	switch sev {
+	case Fatal:
+		c.Fatal++
+	case Error:
+		c.Errors++
+	case Warning:
+		c.Warnings++
+	case Info:
+		c.Info++
+	case Hint:
+		c.Hints++
+	}
+}
+
+// addCounts folds o into c field-wise, letting [Collector.Merge] carry a source
+// Result's whole seen-severity tally forward in one call.
+func (c *SeverityCounts) addCounts(o SeverityCounts) {
+	c.Fatal += o.Fatal
+	c.Errors += o.Errors
+	c.Warnings += o.Warnings
+	c.Info += o.Info
+	c.Hints += o.Hints
+}
+
 // Result is an immutable snapshot of diagnostic issues with precomputed counts.
 //
 // Result provides O(1) severity queries and iterator-based access to issues.
@@ -41,38 +72,37 @@ type Result struct {
 	hintCount    int
 }
 
-// newResult creates a Result with precomputed counts.
+// newResult creates a Result, computing the severity counts from issues.
 //
 // The issues slice is owned by the Result and must not be modified after
 // this call. Callers must pass a fresh slice (not shared with other code).
+//
+// Use [newResultWithCounts] directly when the counts must reflect issues that
+// are not in the slice (e.g. a [Collector] carrying issues dropped past its
+// limit, which must still count toward OK/HasErrors).
 func newResult(issues []Issue, limit int, limitReached bool, droppedCount int) Result {
-	var fatalCount, errorCount, warningCount, infoCount, hintCount int
-
+	var counts SeverityCounts
 	for _, issue := range issues {
-		switch issue.Severity() {
-		case Fatal:
-			fatalCount++
-		case Error:
-			errorCount++
-		case Warning:
-			warningCount++
-		case Info:
-			infoCount++
-		case Hint:
-			hintCount++
-		}
+		counts.add(issue.Severity())
 	}
+	return newResultWithCounts(issues, limit, limitReached, droppedCount, counts)
+}
 
+// newResultWithCounts builds a Result from explicit precomputed severity counts.
+// It is the single point that constructs the Result struct, so a new Result
+// field is added in exactly one place. The issues slice is owned by the Result
+// (see [newResult]'s contract).
+func newResultWithCounts(issues []Issue, limit int, limitReached bool, droppedCount int, counts SeverityCounts) Result {
 	return Result{
 		issues:       issues,
 		limit:        limit,
 		limitReached: limitReached,
 		droppedCount: droppedCount,
-		fatalCount:   fatalCount,
-		errorCount:   errorCount,
-		warningCount: warningCount,
-		infoCount:    infoCount,
-		hintCount:    hintCount,
+		fatalCount:   counts.Fatal,
+		errorCount:   counts.Errors,
+		warningCount: counts.Warnings,
+		infoCount:    counts.Info,
+		hintCount:    counts.Hints,
 	}
 }
 

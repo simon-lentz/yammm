@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
@@ -213,20 +214,6 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 	w.publishMarkdownDiagnostics(snap)
 }
 
-// isImportDeclarationCode reports whether a diagnostic code concerns an import
-// declaration — the family downgraded to Hint in markdown blocks, where
-// imports are categorically not processed. Codes are matched by string to
-// avoid importing diag here (the diag package name is shadowed by the local
-// diagnostic variable in publishMarkdownDiagnostics).
-func isImportDeclarationCode(code string) bool {
-	switch code {
-	case "E_IMPORT_NOT_ALLOWED", "E_DUPLICATE_IMPORT", "E_IMPORT_ALIAS_COLLISION", "E_INVALID_ALIAS":
-		return true
-	default:
-		return false
-	}
-}
-
 // publishMarkdownDiagnostics collects diagnostics from all block snapshots,
 // remaps positions from block-local to markdown coordinates, and publishes.
 func (w *Workspace) publishMarkdownDiagnostics(snap *MarkdownDocumentSnapshot) {
@@ -238,10 +225,10 @@ func (w *Workspace) publishMarkdownDiagnostics(snap *MarkdownDocumentSnapshot) {
 		}
 
 		for _, uriDiag := range snapshot.LSPDiagnostics {
-			diag := uriDiag.Diagnostic
+			d := uriDiag.Diagnostic
 
 			// Skip diagnostics that reference synthetic prefix content
-			if int(diag.Range.Start.Line) < snap.Blocks[i].PrefixLines {
+			if int(d.Range.Start.Line) < snap.Blocks[i].PrefixLines {
 				continue
 			}
 
@@ -250,20 +237,20 @@ func (w *Workspace) publishMarkdownDiagnostics(snap *MarkdownDocumentSnapshot) {
 			// rejected, duplicated, or colliding import alias is informational
 			// here, not an error in the example. The block's own semantic
 			// diagnostics keep their severity.
-			if diag.Code != nil {
-				if codeVal, ok := diag.Code.Value.(string); ok && isImportDeclarationCode(codeVal) {
+			if d.Code != nil {
+				if codeVal, ok := d.Code.Value.(string); ok && diag.IsImportDeclarationCode(codeVal) {
 					hint := protocol.DiagnosticSeverityHint
-					diag.Severity = &hint
+					d.Severity = &hint
 				}
 			}
 
 			// Convert primary range from block-local to markdown coordinates
 			startLine, startChar := snap.BlockPositionToMarkdown(i,
-				int(diag.Range.Start.Line), int(diag.Range.Start.Character))
+				int(d.Range.Start.Line), int(d.Range.Start.Character))
 			endLine, endChar := snap.BlockPositionToMarkdown(i,
-				int(diag.Range.End.Line), int(diag.Range.End.Character))
+				int(d.Range.End.Line), int(d.Range.End.Character))
 
-			diag.Range = protocol.Range{
+			d.Range = protocol.Range{
 				Start: protocol.Position{
 					Line:      lsputil.ToUInteger(startLine),
 					Character: lsputil.ToUInteger(startChar),
@@ -275,11 +262,11 @@ func (w *Workspace) publishMarkdownDiagnostics(snap *MarkdownDocumentSnapshot) {
 			}
 
 			// Remap RelatedInformation URIs and ranges
-			if len(diag.RelatedInformation) > 0 {
+			if len(d.RelatedInformation) > 0 {
 				block := snap.Blocks[i]
 				expectedURI := lsputil.PathToURI(block.SourceID.String())
 				var remapped []protocol.DiagnosticRelatedInformation
-				for _, rel := range diag.RelatedInformation {
+				for _, rel := range d.RelatedInformation {
 					if rel.Location.URI != expectedURI {
 						w.logger.Warn("related info URI does not match expected block SourceID; skipping remap",
 							slog.String("expected", expectedURI), slog.String("got", rel.Location.URI))
@@ -309,10 +296,10 @@ func (w *Workspace) publishMarkdownDiagnostics(snap *MarkdownDocumentSnapshot) {
 						Message: rel.Message,
 					})
 				}
-				diag.RelatedInformation = remapped
+				d.RelatedInformation = remapped
 			}
 
-			allDiagnostics = append(allDiagnostics, diag)
+			allDiagnostics = append(allDiagnostics, d)
 		}
 	}
 

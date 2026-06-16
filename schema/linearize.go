@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -171,7 +172,7 @@ func (c *completer) completeTypes() {
 				// from the imported schema), mirroring validateRelationTarget;
 				// silently dropping it would strip the child of every inherited
 				// member with no diagnostic.
-				if ref.Qualifier() != "" && (c.registry == nil || c.qualifierDeferred(ref.Qualifier())) {
+				if c.referenceDeferred(ref.Qualifier()) {
 					return
 				}
 				c.errorf(t.Span(), diag.E_UNKNOWN_TYPE,
@@ -217,16 +218,6 @@ func (c *completer) completeTypes() {
 		allProps := c.mergeProperties(t, supers)
 		t.setAllProperties(allProps)
 
-		// Own (declared-in-t) properties. A rejected primary's root cause is
-		// the type that DECLARES it; that type reports it when completed
-		// (supertypes complete before their subtypes). Re-checking the same
-		// inherited *Property at every descendant would duplicate the
-		// identical diagnostic at the identical span once per subtype.
-		ownProps := make(map[*Property]bool, len(t.PropertiesSlice()))
-		for _, p := range t.PropertiesSlice() {
-			ownProps[p] = true
-		}
-
 		// Extract primary keys
 		pks := make([]*Property, 0)
 		for _, p := range allProps {
@@ -241,9 +232,15 @@ func (c *completer) completeTypes() {
 					continue
 				}
 				if !isPrimaryKeyAllowed(p.Constraint()) {
-					// Report only at the declaring type; an inherited rejected
-					// primary was already reported when its ancestor completed.
-					if ownProps[p] {
+					// Report only at the declaring type. An inherited rejected
+					// primary was already reported when its ancestor completed
+					// (supertypes complete before their subtypes); re-checking the
+					// same inherited *Property at every descendant would duplicate
+					// the identical diagnostic at the identical span. Membership is
+					// tested against the type's own-property slice (t.properties)
+					// directly on this rare rejection path — no clone, no per-type
+					// set.
+					if slices.Contains(t.properties, p) {
 						// The constraint is nil when parse-error recovery kept a
 						// property that never received a type; describe that
 						// rather than dereferencing it.

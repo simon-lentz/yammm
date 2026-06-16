@@ -141,6 +141,42 @@ func TestCollector_Merge(t *testing.T) {
 	}
 }
 
+func TestCollector_MergeTruncatedResult_PreservesCountsAndTruncation(t *testing.T) {
+	// A truncated source Result (its limit hit, a real Error dropped past it)
+	// must merge without losing the dropped error's severity contribution or the
+	// truncation state — otherwise a dropped error reads as success after a
+	// merge, the same hazard collectLocked closes for direct collection.
+	src := NewCollector(1)
+	src.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
+	src.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
+	srcRes := src.Result()
+	if !srcRes.LimitReached() || srcRes.Len() != 1 || srcRes.DroppedCount() != 1 || srcRes.OK() {
+		t.Fatalf("source setup: LimitReached=%v Len=%d Dropped=%d OK=%v; want true/1/1/false",
+			srcRes.LimitReached(), srcRes.Len(), srcRes.DroppedCount(), srcRes.OK())
+	}
+
+	dst := NewCollectorUnlimited()
+	dst.Merge(srcRes)
+	res := dst.Result()
+
+	if res.OK() {
+		t.Error("OK() = true; want false — the dropped error must survive the merge")
+	}
+	if !res.HasErrors() {
+		t.Error("HasErrors() = false; want true")
+	}
+	if !res.LimitReached() {
+		t.Error("LimitReached() = false; want true — truncation must propagate through Merge")
+	}
+	if res.DroppedCount() != 1 {
+		t.Errorf("DroppedCount() = %d; want 1", res.DroppedCount())
+	}
+	// The surviving warning is stored; the dropped error is counted, not listed.
+	if res.Len() != 1 {
+		t.Errorf("Len() = %d; want 1 (the survivor; the dropped error is counted, not stored)", res.Len())
+	}
+}
+
 func TestCollector_Limit(t *testing.T) {
 	c := NewCollector(2)
 

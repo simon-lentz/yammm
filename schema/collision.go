@@ -199,7 +199,7 @@ func (c *completer) validateRelationTarget(_ *Type, r *Relation, kind string) {
 		// loader saw but could not resolve — the import failure already
 		// carries the root-cause diagnostic, so the reference is skipped
 		// rather than re-blamed.
-		if r.Target().Qualifier() != "" && (c.registry == nil || c.qualifierDeferred(r.Target().Qualifier())) {
+		if c.referenceDeferred(r.Target().Qualifier()) {
 			return
 		}
 
@@ -225,7 +225,7 @@ func (c *completer) validateCompositionTarget(t *Type, r *Relation) {
 		// linking), or the qualifier names an import the loader saw but
 		// could not resolve — the import failure is the root-cause
 		// diagnostic, so the reference is skipped rather than re-blamed.
-		if r.Target().Qualifier() != "" && (c.registry == nil || c.qualifierDeferred(r.Target().Qualifier())) {
+		if c.referenceDeferred(r.Target().Qualifier()) {
 			return
 		}
 

@@ -252,6 +252,7 @@ func (r *Renderer) writeSeverity(sb *strings.Builder, sev Severity) {
 	}
 
 	if r.colorize {
+		//exhaustive:enforce
 		switch sev {
 		case Fatal, Error:
 			sb.WriteString("\033[1;31m") // Bold red

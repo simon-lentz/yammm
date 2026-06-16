@@ -608,7 +608,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// broken sibling still compiles, registers, and draws no false
 	// E_UPSTREAM_FAIL. For the entry schema the snapshot is zero, which
 	// preserves the public all-or-nothing contract exactly.
-	errorsAtEntry := l.collector.ErrorCount()
+	gate := newErrorGate(l.collector)
 
 	// Save the parent's per-schema import bindings and create a fresh map for
 	// this invocation. This stack-based approach gives each schema load its own
@@ -681,9 +681,27 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	}
 
 	// Wire resolved schema references (SourceID already set during completion).
-	// A failed binding has a nil schema and is skipped — its Import is deferred.
+	// The Import's own ResolvedSourceID is the single authority for whether to
+	// wire — exactly as [Builder.wireImports] uses it. A completer-resolved
+	// import (non-zero SourceID) carries a schema; a deferred import — a failed
+	// load, or an alias the loader resolved but the completer then rejected (e.g.
+	// colliding with a local name) — has a zero SourceID and stays schema-less.
+	// Wiring the loader's still-resolved schema onto a deferred Import would give
+	// it a non-nil Schema contradicting its zero ResolvedSourceID, so the
+	// zero-SourceID check — not the loader binding's failed flag — is what gates
+	// this (the binding is then known non-failed, so its schema is real).
+	//
+	// The schema pointer comes from the loader binding rather than a
+	// registry-by-SourceID lookup (the shape Builder.wireImports uses): the
+	// binding is the loader's authoritative within-load record, whereas s and its
+	// freshly-loaded imports are not registered until after this loop (see
+	// l.registry.Register below), so a registry lookup here would couple wiring to
+	// registration order.
 	for _, imp := range s.ImportsSlice() {
-		if binding, ok := l.imports[imp.Alias()]; ok && !binding.failed {
+		if imp.ResolvedSourceID().IsZero() {
+			continue
+		}
+		if binding, ok := l.imports[imp.Alias()]; ok {
 			imp.setSchema(binding.schema)
 		}
 	}
@@ -698,7 +716,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// error-delta against the entry snapshot; errors collected before this
 	// schema began belong to siblings and do not poison it).
 	// Check BEFORE registration to avoid registering schemas we'll discard.
-	if l.collector.ErrorCount() > errorsAtEntry {
+	if gate.tripped() {
 		return nil, l.collector.Result(), nil
 	}
 
@@ -821,6 +839,12 @@ func (l *loader) aliasBound(alias string) bool {
 func (l *loader) markImportFailed(imp *importDecl) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.markImportFailedLocked(imp)
+}
+
+// markImportFailedLocked records imp's alias as a failed (no-SourceID) binding.
+// Caller must hold l.mu; see [loader.markImportFailed] for the contract.
+func (l *loader) markImportFailedLocked(imp *importDecl) {
 	l.imports[imp.Alias] = importBinding{decl: imp, failed: true}
 }
 
@@ -828,10 +852,14 @@ func (l *loader) markImportFailed(imp *importDecl) {
 // an already-bound alias is left as-is). Used when imports are categorically
 // rejected (disallowed) or unresolvable as a group (no module root), so the
 // completer defers references through them instead of re-reporting per site.
+// The check-and-set runs under a single lock for the whole batch rather than a
+// lock cycle per import.
 func (l *loader) markUnboundImportsFailed(imports []*importDecl) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	for _, imp := range imports {
-		if !l.aliasBound(imp.Alias) {
-			l.markImportFailed(imp)
+		if _, bound := l.imports[imp.Alias]; !bound {
+			l.markImportFailedLocked(imp)
 		}
 	}
 }
@@ -896,6 +924,41 @@ func (l *loader) validateResolvedImports(imports []*importDecl) {
 	}
 }
 
+// bindIfKnown binds imp to an already-known schema for sourceID without reading
+// or compiling it: a prior compile failure in this load, a within-Load cache hit
+// (l.loadedSchemas), or a shared-registry hit. It returns true when it handled
+// imp — bound, or (for a prior compile failure) reported imp's own
+// E_UPSTREAM_FAIL — and false when sourceID is not yet known, leaving imp for the
+// caller to read and load.
+//
+// The failed-compile memo is why a diamond over a broken import does not
+// re-parse it per importer: the broken source's own diagnostics are collected
+// once (by the first attempt that recursively loaded it), while every importer
+// still reports its own E_UPSTREAM_FAIL here.
+//
+// Acquires l.mu internally; the caller must NOT hold it.
+func (l *loader) bindIfKnown(imp *importDecl, sourceID location.SourceID) bool {
+	l.mu.Lock()
+	if _, failed := l.failedCompiles[sourceID]; failed {
+		l.mu.Unlock() // reportFailedCompile takes l.mu itself
+		l.reportFailedCompile(imp, sourceID)
+		return true
+	}
+	loaded, ok := l.loadedSchemas[sourceID]
+	if !ok {
+		loaded, ok = l.registry.LookupBySourceID(sourceID)
+		if !ok {
+			l.mu.Unlock()
+			return false
+		}
+		l.loadedSchemas[sourceID] = loaded
+	}
+	l.registerCachedClosureSources(loaded)
+	l.imports[imp.Alias] = importBinding{sourceID: sourceID, schema: loaded, decl: imp}
+	l.mu.Unlock()
+	return true
+}
+
 // loadImport loads a single imported schema. A content failure is
 // collected at the declaration and the alias recorded as failed; the
 // error return carries only cancellation.
@@ -927,40 +990,9 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 		_ = l.ensureRootLoader() //nolint:errcheck // readImportFile re-runs ensureRootLoader and surfaces the error uniformly
 	}
 	for _, cand := range l.candidateImportSourceIDs(relativePath) {
-		l.mu.Lock()
-		// A source that already failed to compile in this load is not
-		// re-attempted: each importer gets its own E_UPSTREAM_FAIL at its
-		// own declaration, but the failed source's diagnostics were
-		// collected once, by the first attempt. Without the memo a
-		// diamond-shaped graph over a broken import would re-parse the
-		// import per importer and collect its diagnostics once per path.
-		if _, failed := l.failedCompiles[cand]; failed {
-			l.mu.Unlock()
-			l.reportFailedCompile(imp, cand)
+		if l.bindIfKnown(imp, cand) {
 			return nil
 		}
-		if loadedSchema, ok := l.loadedSchemas[cand]; ok {
-			l.registerCachedClosureSources(loadedSchema)
-			l.imports[imp.Alias] = importBinding{
-				sourceID: cand,
-				schema:   loadedSchema,
-				decl:     imp,
-			}
-			l.mu.Unlock()
-			return nil
-		}
-		if existing, ok := l.registry.LookupBySourceID(cand); ok {
-			l.loadedSchemas[cand] = existing
-			l.registerCachedClosureSources(existing)
-			l.imports[imp.Alias] = importBinding{
-				sourceID: cand,
-				schema:   existing,
-				decl:     imp,
-			}
-			l.mu.Unlock()
-			return nil
-		}
-		l.mu.Unlock()
 	}
 
 	// Read the import using rootLoader (sandboxed) or in-memory sources
@@ -989,34 +1021,9 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	// survives any future path-resolution edge case that the candidate
 	// derivation above doesn't anticipate). The failed-compile memo gets the
 	// same treatment for the same reason.
-	l.mu.Lock()
-	if _, failed := l.failedCompiles[importSourceID]; failed {
-		l.mu.Unlock()
-		l.reportFailedCompile(imp, importSourceID)
+	if l.bindIfKnown(imp, importSourceID) {
 		return nil
 	}
-	if loadedSchema, ok := l.loadedSchemas[importSourceID]; ok {
-		l.registerCachedClosureSources(loadedSchema)
-		l.imports[imp.Alias] = importBinding{
-			sourceID: importSourceID,
-			schema:   loadedSchema,
-			decl:     imp,
-		}
-		l.mu.Unlock()
-		return nil
-	}
-	if existing, ok := l.registry.LookupBySourceID(importSourceID); ok {
-		l.loadedSchemas[importSourceID] = existing
-		l.registerCachedClosureSources(existing)
-		l.imports[imp.Alias] = importBinding{
-			sourceID: importSourceID,
-			schema:   existing,
-			decl:     imp,
-		}
-		l.mu.Unlock()
-		return nil
-	}
-	l.mu.Unlock()
 
 	// Register the source if not already registered
 	if _, exists := l.sourceContent[importSourceID]; !exists {

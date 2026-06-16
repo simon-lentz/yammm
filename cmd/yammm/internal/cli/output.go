@@ -65,27 +65,26 @@ func NewRenderer(format OutputFormat, isTTY bool, noColor bool, provider diag.So
 // droppedCount) rather than nothing — otherwise a machine consumer could not
 // tell a truncated result from a clean one.
 func RenderResult(w io.Writer, renderer *diag.Renderer, format OutputFormat, result diag.Result) error {
-	if result.OK() {
-		if !result.LimitReached() {
-			return nil
-		}
-		// No errors render, but the drop must still be visible.
-		if format == FormatJSON {
-			return writeResultJSON(w, renderer, result)
-		}
-		return writeTruncationNote(w, result)
-	}
-
 	switch format {
 	case FormatJSON:
+		// The JSON wire object carries limit/limitReached/droppedCount, so it is
+		// the single truncation surface for JSON: emit it whenever there is
+		// anything to report — errors, or a truncation that a clean result would
+		// otherwise render as nothing.
+		if result.OK() && !result.LimitReached() {
+			return nil
+		}
 		return writeResultJSON(w, renderer, result)
 	default:
-		text := renderer.FormatResult(result)
-		if text != "" {
-			if _, err := fmt.Fprintln(w, text); err != nil {
-				return err
+		if !result.OK() {
+			if text := renderer.FormatResult(result); text != "" {
+				if _, err := fmt.Fprintln(w, text); err != nil {
+					return err
+				}
 			}
 		}
+		// Truncation is surfaced uniformly for text — after any errors render,
+		// or alone when a clean result was truncated.
 		if result.LimitReached() {
 			return writeTruncationNote(w, result)
 		}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -844,6 +845,229 @@ type Code = String[2,2]`),
 	}, "main.yammm", t.TempDir())
 	if res.HasErrors() {
 		t.Fatalf("a resolvable imported datatype must load cleanly: %v", res)
+	}
+	if s == nil {
+		t.Fatal("expected a non-nil schema")
+	}
+}
+
+// requireBuildFailed asserts a Builder produced no schema — the all-or-nothing
+// contract (any error ⇒ nil schema) on the programmatic front door.
+func requireBuildFailed(t *testing.T, s *schema.Schema) {
+	t.Helper()
+	if s == nil {
+		return
+	}
+	t.Fatalf("build should fail, got schema %q", s.Name())
+}
+
+// TestLoad_RepeatedCollidingAlias_ReportedAsDuplicate pins that a repeated
+// import alias that also collides with a local datatype name is reported once
+// for the collision (the first declaration) and once as a duplicate (the later
+// declaration) — not twice as a collision. The keep-first alias slot is claimed
+// even for a rejected declaration, so a repeat draws E_DUPLICATE_IMPORT rather
+// than re-firing the collision, holding the "each independent error exactly
+// once" contract for the repeated-rejected-alias shape.
+func TestLoad_RepeatedCollidingAlias_ReportedAsDuplicate(t *testing.T) {
+	t.Parallel()
+	res := loadSourcesErr(t, map[string][]byte{
+		"main.yammm": []byte(`schema "main"
+import "./a" as Money
+import "./b" as Money
+type Money = String[3,3]
+type Thing { id String primary }`),
+		"a.yammm": []byte(`schema "a"`),
+		"b.yammm": []byte(`schema "b"`),
+	})
+
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_IMPORT_ALIAS_COLLISION: 1,
+		diag.E_DUPLICATE_IMPORT:       1,
+	})
+}
+
+// TestBuild_RegistryQualifiedExtends_UndeclaredImport_Errors pins that a Builder
+// schema with a registry but zero imports rejects a qualified extends naming an
+// undeclared import: with a registry present, a nil resolution map can only mean
+// a zero-import schema, so the qualifier names no import and can never resolve —
+// a genuine E_UNKNOWN_TYPE that nils the schema, not a silent deferral. The
+// regression dropped the supertype and loaded clean.
+func TestBuild_RegistryQualifiedExtends_UndeclaredImport_Errors(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("d").
+		WithRegistry(schema.NewRegistry()).
+		AddType("Person").
+		WithPrimaryKey("name", schema.NewStringConstraint()).
+		Extends(schema.NewTypeRef("bogus", "Base", location.Span{})).
+		Done().
+		Build()
+	requireBuildFailed(t, s)
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_UNKNOWN_TYPE: 1,
+	})
+}
+
+// TestBuild_RegistryQualifiedRelation_UndeclaredImport_Errors pins the same
+// regression on a relation target: a qualified association target naming an
+// undeclared import is reported, not silently dropped.
+func TestBuild_RegistryQualifiedRelation_UndeclaredImport_Errors(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("d").
+		WithRegistry(schema.NewRegistry()).
+		AddType("Person").
+		WithPrimaryKey("name", schema.NewStringConstraint()).
+		WithRelation("employer", schema.NewTypeRef("bogus", "Organization", location.Span{}), true, false).
+		Done().
+		Build()
+	requireBuildFailed(t, s)
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_UNKNOWN_TYPE: 1,
+	})
+}
+
+// TestBuild_RegistryQualifiedPropertyDatatype_UndeclaredImport_Errors pins the
+// same regression on a property's datatype reference (the resolveAliasChain
+// path, distinct from the extends/relation resolveTypeRef path).
+func TestBuild_RegistryQualifiedPropertyDatatype_UndeclaredImport_Errors(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("d").
+		WithRegistry(schema.NewRegistry()).
+		AddType("Thing").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("code", schema.NewAliasConstraint("bogus.Code", nil)).
+		Done().
+		Build()
+	requireBuildFailed(t, s)
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_UNKNOWN_TYPE: 1,
+	})
+}
+
+// TestBuild_RegistryQualifiedPrimaryKey_UndeclaredImport_SingleError pins that a
+// primary key typed through an undeclared import reports exactly one diagnostic:
+// E_UNKNOWN_TYPE from alias resolution. The primary-key type check defers to
+// that report (no E_INVALID_PRIMARY_KEY_TYPE), and absence-blame does not fire
+// (the property IS a declared primary). Without the coordinated primaryKeyType
+// Deferred change, the resolveAliasChain fix would double-report.
+func TestBuild_RegistryQualifiedPrimaryKey_UndeclaredImport_SingleError(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("d").
+		WithRegistry(schema.NewRegistry()).
+		AddType("Thing").
+		WithPrimaryKey("id", schema.NewAliasConstraint("bogus.IdType", nil)).
+		Done().
+		Build()
+	requireBuildFailed(t, s)
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_UNKNOWN_TYPE:             1,
+		diag.E_INVALID_PRIMARY_KEY_TYPE: 0,
+		diag.E_NO_PRIMARY_KEY:           0,
+	})
+}
+
+// TestBuild_NoRegistryQualifiedExtends_DefersAtLinkTime is the control for the
+// registry-present fix above: without a registry, a qualified reference resolves
+// at link time, so it defers (no error, non-nil schema). This behavior is
+// unchanged — the fix narrows only the registry-present, nil-map case.
+func TestBuild_NoRegistryQualifiedExtends_DefersAtLinkTime(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("d").
+		AddType("Person").
+		WithPrimaryKey("name", schema.NewStringConstraint()).
+		Extends(schema.NewTypeRef("bogus", "Base", location.Span{})).
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("a no-registry Builder defers qualified refs to link time, got: %v", res)
+	}
+	if s == nil {
+		t.Fatal("expected a non-nil schema (the qualified extends defers)")
+	}
+}
+
+// TestBuild_DatatypeAliasChainToUnknown_ReportedOnce pins that a datatype alias
+// chain bottoming out in an unknown name blames that name exactly once, even
+// though the chain is re-walked once per reference (the datatype's own
+// resolution plus every property that chains through it). Constructible only via
+// the Builder: the DSL grammar requires a builtin on a datatype's right-hand
+// side, so `type X = Mystery` is a parse error in .yammm text.
+func TestBuild_DatatypeAliasChainToUnknown_ReportedOnce(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("main").
+		AddDataType("X", schema.NewAliasConstraint("Mystery", nil)).
+		AddType("Thing").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("a", schema.NewAliasConstraint("X", nil)).
+		WithProperty("b", schema.NewAliasConstraint("X", nil)).
+		Done().
+		Build()
+	requireBuildFailed(t, s)
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_UNKNOWN_TYPE: 1,
+	})
+}
+
+// TestLoad_DistinctPropertiesSameUnknownDatatype_EachReported pins that the
+// chain-recursion suppression is scoped to the chain, not to direct references:
+// two properties typed by the same undeclared name draw two E_UNKNOWN_TYPE, one
+// per declaration site — mirroring how two relations to the same unknown target
+// each report. A datatype-mediated chain (above) is the only shape deduplicated.
+func TestLoad_DistinctPropertiesSameUnknownDatatype_EachReported(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, `schema "main"
+type Thing {
+	id String primary
+	a Mystery
+	b Mystery
+}`)
+
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_UNKNOWN_TYPE: 2,
+	})
+}
+
+// TestLoad_PrimaryKeyTypedByResolvedImportMissingDatatype_SingleUnknownType pins
+// the reachable primary-key deferral path: a primary key typed by a qualified
+// name whose import resolves but does not declare the datatype is reported once
+// (E_UNKNOWN_TYPE by alias resolution), with the primary-key type check deferring
+// to that report (no E_INVALID_PRIMARY_KEY_TYPE) and no absence blame.
+func TestLoad_PrimaryKeyTypedByResolvedImportMissingDatatype_SingleUnknownType(t *testing.T) {
+	t.Parallel()
+	res := loadSourcesErr(t, map[string][]byte{
+		"main.yammm": []byte(`schema "main"
+import "./other" as other
+type Thing { id other.Missing primary }`),
+		"other.yammm": []byte(`schema "other"
+type Code = String[2,2]`),
+	})
+
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_UNKNOWN_TYPE:             1,
+		diag.E_INVALID_PRIMARY_KEY_TYPE: 0,
+		diag.E_NO_PRIMARY_KEY:           0,
+	})
+}
+
+// TestLoad_PrimaryKeyTypedByResolvedImportedDatatype_Resolves is the positive
+// control: a primary key typed by a datatype that exists in a resolved import
+// and bottoms out in a key-eligible builtin loads cleanly.
+func TestLoad_PrimaryKeyTypedByResolvedImportedDatatype_Resolves(t *testing.T) {
+	t.Parallel()
+	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"main.yammm": []byte(`schema "main"
+import "./other" as other
+type Thing { id other.Code primary }`),
+		"other.yammm": []byte(`schema "other"
+type Code = String[2,2]`),
+	}, "main.yammm", t.TempDir())
+	if res.HasErrors() {
+		t.Fatalf("a primary key typed by a resolved imported datatype must load cleanly: %v", res)
 	}
 	if s == nil {
 		t.Fatal("expected a non-nil schema")
