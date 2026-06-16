@@ -130,7 +130,7 @@ func (c *completer) completeTypes() {
 
 	// Set schema name on each type for cross-schema display.
 	schemaName := c.schema.Name()
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		t.setSchemaName(schemaName)
 	}
 
@@ -272,14 +272,14 @@ func (c *completer) completeTypes() {
 		t.setAllInvariants(allInvs)
 	}
 
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		completeType(t)
 	}
 
 	// Set subtypes after all types are completed.
 	// Only update subtypes for types in the current schema; cross-schema
 	// types are already sealed and their subtypes are not mutable here.
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		for super := range t.SuperTypes() {
 			superID := super.ID()
 			// Only set subtypes on local types (same schema)
@@ -366,7 +366,7 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 			continue
 		}
 
-		for _, p := range superType.AllPropertiesSlice() {
+		for p := range superType.AllProperties() {
 			existing, ok := seen[p.Name()]
 			if !ok {
 				seen[p.Name()] = p
@@ -424,7 +424,7 @@ func (c *completer) mergeInvariants(t *Type, supers []ResolvedTypeRef) []*Invari
 			continue
 		}
 
-		for _, inv := range superType.AllInvariantsSlice() {
+		for inv := range superType.AllInvariants() {
 			if seen[inv.Name()] {
 				continue
 			}

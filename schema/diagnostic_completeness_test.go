@@ -990,6 +990,30 @@ func TestBuild_NoRegistryQualifiedExtends_DefersAtLinkTime(t *testing.T) {
 	}
 }
 
+// TestBuild_NoRegistryQualifiedPrimaryKey_DefersAtLinkTime pins that a primary
+// key typed by a qualified datatype defers at link time on a no-registry Builder,
+// exactly as a qualified extends (above), relation target, and non-primary
+// property datatype already do. Without a registry the cross-schema datatype
+// cannot be resolved, so the type is unknowable here — not invalid: the
+// primary-key type check defers rather than rejecting with a misleading
+// E_INVALID_PRIMARY_KEY_TYPE that would nil a schema every sibling reference kind
+// loads clean.
+func TestBuild_NoRegistryQualifiedPrimaryKey_DefersAtLinkTime(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("d").
+		AddType("Thing").
+		WithPrimaryKey("id", schema.NewAliasConstraint("bogus.IdType", nil)).
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("a no-registry Builder defers a qualified primary-key datatype to link time, got: %v", res)
+	}
+	if s == nil {
+		t.Fatal("expected a non-nil schema (the qualified primary-key type defers)")
+	}
+}
+
 // TestBuild_DatatypeAliasChainToUnknown_ReportedOnce pins that a datatype alias
 // chain bottoming out in an unknown name blames that name exactly once, even
 // though the chain is re-walked once per reference (the datatype's own

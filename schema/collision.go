@@ -11,7 +11,7 @@ const reservedPrefix = "_target_"
 
 // detectCollisions checks for naming collisions in all types.
 func (c *completer) detectCollisions() {
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		c.detectTypeCollisions(t)
 	}
 }
@@ -24,7 +24,7 @@ func (c *completer) detectTypeCollisions(t *Type) {
 	// We intentionally check PropertiesSlice() (own) not AllPropertiesSlice() (all)
 	// because inherited properties are validated when their declaring type is checked,
 	// avoiding duplicate errors when parent and child are in the same schema.
-	for _, p := range t.PropertiesSlice() {
+	for p := range t.Properties() {
 		if strings.HasPrefix(strings.ToLower(p.Name()), reservedPrefix) {
 			c.errorf(p.Span(), diag.E_RESERVED_PREFIX,
 				"property %q uses reserved prefix %q", p.Name(), reservedPrefix)
@@ -32,13 +32,13 @@ func (c *completer) detectTypeCollisions(t *Type) {
 	}
 
 	// Check reserved prefixes on own relations
-	for _, r := range t.AssociationsSlice() {
+	for r := range t.Associations() {
 		if strings.HasPrefix(strings.ToLower(r.FieldName()), reservedPrefix) {
 			c.errorf(r.Span(), diag.E_RESERVED_PREFIX,
 				"relation %q uses reserved prefix %q", r.Name(), reservedPrefix)
 		}
 	}
-	for _, r := range t.CompositionsSlice() {
+	for r := range t.Compositions() {
 		if strings.HasPrefix(strings.ToLower(r.FieldName()), reservedPrefix) {
 			c.errorf(r.Span(), diag.E_RESERVED_PREFIX,
 				"relation %q uses reserved prefix %q", r.Name(), reservedPrefix)
@@ -54,7 +54,7 @@ func (c *completer) detectTypeCollisions(t *Type) {
 func (c *completer) checkPropertyCaseCollisions(t *Type) {
 	seen := make(map[string]*Property) // lowercase -> first property
 
-	for _, p := range t.AllPropertiesSlice() {
+	for p := range t.AllProperties() {
 		lower := strings.ToLower(p.Name())
 		if existing, found := seen[lower]; found {
 			if existing.Name() != p.Name() {
@@ -74,12 +74,12 @@ func (c *completer) checkPropertyCaseCollisions(t *Type) {
 func (c *completer) checkPropertyRelationCollisions(t *Type) {
 	// Build property name set (lowercase for case-insensitive check)
 	propNames := make(map[string]*Property)
-	for _, p := range t.AllPropertiesSlice() {
+	for p := range t.AllProperties() {
 		propNames[strings.ToLower(p.Name())] = p
 	}
 
 	// Check associations
-	for _, r := range t.AllAssociationsSlice() {
+	for r := range t.AllAssociations() {
 		lower := strings.ToLower(r.FieldName())
 		if prop, found := propNames[lower]; found {
 			c.errorf(r.Span(), diag.E_PROPERTY_RELATION_COLLISION,
@@ -89,7 +89,7 @@ func (c *completer) checkPropertyRelationCollisions(t *Type) {
 	}
 
 	// Check compositions
-	for _, r := range t.AllCompositionsSlice() {
+	for r := range t.AllCompositions() {
 		lower := strings.ToLower(r.FieldName())
 		if prop, found := propNames[lower]; found {
 			c.errorf(r.Span(), diag.E_PROPERTY_RELATION_COLLISION,
@@ -104,7 +104,7 @@ func (c *completer) checkRelationCollisions(t *Type) {
 	seen := make(map[string]*Relation) // fieldName -> first relation
 
 	// Check associations
-	for _, r := range t.AllAssociationsSlice() {
+	for r := range t.AllAssociations() {
 		if existing, found := seen[r.FieldName()]; found {
 			// Collision - check if they're from the same declaration
 			if !r.Equal(existing) {
@@ -119,7 +119,7 @@ func (c *completer) checkRelationCollisions(t *Type) {
 	}
 
 	// Check compositions
-	for _, r := range t.AllCompositionsSlice() {
+	for r := range t.AllCompositions() {
 		if existing, found := seen[r.FieldName()]; found {
 			// Collision between composition and association, or composition and composition
 			if !r.Equal(existing) {
@@ -136,14 +136,14 @@ func (c *completer) checkRelationCollisions(t *Type) {
 
 // validateRelationTargets checks that all relation targets exist.
 func (c *completer) validateRelationTargets() {
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		// Check associations
-		for _, r := range t.AssociationsSlice() {
+		for r := range t.Associations() {
 			c.validateRelationTarget(t, r, "association")
 		}
 
 		// Check compositions - must target a concrete part type
-		for _, r := range t.CompositionsSlice() {
+		for r := range t.Compositions() {
 			c.validateCompositionTarget(t, r)
 		}
 	}
@@ -155,10 +155,10 @@ func (c *completer) validateRelationTargets() {
 // validateAssociationTargets checks that part types don't declare associations
 // and that associations target a concrete type (not a part or abstract type).
 func (c *completer) validateAssociationTargets() {
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		// Part types cannot declare associations
 		if t.IsPart() {
-			for _, r := range t.AssociationsSlice() {
+			for r := range t.Associations() {
 				c.errorf(r.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
 					"part type %q cannot declare association %q", t.Name(), r.Name())
 			}
@@ -168,11 +168,12 @@ func (c *completer) validateAssociationTargets() {
 		// declared target's exact TypeID, and neither a part (composition-only) nor
 		// an abstract (non-instantiable) type ever has an instance under that
 		// TypeID, so such an edge could never resolve in a graph.
-		for _, r := range t.AssociationsSlice() {
+		for r := range t.Associations() {
 			target := c.resolveTypeRef(r.Target())
 			if target == nil {
-				// Deferred cross-schema ref (registry absent); re-validated on a
-				// full registry-backed load, as in validateCompositionTarget.
+				// Cross-schema ref the registry-less Builder cannot resolve, so this
+				// check is skipped here; the registry-backed Load path runs it (see
+				// validateCompositionTarget).
 				continue
 			}
 			switch {
@@ -215,16 +216,19 @@ func (c *completer) validateRelationTarget(_ *Type, r *Relation, kind string) {
 }
 
 // validateCompositionTarget checks that a composition target is a concrete part type.
-// NOTE: When the target is a cross-schema ref and registry is nil, the IsPart and
-// IsAbstract checks are deferred. These constraints should be re-validated when
-// the schema is linked with a registry that can resolve cross-schema references.
+// NOTE: when the target is a cross-schema ref and registry is nil (the registry-less
+// Builder path), the IsPart and IsAbstract checks are skipped — the registry-backed
+// Load path runs them instead, since it always supplies a registry. There is no API to
+// validate an already-built schema after the fact, so a registry-less Builder schema
+// with an unresolved cross-schema target never receives these checks.
 func (c *completer) validateCompositionTarget(t *Type, r *Relation) {
 	target := c.resolveTypeRef(r.Target())
 	if target == nil {
-		// Deferred: no registry to resolve cross-schema refs (validated at
-		// linking), or the qualifier names an import the loader saw but
-		// could not resolve — the import failure is the root-cause
-		// diagnostic, so the reference is skipped rather than re-blamed.
+		// Deferred: without a registry the cross-schema ref cannot be resolved
+		// here, so this check is skipped — the registry-backed Load path runs it.
+		// Or the qualifier names an import the loader saw but could not resolve,
+		// whose import failure is the root-cause diagnostic, so the reference is
+		// skipped rather than re-blamed.
 		if c.referenceDeferred(r.Target().Qualifier()) {
 			return
 		}

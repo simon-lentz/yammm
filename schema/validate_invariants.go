@@ -25,15 +25,15 @@ func buildStaticScope(t *Type) *staticScope {
 	}
 
 	// Add all property names (own + inherited)
-	for _, p := range t.AllPropertiesSlice() {
+	for p := range t.AllProperties() {
 		scope.names[strings.ToLower(p.Name())] = true
 	}
 
 	// Add all relation field names (own + inherited)
-	for _, r := range t.AllAssociationsSlice() {
+	for r := range t.AllAssociations() {
 		scope.names[strings.ToLower(r.FieldName())] = true
 	}
-	for _, r := range t.AllCompositionsSlice() {
+	for r := range t.AllCompositions() {
 		scope.names[strings.ToLower(r.FieldName())] = true
 	}
 
@@ -64,12 +64,12 @@ func (s *staticScope) child(varName string, targetType *Type) *staticScope {
 // (relation targets resolved), so AllPropertiesSlice/AllAssociationsSlice/
 // AllCompositionsSlice are fully populated.
 func (c *completer) validateInvariantExpressions() {
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		// Nothing to validate for a type with no invariants — skip the per-type
 		// supertype-resolution check and scope build, whose only product is
 		// invariant diagnostics. (Common shape; this phase runs on every LSP
 		// analyze, so the skip matters for editor responsiveness on large schemas.)
-		if len(t.AllInvariantsSlice()) == 0 {
+		if len(t.allInvariants) == 0 {
 			continue
 		}
 		// A type whose supertype chain has an unresolved link has an
@@ -82,7 +82,7 @@ func (c *completer) validateInvariantExpressions() {
 		}
 		scope := buildStaticScope(t)
 
-		for _, inv := range t.AllInvariantsSlice() {
+		for inv := range t.AllInvariants() {
 			if inv.Expression() == nil {
 				continue
 			}
@@ -457,13 +457,13 @@ func (c *completer) extractVarName(e expr.Expression) string {
 func (c *completer) lookupRelationTarget(ownerType *Type, fieldName string) *Type {
 	lower := strings.ToLower(fieldName)
 
-	for _, r := range ownerType.AllAssociationsSlice() {
+	for r := range ownerType.AllAssociations() {
 		if strings.ToLower(r.FieldName()) == lower {
 			return c.resolveTypeRef(r.Target())
 		}
 	}
 
-	for _, r := range ownerType.AllCompositionsSlice() {
+	for r := range ownerType.AllCompositions() {
 		if strings.ToLower(r.FieldName()) == lower {
 			return c.resolveTypeRef(r.Target())
 		}

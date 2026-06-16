@@ -963,6 +963,23 @@ func TestMarkdownIntegration_ImportRejection(t *testing.T) {
 	require.NoError(t, err, "document symbols should not error despite import rejection")
 }
 
+// severityByCode indexes published diagnostics by their string code, keeping each
+// code's severity. Diagnostics without a code or severity are skipped. Used by the
+// markdown-integration tests to assert per-code severity (e.g. import-declaration
+// codes downgraded to Hint while the block's own errors keep Error).
+func severityByCode(diags []protocol.Diagnostic) map[string]protocol.DiagnosticSeverity {
+	byCode := make(map[string]protocol.DiagnosticSeverity)
+	for _, d := range diags {
+		if d.Code == nil || d.Severity == nil {
+			continue
+		}
+		if codeVal, ok := d.Code.Value.(string); ok {
+			byCode[codeVal] = *d.Severity
+		}
+	}
+	return byCode
+}
+
 // TestMarkdownIntegration_ImportRejectionDoesNotSuppressOtherDiagnostics pins
 // that a code block declaring an import still publishes the block's own
 // independent findings: the structural rejection arrives as a Hint (the
@@ -990,23 +1007,15 @@ func TestMarkdownIntegration_ImportRejectionDoesNotSuppressOtherDiagnostics(t *t
 	diags := collector.DiagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for the block")
 
-	severityByCode := make(map[string]protocol.DiagnosticSeverity)
-	for _, d := range diags {
-		if d.Code == nil || d.Severity == nil {
-			continue
-		}
-		if codeVal, ok := d.Code.Value.(string); ok {
-			severityByCode[codeVal] = *d.Severity
-		}
-	}
+	byCode := severityByCode(diags)
 
-	assert.Equal(t, protocol.DiagnosticSeverityHint, severityByCode["E_IMPORT_NOT_ALLOWED"],
+	assert.Equal(t, protocol.DiagnosticSeverityHint, byCode["E_IMPORT_NOT_ALLOWED"],
 		"the structural rejection renders as a Hint in markdown")
-	assert.Equal(t, protocol.DiagnosticSeverityError, severityByCode["E_NO_PRIMARY_KEY"],
+	assert.Equal(t, protocol.DiagnosticSeverityError, byCode["E_NO_PRIMARY_KEY"],
 		"the block's own semantic error keeps Error severity alongside the rejection")
-	assert.NotContains(t, severityByCode, "E_UNKNOWN_TYPE",
+	assert.NotContains(t, byCode, "E_UNKNOWN_TYPE",
 		"references through the rejected alias are deferred, not unknown")
-	assert.NotContains(t, severityByCode, "E_IMPORT_RESOLVE",
+	assert.NotContains(t, byCode, "E_IMPORT_RESOLVE",
 		"rejected imports are never probed")
 }
 
@@ -1037,21 +1046,13 @@ func TestMarkdownIntegration_ImportDeclarationErrorsAreHints(t *testing.T) {
 	diags := collector.DiagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for the block")
 
-	severityByCode := make(map[string]protocol.DiagnosticSeverity)
-	for _, d := range diags {
-		if d.Code == nil || d.Severity == nil {
-			continue
-		}
-		if codeVal, ok := d.Code.Value.(string); ok {
-			severityByCode[codeVal] = *d.Severity
-		}
-	}
+	byCode := severityByCode(diags)
 
-	assert.Equal(t, protocol.DiagnosticSeverityHint, severityByCode["E_IMPORT_NOT_ALLOWED"],
+	assert.Equal(t, protocol.DiagnosticSeverityHint, byCode["E_IMPORT_NOT_ALLOWED"],
 		"the structural rejection renders as a Hint")
-	assert.Equal(t, protocol.DiagnosticSeverityHint, severityByCode["E_DUPLICATE_IMPORT"],
+	assert.Equal(t, protocol.DiagnosticSeverityHint, byCode["E_DUPLICATE_IMPORT"],
 		"a duplicate import alias is an import-declaration finding — soft in a snippet, like the rejection")
-	assert.Equal(t, protocol.DiagnosticSeverityError, severityByCode["E_NO_PRIMARY_KEY"],
+	assert.Equal(t, protocol.DiagnosticSeverityError, byCode["E_NO_PRIMARY_KEY"],
 		"the block's own semantic error keeps Error severity")
 }
 
