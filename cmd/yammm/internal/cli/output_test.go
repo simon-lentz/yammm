@@ -91,6 +91,80 @@ func TestRenderResult_OKResultWritesNothing(t *testing.T) {
 	assert.Empty(t, buf.String())
 }
 
+// truncatedResult builds a Result whose collector hit its issue limit:
+// `total` issues of the given severity collected against a limit of `limit`.
+func truncatedResult(severity diag.Severity, total, limit int) diag.Result {
+	c := diag.NewCollector(limit)
+	for i := range total {
+		c.Collect(diag.NewIssue(severity, diag.E_INTERNAL,
+			"issue "+string(rune('a'+i%26))).Build())
+	}
+	return c.Result()
+}
+
+func TestRenderResult_Text_SurfacesTruncation(t *testing.T) {
+	t.Parallel()
+
+	res := truncatedResult(diag.Error, 7, 5)
+	require.True(t, res.LimitReached())
+
+	renderer := diag.NewRenderer()
+	var buf bytes.Buffer
+	err := RenderResult(&buf, renderer, FormatText, res)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "2 more issue(s) dropped after reaching the 5-issue limit",
+		"the text format must say how many issues fell past the limit")
+}
+
+func TestRenderResult_Text_SurfacesTruncationOnOKResult(t *testing.T) {
+	t.Parallel()
+
+	// All-warning truncation: the result is OK (no errors) so no issues
+	// render, but the drop must still be visible.
+	res := truncatedResult(diag.Warning, 7, 5)
+	require.True(t, res.LimitReached())
+	require.True(t, res.OK())
+
+	renderer := diag.NewRenderer()
+	var buf bytes.Buffer
+	err := RenderResult(&buf, renderer, FormatText, res)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "2 more issue(s) dropped after reaching the 5-issue limit",
+		"truncation must not hide behind the no-errors early return")
+}
+
+func TestRenderResult_JSON_CarriesTruncationFields(t *testing.T) {
+	t.Parallel()
+
+	res := truncatedResult(diag.Error, 7, 5)
+
+	renderer := diag.NewRenderer()
+	var buf bytes.Buffer
+	err := RenderResult(&buf, renderer, FormatJSON, res)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), `"limitReached":true`)
+	assert.Contains(t, buf.String(), `"droppedCount":2`)
+}
+
+func TestRenderResult_JSON_SurfacesTruncationOnOKResult(t *testing.T) {
+	t.Parallel()
+
+	// All-warning truncation: the result is OK, so the OK early-return path
+	// handles it — but JSON must still emit the truncation wire fields, or a
+	// machine consumer cannot distinguish a truncated result from a clean one.
+	res := truncatedResult(diag.Warning, 8, 6)
+	require.True(t, res.LimitReached())
+	require.True(t, res.OK())
+
+	renderer := diag.NewRenderer()
+	var buf bytes.Buffer
+	err := RenderResult(&buf, renderer, FormatJSON, res)
+	require.NoError(t, err)
+	assert.NotEmpty(t, buf.String(), "JSON output for a truncated result must not be empty")
+	assert.Contains(t, buf.String(), `"limitReached":true`)
+	assert.Contains(t, buf.String(), `"droppedCount":2`)
+}
+
 func TestExitError(t *testing.T) {
 	t.Parallel()
 

@@ -25,15 +25,15 @@ func buildStaticScope(t *Type) *staticScope {
 	}
 
 	// Add all property names (own + inherited)
-	for _, p := range t.AllPropertiesSlice() {
+	for p := range t.AllProperties() {
 		scope.names[strings.ToLower(p.Name())] = true
 	}
 
 	// Add all relation field names (own + inherited)
-	for _, r := range t.AllAssociationsSlice() {
+	for r := range t.AllAssociations() {
 		scope.names[strings.ToLower(r.FieldName())] = true
 	}
-	for _, r := range t.AllCompositionsSlice() {
+	for r := range t.AllCompositions() {
 		scope.names[strings.ToLower(r.FieldName())] = true
 	}
 
@@ -63,23 +63,32 @@ func (s *staticScope) child(varName string, targetType *Type) *staticScope {
 // This runs after completeTypes (inheritance merged) and validateRelationTargets
 // (relation targets resolved), so AllPropertiesSlice/AllAssociationsSlice/
 // AllCompositionsSlice are fully populated.
-func (c *completer) validateInvariantExpressions() bool {
-	ok := true
-
-	for _, t := range c.schema.TypesSlice() {
+func (c *completer) validateInvariantExpressions() {
+	for _, t := range c.schema.types {
+		// Nothing to validate for a type with no invariants — skip the per-type
+		// supertype-resolution check and scope build, whose only product is
+		// invariant diagnostics. (Common shape; this phase runs on every LSP
+		// analyze, so the skip matters for editor responsiveness on large schemas.)
+		if len(t.allInvariants) == 0 {
+			continue
+		}
+		// A type whose supertype chain has an unresolved link has an
+		// incomplete merged member set, so invariants referencing inherited
+		// members would false-positive E_UNKNOWN_PROPERTY. The unresolved
+		// reference already carries its own diagnostic; a genuinely bogus
+		// reference on such a type surfaces once the root cause is fixed.
+		if c.hasUnresolvedSupertype(t) {
+			continue
+		}
 		scope := buildStaticScope(t)
 
-		for _, inv := range t.AllInvariantsSlice() {
+		for inv := range t.AllInvariants() {
 			if inv.Expression() == nil {
 				continue
 			}
-			if !c.walkExpr(inv.Expression(), scope, t, inv) {
-				ok = false
-			}
+			c.walkExpr(inv.Expression(), scope, t, inv)
 		}
 	}
-
-	return ok
 }
 
 // walkExpr recursively validates property/variable references in an expression.
@@ -448,13 +457,13 @@ func (c *completer) extractVarName(e expr.Expression) string {
 func (c *completer) lookupRelationTarget(ownerType *Type, fieldName string) *Type {
 	lower := strings.ToLower(fieldName)
 
-	for _, r := range ownerType.AllAssociationsSlice() {
+	for r := range ownerType.AllAssociations() {
 		if strings.ToLower(r.FieldName()) == lower {
 			return c.resolveTypeRef(r.Target())
 		}
 	}
 
-	for _, r := range ownerType.AllCompositionsSlice() {
+	for r := range ownerType.AllCompositions() {
 		if strings.ToLower(r.FieldName()) == lower {
 			return c.resolveTypeRef(r.Target())
 		}

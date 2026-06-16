@@ -1261,14 +1261,14 @@ func TestLoad_TransitiveImportsChain(t *testing.T) {
 	bPath := filepath.Join(moduleRoot, "b.yammm")
 	bContent := `schema "b"
 import "./c" as c
-type Middle { id String primary base c.BaseType }`
+type Middle { id String primary --> BASE (one) c.BaseType }`
 	require.NoError(t, os.WriteFile(bPath, []byte(bContent), 0o600))
 
 	// Create A (imports B)
 	aPath := filepath.Join(moduleRoot, "a.yammm")
 	aContent := `schema "a"
 import "./b" as b
-type Top { id String primary middle b.Middle }`
+type Top { id String primary --> MIDDLE (one) b.Middle }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
 	ctx := t.Context()
@@ -1425,9 +1425,9 @@ import "./helper2" as h2
 import "./helper3" as h3
 type Combined {
 	id String primary
-	ref1 h1.Type1
-	ref2 h2.Type2
-	ref3 h3.Type3
+	--> REF_1 (one) h1.Type1
+	--> REF_2 (one) h2.Type2
+	--> REF_3 (one) h3.Type3
 }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
@@ -1501,13 +1501,13 @@ func TestLoad_DiamondImport(t *testing.T) {
 	bPath := filepath.Join(moduleRoot, "b.yammm")
 	require.NoError(t, os.WriteFile(bPath, []byte(`schema "b"
 import "./d" as d
-type TypeB { id String primary ref d.BaseD }`), 0o600))
+type TypeB { id String primary --> REF (one) d.BaseD }`), 0o600))
 
 	// C imports D
 	cPath := filepath.Join(moduleRoot, "c.yammm")
 	require.NoError(t, os.WriteFile(cPath, []byte(`schema "c"
 import "./d" as d
-type TypeC { id String primary ref d.BaseD }`), 0o600))
+type TypeC { id String primary --> REF (one) d.BaseD }`), 0o600))
 
 	// A imports B and C
 	aPath := filepath.Join(moduleRoot, "a.yammm")
@@ -1516,8 +1516,8 @@ import "./b" as b
 import "./c" as c
 type TypeA {
 	id String primary
-	refB b.TypeB
-	refC c.TypeC
+	--> REF_B (one) b.TypeB
+	--> REF_C (one) c.TypeC
 }`), 0o600))
 
 	ctx := t.Context()
@@ -1656,14 +1656,14 @@ func writeSharedRegistryFixtures(t *testing.T) string {
 		filepath.Join(dir, "root_a.yammm"),
 		[]byte(`schema "root_a"
 import "./common" as c
-type HolderA { id String primary ref c.BaseCommon }`),
+type HolderA { id String primary --> REF (one) c.BaseCommon }`),
 		0o600,
 	))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "root_b.yammm"),
 		[]byte(`schema "root_b"
 import "./common" as c
-type HolderB { id String primary ref c.BaseCommon }`),
+type HolderB { id String primary --> REF (one) c.BaseCommon }`),
 		0o600,
 	))
 

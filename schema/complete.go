@@ -2,7 +2,6 @@ package schema
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -17,25 +16,51 @@ type completionRegistry interface {
 	LookupBySourceID(id location.SourceID) (*Schema, bool)
 }
 
-// resolvedImportMap maps import aliases to their resolved SourceIDs.
-// Passed from the loader to enable cross-schema type resolution during completion.
-type resolvedImportMap map[string]location.SourceID
+// importResolution is one import alias's resolution outcome, handed from the
+// loader (or the Builder) to completion. A deferred entry — the import was
+// declared but its load failed or was structurally rejected — carries no
+// SourceID; references through the alias defer to the root-cause diagnostic. A
+// resolved entry carries the imported schema's SourceID. The explicit deferred
+// flag replaces an earlier in-band convention (a zero SourceID meaning
+// "deferred"), so the state is read, not inferred.
+//
+// "Deferred" has one source that flows one way, not parallel representations
+// that must be kept in agreement by hand: the loader folds each importBinding
+// into this map (a failed binding becomes a deferred entry; see loadSource),
+// [completer.indexImports] then builds each schema Import from the map (a
+// deferred entry yields a zero-ResolvedSourceID Import that the loader's wiring
+// loop leaves schema-less), and completion reads only the map — via
+// [completer.classifyQualifier], the single interpreter named on
+// [resolvedImportMap], through which every qualifier-resolving site routes.
+type importResolution struct {
+	deferred bool
+	sourceID location.SourceID
+}
+
+// resolvedImportMap maps an import alias to its resolution. An alias is present
+// iff its declaration was seen; an absent alias was never resolved (a loader
+// bug on the Load path, or a no-imports / no-registry context elsewhere). See
+// [completer.classifyQualifier], the single interpreter of this map.
+type resolvedImportMap map[string]importResolution
 
 // completeModel transforms a parsed AST model into a completed Schema.
 //
-// The completion process:
-//  1. Creates the Schema and indexes types/datatypes
-//  2. Validates imports against alias rules
-//  3. Detects inheritance cycles
-//  4. Linearizes inheritance (DFS, keep-first)
-//  5. Merges inherited properties and relations
-//  6. Detects collisions (case-insensitive, normalized names)
-//  7. Validates relation targets
+// Completion runs a fixed sequence of phases: it indexes the declared types and
+// datatypes, validates and indexes imports, resolves datatype-alias constraints,
+// and linearizes inheritance to merge inherited members; it then validates
+// primary keys, relation edge properties, name collisions, relation targets, and
+// invariant expressions. Inheritance-cycle detection is the one hard gate — it
+// aborts completion, because the downstream phases cannot run on a cyclic graph;
+// every other phase collects its diagnostics and continues, so one schema reports
+// every independent error in a single pass.
 //
-// Errors are collected in the provided collector. Returns nil if completion
-// fails with fatal errors. The registry is optional; when nil, cross-schema
-// references are deferred. The resolvedImports map provides pre-resolved
-// import alias to SourceID mappings from the loader.
+// Errors are collected in the provided collector. completeModel returns the
+// completed *Schema, or nil if this completion contributed any Fatal or Error
+// issue — a per-completion error gate, so when the collector is shared across a
+// multi-schema load each schema is judged by its own error delta. The registry
+// is optional; when nil, cross-schema references are deferred to link time. The
+// resolvedImports map carries each import alias's resolution (or deferral) from
+// the loader.
 func completeModel(
 	m *model,
 	sourceID location.SourceID,
@@ -56,9 +81,48 @@ func completeModel(
 		resolvedImports: resolvedImports,
 		typeIndex:       make(map[string]*Type),
 		dataIndex:       make(map[string]*DataType),
+		// The collector may be shared across a whole multi-schema load, so
+		// this completion is judged on the errors IT contributes, not on
+		// errors collected before it began (a sibling import's failure must
+		// not nil an unrelated clean schema).
+		gate:                    newErrorGate(collector),
+		unresolvedSupertypeMemo: make(map[*Type]bool),
 	}
 
 	return c.complete()
+}
+
+// errorGate snapshots a collector's Fatal+Error count so a later check reports
+// whether the guarded operation contributed any error. When a collector is
+// shared across nested schema loads, "any error" ([diag.Collector.HasErrors])
+// conflates a schema's own failures with a sibling's; the gate judges each
+// schema by the errors IT contributed. tripped is the single load-bearing
+// comparison, so a nested caller cannot reintroduce the conflation by forgetting
+// to snapshot.
+//
+// INVARIANT: the gate is an entry/exit delta on one shared collector, so it is
+// correct only while accumulation into that collector is serial — the guarded
+// operation and the nested loads it triggers are the sole writers between
+// newErrorGate and tripped. A sibling writing errors to the same collector
+// concurrently within that window would be miscounted against this gate. The
+// loader is serial today (loadImports walks imports in sequence, one collector
+// per Load); parallelizing import loading would break this assumption, and the
+// fix would then be per-schema sub-collectors merged upward
+// ([diag.Collector.Merge] already folds counts and truncation losslessly for
+// exactly that), not a delta on a shared collector.
+type errorGate struct {
+	collector *diag.Collector
+	entry     int
+}
+
+func newErrorGate(c *diag.Collector) errorGate {
+	return errorGate{collector: c, entry: c.ErrorCount()}
+}
+
+// tripped reports whether any Fatal+Error issue was collected since the gate was
+// taken.
+func (g errorGate) tripped() bool {
+	return g.collector.ErrorCount() > g.entry
 }
 
 // completer holds state during schema completion.
@@ -71,6 +135,13 @@ type completer struct {
 	schema          *Schema
 	typeIndex       map[string]*Type
 	dataIndex       map[string]*DataType
+	gate            errorGate // judges this completion by the errors it contributes
+
+	// unresolvedSupertypeMemo caches [completer.hasUnresolvedSupertype] per type:
+	// the inheritance graph and resolution state are fixed across the phases that
+	// query it (validatePrimaryKeys, validateInvariantExpressions), so a type's
+	// answer cannot change between calls.
+	unresolvedSupertypeMemo map[*Type]bool
 }
 
 func (c *completer) complete() *Schema {
@@ -82,67 +153,62 @@ func (c *completer) complete() *Schema {
 		c.model.Documentation,
 	)
 
+	// Phases run in dependency order. Each phase collects every independent
+	// finding it can and skips the entities it has already reported
+	// (keep-first indexing, deferred references, poisoned-chain skips), so
+	// one phase's failures do not hide another phase's findings. The final
+	// error gate — not per-phase aborts — decides whether a schema is
+	// produced. The one exception is detectCycles, whose gate guards a
+	// genuine data dependency.
+
 	// Phase 1: Index types and datatypes
-	if !c.indexTypes() {
-		return nil
-	}
-	if !c.indexDataTypes() {
-		return nil
-	}
+	c.indexTypes()
+	c.indexDataTypes()
 
 	// Phase 2: Validate and index imports
-	if !c.indexImports() {
-		return nil
-	}
+	c.indexImports()
 
 	// Phase 3: Resolve alias constraints
-	if !c.resolveAliasConstraints() {
-		return nil
-	}
+	c.resolveAliasConstraints()
 
 	// Phase 3b: Validate relation edge properties (must be after alias resolution)
-	if !c.validateRelationProperties() {
-		return nil
-	}
+	c.validateRelationProperties()
 
-	// Phase 4: Detect inheritance cycles
+	// Phase 4: Detect inheritance cycles. This gate stays: linearization
+	// requires cycle-free input. completeTypes' DFS would terminate on a
+	// cycle (early-mark plus seen-dedup), but the merged member sets it
+	// produced would be garbage, and every downstream phase that reads
+	// merged members would generate noise from them.
 	if !c.detectCycles() {
 		return nil
 	}
 
 	// Phase 5: Complete each type (linearize, merge, validate)
-	if !c.completeTypes() {
-		return nil
-	}
+	c.completeTypes()
 
 	// Phase 5b: Concrete types must declare or inherit a primary key. Collected
 	// (not aborted here) so collision/relation/invariant diagnostics still surface
-	// in the same pass; the final HasErrors gate below ends completion.
+	// in the same pass; the final error gate below ends completion.
 	c.validatePrimaryKeys()
 
 	// Phase 6: Detect collisions
-	if !c.detectCollisions() {
-		return nil
-	}
+	c.detectCollisions()
 
 	// Phase 7: Validate relation targets
-	if !c.validateRelationTargets() {
-		return nil
-	}
+	c.validateRelationTargets()
 
 	// Phase 7b: Validate invariant expressions (static property checking)
-	if !c.validateInvariantExpressions() {
-		return nil
-	}
+	c.validateInvariantExpressions()
 
-	// Final check for any errors collected during completion phases
-	// (e.g., from merge operations that don't abort but collect diagnostics)
-	if c.collector.HasErrors() {
+	// Final check for any errors THIS completion collected — its own error
+	// delta, not the shared collector's total: errors collected before this
+	// completion began belong to other schemas in the same load.
+	if c.gate.tripped() {
 		return nil
 	}
 
 	// Phase 8: Seal all types and relations to prevent post-completion mutation
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		t.seal()
 		// Seal all relations on this type
 		for rel := range t.AllAssociations() {
@@ -154,15 +220,18 @@ func (c *completer) complete() *Schema {
 	}
 
 	// Seal all data types for consistency with type/relation sealing
-	for _, dt := range c.schema.DataTypesSlice() {
+	for _, dt := range c.schema.dataTypes {
 		dt.seal()
 	}
 
 	return c.schema
 }
 
-// indexTypes creates Type objects and indexes them by name.
-func (c *completer) indexTypes() bool {
+// indexTypes creates Type objects and indexes them by name. A duplicate
+// declaration is reported and skipped — the first declaration is the one
+// kept and indexed — so every duplicate is diagnosed in one pass and
+// downstream phases see one coherent Type per name.
+func (c *completer) indexTypes() {
 	types := make([]*Type, 0, len(c.model.Types))
 
 	for _, td := range c.model.Types {
@@ -170,11 +239,11 @@ func (c *completer) indexTypes() bool {
 			continue
 		}
 
-		if existing, ok := c.typeIndex[td.Name]; ok {
+		if existing, dup := c.typeIndex[td.Name]; dup {
 			c.errorf(td.Span, diag.E_DUPLICATE_TYPE,
 				"type %q is defined multiple times; first defined at %s",
 				td.Name, existing.Span().Start)
-			return false
+			continue
 		}
 
 		t := newType(
@@ -218,11 +287,12 @@ func (c *completer) indexTypes() bool {
 	}
 
 	c.schema.setTypes(types)
-	return true
 }
 
-// indexDataTypes creates DataType objects and indexes them by name.
-func (c *completer) indexDataTypes() bool {
+// indexDataTypes creates DataType objects and indexes them by name. A
+// duplicate declaration is reported and skipped, keep-first, like
+// indexTypes.
+func (c *completer) indexDataTypes() {
 	dataTypes := make([]*DataType, 0, len(c.model.DataTypes))
 
 	for _, dd := range c.model.DataTypes {
@@ -230,11 +300,11 @@ func (c *completer) indexDataTypes() bool {
 			continue
 		}
 
-		if existing, ok := c.dataIndex[dd.Name]; ok {
+		if existing, dup := c.dataIndex[dd.Name]; dup {
 			c.errorf(dd.Span, diag.E_DUPLICATE_TYPE,
 				"datatype %q is defined multiple times; first defined at %s",
 				dd.Name, existing.Span().Start)
-			return false
+			continue
 		}
 
 		dt := newDataType(
@@ -249,84 +319,127 @@ func (c *completer) indexDataTypes() bool {
 	}
 
 	c.schema.setDataTypes(dataTypes)
-	return true
 }
 
-// indexImports validates and indexes import declarations.
-func (c *completer) indexImports() bool {
+// indexImports validates and indexes import declarations. Declaration-level
+// import validation is owned here: this phase is shared by both front doors
+// (parsed sources and the Builder), so checks live in one place. Every
+// declaration is validated and one bad declaration does not hide another. A
+// later declaration of a duplicated alias is dropped keep-first (no Import),
+// so references resolve against the kept first binding. A declaration rejected
+// for an invalid or reserved alias, or for colliding with a local
+// type/datatype name, is marked deferred instead (see deferRejectedAlias), so
+// references through its alias defer to the rejection's single root-cause
+// diagnostic rather than silently resolving against the import the loader did
+// resolve, or re-blaming E_UNKNOWN_TYPE at each reference site.
+func (c *completer) indexImports() {
 	imports := make([]*Import, 0, len(c.model.Imports))
 	aliasIndex := make(map[string]*importDecl)
-	seenSourceIDs := make(map[location.SourceID]*importDecl)
+
+	// deferRejectedAlias records a rejected declaration's alias as deferred in
+	// the resolution map — the single deferral signal both reference kinds read:
+	// datatype references via resolveAliasChain, and extends/relation references
+	// via referenceDeferred (through classifyQualifier). A reference through the
+	// alias then defers to the rejection's root-cause diagnostic instead of
+	// re-blaming E_UNKNOWN_TYPE; and on the Load path — where the loader may
+	// already have resolved this alias before this phase rejected it — the
+	// deferred entry overwrites that resolution, so a datatype reference cannot
+	// silently resolve against the rejected import. The nil check skips contexts
+	// with no resolution map (a completeModel bridge, or a Builder with no
+	// imports), where there is nothing to record or defer against.
+	deferRejectedAlias := func(id *importDecl) {
+		if c.resolvedImports != nil {
+			c.resolvedImports[id.Alias] = importResolution{deferred: true}
+		}
+	}
 
 	for _, id := range c.model.Imports {
 		if id == nil {
 			continue
 		}
 
-		// Validate alias is a valid identifier
+		// Duplicate alias (keep-first): the first declaration of an alias owns
+		// the slot — even one later rejected as invalid, reserved, or colliding
+		// — so a repeat is reported once here as E_DUPLICATE_IMPORT and stays
+		// inert. The slot is claimed before the per-declaration validation
+		// below; otherwise a repeated *rejected* alias would re-fire its own
+		// rejection at every occurrence instead (two imports whose alias
+		// collides with a local name would each draw E_IMPORT_ALIAS_COLLISION
+		// and never the duplicate report).
+		if existing, dup := aliasIndex[id.Alias]; dup {
+			c.errorf(id.Span, diag.E_DUPLICATE_IMPORT,
+				"alias %q already used for import %q; use explicit 'as' to disambiguate\n    existing: import %q\n    new:      import %q",
+				id.Alias, existing.Path, existing.Path, id.Path)
+			continue
+		}
+		aliasIndex[id.Alias] = id
+
+		// Validate alias is a valid identifier. Parse-path aliases always
+		// pass — derived aliases are normalized by deriveAliasFromPath and
+		// explicit aliases are letter-start by grammar — so this rejects
+		// Builder-supplied strings.
 		if !isValidAlias(id.Alias) {
 			c.errorf(id.Span, diag.E_INVALID_ALIAS,
 				"derived alias %q is not a valid identifier (aliases must start with a letter); use 'as <alias>' to provide a valid alias",
 				id.Alias)
-			return false
+			deferRejectedAlias(id)
+			continue
 		}
 
-		// Validate alias is not a reserved keyword
+		// Validate alias is not a reserved keyword. The parser drops such
+		// declarations before they reach a model, so this too is live for
+		// the Builder.
 		if isReservedKeyword(id.Alias) {
 			c.errorf(id.Span, diag.E_INVALID_ALIAS,
 				"import alias %q is a reserved keyword; use 'as <alias>' to provide a different alias",
 				id.Alias)
-			return false
+			deferRejectedAlias(id)
+			continue
 		}
 
-		// Check for duplicate alias
-		if existing, ok := aliasIndex[id.Alias]; ok {
-			c.errorf(id.Span, diag.E_DUPLICATE_IMPORT,
-				"alias %q already used for import %q; use explicit 'as' to disambiguate\n    existing: import %q\n    new:      import %q",
-				id.Alias, existing.Path, existing.Path, id.Path)
-			return false
-		}
-
-		// Check for alias collision with local type
-		if _, ok := c.typeIndex[id.Alias]; ok {
+		// Check for alias collision with local type or datatype names.
+		// Both indexes are consulted: a qualified reference's qualifier is
+		// ambiguous against either kind of local declaration.
+		if _, collides := c.typeIndex[id.Alias]; collides {
 			c.errorf(id.Span, diag.E_IMPORT_ALIAS_COLLISION,
 				"import alias %q collides with local type name", id.Alias)
-			return false
+			deferRejectedAlias(id)
+			continue
+		}
+		if _, collides := c.dataIndex[id.Alias]; collides {
+			c.errorf(id.Span, diag.E_IMPORT_ALIAS_COLLISION,
+				"import alias %q collides with local datatype name", id.Alias)
+			deferRejectedAlias(id)
+			continue
 		}
 
-		aliasIndex[id.Alias] = id
-
-		// Resolve SourceID from pre-resolved imports or defer resolution
+		// Resolve SourceID from pre-resolved imports or defer resolution.
+		// Duplicate resolved SourceIDs are the resolver's concern (the
+		// loader's validateResolvedImports, the Builder's resolveImports
+		// dedup) — by the time a resolution map reaches completion it is
+		// already deduplicated.
 		var resolvedSourceID location.SourceID
 		if c.resolvedImports != nil {
-			// ResolvedImports was provided - verify alias has a resolution
-			var ok bool
-			resolvedSourceID, ok = c.resolvedImports[id.Alias]
-			if !ok || resolvedSourceID.IsZero() {
+			resolved, present := c.resolvedImports[id.Alias]
+			switch {
+			case !present:
+				// Key-absent: the loader never resolved this alias at all —
+				// a loader bug, not a user error. Reported and skipped.
 				c.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
 					fmt.Sprintf("import alias %q has no resolved SourceID; ensure loader provides all import resolutions", id.Alias)).
 					WithSpan(id.Span).
 					WithDetail(diag.DetailKeyAlias, id.Alias).
 					WithDetail(diag.DetailKeyImportPath, id.Path).Build())
-				return false
+				continue
+			case resolved.deferred:
+				// The loader saw this alias and already reported why it has no
+				// resolution (failed load or structural rejection). Construct
+				// the Import deferred — zero SourceID, no additional diagnostic
+				// — so references through the alias are recognizably deferred
+				// downstream.
+			default:
+				resolvedSourceID = resolved.sourceID
 			}
-			// Check for duplicate SourceID
-			if existing, ok := seenSourceIDs[resolvedSourceID]; ok {
-				c.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_IMPORT,
-					fmt.Sprintf("schema %q imported multiple times", resolvedSourceID.String())).
-					WithSpan(id.Span).
-					WithDetail(diag.DetailKeyImportPath, resolvedSourceID.String()).
-					WithDetail(diag.DetailKeyFirstAlias, existing.Alias).
-					WithDetail(diag.DetailKeyFirstLine, strconv.Itoa(existing.Span.Start.Line)).
-					WithDetail(diag.DetailKeyDuplicateAlias, id.Alias).
-					WithDetail(diag.DetailKeyDuplicateLine, strconv.Itoa(id.Span.Start.Line)).
-					WithRelated(location.RelatedInfo{
-						Span:    existing.Span,
-						Message: fmt.Sprintf("first imported here as %q", existing.Alias),
-					}).Build())
-				return false
-			}
-			seenSourceIDs[resolvedSourceID] = id
 		}
 		// If resolvedImports is nil, leave resolvedSourceID as zero for deferred resolution
 		imp := newImport(id.Path, id.Alias, resolvedSourceID, id.Span)
@@ -334,7 +447,6 @@ func (c *completer) indexImports() bool {
 	}
 
 	c.schema.setImports(imports)
-	return true
 }
 
 // convertProperties converts propertyDecl to Property.
@@ -484,17 +596,16 @@ func (c *completer) convertInvariants(decls []*invariantDecl) []*Invariant {
 	return invs
 }
 
-// resolveAliasConstraints resolves all AliasConstraint references in properties and datatypes.
-// Returns false if any unresolvable aliases are found.
-func (c *completer) resolveAliasConstraints() bool {
-	ok := true
-
+// resolveAliasConstraints resolves all AliasConstraint references in
+// properties and datatypes. Unresolvable chains (cycles) are reported per
+// chain and the affected constraint left unresolved; resolution continues
+// with the remaining constraints.
+func (c *completer) resolveAliasConstraints() {
 	// First, resolve DataType constraints (they may reference each other)
-	for _, dt := range c.schema.DataTypesSlice() {
+	for _, dt := range c.schema.dataTypes {
 		if alias, isAlias := dt.Constraint().(AliasConstraint); isAlias && !alias.IsResolved() {
 			resolved, success := c.resolveAliasChain(alias.DataTypeName(), dt.Span(), make(map[string]bool))
 			if !success {
-				ok = false
 				continue
 			}
 			dt.setConstraint(resolved)
@@ -502,11 +613,10 @@ func (c *completer) resolveAliasConstraints() bool {
 	}
 
 	// Resolve List element aliases in DataTypes
-	for _, dt := range c.schema.DataTypesSlice() {
+	for _, dt := range c.schema.dataTypes {
 		if _, isList := dt.Constraint().(ListConstraint); isList {
 			resolved, success := c.resolveListElementAliases(dt.Constraint(), dt.Span())
 			if !success {
-				ok = false
 				continue
 			}
 			dt.setConstraint(resolved)
@@ -514,12 +624,11 @@ func (c *completer) resolveAliasConstraints() bool {
 	}
 
 	// Then, resolve property constraints on all types
-	for _, t := range c.schema.TypesSlice() {
-		for _, p := range t.PropertiesSlice() {
+	for _, t := range c.schema.types {
+		for p := range t.Properties() {
 			if alias, isAlias := p.Constraint().(AliasConstraint); isAlias && !alias.IsResolved() {
 				resolved, success := c.resolveAliasChain(alias.DataTypeName(), p.Span(), make(map[string]bool))
 				if !success {
-					ok = false
 					continue
 				}
 				p.setConstraint(resolved)
@@ -528,28 +637,163 @@ func (c *completer) resolveAliasConstraints() bool {
 	}
 
 	// Resolve List element aliases in Properties
-	for _, t := range c.schema.TypesSlice() {
-		for _, p := range t.PropertiesSlice() {
+	for _, t := range c.schema.types {
+		for p := range t.Properties() {
 			if _, isList := p.Constraint().(ListConstraint); isList {
 				resolved, success := c.resolveListElementAliases(p.Constraint(), p.Span())
 				if !success {
-					ok = false
 					continue
 				}
 				p.setConstraint(resolved)
 			}
 		}
 	}
+}
 
-	return ok
+// aliasResolution classifies an import qualifier against the resolution map —
+// the single source of truth for alias state during completion. It is the one
+// interpreter of that map's three-state sentinel, so the deferral and
+// resolution sites cannot disagree about an alias the way a Schema.ImportByAlias
+// reader and a resolvedImports reader once could (the divergence that let a
+// completion-rejected alias resolve silently on one path while re-blaming
+// E_UNKNOWN_TYPE on another). Callers layer their own registry policy on top.
+type aliasResolution int
+
+const (
+	// aliasAbsent: the qualifier names no declared import — a genuine unknown
+	// reference (a user typo). This folds in the no-map case (a Builder schema
+	// or deferred-completion bridge with zero imports): a completion consumer
+	// reaches classification only with a registry present, where a nil map can
+	// only mean a zero-import schema, so any qualified reference names no import
+	// — exactly aliasAbsent, not a deferral.
+	aliasAbsent aliasResolution = iota
+	// aliasDeferred: the import is declared but unresolved (failed load or
+	// rejected declaration); its root cause already carries a diagnostic.
+	aliasDeferred
+	// aliasResolved: the import is declared and resolved to a SourceID.
+	aliasResolved
+)
+
+// classifyQualifier interprets the resolution map for one qualifier. It reads
+// only the map, never the registry: its callers ([completer.referenceDeferred]
+// and [completer.resolveAliasChain]) layer their own registry policy on top.
+func (c *completer) classifyQualifier(qualifier string) (aliasResolution, location.SourceID) {
+	if c.resolvedImports == nil {
+		// No resolution map: a Builder/bridge with zero imports, reached only
+		// with a registry present, so any qualifier names no import — absent.
+		return aliasAbsent, location.SourceID{}
+	}
+	res, declared := c.resolvedImports[qualifier]
+	switch {
+	case !declared:
+		return aliasAbsent, location.SourceID{}
+	case res.deferred:
+		return aliasDeferred, location.SourceID{}
+	default:
+		return aliasResolved, res.sourceID
+	}
+}
+
+// referenceDeferred reports whether a qualified reference whose target did not
+// resolve should be skipped silently rather than reported as unknown. Two cases
+// defer: no registry is available to resolve cross-schema refs (so the
+// reference is validated at link time), or the qualifier names a declared
+// import whose load failed (whose failure already carries the root-cause
+// diagnostic). An unqualified reference, and a qualifier that names no declared
+// import while a registry IS present (including a nil resolution map — a Builder
+// or bridge with zero imports), is NOT deferred: it is a genuine unknown.
+//
+// This is the single deferral predicate for the resolveTypeRef-based reference
+// sites (extends clauses, relation and composition targets), folding the
+// registry check in so no site re-derives it — and so a future site cannot get
+// the registry/nil-map interaction wrong, as one once did.
+func (c *completer) referenceDeferred(qualifier string) bool {
+	if qualifier == "" {
+		return false
+	}
+	if c.registry == nil {
+		return true
+	}
+	state, _ := c.classifyQualifier(qualifier)
+	return state == aliasDeferred
+}
+
+// primaryKeyTypeDeferred reports whether a primary property's primary-key TYPE
+// check should be skipped because its constraint bottoms out in an unresolved
+// alias. Such a terminal's type is unknowable here, so validating it against the
+// allowed key types (String, UUID, Date, Timestamp) is meaningless — and its
+// unresolvability is already accounted for by alias resolution (phase 3,
+// [completer.resolveAliasConstraints]), which runs before this check:
+//
+//   - reported — an undeclared local name, or a qualifier naming no declared
+//     import, draws E_UNKNOWN_TYPE; a cyclic chain draws the cycle diagnostic;
+//   - silently deferred to link time — a cross-schema reference with no registry
+//     to resolve it, or a declared-but-failed import whose failure is the root
+//     cause.
+//
+// Either way the root cause is owned elsewhere, so the type check defers rather
+// than stacking a (usually misleading) E_INVALID_PRIMARY_KEY_TYPE on top of a
+// reported error, or rejecting a reference that every sibling site — extends,
+// relation and composition targets, and non-primary property datatypes — defers
+// to link time. A resolved terminal (a builtin, or an alias resolved to one) is
+// checked normally.
+//
+// Keying off the terminal's resolved state alone — not a re-derived
+// qualifier/registry prediction — is what keeps this in step with
+// [completer.resolveAliasChain]: every unresolved terminal it leaves behind was
+// reported or deferred there, and a resolved one is the only shape this checks.
+//
+// This couples to [completer.resolveAliasConstraints] leaving a deferred
+// terminal as an unresolved AliasConstraint — the invariant pinned by
+// [TestBuild_NoRegistryQualifiedPrimaryKey_TerminalStaysUnresolved]. A change
+// that instead resolved such terminals to a placeholder would silently flip this
+// predicate to false and resurface a mis-attributed E_INVALID_PRIMARY_KEY_TYPE,
+// so the two must move together.
+func (c *completer) primaryKeyTypeDeferred(constraint Constraint) bool {
+	if constraint == nil {
+		return false
+	}
+	terminal, isAlias := ResolveAlias(constraint).(AliasConstraint)
+	return isAlias && !terminal.IsResolved()
+}
+
+// reportUnknownAlias emits an E_UNKNOWN_TYPE for an unresolvable datatype
+// reference unless suppress is set. The chain recursion in resolveAliasChain —
+// resolving a found datatype's own unresolved underlying — suppresses it: that
+// datatype's own resolution already blamed the unknown terminal, so re-walking
+// it through a referencing property or datatype must not re-report the same
+// name. Direct references each report independently.
+func (c *completer) reportUnknownAlias(suppress bool, span location.Span, format string, args ...any) {
+	if suppress {
+		return
+	}
+	c.errorf(span, diag.E_UNKNOWN_TYPE, format, args...)
 }
 
 // resolveAliasChain resolves a datatype name to its underlying constraint.
-// The visited map tracks seen names for cycle detection.
-// Returns the resolved AliasConstraint and success status.
-// If the datatype is not found, returns the original unresolved alias (not an error).
-// This allows for forward references and type-as-property patterns.
+// The visited map tracks seen names for cycle detection. Returns the resolved
+// AliasConstraint and success status.
+//
+// A name that cannot name a datatype is an error (E_UNKNOWN_TYPE): an
+// undeclared local name, a qualifier that names no declared import, or a
+// resolved import that lacks the datatype. The reference is left unresolved
+// silently only when resolution is genuinely deferred — no registry to resolve
+// a cross-schema ref, a declared-but-failed import whose failure was already
+// reported, or an import whose schema is absent from the registry.
+//
+// suppressUnknown gates the E_UNKNOWN_TYPE reports (not the cycle report): the
+// self-recursion that resolves a found datatype's own unresolved underlying
+// sets it, because that datatype's own resolution already blamed the unknown
+// terminal — re-walking the chain through a referencing property or datatype
+// must not re-report the same name.
 func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, visited map[string]bool) (Constraint, bool) {
+	// The self-recursion below (resolving a found datatype's own underlying)
+	// inherits a non-empty visited map; every external caller passes a fresh
+	// empty one. That distinction IS the suppress signal — re-walking a declared
+	// datatype's chain must not re-report an unknown its own resolution already
+	// blamed, while a direct reference reports independently.
+	suppressUnknown := len(visited) > 0
+
 	// Cycle detection
 	if visited[dataTypeName] {
 		c.errorf(span, diag.E_INVALID_CONSTRAINT,
@@ -565,38 +809,73 @@ func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, v
 	var dt *DataType
 	var found bool
 	if qualifier == "" {
-		// Local datatype
+		// Local datatype. The lookup needs no registry, so an undeclared
+		// name is an error in every resolution context: a property's type
+		// must be a built-in or a declared (possibly imported) datatype.
 		dt, found = c.dataIndex[name]
+		if !found {
+			c.reportUnknownAlias(suppressUnknown, span,
+				"unknown type %q in datatype reference; a property type must be a built-in or a declared datatype",
+				dataTypeName)
+			return nil, false
+		}
 	} else {
-		// Cross-schema reference
+		// Cross-schema reference. This site needs the full alias state — the
+		// absent/resolved split and the resolved SourceID — so it reads the
+		// tri-state [completer.classifyQualifier] directly rather than the bool
+		// [completer.referenceDeferred] the resolveTypeRef sites use. The two
+		// defer on the same conditions (no registry to resolve against, or a
+		// declared-but-failed import whose failure already carries the root
+		// cause), so datatype references and extends/relation references cannot
+		// diverge on the registry/nil-map interaction the way they once did.
 		if c.registry == nil {
-			// Without registry, we cannot resolve cross-schema refs
-			// Return unresolved alias; will be validated at link time
+			// No registry to resolve the cross-schema ref; defer to link time.
 			return NewAliasConstraint(dataTypeName, nil), true
 		}
-		sourceID, ok := c.resolvedImports[qualifier]
-		if !ok {
-			// Unknown import alias - leave unresolved
-			// This might be a type reference pattern (e.g., b.Middle where Middle is a type)
+		state, sourceID := c.classifyQualifier(qualifier)
+		switch state {
+		case aliasDeferred:
+			// A declared import whose load/declaration failed; its failure
+			// already carries the root cause, so defer rather than re-blame.
 			return NewAliasConstraint(dataTypeName, nil), true
+		case aliasAbsent:
+			// The qualifier names no declared import (a nil resolution map — a
+			// Builder schema or bridge with zero imports — classifies absent, and
+			// is reached here only with a registry present): a genuine unknown.
+			c.reportUnknownAlias(suppressUnknown, span,
+				"unknown type %q in datatype reference: no import declared with alias %q",
+				dataTypeName, qualifier)
+			return nil, false
 		}
+		// aliasResolved: the import resolved to sourceID.
 		importedSchema, ok := c.registry.LookupBySourceID(sourceID)
 		if !ok {
-			// Imported schema not found - leave unresolved
-			return NewAliasConstraint(dataTypeName, nil), true
+			// The import resolved to a SourceID but its schema is absent from the
+			// registry — an internal inconsistency (every resolved import is
+			// registered on both the Load and Builder paths). Report it as unknown
+			// rather than leaving the reference silently unresolved, matching how
+			// resolveTypeRef surfaces the same state for relation/extends targets.
+			c.reportUnknownAlias(suppressUnknown, span,
+				"unknown type %q in datatype reference: schema imported as %q is not registered",
+				dataTypeName, qualifier)
+			return nil, false
 		}
 		dt, found = importedSchema.DataType(name)
-	}
-
-	if !found {
-		// Datatype not found - leave unresolved
-		// This might be a type reference pattern or forward reference
-		return NewAliasConstraint(dataTypeName, nil), true
+		if !found {
+			c.reportUnknownAlias(suppressUnknown, span,
+				"unknown type %q in datatype reference: datatype %q does not exist in the schema imported as %q",
+				dataTypeName, name, qualifier)
+			return nil, false
+		}
 	}
 
 	underlying := dt.Constraint()
 
-	// If underlying is an unresolved alias, resolve it first
+	// If underlying is an unresolved alias, resolve it first. Passing the
+	// inherited (non-empty) visited map suppresses its E_UNKNOWN_TYPE: dt is a
+	// declared datatype, so dt's own resolution already blamed any unknown
+	// terminal in its chain — re-blaming it through this reference would report
+	// the same name twice.
 	if alias, isAlias := underlying.(AliasConstraint); isAlias && !alias.IsResolved() {
 		resolved, ok := c.resolveAliasChain(alias.DataTypeName(), dt.Span(), visited)
 		if !ok {
@@ -663,29 +942,24 @@ func parseQualifiedName(name string) (qualifier, localName string) {
 }
 
 // validateRelationProperties validates edge properties on all relations.
-// Specifically checks that relation properties do not use Vector types (per spec).
-// Returns false if any validation errors are found.
-func (c *completer) validateRelationProperties() bool {
-	ok := true
-
-	for _, t := range c.schema.TypesSlice() {
+// Specifically checks that relation properties do not use Vector or List
+// types (per spec). Findings are per-property diagnostics; the constraint
+// objects themselves are unchanged by the check.
+func (c *completer) validateRelationProperties() {
+	for _, t := range c.schema.types {
 		for rel := range t.Associations() {
-			for _, p := range rel.PropertiesSlice() {
+			for p := range rel.Properties() {
 				if isVectorConstraint(p.Constraint()) {
 					c.errorf(p.Span(), diag.E_INVALID_CONSTRAINT,
 						"relationship property %q cannot use Vector type", p.Name())
-					ok = false
 				}
 				if isListConstraint(p.Constraint()) {
 					c.errorf(p.Span(), diag.E_LIST_ON_EDGE,
 						"relationship property %q cannot use List type", p.Name())
-					ok = false
 				}
 			}
 		}
 	}
-
-	return ok
 }
 
 // isVectorConstraint checks if a constraint is or resolves to a Vector type.
@@ -759,8 +1033,16 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 // (embedded, no independent identity — PK-less parts are a supported composition
 // feature) are exempt. Errors are collected; the caller's final error gate aborts.
 func (c *completer) validatePrimaryKeys() {
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		if t.IsAbstract() || t.IsPart() || t.HasPrimaryKey() {
+			continue
+		}
+		// A type whose merged property set carries a declared `primary` flag
+		// never draws absence-blame: an empty extracted key slice despite a
+		// declared primary means key extraction rejected the declaration for
+		// its type (E_INVALID_PRIMARY_KEY_TYPE), and stacking
+		// E_NO_PRIMARY_KEY on top would re-report the same root cause.
+		if hasDeclaredPrimary(t) {
 			continue
 		}
 		// Skip a type whose supertype chain has an unresolved link (a deferred
@@ -776,6 +1058,18 @@ func (c *completer) validatePrimaryKeys() {
 	}
 }
 
+// hasDeclaredPrimary reports whether any merged property carries the
+// primary flag, independent of whether key extraction accepted it into
+// the type's primary keys.
+func hasDeclaredPrimary(t *Type) bool {
+	for p := range t.AllProperties() {
+		if p.IsPrimaryKey() {
+			return true
+		}
+	}
+	return false
+}
+
 // hasUnresolvedSupertype reports whether t, or any type in its declared-inheritance
 // closure, names an `extends` supertype that does not resolve at this point in
 // completion — a deferred cross-schema reference when the registry lacks the import, or
@@ -784,28 +1078,39 @@ func (c *completer) validatePrimaryKeys() {
 // extends an unresolved root, so the presence check must skip the whole chain, not only
 // types that declare the unresolved reference directly. Recursion follows local
 // supertypes only — a resolved cross-schema supertype is already linearized and its
-// members merged, so it is a leaf here. Inheritance cycles are rejected earlier
-// (detectCycles), so visited bounds the walk rather than guarding correctness.
+// members merged, so it is a leaf here.
+//
+// Every type reached is memoized, not just the entry: the recursion routes back through
+// this method, so each supertype's answer is recorded as it is determined and a chain is
+// walked once across all queries rather than re-walked per query. The two phases that
+// call this (validatePrimaryKeys and validateInvariantExpressions) run after inheritance
+// and resolution are fixed, so a type's answer cannot change between calls.
+//
+// detectCycles rejects inheritance cycles before this runs, so the graph is acyclic; the
+// memo is seeded false before recursing purely so the walk still terminates should that
+// ever cease to hold, then overwritten with the real answer.
 func (c *completer) hasUnresolvedSupertype(t *Type) bool {
-	visited := map[string]bool{t.Name(): true}
-	queue := []*Type{t}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for ref := range cur.Inherits() {
-			super := c.resolveTypeRef(ref)
-			if super == nil {
-				return true
-			}
-			// Recurse only into local supertypes; a resolved cross-schema supertype is
-			// a fully-merged leaf. A qualified ref that resolved cannot be local.
-			if ref.Qualifier() == "" && !visited[ref.Name()] {
-				visited[ref.Name()] = true
-				queue = append(queue, super)
-			}
+	if cached, ok := c.unresolvedSupertypeMemo[t]; ok {
+		return cached
+	}
+	c.unresolvedSupertypeMemo[t] = false // cycle-termination guard; overwritten below
+
+	result := false
+	for ref := range t.Inherits() {
+		super := c.resolveTypeRef(ref)
+		if super == nil {
+			result = true
+			break
+		}
+		// Recurse only into local supertypes; a resolved cross-schema supertype is a
+		// fully-merged leaf. A qualified ref that resolved cannot be local.
+		if ref.Qualifier() == "" && c.hasUnresolvedSupertype(super) {
+			result = true
+			break
 		}
 	}
-	return false
+	c.unresolvedSupertypeMemo[t] = result
+	return result
 }
 
 // errorf reports an error at the given span.

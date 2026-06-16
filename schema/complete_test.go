@@ -951,9 +951,9 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 		},
 	}
 
-	// Map of alias -> sourceID for resolved imports
-	resolvedImports := map[string]location.SourceID{
-		"base": baseSourceID,
+	// Map of alias -> resolution for resolved imports
+	resolvedImports := schema.TestResolvedImportMap{
+		"base": schema.TestResolvedImport(baseSourceID),
 	}
 
 	derivedCollector := diag.NewCollector(0)
@@ -1322,37 +1322,11 @@ func TestComplete_RelationInheritance_Compositions(t *testing.T) {
 	completeGolden(t, model)
 }
 
-func TestComplete_Import_DuplicateSourceID(t *testing.T) {
-	// Two imports with different aliases but same resolved SourceID
-	model := &schema.TestModel{
-		Name: "test",
-		Imports: []*schema.TestImportDecl{
-			{Path: "common.yammm", Alias: "c", Span: location.Span{Start: location.Position{Line: 5}}},
-			{Path: "common.yammm", Alias: "common", Span: location.Span{Start: location.Position{Line: 12}}},
-		},
-	}
-
-	collector := diag.NewCollector(0)
-	srcID := sourceID(t, "dup_sourceid.yammm")
-
-	// Both imports resolve to the same SourceID
-	commonSourceID := location.MustNewSourceID("test://common.yammm")
-	resolvedImports := map[string]location.SourceID{
-		"c":      commonSourceID,
-		"common": commonSourceID, // Same SourceID!
-	}
-
-	s := schema.TestCompleteModel(model, srcID, collector, nil, resolvedImports)
-
-	assert.Nil(t, s)
-	assert.True(t, collector.HasErrors())
-
-	// Verify E_DUPLICATE_IMPORT is emitted with correct details
-	issues := slices.Collect(collector.Result().Issues())
-	require.Len(t, issues, 1)
-	assert.Equal(t, diag.E_DUPLICATE_IMPORT, issues[0].Code())
-	assert.Contains(t, issues[0].Message(), "imported multiple times")
-}
+// Duplicate resolved SourceIDs are validated by the resolvers, not during
+// completion: the loader's check is pinned by
+// [TestLoad_SameFileTwoSpellings_SingleDuplicateReport] and the Builder's
+// dedup by [TestBuilder_DuplicateImportByResolvedSourceID]. A resolution
+// map reaching completion is already deduplicated.
 
 func TestComplete_Import_NilSkipped(t *testing.T) {
 	model := &schema.TestModel{
@@ -1374,7 +1348,7 @@ func TestComplete_Import_MissingResolution(t *testing.T) {
 	}
 
 	// Provide empty resolved imports - alias should fail resolution
-	resolvedImports := map[string]location.SourceID{}
+	resolvedImports := schema.TestResolvedImportMap{}
 
 	collector := diag.NewCollector(0)
 	srcID := sourceID(t, "import_missing_res.yammm")

@@ -141,6 +141,42 @@ func TestCollector_Merge(t *testing.T) {
 	}
 }
 
+func TestCollector_MergeTruncatedResult_PreservesCountsAndTruncation(t *testing.T) {
+	// A truncated source Result (its limit hit, a real Error dropped past it)
+	// must merge without losing the dropped error's severity contribution or the
+	// truncation state — otherwise a dropped error reads as success after a
+	// merge, the same hazard collectLocked closes for direct collection.
+	src := NewCollector(1)
+	src.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
+	src.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
+	srcRes := src.Result()
+	if !srcRes.LimitReached() || srcRes.Len() != 1 || srcRes.DroppedCount() != 1 || srcRes.OK() {
+		t.Fatalf("source setup: LimitReached=%v Len=%d Dropped=%d OK=%v; want true/1/1/false",
+			srcRes.LimitReached(), srcRes.Len(), srcRes.DroppedCount(), srcRes.OK())
+	}
+
+	dst := NewCollectorUnlimited()
+	dst.Merge(srcRes)
+	res := dst.Result()
+
+	if res.OK() {
+		t.Error("OK() = true; want false — the dropped error must survive the merge")
+	}
+	if !res.HasErrors() {
+		t.Error("HasErrors() = false; want true")
+	}
+	if !res.LimitReached() {
+		t.Error("LimitReached() = false; want true — truncation must propagate through Merge")
+	}
+	if res.DroppedCount() != 1 {
+		t.Errorf("DroppedCount() = %d; want 1", res.DroppedCount())
+	}
+	// The surviving warning is stored; the dropped error is counted, not listed.
+	if res.Len() != 1 {
+		t.Errorf("Len() = %d; want 1 (the survivor; the dropped error is counted, not stored)", res.Len())
+	}
+}
+
 func TestCollector_Limit(t *testing.T) {
 	c := NewCollector(2)
 
@@ -161,6 +197,49 @@ func TestCollector_Limit(t *testing.T) {
 	}
 	if c.DroppedCount() != 1 {
 		t.Errorf("DroppedCount() = %d; want 1", c.DroppedCount())
+	}
+}
+
+func TestCollector_DroppedErrorStillCounts(t *testing.T) {
+	// Severity counts reflect every issue SEEN, not just those stored under
+	// the limit. Callers gate on ErrorCount()/HasErrors()/OK() (the loader and
+	// completer compare ErrorCount deltas to decide whether a schema failed);
+	// an error dropped at the cap that left those untouched would read as
+	// success and let a broken schema escape the all-or-nothing contract.
+	c := NewCollector(1)
+	c.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
+
+	if c.Len() != 1 {
+		t.Errorf("Len() = %d; want 1 (one stored, one dropped)", c.Len())
+	}
+	if !c.LimitReached() {
+		t.Error("LimitReached() = false; want true")
+	}
+	if got := c.ErrorCount(); got != 1 {
+		t.Errorf("ErrorCount() = %d; want 1 (the dropped error still counts)", got)
+	}
+	if !c.HasErrors() {
+		t.Error("HasErrors() = false; want true (a dropped error is still an error)")
+	}
+	if c.OK() {
+		t.Error("OK() = true; want false (a dropped error is still an error)")
+	}
+
+	// The Result snapshot must agree: a nil schema with an OK() result would
+	// be a self-contradiction for consumers checking result.OK().
+	res := c.Result()
+	if res.OK() {
+		t.Error("Result.OK() = true; want false")
+	}
+	if !res.HasErrors() {
+		t.Error("Result.HasErrors() = false; want true")
+	}
+	if res.Len() != 1 {
+		t.Errorf("Result.Len() = %d; want 1 (stored count is unaffected)", res.Len())
+	}
+	if res.DroppedCount() != 1 {
+		t.Errorf("Result.DroppedCount() = %d; want 1", res.DroppedCount())
 	}
 }
 

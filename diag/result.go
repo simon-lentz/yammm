@@ -15,6 +15,37 @@ type SeverityCounts struct {
 	Hints    int
 }
 
+// add increments the counter for sev. It is the single Severity-to-counter
+// mapping in the package — [Collector.collectLocked] (the live collection path)
+// and [newResult] (recompute from a slice) both route through it, so the two
+// cannot disagree on how a severity is counted and a new Severity is handled in
+// exactly one switch.
+func (c *SeverityCounts) add(sev Severity) {
+	//exhaustive:enforce
+	switch sev {
+	case Fatal:
+		c.Fatal++
+	case Error:
+		c.Errors++
+	case Warning:
+		c.Warnings++
+	case Info:
+		c.Info++
+	case Hint:
+		c.Hints++
+	}
+}
+
+// addCounts folds o into c field-wise, letting [Collector.Merge] carry a source
+// Result's whole seen-severity tally forward in one call.
+func (c *SeverityCounts) addCounts(o SeverityCounts) {
+	c.Fatal += o.Fatal
+	c.Errors += o.Errors
+	c.Warnings += o.Warnings
+	c.Info += o.Info
+	c.Hints += o.Hints
+}
+
 // Result is an immutable snapshot of diagnostic issues with precomputed counts.
 //
 // Result provides O(1) severity queries and iterator-based access to issues.
@@ -33,46 +64,41 @@ type Result struct {
 	limitReached bool
 	droppedCount int
 
-	// Precomputed counts (set at construction time)
-	fatalCount   int
-	errorCount   int
-	warningCount int
-	infoCount    int
-	hintCount    int
+	// Precomputed severity counts, set at construction time. Holds the same
+	// [SeverityCounts] the producing [Collector] carries (rather than mirroring
+	// it into separate fields), so the two cannot drift. Under truncation these
+	// reflect every issue seen, not only those stored (see
+	// [Collector.collectLocked]).
+	counts SeverityCounts
 }
 
-// newResult creates a Result with precomputed counts.
+// newResult creates a Result, computing the severity counts from issues.
 //
 // The issues slice is owned by the Result and must not be modified after
 // this call. Callers must pass a fresh slice (not shared with other code).
+//
+// Use [newResultWithCounts] directly when the counts must reflect issues that
+// are not in the slice (e.g. a [Collector] carrying issues dropped past its
+// limit, which must still count toward OK/HasErrors).
 func newResult(issues []Issue, limit int, limitReached bool, droppedCount int) Result {
-	var fatalCount, errorCount, warningCount, infoCount, hintCount int
-
+	var counts SeverityCounts
 	for _, issue := range issues {
-		switch issue.Severity() {
-		case Fatal:
-			fatalCount++
-		case Error:
-			errorCount++
-		case Warning:
-			warningCount++
-		case Info:
-			infoCount++
-		case Hint:
-			hintCount++
-		}
+		counts.add(issue.Severity())
 	}
+	return newResultWithCounts(issues, limit, limitReached, droppedCount, counts)
+}
 
+// newResultWithCounts builds a Result from explicit precomputed severity counts.
+// It is the single point that constructs the Result struct, so a new Result
+// field is added in exactly one place. The issues slice is owned by the Result
+// (see [newResult]'s contract).
+func newResultWithCounts(issues []Issue, limit int, limitReached bool, droppedCount int, counts SeverityCounts) Result {
 	return Result{
 		issues:       issues,
 		limit:        limit,
 		limitReached: limitReached,
 		droppedCount: droppedCount,
-		fatalCount:   fatalCount,
-		errorCount:   errorCount,
-		warningCount: warningCount,
-		infoCount:    infoCount,
-		hintCount:    hintCount,
+		counts:       counts,
 	}
 }
 
@@ -90,36 +116,41 @@ func OK() Result {
 
 // OK reports whether no Fatal or Error issues are present.
 func (r Result) OK() bool {
-	return r.fatalCount == 0 && r.errorCount == 0
+	return r.counts.Fatal == 0 && r.counts.Errors == 0
 }
 
 // HasFatal reports whether any Fatal issue is present.
 func (r Result) HasFatal() bool {
-	return r.fatalCount > 0
+	return r.counts.Fatal > 0
 }
 
 // HasErrors reports whether any Fatal or Error issue is present.
 func (r Result) HasErrors() bool {
-	return r.fatalCount > 0 || r.errorCount > 0
+	return r.counts.Fatal > 0 || r.counts.Errors > 0
 }
 
 // HasWarnings reports whether any Warning issue is present.
 func (r Result) HasWarnings() bool {
-	return r.warningCount > 0
+	return r.counts.Warnings > 0
 }
 
 // HasInfo reports whether any Info issue is present.
 func (r Result) HasInfo() bool {
-	return r.infoCount > 0
+	return r.counts.Info > 0
 }
 
 // HasHints reports whether any Hint issue is present.
 func (r Result) HasHints() bool {
-	return r.hintCount > 0
+	return r.counts.Hints > 0
 }
 
-// HasCode reports whether any issue carries the given code, at any
-// severity.
+// HasCode reports whether any retained issue carries the given code, at any
+// severity. Like [Result.Issues] and [Result.Len], it reflects the issues the
+// result can enumerate: when the issue limit was reached ([Result.LimitReached]),
+// a code present only among the dropped issues reads false here. Use the
+// seen-based queries ([Result.HasErrors], [Result.SeverityCounts]) for gating
+// that must stay truthful under truncation, and [Result.DroppedCount] to detect
+// that the enumerable set is incomplete.
 func (r Result) HasCode(code Code) bool {
 	for _, issue := range r.issues {
 		if issue.Code() == code {
@@ -144,6 +175,27 @@ func (r Result) DroppedCount() int {
 	return r.droppedCount
 }
 
+// TruncationNote returns a one-line, human-readable summary of how many issues
+// were dropped at the collection limit, or "" when the limit was not reached.
+// It is the single source of the dropped-issues wording for text-rendering
+// consumers (e.g. the CLI); the structured LSP log and the compact
+// [Result.String] suffix surface the same fact in formats suited to their own
+// audiences.
+func (r Result) TruncationNote() string {
+	if !r.limitReached {
+		return ""
+	}
+	// limit is the producing collector's own configured cap; after a Merge into
+	// an unlimited collector it can be 0 (unlimited) even though issues were
+	// dropped upstream. Name the cap only when it is a positive number;
+	// droppedCount is the authoritative fact either way.
+	if r.limit > 0 {
+		return fmt.Sprintf("%d more issue(s) dropped after reaching the %d-issue limit; resolve issues and re-run to see the rest",
+			r.droppedCount, r.limit)
+	}
+	return fmt.Sprintf("%d more issue(s) dropped; resolve issues and re-run to see the rest", r.droppedCount)
+}
+
 // Limit returns the configured issue limit (0 means unlimited).
 // Use [LimitReached] to check if the limit was actually reached.
 func (r Result) Limit() int {
@@ -152,13 +204,7 @@ func (r Result) Limit() int {
 
 // SeverityCounts returns counts by severity level.
 func (r Result) SeverityCounts() SeverityCounts {
-	return SeverityCounts{
-		Fatal:    r.fatalCount,
-		Errors:   r.errorCount,
-		Warnings: r.warningCount,
-		Info:     r.infoCount,
-		Hints:    r.hintCount,
-	}
+	return r.counts
 }
 
 // Issues returns an iterator over all issues without copying.

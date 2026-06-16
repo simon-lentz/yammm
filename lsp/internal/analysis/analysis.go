@@ -44,8 +44,9 @@ type Snapshot struct {
 	// Root is the module root directory used for import resolution.
 	Root string
 
-	// Schema is the parsed schema, or nil if parsing failed catastrophically.
-	// May be non-nil even when Result contains errors (partial parse).
+	// Schema is the loaded schema. Non-nil only when the load succeeded:
+	// any error in Result means a nil Schema (the loader's all-or-nothing
+	// contract). Warnings may still be present alongside a non-nil Schema.
 	Schema *schema.Schema
 
 	// Result contains all diagnostics from analysis. Check Result.OK() to
@@ -273,6 +274,17 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 				}
 			}
 		}
+	}
+
+	// Diagnostics past the collector's issue limit are dropped before they
+	// reach the editor; the drop is only observable server-side, so log it.
+	if diagResult.LimitReached() {
+		a.logger.Warn(
+			"diagnostics truncated at issue limit",
+			slog.String("entry", entryPath),
+			slog.Int("limit", diagResult.Limit()),
+			slog.Int("dropped", diagResult.DroppedCount()),
+		)
 	}
 
 	entrySourceID, idErr := location.SourceIDFromAbsolutePath(entryPath)

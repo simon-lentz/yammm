@@ -118,9 +118,12 @@ func WithSourcesOnly() LoadOption {
 }
 
 // WithDisallowImports prevents import declarations from being processed.
-// When enabled, any import statements in the source produce an
-// E_IMPORT_NOT_ALLOWED diagnostic. Used by LoadString (unconditionally)
-// and by the LSP markdown analysis path (isolated blocks).
+// When enabled, any import statements in the source produce a single
+// E_IMPORT_NOT_ALLOWED diagnostic at the first declaration. The rejection
+// does not suppress the source's other diagnostics: analysis continues
+// with the rejected aliases deferred, and the rejected imports are never
+// probed or resolved. Used by LoadString (unconditionally) and by the LSP
+// markdown analysis path (isolated blocks).
 func WithDisallowImports() LoadOption {
 	return func(c *loadConfig) {
 		c.disallowImports = true

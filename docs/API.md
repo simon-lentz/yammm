@@ -61,6 +61,54 @@ if !result.OK() {
 // Use s
 ```
 
+### Diagnostic Completeness
+
+One load pass reports every *independent* error in the schema and its import
+closure — each exactly once:
+
+- **Import failures accumulate.** Every unresolvable or failed import is
+  reported at its own declaration; one broken import neither hides its
+  siblings nor suppresses the source's own semantic diagnostics. A shared
+  broken import in a diamond-shaped graph is compiled once — its own
+  diagnostics appear once, and each importer adds one `E_UPSTREAM_FAIL` at
+  its own declaration.
+- **References through a failed import are deferred, not re-blamed.** An
+  alias whose import failed produces one diagnostic at the import
+  declaration; `extends` clauses, relation targets, and primary-key types
+  reached through that alias are skipped silently. A qualifier that names
+  no declared import at all remains a genuine `E_UNKNOWN_TYPE`.
+- **An alias binds once (keep-first).** The first declaration of an alias
+  wins at every layer; a later declaration of the same alias is reported
+  with `E_DUPLICATE_IMPORT` and stays inert — not loaded, not resolved,
+  not wired. References through the alias resolve against the kept first
+  binding.
+- **The all-or-nothing contract is unchanged.** Any error still yields a
+  nil `*Schema`; completeness changes what `result` carries, not the
+  contract.
+
+`LoadString` — and any load with `WithDisallowImports` — still rejects
+import declarations categorically with a single `E_IMPORT_NOT_ALLOWED`, but
+the rejection no longer suppresses the source's other findings: the
+remaining diagnostics are reported alongside it, with references through
+the rejected aliases deferred. Rejected imports are never probed or
+resolved.
+
+#### Issue limit
+
+`WithIssueLimit` bounds *collection*: once the limit is reached, further
+issues are dropped — counted in `Result.DroppedCount()` and flagged by
+`Result.LimitReached()`. Which issues survive the cap is collection-order
+dependent (declaration order, so earlier declarations win cap survival);
+the *display* order of surviving issues is always deterministic.
+Dropped issues still count toward `Result.OK()` / `HasErrors()` /
+`SeverityCounts()` (the counts reflect every issue *seen*, not only those
+stored), so truncation never flips a failing result to OK and the
+all-or-nothing contract holds regardless of the limit.
+`WithIssueLimit(0)` (or `diag.NoLimit`) means unlimited. The JSON output
+format carries `limit`, `limitReached`, and `droppedCount` whenever the cap
+was hit (including a truncated result with no errors); the CLI's text output
+appends a dropped-issues note.
+
 ### Shared Registry Semantics
 
 Passing the same `*Registry` to multiple `Load` calls in one process is safe and efficient (since v0.3.0). The behavior has two coordinated parts:

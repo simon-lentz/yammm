@@ -28,12 +28,10 @@ type Collector struct {
 	limitReached bool
 	droppedCount int
 
-	// Precomputed severity counts for O(1) queries
-	fatalCount   int
-	errorCount   int
-	warningCount int
-	infoCount    int
-	hintCount    int
+	// Precomputed severity counts for O(1) queries. Counts every issue SEEN,
+	// including those dropped past the limit (see storeLocked), so the severity
+	// queries stay truthful under truncation.
+	counts SeverityCounts
 
 	// Cached sorted result (invalidated on Collect)
 	cachedResult *Result
@@ -105,7 +103,7 @@ func (c *Collector) CollectAll(issues []Issue) {
 	}
 }
 
-// Merge incorporates all issues from a Result under a single lock.
+// Merge incorporates a Result into this collector under a single lock.
 //
 // Results are structurally guaranteed to contain only valid issues because
 // the Result type has no public constructor accepting arbitrary issues.
@@ -115,12 +113,41 @@ func (c *Collector) CollectAll(issues []Issue) {
 //
 // This differs from [Collect] and [CollectAll], which actively validate
 // each issue because they accept Issue values directly.
+//
+// A truncated res merges losslessly in aggregate: its dropped issues cannot be
+// re-listed, but their severity contributions and its truncation state
+// ([Result.LimitReached] / [Result.DroppedCount]) are carried into the
+// receiver. So a dropped error in res cannot flip the merged result to OK — the
+// same guarantee [Collector] already gives for directly-collected issues.
+//
+// The receiver's own configured limit is unchanged: merging a truncated res
+// into an unlimited collector yields LimitReached()==true with Limit()==0.
+// [Result.LimitReached] and [Result.DroppedCount] are the authoritative
+// truncation facts after a merge; Limit() remains the receiver's local cap, not
+// the cap that produced res's drops.
 func (c *Collector) Merge(res Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.cachedResult = nil
 
-	for issue := range res.Issues() {
-		c.collectLocked(issue)
+	// Fold in res's seen-severity counts wholesale. Each Result's counts reflect
+	// every issue it saw — stored and dropped past its own limit — so adding the
+	// counts (rather than re-counting only the surviving issues) keeps
+	// OK/HasErrors/ErrorCount truthful even when res was itself truncated and its
+	// dropped issues are no longer enumerable.
+	c.counts.addCounts(res.SeverityCounts())
+
+	// res's own drops can never be recovered, so carry its truncation forward.
+	if res.limitReached {
+		c.limitReached = true
+		c.droppedCount += res.droppedCount
+	}
+
+	// Store res's surviving issues, honoring c's own limit. storeLocked does not
+	// re-count (the counts were folded in above); issues past c's limit are
+	// dropped and flagged.
+	for _, issue := range res.issues {
+		c.storeLocked(issue)
 	}
 }
 
@@ -140,7 +167,24 @@ func (c *Collector) collectLocked(issue Issue) {
 	// Invalidate cached result
 	c.cachedResult = nil
 
-	// Check limit
+	// Severity counts reflect every issue SEEN, not just those stored under the
+	// limit, so HasErrors/OK/ErrorCount stay truthful when collection is
+	// truncated. The loader and completer gate on ErrorCount deltas to decide
+	// whether a schema failed; an error dropped at the cap that left these
+	// counts untouched would read as success and let a broken schema escape the
+	// all-or-nothing contract. Len() remains the stored count.
+	c.counts.add(issue.Severity())
+
+	c.storeLocked(issue)
+}
+
+// storeLocked appends an issue to the stored slice unless the issue limit has
+// been reached, in which case the issue is dropped and the truncation flags are
+// set. Caller must hold c.mu and must have already updated the severity counts:
+// storeLocked governs storage, not counting, so a dropped issue still shows up
+// in the severity totals (and thus in HasErrors/OK/ErrorCount).
+func (c *Collector) storeLocked(issue Issue) {
+	// At the limit, the issue is counted (by the caller) but not stored.
 	if c.limit > 0 && len(c.issues) >= c.limit {
 		c.limitReached = true
 		c.droppedCount++
@@ -148,20 +192,6 @@ func (c *Collector) collectLocked(issue Issue) {
 	}
 
 	c.issues = append(c.issues, issue)
-
-	// Update severity counts
-	switch issue.Severity() {
-	case Fatal:
-		c.fatalCount++
-	case Error:
-		c.errorCount++
-	case Warning:
-		c.warningCount++
-	case Info:
-		c.infoCount++
-	case Hint:
-		c.hintCount++
-	}
 }
 
 // Result produces a sorted, immutable snapshot.
@@ -185,7 +215,12 @@ func (c *Collector) Result() Result {
 	// Sort by source, position, code
 	slices.SortFunc(sorted, compareIssues)
 
-	result := newResult(sorted, c.limit, c.limitReached, c.droppedCount)
+	// Carry the collector's SEEN severity counts rather than recomputing from
+	// the stored slice (what newResult does): under truncation the dropped
+	// issues are absent from sorted, and recomputing would make Result.OK /
+	// HasErrors blind to a dropped error exactly as the gates would be. In the
+	// non-truncated case the two are identical (every collected issue is stored).
+	result := newResultWithCounts(sorted, c.limit, c.limitReached, c.droppedCount, c.counts)
 	c.cachedResult = &result
 	return result
 }
@@ -298,7 +333,7 @@ func compareRelated(a, b []location.RelatedInfo) int {
 func (c *Collector) HasFatal() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.fatalCount > 0
+	return c.counts.Fatal > 0
 }
 
 // HasErrors reports whether any Fatal or Error issue has been collected.
@@ -307,7 +342,7 @@ func (c *Collector) HasFatal() bool {
 func (c *Collector) HasErrors() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.fatalCount > 0 || c.errorCount > 0
+	return c.counts.Fatal > 0 || c.counts.Errors > 0
 }
 
 // OK reports whether no Fatal or Error issues have been collected.
@@ -316,7 +351,20 @@ func (c *Collector) HasErrors() bool {
 func (c *Collector) OK() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.fatalCount == 0 && c.errorCount == 0
+	return c.counts.Fatal == 0 && c.counts.Errors == 0
+}
+
+// ErrorCount returns the number of Fatal and Error issues collected so far.
+//
+// This is an O(1) operation using precomputed counts. Callers that share
+// one collector across nested operations can compare counts taken before
+// and after an operation to determine whether that specific operation
+// contributed errors — [Collector.HasErrors] only answers whether any
+// operation has.
+func (c *Collector) ErrorCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.counts.Fatal + c.counts.Errors
 }
 
 // Len returns the number of collected issues.

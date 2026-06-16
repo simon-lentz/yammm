@@ -489,3 +489,25 @@ func CodesByCategory(cat CodeCategory) []Code {
 	}
 	return result
 }
+
+// IsImportDeclarationCode reports whether code (a diagnostic code's String())
+// names an import-DECLARATION diagnostic — a rejected, duplicated, colliding, or
+// invalid import alias — as distinct from an import-RESOLUTION diagnostic
+// (E_IMPORT_RESOLVE / E_IMPORT_CYCLE / E_PATH_ESCAPE). Both families share
+// [CategoryImport], which is too coarse to tell them apart, so this is the
+// canonical declaration subset — co-located with the code definitions so a new
+// declaration code is added here too.
+//
+// The LSP markdown surface downgrades the declaration family to Hint in code
+// blocks (imports are categorically not processed there); the resolution family
+// keeps its severity. Keyed by the code's String() so callers holding only the
+// rendered code string can consult the list.
+func IsImportDeclarationCode(code string) bool {
+	switch code {
+	case E_IMPORT_NOT_ALLOWED.String(), E_DUPLICATE_IMPORT.String(),
+		E_IMPORT_ALIAS_COLLISION.String(), E_INVALID_ALIAS.String():
+		return true
+	default:
+		return false
+	}
+}

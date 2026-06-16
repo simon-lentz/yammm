@@ -7,6 +7,46 @@ import (
 	"testing"
 )
 
+func TestResult_TruncationNote(t *testing.T) {
+	c := NewCollector(2)
+	c.Collect(NewIssue(Error, E_SYNTAX, "a").Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "b").Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "c").Build()) // dropped past the limit
+
+	note := c.Result().TruncationNote()
+	if !strings.Contains(note, "1 more issue(s) dropped after reaching the 2-issue limit") {
+		t.Errorf("TruncationNote() = %q; want the dropped-count/limit summary", note)
+	}
+
+	if got := OK().TruncationNote(); got != "" {
+		t.Errorf("TruncationNote() on a non-truncated result = %q; want empty", got)
+	}
+}
+
+func TestResult_TruncationNote_MergedIntoUnlimited_OmitsBogusLimit(t *testing.T) {
+	// Merging a truncated result into an unlimited collector carries the
+	// truncation state forward but not a positive limit, so the note must
+	// report the dropped count without naming a nonsensical "0-issue limit".
+	src := NewCollector(1)
+	src.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
+	src.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
+
+	dst := NewCollectorUnlimited()
+	dst.Merge(src.Result())
+	r := dst.Result()
+
+	if !r.LimitReached() || r.DroppedCount() != 1 {
+		t.Fatalf("setup: LimitReached=%v DroppedCount=%d; want true/1", r.LimitReached(), r.DroppedCount())
+	}
+	note := r.TruncationNote()
+	if strings.Contains(note, "0-issue") {
+		t.Errorf("TruncationNote() = %q; must not name a 0-issue limit after merge into an unlimited collector", note)
+	}
+	if !strings.Contains(note, "1 more issue(s) dropped") {
+		t.Errorf("TruncationNote() = %q; want the dropped-count summary", note)
+	}
+}
+
 func TestOK(t *testing.T) {
 	r := OK()
 
@@ -45,6 +85,34 @@ func TestResult_HasCode(t *testing.T) {
 	}
 	if OK().HasCode(E_SYNTAX) {
 		t.Error("empty result HasCode(E_SYNTAX) = true; want false")
+	}
+}
+
+func TestResult_HasCode_ReflectsRetainedIssuesUnderTruncation(t *testing.T) {
+	// HasCode is an enumeration query (like Issues/Len): it reflects the issues
+	// the result can enumerate, so a code present only among issues dropped past
+	// the limit reads false. The seen-based severity gate stays truthful — a
+	// dropped Error still fails OK()/HasErrors() — so the two families are
+	// deliberately distinct, not in conflict.
+	c := NewCollector(1)
+	c.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
+	c.Collect(NewIssue(Error, E_INTERNAL, "dropped past the limit").Build())
+	r := c.Result()
+
+	if !r.LimitReached() || r.DroppedCount() != 1 {
+		t.Fatalf("setup: LimitReached=%v DroppedCount=%d; want true/1", r.LimitReached(), r.DroppedCount())
+	}
+	// The dropped Error's code is not enumerable, so HasCode reports false...
+	if r.HasCode(E_INTERNAL) {
+		t.Error("HasCode(E_INTERNAL) = true; want false (the issue was dropped past the limit)")
+	}
+	// ...while the seen-based gate still counts it.
+	if r.OK() || !r.HasErrors() {
+		t.Errorf("OK=%v HasErrors=%v; want false/true — the dropped Error must still fail the gate", r.OK(), r.HasErrors())
+	}
+	// The retained issue's code is enumerable.
+	if !r.HasCode(E_SYNTAX) {
+		t.Error("HasCode(E_SYNTAX) = false; want true (the retained issue)")
 	}
 }
 

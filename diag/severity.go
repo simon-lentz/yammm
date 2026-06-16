@@ -32,6 +32,7 @@ const (
 // the wire format stability guarantee. The returned strings are:
 // "fatal", "error", "warning", "info", "hint".
 func (s Severity) String() string {
+	//exhaustive:enforce
 	switch s {
 	case Fatal:
 		return "fatal"

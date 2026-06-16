@@ -103,12 +103,7 @@ func (c *completer) resolveTypeRefName(ref TypeRef) string {
 		return "" // Deferred
 	}
 
-	imp, ok := c.schema.ImportByAlias(ref.Qualifier())
-	if !ok {
-		return ""
-	}
-
-	importedSchema, ok := c.registry.LookupBySourceID(imp.ResolvedSourceID())
+	importedSchema, ok := c.resolveImportedSchema(ref.Qualifier())
 	if !ok {
 		return ""
 	}
@@ -121,20 +116,22 @@ func (c *completer) resolveTypeRefName(ref TypeRef) string {
 }
 
 // completeTypes linearizes inheritance and merges members for each type.
-func (c *completer) completeTypes() bool {
-	ok := true
+// Per-type findings (unknown supertypes, rejected primary-key types,
+// inheritance conflicts) are collected; every type is completed so each
+// carries its merged member view for the downstream phases.
+func (c *completer) completeTypes() {
 	completed := make(map[string]bool)
 
 	// Set schema name on each type for cross-schema display.
 	schemaName := c.schema.Name()
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		t.setSchemaName(schemaName)
 	}
 
-	var completeType func(t *Type) bool
-	completeType = func(t *Type) bool {
+	var completeType func(t *Type)
+	completeType = func(t *Type) {
 		if completed[t.Name()] {
-			return true
+			return
 		}
 
 		// Mark early to handle re-entry during recursion
@@ -158,20 +155,22 @@ func (c *completer) completeTypes() bool {
 		linearize = func(ref TypeRef) {
 			resolved := c.resolveTypeRef(ref)
 			if resolved == nil {
-				// Defer a qualified ref only when no registry is present to resolve it
+				// Defer a qualified ref when no registry is present to resolve it
 				// (a schema.Builder schema built without WithRegistry, or a direct
-				// completeModel caller). With a registry — which every
-				// Load/LoadString/LoadSources path supplies, including the LSP via
-				// LoadSourcesWithEntry — a qualified supertype that still does not resolve
-				// is a genuine error (an undefined alias, or a type absent from the
-				// imported schema), mirroring validateRelationTarget; silently dropping it
-				// would strip the child of every inherited member with no diagnostic.
-				if ref.Qualifier() != "" && c.registry == nil {
+				// completeModel caller), or when its qualifier names an import the
+				// loader saw but could not resolve — the import failure already
+				// carries the root-cause diagnostic, and blaming every reference
+				// through the alias would bury it in noise. With a registry and a
+				// resolved import, a qualified supertype that still does not
+				// resolve is a genuine error (an undefined alias, or a type absent
+				// from the imported schema), mirroring validateRelationTarget;
+				// silently dropping it would strip the child of every inherited
+				// member with no diagnostic.
+				if c.referenceDeferred(ref.Qualifier()) {
 					return
 				}
 				c.errorf(t.Span(), diag.E_UNKNOWN_TYPE,
 					"unknown type %q in extends clause of type %q", ref.String(), t.Name())
-				ok = false
 				return
 			}
 
@@ -186,9 +185,7 @@ func (c *completer) completeTypes() bool {
 			// are declared before their base types in the source file.
 			if ref.Qualifier() == "" {
 				if st, exists := c.typeIndex[ref.Name()]; exists {
-					if !completeType(st) {
-						ok = false
-					}
+					completeType(st)
 				}
 			}
 
@@ -215,22 +212,42 @@ func (c *completer) completeTypes() bool {
 		allProps := c.mergeProperties(t, supers)
 		t.setAllProperties(allProps)
 
-		// Extract primary keys
+		// Extract primary keys. mergeProperties emits t's own properties first
+		// (unmodified) and inherited ones after, so allProps[:ownPropCount] are
+		// exactly t's own — an O(1), pointer-exact "declared on t?" test for the
+		// rejection branch below, without a clone or a per-type set.
+		ownPropCount := len(t.properties)
 		pks := make([]*Property, 0)
-		for _, p := range allProps {
+		for i, p := range allProps {
 			if p.IsPrimaryKey() {
+				// A primary whose type bottoms out in an already-diagnosed
+				// unresolvable alias (deferred import, cyclic local chain)
+				// is kept as a key without the type check: the declaration
+				// IS a primary key — only its type is unknowable here — and
+				// the root cause carries its own diagnostic.
+				if c.primaryKeyTypeDeferred(p.Constraint()) {
+					pks = append(pks, p)
+					continue
+				}
 				if !isPrimaryKeyAllowed(p.Constraint()) {
-					// The constraint is nil when parse-error recovery kept a
-					// property that never received a type; describe that
-					// rather than dereferencing it.
-					kind := "missing type"
-					if pc := p.Constraint(); pc != nil {
-						kind = pc.Kind().String()
+					// Report only at the declaring type. An inherited rejected
+					// primary was already reported when its ancestor completed
+					// (supertypes complete before their subtypes); re-checking the
+					// same inherited *Property at every descendant would duplicate
+					// the identical diagnostic at the identical span. i < ownPropCount
+					// holds exactly for t's own properties (see above).
+					if i < ownPropCount {
+						// The constraint is nil when parse-error recovery kept a
+						// property that never received a type; describe that
+						// rather than dereferencing it.
+						kind := "missing type"
+						if pc := p.Constraint(); pc != nil {
+							kind = pc.Kind().String()
+						}
+						c.errorf(p.Span(), diag.E_INVALID_PRIMARY_KEY_TYPE,
+							"property %q: %s cannot be used as a primary key (allowed: String, UUID, Date, Timestamp)",
+							p.Name(), kind)
 					}
-					c.errorf(p.Span(), diag.E_INVALID_PRIMARY_KEY_TYPE,
-						"property %q: %s cannot be used as a primary key (allowed: String, UUID, Date, Timestamp)",
-						p.Name(), kind)
-					ok = false
 					continue
 				}
 				pks = append(pks, p)
@@ -249,20 +266,16 @@ func (c *completer) completeTypes() bool {
 		// Merge invariants from ancestors
 		allInvs := c.mergeInvariants(t, supers)
 		t.setAllInvariants(allInvs)
-
-		return ok
 	}
 
-	for _, t := range c.schema.TypesSlice() {
-		if !completeType(t) {
-			ok = false
-		}
+	for _, t := range c.schema.types {
+		completeType(t)
 	}
 
 	// Set subtypes after all types are completed.
 	// Only update subtypes for types in the current schema; cross-schema
 	// types are already sealed and their subtypes are not mutable here.
-	for _, t := range c.schema.TypesSlice() {
+	for _, t := range c.schema.types {
 		for super := range t.SuperTypes() {
 			superID := super.ID()
 			// Only set subtypes on local types (same schema)
@@ -276,8 +289,6 @@ func (c *completer) completeTypes() bool {
 			}
 		}
 	}
-
-	return ok
 }
 
 // resolveTypeRef resolves a TypeRef to a Type.
@@ -296,18 +307,30 @@ func (c *completer) resolveTypeRef(ref TypeRef) *Type {
 		return nil
 	}
 
-	imp, ok := c.schema.ImportByAlias(ref.Qualifier())
-	if !ok {
-		return nil
-	}
-
-	importedSchema, ok := c.registry.LookupBySourceID(imp.ResolvedSourceID())
+	importedSchema, ok := c.resolveImportedSchema(ref.Qualifier())
 	if !ok {
 		return nil
 	}
 
 	t, _ := importedSchema.Type(ref.Name())
 	return t
+}
+
+// resolveImportedSchema resolves a non-empty import qualifier to the imported
+// schema through the resolution map — [completer.classifyQualifier], the single
+// interpreter of that map — returning false when the qualifier is absent or
+// deferred, or when its resolved schema is not registered. It is the
+// completion-time counterpart to the runtime [Schema.ResolveType] /
+// [Schema.ResolveDataType], which read the wired Import objects instead; routing
+// completion through classifyQualifier keeps a qualifier's deferred/resolved
+// state read in one place during a load, not two. The caller must have already
+// handled the registry-less case (no registry means the reference defers).
+func (c *completer) resolveImportedSchema(qualifier string) (*Schema, bool) {
+	state, sourceID := c.classifyQualifier(qualifier)
+	if state != aliasResolved {
+		return nil, false
+	}
+	return c.registry.LookupBySourceID(sourceID)
 }
 
 // resolveTypeID resolves a TypeID to a Type.
@@ -351,7 +374,7 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 			continue
 		}
 
-		for _, p := range superType.AllPropertiesSlice() {
+		for p := range superType.AllProperties() {
 			existing, ok := seen[p.Name()]
 			if !ok {
 				seen[p.Name()] = p
@@ -409,7 +432,7 @@ func (c *completer) mergeInvariants(t *Type, supers []ResolvedTypeRef) []*Invari
 			continue
 		}
 
-		for _, inv := range superType.AllInvariantsSlice() {
+		for inv := range superType.AllInvariants() {
 			if seen[inv.Name()] {
 				continue
 			}

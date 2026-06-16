@@ -58,25 +58,56 @@ func NewRenderer(format OutputFormat, isTTY bool, noColor bool, provider diag.So
 }
 
 // RenderResult writes diagnostic output to w using the given renderer and format.
+//
+// Truncation at the collector's issue limit is surfaced in both formats even
+// when no errors render: the text format appends a summary line, and the JSON
+// format emits its wire object (which carries limit, limitReached, and
+// droppedCount) rather than nothing — otherwise a machine consumer could not
+// tell a truncated result from a clean one.
 func RenderResult(w io.Writer, renderer *diag.Renderer, format OutputFormat, result diag.Result) error {
-	if result.OK() {
-		return nil
-	}
-
 	switch format {
 	case FormatJSON:
-		data := renderer.FormatResultJSON(result)
-		if _, err := w.Write(data); err != nil {
-			return err
+		// The JSON wire object carries limit/limitReached/droppedCount, so it is
+		// the single truncation surface for JSON: emit it whenever there is
+		// anything to report — errors, or a truncation that a clean result would
+		// otherwise render as nothing.
+		if result.OK() && !result.LimitReached() {
+			return nil
 		}
-		_, err := w.Write([]byte{'\n'})
-		return err
+		return writeResultJSON(w, renderer, result)
 	default:
-		text := renderer.FormatResult(result)
-		if text != "" {
-			_, err := fmt.Fprintln(w, text)
-			return err
+		if !result.OK() {
+			if text := renderer.FormatResult(result); text != "" {
+				if _, err := fmt.Fprintln(w, text); err != nil {
+					return err
+				}
+			}
+		}
+		// Truncation is surfaced uniformly for text — after any errors render,
+		// or alone when a clean result was truncated.
+		if result.LimitReached() {
+			return writeTruncationNote(w, result)
 		}
 		return nil
 	}
+}
+
+// writeResultJSON writes the result's JSON wire object followed by a newline.
+func writeResultJSON(w io.Writer, renderer *diag.Renderer, result diag.Result) error {
+	data := renderer.FormatResultJSON(result)
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	_, err := w.Write([]byte{'\n'})
+	return err
+}
+
+// writeTruncationNote reports how many issues were dropped after the
+// collector's limit was reached, using the canonical wording from
+// [diag.Result.TruncationNote] so the CLI text surface and any future text
+// consumer stay in sync (the JSON wire and the LSP log carry the same fact in
+// their own shapes).
+func writeTruncationNote(w io.Writer, result diag.Result) error {
+	_, err := fmt.Fprintf(w, "note: %s\n", result.TruncationNote())
+	return err
 }
