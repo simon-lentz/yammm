@@ -144,8 +144,13 @@ func (r Result) HasHints() bool {
 	return r.counts.Hints > 0
 }
 
-// HasCode reports whether any issue carries the given code, at any
-// severity.
+// HasCode reports whether any retained issue carries the given code, at any
+// severity. Like [Result.Issues] and [Result.Len], it reflects the issues the
+// result can enumerate: when the issue limit was reached ([Result.LimitReached]),
+// a code present only among the dropped issues reads false here. Use the
+// seen-based queries ([Result.HasErrors], [Result.SeverityCounts]) for gating
+// that must stay truthful under truncation, and [Result.DroppedCount] to detect
+// that the enumerable set is incomplete.
 func (r Result) HasCode(code Code) bool {
 	for _, issue := range r.issues {
 		if issue.Code() == code {

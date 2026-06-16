@@ -23,6 +23,15 @@ type completionRegistry interface {
 // resolved entry carries the imported schema's SourceID. The explicit deferred
 // flag replaces an earlier in-band convention (a zero SourceID meaning
 // "deferred"), so the state is read, not inferred.
+//
+// "Deferred" has one source that flows one way, not parallel representations
+// that must be kept in agreement by hand: the loader folds each importBinding
+// into this map (a failed binding becomes a deferred entry; see loadSource),
+// [completer.indexImports] then builds each schema Import from the map (a
+// deferred entry yields a zero-ResolvedSourceID Import that the loader's wiring
+// loop leaves schema-less), and completion reads only the map — via
+// [completer.classifyQualifier], the single interpreter named on
+// [resolvedImportMap], through which every qualifier-resolving site routes.
 type importResolution struct {
 	deferred bool
 	sourceID location.SourceID
@@ -90,6 +99,17 @@ func completeModel(
 // schema by the errors IT contributed. tripped is the single load-bearing
 // comparison, so a nested caller cannot reintroduce the conflation by forgetting
 // to snapshot.
+//
+// INVARIANT: the gate is an entry/exit delta on one shared collector, so it is
+// correct only while accumulation into that collector is serial — the guarded
+// operation and the nested loads it triggers are the sole writers between
+// newErrorGate and tripped. A sibling writing errors to the same collector
+// concurrently within that window would be miscounted against this gate. The
+// loader is serial today (loadImports walks imports in sequence, one collector
+// per Load); parallelizing import loading would break this assumption, and the
+// fix would then be per-schema sub-collectors merged upward
+// ([diag.Collector.Merge] already folds counts and truncation losslessly for
+// exactly that), not a delta on a shared collector.
 type errorGate struct {
 	collector *diag.Collector
 	entry     int
@@ -722,6 +742,13 @@ func (c *completer) referenceDeferred(qualifier string) bool {
 // qualifier/registry prediction — is what keeps this in step with
 // [completer.resolveAliasChain]: every unresolved terminal it leaves behind was
 // reported or deferred there, and a resolved one is the only shape this checks.
+//
+// This couples to [completer.resolveAliasConstraints] leaving a deferred
+// terminal as an unresolved AliasConstraint — the invariant pinned by
+// [TestBuild_NoRegistryQualifiedPrimaryKey_TerminalStaysUnresolved]. A change
+// that instead resolved such terminals to a placeholder would silently flip this
+// predicate to false and resurface a mis-attributed E_INVALID_PRIMARY_KEY_TYPE,
+// so the two must move together.
 func (c *completer) primaryKeyTypeDeferred(constraint Constraint) bool {
 	if constraint == nil {
 		return false

@@ -88,6 +88,34 @@ func TestResult_HasCode(t *testing.T) {
 	}
 }
 
+func TestResult_HasCode_ReflectsRetainedIssuesUnderTruncation(t *testing.T) {
+	// HasCode is an enumeration query (like Issues/Len): it reflects the issues
+	// the result can enumerate, so a code present only among issues dropped past
+	// the limit reads false. The seen-based severity gate stays truthful — a
+	// dropped Error still fails OK()/HasErrors() — so the two families are
+	// deliberately distinct, not in conflict.
+	c := NewCollector(1)
+	c.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
+	c.Collect(NewIssue(Error, E_INTERNAL, "dropped past the limit").Build())
+	r := c.Result()
+
+	if !r.LimitReached() || r.DroppedCount() != 1 {
+		t.Fatalf("setup: LimitReached=%v DroppedCount=%d; want true/1", r.LimitReached(), r.DroppedCount())
+	}
+	// The dropped Error's code is not enumerable, so HasCode reports false...
+	if r.HasCode(E_INTERNAL) {
+		t.Error("HasCode(E_INTERNAL) = true; want false (the issue was dropped past the limit)")
+	}
+	// ...while the seen-based gate still counts it.
+	if r.OK() || !r.HasErrors() {
+		t.Errorf("OK=%v HasErrors=%v; want false/true — the dropped Error must still fail the gate", r.OK(), r.HasErrors())
+	}
+	// The retained issue's code is enumerable.
+	if !r.HasCode(E_SYNTAX) {
+		t.Error("HasCode(E_SYNTAX) = false; want true (the retained issue)")
+	}
+}
+
 func TestResult_SeverityQueries(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Fatal, E_LIMIT_REACHED, "limit").Build(),

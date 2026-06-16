@@ -103,12 +103,7 @@ func (c *completer) resolveTypeRefName(ref TypeRef) string {
 		return "" // Deferred
 	}
 
-	imp, ok := c.schema.ImportByAlias(ref.Qualifier())
-	if !ok {
-		return ""
-	}
-
-	importedSchema, ok := c.registry.LookupBySourceID(imp.ResolvedSourceID())
+	importedSchema, ok := c.resolveImportedSchema(ref.Qualifier())
 	if !ok {
 		return ""
 	}
@@ -312,18 +307,30 @@ func (c *completer) resolveTypeRef(ref TypeRef) *Type {
 		return nil
 	}
 
-	imp, ok := c.schema.ImportByAlias(ref.Qualifier())
-	if !ok {
-		return nil
-	}
-
-	importedSchema, ok := c.registry.LookupBySourceID(imp.ResolvedSourceID())
+	importedSchema, ok := c.resolveImportedSchema(ref.Qualifier())
 	if !ok {
 		return nil
 	}
 
 	t, _ := importedSchema.Type(ref.Name())
 	return t
+}
+
+// resolveImportedSchema resolves a non-empty import qualifier to the imported
+// schema through the resolution map — [completer.classifyQualifier], the single
+// interpreter of that map — returning false when the qualifier is absent or
+// deferred, or when its resolved schema is not registered. It is the
+// completion-time counterpart to the runtime [Schema.ResolveType] /
+// [Schema.ResolveDataType], which read the wired Import objects instead; routing
+// completion through classifyQualifier keeps a qualifier's deferred/resolved
+// state read in one place during a load, not two. The caller must have already
+// handled the registry-less case (no registry means the reference defers).
+func (c *completer) resolveImportedSchema(qualifier string) (*Schema, bool) {
+	state, sourceID := c.classifyQualifier(qualifier)
+	if state != aliasResolved {
+		return nil, false
+	}
+	return c.registry.LookupBySourceID(sourceID)
 }
 
 // resolveTypeID resolves a TypeID to a Type.

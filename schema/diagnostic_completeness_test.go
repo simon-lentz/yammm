@@ -257,6 +257,39 @@ type Item { id String primary }`),
 	})
 }
 
+// TestLoad_CollisionRejectedAlias_NotResolvedAgainstLoaderImport pins the
+// deferRejectedAlias overwrite on the Load path: the loader resolves the import
+// before the completer rejects its alias (here colliding with a local datatype),
+// so the rejection must overwrite that resolution in the resolution map — else a
+// reference through the alias would silently resolve against the still-loaded
+// import. The reference names a datatype ABSENT from the imported schema, so a
+// silent resolution would surface as E_UNKNOWN_TYPE ("datatype ... does not exist
+// in the schema imported as ..."); its absence proves the alias deferred to the
+// collision's root cause instead. Distinct from
+// TestLoad_CollisionRejectedAlias_ReferencesDeferred, whose reference names a
+// member that DOES exist in the import and so cannot tell deferral from silent
+// resolution apart.
+func TestLoad_CollisionRejectedAlias_NotResolvedAgainstLoaderImport(t *testing.T) {
+	t.Parallel()
+	res := loadSourcesErr(t, map[string][]byte{
+		"main.yammm": []byte(`schema "main"
+import "./other" as Money
+type Money = String[3,3]
+type Holder {
+	id String primary
+	pay Money.NoSuchDatatype
+}`),
+		"other.yammm": []byte(`schema "other"
+type Code = String[2,2]
+type Item { id String primary }`),
+	})
+
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_IMPORT_ALIAS_COLLISION: 1,
+		diag.E_UNKNOWN_TYPE:           0,
+	})
+}
+
 // TestLoad_DiamondBrokenImport_DiagnosticsExactlyOnce pins failure
 // memoization on a diamond import graph: the entry imports B and C, which
 // both import broken D (a single pure semantic defect). D's own diagnostic
@@ -1011,6 +1044,48 @@ func TestBuild_NoRegistryQualifiedPrimaryKey_DefersAtLinkTime(t *testing.T) {
 	}
 	if s == nil {
 		t.Fatal("expected a non-nil schema (the qualified primary-key type defers)")
+	}
+}
+
+// TestBuild_NoRegistryQualifiedPrimaryKey_TerminalStaysUnresolved pins the
+// invariant completer.primaryKeyTypeDeferred depends on: alias-constraint
+// resolution ([completer.resolveAliasConstraints]) leaves a deferred datatype
+// reference as an *unresolved* AliasConstraint, the exact shape
+// primaryKeyTypeDeferred recognizes to skip the primary-key type check
+// (deferring to link time) rather than stacking a mis-attributed
+// E_INVALID_PRIMARY_KEY_TYPE.
+// TestBuild_NoRegistryQualifiedPrimaryKey_DefersAtLinkTime pins the resulting
+// behavior (a clean deferred load); this pins the mechanism, so a future change
+// that resolved such terminals to a placeholder fails here and forces
+// primaryKeyTypeDeferred to be revisited in lockstep.
+func TestBuild_NoRegistryQualifiedPrimaryKey_TerminalStaysUnresolved(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("d").
+		AddType("Thing").
+		WithPrimaryKey("id", schema.NewAliasConstraint("bogus.IdType", nil)).
+		Done().
+		Build()
+	if res.HasErrors() || s == nil {
+		t.Fatalf("setup: want a clean deferred load; HasErrors=%v nilSchema=%v (%v)", res.HasErrors(), s == nil, res)
+	}
+
+	typ, ok := s.Type("Thing")
+	if !ok {
+		t.Fatal("type Thing missing from the built schema")
+	}
+	pks := typ.PrimaryKeysSlice()
+	if len(pks) != 1 {
+		t.Fatalf("PrimaryKeysSlice() = %d keys; want 1 (the deferred primary is kept as a key)", len(pks))
+	}
+	// ResolveAlias returns an unresolved alias unchanged, so the deferred
+	// primary-key terminal must still be an AliasConstraint reporting
+	// IsResolved()==false — exactly what primaryKeyTypeDeferred keys off.
+	terminal := schema.ResolveAlias(pks[0].Constraint())
+	alias, isAlias := terminal.(schema.AliasConstraint)
+	if !isAlias || alias.IsResolved() {
+		t.Errorf("primary-key terminal = %T (isAlias=%v resolved=%v); want an unresolved AliasConstraint",
+			terminal, isAlias, isAlias && alias.IsResolved())
 	}
 }
 
