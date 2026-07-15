@@ -29,7 +29,8 @@ Key `diag.Result` methods:
 | `Err()` | `nil` if OK, or `*diag.ResultError` |
 | `Issues()` | Iterator over all issues |
 | `Errors()` | Iterator over Fatal + Error issues |
-| `Messages()` | `[]string` of Fatal + Error messages |
+| `HasCode(code)` | `true` if any issue carries the given diagnostic code |
+| `TruncationNote()` | One-line dropped-issues note when the issue limit was hit (empty otherwise) |
 
 ---
 
@@ -170,6 +171,24 @@ type RawInstance struct {
 }
 ```
 
+### Build RawInstances with SchemaBuilder
+
+`instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, and cardinality mismatches surface from `Build()` with the offending call site's file:line. Errors on nil schema, unknown type, or abstract type.
+
+```go
+b, err := instance.BuilderFor(s, "Person")
+if err != nil { /* handle */ }
+raw, err := b.
+    Property("id", "p1").
+    Property("name", "Alice").
+    EdgeTo("works_at", "c1").                    // association; variadic key supports composite PKs
+    EdgeToWith("knows", []any{"p2"},             // association with edge properties
+        map[string]any{"since": "2020-01-01"}).
+    Composed("addresses",                        // composition: pass child builders
+        addr.Property("id", "a1")).
+    Build()
+```
+
 ### ValidInstance (Output -- Immutable)
 
 ```go
@@ -293,6 +312,17 @@ info, result := snapshot.Info(ctx, data)
 
 `SnapshotInfo` fields: `Version`, `Features`, `SchemaName`, `SchemaHash`, `IntegrityHash`, `CreatedAt`, `Metadata`, `Types`, `InstanceCounts`, `TotalInstances`, `TotalEdges`, `IntegrityStatus`.
 
+### Update Metadata In Place
+
+```go
+header, res := snapshot.HeaderOnly(ctx, data)   // read existing metadata
+newMeta := maps.Clone(header.Metadata)          // replace-not-merge contract
+newMeta["pipeline_completed"] = "true"
+updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
+```
+
+`UpdateMetadataOrReMarshal(ctx, data, newMeta, s, opts...)` is the default entry point: it rewrites the header's metadata map (a full replace — clone the old map and mutate) while reusing the body bytes verbatim (fast path), and transparently falls back to `Load + Marshal` on any recoverable failure, emitting `W_UPDATE_METADATA_FALLBACK` so the transition is observable. The strict-fast-path primitive `UpdateMetadata(ctx, data, newMeta, opts...)` stays exported for consumers where a round-trip is unacceptable. CLI form: `yammm snapshot update-metadata --set k=v`.
+
 ---
 
 ## Thread Safety and Immutability
@@ -306,6 +336,15 @@ info, result := snapshot.Info(ctx, data)
 
 ---
 
+## Test Helpers
+
+Two packages provide shared vocabulary for consumer test suites:
+
+- **`instance/instancetest`** — `VI(typeName, opts...)` builds a `*ValidInstance` fixture directly (no validation pass), defaulting every field a scenario does not name; options include `PK(parts...)`, `Props(m)`, `Edges(m)`, `Composed(m)`, `Provenance(p)`, `TypeID(id)`.
+- **`snapshot/snapshottest`** — `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances; `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence; `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling; `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison.
+
+---
+
 ## Complete Pipeline Example
 
 ```go
@@ -315,8 +354,8 @@ if result.HasErrors() {
     return result.Err()
 }
 
-// 2. Parse data (using JSON adapter)
-adapter, _ := jsonAdapter.New(source.NewRegistry())
+// 2. Parse data (using JSON adapter; nil registry — location tracking off)
+adapter, _ := jsonAdapter.New(nil)
 parsed, result := adapter.ParseObject(ctx, loc, jsonData)
 if result.HasErrors() {
     return result.Err()

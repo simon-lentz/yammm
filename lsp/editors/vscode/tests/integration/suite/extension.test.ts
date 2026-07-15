@@ -75,4 +75,40 @@ suite('YAMMM extension integration', () => {
                 .join('; ')}`
         );
     });
+
+    test('language server provides hover for a type declaration', async () => {
+        const uri = fixtureUri('valid.yammm');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc);
+
+        // Line 2, character 7 is the "P" of "type Person {". Poll because
+        // the server may still be analyzing when the document first opens.
+        const position = new vscode.Position(2, 7);
+        const deadline = Date.now() + 30_000;
+        let hovers: vscode.Hover[] = [];
+        for (;;) {
+            hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+                'vscode.executeHoverProvider',
+                uri,
+                position
+            );
+            if (hovers.length > 0 || Date.now() > deadline) {
+                break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+
+        assert.ok(
+            hovers.length > 0,
+            'expected a hover result for the Person type declaration'
+        );
+        const text = hovers
+            .flatMap((h) => h.contents)
+            .map((c) => (typeof c === 'string' ? c : c.value))
+            .join('\n');
+        assert.ok(
+            text.includes('Person'),
+            `hover content should mention the type name, got: ${text}`
+        );
+    });
 });

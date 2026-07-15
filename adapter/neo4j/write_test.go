@@ -107,6 +107,192 @@ func TestNodeQueryFor_ImmutableKeys(t *testing.T) {
 	}
 }
 
+func TestNodeQueryFor_ImmutableKeyUnknown(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "basic.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
+	})
+
+	inst := graphResult.InstancesOf("Entity")[0]
+	ns := shape.Types["Entity"]
+	st, _ := s.Type("Entity")
+
+	// A mistyped immutable key must fail loudly: honored silently, the real
+	// property would stay in update_props and be rewritten on every re-MERGE,
+	// defeating write-once. A valid key alongside it must not mask the error.
+	_, err := a.NodeQueryFor(context.Background(), &ns, inst, st, WithImmutableKeys("created_at", "craeted_at"))
+	if err == nil {
+		t.Fatal("expected error for unknown immutable key")
+	}
+	if !strings.Contains(err.Error(), "craeted_at") {
+		t.Errorf("error should name the unknown key: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Entity") {
+		t.Errorf("error should name the type: %v", err)
+	}
+}
+
+func TestNodeQueryFor_ImmutableKeyInherited(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "inheritance.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "test", "run_id": "r1", "source_fetched_at": "2024-01-01T00:00:00Z"}},
+	})
+
+	inst := graphResult.InstancesOf("Entity")[0]
+	ns := shape.Types["Entity"]
+	st, _ := s.Type("Entity")
+
+	// An inherited property is a real property of the type and must validate.
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st, WithImmutableKeys("source_fetched_at"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateProps, ok := q.Params["update_props"].(map[string]any)
+	if !ok {
+		t.Fatal("update_props should be map[string]any")
+	}
+	if _, has := updateProps["source_fetched_at"]; has {
+		t.Error("update_props should not contain immutable key 'source_fetched_at'")
+	}
+}
+
+func TestNodeQueryFor_ImmutableKeysNilSchemaType(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "basic.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
+	})
+
+	inst := graphResult.InstancesOf("Entity")[0]
+	ns := shape.Types["Entity"]
+
+	// With no schema type there is nothing to validate against; the key is
+	// honored unvalidated, matching the nil pass-through coercion contract.
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, nil, WithImmutableKeys("created_at"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateProps, ok := q.Params["update_props"].(map[string]any)
+	if !ok {
+		t.Fatal("update_props should be map[string]any")
+	}
+	if _, has := updateProps["created_at"]; has {
+		t.Error("update_props should not contain immutable key 'created_at'")
+	}
+}
+
+func TestBatchNodeQueries_ImmutableKeyUnknown(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "basic.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
+	})
+
+	_, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("frist_seen_at"))
+	if err == nil {
+		t.Fatal("expected error for unknown immutable key")
+	}
+	if !strings.Contains(err.Error(), "frist_seen_at") {
+		t.Errorf("error should name the unknown key: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Entity") {
+		t.Errorf("error should name the written type(s): %v", err)
+	}
+}
+
+func TestBatchNodeQueries_ImmutableKeyPartialTypeMatch(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "multiple_types.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Widget": {{"id": "w1", "code": "c1"}},
+		"Gadget": {{"uid": "u1", "sku": "s1", "optional_note": "n"}},
+	})
+
+	// optional_note is a property of Gadget but not Widget: real for at least
+	// one written type, so the batch is accepted; removeKeys no-ops on the
+	// Widget rows.
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("optional_note"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("expected 2 queries, got %d", len(queries))
+	}
+
+	// Regression on the valid-key behavior: rows carrying the property keep it
+	// in props and exclude it from update_props.
+	for _, q := range queries {
+		rows, ok := q.Params["rows"].([]map[string]any)
+		if !ok {
+			t.Fatal("rows should be []map[string]any")
+		}
+		for _, row := range rows {
+			props, ok := row["props"].(map[string]any)
+			if !ok {
+				t.Fatal("props should be map[string]any")
+			}
+			updateProps, ok := row["update_props"].(map[string]any)
+			if !ok {
+				t.Fatal("update_props should be map[string]any")
+			}
+			if _, has := props["optional_note"]; !has {
+				continue
+			}
+			if _, still := updateProps["optional_note"]; still {
+				t.Error("update_props should not contain immutable key 'optional_note'")
+			}
+		}
+	}
+}
+
+func TestBatchNodeQueries_ImmutableKeyMatchesNoType(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "multiple_types.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Widget": {{"id": "w1", "code": "c1"}},
+		"Gadget": {{"uid": "u1", "sku": "s1"}},
+	})
+
+	_, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("optional_note", "does_not_exist"))
+	if err == nil {
+		t.Fatal("expected error for immutable key naming no written type's property")
+	}
+	if !strings.Contains(err.Error(), "does_not_exist") {
+		t.Errorf("error should name the unknown key: %v", err)
+	}
+	if strings.Contains(err.Error(), "optional_note") {
+		t.Errorf("error should not name the key that matched a written type: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Widget") || !strings.Contains(err.Error(), "Gadget") {
+		t.Errorf("error should name the written types: %v", err)
+	}
+}
+
+func TestBatchNodeQueries_ImmutableKeysEmptySnapshot(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "basic.yammm")
+
+	graphResult := buildGraphResult(t, s, v, nil)
+
+	// An empty snapshot generates no queries, so there is no write-once
+	// invariant to defeat; a legitimately-empty pipeline run must not fail.
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("anything"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 0 {
+		t.Errorf("expected no queries for empty snapshot, got %d", len(queries))
+	}
+}
+
 func TestBatchNodeQueries_SingleType(t *testing.T) {
 	t.Parallel()
 	a, s, v, shape := setupWrite(t, "basic.yammm")
