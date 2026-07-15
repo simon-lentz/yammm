@@ -136,7 +136,8 @@
 //
 // Write options control query generation:
 //
-//   - [WithImmutableKeys]: properties set only on node creation
+//   - [WithImmutableKeys]: properties set only on node creation; keys are
+//     validated against the written node types' declared properties
 //   - [WithNodeChunkSize] / [WithEdgeChunkSize]: max rows per UNWIND batch
 //
 // # Edition Gating

@@ -1038,9 +1038,11 @@ All write methods return query structs (`NodeQuery`, `BatchNodeQuery`, `EdgeQuer
 
 | Option | Description |
 | ------ | ----------- |
-| `WithImmutableKeys` | Properties only set on creation, not updated |
+| `WithImmutableKeys` | Properties only set on creation, not updated. Node merges only. |
 | `WithNodeChunkSize` | `UNWIND` batch size for node queries (default: 5000) |
 | `WithEdgeChunkSize` | `UNWIND` batch size for edge queries (default: 5000) |
+
+Immutable keys are validated against the schema at query-generation time: every key must name a declared property (own or inherited) of a node type being written. `NodeQueryFor` rejects a key that is not a property of its schema type (skipped when `schemaType` is nil); `BatchNodeQueries` rejects a key that is a property of no node type in the snapshot, while accepting a key real for at least one written type (it may legitimately apply to a subset of a multi-type snapshot). A mistyped key would otherwise be honored silently and the real property rewritten on every re-MERGE, defeating the write-once guarantee.
 
 ### Cypher Builders
 

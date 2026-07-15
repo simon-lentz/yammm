@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
@@ -74,6 +75,18 @@ func defaultWriteConfig() writeConfig {
 // WithImmutableKeys specifies properties that should only be set when a node
 // is first created (ON CREATE SET), not when merging with an existing node.
 // Example: "first_seen_at" should not be overwritten on re-ingestion.
+//
+// Every key must name a declared property (own or inherited) of a node type
+// being written: [Adapter.NodeQueryFor] rejects a key that is not a property
+// of its schema type, and [Adapter.BatchNodeQueries] rejects a key that is a
+// property of no node type in the snapshot. A mistyped key would otherwise be
+// honored silently — the real property would stay in $update_props and be
+// rewritten on every re-MERGE, defeating the write-once guarantee with no
+// diagnostic. [Adapter.NodeQueryFor] skips the check when called with a nil
+// schema type, matching its nil pass-through coercion behavior.
+//
+// The option affects node merges only: relationship merges have no
+// ON CREATE / ON MATCH split, so edge query generation ignores it.
 func WithImmutableKeys(keys ...string) WriteOption {
 	return func(c *writeConfig) {
 		c.immutableKeys = keys
@@ -114,6 +127,10 @@ type NodeSource interface {
 // (e.g., converting []any to []string for List<String> properties). This
 // matches the coercion behavior of [Adapter.BatchNodeQueries].
 //
+// Immutable keys (see [WithImmutableKeys]) are validated against schemaType:
+// a key that names no property (own or inherited) of the type is an error.
+// A nil schemaType skips the check along with coercion.
+//
 // Any type satisfying [NodeSource] may be passed — both [*graph.Instance]
 // (graph-based path) and [*instance.ValidInstance] (streaming path) work.
 //
@@ -128,6 +145,12 @@ func (a *Adapter) NodeQueryFor(
 	cfg := defaultWriteConfig()
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+
+	if len(cfg.immutableKeys) > 0 && schemaType != nil {
+		if err := validateImmutableKeys(cfg.immutableKeys, schemaType); err != nil {
+			return nil, err
+		}
 	}
 
 	keyProps, err := extractKeyProps(inst.Properties(), shape.PrimaryKeys)
@@ -160,6 +183,12 @@ func (a *Adapter) NodeQueryFor(
 // BatchNodeQueries generates UNWIND-batched MERGE queries for all instances
 // of each type in a graph result.
 //
+// Immutable keys (see [WithImmutableKeys]) are validated against the
+// snapshot's node types before any query is built: a key that names a
+// property of no written type is an error, while a key real for at least one
+// written type is accepted (it may legitimately apply to a subset of a
+// multi-type snapshot).
+//
 // Returns one [BatchNodeQuery] per type per chunk. Types with more instances
 // than the chunk size produce multiple queries.
 func (a *Adapter) BatchNodeQueries(
@@ -177,6 +206,9 @@ func (a *Adapter) BatchNodeQueries(
 	km := MutableKeys
 	if hasImmutable {
 		km = ImmutableKeys
+		if err := validateSnapshotImmutableKeys(cfg.immutableKeys, result); err != nil {
+			return nil, err
+		}
 	}
 	var queries []*BatchNodeQuery
 
@@ -801,6 +833,74 @@ func extractKeyFromImmutableKey(key immutable.Key, keyNames []string) (map[strin
 		return nil, fmt.Errorf("nil primary key(s): %v", nilKeys)
 	}
 	return result, nil
+}
+
+// validateImmutableKeys reports an error when any immutable key names no
+// property (own or inherited) of the type being written. Left unvalidated, a
+// mistyped key is a silent no-op in [removeKeys]: the real property stays in
+// $update_props and is rewritten on every re-MERGE, so the write-once
+// guarantee is lost without any diagnostic. Validation runs against the
+// schema type's declared properties, not the instance's present properties —
+// an immutable key may legitimately be a declared-but-absent optional
+// property on a given instance.
+func validateImmutableKeys(keys []string, schemaType *schema.Type) error {
+	seen := make(map[string]bool, len(keys))
+	var unknown []string
+	for _, k := range keys {
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		if _, ok := schemaType.Property(k); !ok {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	var names []string
+	for p := range schemaType.AllProperties() {
+		names = append(names, p.Name())
+	}
+	slices.Sort(names)
+	return fmt.Errorf("immutable key(s) %q do not name a property of type %q (properties: %s)",
+		unknown, schemaType.Name(), strings.Join(names, ", "))
+}
+
+// validateSnapshotImmutableKeys reports an error when any immutable key names
+// a property of no node type present in the snapshot. A key real for at least
+// one written type is accepted — it may legitimately apply to a subset of a
+// multi-type snapshot — so only a key real for no written type (a typo or a
+// stale field name) fails. A snapshot with no types generates no queries and
+// validates vacuously.
+func validateSnapshotImmutableKeys(keys []string, result *graph.Snapshot) error {
+	typeNames := result.Types()
+	if len(typeNames) == 0 {
+		return nil
+	}
+	matched := make(map[string]bool, len(keys))
+	for _, typeName := range typeNames {
+		schemaType, ok := result.Schema().Type(typeName)
+		if !ok {
+			return fmt.Errorf("type %q not found in schema", typeName)
+		}
+		for _, k := range keys {
+			if _, ok := schemaType.Property(k); ok {
+				matched[k] = true
+			}
+		}
+	}
+	var unknown []string
+	for _, k := range keys {
+		if !matched[k] && !slices.Contains(unknown, k) {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	return fmt.Errorf("immutable key(s) %q do not name a property of any written type (%s)",
+		unknown, strings.Join(typeNames, ", "))
 }
 
 // removeKeys creates a copy of props without the specified keys.
