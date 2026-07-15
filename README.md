@@ -13,7 +13,8 @@ YAMMM (Yet Another Meta-Meta Model) is a Go library for defining schemas in a sm
 - **Relationship modeling**: Associations (references) and compositions (ownership) with multiplicity
 - **Invariants**: Boolean constraint expressions evaluated at validation time
 - **Graph construction**: Build in-memory graphs from validated instances with integrity checking
-- **Graph persistence**: Save, load, verify, and inspect graph snapshots (`.ys` format)
+- **Graph persistence**: Save, load, verify, inspect, and edit-metadata-in-place graph snapshots (`.ys` format)
+- **Batch assembly**: Concurrent-safe validate → add → check → snapshot pipeline surface, resumable from a prior snapshot
 - **Structured diagnostics**: Stable error codes with source location tracking
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
 - **Go code generation**: Generate Go structs from schemas with `yammm gen --to go`
@@ -119,6 +120,46 @@ func main() {
     }
     fmt.Println("Snapshot saved to vehicles.ys")
 }
+```
+
+### Assemble Batches
+
+For pipeline workloads, `graph.BatchAssembler` composes the validator and graph into a single concurrent-safe surface that encodes the validate → add → check → snapshot ordering:
+
+```go
+ba := graph.NewBatchAssembler(ctx, s,
+    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+
+for i, rec := range records { // rec is an instance.RawInstance
+    if err := ba.Add("Person", rec); err != nil {
+        log.Fatalf("record %d: %v", i, err)
+    }
+}
+
+res, err := ba.Finalize(ctx) // res.Snapshot is non-nil even on error
+if err != nil {
+    log.Fatal("batch failed:", err)
+}
+data, result := snapshot.Marshal(ctx, res.Snapshot)
+```
+
+To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap, opts...)` — new adds resolve against the seeded instances and `Finalize` checks the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
+
+### Build Instances Programmatically
+
+`instance.BuilderFor` returns a builder bound to a schema type that constructs `RawInstance` values while enforcing schema shape — unknown properties, unknown relations, and cardinality mismatches surface from `Build()` with the offending call site's file:line:
+
+```go
+b, err := instance.BuilderFor(s, "Car")
+if err != nil {
+    log.Fatal(err)
+}
+raw, err := b.
+    Property("vin", "1HGCM82633A004352").
+    Property("model", "Accord").
+    Property("year", int64(2003)).
+    EdgeTo("OWNER", "550e8400-e29b-41d4-a716-446655440000").
+    Build()
 ```
 
 ### Build Schemas Programmatically

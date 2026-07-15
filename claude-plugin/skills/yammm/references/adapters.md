@@ -22,7 +22,7 @@ adapter, err := jsonAdapter.New(registry,
 )
 ```
 
-The `registry` is a `location.PositionRegistry` for tracking source positions. Pass `source.NewRegistry()` for a default registry.
+The `registry` is a `location.PositionRegistry` for tracking source positions. Pass `nil` unless `WithTrackLocations(true)` is set (a nil registry with tracking enabled is a construction error).
 
 ### Parsing
 
@@ -166,8 +166,8 @@ shape, result := adapter.ShapeForSchema(ctx, s)
 ```go
 // Batch node queries for an entire snapshot
 nodeQueries, err := adapter.BatchNodeQueries(ctx, snapshot, shape,
-    neo4jAdapter.WithImmutableKeys("id"),        // properties set only on creation
-    neo4jAdapter.WithNodeChunkSize(5000),         // max nodes per UNWIND batch
+    neo4jAdapter.WithImmutableKeys("first_seen_at"), // properties set only on creation
+    neo4jAdapter.WithNodeChunkSize(5000),             // max nodes per UNWIND batch
 )
 
 // Batch edge queries
@@ -177,6 +177,20 @@ edgeQueries, err := adapter.BatchEdgeQueries(ctx, snapshot, shape,
 ```
 
 Each `BatchNodeQuery` / `BatchEdgeQuery` contains a Cypher statement and parameters map ready for driver execution.
+
+Immutable keys are validated against the schema at query generation: every key must name a declared property (own or inherited) of a node type being written, otherwise the call errors — a mistyped key would silently defeat the write-once guarantee. The option affects node merges only (relationship merges have no ON CREATE / ON MATCH split).
+
+### Parameter Coercion (Direct-Cypher Path)
+
+Values passing through `BatchNodeQueries` / `NodeQueryFor` are coerced to driver-native types automatically. Consumers hand-building Cypher parameters use the same chokepoint directly:
+
+```go
+v, err := neo4jAdapter.Coerce(constraint, raw)   // one value against one constraint
+types := neo4jAdapter.ParamTypesForType(t, "")   // property-name -> constraint map for a type
+params, err := neo4jAdapter.CoerceParams(params, types)  // whole parameter map
+```
+
+This repairs JSON round-trip artifacts (whole-number floats decoded as `int64`, `Date`/`Timestamp` strings) so values satisfy Neo4j `IS ::` type constraints.
 
 ### Label Management
 

@@ -11,13 +11,19 @@ Every yammm operation returns `(value, diag.Result)` with structured diagnostics
 The primary container for diagnostic output. Check results with:
 
 ```go
-result.OK()           // true if no Fatal or Error issues
-result.HasErrors()    // true if any Fatal or Error issues
-result.HasWarnings()  // true if any Warning issues
-result.Err()          // nil if OK, or *diag.ResultError
-result.Issues()       // iterator over all issues
-result.Errors()       // iterator over Fatal + Error issues only
+result.OK()             // true if no Fatal or Error issues
+result.HasErrors()      // true if any Fatal or Error issues
+result.HasWarnings()    // true if any Warning issues
+result.HasCode(code)    // true if any issue carries the given code
+result.Err()            // nil if OK, or *diag.ResultError
+result.Issues()         // iterator over all issues
+result.Errors()         // iterator over Fatal + Error issues only
+result.TruncationNote() // dropped-issues one-liner when the limit was hit
 ```
+
+### Contextual Wrap (ContextualError)
+
+`result.WithContext(tag)` converts a failed Result into an `error` — a `*diag.ContextualError` carrying the tag plus the full Result — and returns `nil` when the Result is OK, so it slots directly into `return result.WithContext("load users")`. Recover the diagnostics downstream with `errors.As` or `diag.AsContextualError(err, fallbackTag)`. `diag.Collect(issues...)` builds a Result directly from issues. `diag.IsImportDeclarationCode(code)` classifies import-*declaration* codes (the import line itself is wrong) apart from import-*resolution* codes.
 
 ### diag.Issue
 
