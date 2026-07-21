@@ -32,6 +32,38 @@ stdout '"lib/dep.yammm":'
 ! exec yammm gen --to go registry/a/b/entry.yammm
 stderr 'lib/dep'
 
+# gen --to jsonschema: a JSON Schema draft 2020-12 document describing the
+# instance-data JSON accepted by `yammm check`; "$id" omitted by default.
+exec yammm gen --to jsonschema county.yammm
+stdout '"\$schema": "https://json-schema\.org/draft/2020-12/schema"'
+stdout '"County": \{ "type": "array", "items": \{ "\$ref": "#/\$defs/County" \} \}'
+! stdout '"\$id"'
+
+# --schema-id sets the emitted document's "$id".
+exec yammm gen --to jsonschema --schema-id https://example.com/geo.schema.json county.yammm
+stdout '"\$id": "https://example\.com/geo\.schema\.json"'
+
+# --output writes the document to a file and keeps stdout free of it.
+exec yammm gen --to jsonschema --output county.schema.json county.yammm
+exists county.schema.json
+grep '"\$defs"' county.schema.json
+! stdout '"\$defs"'
+
+# The jsonschema target flattens the import closure like the go target does.
+exec yammm gen --to jsonschema --module-root registry registry/a/b/entry.yammm
+stdout '"Contract"'
+stdout '"dep\.Vendor"'
+
+# Go-only flags are rejected for the jsonschema target with a usage error...
+! exec yammm gen --to jsonschema --package foo county.yammm
+stderr 'flag --package applies only to --to go'
+! exec yammm gen --to jsonschema --initialisms JWT county.yammm
+stderr 'flag --initialisms applies only to --to go'
+
+# ...and the jsonschema-only flag is rejected for the go target.
+! exec yammm gen --to go --schema-id https://example.com/x.json county.yammm
+stderr 'flag --schema-id applies only to --to jsonschema'
+
 -- county.yammm --
 schema "geo"
 

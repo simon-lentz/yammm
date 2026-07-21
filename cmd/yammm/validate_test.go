@@ -67,6 +67,8 @@ func TestExitCodes(t *testing.T) {
 		{"check missing data file", []string{"check", "testdata/valid.yammm", "testdata/nonexistent.json"}, cli.ExitUsage},
 		{"check csv without type", []string{"check", "testdata/valid.yammm", "testdata/data.csv"}, cli.ExitUsage},
 		{"gen unsupported target", []string{"gen", "--to", "rust", "testdata/county.yammm"}, cli.ExitUsage},
+		{"gen go-only flag with jsonschema target", []string{"gen", "--to", "jsonschema", "--package", "foo", "testdata/county.yammm"}, cli.ExitUsage},
+		{"gen jsonschema-only flag with go target", []string{"gen", "--to", "go", "--schema-id", "https://example.com/x.json", "testdata/county.yammm"}, cli.ExitUsage},
 		{"snapshot save without output or into", []string{"snapshot", "save", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
 		{"snapshot info without arg or dir", []string{"snapshot", "info"}, cli.ExitUsage},
 		{"snapshot info nonexistent dir", []string{"snapshot", "info", "--dir", "/does/not/exist/yammm-cli-test"}, cli.ExitRuntime},
