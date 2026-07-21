@@ -14,6 +14,7 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | `yammm load <schema> <data>` | Load data into graph and validate |
 | `yammm export <schema> <data>` | Export data to JSON, CSV, or Cypher |
 | `yammm gen --to go <schema>` | Generate Go source from a schema |
+| `yammm gen --to jsonschema <schema>` | Generate a JSON Schema (draft 2020-12) for instance-data authoring |
 | `yammm neo4j constraints <schema>` | Generate Neo4j constraint statements |
 | `yammm neo4j diff <schema>` | Diff schema constraints vs live database |
 | `yammm neo4j introspect` | Infer schema from live Neo4j database |
@@ -179,17 +180,24 @@ yammm export --to json --output result.json schema.yammm data.csv --type User
 yammm gen --to go schema.yammm
 yammm gen --to go --package models --output models_gen.go schema.yammm
 yammm gen --to go --initialisms GUID,JWT --module-root . schema.yammm
+yammm gen --to jsonschema schema.yammm
+yammm gen --to jsonschema --schema-id https://example.com/s.json --output s.schema.json schema.yammm
 ```
 
-Generates Go source from a schema via the `adapter/gogen` adapter: one struct per type, named Enum/DataType types, `EDGE_` association structs, a Graph aggregate, and an embedded `SerializedModel`. Output is stdlib-only (imports at most `time`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
+`--to go` generates Go source via the `adapter/gogen` adapter: one struct per type, named Enum/DataType types, `EDGE_` association structs, a Graph aggregate, and an embedded `SerializedModel`. Output is stdlib-only (imports at most `time`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
+
+`--to jsonschema` generates a JSON Schema draft 2020-12 document via the `adapter/jschema` adapter, describing the instance-data JSON object form `yammm check` accepts — wire it into an editor (e.g. a `# yaml-language-server: $schema=…` header or a VS Code `json.schemas` mapping) for completion, hover documentation, and validation while authoring data files. Same closure flattening; output is deterministic and self-checked before being written.
 
 | Flag | Description |
 |------|-------------|
-| `--to` | Target: `go` (required) |
-| `--package` | Generated Go package name (default: derived from schema name) |
+| `--to` | Target: `go` or `jsonschema` (required) |
+| `--package` | go target: generated package name (default: derived from schema name) |
 | `--output` | Output file path (default: stdout) |
-| `--initialisms` | Extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
+| `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
 | `--module-root` | Root directory for module-style imports (default: the schema's directory) |
+| `--schema-id` | jsonschema target: value for the emitted `"$id"` (omitted when unset) |
+
+Per-target flags are enforced with a usage error: `--package`/`--initialisms` apply only to `--to go`, `--schema-id` only to `--to jsonschema`.
 
 ---
 

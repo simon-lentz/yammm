@@ -20,6 +20,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 - **Structured diagnostics**: Stable error codes with source location tracking
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
 - **Go code generation**: Generate Go structs from schemas with `yammm gen --to go`
+- **JSON Schema generation**: Emit editor-ready JSON Schema (draft 2020-12) for instance-data authoring with `yammm gen --to jsonschema`
 - **CLI tool**: `yammm` binary for snapshot management, data export, and validation
 
 ## Installation
@@ -217,6 +218,7 @@ Internal                 : internal/* (no compatibility guarantees)
 | `adapter/csv` | CSV data parsing and writing |
 | `adapter/neo4j` | Neo4j constraint generation and Cypher query building |
 | `adapter/gogen` | Go source generation from a schema (structs, enums, `EDGE_` structs, `Graph`) |
+| `adapter/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
 | `lsp` | Language Server Protocol server for `.yammm` files |
 
 ### Entry Point Pattern
@@ -227,7 +229,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: Semantic failure (structured issues)
 - `result.OK()`: Success (may have warnings)
 
-Pure adapter transformations (JSON/CSV serialization, Cypher and Go source generation) return `(T, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+Pure adapter transformations (JSON/CSV serialization, Cypher, Go source, and JSON Schema generation) return `(T, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 
@@ -348,6 +350,7 @@ yammm fmt <schema> [-w]                                  # canonical formatting 
 yammm check <schema> <data>                              # validate JSON/CSV data against a schema
 yammm load <schema> <data>                               # build an in-memory graph, report diagnostics
 yammm gen --to go <schema>                               # generate Go source from a schema
+yammm gen --to jsonschema <schema>                       # generate a JSON Schema for instance-data authoring
 yammm export <schema> <data> --to <json|csv|cypher>      # export a validated graph
 yammm snapshot save <schema> <data...> -o <file.ys>      # build graph, persist
 yammm snapshot save <schema> <data...> --into <file.ys>  # merge into an existing snapshot

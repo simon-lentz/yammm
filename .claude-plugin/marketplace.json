@@ -10,7 +10,7 @@
     {
       "name": "yammm",
       "source": "./claude-plugin",
-      "description": "Schema DSL, Go library, and CLI support for yammm — typed data validation, graph construction, database export, and Go code generation",
+      "description": "Schema DSL, Go library, and CLI support for yammm — typed data validation, graph construction, database export, and Go / JSON Schema code generation",
       "category": "development",
       "homepage": "https://github.com/simon-lentz/yammm"
     }

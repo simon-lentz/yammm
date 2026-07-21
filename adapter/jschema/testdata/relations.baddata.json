@@ -13,6 +13,8 @@
       "vin": "V6",
       "wheels": [{ "position": "FL" }],
       "owner": [{ "_target_id": "0e4ac47a-8b6f-4bb9-b1e5-6a8f6c2f1a4d" }]
-    }
+    },
+    { "vin": "V7", "wheels": [{ "position": "FL" }], "owner": null },
+    { "vin": "V8", "wheels": null }
   ]
 }

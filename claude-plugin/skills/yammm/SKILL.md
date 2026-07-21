@@ -39,7 +39,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 
 ### Use the CLI
 
-`yammm validate`, `yammm fmt`, `yammm check`, `yammm load`, `yammm snapshot`, `yammm export`, `yammm gen`, `yammm neo4j`. Schema development, data pipelines, Go code generation, and database setup from the terminal.
+`yammm validate`, `yammm fmt`, `yammm check`, `yammm load`, `yammm snapshot`, `yammm export`, `yammm gen`, `yammm neo4j`. Schema development, data pipelines, Go and JSON Schema generation, and database setup from the terminal.
 
 ---
 
@@ -75,7 +75,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 | `references/type-system.md` | Constraint types, aliases, abstract/part, inheritance | Type system questions, narrowing rules, PK restrictions |
 | `references/patterns.md` | Common modeling patterns with examples | Looking for schema design patterns |
 | `references/api-pipeline.md` | Go API: load -> validate -> graph -> snapshot | Writing Go code that uses yammm packages |
-| `references/adapters.md` | JSON/CSV/Neo4j/gogen adapter usage | Exporting, importing, or generating Go from a schema |
+| `references/adapters.md` | JSON/CSV/Neo4j/gogen/jschema adapter usage | Exporting, importing, or generating Go / JSON Schema from a schema |
 | `references/diagnostics.md` | Error codes, troubleshooting | Understanding or fixing errors |
 | `references/cli.md` | CLI commands and workflows | Using yammm from the terminal |
 

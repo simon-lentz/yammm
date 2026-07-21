@@ -25,6 +25,11 @@
         "in_state": {
           "$ref": "#/$defs/EDGE_County_in_state_State",
           "description": "Association IN_STATE (one) → State. Presence is enforced when the graph is assembled, not per-file."
+        },
+        "borders": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EDGE_County_borders_County" },
+          "description": "Association BORDERS (many) → County."
         }
       },
       "required": ["fips"],
@@ -39,6 +44,12 @@
         "code_tag": { "$ref": "#/$defs/StateCode" }
       },
       "required": ["_target_code", "since"],
+      "additionalProperties": false
+    },
+    "EDGE_County_borders_County": {
+      "type": "object",
+      "properties": { "_target_fips": { "type": "string" } },
+      "required": ["_target_fips"],
       "additionalProperties": false
     },
     "StateCode": { "type": "string", "minLength": 2, "maxLength": 2 }

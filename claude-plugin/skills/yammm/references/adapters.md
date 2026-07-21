@@ -240,6 +240,20 @@ Full API semantics: the gogen section of `docs/API.md`. CLI form: `yammm gen --t
 
 ---
 
+## jschema Adapter (JSON Schema Generation)
+
+```go
+import "github.com/simon-lentz/yammm/adapter/jschema"
+```
+
+Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` accepts — one top-level key per concrete type (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset), `WithTitle`, `WithDescription`. Plain `error`, no instance-data path, no source-backing requirement (Builder-built schemas accepted).
+
+Wire the generated document into an editor for completion and validation while authoring data files (e.g. `# yaml-language-server: $schema=./fleet.schema.json`).
+
+Full API semantics: the JSON Schema Generation section of `docs/API.md`. CLI form: `yammm gen --to jsonschema` (see `cli.md`).
+
+---
+
 ## Adapter Error Codes
 
 | Code | Adapter | Meaning |
