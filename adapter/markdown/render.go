@@ -46,19 +46,22 @@ func slug(heading string) string {
 	return b.String()
 }
 
-// cellEscaper makes arbitrary text safe inside a Markdown table cell:
+// escapeCell returns s made safe for use inside a Markdown table cell:
 // pipes are escaped so they cannot split the row, and newlines fold to
-// <br> so the cell stays on one line.
-var cellEscaper = strings.NewReplacer(
-	"\r\n", "<br>",
-	"\n", "<br>",
-	"\r", "<br>",
-	"|", `\|`,
-)
-
-// escapeCell returns s made safe for use inside a Markdown table cell.
+// <br> so the cell stays on one line. Whitespace around each folded line
+// break is dropped — it is source-comment layout, not content, and a cell
+// cannot render it anyway.
 func escapeCell(s string) string {
-	return cellEscaper.Replace(s)
+	if strings.ContainsAny(s, "\r\n") {
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+		s = strings.ReplaceAll(s, "\r", "\n")
+		lines := strings.Split(s, "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimSpace(line)
+		}
+		s = strings.Join(lines, "<br>")
+	}
+	return strings.ReplaceAll(s, "|", `\|`)
 }
 
 // codeTagEscaper makes text safe inside a raw HTML <code> element:

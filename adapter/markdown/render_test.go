@@ -67,6 +67,7 @@ func TestEscapeCell(t *testing.T) {
 		{"crlf", "line1\r\nline2", "line1<br>line2"},
 		{"bare cr", "line1\rline2", "line1<br>line2"},
 		{"pipe and newline", "a|b\nc", `a\|b<br>c`},
+		{"indentation around fold dropped", "line1: \n\tline2 indented", "line1:<br>line2 indented"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

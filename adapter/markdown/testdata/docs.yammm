@@ -1,0 +1,25 @@
+/* Geo reference vocabulary for county-level records. */
+schema "geo"
+
+/* FipsCode is a five-character FIPS identifier. */
+type FipsCode = String [5, 5]
+
+/* State is a US state. */
+type State {
+	code String primary
+}
+
+part type District {
+	id UUID primary
+}
+
+/* County is a US county node. */
+type County {
+	fips FipsCode primary
+	/* population is the resident count at the last census. */
+	population Integer required
+	/* IN_STATE records the county's state. */
+	--> IN_STATE (one) State
+	/* HAS_DISTRICT holds electoral districts. */
+	*-> HAS_DISTRICT (many) District
+}

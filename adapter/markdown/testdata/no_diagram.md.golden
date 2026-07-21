@@ -1,0 +1,9 @@
+# Schema tiny
+
+## Types
+
+### Item
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `String` | primary |  |

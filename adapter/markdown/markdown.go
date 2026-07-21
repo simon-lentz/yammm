@@ -2,10 +2,236 @@ package markdown
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
+
+// Option configures Marshal.
+type Option func(*config)
+
+type config struct {
+	classDiagram bool
+}
+
+// WithClassDiagram toggles the Mermaid class-diagram section (default true).
+func WithClassDiagram(include bool) Option {
+	return func(c *config) {
+		c.classDiagram = include
+	}
+}
+
+// Marshal renders a schema and its transitive import closure as one
+// self-contained Markdown document: a Mermaid class diagram followed by
+// per-type reference sections and data-type tables, with one section per
+// imported schema. Output is deterministic — byte-identical across runs
+// for the same schema — and structurally verified before return; an error
+// reports a generator bug or unusable input, never broken Markdown. The
+// schema does not need source backing: on a Builder-built schema,
+// invariant sections degrade to their message line.
+func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
+	cfg := config{classDiagram: true}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	g := newGenerator(s)
+	g.emitDocument(cfg)
+	out := g.buf.Bytes()
+	if err := selfCheck(out, g.anchors); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// emitDocument writes the full document skeleton: title, schema
+// documentation, class diagram, the entry schema's type sections and
+// data-type table, then one section per imported schema in closure order.
+// Sections with nothing to say are omitted entirely.
+func (g *generator) emitDocument(cfg config) {
+	title := "Schema " + g.entry.Name()
+	g.anchors[slug(title)] = true
+	g.buf.WriteString("# " + title + "\n")
+
+	if doc := g.entry.Documentation(); doc != "" {
+		g.buf.WriteString("\n" + doc + "\n")
+	}
+	if cfg.classDiagram {
+		g.buf.WriteString("\n")
+		g.emitClassDiagram()
+	}
+	if types := g.entry.TypesSlice(); len(types) > 0 {
+		g.anchors["types"] = true
+		g.buf.WriteString("\n## Types\n")
+		for _, t := range types {
+			g.buf.WriteString("\n")
+			g.emitTypeSection(t)
+		}
+	}
+	if dts := g.entry.DataTypesSlice(); len(dts) > 0 {
+		g.anchors["data-types"] = true
+		g.buf.WriteString("\n## Data Types\n\n")
+		g.buf.WriteString(dataTypeTable(dts))
+	}
+
+	for _, sch := range g.closure[1:] {
+		heading := "Schema " + sch.Name()
+		if alias := g.entry.FindImportAlias(sch.SourceID()); alias != "" {
+			heading += " (imported as " + alias + ")"
+		}
+		g.anchors[slug(heading)] = true
+		g.buf.WriteString("\n## " + heading + "\n")
+		if doc := sch.Documentation(); doc != "" {
+			g.buf.WriteString("\n" + doc + "\n")
+		}
+		for _, t := range sch.TypesSlice() {
+			g.buf.WriteString("\n")
+			g.emitTypeSection(t)
+		}
+		if dts := sch.DataTypesSlice(); len(dts) > 0 {
+			g.anchors["data-types"] = true
+			g.buf.WriteString("\n### Data Types\n\n")
+			g.buf.WriteString(dataTypeTable(dts))
+		}
+	}
+}
+
+// dataTypeTable renders the Name | Definition | Description table over a
+// schema's named DataTypes.
+func dataTypeTable(dts []*schema.DataType) string {
+	var b bytes.Buffer
+	writeTableHeader(&b, "Name", "Definition", "Description")
+	for _, dt := range dts {
+		def := ""
+		if c := dt.Constraint(); c != nil {
+			def = c.String()
+		}
+		writeTableRow(&b, codeCell(dt.Name()), codeCell(def), escapeCell(dt.Documentation()))
+	}
+	return b.String()
+}
+
+// selfCheck structurally verifies emitted output before Marshal returns:
+// code fences balance and no heading opens inside one, every internal link
+// resolves to an emitted heading's anchor, and every table separator row
+// matches its header's column count. A failure is a generator bug
+// surfaced as an error, never emitted output.
+func selfCheck(out []byte, anchors map[string]bool) error {
+	if err := checkFences(out); err != nil {
+		return err
+	}
+	if err := checkLinks(out, anchors); err != nil {
+		return err
+	}
+	return checkTables(out)
+}
+
+// checkFences verifies that every opened code fence closes (a closing
+// fence needs at least the opening run's backtick count) and that no
+// column-zero heading line appears while a fence is open — the symptom of
+// a fence swallowing the rest of the document.
+func checkFences(out []byte) error {
+	inFence := false
+	openRun := 0
+	for line := range strings.SplitSeq(string(out), "\n") {
+		trimmed := strings.TrimLeft(line, " ")
+		run := 0
+		for run < len(trimmed) && trimmed[run] == '`' {
+			run++
+		}
+		if !inFence {
+			if run >= 3 {
+				inFence = true
+				openRun = run
+			}
+			continue
+		}
+		if run >= openRun && strings.TrimRight(trimmed, "`") == "" {
+			inFence = false
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			return fmt.Errorf("markdown: self-check: heading %q inside an open code fence", line)
+		}
+	}
+	if inFence {
+		return errors.New("markdown: self-check: unclosed code fence at end of document")
+	}
+	return nil
+}
+
+// checkLinks verifies every emitted internal link targets an anchor
+// registered when its heading was written — the analog of jschema's $ref
+// audit, catching slug-rule drift between link and heading emission.
+func checkLinks(out []byte, anchors map[string]bool) error {
+	doc := string(out)
+	for i := 0; ; {
+		start := strings.Index(doc[i:], "](#")
+		if start < 0 {
+			return nil
+		}
+		start += i + len("](#")
+		end := strings.IndexByte(doc[start:], ')')
+		if end < 0 {
+			return fmt.Errorf("markdown: self-check: unterminated internal link at byte %d", start)
+		}
+		anchor := doc[start : start+end]
+		if !anchors[anchor] {
+			return fmt.Errorf("markdown: self-check: internal link #%s resolves to no emitted heading", anchor)
+		}
+		i = start + end
+	}
+}
+
+// checkTables verifies each table separator row declares the same column
+// count as the header row above it.
+func checkTables(out []byte) error {
+	lines := strings.Split(string(out), "\n")
+	for i := 1; i < len(lines); i++ {
+		if !isSeparatorRow(lines[i]) {
+			continue
+		}
+		header := strings.TrimLeft(lines[i-1], " ")
+		if !strings.HasPrefix(header, "|") {
+			return fmt.Errorf("markdown: self-check: table separator %q has no header row", lines[i])
+		}
+		if h, s := countCells(header), countCells(strings.TrimLeft(lines[i], " ")); h != s {
+			return fmt.Errorf("markdown: self-check: table separator declares %d columns, header %q has %d", s, header, h)
+		}
+	}
+	return nil
+}
+
+// isSeparatorRow reports whether the line is a table separator: pipes
+// delimiting cells that contain only hyphens.
+func isSeparatorRow(line string) bool {
+	trimmed := strings.TrimLeft(line, " ")
+	if !strings.HasPrefix(trimmed, "|") {
+		return false
+	}
+	cells := strings.SplitSeq(strings.Trim(trimmed, "|"), "|")
+	for cell := range cells {
+		c := strings.TrimSpace(cell)
+		if c == "" || strings.Trim(c, "-") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// countCells counts a table row's cells: unescaped pipe delimiters minus
+// the trailing edge.
+func countCells(row string) int {
+	pipes := 0
+	for i := range len(row) {
+		if row[i] == '|' && (i == 0 || row[i-1] != '\\') {
+			pipes++
+		}
+	}
+	return pipes - 1
+}
 
 // typeEntry records how one type in the closure is addressed in the emitted
 // document: the display name used for its heading and in links to it (bare

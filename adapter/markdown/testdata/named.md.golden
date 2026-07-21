@@ -1,0 +1,32 @@
+# Schema geo
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class County {
+        fips FipsCode
+        tier Tier
+        status Enum
+        codes List
+    }
+```
+
+## Types
+
+### County
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `fips` | `FipsCode` | primary |  |
+| `tier` | `Tier` | required |  |
+| `status` | `Enum["active", "merged", "dissolved"]` | required |  |
+| `codes` | `List<FipsCode>` |  |  |
+
+## Data Types
+
+| Name | Definition | Description |
+| --- | --- | --- |
+| `FipsCode` | `String[5, 5]` |  |
+| `Tier` | `Enum["gold", "silver"]` |  |

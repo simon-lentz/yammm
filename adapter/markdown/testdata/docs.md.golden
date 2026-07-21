@@ -1,0 +1,68 @@
+# Schema geo
+
+Geo reference vocabulary for county-level records.
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class State {
+        code String
+    }
+    class District {
+        <<Part>>
+        id UUID
+    }
+    class County {
+        fips FipsCode
+        population Integer
+    }
+    County --> State : IN_STATE (one)
+    County *-- District : HAS_DISTRICT (many)
+```
+
+## Types
+
+### State
+
+State is a US state.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `code` | `String` | primary |  |
+
+### District
+
+*Part type* — instances exist only as composed children.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `UUID` | primary |  |
+
+### County
+
+County is a US county node.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `fips` | `FipsCode` | primary |  |
+| `population` | `Integer` | required | population is the resident count at the last census. |
+
+**Associations**
+
+- `--> IN_STATE (one)` [State](#state)
+
+  IN_STATE records the county's state.
+
+**Compositions**
+
+- `*-> HAS_DISTRICT (many)` [District](#district)
+
+  HAS_DISTRICT holds electoral districts.
+
+## Data Types
+
+| Name | Definition | Description |
+| --- | --- | --- |
+| `FipsCode` | `String[5, 5]` | FipsCode is a five-character FIPS identifier. |

@@ -1,0 +1,56 @@
+# Schema Fleet
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class Person {
+        id UUID
+        name String
+        age Integer
+    }
+    class Car {
+        vin String
+        color Enum
+    }
+    class Wheel {
+        <<Part>>
+        position Enum
+    }
+    Car --> Person : OWNER (one)
+    Car *-- Wheel : WHEELS (one:many)
+```
+
+## Types
+
+### Person
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `UUID` | primary |  |
+| `name` | `String[1, 100]` | required |  |
+| `age` | `Integer[0, 150]` |  |  |
+
+### Car
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `vin` | `String` | primary |  |
+| `color` | `Enum["red", "green"]` |  |  |
+
+**Associations**
+
+- `--> OWNER (one)` [Person](#person)
+
+**Compositions**
+
+- `*-> WHEELS (one:many)` [Wheel](#wheel)
+
+### Wheel
+
+*Part type* — instances exist only as composed children.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `position` | `Enum["FL", "FR", "RL", "RR"]` | required |  |

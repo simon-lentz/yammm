@@ -1,0 +1,39 @@
+# Schema geo
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class County {
+        fips String
+        name String
+        population Integer
+        density Float
+        rank Integer
+        active Boolean
+        founded Date
+        updated_at Timestamp
+        guid UUID
+        embedding Vector
+        tags List
+    }
+```
+
+## Types
+
+### County
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `fips` | `String[5, 5]` | primary |  |
+| `name` | `String[1, _]` | required |  |
+| `population` | `Integer[0, _]` | required |  |
+| `density` | `Float[0, 100000]` |  |  |
+| `rank` | `Integer[_, 99]` |  |  |
+| `active` | `Boolean` | required |  |
+| `founded` | `Date` |  |  |
+| `updated_at` | `Timestamp` |  |  |
+| `guid` | `UUID` |  |  |
+| `embedding` | `Vector[3]` |  |  |
+| `tags` | `List<String>[1, 5]` |  |  |

@@ -1,0 +1,13 @@
+schema "geo"
+
+abstract type Entity {
+	id UUID primary
+}
+
+abstract type Named extends Entity {
+	name String required
+}
+
+type Landmark extends Named {
+	code String
+}

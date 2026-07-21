@@ -1,0 +1,11 @@
+schema "notes"
+
+type Grade = Enum ["A|B", "C`D"]
+
+type Note {
+	id String primary
+	/* Multi-line doc:
+	line two with a | pipe. */
+	grade Grade required
+	status Enum ["on|off", "idle"]
+}

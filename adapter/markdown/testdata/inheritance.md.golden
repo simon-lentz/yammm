@@ -1,0 +1,74 @@
+# Schema geo
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class Region {
+        id String
+    }
+    class GeoEntity {
+        <<Abstract>>
+        id UUID
+        name String
+    }
+    class County {
+        fips String
+    }
+    class City {
+        population Integer
+    }
+    GeoEntity --> Region : IN_REGION (one)
+    GeoEntity <|-- County
+    GeoEntity <|-- City
+```
+
+## Types
+
+### Region
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `String` | primary |  |
+
+### GeoEntity
+
+*Abstract type* — no direct instances.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `UUID` | primary |  |
+| `name` | `String` | required |  |
+
+**Associations**
+
+- `--> IN_REGION (one)` [Region](#region)
+
+### County
+
+Extends: [GeoEntity](#geoentity).
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `fips` | `String` | required |  |
+| `id` | `UUID` | primary, from GeoEntity |  |
+| `name` | `String` | required, from GeoEntity |  |
+
+**Associations**
+
+- `--> IN_REGION (one)` [Region](#region)
+
+### City
+
+Extends: [GeoEntity](#geoentity).
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `population` | `Integer` |  |  |
+| `id` | `UUID` | primary, from GeoEntity |  |
+| `name` | `String` | required, from GeoEntity |  |
+
+**Associations**
+
+- `--> IN_REGION (one)` [Region](#region)

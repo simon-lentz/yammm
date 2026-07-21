@@ -1,0 +1,11 @@
+schema "common"
+
+import "base.yammm" as base
+
+type RegionCode = String [5, 5]
+
+type Region {
+	code RegionCode primary
+	name String required
+	--> IN_BASIN (_) base.Basin
+}
