@@ -1,0 +1,7 @@
+schema "fleet"
+
+type Reading {
+	id String primary
+	taken_at Timestamp required
+	logged_at Timestamp ["2006-01-02 15:04:05"]
+}

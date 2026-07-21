@@ -1,0 +1,7 @@
+schema "fleet"
+
+type Car {
+	vin String primary
+	color Enum ["red", "green", "blue"]
+	sizes List <Enum ["s", "m", "l"]>
+}

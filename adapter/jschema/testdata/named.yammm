@@ -1,0 +1,11 @@
+schema "geo"
+
+type FipsCode = String [5, 5]
+type Tier = Enum ["gold", "silver"]
+
+type County {
+	fips FipsCode primary
+	tier Tier required
+	status Enum ["active", "merged", "dissolved"] required
+	codes List <FipsCode>
+}

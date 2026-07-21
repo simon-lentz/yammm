@@ -1,0 +1,7 @@
+schema "contacts"
+
+type Contact {
+	id String primary
+	email Pattern ["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"] required
+	phone Pattern ["^\\d{3}-\\d{3}-\\d{4}$", "^[0-9-]{12}$"]
+}
