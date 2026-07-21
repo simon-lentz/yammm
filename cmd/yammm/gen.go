@@ -10,6 +10,7 @@ import (
 
 	"github.com/simon-lentz/yammm/adapter/gogen"
 	"github.com/simon-lentz/yammm/adapter/jschema"
+	"github.com/simon-lentz/yammm/adapter/markdown"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -37,18 +38,25 @@ Targets:
                    Use --schema-id to set the document's "$id" (omitted when
                    unset).
 
+  --to md          A self-contained Markdown reference document: a Mermaid
+                   class diagram of every type in the import closure, per-type
+                   sections (property tables, relations, invariants), and
+                   data-type tables. "markdown" is accepted as an alias. Use
+                   --no-class-diagram to omit the diagram section.
+
 Use --module-root to resolve module-style imports against a root directory other
 than the schema's own (e.g. a repository root); for the go target the embedded
 SerializedModel keys are relative to that root.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runGen,
 	}
-	cmd.Flags().String("to", "", "target: go or jsonschema (required)")
+	cmd.Flags().String("to", "", "target: go, jsonschema, or md (required)")
 	cmd.Flags().String("package", "", "go target: generated package name (default: derived from schema name)")
 	cmd.Flags().String("output", "", "output file path (default: stdout)")
 	cmd.Flags().StringSlice("initialisms", nil, "go target: extra acronyms to upper-case in generated names, e.g. GUID,JWT")
 	cmd.Flags().String("module-root", "", "root directory for module-style imports (default: the schema's directory)")
 	cmd.Flags().String("schema-id", "", `jsonschema target: value for the emitted "$id" (omitted when unset)`)
+	cmd.Flags().Bool("no-class-diagram", false, "md target: omit the Mermaid class-diagram section")
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
 }
@@ -63,6 +71,7 @@ func rejectInapplicableFlags(cmd *cobra.Command, target string) error {
 		{"package", "go"},
 		{"initialisms", "go"},
 		{"schema-id", "jsonschema"},
+		{"no-class-diagram", "md"},
 	}
 	for _, pf := range perTarget {
 		if pf.target != target && cmd.Flags().Changed(pf.flag) {
@@ -86,8 +95,11 @@ func runGen(cmd *cobra.Command, args []string) error {
 	}
 
 	target := strings.ToLower(toFormat)
-	if target != "go" && target != "jsonschema" {
-		fmt.Fprintf(os.Stderr, "error: unsupported gen target %q: must be go or jsonschema\n", toFormat)
+	if target == "markdown" {
+		target = "md"
+	}
+	if target != "go" && target != "jsonschema" && target != "md" {
+		fmt.Fprintf(os.Stderr, "error: unsupported gen target %q: must be go, jsonschema, or md\n", toFormat)
 		return &cli.ExitError{Code: cli.ExitUsage}
 	}
 	if err := rejectInapplicableFlags(cmd, target); err != nil {
@@ -137,6 +149,13 @@ func runGen(cmd *cobra.Command, args []string) error {
 			opts = append(opts, jschema.WithSchemaID(schemaID))
 		}
 		data, err = jschema.Marshal(s, opts...)
+	case "md":
+		noDiagram, _ := cmd.Flags().GetBool("no-class-diagram")
+		var opts []markdown.Option
+		if noDiagram {
+			opts = append(opts, markdown.WithClassDiagram(false))
+		}
+		data, err = markdown.Marshal(s, opts...)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: generate %s: %v\n", target, err)

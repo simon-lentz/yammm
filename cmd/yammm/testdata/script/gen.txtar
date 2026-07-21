@@ -64,6 +64,40 @@ stderr 'flag --initialisms applies only to --to go'
 ! exec yammm gen --to go --schema-id https://example.com/x.json county.yammm
 stderr 'flag --schema-id applies only to --to jsonschema'
 
+# gen --to md: a self-contained Markdown reference document with a Mermaid
+# class diagram and per-type sections.
+exec yammm gen --to md county.yammm
+stdout '# Schema geo'
+stdout '```mermaid'
+stdout '### County'
+
+# --no-class-diagram omits the diagram section and its fence.
+exec yammm gen --to md --no-class-diagram county.yammm
+! stdout 'mermaid'
+stdout '### County'
+
+# "markdown" is accepted as an alias for md.
+exec yammm gen --to markdown county.yammm
+stdout '# Schema geo'
+
+# --output writes the document to a file and keeps stdout free of it.
+exec yammm gen --to md --output county.md county.yammm
+exists county.md
+grep '## Class Diagram' county.md
+! stdout '## Class Diagram'
+
+# The md target flattens the import closure like the other targets; imported
+# schemas get their own section with schema-qualified type headings.
+exec yammm gen --to md --module-root registry registry/a/b/entry.yammm
+stdout '## Schema deplib \(imported as dep\)'
+stdout '### deplib\.Vendor'
+
+# Per-target flag rejection covers the md target in both directions.
+! exec yammm gen --to md --package foo county.yammm
+stderr 'flag --package applies only to --to go'
+! exec yammm gen --to go --no-class-diagram county.yammm
+stderr 'flag --no-class-diagram applies only to --to md'
+
 -- county.yammm --
 schema "geo"
 
