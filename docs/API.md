@@ -1371,6 +1371,48 @@ yammm gen --to jsonschema <schema.yammm> [--schema-id <uri>] [--output <path>] [
 
 Per-target flags are enforced: `--package`/`--initialisms` are rejected for the jsonschema target, `--schema-id` for the go target.
 
+## Markdown Documentation Generation
+
+The `adapter/markdown` package generates a Markdown reference document — a Mermaid class diagram plus per-type sections — from a schema, giving every schema a canonical, regenerable documentation artifact. Like its gen-family siblings it is schema-in, bytes-out — no instance-data path, plain `error` — and the adapter is stdlib-only.
+
+### Generation
+
+```go
+func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
+```
+
+```go
+doc, err := markdown.Marshal(s)                                  // full document
+doc, err := markdown.Marshal(s, markdown.WithClassDiagram(false)) // tables only
+```
+
+`Marshal` requires a completed schema (always true for one returned by `schema.Load*` or `schema.Builder.Build`). Source backing is optional: on a Builder-built schema, invariant sections degrade to their message line instead of a source fence — nothing else needs source content.
+
+### The Emitted Document
+
+One document per invocation, covering the entry schema plus its whole import closure:
+
+- **Title + schema doc** — `# Schema <Name>`, then the schema's doc-comment verbatim.
+- **Class diagram** — one Mermaid `classDiagram` fence over the entire closure. Classes carry each type's **own** members as `name KindLabel` pairs (named DataTypes show their name; constraint detail stays out of the diagram); abstract and part types carry `<<Abstract>>` / `<<Part>>` stereotypes; edges are `Parent <|-- Child` for inheritance and DSL-labeled `Owner --> Target : NAME (mult)` / `Owner *-- Child : NAME (mult)` for each type's own associations and compositions — inherited structure is conveyed by the inheritance edges, not redrawn. Qualified names (invalid as Mermaid class ids) emit the sanitized-id form `class common_Region["common.Region"]`; Mermaid namespaces are deliberately not used (GitHub's renderer does not support them in class diagrams).
+- **Type sections** — one `### <TypeName>` per type in declaration order: a badge line (`*Abstract type*` / `*Part type*` / `Extends: [Parent](#parent)`), the doc-comment, then a **flattened property table** (Property | Type | Modifiers | Description) over the full inheritance chain — the Type column renders each constraint's DSL form (`String[1, 100]`, `List<FipsCode>`), and inherited rows carry `from <Owner>` in Modifiers. Associations and compositions follow as DSL-notation bullets with linked targets; edge properties nest as a sub-table under their relation's bullet.
+- **Invariants** — the failure message as a bullet, the doc-comment beneath, then the declaration source (`! "message" expression`, exactly as written) in a `yammm` fence extracted via the invariant's span.
+- **Data Types** — a Name | Definition | Description table per schema.
+- **Imported schemas** — one `## Schema <Name> (imported as <alias>)` section per import in closure order (transitive imports, which have no entry alias, head as plain `## Schema <Name>`), with collision-proof `### <schemaName>.<TypeName>` headings.
+
+Arbitrary doc/enum text cannot break structure: table cells escape pipes and fold newlines to `<br>`; a value containing a backtick renders through an entity-escaped `<code>` element; fences are sized past any backtick run in their body.
+
+### Validation
+
+Output is deterministic (byte-identical across runs and checkouts), so generated documents can be committed and drift-checked by regenerate-and-diff. Before returning, `Marshal` structurally self-checks: every fence closes, every internal link resolves to an emitted heading, and every table separator matches its header's column count — a failure is a generation error, never emitted output.
+
+### CLI
+
+```text
+yammm gen --to md <schema.yammm> [--no-class-diagram] [--output <path>] [--module-root <dir>]
+```
+
+`markdown` is accepted as an alias for `md`. Per-target flag enforcement extends to the md target: `--no-class-diagram` is rejected for other targets, and go/jsonschema-only flags are rejected for md.
+
 ## Formatting
 
 The `format` package provides canonical formatting for `.yammm` schema files:
