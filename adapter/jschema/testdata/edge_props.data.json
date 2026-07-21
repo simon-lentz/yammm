@@ -1,0 +1,10 @@
+{
+  "State": [{ "code": "CA", "name": "California" }],
+  "County": [
+    {
+      "fips": "06001",
+      "in_state": { "_target_code": "CA", "since": 1850, "notes": "founding county" }
+    },
+    { "fips": "06003" }
+  ]
+}

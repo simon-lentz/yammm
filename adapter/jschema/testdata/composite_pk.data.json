@@ -1,0 +1,6 @@
+{
+  "Region": [{ "country": "US", "code": "CA", "name": "California" }],
+  "Sensor": [
+    { "id": "S1", "located_in": { "_target_country": "US", "_target_code": "CA" } }
+  ]
+}

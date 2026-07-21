@@ -1,0 +1,18 @@
+{
+  "County": [
+    {
+      "fips": "12345",
+      "name": "Alpha",
+      "population": 5000,
+      "density": 12.5,
+      "rank": 10,
+      "active": true,
+      "founded": "1901-05-04",
+      "updated_at": "2026-07-21T12:00:00Z",
+      "guid": "0e4ac47a-8b6f-4bb9-b1e5-6a8f6c2f1a4d",
+      "embedding": [0.1, 0.2, 0.3],
+      "tags": ["rural", "coastal"]
+    },
+    { "fips": "67890", "name": "Beta", "population": 0, "active": false }
+  ]
+}

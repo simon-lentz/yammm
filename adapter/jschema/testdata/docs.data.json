@@ -1,0 +1,11 @@
+{
+  "State": [{ "code": "CA" }],
+  "County": [
+    {
+      "fips": "06001",
+      "population": 1500000,
+      "in_state": { "_target_code": "CA" },
+      "has_district": [{ "id": "0e4ac47a-8b6f-4bb9-b1e5-6a8f6c2f1a4d" }]
+    }
+  ]
+}

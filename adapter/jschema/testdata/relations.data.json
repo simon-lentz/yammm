@@ -1,0 +1,14 @@
+{
+  "Person": [
+    { "id": "0e4ac47a-8b6f-4bb9-b1e5-6a8f6c2f1a4d", "name": "Avery", "age": 40 }
+  ],
+  "Car": [
+    {
+      "vin": "V1",
+      "color": "red",
+      "wheels": [{ "position": "FL" }, { "position": "FR" }],
+      "owner": { "_target_id": "0e4ac47a-8b6f-4bb9-b1e5-6a8f6c2f1a4d" }
+    },
+    { "vin": "V2", "wheels": [{ "position": "RL" }] }
+  ]
+}

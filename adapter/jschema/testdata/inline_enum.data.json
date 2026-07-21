@@ -1,0 +1,6 @@
+{
+  "Car": [
+    { "vin": "V1", "color": "red", "sizes": ["s", "m"] },
+    { "vin": "V2" }
+  ]
+}

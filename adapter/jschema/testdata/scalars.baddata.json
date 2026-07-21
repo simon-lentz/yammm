@@ -1,0 +1,11 @@
+{
+  "County": [
+    { "fips": "123", "name": "Alpha", "population": 1, "active": true },
+    { "fips": "12345", "population": 1, "active": true },
+    { "fips": "12345", "name": "Gamma", "population": "many", "active": true },
+    { "fips": "12345", "name": "Delta", "population": 1, "active": true, "rank": 100 },
+    { "fips": "12345", "name": "Epsilon", "population": 1, "active": true, "guid": "not-a-uuid" },
+    { "fips": "12345", "name": "Zeta", "population": 1, "active": true, "embedding": [0.1, 0.2] },
+    { "fips": "12345", "name": "Eta", "population": 1, "active": true, "bogus": 1 }
+  ]
+}

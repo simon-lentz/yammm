@@ -1,0 +1,6 @@
+{
+  "County": [
+    { "fips": "06001", "in_state": { "_target_code": "CA" } },
+    { "fips": "06003", "in_state": { "_target_code": "CAL", "since": 1850 } }
+  ]
+}

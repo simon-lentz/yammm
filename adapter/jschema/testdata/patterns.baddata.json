@@ -1,0 +1,6 @@
+{
+  "Contact": [
+    { "id": "C1", "email": "not-an-email" },
+    { "id": "C2", "email": "a@example.com", "phone": "555-12345678" }
+  ]
+}
