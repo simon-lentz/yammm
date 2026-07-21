@@ -14,7 +14,7 @@ argument-hint: "[question about yammm]"
 
 # yammm
 
-YAMMM (Yet Another Meta-Meta Model) is a schema DSL, Go library, and CLI for typed data validation, graph construction, and multi-format export (JSON, CSV, Neo4j Cypher, generated Go). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and export to databases.
+YAMMM is a schema DSL, Go library, and CLI for typed data validation, graph construction, and multi-format export (JSON, CSV, Neo4j Cypher, generated Go). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and export to databases.
 
 ```text
 .yammm file --> schema.Load() --> instance.Validate() --> graph.Add()

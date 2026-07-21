@@ -1,6 +1,6 @@
 // Package yammm provides schema definition and instance validation for Go applications.
 //
-// YAMMM (Yet Another Meta-Meta Model) is a library for defining schemas in a
+// YAMMM is a library for defining schemas in a
 // small DSL (.yammm files) and validating Go data against them at runtime.
 // It provides post-validation services including snapshot persistence and
 // integrity checking.

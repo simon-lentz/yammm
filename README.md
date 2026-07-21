@@ -4,7 +4,9 @@
 [![Go Version](https://img.shields.io/badge/go-1.26+-blue.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-YAMMM (Yet Another Meta-Meta Model) is a Go library for defining schemas in a small DSL (`.yammm` files) and validating Go data against them at runtime. It provides post-validation services including graph traversal and integrity checking.
+YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and validating Go data against them at runtime. It provides post-validation services including graph traversal and integrity checking.
+
+> **About the name** — YAMMM stands for *Yet Another Meta-Meta Model*, in the modeling-stack sense: your data is the model, the schema that describes it is the metamodel, and the language schemas are written in sits one tier above that. The third *m* is not a typo.
 
 ## Features
 
