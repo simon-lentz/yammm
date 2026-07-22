@@ -139,8 +139,8 @@ type completer struct {
 
 	// unresolvedSupertypeMemo caches [completer.hasUnresolvedSupertype] per type:
 	// the inheritance graph and resolution state are fixed across the phases that
-	// query it (validatePrimaryKeys, validateInvariantExpressions), so a type's
-	// answer cannot change between calls.
+	// query it (validatePrimaryKeys, validateInvariantExpressions,
+	// validateAnnotations), so a type's answer cannot change between calls.
 	unresolvedSupertypeMemo map[*Type]bool
 }
 
@@ -199,6 +199,11 @@ func (c *completer) complete() *Schema {
 
 	// Phase 7b: Validate invariant expressions (static property checking)
 	c.validateInvariantExpressions()
+
+	// Phase 7c: Validate annotations (name, placement, args, target eligibility).
+	// Runs after linearization so property-reference arguments can resolve
+	// against inherited properties.
+	c.validateAnnotations()
 
 	// Final check for any errors THIS completion collected — its own error
 	// delta, not the shared collector's total: errors collected before this
@@ -281,6 +286,9 @@ func (c *completer) indexTypes() {
 		// Convert and set invariants
 		invariants := c.convertInvariants(td.Invariants)
 		t.setInvariants(invariants)
+
+		// Convert and set type-level annotations (@@name members)
+		t.setAnnotations(convertAnnotations(td.Annotations))
 
 		c.typeIndex[td.Name] = t
 		types = append(types, t)
@@ -483,6 +491,7 @@ func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) [
 			pd.Optional,
 			pd.IsPrimaryKey,
 			scope,
+			convertAnnotations(pd.Annotations),
 		)
 		props = append(props, p)
 	}
@@ -539,6 +548,7 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 					pd.Optional,
 					pd.IsPrimaryKey,
 					scope,
+					nil, // relation edge properties take no annotations
 				)
 				props = append(props, p)
 			}
@@ -594,6 +604,37 @@ func (c *completer) convertInvariants(decls []*invariantDecl) []*Invariant {
 	}
 
 	return invs
+}
+
+// convertAnnotations turns parsed annotationDecls into model Annotations,
+// mirroring convertInvariants. Argument semantic kinds start ArgUnvalidated;
+// validateAnnotations stamps them after linearization, before sealing. Used for
+// both type-level annotations (in indexTypes) and property-trailing ones (in
+// convertProperties), so property and type annotations share one conversion.
+func convertAnnotations(decls []*annotationDecl) []*Annotation {
+	if len(decls) == 0 {
+		return nil
+	}
+	anns := make([]*Annotation, 0, len(decls))
+	for _, d := range decls {
+		if d == nil {
+			continue
+		}
+		var args []AnnotationArg
+		if len(d.Args) > 0 {
+			args = make([]AnnotationArg, 0, len(d.Args))
+			for _, a := range d.Args {
+				args = append(args, AnnotationArg{
+					text:      a.Text,
+					tokenKind: a.Token,
+					kind:      ArgUnvalidated,
+					span:      a.Span,
+				})
+			}
+		}
+		anns = append(anns, newAnnotation(d.Name, args, d.Documentation, d.Span))
+	}
+	return anns
 }
 
 // resolveAliasConstraints resolves all AliasConstraint references in
@@ -1117,9 +1158,10 @@ func hasDeclaredPrimary(t *Type) bool {
 //
 // Every type reached is memoized, not just the entry: the recursion routes back through
 // this method, so each supertype's answer is recorded as it is determined and a chain is
-// walked once across all queries rather than re-walked per query. The two phases that
-// call this (validatePrimaryKeys and validateInvariantExpressions) run after inheritance
-// and resolution are fixed, so a type's answer cannot change between calls.
+// walked once across all queries rather than re-walked per query. The three phases that
+// call this (validatePrimaryKeys, validateInvariantExpressions, and validateAnnotations)
+// run after inheritance and resolution are fixed, so a type's answer cannot change
+// between calls.
 //
 // detectCycles rejects inheritance cycles before this runs, so the graph is acyclic; the
 // memo is seeded false before recursing purely so the walk still terminates should that

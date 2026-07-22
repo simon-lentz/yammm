@@ -1,0 +1,58 @@
+>// Grammar snapshot: annotation scopes (@name property-level, @@name type-level).
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ source.yammm comment.line.double-slash.yammm
+>
+>schema "annotations_snapshot"
+#^^^^^^ source.yammm keyword.control.schema.yammm
+#      ^ source.yammm
+#       ^^^^^^^^^^^^^^^^^^^^^^ source.yammm string.quoted.yammm
+>
+>type Document {
+#^^^^ source.yammm keyword.declaration.type.yammm
+#    ^ source.yammm
+#     ^^^^^^^^ source.yammm entity.name.type.yammm
+#             ^ source.yammm
+#              ^ source.yammm punctuation.definition.block.begin.yammm
+>	content_hash String      primary
+#^ source.yammm
+# ^^^^^^^^^^^^ source.yammm variable.other.property.yammm
+#             ^ source.yammm
+#              ^^^^^^ source.yammm support.type.yammm
+#                    ^^^^^^ source.yammm
+#                          ^^^^^^^ source.yammm storage.modifier.yammm
+>	state        String      @index
+#^ source.yammm
+# ^^^^^ source.yammm variable.other.property.yammm
+#      ^^^^^^^^ source.yammm
+#              ^^^^^^ source.yammm support.type.yammm
+#                    ^^^^^^ source.yammm
+#                          ^ source.yammm punctuation.definition.annotation.yammm
+#                           ^^^^^ source.yammm entity.name.function.decorator.yammm
+>	embedding    Vector[768] @vector(cosine)
+#^ source.yammm
+# ^^^^^^^^^ source.yammm variable.other.property.yammm
+#          ^^^^ source.yammm
+#              ^^^^^^ source.yammm support.type.yammm
+#                    ^ source.yammm meta.constraint.yammm punctuation.definition.bracket.begin.yammm
+#                     ^^^ source.yammm meta.constraint.yammm constant.numeric.yammm
+#                        ^ source.yammm meta.constraint.yammm punctuation.definition.bracket.end.yammm
+#                         ^ source.yammm
+#                          ^ source.yammm punctuation.definition.annotation.yammm
+#                           ^^^^^^ source.yammm entity.name.function.decorator.yammm
+#                                 ^^^^^^^^ source.yammm
+>	first_seen   Timestamp   @writeOnce
+#^ source.yammm
+# ^^^^^^^^^^ source.yammm variable.other.property.yammm
+#           ^^^ source.yammm
+#              ^^^^^^^^^ source.yammm support.type.yammm
+#                       ^^^ source.yammm
+#                          ^ source.yammm punctuation.definition.annotation.yammm
+#                           ^^^^^^^^^ source.yammm entity.name.function.decorator.yammm
+>
+>	@@index(state, content_hash)
+#^ source.yammm
+# ^^ source.yammm punctuation.definition.annotation.yammm
+#   ^^^^^ source.yammm entity.name.function.decorator.yammm
+#        ^^^^^^^^^^^^^^^^^^^^^^ source.yammm
+>}
+#^ source.yammm punctuation.definition.block.end.yammm
+>

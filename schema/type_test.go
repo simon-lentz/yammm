@@ -22,6 +22,8 @@ func TestType_Seal_PreventsMutation(t *testing.T) {
 		{"SetAssociations", func(s *schema.Type) { schema.TestSetTypeAssociations(s, []*schema.Relation{}) }},
 		{"SetCompositions", func(s *schema.Type) { schema.TestSetTypeCompositions(s, []*schema.Relation{}) }},
 		{"SetInvariants", func(s *schema.Type) { schema.TestSetTypeInvariants(s, []*schema.Invariant{}) }},
+		{"SetAnnotations", func(s *schema.Type) { schema.TestSetTypeAnnotations(s, []*schema.Annotation{}) }},
+		{"SetAllAnnotations", func(s *schema.Type) { schema.TestSetTypeAllAnnotations(s, []*schema.Annotation{}) }},
 		{"SetInherits", func(s *schema.Type) { schema.TestSetTypeInherits(s, []schema.TypeRef{}) }},
 		{"SetAllProperties", func(s *schema.Type) { schema.TestSetTypeAllProperties(s, []*schema.Property{}) }},
 		{"SetPrimaryKeys", func(s *schema.Type) { schema.TestSetTypePrimaryKeys(s, []*schema.Property{}) }},
@@ -148,7 +150,7 @@ func TestType_ID(t *testing.T) {
 
 func TestType_Property_Found(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	prop := schema.TestNewProperty("name", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	prop := schema.TestNewProperty("name", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
 	schema.TestSetTypeProperties(typ, []*schema.Property{prop})
 
 	result, ok := typ.Property("name")
@@ -168,8 +170,8 @@ func TestType_Property_NotFound(t *testing.T) {
 
 func TestType_Properties_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p1 := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.TestNewProperty("age", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
+	p2 := schema.TestNewProperty("age", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
 	schema.TestSetTypeProperties(typ, []*schema.Property{p1, p2})
 
 	count := 0
@@ -182,7 +184,7 @@ func TestType_Properties_Iterator(t *testing.T) {
 
 func TestType_PropertiesSlice(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
 	schema.TestSetTypeProperties(typ, []*schema.Property{p})
 
 	result := typ.PropertiesSlice()
@@ -193,8 +195,8 @@ func TestType_PropertiesSlice(t *testing.T) {
 
 func TestType_AllProperties_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p1 := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.TestNewProperty("inherited", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
+	p2 := schema.TestNewProperty("inherited", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
 	schema.TestSetTypeAllProperties(typ, []*schema.Property{p1, p2})
 
 	count := 0
@@ -207,7 +209,7 @@ func TestType_AllProperties_Iterator(t *testing.T) {
 
 func TestType_AllPropertiesSlice(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
 	schema.TestSetTypeAllProperties(typ, []*schema.Property{p})
 
 	result := typ.AllPropertiesSlice()
@@ -218,7 +220,7 @@ func TestType_AllPropertiesSlice(t *testing.T) {
 
 func TestType_PrimaryKeys_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	pk := schema.TestNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	pk := schema.TestNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{}, nil)
 	schema.TestSetTypePrimaryKeys(typ, []*schema.Property{pk})
 
 	count := 0
@@ -232,7 +234,7 @@ func TestType_PrimaryKeys_Iterator(t *testing.T) {
 
 func TestType_PrimaryKeysSlice(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	pk := schema.TestNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	pk := schema.TestNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{}, nil)
 	schema.TestSetTypePrimaryKeys(typ, []*schema.Property{pk})
 
 	result := typ.PrimaryKeysSlice()
@@ -242,7 +244,7 @@ func TestType_PrimaryKeysSlice(t *testing.T) {
 
 func TestType_HasPrimaryKey(t *testing.T) {
 	typWithPK := schema.TestNewType("WithPK", location.SourceID{}, location.Span{}, "", false, false)
-	pk := schema.TestNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{})
+	pk := schema.TestNewProperty("id", location.Span{}, "", nil, schema.DataTypeRef{}, false, true, schema.DeclaringScope{}, nil)
 	schema.TestSetTypePrimaryKeys(typWithPK, []*schema.Property{pk})
 
 	typWithoutPK := schema.TestNewType("NoPK", location.SourceID{}, location.Span{}, "", false, false)
@@ -612,8 +614,8 @@ func TestType_IsSubTypeOf(t *testing.T) {
 
 func TestType_CanonicalPropertyMap(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p1 := schema.TestNewProperty("FirstName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
-	p2 := schema.TestNewProperty("LastName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p1 := schema.TestNewProperty("FirstName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
+	p2 := schema.TestNewProperty("LastName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
 	schema.TestSetTypeAllProperties(typ, []*schema.Property{p1, p2})
 
 	result := typ.CanonicalPropertyMap()
@@ -624,7 +626,7 @@ func TestType_CanonicalPropertyMap(t *testing.T) {
 
 func TestType_CanonicalPropertyMap_AfterSeal(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p := schema.TestNewProperty("Name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{})
+	p := schema.TestNewProperty("Name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
 	schema.TestSetTypeAllProperties(typ, []*schema.Property{p})
 	schema.TestSealType(typ)
 

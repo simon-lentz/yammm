@@ -136,6 +136,11 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_INVALID_PRIMARY_KEY_TYPE` | Type not allowed as primary key |
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
 | `E_LOAD_IO_FAILURE` | I/O error during schema loading |
+| `E_UNKNOWN_ANNOTATION` | Annotation name not in the built-in registry for its placement |
+| `E_UNKNOWN_ANNOTATION_TARGET` | Annotation property-reference argument names no property of the type |
+| `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation |
+| `E_INVALID_ANNOTATION_TARGET` | Annotation attached to an ineligible property |
+| `W_ANNOTATION_SHADOWED` | A re-declaration silently drops an inherited property's annotations (warning) |
 
 ### Instance Validation
 

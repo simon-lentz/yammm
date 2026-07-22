@@ -1,9 +1,11 @@
 package schema
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 )
 
 // visitState tracks DFS progress for cycle detection.
@@ -266,6 +268,10 @@ func (c *completer) completeTypes() {
 		// Merge invariants from ancestors
 		allInvs := c.mergeInvariants(t, supers)
 		t.setAllInvariants(allInvs)
+
+		// Merge type-level annotations from ancestors
+		allAnns := c.mergeAnnotations(t, supers)
+		t.setAllAnnotations(allAnns)
 	}
 
 	for _, t := range c.schema.types {
@@ -383,11 +389,23 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 			}
 
 			if p.Equal(existing) {
+				// An own declaration that re-declares an inherited property
+				// identically wins keep-first; warn if it drops the inherited
+				// annotations. Keep-first between two equal ancestors (ownProps
+				// false) is silent by design — the dedup exists to merge them.
+				if ownProps[p.Name()] {
+					c.warnShadowedAnnotations(existing, p)
+				}
 				continue
 			}
 
 			// Check if existing (child's own or earlier ancestor) narrows the inherited
 			if existing.CanNarrowFrom(p) {
+				// A narrowing own declaration wins; warn if it drops the
+				// inherited annotations, same as the identical-re-declaration case.
+				if ownProps[p.Name()] {
+					c.warnShadowedAnnotations(existing, p)
+				}
 				continue // Existing narrower version is already in result
 			}
 
@@ -442,6 +460,96 @@ func (c *completer) mergeInvariants(t *Type, supers []ResolvedTypeRef) []*Invari
 	}
 
 	return result
+}
+
+// mergeAnnotations merges own type-level annotations with inherited ones.
+// Own annotations come first, then inherited (left-to-right supertype order),
+// deduplicated keep-first by exact identity: name plus the ordered argument
+// texts. Two type-level annotations differing only in argument list (two
+// distinct @@index composites) therefore both survive.
+//
+// It deduplicates inherited-against-existing ONLY: an own-vs-own duplicate is
+// deliberately left in place — exactly as mergeInvariants leaves own duplicates
+// — so validateAnnotations can detect and report it against the raw own set
+// before any adapter reads the merged view. Collapsing own duplicates here
+// would make that diagnostic vanish silently.
+func (c *completer) mergeAnnotations(t *Type, supers []ResolvedTypeRef) []*Annotation {
+	result := t.AnnotationsSlice()
+	seen := make(map[string]bool)
+	for _, a := range result {
+		seen[a.identity()] = true
+	}
+
+	for _, superRef := range supers {
+		superType := c.resolveTypeID(superRef.ID())
+		if superType == nil {
+			continue
+		}
+
+		for _, a := range superType.AllAnnotationsSlice() {
+			id := a.identity()
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			result = append(result, a)
+		}
+	}
+
+	return result
+}
+
+// warnShadowedAnnotations emits a Warning when a type's own property
+// declaration (surviving) drops annotations that the inherited property
+// (shadowed) carried. It is called from the two mergeProperties branches where
+// an own declaration wins over an inherited one — identical re-declaration or
+// narrowing — so a child shadowing the same property across N annotated
+// ancestors draws N warnings (once per shadowing ancestor). The Issue is built
+// directly on the collector with Warning severity and a related span at the
+// shadowed declaration; completer.errorf cannot serve here because it hardcodes
+// Error severity and exposes no related-info hook.
+func (c *completer) warnShadowedAnnotations(surviving, shadowed *Property) {
+	dropped := droppedAnnotationNames(surviving, shadowed)
+	if len(dropped) == 0 {
+		return
+	}
+	display := make([]string, len(dropped))
+	for i, name := range dropped {
+		display[i] = "@" + name
+	}
+	msg := fmt.Sprintf(
+		"re-declaration of property %q drops inherited annotation(s) %s; re-state them on this declaration to keep them",
+		surviving.Name(), strings.Join(display, ", "),
+	)
+	c.collector.Collect(
+		diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, msg).
+			WithSpan(surviving.Span()).
+			WithRelated(location.RelatedInfo{
+				Span:    shadowed.Span(),
+				Message: "inherited annotation declared here",
+			}).Build(),
+	)
+}
+
+// droppedAnnotationNames returns the names of annotations on shadowed that are
+// absent by name from surviving's annotation set — the annotations a
+// re-declaration drops. Comparison is name-level: re-stating an annotation of
+// the same name (any args) suppresses the warning for it.
+func droppedAnnotationNames(surviving, shadowed *Property) []string {
+	if len(shadowed.annotations) == 0 {
+		return nil
+	}
+	have := make(map[string]bool, len(surviving.annotations))
+	for _, a := range surviving.annotations {
+		have[a.name] = true
+	}
+	var dropped []string
+	for _, a := range shadowed.annotations {
+		if !have[a.name] {
+			dropped = append(dropped, a.name)
+		}
+	}
+	return dropped
 }
 
 // mergeRelations merges own relations with inherited relations.

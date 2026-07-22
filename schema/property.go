@@ -1,6 +1,9 @@
 package schema
 
 import (
+	"iter"
+	"slices"
+
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -104,6 +107,7 @@ type Property struct {
 	optional     bool
 	isPrimaryKey bool
 	scope        DeclaringScope
+	annotations  []*Annotation // property-trailing @name(args) decorators, in source order
 }
 
 // newProperty creates a new Property.
@@ -126,6 +130,7 @@ func newProperty(
 	optional bool,
 	isPrimaryKey bool,
 	scope DeclaringScope,
+	annotations []*Annotation,
 ) *Property {
 	return &Property{
 		name:         name,
@@ -136,6 +141,7 @@ func newProperty(
 		optional:     optional,
 		isPrimaryKey: isPrimaryKey,
 		scope:        scope,
+		annotations:  annotations,
 	}
 }
 
@@ -194,6 +200,36 @@ func (p *Property) DeclaringScope() DeclaringScope {
 	return p.scope
 }
 
+// Annotations returns an iterator over this property's annotations in source
+// order (the @name / @name(args) decorators trailing the property). Duplicate
+// names are rejected during completion, so each name appears at most once.
+func (p *Property) Annotations() iter.Seq[*Annotation] {
+	return func(yield func(*Annotation) bool) {
+		for _, a := range p.annotations {
+			if !yield(a) {
+				return
+			}
+		}
+	}
+}
+
+// AnnotationsSlice returns a defensive copy of this property's annotations.
+func (p *Property) AnnotationsSlice() []*Annotation {
+	return slices.Clone(p.annotations)
+}
+
+// Annotation returns the annotation with the given name, if present. The result
+// is unambiguous because duplicate annotation names on one property are a load
+// error.
+func (p *Property) Annotation(name string) (*Annotation, bool) {
+	for _, a := range p.annotations {
+		if a.name == name {
+			return a, true
+		}
+	}
+	return nil, false
+}
+
 // CanNarrowFrom reports whether this (child) property is a valid narrowing of
 // the parent property. A child narrows its parent when:
 //   - Names match (case-sensitive)
@@ -229,10 +265,13 @@ func (p *Property) CanNarrowFrom(parent *Property) bool {
 
 // Equal reports whether two properties are structurally equal.
 // Compares: name (case-sensitive), optionality, PK status, constraint.
-// NOT compared: span, docs, scope. Scope is excluded because properties
-// inherited from different ancestors should be considered equal for
+// NOT compared: span, docs, scope, annotations. Scope is excluded because
+// properties inherited from different ancestors should be considered equal for
 // deduplication purposes during type completion—two ancestors may define
 // identical properties, and we want to merge them rather than flag a conflict.
+// Annotations are excluded so a child re-declaration that drops an inherited
+// annotation is still Equal (and the drop is surfaced by W_ANNOTATION_SHADOWED
+// during linearization, not treated as a structural conflict).
 func (p *Property) Equal(other *Property) bool {
 	if p == nil || other == nil {
 		return p == other

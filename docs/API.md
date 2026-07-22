@@ -193,7 +193,20 @@ free-form; import aliases are validated during completion (`E_INVALID_ALIAS`).
 | `AsAbstract()` | Mark the type as abstract |
 | `WithTypeDocumentation(doc)` | Set documentation for the type |
 | `WithInvariant(name, expr, doc)` | Add an invariant constraint |
+| `WithTypeAnnotation(name, args...)` | Add a type-level `@@name(args)` annotation |
+| `WithPropertyAnnotation(propertyName, name, args...)` | Add a `@name(args)` annotation to a property |
 | `Done()` | Complete the type definition and return to the parent `Builder` |
+
+### Annotations
+
+Annotations declared in `.yammm` (or via the Builder methods above) are carried on the loaded schema:
+
+- `Property.Annotations()` / `AnnotationsSlice()` / `Annotation(name) (*Annotation, bool)` — a property's `@name` annotations.
+- `Type.Annotations()` / `AllAnnotations()` (with `*Slice` variants) — a type's `@@` members (own, and own-plus-inherited).
+- `Annotation` exposes `Name()`, `Args() []AnnotationArg`, `Documentation()`, `Span()`; `AnnotationArg` exposes `Text()`, `Kind() AnnotationArgKind`, `Span()`.
+- `schema.AnnotationSpecs() []AnnotationSpec` returns the built-in registry for editor tooling — a read-only surface, not a registration API. Each `AnnotationSpec` exposes `Name()`, `Placement() AnnotationPlacement` (`PlacementProperty` or `PlacementType`), `Documentation()`, and `ArgHint()`.
+
+Annotation structure and eligibility are validated at load; see [SPEC.md](SPEC.md#annotations) for the blessed set and the diagnostics they produce.
 
 ## Instance Validation
 
@@ -531,7 +544,7 @@ hash := schema.StructuralHash(s) // returns "sha256:<hex>"
 
 `StructuralHash` computes a deterministic hash of a schema's structural shape. Two schemas produce the same hash if and only if they define the same types, properties, relations, compositions, data types, and constraints (by name, kind, and parameters).
 
-Invariants are deliberately excluded from the hash — they constrain runtime validation but do not affect structural shape.
+Invariants and annotations are deliberately excluded from the hash — they constrain runtime validation or downstream store DDL but do not affect structural shape (what instance data is valid).
 
 The hash is used by the `snapshot` package to verify that a persisted snapshot is compatible with the schema provided at load time. `StructuralHashVersion` (currently `1`) identifies the hashing algorithm version.
 

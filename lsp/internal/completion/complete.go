@@ -98,6 +98,12 @@ func Complete(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char in
 		items = TypeCompletions(snapshot, doc.SourceID)
 	case ImportPath:
 		items = ImportCompletions()
+	case AnnotationName:
+		placement, _, _, _ := annotationHead(LineBeforeCursor(doc, line, byteOffset))
+		items = AnnotationNameCompletions(placement)
+	case AnnotationArgs:
+		_, name, _, _ := annotationHead(LineBeforeCursor(doc, line, byteOffset))
+		items = AnnotationArgCompletions(name)
 	default:
 		items = TopLevelCompletions()
 	}
@@ -296,6 +302,59 @@ func ImportCompletions() []protocol.CompletionItem {
 	return []protocol.CompletionItem{
 		SnippetCompletion("import", "import \"${1:./path}\"${2: as ${3:alias}}", "Import statement"),
 	}
+}
+
+// AnnotationNameCompletions returns annotation-name completions for the given
+// placement, sourced from the built-in registry. A property context offers the
+// property-placement names; a @@ context offers the type-placement names.
+func AnnotationNameCompletions(placement schema.AnnotationPlacement) []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	for _, spec := range schema.AnnotationSpecs() {
+		if spec.Placement() != placement {
+			continue
+		}
+		kind := protocol.CompletionItemKindKeyword
+		detail := spec.Documentation()
+		sortText := "0_" + spec.Name()
+		item := protocol.CompletionItem{
+			Label:    spec.Name(),
+			Kind:     &kind,
+			Detail:   &detail,
+			SortText: &sortText,
+		}
+		// Annotations that take arguments insert a "(...)" with the cursor
+		// inside, where the argument context (e.g. @vector keywords) takes over.
+		if spec.ArgHint() != "" {
+			insert := spec.Name() + "($1)"
+			format := protocol.InsertTextFormatSnippet
+			item.InsertText = &insert
+			item.InsertTextFormat = &format
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+// AnnotationArgCompletions returns argument completions inside a recognized
+// annotation's parentheses. Only @vector offers a fixed keyword set in v1;
+// @@index property-reference completion is a deferred stretch goal.
+func AnnotationArgCompletions(name string) []protocol.CompletionItem {
+	if name != "vector" {
+		return nil
+	}
+	var items []protocol.CompletionItem
+	for _, kw := range []string{"cosine", "euclidean"} {
+		kind := protocol.CompletionItemKindValue
+		detail := "vector similarity function"
+		sortText := "0_" + kw
+		items = append(items, protocol.CompletionItem{
+			Label:    kw,
+			Kind:     &kind,
+			Detail:   &detail,
+			SortText: &sortText,
+		})
+	}
+	return items
 }
 
 // KeywordCompletion creates a keyword completion item.

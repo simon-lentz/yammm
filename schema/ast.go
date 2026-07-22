@@ -53,6 +53,7 @@ type typeDecl struct {
 	Properties    []*propertyDecl
 	Relations     []*relationDecl
 	Invariants    []*invariantDecl
+	Annotations   []*annotationDecl // Type-level @@name(args) members
 	IsPart        bool
 	IsAbstract    bool
 	Documentation string
@@ -75,6 +76,7 @@ type propertyDecl struct {
 	Optional      bool
 	IsPrimaryKey  bool
 	Documentation string
+	Annotations   []*annotationDecl // Property-trailing @name(args) decorators
 	Span          location.Span
 }
 
@@ -103,4 +105,23 @@ type invariantDecl struct {
 	Expr          expr.Expression // Compiled expression (nil indicates parse failure)
 	Documentation string
 	Span          location.Span
+}
+
+// annotationDecl is the parsed form of a @name / @@name annotation, before
+// semantic validation. Documentation is only populated for type-level (@@)
+// annotations, which may carry a leading doc comment.
+type annotationDecl struct {
+	Name          string
+	Args          []annotationArgDecl
+	Documentation string
+	Span          location.Span
+}
+
+// annotationArgDecl is one parsed annotation argument. Token records whether
+// the argument was an identifier or a literal so completion can distinguish
+// "expected a reference, got a literal" from a bad identifier.
+type annotationArgDecl struct {
+	Text  string
+	Token annotationTokenKind
+	Span  location.Span
 }

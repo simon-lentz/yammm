@@ -4,10 +4,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"

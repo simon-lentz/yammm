@@ -433,3 +433,28 @@ tags List<String[1, 50]>[0, 20]
 tags List<String[1, 50]>
 ! "tag_limit" tags -> Len <= 100
 ```
+
+---
+
+## 21. Single `@` for a Composite Index
+
+`@index` is a property-level annotation that takes no arguments. A composite (multi-property) index is a type-level `@@index(...)` member. Writing `@index(a, b)` on a property is an error (`E_INVALID_ANNOTATION`).
+
+```yammm-snippet
+// WRONG -- @index takes no arguments; this does not declare a composite index
+type Document {
+    content_hash String primary
+    state        String @index(state, published_on)
+}
+```
+
+```yammm-snippet
+// RIGHT -- a single-property index trails the property; a composite is a @@ member
+type Document {
+    content_hash String primary
+    state        String @index
+    published_on Date
+
+    @@index(state, published_on)
+}
+```

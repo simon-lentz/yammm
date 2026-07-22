@@ -46,6 +46,18 @@ type YammmGrammarVisitor interface {
 	// Visit a parse tree produced by YammmGrammarParser#property_name.
 	VisitProperty_name(ctx *Property_nameContext) interface{}
 
+	// Visit a parse tree produced by YammmGrammarParser#annotation.
+	VisitAnnotation(ctx *AnnotationContext) interface{}
+
+	// Visit a parse tree produced by YammmGrammarParser#type_annotation.
+	VisitType_annotation(ctx *Type_annotationContext) interface{}
+
+	// Visit a parse tree produced by YammmGrammarParser#annotation_args.
+	VisitAnnotation_args(ctx *Annotation_argsContext) interface{}
+
+	// Visit a parse tree produced by YammmGrammarParser#annotation_arg.
+	VisitAnnotation_arg(ctx *Annotation_argContext) interface{}
+
 	// Visit a parse tree produced by YammmGrammarParser#data_type_ref.
 	VisitData_type_ref(ctx *Data_type_refContext) interface{}
 

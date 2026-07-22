@@ -207,6 +207,7 @@ in                                  // membership
 ->                                  // pipeline/function call
 -->                                 // association
 *->                                 // composition
+@     @@                             // annotation (property / type level)
 .                                   // property access
 ?                                   // ternary conditional
 {     }                             // braces
@@ -1072,6 +1073,67 @@ For **to-many associations**, use an array of edge objects:
 
 **Reserved prefix:** The `_target_` prefix is reserved for foreign key fields. User-defined relation names cannot start with `_target_` (case-insensitive).
 
+## Annotations
+
+Annotations attach validated, store-agnostic metadata to properties and types. The core validates their structure and eligibility at load; downstream adapters interpret them (for example, turning them into index or write-shape DDL). Annotations do not change what instance data is valid, and they are excluded from the structural hash.
+
+### Syntax
+
+A **property-level** annotation trails a property, after its datatype and any `primary`/`required` modifier. A property may carry zero or more:
+
+```
+state        String      @index
+first_seen   Timestamp   @writeOnce
+embedding    Vector[768] @vector(cosine)
+```
+
+A **type-level** annotation is a type-body member written with the doubled sigil `@@`, optionally preceded by a doc comment. It may appear anywhere in the body:
+
+```
+type Document {
+  content_hash String primary
+  state        String
+  published_on Date
+
+  @@index(state, published_on)
+}
+```
+
+The single/double sigil split is required, not stylistic. Because whitespace — including newlines — is not significant to the parser, a standalone type-level annotation written with a single `@` after a property would be parsed as another annotation on that property; the `@@` sigil disambiguates.
+
+**Ordering.** A property-level annotation must follow the datatype and any modifier: `state String @index` is valid, but `state String @index primary` is a syntax error — the modifier must precede the annotation. The parser recovers from the wrong order with a generic `E_SYNTAX` at the modifier rather than a targeted message.
+
+**Arguments** are positional. When parentheses are present they must hold at least one argument — `@index()` is a syntax error; a no-argument annotation is written without parentheses (`@index`). A trailing comma is allowed.
+
+### Blessed annotations (v1)
+
+| Annotation | Placement | Arguments | Eligible target | Meaning |
+|---|---|---|---|---|
+| `@index` | property | none | a scalar property (String, UUID, Enum, Pattern, Integer, Float, Boolean, Date, Timestamp) that is not the type's sole primary key | single-property range index |
+| `@@index(p1, p2, …)` | type | one or more property references, ordered, no duplicates | each reference a scalar property of the type (own or inherited); primary-key members allowed | composite range index (order significant) |
+| `@vector(similarity)` | property | exactly one keyword: `cosine` or `euclidean` | a `Vector[N]` property | vector (approximate-nearest-neighbour) index |
+| `@writeOnce` | property | none | any non-primary-key property | marks the property immutable after node creation |
+
+A member of a **composite** primary key may carry `@index` (the composite backing index does not serve single-property lookups on it); the type's **sole** primary key may not, because its uniqueness constraint already backs an index. `@writeOnce` is rejected on every primary-key member, sole or composite.
+
+Annotation eligibility is independent of type category: `abstract`, `part`, and concrete types are validated identically.
+
+### Validation
+
+Annotations are validated at load, after inheritance linearization. Violations produce these diagnostics:
+
+- `E_UNKNOWN_ANNOTATION` — the name is not a blessed annotation for its placement.
+- `E_INVALID_ANNOTATION` — a structural violation: wrong placement (e.g. `@@writeOnce`), wrong arity, a literal where a reference or keyword is required, an unknown similarity keyword, or a duplicate.
+- `E_UNKNOWN_ANNOTATION_TARGET` — a `@@index` reference names no property of the type (the same failure class as `E_UNKNOWN_PROPERTY`, on a different construct).
+- `E_INVALID_ANNOTATION_TARGET` — the annotation is attached to an ineligible property (a non-scalar `@index`, a non-`Vector` `@vector`, `@writeOnce` on a primary key, and so on).
+- `W_ANNOTATION_SHADOWED` — a warning (not an error): a subtype re-declaration drops an inherited property's annotations without re-stating them (see [Inheritance](#inheritance)). The load still succeeds.
+
+### Inheritance
+
+Property-level annotations travel with the property they decorate: a subtype that inherits a property unchanged inherits its annotations. Type-level annotations linearize like invariants — the subtype's own annotations first, then inherited ones, with exact duplicates (same name and argument list) deduplicated keep-first. Two `@@index` members differing only in argument list are distinct indexes and both survive.
+
+Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype and the load reports `W_ANNOTATION_SHADOWED` (a warning; the load still succeeds). Re-state the annotations on the re-declaration to keep them. When two ancestors declare an equal property and the subtype does not re-declare it, the first-linearized ancestor's annotation set wins silently — this keep-first dedup is the intended merge, not a shadowing.
+
 ## Expressions and Invariants
 
 Invariants are constraints attached to types that are evaluated during instance validation.
@@ -1494,6 +1556,9 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UPSTREAM_FAIL` — imported schema failed to compile
 - `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
 - `E_LOAD_IO_FAILURE` — I/O error during schema loading
+- `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, or duplicate errors
+- `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
+- `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
 
 **Syntax** — parse errors:
 
@@ -1598,12 +1663,17 @@ TypeName   = UC_WORD .
 AliasName  = UC_WORD | LC_WORD .
 TypeRef    = [ AliasName "." ] TypeName .
 ExtendsClause = "extends" TypeRef { "," TypeRef } [ "," ] .
-TypeBody   = { Property | Association | Composition | Invariant } .
+TypeBody   = { Property | Association | Composition | Invariant | TypeAnnotation } .
 
-Property   = [ DOC_COMMENT ] PropertyName DataTypeRef [ "primary" | "required" ] .
+Property   = [ DOC_COMMENT ] PropertyName DataTypeRef [ "primary" | "required" ] { Annotation } .
 PropertyName = LC_WORD | lc_keyword .
 DataTypeRef = BuiltIn | QualifiedAlias .
 QualifiedAlias = [ AliasName "." ] UC_WORD .
+
+Annotation     = "@" PropertyName [ AnnotationArgs ] .
+TypeAnnotation = [ DOC_COMMENT ] "@@" PropertyName [ AnnotationArgs ] .
+AnnotationArgs = "(" AnnotationArg { "," AnnotationArg } [ "," ] ")" .
+AnnotationArg  = PropertyName | UC_WORD | STRING | INTEGER | FLOAT | BOOLEAN | REGEXP .
 
 Association = [ DOC_COMMENT ] "-->" Name [ Multiplicity ] TypeRef
               [ "/" Name [ Multiplicity ] ] [ "{" { RelProperty } "}" ] .

@@ -26,6 +26,7 @@ type Type struct {
 	associations []*Relation
 	compositions []*Relation
 	invariants   []*Invariant
+	annotations  []*Annotation // type-level @@name(args) members, in source order
 
 	// Computed at completion (linearized order)
 	allProperties   []*Property
@@ -33,6 +34,7 @@ type Type struct {
 	allAssociations []*Relation
 	allCompositions []*Relation
 	allInvariants   []*Invariant
+	allAnnotations  []*Annotation // own type-level annotations then inherited, deduped keep-first
 
 	// Inheritance
 	inherits   []TypeRef         // declared extends clause
@@ -295,6 +297,44 @@ func (t *Type) AllInvariantsSlice() []*Invariant {
 	return slices.Clone(t.allInvariants)
 }
 
+// Annotations returns an iterator over the type-level annotations declared in
+// this type body (@@name(args) members). Does NOT include inherited
+// annotations; use AllAnnotations for that.
+func (t *Type) Annotations() iter.Seq[*Annotation] {
+	return func(yield func(*Annotation) bool) {
+		for _, a := range t.annotations {
+			if !yield(a) {
+				return
+			}
+		}
+	}
+}
+
+// AnnotationsSlice returns a defensive copy of the type-level annotations
+// declared in this type body.
+func (t *Type) AnnotationsSlice() []*Annotation {
+	return slices.Clone(t.annotations)
+}
+
+// AllAnnotations returns an iterator over all type-level annotations (own and
+// inherited) in linearized order: own first, then inherited, with exact
+// duplicates deduplicated keep-first.
+func (t *Type) AllAnnotations() iter.Seq[*Annotation] {
+	return func(yield func(*Annotation) bool) {
+		for _, a := range t.allAnnotations {
+			if !yield(a) {
+				return
+			}
+		}
+	}
+}
+
+// AllAnnotationsSlice returns a defensive copy of all type-level annotations
+// (own and inherited).
+func (t *Type) AllAnnotationsSlice() []*Annotation {
+	return slices.Clone(t.allAnnotations)
+}
+
 // Inherits returns an iterator over the declared extends clause (syntactic refs).
 func (t *Type) Inherits() iter.Seq[TypeRef] {
 	return func(yield func(TypeRef) bool) {
@@ -460,6 +500,24 @@ func (t *Type) setAllInvariants(all []*Invariant) {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.allInvariants = all
+}
+
+// setAnnotations sets the type-level annotations declared in this body
+// (called during completion).
+func (t *Type) setAnnotations(annotations []*Annotation) {
+	if t.sealed {
+		panic("schema: cannot mutate sealed type")
+	}
+	t.annotations = annotations
+}
+
+// setAllAnnotations sets all type-level annotations including inherited
+// (called during completion).
+func (t *Type) setAllAnnotations(all []*Annotation) {
+	if t.sealed {
+		panic("schema: cannot mutate sealed type")
+	}
+	t.allAnnotations = all
 }
 
 // setInherits sets the declared extends clause (called during completion).

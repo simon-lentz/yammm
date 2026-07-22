@@ -14,6 +14,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 - **Runtime validation**: Validate Go maps, structs, and JSON against compiled schemas
 - **Relationship modeling**: Associations (references) and compositions (ownership) with multiplicity
 - **Invariants**: Boolean constraint expressions evaluated at validation time
+- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@writeOnce` metadata that adapters turn into store DDL
 - **Graph construction**: Build in-memory graphs from validated instances with integrity checking
 - **Graph persistence**: Save, load, verify, inspect, and edit-metadata-in-place graph snapshots (`.ys` format)
 - **Batch assembly**: Concurrent-safe validate → add → check → snapshot pipeline surface, resumable from a prior snapshot

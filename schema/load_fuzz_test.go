@@ -30,6 +30,10 @@ func FuzzLoadString(f *testing.F) {
 		"",
 		"type Orphan {}",
 		"schema \"test\"\ntype Broken {\n\tid Unknown primary\n}",
+		"schema \"test\"\ntype Trade {\n\tid String primary\n\tstate String @index\n\tembedding Vector[8] @vector(cosine)\n\tseen Timestamp @writeOnce\n\t@@index(id, state)\n}",
+		"schema \"test\"\ntype Trade {\n\tid String primary\n\tx String @index()\n}",
+		"schema \"test\"\ntype Trade {\n\tid String primary\n\t@@index(ghost)\n}",
+		"schema \"test\"\ntype Trade {\n\tid String primary\n\tx String @index @index\n}",
 	}
 	for _, s := range seeds {
 		f.Add(s)

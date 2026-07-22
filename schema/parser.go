@@ -270,11 +270,77 @@ func (b *astBuilder) ExitProperty(ctx *grammar.PropertyContext) {
 		Optional:      !isRequired,
 		IsPrimaryKey:  isPrimary,
 		Documentation: doc,
+		Annotations:   b.buildPropertyAnnotations(ctx),
 		Span:          b.spans.FromContext(ctx),
 	}
 	b.currentType.Properties = append(b.currentType.Properties, prop)
 	b.currentDT = nil
 	b.currentDTRef = DataTypeRef{} // Clear for next property
+}
+
+// buildPropertyAnnotations collects the property-trailing @name(args)
+// decorators into their decls. Order is preserved (the deterministic base for
+// AllAnnotations ordering).
+func (b *astBuilder) buildPropertyAnnotations(ctx *grammar.PropertyContext) []*annotationDecl {
+	annCtxs := ctx.AllAnnotation()
+	if len(annCtxs) == 0 {
+		return nil
+	}
+	decls := make([]*annotationDecl, 0, len(annCtxs))
+	for _, ac := range annCtxs {
+		nameCtx := ac.GetName()
+		if nameCtx == nil {
+			continue
+		}
+		decls = append(decls, &annotationDecl{
+			Name: nameCtx.GetText(),
+			Args: b.buildAnnotationArgs(ac.Annotation_args()),
+			Span: b.spans.FromContext(ac),
+		})
+	}
+	return decls
+}
+
+// buildAnnotationArgs collects an annotation's argument list, recording whether
+// each argument was an identifier or a literal. String literals are unquoted;
+// other literals keep their source text (they exist only to draw a precise
+// "got a literal" diagnostic in completion, since no v1 annotation accepts one).
+func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext) []annotationArgDecl {
+	if argsCtx == nil {
+		return nil
+	}
+	argCtxs := argsCtx.AllAnnotation_arg()
+	args := make([]annotationArgDecl, 0, len(argCtxs))
+	for _, ac := range argCtxs {
+		var (
+			text  string
+			token = tokenIdentifier
+		)
+		switch {
+		case ac.Property_name() != nil:
+			text = ac.Property_name().GetText()
+		case ac.UC_WORD() != nil:
+			text = ac.UC_WORD().GetText()
+		case ac.Literal() != nil:
+			token = tokenLiteral
+			raw := ac.Literal().GetText()
+			if len(raw) > 0 && (raw[0] == '"' || raw[0] == '\'') {
+				if unquoted, err := unquoteString(raw); err == nil {
+					text = unquoted
+				} else {
+					text = raw
+				}
+			} else {
+				text = raw
+			}
+		}
+		args = append(args, annotationArgDecl{
+			Text:  text,
+			Token: token,
+			Span:  b.spans.FromContext(ac),
+		})
+	}
+	return args
 }
 
 // ExitDatatype is called when exiting the datatype production.
@@ -482,6 +548,28 @@ func (b *astBuilder) ExitInvariant(ctx *grammar.InvariantContext) {
 		Span:          b.spans.FromContext(ctx),
 	}
 	b.currentType.Invariants = append(b.currentType.Invariants, inv)
+}
+
+// ExitType_annotation collects a type-level @@name(args) member, with its
+// optional leading doc comment, onto the current type in document order.
+func (b *astBuilder) ExitType_annotation(ctx *grammar.Type_annotationContext) { //nolint:revive // ANTLR-generated name
+	if b.currentType == nil {
+		return
+	}
+	nameCtx := ctx.GetName()
+	if nameCtx == nil {
+		return
+	}
+	var doc string
+	if ctx.DOC_COMMENT() != nil {
+		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
+	}
+	b.currentType.Annotations = append(b.currentType.Annotations, &annotationDecl{
+		Name:          nameCtx.GetText(),
+		Args:          b.buildAnnotationArgs(ctx.Annotation_args()),
+		Documentation: doc,
+		Span:          b.spans.FromContext(ctx),
+	})
 }
 
 // boundSpan returns a span covering a bound value, including the optional

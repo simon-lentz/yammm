@@ -55,6 +55,8 @@ var (
 	TestSetTypeCompositions    = (*Type).setCompositions
 	TestSetTypeInvariants      = (*Type).setInvariants
 	TestSetTypeAllInvariants   = (*Type).setAllInvariants
+	TestSetTypeAnnotations     = (*Type).setAnnotations
+	TestSetTypeAllAnnotations  = (*Type).setAllAnnotations
 	TestSetTypeInherits        = (*Type).setInherits
 	TestSetTypeAllProperties   = (*Type).setAllProperties
 	TestSetTypePrimaryKeys     = (*Type).setPrimaryKeys

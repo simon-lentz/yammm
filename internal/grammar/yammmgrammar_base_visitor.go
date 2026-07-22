@@ -59,6 +59,22 @@ func (v *BaseYammmGrammarVisitor) VisitProperty_name(ctx *Property_nameContext) 
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseYammmGrammarVisitor) VisitAnnotation(ctx *AnnotationContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseYammmGrammarVisitor) VisitType_annotation(ctx *Type_annotationContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseYammmGrammarVisitor) VisitAnnotation_args(ctx *Annotation_argsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseYammmGrammarVisitor) VisitAnnotation_arg(ctx *Annotation_argContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseYammmGrammarVisitor) VisitData_type_ref(ctx *Data_type_refContext) interface{} {
 	return v.VisitChildren(ctx)
 }

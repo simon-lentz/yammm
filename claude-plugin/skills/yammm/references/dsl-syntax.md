@@ -200,6 +200,44 @@ Composition targets must be `part type`.
 
 ---
 
+## Annotations
+
+Validated metadata that downstream adapters turn into store DDL (indexes, write-once markers). Property-level annotations trail a property with a single `@`; type-level annotations are body members with a doubled `@@`.
+
+```yammm-snippet
+state        String      @index
+embedding    Vector[768] @vector(cosine)
+first_seen   Timestamp   @writeOnce
+@@index(state, published_on)
+```
+
+Blessed annotations (v1):
+
+| Annotation | Placement | Arguments | Target |
+|---|---|---|---|
+| `@index` | property | none | a scalar property that is not the sole primary key |
+| `@@index(p, …)` | type | one or more property references (ordered) | scalar properties; primary-key members allowed |
+| `@vector(sim)` | property | `cosine` \| `euclidean` | a `Vector[N]` property |
+| `@writeOnce` | property | none | any non-primary-key property |
+
+```yammm
+type Document {
+    content_hash String      primary
+    state        String      @index
+    published_on Date        @index
+    embedding    Vector[768] @vector(cosine)
+    first_seen   Timestamp   @writeOnce
+
+    @@index(state, published_on)
+}
+```
+
+### Rules
+
+- A property-level annotation follows the datatype and any `primary`/`required` modifier: `foo String @index` is valid, `foo String @index primary` is a syntax error.
+- Parentheses, when present, hold at least one argument — `@index`, never `@index()`.
+- Annotations do not survive a property re-declaration (identical or narrowing) unless re-stated on the surviving declaration; the load then warns with `W_ANNOTATION_SHADOWED`.
+
 ## Invariants
 
 Business logic constraints evaluated after type checking:

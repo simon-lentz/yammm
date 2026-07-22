@@ -74,6 +74,12 @@ func TokenStream(text string) (string, error) {
 	indentLevel := 0
 	var prev antlr.Token
 	prevInExpr := false
+	// Annotation-head tracking. prevAtSigil marks that the previous non-hidden
+	// token was @ / @@ (so the current token is the annotation name), and
+	// prevAnnotationName marks that the previous token was that name (so a
+	// following "(" opens an argument list and takes no space).
+	prevAtSigil := false
+	prevAnnotationName := false
 
 	for _, tok := range allTokens {
 		if tok.GetTokenType() == antlr.TokenEOF {
@@ -129,6 +135,13 @@ func TokenStream(text string) (string, error) {
 		}
 
 		sep := declarationSeparator(prev, tok, pendingStr, indentLevel, false)
+		// An annotation name followed by "(" opens its argument list: collapse the
+		// space the (name, LPAR) default would otherwise emit. Decided here from
+		// loop state because that same pair is a relation multiplicity elsewhere,
+		// which must keep its space.
+		if prevAnnotationName && tt == grammar.YammmGrammarLexerLPAR {
+			sep = ""
+		}
 		pendingWS.Reset()
 		writeText(&out, sep, &lineStart)
 		writeTokenText(&out, tok, &lineStart)
@@ -139,6 +152,10 @@ func TokenStream(text string) (string, error) {
 			indentLevel--
 		}
 
+		// The non-hidden token immediately after @ / @@ is always the annotation
+		// name (grammar), so prevAtSigil alone identifies it.
+		prevAnnotationName = prevAtSigil
+		prevAtSigil = tt == grammar.YammmGrammarLexerAT || tt == grammar.YammmGrammarLexerATAT
 		prev = tok
 		prevInExpr = false
 	}
@@ -283,6 +300,14 @@ func declarationSpacingAction(prev antlr.Token, curr antlr.Token) spacingAction 
 
 	// Closing delimiters win over broad left-side rules.
 	if currType == grammar.YammmGrammarLexerRBRACK || currType == grammar.YammmGrammarLexerRPAR {
+		return spacingNone
+	}
+
+	// Annotation sigil: no space between @ / @@ and the annotation name that
+	// always follows it. The name-to-"(" spacing is decided in TokenStream from
+	// loop state, not here, because that pair is shared with a relation
+	// multiplicity (`worksAt (one)`), which must keep its space.
+	if prevType == grammar.YammmGrammarLexerAT || prevType == grammar.YammmGrammarLexerATAT {
 		return spacingNone
 	}
 
