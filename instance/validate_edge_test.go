@@ -1021,3 +1021,64 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateEdges_DataTypeEdgeProperty pins that a DataType-typed edge
+// property validates values against its resolved underlying constraint —
+// valid values pass, constraint-violating values fail with E_CONSTRAINT_FAIL —
+// exactly like a DataType-typed type property.
+func TestValidateEdges_DataTypeEdgeProperty(t *testing.T) {
+	s, result := schema.LoadString(t.Context(), `schema "geo"
+type StateCode = String [2, 2]
+type State {
+    code StateCode primary
+}
+type County {
+    fips String primary
+    --> IN_STATE (one) State {
+        code_tag StateCode
+    }
+}`, "test.yammm")
+	require.False(t, result.HasErrors(), "schema: %s", result)
+
+	validator := instance.NewValidator(s)
+
+	t.Run("valid value passes", func(t *testing.T) {
+		raw := instance.RawInstance{
+			Properties: map[string]any{
+				"fips": "06001",
+				"in_state": map[string]any{
+					"_target_code": "CA",
+					"code_tag":     "CA",
+				},
+			},
+		}
+		valid, result := validator.ValidateOne(t.Context(), "County", raw)
+		require.True(t, result.OK(), "valid DataType edge-property value must validate: %s", result)
+		require.NotNil(t, valid)
+
+		edge, ok := valid.Edge("IN_STATE")
+		require.True(t, ok)
+		tagVal, ok := edge.Targets()[0].Properties().Get("code_tag")
+		require.True(t, ok)
+		tag, ok := tagVal.String()
+		require.True(t, ok)
+		assert.Equal(t, "CA", tag)
+	})
+
+	t.Run("constraint-violating value fails", func(t *testing.T) {
+		raw := instance.RawInstance{
+			Properties: map[string]any{
+				"fips": "06001",
+				"in_state": map[string]any{
+					"_target_code": "CA",
+					"code_tag":     "C",
+				},
+			},
+		}
+		valid, result := validator.ValidateOne(t.Context(), "County", raw)
+		assert.Nil(t, valid)
+		require.False(t, result.OK())
+		assert.True(t, result.HasCode(instance.ErrConstraintFail),
+			"want E_CONSTRAINT_FAIL, got: %s", result)
+	})
+}

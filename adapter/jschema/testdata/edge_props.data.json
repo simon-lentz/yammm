@@ -3,7 +3,7 @@
   "County": [
     {
       "fips": "06001",
-      "in_state": { "_target_code": "CA", "since": 1850, "notes": "founding county" },
+      "in_state": { "_target_code": "CA", "since": 1850, "notes": "founding county", "code_tag": "CA" },
       "borders": [{ "_target_fips": "06003" }, { "_target_fips": "06005" }]
     },
     { "fips": "06003", "borders": [] },

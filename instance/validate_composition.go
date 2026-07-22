@@ -210,8 +210,10 @@ func (v *Validator) validateComposition(
 		})
 	}
 
-	// Recursively validate children
-	validChildren, childResult := v.ValidateForComposition(ctx, rel.Owner(), rel.Name(), childRaws)
+	// Recursively validate children against the relation already in hand;
+	// rel.Owner() is a declaring-schema-local name the entry schema may not
+	// know, so no name round-trips through public tag resolution.
+	validChildren, childResult := v.validateComposedBatch(ctx, rel, childRaws)
 
 	// Collect child diagnostics into the parent collector with relation context.
 	relationDetails := diag.PathRelation(rel.Name(), rel.FieldName())
@@ -226,7 +228,7 @@ func (v *Validator) validateComposition(
 	// PK-less composed children use structural position (array index) for identity,
 	// so no duplicate check is needed for them.
 	if len(validChildren) > 0 {
-		childType, found := v.schema.ResolveType(rel.Target())
+		childType, found := resolveRelationTarget(v.schema, rel)
 		if found && childType.HasPrimaryKey() {
 			seenPKs := make(map[string]int) // pk string -> first occurrence index
 			for i, child := range validChildren {

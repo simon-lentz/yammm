@@ -247,6 +247,8 @@ composed, result := validator.ValidateForComposition(ctx, "Car", "WHEELS", rawWh
 
 > **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state.
 
+Type names passed to the validator (`Validate`, `ValidateOne`, and `ValidateForComposition`'s parent tag) are entry-schema-relative: bare names for entry-schema types, alias-qualified names (`common.Region`) for directly imported ones. Relation *targets*, by contrast, are resolved internally by the absolute identity completion records (`Relation.TargetID`), never by re-reading the declared target name against the entry schema — so associations and compositions declared on imported types, or inherited from cross-schema parents, validate against the true target type even when the entry schema does not know the declaring schema's aliases or shadows the target's bare name with a type of its own.
+
 ### Expected Instance Shape
 
 Instance data is a top-level object keyed by type names whose values are arrays of instances:
@@ -495,6 +497,29 @@ The `Snapshot` type provides read-only access to graph state:
 - `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
 
 The `Instances()` map has non-deterministic iteration order per Go semantics. For deterministic iteration, use `AllInstances()` (iterator) or `Types()` + `InstancesOf()` (slice-based).
+
+## Import Closure & Type Lookup
+
+Two `Schema` accessors expose the import closure — the schema plus every transitively imported schema — without callers hand-rolling the walk:
+
+```go
+// The schema itself, followed by every transitively imported schema:
+// a breadth-first walk over each schema's imports in declaration order,
+// deduplicated by SourceID (a diamond import appears once, at its
+// first-reached position). Deterministic; the returned slice is a copy.
+for _, sc := range s.Closure() {
+    fmt.Println(sc.Name())
+}
+
+// Resolve an absolute type identity (schema.TypeID) anywhere in the closure —
+// the identities completion records on relations (Relation.TargetID) and
+// types (Type.ID). No local names or import aliases are involved.
+if target, ok := s.TypeByID(rel.TargetID()); ok {
+    fmt.Println(target.Name())
+}
+```
+
+`TypeByID` returns `ok == false` for a zero or unknown `TypeID`. Both accessors compute the closure lazily on first use and cache it; like all `Schema` accessors they are safe for concurrent use. The generators (`adapter/gogen`, `adapter/jschema`, `adapter/markdown`) drive their emission walks off `Closure()`, and the instance layer resolves relation targets through `TypeByID`.
 
 ## Schema Identity
 

@@ -10,7 +10,6 @@ import (
 	"unicode"
 
 	"github.com/simon-lentz/yammm/internal/ident"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -121,7 +120,7 @@ var reservedNames = []string{"Graph", "SerializedModel", "SerializedModelEntry",
 // qualification is a hard error (mirrors DetectLabelCollisions in
 // adapter/neo4j/labels.go).
 func buildNameTable(s *schema.Schema, inits map[string]bool) (*nameTable, error) {
-	schemas := closureSchemas(s)
+	schemas := s.Closure()
 
 	nt := &nameTable{
 		taken:      map[string]bool{},
@@ -186,31 +185,6 @@ func buildNameTable(s *schema.Schema, inits map[string]bool) (*nameTable, error)
 	}
 
 	return nt, nil
-}
-
-// closureSchemas returns the entry schema plus every transitively imported
-// schema, deduped by SourceID, in a deterministic order (entry first, then
-// imports in ImportsSlice order, breadth-first). Mirrors the import walk in
-// lsp/internal/analysis.
-func closureSchemas(s *schema.Schema) []*schema.Schema {
-	var out []*schema.Schema
-	seen := map[location.SourceID]bool{}
-	queue := []*schema.Schema{s}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		if cur == nil || seen[cur.SourceID()] {
-			continue
-		}
-		seen[cur.SourceID()] = true
-		out = append(out, cur)
-		for _, imp := range cur.ImportsSlice() {
-			if dep := imp.Schema(); dep != nil {
-				queue = append(queue, dep)
-			}
-		}
-	}
-	return out
 }
 
 // goType returns the resolved Go type name for a type identity.

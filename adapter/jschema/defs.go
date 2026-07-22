@@ -5,7 +5,6 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -58,7 +57,7 @@ func buildDefsTable(s *schema.Schema) (*defsTable, error) {
 		dtProps:   map[*schema.Property]string{},
 		edges:     map[*schema.Relation]string{},
 
-		orderedSchemas: closureSchemas(s),
+		orderedSchemas: s.Closure(),
 	}
 	for _, sc := range table.orderedSchemas {
 		table.orderedTypes = append(table.orderedTypes, sc.TypesSlice()...)
@@ -235,29 +234,4 @@ func (dt *defsTable) edgeDefName(rel *schema.Relation) (string, bool) {
 func (dt *defsTable) dtPropName(p *schema.Property) (string, bool) {
 	n, ok := dt.dtProps[p]
 	return n, ok
-}
-
-// closureSchemas returns the entry schema plus every transitively imported
-// schema, deduped by SourceID, in a deterministic order (entry first, then
-// imports in ImportsSlice order, breadth-first). Mirrors the closure walk in
-// adapter/gogen.
-func closureSchemas(s *schema.Schema) []*schema.Schema {
-	var out []*schema.Schema
-	seen := map[location.SourceID]bool{}
-	queue := []*schema.Schema{s}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		if cur == nil || seen[cur.SourceID()] {
-			continue
-		}
-		seen[cur.SourceID()] = true
-		out = append(out, cur)
-		for _, imp := range cur.ImportsSlice() {
-			if dep := imp.Schema(); dep != nil {
-				queue = append(queue, dep)
-			}
-		}
-	}
-	return out
 }

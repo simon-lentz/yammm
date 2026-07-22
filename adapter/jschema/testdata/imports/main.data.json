@@ -3,7 +3,7 @@
     { "fips": "12345", "in_region": { "_target_code": "R0001" } }
   ],
   "common.Region": [
-    { "code": "R0001", "name": "Alpha Region" },
+    { "code": "R0001", "name": "Alpha Region", "in_basin": { "_target_id": "B1" } },
     { "code": "R0002", "name": "Beta Region" }
   ]
 }

@@ -15,8 +15,9 @@ type County struct {
 }
 
 type EDGE_County_in_state_State struct {
-	Since int64 `json:"since"`
-	Where struct {
+	Since   int64      `json:"since"`
+	CodeTag *StateCode `json:"code_tag,omitempty"`
+	Where   struct {
 		Code StateCode `json:"code"`
 	} `json:"where"`
 }
@@ -28,6 +29,6 @@ type Graph struct {
 
 // SerializedModel is the verbatim .yammm source this file was generated from.
 // Re-load with: schema.LoadString(ctx, SerializedModel, "edge_datatype.yammm")
-var SerializedModel = "schema \"geo\"\n\ntype StateCode = String [2, 2]\n\ntype State {\n\tcode StateCode primary\n\tname String required\n}\n\ntype County {\n\tfips String primary\n\tzips List <StateCode>\n\t--> IN_STATE (one) State {\n\t\tsince Integer required\n\t}\n}\n"
+var SerializedModel = "schema \"geo\"\n\ntype StateCode = String [2, 2]\n\ntype State {\n\tcode StateCode primary\n\tname String required\n}\n\ntype County {\n\tfips String primary\n\tzips List <StateCode>\n\t--> IN_STATE (one) State {\n\t\tsince Integer required\n\t\tcode_tag StateCode\n\t}\n}\n"
 
-const SchemaHash = "sha256:22125110c709f3c2dd0bbf0bd46b1a0edb1e42e14c75d975654584d88779aed9"
+const SchemaHash = "sha256:bad077a15a127af5d883f2e26b2ce8f6f3ca3d86dc13adf9807caf42079e5566"
