@@ -3,6 +3,8 @@ package jschema
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -92,11 +94,47 @@ func readData(t *testing.T, name string) []byte {
 	return b
 }
 
+// instanceDoc is a single-instance projection of a corpus data file: one type
+// key wrapping exactly one instance, with a label naming its origin.
+type instanceDoc struct {
+	label string
+	data  []byte
+}
+
+// splitInstances projects a type-keyed array-of-instances document into one
+// single-instance document per instance, preserving each instance's original
+// bytes. Keys are visited in sorted order so labels are deterministic. It backs
+// the per-instance baddata contract in TestContractAlignment: a whole-file
+// check passes the moment ANY instance fails, so each instance is projected out
+// and asserted on its own.
+func splitInstances(t *testing.T, data []byte) []instanceDoc {
+	t.Helper()
+	var doc map[string][]json.RawMessage
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("data is not a type-keyed array-of-instances document: %v", err)
+	}
+	var docs []instanceDoc
+	for _, key := range slices.Sorted(maps.Keys(doc)) {
+		for i, inst := range doc[key] {
+			single, err := json.Marshal(map[string][]json.RawMessage{key: {inst}})
+			if err != nil {
+				t.Fatalf("re-marshal %s[%d]: %v", key, i, err)
+			}
+			docs = append(docs, instanceDoc{label: fmt.Sprintf("%s_%d", key, i), data: single})
+		}
+	}
+	return docs
+}
+
 // TestContractAlignment is the trust anchor for the generator: for every
 // corpus case, a valid data file must pass BOTH the yammm ingestion path and
-// the freshly emitted schema, and an invalid data file (one violation per
-// instance) must fail BOTH. A disagreement in either direction means the
-// emitted schema describes a different language than yammm accepts.
+// the freshly emitted schema, and every instance of an invalid data file —
+// each carrying one isolated violation — must fail BOTH on its own. A
+// disagreement in either direction means the emitted schema describes a
+// different language than yammm accepts. The baddata half runs per instance,
+// not whole-file: a whole-file check passes as soon as ANY instance fails,
+// which would let a regression that wrongly accepts one specific instance hide
+// behind its siblings.
 func TestContractAlignment(t *testing.T) {
 	cases := []string{
 		"scalars",
@@ -128,12 +166,19 @@ func TestContractAlignment(t *testing.T) {
 			})
 
 			t.Run("baddata", func(t *testing.T) {
-				bad := readData(t, name+".baddata.json")
-				if errs := yammmErrors(t, s, bad); len(errs) == 0 {
-					t.Error("yammm accepted invalid data")
+				docs := splitInstances(t, readData(t, name+".baddata.json"))
+				if len(docs) == 0 {
+					t.Fatal("baddata file has no instances to check")
 				}
-				if err := validateEmitted(t, compiled, bad); err == nil {
-					t.Error("emitted schema accepted invalid data")
+				for _, doc := range docs {
+					t.Run(doc.label, func(t *testing.T) {
+						if errs := yammmErrors(t, s, doc.data); len(errs) == 0 {
+							t.Errorf("yammm accepted an invalid instance in isolation:\n%s", doc.data)
+						}
+						if err := validateEmitted(t, compiled, doc.data); err == nil {
+							t.Errorf("emitted schema accepted an invalid instance in isolation:\n%s", doc.data)
+						}
+					})
 				}
 			})
 		})
