@@ -31,10 +31,21 @@ func loadSources(t *testing.T, sources map[string][]byte) *schema.Schema {
 	return s
 }
 
+// newTestGenerator builds a generator, failing the test on an anchor-collision
+// error (the corpus fixtures never collide).
+func newTestGenerator(t *testing.T, s *schema.Schema) *generator {
+	t.Helper()
+	g, err := newGenerator(s)
+	if err != nil {
+		t.Fatalf("newGenerator: %v", err)
+	}
+	return g
+}
+
 // sectionFor renders the named type's section and returns it.
 func sectionFor(t *testing.T, s *schema.Schema, typeName string) string {
 	t.Helper()
-	g := newGenerator(s)
+	g := newTestGenerator(t, s)
 	target := findType(t, g, typeName)
 	g.emitTypeSection(target)
 	return g.buf.String()
@@ -403,9 +414,99 @@ abstract type Located {
 		"\n" +
 		"**Associations**\n" +
 		"\n" +
-		"- `--> IN_REGION (one)` [common.Region](#commonregion)\n"
+		"- `--> IN_REGION (one)` [common.Region](#commonregion) — from common.Located\n"
 	if got != want {
 		t.Errorf("section = %q, want %q", got, want)
+	}
+}
+
+func TestEmitTypeSection_InheritedRelationProvenance(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, `schema "fleet"
+
+type Person {
+	id UUID primary
+}
+
+part type Wheel {
+	position Enum["FL", "FR", "RL", "RR"] required
+}
+
+abstract type Vehicle {
+	vin String primary
+	--> OWNER (one) Person
+	*-> WHEELS (one:many) Wheel
+}
+
+type Car extends Vehicle {
+	color String
+	--> DEALER (one) Person
+}
+`)
+	got := sectionFor(t, s, "Car")
+	// Own relations (DEALER) carry no marker; inherited relations (OWNER,
+	// WHEELS) name the declaring ancestor, exactly as the property table's
+	// "from <Owner>" marks inherited rows.
+	want := "### Car\n" +
+		"\n" +
+		"Extends: [Vehicle](#vehicle).\n" +
+		"\n" +
+		"| Property | Type | Modifiers | Description |\n" +
+		"| --- | --- | --- | --- |\n" +
+		"| `color` | `String` |  |  |\n" +
+		"| `vin` | `String` | primary, from Vehicle |  |\n" +
+		"\n" +
+		"**Associations**\n" +
+		"\n" +
+		"- `--> DEALER (one)` [Person](#person)\n" +
+		"\n" +
+		"- `--> OWNER (one)` [Person](#person) — from Vehicle\n" +
+		"\n" +
+		"**Compositions**\n" +
+		"\n" +
+		"- `*-> WHEELS (one:many)` [Wheel](#wheel) — from Vehicle\n"
+	if got != want {
+		t.Errorf("section = %q, want %q", got, want)
+	}
+}
+
+func TestEmitTypeSection_InheritedInvariantProvenance(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, `schema "people"
+
+abstract type Base {
+	id UUID primary
+	age Integer
+
+	! "adults only" age >= 18
+}
+
+type Person extends Base {
+	score Integer
+
+	! "positive score" score >= 0
+}
+`)
+	got := sectionFor(t, s, "Person")
+	// The type's own invariant carries no marker; the inherited one names its
+	// declaring ancestor.
+	wantInv := "**Invariants**\n" +
+		"\n" +
+		"- \"positive score\"\n" +
+		"\n" +
+		"  ```yammm\n" +
+		"  ! \"positive score\" score >= 0\n" +
+		"  ```\n" +
+		"\n" +
+		"- \"adults only\" — from Base\n" +
+		"\n" +
+		"  ```yammm\n" +
+		"  ! \"adults only\" age >= 18\n" +
+		"  ```\n"
+	if !strings.Contains(got, wantInv) {
+		t.Errorf("section %q does not contain expected invariant block %q", got, wantInv)
 	}
 }
 
@@ -418,7 +519,7 @@ type Person {
 	id UUID primary
 }
 `)
-	g := newGenerator(s)
+	g := newTestGenerator(t, s)
 	g.emitTypeSection(findType(t, g, "Person"))
 	if !g.anchors["person"] {
 		t.Errorf("anchors = %v, want %q registered", g.anchors, "person")

@@ -4,14 +4,22 @@ type Region {
 	id String primary
 }
 
+part type Landmark {
+	label String required
+}
+
 abstract type GeoEntity {
 	id UUID primary
 	name String required
+	rank Integer
 	--> IN_REGION (one) Region
+	*-> LANDMARKS (many) Landmark
+	! "ranked" rank >= 0
 }
 
 type County extends GeoEntity {
 	fips String required
+	--> SEAT (one) City
 }
 
 type City extends GeoEntity {

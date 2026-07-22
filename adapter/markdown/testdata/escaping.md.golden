@@ -9,6 +9,7 @@ classDiagram
         id String
         grade Grade
         status Enum
+        code String
     }
 ```
 
@@ -21,6 +22,7 @@ classDiagram
 | `id` | `String` | primary |  |
 | `grade` | `Grade` | required | Multi-line doc:<br>line two with a \| pipe. |
 | `status` | `Enum["on\|off", "idle"]` |  |  |
+| `code` | `String` |  | Alt spelling uses a\\\|b. |
 
 ## Data Types
 

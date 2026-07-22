@@ -8,4 +8,6 @@ type Note {
 	line two with a | pipe. */
 	grade Grade required
 	status Enum ["on|off", "idle"]
+	/* Alt spelling uses a\|b. */
+	code String
 }

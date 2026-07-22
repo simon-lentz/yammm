@@ -32,7 +32,7 @@ part type Wheel {
 	position Enum["FL", "FR", "RL", "RR"] required
 }
 `)
-	g := newGenerator(s)
+	g := newTestGenerator(t, s)
 	g.emitClassDiagram()
 	want := "## Class Diagram\n" +
 		"\n" +
@@ -78,7 +78,7 @@ type Car extends Vehicle {
 type Truck extends Vehicle {
 }
 `)
-	g := newGenerator(s)
+	g := newTestGenerator(t, s)
 	g.emitClassDiagram()
 	want := "## Class Diagram\n" +
 		"\n" +
@@ -126,7 +126,7 @@ abstract type Located {
 }
 `),
 	})
-	g := newGenerator(s)
+	g := newTestGenerator(t, s)
 	g.emitClassDiagram()
 	want := "## Class Diagram\n" +
 		"\n" +
@@ -160,7 +160,7 @@ type Person {
 	id UUID primary
 }
 `)
-	g := newGenerator(s)
+	g := newTestGenerator(t, s)
 	g.emitClassDiagram()
 	if !g.anchors["class-diagram"] {
 		t.Errorf("anchors = %v, want %q registered", g.anchors, "class-diagram")

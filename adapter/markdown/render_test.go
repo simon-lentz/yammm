@@ -68,6 +68,8 @@ func TestEscapeCell(t *testing.T) {
 		{"bare cr", "line1\rline2", "line1<br>line2"},
 		{"pipe and newline", "a|b\nc", `a\|b<br>c`},
 		{"indentation around fold dropped", "line1: \n\tline2 indented", "line1:<br>line2 indented"},
+		{"lone backslash doubled", `a\b`, `a\\b`},
+		{"backslash before pipe keeps odd parity", `a\|b`, `a\\\|b`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,6 +95,7 @@ func TestCodeCell(t *testing.T) {
 		{"backtick falls back to code tag", "a`b", "<code>a&#96;b</code>"},
 		{"backtick with html metacharacters", "a`<&>", "<code>a&#96;&lt;&amp;&gt;</code>"},
 		{"backtick with pipe", "a`|b", "<code>a&#96;\\|b</code>"},
+		{"backslash before pipe stays table-safe", `a\|b`, "`" + `a\\\|b` + "`"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

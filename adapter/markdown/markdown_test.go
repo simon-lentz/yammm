@@ -145,6 +145,38 @@ func TestMarshal_NonSourceBacked(t *testing.T) {
 	}
 }
 
+// TestMarshal_AnchorCollisionErrors pins that two type headings whose display
+// names slug to the same anchor are rejected rather than silently colliding —
+// a link to one would otherwise resolve to the other's section. Here entry
+// "County" and imported "co.Unty" both slug to "county".
+func TestMarshal_AnchorCollisionErrors(t *testing.T) {
+	t.Parallel()
+
+	s := loadSources(t, map[string][]byte{
+		"entry.yammm": []byte(`schema "geo"
+
+import "co.yammm" as co
+
+type County {
+	id String primary
+	--> PAIRED (one) co.Unty
+}
+`),
+		"co.yammm": []byte(`schema "co"
+
+type Unty {
+	id String primary
+}
+`),
+	})
+
+	if _, err := Marshal(s); err == nil {
+		t.Fatal("Marshal = nil error, want an anchor-collision error")
+	} else if !strings.Contains(err.Error(), "anchor") {
+		t.Errorf("Marshal error = %v, want an anchor-collision message", err)
+	}
+}
+
 // TestSelfCheck exercises the structural output guard directly on
 // hand-authored documents.
 func TestSelfCheck(t *testing.T) {

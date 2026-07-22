@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"bytes"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -47,10 +48,10 @@ func slug(heading string) string {
 }
 
 // escapeCell returns s made safe for use inside a Markdown table cell:
-// pipes are escaped so they cannot split the row, and newlines fold to
-// <br> so the cell stays on one line. Whitespace around each folded line
-// break is dropped — it is source-comment layout, not content, and a cell
-// cannot render it anyway.
+// backslashes and pipes are escaped so they cannot split the row, and
+// newlines fold to <br> so the cell stays on one line. Whitespace around
+// each folded line break is dropped — it is source-comment layout, not
+// content, and a cell cannot render it anyway.
 func escapeCell(s string) string {
 	if strings.ContainsAny(s, "\r\n") {
 		s = strings.ReplaceAll(s, "\r\n", "\n")
@@ -61,6 +62,12 @@ func escapeCell(s string) string {
 		}
 		s = strings.Join(lines, "<br>")
 	}
+	// Escape backslashes before pipes: a literal "\|" in content must become
+	// "\\\|" (odd backslash run, a genuinely escaped pipe) rather than "\\|"
+	// (even run), which a GFM table parser reads as an escaped backslash plus
+	// a live column delimiter — splitting the row. The <br> markers inserted
+	// above carry no backslash or pipe, so folding is unaffected.
+	s = strings.ReplaceAll(s, `\`, `\\`)
 	return strings.ReplaceAll(s, "|", `\|`)
 }
 
@@ -160,16 +167,59 @@ func (g *generator) emitTypeSection(t *schema.Type) {
 	if tbl := g.propertyTable(t); tbl != "" {
 		blocks = append(blocks, tbl)
 	}
-	if list := g.relationList("**Associations**", t.AllAssociationsSlice()); list != "" {
+	// Associations and compositions share one relation namespace, so one
+	// resolver marks inherited relations of either kind.
+	relFrom := inheritedFrom(g, t, func(st *schema.Type) []*schema.Relation {
+		return slices.Concat(st.AssociationsSlice(), st.CompositionsSlice())
+	})
+	if list := g.relationList("**Associations**", t.AllAssociationsSlice(), relFrom); list != "" {
 		blocks = append(blocks, list)
 	}
-	if list := g.relationList("**Compositions**", t.AllCompositionsSlice()); list != "" {
+	if list := g.relationList("**Compositions**", t.AllCompositionsSlice(), relFrom); list != "" {
 		blocks = append(blocks, list)
 	}
 	if list := g.invariantList(t); list != "" {
 		blocks = append(blocks, list)
 	}
 	g.buf.WriteString(strings.Join(blocks, "\n"))
+}
+
+// inheritedOwners maps every member a type inherits — keyed by pointer — to the
+// display name of the ancestor that declares it, for the "from <Owner>"
+// provenance marker. own extracts a type's own members of the relevant kind;
+// members the type declares itself belong to no ancestor and are absent from
+// the result. Merge only pulls inherited members from resolved, closure-present
+// ancestors, so every inherited member resolves to a display name here.
+func inheritedOwners[T comparable](g *generator, t *schema.Type, own func(*schema.Type) []T) map[T]string {
+	owners := make(map[T]string)
+	for _, super := range t.SuperTypesSlice() {
+		se, ok := g.types[super.ID()]
+		if !ok {
+			continue
+		}
+		for _, m := range own(se.typ) {
+			if _, exists := owners[m]; !exists {
+				owners[m] = se.display
+			}
+		}
+	}
+	return owners
+}
+
+// inheritedFrom builds the provenance-suffix resolver for one kind of type
+// member: it returns " — from <Owner>" for a member the type inherits, naming
+// the declaring ancestor as displayed in this document (schema-qualified for an
+// imported ancestor), and "" for a member the type declares itself. This gives
+// relation bullets and invariant bullets the same provenance the property
+// table's "from <Owner>" modifier gives inherited rows.
+func inheritedFrom[T comparable](g *generator, t *schema.Type, own func(*schema.Type) []T) func(T) string {
+	owners := inheritedOwners(g, t, own)
+	return func(m T) string {
+		if owner, ok := owners[m]; ok {
+			return " — from " + owner
+		}
+		return ""
+	}
 }
 
 // typeBadges renders the badges paragraph: the abstract or part marker and
@@ -216,20 +266,9 @@ func (g *generator) propertyTable(t *schema.Type) string {
 	for _, p := range t.PropertiesSlice() {
 		own[p] = true
 	}
-	// Inherited rows reuse the declaring ancestor's own *Property values,
-	// so walking the full linearization maps each row to its declarer.
-	ownerOf := make(map[*schema.Property]string)
-	for _, super := range t.SuperTypesSlice() {
-		se, ok := g.types[super.ID()]
-		if !ok {
-			continue
-		}
-		for _, p := range se.typ.PropertiesSlice() {
-			if _, exists := ownerOf[p]; !exists {
-				ownerOf[p] = se.display
-			}
-		}
-	}
+	// Inherited rows reuse the declaring ancestor's own *Property values, so
+	// the pointer map keys each row to its declarer.
+	ownerOf := inheritedOwners(g, t, (*schema.Type).PropertiesSlice)
 
 	var b bytes.Buffer
 	writeTableHeader(&b, "Property", "Type", "Modifiers", "Description")
@@ -279,9 +318,11 @@ func writePropertyRow(b *bytes.Buffer, p *schema.Property, mods string) {
 }
 
 // relationList renders a labeled bullet list of relations in DSL notation
-// with linked targets. A relation's documentation and edge-property
-// sub-table nest under its bullet. Returns "" for an empty list.
-func (g *generator) relationList(label string, rels []*schema.Relation) string {
+// with linked targets. An inherited relation carries a " — from <Owner>"
+// marker via origin, mirroring the property table. A relation's documentation
+// and edge-property sub-table nest under its bullet. Returns "" for an empty
+// list.
+func (g *generator) relationList(label string, rels []*schema.Relation, origin func(*schema.Relation) string) string {
 	if len(rels) == 0 {
 		return ""
 	}
@@ -294,7 +335,7 @@ func (g *generator) relationList(label string, rels []*schema.Relation) string {
 			arrow = "*->"
 		}
 		mult := multiplicity(rel.IsOptional(), rel.IsMany())
-		b.WriteString("- `" + arrow + " " + rel.Name() + " (" + mult + ")` " + g.relationTarget(rel) + "\n")
+		b.WriteString("- `" + arrow + " " + rel.Name() + " (" + mult + ")` " + g.relationTarget(rel) + origin(rel) + "\n")
 
 		var nested []string
 		if doc := rel.Documentation(); doc != "" {
@@ -321,18 +362,20 @@ func (g *generator) relationTarget(rel *schema.Relation) string {
 }
 
 // invariantList renders the type's invariants: the failure message as the
-// bullet, the documentation indented beneath it, then the declaration
-// source in a yammm fence when the span and source content allow
+// bullet (an inherited invariant carries a " — from <Owner>" marker, mirroring
+// the property table), the documentation indented beneath it, then the
+// declaration source in a yammm fence when the span and source content allow
 // extraction. Returns "" when the type has no invariants.
 func (g *generator) invariantList(t *schema.Type) string {
 	invs := t.AllInvariantsSlice()
 	if len(invs) == 0 {
 		return ""
 	}
+	from := inheritedFrom(g, t, (*schema.Type).InvariantsSlice)
 	var b strings.Builder
 	b.WriteString("**Invariants**\n")
 	for _, inv := range invs {
-		b.WriteString("\n- " + strconv.Quote(inv.Name()) + "\n")
+		b.WriteString("\n- " + strconv.Quote(inv.Name()) + from(inv) + "\n")
 		if doc := inv.Documentation(); doc != "" {
 			b.WriteString("\n" + indentUnderBullet(doc) + "\n")
 		}

@@ -37,7 +37,10 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	g := newGenerator(s)
+	g, err := newGenerator(s)
+	if err != nil {
+		return nil, err
+	}
 	g.emitDocument(cfg)
 	out := g.buf.Bytes()
 	if err := selfCheck(out, g.anchors); err != nil {
@@ -258,9 +261,15 @@ type generator struct {
 
 // newGenerator builds the generator for a schema and its import closure.
 // Entry-schema types display under their bare name; every imported type
-// displays schema-qualified, which makes headings collision-proof across
-// the closure.
-func newGenerator(s *schema.Schema) *generator {
+// displays schema-qualified. Display names are unique across the closure, but
+// slug normalization strips the dots that qualify a name, so two distinct
+// displays can still collapse to one heading anchor. Every internal link
+// targets a type anchor, so such a collision would silently resolve a link to
+// the wrong type's section; it is rejected here instead, mirroring
+// adapter/jschema's $defs key-collision guard. (Section anchors like the
+// duplicated per-schema "data-types" are intentionally excluded — nothing
+// links to them.)
+func newGenerator(s *schema.Schema) (*generator, error) {
 	g := &generator{
 		entry:   s,
 		closure: closureSchemas(s),
@@ -268,16 +277,25 @@ func newGenerator(s *schema.Schema) *generator {
 		anchors: make(map[string]bool),
 		sources: s.Sources(),
 	}
+	anchorOwner := make(map[string]string) // anchor -> first claiming display name
 	for i, sch := range g.closure {
 		for _, t := range sch.TypesSlice() {
 			display := t.Name()
 			if i > 0 {
 				display = sch.Name() + "." + t.Name()
 			}
-			g.types[t.ID()] = &typeEntry{typ: t, display: display, anchor: slug(display)}
+			anchor := slug(display)
+			if first, taken := anchorOwner[anchor]; taken {
+				return nil, fmt.Errorf(
+					"markdown: type headings %q and %q both anchor to #%s; rename one type",
+					first, display, anchor,
+				)
+			}
+			anchorOwner[anchor] = display
+			g.types[t.ID()] = &typeEntry{typ: t, display: display, anchor: anchor}
 		}
 	}
-	return g
+	return g, nil
 }
 
 // resolveSuper finds the closure entry for a declared extends reference by

@@ -63,14 +63,17 @@
 // with a display label instead.
 //
 // Relations render in the type sections as DSL-notation bullets with the
-// target linked to its section ("--> OWNER (one) [Person](#person)");
-// a relation's edge properties nest as a sub-table under its bullet, and
-// its doc-comment as an indented line.
+// target linked to its section ("--> OWNER (one) [Person](#person)"); an
+// inherited relation carries a "— from <Owner>" marker naming its declaring
+// ancestor, the same provenance the property table gives inherited rows. A
+// relation's edge properties nest as a sub-table under its bullet, and its
+// doc-comment as an indented line.
 //
 // # Invariants
 //
-// Each invariant renders its failure message as a bullet, its doc-comment
-// beneath, then the declaration source ("! \"message\" expression",
+// Each invariant renders its failure message as a bullet — with a
+// "— from <Owner>" marker when inherited — its doc-comment beneath, then the
+// declaration source ("! \"message\" expression",
 // exactly as written, doc comment stripped) in a yammm code fence,
 // extracted from the schema source via the invariant's span. When no
 // source text is available — a Builder-built schema, or a span without
@@ -89,9 +92,10 @@
 // internal link resolves to a heading emitted in this document, and every
 // table separator row matches its header's column count. A failure there
 // is a generator bug surfaced as an error, never emitted output. Table
-// cells escape pipes and fold newlines so arbitrary doc-comment and enum
-// text cannot break table structure; a value containing a backtick renders
-// through an entity-escaped <code> element instead of a code span.
+// cells escape backslashes and pipes and fold newlines so arbitrary
+// doc-comment and enum text cannot break table structure; a value
+// containing a backtick renders through an entity-escaped <code> element
+// instead of a code span.
 //
 // # Preconditions
 //
@@ -110,10 +114,12 @@
 //
 // # Error Conditions
 //
-// [Marshal] returns an error (never partial or broken output) only when
-// the emitted document fails the structural self-check — an unclosed
-// fence, an unresolvable internal link, or a malformed table, each a
-// generator bug.
+// [Marshal] returns an error (never partial or broken output) when two type
+// headings slug to the same anchor — a rename-able input collision (slug
+// normalization strips the dots that qualify an imported name), since a link
+// to one type would otherwise resolve to the other's section — or when the
+// emitted document fails the structural self-check (an unclosed fence, an
+// unresolvable internal link, or a malformed table, each a generator bug).
 //
 // # Thread Safety
 //

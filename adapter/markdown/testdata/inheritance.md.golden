@@ -8,10 +8,15 @@ classDiagram
     class Region {
         id String
     }
+    class Landmark {
+        <<Part>>
+        label String
+    }
     class GeoEntity {
         <<Abstract>>
         id UUID
         name String
+        rank Integer
     }
     class County {
         fips String
@@ -20,7 +25,9 @@ classDiagram
         population Integer
     }
     GeoEntity --> Region : IN_REGION (one)
+    GeoEntity *-- Landmark : LANDMARKS (many)
     GeoEntity <|-- County
+    County --> City : SEAT (one)
     GeoEntity <|-- City
 ```
 
@@ -32,6 +39,14 @@ classDiagram
 | --- | --- | --- | --- |
 | `id` | `String` | primary |  |
 
+### Landmark
+
+*Part type* — instances exist only as composed children.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `label` | `String` | required |  |
+
 ### GeoEntity
 
 *Abstract type* — no direct instances.
@@ -40,10 +55,23 @@ classDiagram
 | --- | --- | --- | --- |
 | `id` | `UUID` | primary |  |
 | `name` | `String` | required |  |
+| `rank` | `Integer` |  |  |
 
 **Associations**
 
 - `--> IN_REGION (one)` [Region](#region)
+
+**Compositions**
+
+- `*-> LANDMARKS (many)` [Landmark](#landmark)
+
+**Invariants**
+
+- "ranked"
+
+  ```yammm
+  ! "ranked" rank >= 0
+  ```
 
 ### County
 
@@ -54,10 +82,25 @@ Extends: [GeoEntity](#geoentity).
 | `fips` | `String` | required |  |
 | `id` | `UUID` | primary, from GeoEntity |  |
 | `name` | `String` | required, from GeoEntity |  |
+| `rank` | `Integer` | from GeoEntity |  |
 
 **Associations**
 
-- `--> IN_REGION (one)` [Region](#region)
+- `--> SEAT (one)` [City](#city)
+
+- `--> IN_REGION (one)` [Region](#region) — from GeoEntity
+
+**Compositions**
+
+- `*-> LANDMARKS (many)` [Landmark](#landmark) — from GeoEntity
+
+**Invariants**
+
+- "ranked" — from GeoEntity
+
+  ```yammm
+  ! "ranked" rank >= 0
+  ```
 
 ### City
 
@@ -68,7 +111,20 @@ Extends: [GeoEntity](#geoentity).
 | `population` | `Integer` |  |  |
 | `id` | `UUID` | primary, from GeoEntity |  |
 | `name` | `String` | required, from GeoEntity |  |
+| `rank` | `Integer` | from GeoEntity |  |
 
 **Associations**
 
-- `--> IN_REGION (one)` [Region](#region)
+- `--> IN_REGION (one)` [Region](#region) — from GeoEntity
+
+**Compositions**
+
+- `*-> LANDMARKS (many)` [Landmark](#landmark) — from GeoEntity
+
+**Invariants**
+
+- "ranked" — from GeoEntity
+
+  ```yammm
+  ! "ranked" rank >= 0
+  ```
