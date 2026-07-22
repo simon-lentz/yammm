@@ -1,0 +1,50 @@
+# Schema geo
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class State {
+        code StateCode
+        name String
+    }
+    class County {
+        fips String
+    }
+    County --> State : IN_STATE (one)
+    County --> County : BORDERS (many)
+```
+
+## Types
+
+### State
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `code` | `StateCode` | primary |  |
+| `name` | `String` | required |  |
+
+### County
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `fips` | `String` | primary |  |
+
+**Associations**
+
+- `--> IN_STATE (one)` [State](#state)
+
+  | Property | Type | Modifiers | Description |
+  | --- | --- | --- | --- |
+  | `since` | `Integer` | required |  |
+  | `notes` | `String` |  |  |
+  | `code_tag` | `StateCode` |  |  |
+
+- `--> BORDERS (many)` [County](#county)
+
+## Data Types
+
+| Name | Definition | Description |
+| --- | --- | --- |
+| `StateCode` | `String[2, 2]` |  |

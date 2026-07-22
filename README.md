@@ -4,7 +4,9 @@
 [![Go Version](https://img.shields.io/badge/go-1.26+-blue.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-YAMMM (Yet Another Meta-Meta Model) is a Go library for defining schemas in a small DSL (`.yammm` files) and validating Go data against them at runtime. It provides post-validation services including graph traversal and integrity checking.
+YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and validating Go data against them at runtime. It provides post-validation services including graph traversal and integrity checking.
+
+> **About the name** — YAMMM stands for *Yet Another Meta-Meta Model*, in the modeling-stack sense: your data is the model, the schema that describes it is the metamodel, and the language schemas are written in sits one tier above that. The third *m* is not a typo.
 
 ## Features
 
@@ -18,6 +20,8 @@ YAMMM (Yet Another Meta-Meta Model) is a Go library for defining schemas in a sm
 - **Structured diagnostics**: Stable error codes with source location tracking
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
 - **Go code generation**: Generate Go structs from schemas with `yammm gen --to go`
+- **JSON Schema generation**: Emit editor-ready JSON Schema (draft 2020-12) for instance-data authoring with `yammm gen --to jsonschema`
+- **Markdown documentation generation**: Render a schema as a Markdown reference document with a Mermaid class diagram via `yammm gen --to md`
 - **CLI tool**: `yammm` binary for snapshot management, data export, and validation
 
 ## Installation
@@ -215,6 +219,8 @@ Internal                 : internal/* (no compatibility guarantees)
 | `adapter/csv` | CSV data parsing and writing |
 | `adapter/neo4j` | Neo4j constraint generation and Cypher query building |
 | `adapter/gogen` | Go source generation from a schema (structs, enums, `EDGE_` structs, `Graph`) |
+| `adapter/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
+| `adapter/markdown` | Markdown + Mermaid documentation generation from a schema |
 | `lsp` | Language Server Protocol server for `.yammm` files |
 
 ### Entry Point Pattern
@@ -225,7 +231,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: Semantic failure (structured issues)
 - `result.OK()`: Success (may have warnings)
 
-Pure adapter transformations (JSON/CSV serialization, Cypher and Go source generation) return `(T, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+Pure adapter transformations (JSON/CSV serialization, Cypher, Go source, JSON Schema, and Markdown generation) return `(T, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 
@@ -346,6 +352,8 @@ yammm fmt <schema> [-w]                                  # canonical formatting 
 yammm check <schema> <data>                              # validate JSON/CSV data against a schema
 yammm load <schema> <data>                               # build an in-memory graph, report diagnostics
 yammm gen --to go <schema>                               # generate Go source from a schema
+yammm gen --to jsonschema <schema>                       # generate a JSON Schema for instance-data authoring
+yammm gen --to md <schema>                               # generate Markdown docs with a Mermaid class diagram
 yammm export <schema> <data> --to <json|csv|cypher>      # export a validated graph
 yammm snapshot save <schema> <data...> -o <file.ys>      # build graph, persist
 yammm snapshot save <schema> <data...> --into <file.ys>  # merge into an existing snapshot

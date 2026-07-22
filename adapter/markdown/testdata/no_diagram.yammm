@@ -1,0 +1,5 @@
+schema "tiny"
+
+type Item {
+	id String primary
+}

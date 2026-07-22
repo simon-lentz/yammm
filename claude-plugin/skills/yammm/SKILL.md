@@ -14,7 +14,7 @@ argument-hint: "[question about yammm]"
 
 # yammm
 
-YAMMM (Yet Another Meta-Meta Model) is a schema DSL, Go library, and CLI for typed data validation, graph construction, and multi-format export (JSON, CSV, Neo4j Cypher, generated Go). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and export to databases.
+YAMMM is a schema DSL, Go library, and CLI for typed data validation, graph construction, and multi-format export (JSON, CSV, Neo4j Cypher, generated Go). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and export to databases.
 
 ```text
 .yammm file --> schema.Load() --> instance.Validate() --> graph.Add()
@@ -39,7 +39,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 
 ### Use the CLI
 
-`yammm validate`, `yammm fmt`, `yammm check`, `yammm load`, `yammm snapshot`, `yammm export`, `yammm gen`, `yammm neo4j`. Schema development, data pipelines, Go code generation, and database setup from the terminal.
+`yammm validate`, `yammm fmt`, `yammm check`, `yammm load`, `yammm snapshot`, `yammm export`, `yammm gen`, `yammm neo4j`. Schema development, data pipelines, Go / JSON Schema / Markdown generation, and database setup from the terminal.
 
 ---
 
@@ -75,7 +75,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 | `references/type-system.md` | Constraint types, aliases, abstract/part, inheritance | Type system questions, narrowing rules, PK restrictions |
 | `references/patterns.md` | Common modeling patterns with examples | Looking for schema design patterns |
 | `references/api-pipeline.md` | Go API: load -> validate -> graph -> snapshot | Writing Go code that uses yammm packages |
-| `references/adapters.md` | JSON/CSV/Neo4j/gogen adapter usage | Exporting, importing, or generating Go from a schema |
+| `references/adapters.md` | JSON/CSV/Neo4j/gogen/jschema/markdown adapter usage | Exporting, importing, or generating Go / JSON Schema / Markdown from a schema |
 | `references/diagnostics.md` | Error codes, troubleshooting | Understanding or fixing errors |
 | `references/cli.md` | CLI commands and workflows | Using yammm from the terminal |
 

@@ -1,0 +1,14 @@
+{
+  "Region": [{ "id": "R1" }],
+  "County": [
+    {
+      "fips": "12345",
+      "id": "0e4ac47a-8b6f-4bb9-b1e5-6a8f6c2f1a4d",
+      "name": "Alpha County",
+      "in_region": { "_target_id": "R1" }
+    }
+  ],
+  "City": [
+    { "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "name": "Beta City", "population": 100000 }
+  ]
+}

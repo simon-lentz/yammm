@@ -1,0 +1,59 @@
+# Schema geo
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class County {
+        fips String
+    }
+    class common_Region["common.Region"] {
+        code RegionCode
+        name String
+    }
+    class base_Basin["base.Basin"] {
+        id String
+    }
+    County --> common_Region : IN_REGION (one)
+    common_Region --> base_Basin : IN_BASIN (_)
+```
+
+## Types
+
+### County
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `fips` | `String` | primary |  |
+
+**Associations**
+
+- `--> IN_REGION (one)` [common.Region](#commonregion)
+
+## Schema common (imported as common)
+
+### common.Region
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `code` | `RegionCode` | primary |  |
+| `name` | `String` | required |  |
+
+**Associations**
+
+- `--> IN_BASIN (_)` [base.Basin](#basebasin)
+
+### Data Types
+
+| Name | Definition | Description |
+| --- | --- | --- |
+| `RegionCode` | `String[5, 5]` |  |
+
+## Schema base
+
+### base.Basin
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `String` | primary |  |

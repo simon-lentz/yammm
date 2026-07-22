@@ -1,0 +1,31 @@
+# Schema notes
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class Note {
+        id String
+        grade Grade
+        status Enum
+        code String
+    }
+```
+
+## Types
+
+### Note
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `String` | primary |  |
+| `grade` | `Grade` | required | Multi-line doc:<br>line two with a \| pipe. |
+| `status` | `Enum["on\|off", "idle"]` |  |  |
+| `code` | `String` |  | Alt spelling uses a\\\|b. |
+
+## Data Types
+
+| Name | Definition | Description |
+| --- | --- | --- |
+| `Grade` | <code>Enum["A\|B", "C&#96;D"]</code> |  |

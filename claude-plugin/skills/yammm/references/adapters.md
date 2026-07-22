@@ -1,8 +1,8 @@
 # Adapter Reference
 
-Adapters parse raw data into `RawInstance` values for validation and serialize validated data for export. Four adapters are provided: JSON, CSV, Neo4j, and gogen (Go code generation).
+Adapters parse raw data into `RawInstance` values for validation and serialize validated data for export. Six adapters are provided: the three data adapters (JSON, CSV, Neo4j) and the three gen-family generators (gogen, jschema, markdown).
 
-All adapters live in `adapter/{json,csv,neo4j,gogen}` packages. The library never imports adapters -- adapters import the library. The three data adapters parse and serialize instance data; gogen is schema-in/bytes-out and never touches instance data.
+All adapters live in `adapter/{json,csv,neo4j,gogen,jschema,markdown}` packages. The library never imports adapters -- adapters import the library. The data adapters parse and serialize instance data; the generators are schema-in/bytes-out and never touch instance data.
 
 ---
 
@@ -237,6 +237,32 @@ Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatte
 Schemas with imports are flattened into one self-contained package; cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` becomes `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error.
 
 Full API semantics: the gogen section of `docs/API.md`. CLI form: `yammm gen --to go` (see `cli.md`).
+
+---
+
+## jschema Adapter (JSON Schema Generation)
+
+```go
+import "github.com/simon-lentz/yammm/adapter/jschema"
+```
+
+Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` accepts — one top-level key per concrete type (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset), `WithTitle`, `WithDescription`. Plain `error`, no instance-data path, no source-backing requirement (Builder-built schemas accepted).
+
+Wire the generated document into an editor for completion and validation while authoring data files (e.g. `# yaml-language-server: $schema=./fleet.schema.json`).
+
+Full API semantics: the JSON Schema Generation section of `docs/API.md`. CLI form: `yammm gen --to jsonschema` (see `cli.md`).
+
+---
+
+## markdown Adapter (Markdown + Mermaid Documentation Generation)
+
+```go
+import "github.com/simon-lentz/yammm/adapter/markdown"
+```
+
+Schema-in, bytes-out: `markdown.Marshal` maps a loaded, resolved schema to one self-contained Markdown reference document covering the whole import closure — a Mermaid class diagram (each type's own members as `name KindLabel` pairs, `<<Abstract>>`/`<<Part>>` stereotypes, DSL-labeled relation edges, `Parent <|-- Child` inheritance edges), per-type sections in declaration order (flattened property tables with `from <Owner>` inherited-row markers, DSL-form constraint rendering like `String[1, 100]`, relation bullets with linked targets and edge-property sub-tables, invariant source fences extracted from the schema source), and Name | Definition | Description data-type tables. Imported schemas get their own `## Schema <Name> (imported as <alias>)` sections with collision-proof `schemaName.TypeName` headings. Output is deterministic and structurally self-checked (fence balance, link→anchor resolution, table column counts) before return. Option: `WithClassDiagram(false)` omits the diagram. Plain `error`, no instance-data path, no source-backing requirement (on Builder-built schemas invariants degrade to message-only).
+
+Full API semantics: the Markdown Documentation Generation section of `docs/API.md`. CLI form: `yammm gen --to md` (see `cli.md`).
 
 ---
 

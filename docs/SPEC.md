@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This is a reference manual for the YAMMM (Yet Another Meta-Meta Model) data schema language. YAMMM is a domain-specific language for expressing schemas that define types, their properties, relationships, and constraints. The Go library API for loading, validating, and traversing schemas is documented in [API.md](API.md).
+This is a reference manual for the YAMMM data schema language. YAMMM is a domain-specific language for expressing schemas that define types, their properties, relationships, and constraints. The Go library API for loading, validating, and traversing schemas is documented in [API.md](API.md).
 
 YAMMM is designed for structured data modeling with a focus on:
 

@@ -1,0 +1,19 @@
+schema "geo"
+
+type Region {
+	id String primary
+}
+
+abstract type GeoEntity {
+	id UUID primary
+	name String required
+	--> IN_REGION (one) Region
+}
+
+type County extends GeoEntity {
+	fips String required
+}
+
+type City extends GeoEntity {
+	population Integer
+}

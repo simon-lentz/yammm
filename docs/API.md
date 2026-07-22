@@ -1321,6 +1321,98 @@ yammm gen --to go <schema.yammm> [--package <name>] [--output <path>] [--initial
 
 The `gen` command loads the schema (resolving imports), generates Go, and writes it to stdout or the `--output` path.
 
+## JSON Schema Generation
+
+The `adapter/jschema` package generates a JSON Schema **draft 2020-12** document from a schema, for editor-assisted authoring of the instance-data JSON that `yammm check` accepts. Like gogen it is schema-in, bytes-out — no instance-data path, plain `error` — and the adapter itself is stdlib-only.
+
+### Generation
+
+```go
+func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
+```
+
+```go
+data, err := jschema.Marshal(s, jschema.WithSchemaID("https://example.com/fleet.schema.json"))
+```
+
+`Marshal` requires a completed schema (always true for one returned by `schema.Load*` or `schema.Builder.Build`); unlike gogen it does **not** require a source-backed schema — nothing is embedded — so Builder-built schemas are accepted.
+
+### Options
+
+| Option | Description |
+| ------ | ----------- |
+| `WithSchemaID` | Set the document `"$id"` (omitted entirely when unset) |
+| `WithTitle` | Override the document title (default: the schema name) |
+| `WithDescription` | Override the generated top-level description |
+
+### The Emitted Document
+
+The document describes exactly the object form `adapter/json`'s `ParseObject` + `instance.Validator` accept:
+
+- **Envelope** — one object keyed by type name (`{"Person": [...], "Car": [...]}`), each key an array of instances. Entry-schema types under their bare name; **directly imported** types under their alias-qualified name (`common.Region` — the only form the validator resolves for them); transitively imported types are `$defs`-only.
+- **Instance objects** — properties by name, relations by their lower_snake field name; `additionalProperties: false` (the instance layer rejects unknown fields); required properties in `required`.
+- **Associations** — an edge object (to-one) or array of edge objects (to-many), each `$ref`ing an `EDGE_<Owner>_<field>_<Target>` def carrying the required `_target_<pk_name>` foreign-key fields (validated against the target key's own constraint — a DataType-typed key keeps its `$ref`) plus edge properties. Association **presence is deliberately not `required`**: the instance layer defers it to graph assembly, so a per-file requirement would flag files yammm validates cleanly; the generated `description` states the multiplicity and enforcement point instead.
+- **Compositions** — always arrays of child objects; required compositions are `required` + `minItems: 1`; to-one compositions get `maxItems: 1` (mirroring graph-assembly enforcement).
+- **Constraints** — the full mapping (bounds → `minLength`/`minimum`/…, `Enum` → inline `enum`, multi-`Pattern` → all-must-match `allOf`, `Vector[N]` → fixed-size number array, named DataTypes → `$defs` entries `$ref`ed from every position). Schema doc-comments flow through as `description` — this is what editors show on hover.
+
+Cross-schema imports are closure-flattened into one self-contained document with gogen-parity collision handling (bare names where unique, `<schemaName>.<Name>` on collision, hard error when qualification cannot separate). Abstract types get no `$defs` entry (nothing can legally `$ref` one); their members appear flattened into each subtype.
+
+Fidelity caveats (always degrading toward editor under-/over-flagging, never yammm-side): the schema targets canonical property-name spellings (yammm matches case-insensitively by default); patterns pass through verbatim (yammm compiles RE2, JSON Schema validators assume ECMA-262); a custom `Timestamp["layout"]` emits a plain string with the source form in its `description`. Emitted `format` keywords are annotations by default under 2020-12.
+
+### Validation
+
+Output is deterministic (byte-identical across runs and checkouts, so generated documents can be committed and drift-checked by regenerate-and-diff). Before returning, `Marshal` self-checks: the bytes must parse as JSON and every `$ref` must resolve to an emitted `$defs` entry — a failure is a generation error, never emitted output. The package's contract-alignment tests additionally prove, per corpus case, that sample data validates identically under yammm and under the emitted schema compiled by a real 2020-12 validator.
+
+### CLI
+
+```text
+yammm gen --to jsonschema <schema.yammm> [--schema-id <uri>] [--output <path>] [--module-root <dir>]
+```
+
+Per-target flags are enforced: `--package`/`--initialisms` are rejected for the jsonschema target, `--schema-id` for the go target.
+
+## Markdown Documentation Generation
+
+The `adapter/markdown` package generates a Markdown reference document — a Mermaid class diagram plus per-type sections — from a schema, giving every schema a canonical, regenerable documentation artifact. Like its gen-family siblings it is schema-in, bytes-out — no instance-data path, plain `error` — and the adapter is stdlib-only.
+
+### Generation
+
+```go
+func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
+```
+
+```go
+doc, err := markdown.Marshal(s)                                  // full document
+doc, err := markdown.Marshal(s, markdown.WithClassDiagram(false)) // tables only
+```
+
+`Marshal` requires a completed schema (always true for one returned by `schema.Load*` or `schema.Builder.Build`). Source backing is optional: on a Builder-built schema, invariant sections degrade to their message line instead of a source fence — nothing else needs source content.
+
+### The Emitted Document
+
+One document per invocation, covering the entry schema plus its whole import closure:
+
+- **Title + schema doc** — `# Schema <Name>`, then the schema's doc-comment verbatim.
+- **Class diagram** — one Mermaid `classDiagram` fence over the entire closure. Classes carry each type's **own** members as `name KindLabel` pairs (named DataTypes show their name; constraint detail stays out of the diagram); abstract and part types carry `<<Abstract>>` / `<<Part>>` stereotypes; edges are `Parent <|-- Child` for inheritance and DSL-labeled `Owner --> Target : NAME (mult)` / `Owner *-- Child : NAME (mult)` for each type's own associations and compositions — inherited structure is conveyed by the inheritance edges, not redrawn. Qualified names (invalid as Mermaid class ids) emit the sanitized-id form `class common_Region["common.Region"]`; Mermaid namespaces are deliberately not used (GitHub's renderer does not support them in class diagrams).
+- **Type sections** — one `### <TypeName>` per type in declaration order: a badge line (`*Abstract type*` / `*Part type*` / `Extends: [Parent](#parent)`), the doc-comment, then a **flattened property table** (Property | Type | Modifiers | Description) over the full inheritance chain — the Type column renders each constraint's DSL form (`String[1, 100]`, `List<FipsCode>`), and inherited rows carry `from <Owner>` in Modifiers. Associations and compositions follow as DSL-notation bullets with linked targets, an inherited relation carrying the same provenance as a ` — from <Owner>` marker; edge properties nest as a sub-table under their relation's bullet.
+- **Invariants** — the failure message as a bullet (an inherited invariant carrying the ` — from <Owner>` marker), the doc-comment beneath, then the declaration source (`! "message" expression`, exactly as written) in a `yammm` fence extracted via the invariant's span.
+- **Data Types** — a Name | Definition | Description table per schema.
+- **Imported schemas** — one `## Schema <Name> (imported as <alias>)` section per import in closure order (transitive imports, which have no entry alias, head as plain `## Schema <Name>`), with collision-proof `### <schemaName>.<TypeName>` headings.
+
+Arbitrary doc/enum text cannot break structure: table cells escape backslashes and pipes and fold newlines to `<br>`; a value containing a backtick renders through an entity-escaped `<code>` element; fences are sized past any backtick run in their body.
+
+### Validation
+
+Output is deterministic (byte-identical across runs and checkouts), so generated documents can be committed and drift-checked by regenerate-and-diff. Before returning, `Marshal` structurally self-checks: every fence closes, every internal link resolves to an emitted heading, and every table separator matches its header's column count — a failure is a generation error, never emitted output. A schema whose two type headings slug to the same anchor is also rejected (a rename-able input collision, since an internal link to one would otherwise resolve to the other's section).
+
+### CLI
+
+```text
+yammm gen --to md <schema.yammm> [--no-class-diagram] [--output <path>] [--module-root <dir>]
+```
+
+`markdown` is accepted as an alias for `md`. Per-target flag enforcement extends to the md target: `--no-class-diagram` is rejected for other targets, and go/jsonschema-only flags are rejected for md.
+
 ## Formatting
 
 The `format` package provides canonical formatting for `.yammm` schema files:

@@ -1,0 +1,42 @@
+# Schema people
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class Person {
+        id UUID
+        age Integer
+        email String
+    }
+```
+
+## Types
+
+### Person
+
+Person is a registered individual.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `UUID` | primary |  |
+| `age` | `Integer[0, 150]` |  |  |
+| `email` | `String` |  |  |
+
+**Invariants**
+
+- "adults only"
+
+  ```yammm
+  ! "adults only" age >= 18
+  ```
+
+- "age within bounds"
+
+  Snapshot bound, revisit at next census.
+
+  ```yammm
+  ! "age within bounds" age >= 0 &&
+  age <= 150
+  ```

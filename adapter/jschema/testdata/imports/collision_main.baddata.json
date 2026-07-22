@@ -1,0 +1,4 @@
+{
+  "Region": [{ "id": "R1", "name": "intruder" }],
+  "common.Region": [{ "code": "C2" }]
+}

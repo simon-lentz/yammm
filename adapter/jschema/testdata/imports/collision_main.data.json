@@ -1,0 +1,5 @@
+{
+  "Region": [{ "id": "R1" }],
+  "County": [{ "fips": "12345", "in_region": { "_target_code": "C1" } }],
+  "common.Region": [{ "code": "C1", "name": "Common Alpha" }]
+}

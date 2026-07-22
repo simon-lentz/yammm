@@ -1,0 +1,50 @@
+# Schema geo
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class Entity {
+        <<Abstract>>
+        id UUID
+    }
+    class Named {
+        <<Abstract>>
+        name String
+    }
+    class Landmark {
+        code String
+    }
+    Entity <|-- Named
+    Named <|-- Landmark
+```
+
+## Types
+
+### Entity
+
+*Abstract type* — no direct instances.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `UUID` | primary |  |
+
+### Named
+
+*Abstract type* — no direct instances. Extends: [Entity](#entity).
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `name` | `String` | required |  |
+| `id` | `UUID` | primary, from Entity |  |
+
+### Landmark
+
+Extends: [Named](#named).
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `code` | `String` |  |  |
+| `id` | `UUID` | primary, from Entity |  |
+| `name` | `String` | required, from Named |  |

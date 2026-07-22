@@ -1,0 +1,6 @@
+{
+  "County": [
+    { "fips": "12345", "tier": "bronze", "status": "active" },
+    { "fips": "12345", "tier": "gold", "status": "active", "codes": ["123"] }
+  ]
+}

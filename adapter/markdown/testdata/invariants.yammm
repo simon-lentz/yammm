@@ -1,0 +1,13 @@
+schema "people"
+
+/* Person is a registered individual. */
+type Person {
+	id UUID primary
+	age Integer [0, 150]
+	email String
+
+	! "adults only" age >= 18
+	/* Snapshot bound, revisit at next census. */
+	! "age within bounds" age >= 0 &&
+		age <= 150
+}
