@@ -208,11 +208,13 @@ func (v *Validator) validateEdgeTarget(
 		return nil
 	}
 
-	// Get target type to extract PK fields.
-	// Use ResolveType with the full TypeRef to handle imported types correctly.
-	targetType, found := v.schema.ResolveType(rel.Target())
+	// Get target type to extract PK fields, resolved by the relation's
+	// completion-recorded absolute identity so relations declared on imported
+	// types or inherited cross-schema resolve against the true target.
+	targetType, found := resolveRelationTarget(v.schema, rel)
 	if !found {
-		// This shouldn't happen if schema is valid, but handle gracefully
+		// Reachable only for a deferred (registry-less Builder) cross-schema
+		// reference whose target the entry schema cannot resolve.
 		issue := diag.NewIssue(
 			diag.Error,
 			ErrTypeNotFound,

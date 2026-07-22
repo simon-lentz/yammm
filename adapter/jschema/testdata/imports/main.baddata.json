@@ -1,6 +1,7 @@
 {
   "common.Region": [
     { "code": "R1", "name": "Gamma" },
-    { "code": "R0003" }
+    { "code": "R0003" },
+    { "code": "R0004", "name": "Delta", "in_basin": {} }
   ]
 }

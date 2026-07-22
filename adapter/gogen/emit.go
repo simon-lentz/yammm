@@ -15,7 +15,7 @@ import (
 // so emission is identical for single-file and imported schemas.
 func (g *generator) closureTypes() []*schema.Type {
 	var out []*schema.Type
-	for _, sc := range closureSchemas(g.schema) {
+	for _, sc := range g.schema.Closure() {
 		out = append(out, sc.TypesSlice()...)
 	}
 	return out
@@ -41,7 +41,7 @@ func (g *generator) emitTypes() error {
 // inherited by N concrete types yields N named enum types (keyed by owning type over
 // AllPropertiesSlice) — the inline-enum analog of property flattening.
 func (g *generator) emitNamedTypes() error {
-	for _, sc := range closureSchemas(g.schema) {
+	for _, sc := range g.schema.Closure() {
 		for _, dt := range sc.DataTypesSlice() {
 			name, ok := g.names.goDataType(dt)
 			if !ok {
@@ -123,7 +123,7 @@ func (g *generator) registerDataTypeFields() error {
 		g.dtFieldNames[p] = name
 		return nil
 	}
-	for _, sc := range closureSchemas(g.schema) {
+	for _, sc := range g.schema.Closure() {
 		for _, t := range sc.TypesSlice() {
 			for _, p := range t.PropertiesSlice() { // OWN type properties
 				if err := record(sc, "type", t.Name(), p); err != nil {
@@ -156,7 +156,7 @@ func (g *generator) registerDataTypeFields() error {
 // target against the DECLARING schema sc (not the emitting type's schema) is what
 // makes an association inherited from a cross-schema parent resolve correctly.
 func (g *generator) registerEdges() error {
-	for _, sc := range closureSchemas(g.schema) {
+	for _, sc := range g.schema.Closure() {
 		for _, t := range sc.TypesSlice() {
 			ownerName, ok := g.names.goType(t.ID())
 			if !ok {

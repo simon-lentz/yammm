@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -272,7 +271,7 @@ type generator struct {
 func newGenerator(s *schema.Schema) (*generator, error) {
 	g := &generator{
 		entry:   s,
-		closure: closureSchemas(s),
+		closure: s.Closure(),
 		types:   make(map[schema.TypeID]*typeEntry),
 		anchors: make(map[string]bool),
 		sources: s.Sources(),
@@ -311,27 +310,4 @@ func (g *generator) resolveSuper(t *schema.Type, ref schema.TypeRef) (*typeEntry
 		}
 	}
 	return nil, false
-}
-
-// closureSchemas returns the schema plus its transitive import closure in
-// deterministic breadth-first order, entry first, deduplicated by source.
-func closureSchemas(s *schema.Schema) []*schema.Schema {
-	var out []*schema.Schema
-	seen := map[location.SourceID]bool{}
-	queue := []*schema.Schema{s}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		if cur == nil || seen[cur.SourceID()] {
-			continue
-		}
-		seen[cur.SourceID()] = true
-		out = append(out, cur)
-		for _, imp := range cur.ImportsSlice() {
-			if dep := imp.Schema(); dep != nil {
-				queue = append(queue, dep)
-			}
-		}
-	}
-	return out
 }

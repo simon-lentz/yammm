@@ -166,18 +166,31 @@ func (v *Validator) ValidateForComposition(ctx context.Context, parentType, rela
 		return nil, v.compositionResolutionResult(parentType, relationName, raws)
 	}
 
+	return v.validateComposedBatch(ctx, rel, raws)
+}
+
+// validateComposedBatch validates raw children against rel's target type. The
+// target is resolved by the relation's completion-recorded absolute identity
+// (see resolveRelationTarget), so a relation declared on an imported type or
+// inherited from a cross-schema parent — whose syntactic target ref is
+// meaningful only in its declaring schema — validates against the true target.
+func (v *Validator) validateComposedBatch(ctx context.Context, rel *schema.Relation, raws []RawInstance) ([]*ValidInstance, diag.Result) {
 	// Handle empty input after relation validation per implementation checklist.
 	if len(raws) == 0 {
 		return []*ValidInstance{}, diag.OK()
 	}
 
-	// Get the target type name (qualified form to handle imported types)
+	// The declared syntactic form is preserved as the canonical instance type
+	// name; identity checks downstream (graph resolution) use TypeID.
 	targetTypeName := rel.Target().String()
 
 	// Resolve target type once, pass to all instances
-	targetType, err := v.resolveType(targetTypeName)
-	if err != nil {
-		return nil, v.typeResolutionResultForBatch(err, raws)
+	targetType, found := resolveRelationTarget(v.schema, rel)
+	if !found {
+		return nil, v.typeResolutionResultForBatch(&ValidationError{
+			Code:    ErrTypeNotFound,
+			Message: fmt.Sprintf("type %q not found", targetTypeName),
+		}, raws)
 	}
 
 	batchCollector := diag.NewCollectorUnlimited()
@@ -219,6 +232,22 @@ func parseTypeRef(typeName string) schema.TypeRef {
 		return schema.NewTypeRef(typeName[:idx], typeName[idx+1:], location.Span{})
 	}
 	return schema.LocalTypeRef(typeName, location.Span{})
+}
+
+// resolveRelationTarget resolves a relation's target type by the absolute
+// identity recorded at completion ([schema.Relation.TargetID]), searched
+// across the schema's import closure. The syntactic target ref is
+// declaring-schema-relative — its qualifier is the declaring schema's import
+// alias, and its bare form names a declaring-schema type — so re-resolving it
+// against the entry schema misresolves relations declared on imported types
+// or inherited from cross-schema parents. A zero TargetID (a cross-schema
+// reference a registry-less Builder deferred) falls back to entry-relative
+// syntactic resolution, preserving that path's not-found reporting.
+func resolveRelationTarget(s *schema.Schema, rel *schema.Relation) (*schema.Type, bool) {
+	if id := rel.TargetID(); !id.IsZero() {
+		return s.TypeByID(id)
+	}
+	return s.ResolveType(rel.Target())
 }
 
 // resolveType resolves a type name to a schema type.

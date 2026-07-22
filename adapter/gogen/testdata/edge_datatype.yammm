@@ -12,5 +12,6 @@ type County {
 	zips List <StateCode>
 	--> IN_STATE (one) State {
 		since Integer required
+		code_tag StateCode
 	}
 }

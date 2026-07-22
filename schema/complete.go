@@ -648,6 +648,41 @@ func (c *completer) resolveAliasConstraints() {
 			}
 		}
 	}
+
+	// Resolve relation edge-property constraints. Associations are the only
+	// relation kind that carries a property block (compositions have none by
+	// grammar), and their properties resolve exactly like type properties:
+	// against this schema's own datatype index and import bindings, so a
+	// declaring-schema-relative reference keeps declaring-schema semantics on
+	// inherited relations (subtypes share the declaring type's *Relation).
+	// Resolution must precede validateRelationProperties, whose Vector/List
+	// bans unwrap aliases via Resolved().
+	for _, t := range c.schema.types {
+		for rel := range t.Associations() {
+			for p := range rel.Properties() {
+				if alias, isAlias := p.Constraint().(AliasConstraint); isAlias && !alias.IsResolved() {
+					resolved, success := c.resolveAliasChain(alias.DataTypeName(), p.Span(), make(map[string]bool))
+					if !success {
+						continue
+					}
+					p.setConstraint(resolved)
+				}
+			}
+			// List-shaped edge properties are rejected by the List-on-edge ban
+			// before a schema is produced, so resolved elements are observable
+			// only in diagnostics; the pass keeps every property the completer
+			// owns in the same state on exit from resolveAliasConstraints.
+			for p := range rel.Properties() {
+				if _, isList := p.Constraint().(ListConstraint); isList {
+					resolved, success := c.resolveListElementAliases(p.Constraint(), p.Span())
+					if !success {
+						continue
+					}
+					p.setConstraint(resolved)
+				}
+			}
+		}
+	}
 }
 
 // aliasResolution classifies an import qualifier against the resolution map —

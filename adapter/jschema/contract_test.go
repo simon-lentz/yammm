@@ -3,6 +3,8 @@ package jschema
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -92,11 +94,47 @@ func readData(t *testing.T, name string) []byte {
 	return b
 }
 
+// instanceDoc is a single-instance projection of a corpus data file: one type
+// key wrapping exactly one instance, with a label naming its origin.
+type instanceDoc struct {
+	label string
+	data  []byte
+}
+
+// splitInstances projects a type-keyed array-of-instances document into one
+// single-instance document per instance, preserving each instance's original
+// bytes. Keys are visited in sorted order so labels are deterministic. It backs
+// the per-instance baddata contract in TestContractAlignment: a whole-file
+// check passes the moment ANY instance fails, so each instance is projected out
+// and asserted on its own.
+func splitInstances(t *testing.T, data []byte) []instanceDoc {
+	t.Helper()
+	var doc map[string][]json.RawMessage
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("data is not a type-keyed array-of-instances document: %v", err)
+	}
+	var docs []instanceDoc
+	for _, key := range slices.Sorted(maps.Keys(doc)) {
+		for i, inst := range doc[key] {
+			single, err := json.Marshal(map[string][]json.RawMessage{key: {inst}})
+			if err != nil {
+				t.Fatalf("re-marshal %s[%d]: %v", key, i, err)
+			}
+			docs = append(docs, instanceDoc{label: fmt.Sprintf("%s_%d", key, i), data: single})
+		}
+	}
+	return docs
+}
+
 // TestContractAlignment is the trust anchor for the generator: for every
 // corpus case, a valid data file must pass BOTH the yammm ingestion path and
-// the freshly emitted schema, and an invalid data file (one violation per
-// instance) must fail BOTH. A disagreement in either direction means the
-// emitted schema describes a different language than yammm accepts.
+// the freshly emitted schema, and every instance of an invalid data file —
+// each carrying one isolated violation — must fail BOTH on its own. A
+// disagreement in either direction means the emitted schema describes a
+// different language than yammm accepts. The baddata half runs per instance,
+// not whole-file: a whole-file check passes as soon as ANY instance fails,
+// which would let a regression that wrongly accepts one specific instance hide
+// behind its siblings.
 func TestContractAlignment(t *testing.T) {
 	cases := []string{
 		"scalars",
@@ -128,12 +166,19 @@ func TestContractAlignment(t *testing.T) {
 			})
 
 			t.Run("baddata", func(t *testing.T) {
-				bad := readData(t, name+".baddata.json")
-				if errs := yammmErrors(t, s, bad); len(errs) == 0 {
-					t.Error("yammm accepted invalid data")
+				docs := splitInstances(t, readData(t, name+".baddata.json"))
+				if len(docs) == 0 {
+					t.Fatal("baddata file has no instances to check")
 				}
-				if err := validateEmitted(t, compiled, bad); err == nil {
-					t.Error("emitted schema accepted invalid data")
+				for _, doc := range docs {
+					t.Run(doc.label, func(t *testing.T) {
+						if errs := yammmErrors(t, s, doc.data); len(errs) == 0 {
+							t.Errorf("yammm accepted an invalid instance in isolation:\n%s", doc.data)
+						}
+						if err := validateEmitted(t, compiled, doc.data); err == nil {
+							t.Errorf("emitted schema accepted an invalid instance in isolation:\n%s", doc.data)
+						}
+					})
 				}
 			})
 		})
@@ -192,63 +237,5 @@ func TestContractAsymmetry_CustomTimestampFormat(t *testing.T) {
 	}
 	if err := validateEmitted(t, compiled, data); err != nil {
 		t.Errorf("emitted schema must accept any string for a custom Timestamp layout:\n%v", err)
-	}
-}
-
-// TestKnownDivergence_DataTypeEdgeProperty pins a current instance-layer
-// limitation: schema completion resolves alias constraints for TYPE
-// properties only, so a DataType-typed EDGE property keeps an unresolved
-// AliasConstraint and the instance layer rejects every value for it
-// ("unresolved alias constraint"), valid or not. The emitted schema
-// implements the documented wire contract (the edge property validates
-// against its DataType, here a $ref), so the two sides diverge on exactly
-// this member. If this test starts failing on the yammm side, the
-// instance-layer limitation has been fixed: restore a DataType-typed edge
-// property to the edge_props sample-data pair so the alignment suite covers
-// it again, and delete this pin.
-func TestKnownDivergence_DataTypeEdgeProperty(t *testing.T) {
-	s := loadSchema(t, "edge_props")
-	compiled := compileEmitted(t, s)
-
-	valid := []byte(`{"County":[{"fips":"06001","in_state":{"_target_code":"CA","since":1850,"code_tag":"CA"}}]}`)
-	if errs := yammmErrors(t, s, valid); len(errs) == 0 {
-		t.Error("instance layer accepted a DataType-typed edge property value; the alias-resolution limitation appears fixed — fold this case back into the alignment corpus")
-	}
-	if err := validateEmitted(t, compiled, valid); err != nil {
-		t.Errorf("emitted schema must accept a valid DataType-typed edge property value:\n%v", err)
-	}
-
-	invalid := []byte(`{"County":[{"fips":"06001","in_state":{"_target_code":"CA","since":1850,"code_tag":"C"}}]}`)
-	if err := validateEmitted(t, compiled, invalid); err == nil {
-		t.Error("emitted schema must reject a DataType-constraint-violating edge property value")
-	}
-}
-
-// TestKnownDivergence_ImportedTypeEdgeTarget pins a current instance-layer
-// limitation: edge-target resolution uses the syntactic relation target ref
-// against the ENTRY schema, so an association declared on an imported type —
-// whose target ref is qualified by the imported schema's own alias
-// ("base.Basin", meaningful only inside "common") — cannot resolve when
-// instances of that type are validated from the entry file ("edge target
-// type ... not found"). The resolved relation TargetID is absolute and would
-// name the right type. The emitted schema resolves in the declaring schema,
-// so its EDGE_ reference validates fine. If this test starts failing on the
-// yammm side, the resolution limitation has been fixed: restore the
-// "in_basin" edge to the imports/main sample-data pair and delete this pin.
-func TestKnownDivergence_ImportedTypeEdgeTarget(t *testing.T) {
-	s := loadSchema(t, "imports/main")
-	compiled := compileEmitted(t, s)
-
-	valid := []byte(`{"common.Region":[{"code":"R0001","name":"Alpha Region","in_basin":{"_target_id":"B1"}}]}`)
-	if errs := yammmErrors(t, s, valid); len(errs) == 0 {
-		t.Error("instance layer resolved an imported type's edge target; the resolution limitation appears fixed — fold this case back into the alignment corpus")
-	}
-	if err := validateEmitted(t, compiled, valid); err != nil {
-		t.Errorf("emitted schema must accept a valid edge on an imported type:\n%v", err)
-	}
-
-	invalid := []byte(`{"common.Region":[{"code":"R0001","name":"Alpha Region","in_basin":{}}]}`)
-	if err := validateEmitted(t, compiled, invalid); err == nil {
-		t.Error("emitted schema must reject an edge object missing its foreign-key field")
 	}
 }

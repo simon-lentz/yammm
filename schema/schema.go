@@ -4,6 +4,7 @@ import (
 	"iter"
 	"maps"
 	"slices"
+	"sync"
 
 	"github.com/simon-lentz/yammm/location"
 )
@@ -24,6 +25,13 @@ type Schema struct {
 	dataByName    map[string]*DataType
 	importByAlias map[string]*Import
 	sealed        bool // true after loading is complete; prevents further mutation
+
+	// Lazily computed by ensureClosure on first Closure/TypeByID call:
+	// import wiring (Import.setSchema) finishes after per-schema completion,
+	// so the closure cannot be built eagerly during completion.
+	closureOnce sync.Once
+	closure     []*Schema
+	typeByID    map[TypeID]*Type
 }
 
 // newSchema creates a new Schema. This is primarily for internal use;

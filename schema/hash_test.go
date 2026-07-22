@@ -622,3 +622,39 @@ func buildVectorSchemaConstraintRich() *schema.Schema {
 	typ := buildTypeWithProps("Everything", props)
 	return buildMinimalSchema("constraint_rich", []*schema.Type{typ}, nil)
 }
+
+// TestStructuralHash_DataTypeEdgeProperty pins the loaded-schema shape whose
+// association declares a DataType-typed edge property: completion resolves the
+// edge property's alias constraint, so hashing reaches a resolved terminal
+// instead of the unrecognized-kind panic an unresolved alias produces. The
+// hash must be deterministic and sensitive to the edge property's presence.
+func TestStructuralHash_DataTypeEdgeProperty(t *testing.T) {
+	load := func(edgeProps string) *schema.Schema {
+		t.Helper()
+		s, result := schema.LoadString(t.Context(), `schema "geo"
+
+type StateCode = String [2, 2]
+
+type State {
+	code StateCode primary
+}
+
+type County {
+	fips String primary
+	--> IN_STATE (one) State {`+edgeProps+`
+	}
+}
+`, "test.yammm")
+		require.False(t, result.HasErrors(), "load: %v", result.Err())
+		return s
+	}
+
+	with := load("\n\t\tcode_tag StateCode")
+	without := load("\n\t\tsince Integer")
+
+	h1 := schema.StructuralHash(with)
+	h2 := schema.StructuralHash(with)
+	assert.Equal(t, h1, h2, "hash must be deterministic")
+	assert.NotEqual(t, h1, schema.StructuralHash(without),
+		"a DataType-typed edge property must contribute to the hash")
+}

@@ -305,7 +305,7 @@ func (b *SchemaBuilder) buildEdgeTarget(
 	props map[string]any,
 	caller string,
 ) (map[string]any, *buildError) {
-	targetType, found := b.schema.ResolveType(rel.Target())
+	targetType, found := resolveRelationTarget(b.schema, rel)
 	if !found {
 		return nil, &buildError{
 			kind:   kindEdgeShape,
@@ -435,7 +435,7 @@ func (b *SchemaBuilder) Composed(name string, children ...*SchemaBuilder) *Schem
 		})
 		return b
 	}
-	targetType, found := b.schema.ResolveType(rel.Target())
+	targetType, found := resolveRelationTarget(b.schema, rel)
 	if !found {
 		b.recordErr(&buildError{
 			kind:   kindWrongComposedType,
