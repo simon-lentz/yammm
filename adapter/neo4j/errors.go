@@ -19,6 +19,11 @@ var (
 	// E_NEO4J_UNSUPPORTED_TYPE indicates a constraint kind cannot be mapped
 	// to a Neo4j property type expression.
 	E_NEO4J_UNSUPPORTED_TYPE = diag.NewCode("E_NEO4J_UNSUPPORTED_TYPE", diag.CategoryAdapter)
+
+	// E_NEO4J_INDEX_NAME_COLLISION indicates two or more emitted indexes would
+	// share a name. Because CREATE INDEX ... IF NOT EXISTS silently skips a
+	// colliding index, the collision is reported instead of emitted.
+	E_NEO4J_INDEX_NAME_COLLISION = diag.NewCode("E_NEO4J_INDEX_NAME_COLLISION", diag.CategoryAdapter)
 )
 
 // Sentinel errors for validation failures.

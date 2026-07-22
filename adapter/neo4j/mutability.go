@@ -9,12 +9,14 @@ package neo4j
 // changes output shape.
 //
 // Layering. KeyMutability is a per-call query-shape selector. The
-// per-adapter [WithImmutableKeys] option carries the *property-name
-// filter* that feeds the `update_props` parameter at write time; the
-// two are complementary, not overlapping. [Adapter.NodeQueryFor] and
-// [Adapter.BatchNodeQueries] derive the enum from
-// `len(cfg.immutableKeys) > 0` so the pair stays consistent at the
-// public-wrapper layer. Direct [BuildNodeMergeQuery] /
+// effective immutable-key set — [WithImmutableKeys] unioned with a
+// type's derived @writeOnce keys — carries the *property-name filter*
+// that feeds the `update_props` parameter at write time; the two are
+// complementary, not overlapping. [Adapter.NodeQueryFor] and
+// [Adapter.BatchNodeQueries] derive the enum from whether that
+// effective set is non-empty (per type, for the batch path) so the
+// pair stays consistent at the public-wrapper layer. Direct
+// [BuildNodeMergeQuery] /
 // [BuildBatchNodeMergeQuery] callers are responsible for supplying the
 // matching parameter map themselves: [ImmutableKeys] requires the
 // caller to pass both `$props` and `$update_props`; [MutableKeys]

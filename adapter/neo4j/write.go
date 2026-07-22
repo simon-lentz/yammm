@@ -76,14 +76,28 @@ func defaultWriteConfig() writeConfig {
 // is first created (ON CREATE SET), not when merging with an existing node.
 // Example: "first_seen_at" should not be overwritten on re-ingestion.
 //
-// Every key must name a declared property (own or inherited) of a node type
-// being written: [Adapter.NodeQueryFor] rejects a key that is not a property
-// of its schema type, and [Adapter.BatchNodeQueries] rejects a key that is a
-// property of no node type in the snapshot. A mistyped key would otherwise be
-// honored silently — the real property would stay in $update_props and be
-// rewritten on every re-MERGE, defeating the write-once guarantee with no
-// diagnostic. [Adapter.NodeQueryFor] skips the check when called with a nil
-// schema type, matching its nil pass-through coercion behavior.
+// These explicitly-passed keys UNION with the immutable keys derived from a
+// type's @writeOnce annotations (see [ImmutableKeysFor]). The effective
+// immutable set for a written type is therefore
+// explicit-keys ∪ derived-@writeOnce-keys. A node's write splits into
+// ON CREATE SET / ON MATCH SET whenever that effective set is non-empty, and
+// $update_props excludes every member of it.
+//
+// [Adapter.BatchNodeQueries] selects the shape per type: a type with derived or
+// explicit immutable keys gets the split shape, while an unannotated type in the
+// same snapshot stays mutable. A non-empty explicit list still produces the split
+// shape for every written type, preserving the prior contract.
+//
+// Only the explicitly-passed keys are validated: every one must name a declared
+// property (own or inherited) of a node type being written. [Adapter.NodeQueryFor]
+// rejects a key that is not a property of its schema type, and
+// [Adapter.BatchNodeQueries] rejects a key that is a property of no node type in
+// the snapshot. A mistyped key would otherwise be honored silently — the real
+// property would stay in $update_props and be rewritten on every re-MERGE,
+// defeating the write-once guarantee with no diagnostic. Derived @writeOnce keys
+// are schema-true by construction and are not re-validated. [Adapter.NodeQueryFor]
+// skips derivation and the check when called with a nil schema type, matching its
+// nil pass-through coercion behavior.
 //
 // The option affects node merges only: relationship merges have no
 // ON CREATE / ON MATCH split, so edge query generation ignores it.
@@ -120,16 +134,19 @@ type NodeSource interface {
 // NodeQueryFor generates a single-node MERGE query for an instance.
 //
 // The query uses the NodeShape's label and primary keys for MERGE matching,
-// and SET for all properties. If immutable keys are configured, uses
-// ON CREATE SET / ON MATCH SET to preserve immutable values.
+// and SET for all properties. When the effective immutable set is non-empty —
+// explicitly-passed [WithImmutableKeys] unioned with the type's derived
+// @writeOnce keys — the query uses ON CREATE SET / ON MATCH SET to preserve
+// those values.
 //
 // schemaType provides constraint metadata for schema-aware slice coercion
-// (e.g., converting []any to []string for List<String> properties). This
-// matches the coercion behavior of [Adapter.BatchNodeQueries].
+// (e.g., converting []any to []string for List<String> properties) and is the
+// source of derived @writeOnce immutable keys. This matches the coercion
+// behavior of [Adapter.BatchNodeQueries].
 //
-// Immutable keys (see [WithImmutableKeys]) are validated against schemaType:
-// a key that names no property (own or inherited) of the type is an error.
-// A nil schemaType skips the check along with coercion.
+// Explicitly-passed immutable keys (see [WithImmutableKeys]) are validated
+// against schemaType: a key that names no property (own or inherited) of the
+// type is an error. A nil schemaType skips derivation, validation, and coercion.
 //
 // Any type satisfying [NodeSource] may be passed — both [*graph.Instance]
 // (graph-based path) and [*instance.ValidInstance] (streaming path) work.
@@ -169,11 +186,14 @@ func (a *Adapter) NodeQueryFor(
 	}
 	params["props"] = props
 
-	hasImmutable := len(cfg.immutableKeys) > 0
+	// Effective immutable set: explicitly-passed keys union the type's derived
+	// @writeOnce keys. A nil schemaType contributes no derived keys, preserving
+	// the explicit-only pass-through behavior.
+	immutableKeys := effectiveImmutableKeys(cfg.immutableKeys, schemaType)
 	km := MutableKeys
-	if hasImmutable {
+	if len(immutableKeys) > 0 {
 		km = ImmutableKeys
-		params["update_props"] = removeKeys(props, cfg.immutableKeys)
+		params["update_props"] = removeKeys(props, immutableKeys)
 	}
 
 	stmt := BuildNodeMergeQuery(shape.Label, shape.PrimaryKeys, km)
@@ -183,11 +203,14 @@ func (a *Adapter) NodeQueryFor(
 // BatchNodeQueries generates UNWIND-batched MERGE queries for all instances
 // of each type in a graph result.
 //
-// Immutable keys (see [WithImmutableKeys]) are validated against the
-// snapshot's node types before any query is built: a key that names a
-// property of no written type is an error, while a key real for at least one
-// written type is accepted (it may legitimately apply to a subset of a
-// multi-type snapshot).
+// The immutable-key shape is selected per type: a type with derived @writeOnce
+// keys or explicit keys gets the ON CREATE / ON MATCH split, while an
+// unannotated type in the same snapshot stays mutable (a non-empty explicit
+// list still splits every type). Explicitly-passed immutable keys (see
+// [WithImmutableKeys]) are validated against the snapshot's node types before
+// any query is built: a key that names a property of no written type is an
+// error, while a key real for at least one written type is accepted (it may
+// legitimately apply to a subset of a multi-type snapshot).
 //
 // Returns one [BatchNodeQuery] per type per chunk. Types with more instances
 // than the chunk size produce multiple queries.
@@ -202,10 +225,7 @@ func (a *Adapter) BatchNodeQueries(
 		opt(&cfg)
 	}
 
-	hasImmutable := len(cfg.immutableKeys) > 0
-	km := MutableKeys
-	if hasImmutable {
-		km = ImmutableKeys
+	if len(cfg.immutableKeys) > 0 {
 		if err := validateSnapshotImmutableKeys(cfg.immutableKeys, result); err != nil {
 			return nil, err
 		}
@@ -226,6 +246,15 @@ func (a *Adapter) BatchNodeQueries(
 			return nil, fmt.Errorf("type %q not found in schema", typeName)
 		}
 
+		// Effective immutable set is per type: explicit keys union the type's
+		// derived @writeOnce keys. A non-empty explicit list still splits every
+		// type (today's contract); an annotated type splits individually.
+		immutableKeys := effectiveImmutableKeys(cfg.immutableKeys, schemaType)
+		km := MutableKeys
+		if len(immutableKeys) > 0 {
+			km = ImmutableKeys
+		}
+
 		instances := result.InstancesOf(typeName)
 		var rows []map[string]any
 
@@ -242,8 +271,8 @@ func (a *Adapter) BatchNodeQueries(
 			row := make(map[string]any, len(keyProps)+2)
 			maps.Copy(row, keyProps)
 			row["props"] = props
-			if hasImmutable {
-				row["update_props"] = removeKeys(props, cfg.immutableKeys)
+			if len(immutableKeys) > 0 {
+				row["update_props"] = removeKeys(props, immutableKeys)
 			}
 			rows = append(rows, row)
 		}

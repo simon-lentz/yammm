@@ -17,7 +17,8 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | `yammm gen --to jsonschema <schema>` | Generate a JSON Schema (draft 2020-12) for instance-data authoring |
 | `yammm gen --to md <schema>` | Generate Markdown docs with a Mermaid class diagram |
 | `yammm neo4j constraints <schema>` | Generate Neo4j constraint statements |
-| `yammm neo4j diff <schema>` | Diff schema constraints vs live database |
+| `yammm neo4j indexes <schema>` | Generate Neo4j index statements from annotations |
+| `yammm neo4j diff <schema>` | Diff schema constraints and indexes vs live database |
 | `yammm neo4j introspect` | Infer schema from live Neo4j database |
 | `yammm snapshot save <schema> <data>` | Save graph snapshot to `.ys` file |
 | `yammm snapshot info <snapshot>` | Display snapshot metadata |
@@ -234,13 +235,34 @@ Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 | `--named` | `true` | Generate named constraints |
 | `--separator` | `__` | Label separator (schema__Type) |
 
+### neo4j indexes
+
+```bash
+yammm neo4j indexes schema.yammm
+```
+
+Generates `CREATE INDEX` / `CREATE VECTOR INDEX IF NOT EXISTS` Cypher statements from a schema's `@index` / `@@index` / `@vector` annotations. Index names are always emitted and indexes apply to every edition, so there is no `--edition` or `--named` flag.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--separator` | `__` | Label separator (schema__Type) |
+
 ### neo4j diff
 
 ```bash
 yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
+yammm neo4j diff --uri bolt://localhost:7687 --edition community --separator __ schema.yammm
 ```
 
-Compares desired schema constraints against the live database. Reports constraints to create, drop, and those already present.
+Compares desired schema constraints **and indexes** against the live database (index diffing is always on). Reports constraints and indexes to create, drop, and those already present. A schema-owned remote index with no declaration surfaces as a drop until it is annotated.
+
+Set `--edition` and `--separator` to match how the target graph was generated, so the desired side uses the same labels and edition-gated constraints — otherwise a differently-configured graph reports spurious drift.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed) |
+| `--separator` | `__` | Label separator (schema__Type) |
+| `--named` | `true` | Named constraints in the create output (does not affect diff matching) |
 
 ### neo4j introspect
 

@@ -34,6 +34,37 @@
 // [ConstraintType], and [ConstraintNodeKey]. Generation is controlled by
 // adapter options (see Configuration below).
 //
+// # Index Generation
+//
+// [Adapter.IndexesForSchema] returns index statements as raw Cypher strings
+// derived from a schema's @index, @@index, and @vector annotations.
+// [Adapter.IndexesStructured] returns [Index] values with parsed metadata
+// (kind, label, properties, vector configuration):
+//
+//	indexes, result := adapter.IndexesStructured(ctx, s)
+//
+// A property-level @index yields a single-property [IndexRange]; a type-level
+// @@index yields a composite range index (declared property order is
+// significant); a property-level @vector yields an [IndexVector] ANN index
+// whose dimension comes from the property's Vector[N] constraint. Load-time
+// validation guarantees eligibility, so the adapter trusts the sealed model.
+//
+// Index names are always emitted — {label}_{props}_idx for range,
+// {label}_{prop}_vector_idx for vector — because diff and DROP tooling need
+// stable names and this new surface has no unnamed back-compat to preserve.
+// Because statements carry IF NOT EXISTS, two indexes with the same emitted
+// name would make the database silently skip the second, so a schema-wide name
+// collision is reported as [E_NEO4J_INDEX_NAME_COLLISION] rather than emitted.
+// The collision check is index-set-internal; it does not cross-check emitted
+// constraint names, whose disjoint suffixes make an index-vs-constraint
+// collision negligible.
+//
+// Unlike constraints, indexes are emitted for every edition: range and vector
+// indexes are core query features on both Community and Enterprise. Abstract
+// types are skipped; part types are not (they receive a label and constraints,
+// so they receive index DDL too). The emitted CREATE VECTOR INDEX ... OPTIONS
+// statement form requires Neo4j 5.15+.
+//
 // # Label Mapping
 //
 // [Adapter.Label] generates namespaced Neo4j labels from schema and type names.
@@ -76,6 +107,13 @@
 // Single-instance queries ([Adapter.NodeQueryFor], [Adapter.EdgeQueryFor])
 // complement the batch entry points for streaming pipelines.
 //
+// # Write-Once Derivation
+//
+// [ImmutableKeysFor] returns a type's @writeOnce-annotated properties (own and
+// inherited). The node write path unions these with any keys passed via
+// [WithImmutableKeys], so a @writeOnce property is set on node creation and
+// never rewritten on a subsequent MERGE without the caller re-passing its name.
+//
 // # Cypher Builders
 //
 // The four exported builders produce the Cypher templates the write
@@ -109,7 +147,9 @@
 //   - [IntrospectRelationshipsQuery] / [Adapter.IntrospectRelationshipsQueryFor]: discovers relationship signatures
 //
 // Parse the results with [ParseRemoteConstraints], [ParseRemoteIndexes],
-// and [ParseRemoteRelationships].
+// and [ParseRemoteRelationships]. [ParseRemoteIndexes] reads the index options
+// map, so [RemoteIndex.VectorDimensions] and [RemoteIndex.VectorSimilarity]
+// expose a vector index's configuration for drift detection.
 //
 // # Schema Inference
 //
@@ -121,6 +161,16 @@
 // [Adapter.DiffConstraints] produces a [ConstraintDiffResult] classifying
 // desired vs. actual constraints into four categories: matched, drifted
 // (same target but different definition), to-create, and to-drop.
+//
+// # Index Diffing
+//
+// [Adapter.DiffIndexes] produces an [IndexDiffResult] classifying desired vs.
+// actual indexes into matched, drifted (a vector index whose dimension or
+// similarity differs), to-create, and to-drop. Composite property order is
+// significant, a deliberate divergence from [Adapter.DiffConstraints]: a
+// same-set/different-order remote index classifies as create + drop. A
+// schema-owned remote index with no declaration is reported as a drop — the
+// drift the index feature exists to surface. Drops are reported, never applied.
 //
 // # Configuration
 //
@@ -136,8 +186,9 @@
 //
 // Write options control query generation:
 //
-//   - [WithImmutableKeys]: properties set only on node creation; keys are
-//     validated against the written node types' declared properties
+//   - [WithImmutableKeys]: properties set only on node creation; explicit keys
+//     union with schema-derived @writeOnce keys (see [ImmutableKeysFor]), and
+//     the effective set is selected per type on the batch path
 //   - [WithNodeChunkSize] / [WithEdgeChunkSize]: max rows per UNWIND batch
 //
 // # Edition Gating
@@ -154,6 +205,8 @@
 // Minimum recommended version: Neo4j 5.13+ (fixes the orphaned index
 // bug where interrupted constraint creation leaves an orphaned backing
 // index that blocks subsequent IF NOT EXISTS retries).
+// The emitted CREATE VECTOR INDEX ... OPTIONS statement form (from @vector
+// annotations) requires Neo4j 5.15+.
 //
 // # Sealed Schemas
 //

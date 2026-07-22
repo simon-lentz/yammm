@@ -21,6 +21,7 @@ func newNeo4jCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newNeo4jConstraintsCmd(),
+		newNeo4jIndexesCmd(),
 		newNeo4jDiffCmd(),
 		newNeo4jIntrospectCmd(),
 	)

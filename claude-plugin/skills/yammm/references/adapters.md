@@ -154,6 +154,21 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 // Each Constraint has: Name, Kind, Label, Properties, TypeExpr, Statement
 ```
 
+### Index Generation
+
+```go
+// Generate index Cypher from @index / @@index / @vector annotations
+statements, result := adapter.IndexesForSchema(ctx, s)
+// statements is []string of CREATE INDEX / CREATE VECTOR INDEX IF NOT EXISTS ...
+
+// Structured index objects
+indexes, result := adapter.IndexesStructured(ctx, s)
+// Each Index has: Name, Kind (IndexRange|IndexVector), Label, Properties,
+// VectorDimensions, VectorSimilarity, Statement
+```
+
+Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint). Index names are always emitted; a schema-wide emitted-name collision reports `E_NEO4J_INDEX_NAME_COLLISION`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+. `DiffIndexes(desired, actual, schemaName)` returns an `*IndexDiffResult` (Match/Drift/Create/Drop); composite property order is significant, and a schema-owned remote index with no declaration reports as a drop.
+
 ### Graph Shape Introspection
 
 ```go
@@ -178,7 +193,7 @@ edgeQueries, err := adapter.BatchEdgeQueries(ctx, snapshot, shape,
 
 Each `BatchNodeQuery` / `BatchEdgeQuery` contains a Cypher statement and parameters map ready for driver execution.
 
-Immutable keys are validated against the schema at query generation: every key must name a declared property (own or inherited) of a node type being written, otherwise the call errors — a mistyped key would silently defeat the write-once guarantee. The option affects node merges only (relationship merges have no ON CREATE / ON MATCH split).
+`WithImmutableKeys` unions with the immutable keys derived from a type's `@writeOnce` annotations (`ImmutableKeysFor(t)` returns a type's `@writeOnce` properties, own and inherited); the effective set per type drives the ON CREATE / ON MATCH split, selected per type in a batch. Only the explicitly-passed keys are validated against the schema at query generation: every one must name a declared property (own or inherited) of a node type being written, otherwise the call errors — a mistyped key would silently defeat the write-once guarantee. The option affects node merges only (relationship merges have no ON CREATE / ON MATCH split).
 
 ### Parameter Coercion (Direct-Cypher Path)
 

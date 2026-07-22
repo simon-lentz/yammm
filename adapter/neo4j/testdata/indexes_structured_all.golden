@@ -1,0 +1,91 @@
+[
+  {
+    "Name": "index_test__Document_state_idx",
+    "Kind": 0,
+    "Label": "index_test__Document",
+    "Properties": [
+      "state"
+    ],
+    "VectorDimensions": 0,
+    "VectorSimilarity": "",
+    "Statement": "CREATE INDEX index_test__Document_state_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.state)"
+  },
+  {
+    "Name": "index_test__Document_published_on_idx",
+    "Kind": 0,
+    "Label": "index_test__Document",
+    "Properties": [
+      "published_on"
+    ],
+    "VectorDimensions": 0,
+    "VectorSimilarity": "",
+    "Statement": "CREATE INDEX index_test__Document_published_on_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.published_on)"
+  },
+  {
+    "Name": "index_test__Document_embedding_vector_idx",
+    "Kind": 1,
+    "Label": "index_test__Document",
+    "Properties": [
+      "embedding"
+    ],
+    "VectorDimensions": 768,
+    "VectorSimilarity": "cosine",
+    "Statement": "CREATE VECTOR INDEX index_test__Document_embedding_vector_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.embedding) OPTIONS {indexConfig: {`vector.dimensions`: 768, `vector.similarity_function`: 'cosine'}}"
+  },
+  {
+    "Name": "index_test__Document_state_published_on_idx",
+    "Kind": 0,
+    "Label": "index_test__Document",
+    "Properties": [
+      "state",
+      "published_on"
+    ],
+    "VectorDimensions": 0,
+    "VectorSimilarity": "",
+    "Statement": "CREATE INDEX index_test__Document_state_published_on_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.state, n.published_on)"
+  },
+  {
+    "Name": "index_test__Document_first_seen_idx",
+    "Kind": 0,
+    "Label": "index_test__Document",
+    "Properties": [
+      "first_seen"
+    ],
+    "VectorDimensions": 0,
+    "VectorSimilarity": "",
+    "Statement": "CREATE INDEX index_test__Document_first_seen_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.first_seen)"
+  },
+  {
+    "Name": "index_test__Note_body_idx",
+    "Kind": 0,
+    "Label": "index_test__Note",
+    "Properties": [
+      "body"
+    ],
+    "VectorDimensions": 0,
+    "VectorSimilarity": "",
+    "Statement": "CREATE INDEX index_test__Note_body_idx IF NOT EXISTS FOR (n:index_test__Note) ON (n.body)"
+  },
+  {
+    "Name": "index_test__Note_first_seen_idx",
+    "Kind": 0,
+    "Label": "index_test__Note",
+    "Properties": [
+      "first_seen"
+    ],
+    "VectorDimensions": 0,
+    "VectorSimilarity": "",
+    "Statement": "CREATE INDEX index_test__Note_first_seen_idx IF NOT EXISTS FOR (n:index_test__Note) ON (n.first_seen)"
+  },
+  {
+    "Name": "index_test__Section_heading_idx",
+    "Kind": 0,
+    "Label": "index_test__Section",
+    "Properties": [
+      "heading"
+    ],
+    "VectorDimensions": 0,
+    "VectorSimilarity": "",
+    "Statement": "CREATE INDEX index_test__Section_heading_idx IF NOT EXISTS FOR (n:index_test__Section) ON (n.heading)"
+  }
+]

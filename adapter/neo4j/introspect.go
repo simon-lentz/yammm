@@ -29,11 +29,52 @@ type RemoteRelationship struct {
 //
 // Parse from database output via [ParseRemoteIndexes].
 type RemoteIndex struct {
-	Name          string   // Index name
-	Type          string   // "BTREE", "RANGE", "TEXT", "POINT", "FULLTEXT"
-	EntityType    string   // "NODE" or "RELATIONSHIP"
-	LabelsOrTypes []string // Labels or relationship types
-	Properties    []string // Indexed properties
+	Name          string         // Index name
+	Type          string         // "RANGE", "TEXT", "POINT", "FULLTEXT", "VECTOR" (BTREE is Neo4j 4.x-historical)
+	EntityType    string         // "NODE" or "RELATIONSHIP"
+	LabelsOrTypes []string       // Labels or relationship types
+	Properties    []string       // Indexed properties
+	Options       map[string]any // Raw index options (nil if absent); vector config lives under "indexConfig"
+}
+
+// VectorDimensions returns the configured dimension of a VECTOR index and true,
+// or (0, false) when the index carries no readable vector configuration — a
+// non-vector index, an older server that does not report options, or a
+// malformed options map.
+func (ri RemoteIndex) VectorDimensions() (int, bool) {
+	cfg, ok := ri.indexConfig()
+	if !ok {
+		return 0, false
+	}
+	return toInt(cfg["vector.dimensions"])
+}
+
+// VectorSimilarity returns the configured similarity function of a VECTOR index
+// ("cosine" or "euclidean") and true, or ("", false) when the index carries no
+// readable vector configuration.
+func (ri RemoteIndex) VectorSimilarity() (string, bool) {
+	cfg, ok := ri.indexConfig()
+	if !ok {
+		return "", false
+	}
+	s, ok := cfg["vector.similarity_function"].(string)
+	if !ok {
+		return "", false
+	}
+	return s, true
+}
+
+// indexConfig returns the nested "indexConfig" map from the index options, or
+// (nil, false) when options are absent or malformed.
+func (ri RemoteIndex) indexConfig() (map[string]any, bool) {
+	if ri.Options == nil {
+		return nil, false
+	}
+	cfg, ok := ri.Options["indexConfig"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	return cfg, true
 }
 
 // IntrospectConstraintsQuery returns the Cypher query for fetching all constraints.
@@ -44,9 +85,10 @@ func IntrospectConstraintsQuery() string {
 }
 
 // IntrospectIndexesQuery returns the Cypher query for fetching non-constraint-backing indexes.
-// Filters out LOOKUP indexes and indexes owned by constraints.
+// Filters out LOOKUP indexes and indexes owned by constraints. Yields the
+// options map so vector-index configuration (dimension, similarity) is visible.
 func IntrospectIndexesQuery() string {
-	return "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, owningConstraint " +
+	return "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, options, owningConstraint " +
 		"WHERE owningConstraint IS NULL AND type <> 'LOOKUP'"
 }
 
@@ -126,6 +168,7 @@ func ParseRemoteIndexes(records []map[string]any) ([]RemoteIndex, error) {
 			EntityType:    parseStringField(rec, "entityType"),
 			LabelsOrTypes: parseStringSliceField(rec, "labelsOrTypes"),
 			Properties:    parseStringSliceField(rec, "properties"),
+			Options:       parseMapField(rec, "options"),
 		})
 	}
 	return result, nil
@@ -183,4 +226,34 @@ func parseStringSliceField(rec map[string]any, key string) []string {
 		}
 	}
 	return result
+}
+
+// parseMapField extracts a map[string]any from a record map.
+// Returns nil if the key is missing, nil, or not a map.
+func parseMapField(rec map[string]any, key string) map[string]any {
+	v, ok := rec[key]
+	if !ok || v == nil {
+		return nil
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return m
+}
+
+// toInt coerces a driver-shaped numeric value to int. The Neo4j driver reports
+// Cypher integers as int64; int and float64 are accepted defensively. Returns
+// (0, false) for any other shape.
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int64:
+		return int(n), true
+	case int:
+		return n, true
+	case float64:
+		return int(n), true
+	default:
+		return 0, false
+	}
 }

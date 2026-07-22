@@ -1,0 +1,28 @@
+schema "index_test"
+
+abstract type Tracked {
+    first_seen Timestamp required @writeOnce
+
+    @@index(first_seen)
+}
+
+type Document extends Tracked {
+    content_hash String      primary
+    state        String      @index
+    published_on Date        @index
+    embedding    Vector[768] @vector(cosine)
+
+    @@index(state, published_on)
+
+    *-> SECTIONS (_:many) Section
+}
+
+type Note extends Tracked {
+    note_id String primary
+    body    String @index
+}
+
+part type Section {
+    section_id String primary
+    heading    String @index
+}

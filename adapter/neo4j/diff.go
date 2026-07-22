@@ -64,7 +64,7 @@ func (a *Adapter) DiffConstraints(
 	// Filter actual constraints to schema-owned only.
 	var owned []RemoteConstraint
 	for _, rc := range actual {
-		if isSchemaOwned(rc, labelPrefix) {
+		if isSchemaOwned(rc.LabelsOrTypes, labelPrefix) {
 			owned = append(owned, rc)
 		}
 	}
@@ -116,10 +116,11 @@ func (a *Adapter) DiffConstraints(
 	return result
 }
 
-// isSchemaOwned checks if a remote constraint belongs to the given schema
-// by checking if any of its labels start with the label prefix.
-func isSchemaOwned(rc RemoteConstraint, labelPrefix string) bool {
-	for _, label := range rc.LabelsOrTypes {
+// isSchemaOwned reports whether any of the given labels starts with the schema
+// label prefix. Shared by the constraint ([DiffConstraints]) and index
+// ([DiffIndexes]) diff paths.
+func isSchemaOwned(labels []string, labelPrefix string) bool {
+	for _, label := range labels {
 		if strings.HasPrefix(label, labelPrefix) {
 			return true
 		}

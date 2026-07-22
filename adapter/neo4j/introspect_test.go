@@ -124,6 +124,92 @@ func TestParseRemoteIndexes_Basic(t *testing.T) {
 	assert.Equal(t, "RANGE", indexes[0].Type)
 }
 
+func TestParseRemoteIndexes_VectorOptions(t *testing.T) {
+	t.Parallel()
+	records := []map[string]any{
+		{
+			"name":          "index_test__Document_embedding_vector_idx",
+			"type":          "VECTOR",
+			"entityType":    "NODE",
+			"labelsOrTypes": []any{"index_test__Document"},
+			"properties":    []any{"embedding"},
+			"options": map[string]any{
+				"indexProvider": "vector-2.0",
+				"indexConfig": map[string]any{
+					"vector.dimensions":          int64(768),
+					"vector.similarity_function": "cosine",
+				},
+			},
+		},
+	}
+
+	indexes, err := ParseRemoteIndexes(records)
+	require.NoError(t, err)
+	require.Len(t, indexes, 1)
+
+	dim, ok := indexes[0].VectorDimensions()
+	require.True(t, ok)
+	assert.Equal(t, 768, dim)
+
+	sim, ok := indexes[0].VectorSimilarity()
+	require.True(t, ok)
+	assert.Equal(t, "cosine", sim)
+}
+
+func TestRemoteIndex_VectorOptions_Absent(t *testing.T) {
+	t.Parallel()
+	records := []map[string]any{
+		{
+			"name":          "idx_range",
+			"type":          "RANGE",
+			"entityType":    "NODE",
+			"labelsOrTypes": []any{"A"},
+			"properties":    []any{"x"},
+		},
+	}
+	indexes, err := ParseRemoteIndexes(records)
+	require.NoError(t, err)
+	require.Len(t, indexes, 1)
+
+	_, ok := indexes[0].VectorDimensions()
+	assert.False(t, ok)
+	_, ok = indexes[0].VectorSimilarity()
+	assert.False(t, ok)
+}
+
+func TestRemoteIndex_VectorOptions_Malformed(t *testing.T) {
+	t.Parallel()
+	records := []map[string]any{
+		{
+			"name":          "idx_weird",
+			"type":          "VECTOR",
+			"entityType":    "NODE",
+			"labelsOrTypes": []any{"A"},
+			"properties":    []any{"v"},
+			"options": map[string]any{
+				"indexConfig": "not-a-map",
+			},
+		},
+	}
+	indexes, err := ParseRemoteIndexes(records)
+	require.NoError(t, err)
+	require.Len(t, indexes, 1)
+
+	_, ok := indexes[0].VectorDimensions()
+	assert.False(t, ok)
+	_, ok = indexes[0].VectorSimilarity()
+	assert.False(t, ok)
+}
+
+func TestIntrospectIndexesQuery_YieldsOptions(t *testing.T) {
+	t.Parallel()
+	q := IntrospectIndexesQuery()
+	assert.Contains(t, q, "options")
+	// Constraint-backing and lookup filters are preserved.
+	assert.Contains(t, q, "owningConstraint IS NULL")
+	assert.Contains(t, q, "type <> 'LOOKUP'")
+}
+
 func TestParseRemoteRelationships_Basic(t *testing.T) {
 	t.Parallel()
 	records := []map[string]any{

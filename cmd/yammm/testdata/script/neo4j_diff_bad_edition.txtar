@@ -1,0 +1,13 @@
+# neo4j diff: an invalid --edition fails with a targeted usage error before
+# connecting (proving the flag is recognized and validated, not an unknown flag).
+
+! exec yammm neo4j diff --uri neo4j://127.0.0.1:1 --edition bogus valid.yammm
+stderr 'invalid edition'
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+}

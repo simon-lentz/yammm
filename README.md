@@ -218,7 +218,7 @@ Internal                 : internal/* (no compatibility guarantees)
 | `format` | Canonical `.yammm` file formatting |
 | `adapter/json` | JSON/JSONC parsing with location tracking |
 | `adapter/csv` | CSV data parsing and writing |
-| `adapter/neo4j` | Neo4j constraint generation and Cypher query building |
+| `adapter/neo4j` | Neo4j constraint + index generation and Cypher query building |
 | `adapter/gogen` | Go source generation from a schema (structs, enums, `EDGE_` structs, `Graph`) |
 | `adapter/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
 | `adapter/markdown` | Markdown + Mermaid documentation generation from a schema |
@@ -362,7 +362,8 @@ yammm snapshot info <file.ys>                            # metadata + stats
 yammm snapshot verify <schema> <file.ys>                 # schema-compatibility check
 yammm snapshot update-metadata --set k=v <file.ys>       # rewrite metadata keys in place (--set/--unset)
 yammm neo4j constraints <schema>                         # generate Neo4j constraint statements
-yammm neo4j diff <schema>                                # compare schema constraints against a live database
+yammm neo4j indexes <schema>                             # generate Neo4j index statements from annotations
+yammm neo4j diff <schema>                                # compare schema constraints and indexes against a live database
 yammm neo4j introspect                                   # inspect a live database's schema
 ```
 

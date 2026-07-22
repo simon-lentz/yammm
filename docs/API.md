@@ -1031,6 +1031,22 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 
 The `Constraint` struct contains the constraint `Name`, `Kind` (`ConstraintUnique`, `ConstraintNotNull`, `ConstraintType`, `ConstraintNodeKey`), `Label`, `Properties`, `TypeExpr`, and the complete `Statement`.
 
+### Indexes
+
+Indexes are derived from a schema's `@index`, `@@index`, and `@vector` annotations:
+
+```go
+// Generate Cypher CREATE INDEX / CREATE VECTOR INDEX statements
+statements, result := adapter.IndexesForSchema(ctx, s)
+
+// Generate structured index descriptors
+indexes, result := adapter.IndexesStructured(ctx, s)
+```
+
+The `Index` struct contains `Name`, `Kind` (`IndexRange` or `IndexVector`), `Label`, `Properties` (declared order, significant for composites), `VectorDimensions`, `VectorSimilarity`, and the complete `Statement`. A property-level `@index` yields a single-property range index; a type-level `@@index(a, b)` yields a composite range index; a property-level `@vector(cosine|euclidean)` yields a vector index whose dimension comes from the property's `Vector[N]` constraint.
+
+Index names are always emitted (`{label}_{props}_idx` for range, `{label}_{prop}_vector_idx` for vector). Because `CREATE ... IF NOT EXISTS` silently skips a colliding name, a schema-wide emitted-name collision is reported as `E_NEO4J_INDEX_NAME_COLLISION` rather than emitted. Indexes are emitted for every edition (range and vector indexes are core query features on both Community and Enterprise); abstract types are skipped, part types are not. The emitted `CREATE VECTOR INDEX ... OPTIONS` statement form requires Neo4j 5.15+.
+
 ### Graph Shape
 
 ```go
@@ -1076,11 +1092,13 @@ All write methods return query structs (`NodeQuery`, `BatchNodeQuery`, `EdgeQuer
 
 | Option | Description |
 | ------ | ----------- |
-| `WithImmutableKeys` | Properties only set on creation, not updated. Node merges only. |
+| `WithImmutableKeys` | Properties only set on creation, not updated. Unions with schema-derived `@writeOnce` keys. Node merges only. |
 | `WithNodeChunkSize` | `UNWIND` batch size for node queries (default: 5000) |
 | `WithEdgeChunkSize` | `UNWIND` batch size for edge queries (default: 5000) |
 
-Immutable keys are validated against the schema at query-generation time: every key must name a declared property (own or inherited) of a node type being written. `NodeQueryFor` rejects a key that is not a property of its schema type (skipped when `schemaType` is nil); `BatchNodeQueries` rejects a key that is a property of no node type in the snapshot, while accepting a key real for at least one written type (it may legitimately apply to a subset of a multi-type snapshot). A mistyped key would otherwise be honored silently and the real property rewritten on every re-MERGE, defeating the write-once guarantee.
+Explicitly-passed immutable keys union with the immutable keys derived from a type's `@writeOnce` annotations. `ImmutableKeysFor(t *schema.Type) []string` returns a type's `@writeOnce` properties (own and inherited); the effective immutable set per written type is the union of explicit and derived keys, and `BatchNodeQueries` selects the `ON CREATE` / `ON MATCH` split per type (a non-empty explicit list still splits every type, preserving the prior contract).
+
+Only the explicitly-passed keys are validated against the schema at query-generation time: every one must name a declared property (own or inherited) of a node type being written. `NodeQueryFor` rejects a key that is not a property of its schema type (and skips both derivation and the check when `schemaType` is nil); `BatchNodeQueries` rejects a key that is a property of no node type in the snapshot, while accepting a key real for at least one written type (it may legitimately apply to a subset of a multi-type snapshot). A mistyped key would otherwise be honored silently and the real property rewritten on every re-MERGE, defeating the write-once guarantee. Derived `@writeOnce` keys are schema-true by construction and are not re-validated.
 
 ### Cypher Builders
 
@@ -1173,6 +1191,15 @@ diff := adapter.DiffConstraints(desired, actual, schemaName)
 
 `DiffConstraints` returns a `*ConstraintDiffResult` with `Match` (identical), `Drift` (same key, different definition), `Create` (missing from database), and `Drop` (in database but not in schema) sets.
 
+### Index Diffing
+
+```go
+// Compute the semantic diff between desired schema indexes and actual database indexes
+diff := adapter.DiffIndexes(desired, actual, schemaName)
+```
+
+`DiffIndexes` returns an `*IndexDiffResult` with `Match`, `Drift` (a vector index whose dimension or similarity differs), `Create`, and `Drop` sets. Composite property order is significant — a same-set/different-order remote index classifies as create + drop, a deliberate divergence from `DiffConstraints`. A schema-owned remote index with no declaration is reported as a drop; drops are reported, never applied.
+
 ### Introspection Queries
 
 ```go
@@ -1188,13 +1215,14 @@ This returns a parameterized Cypher query string and parameters — consumers ex
 | `IntrospectIndexesQuery()` | Static Cypher for `SHOW INDEXES YIELD *` |
 | `IntrospectRelationshipsQuery(labelPrefix)` | Parameterized Cypher for relationship topology discovery |
 | `ParseRemoteConstraints(records)` | Parse driver output into `[]RemoteConstraint` |
+| `ParseRemoteIndexes(records)` | Parse driver output into `[]RemoteIndex` (including the options map) |
 | `ParseRemoteRelationships(records)` | Parse driver output into `[]RemoteRelationship` |
 
 The introspection types are:
 
 - `RemoteConstraint` — constraint metadata (name, type, entity type, labels/types, properties, property type)
 - `RemoteRelationship` — relationship topology (relation type, source/target labels)
-- `RemoteIndex` — index metadata (name, type, entity type, labels/types, properties)
+- `RemoteIndex` — index metadata (name, type, entity type, labels/types, properties, options); `VectorDimensions()` and `VectorSimilarity()` read a vector index's configuration from the options map for drift detection
 
 ### Utility Functions
 

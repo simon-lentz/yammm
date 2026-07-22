@@ -186,6 +186,202 @@ func TestNodeQueryFor_ImmutableKeysNilSchemaType(t *testing.T) {
 	}
 }
 
+func TestNodeQueryFor_DerivedImmutableKeys(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
+	})
+
+	inst := graphResult.InstancesOf("Entity")[0]
+	ns := shape.Types["Entity"]
+	st, _ := s.Type("Entity")
+
+	// No WithImmutableKeys option: the @writeOnce annotations alone drive the
+	// immutable-key split.
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, ImmutableKeys); q.Statement != want {
+		t.Errorf("Statement = %q; want immutable-key builder output %q", q.Statement, want)
+	}
+	updateProps, ok := q.Params["update_props"].(map[string]any)
+	if !ok {
+		t.Fatal("update_props should be map[string]any")
+	}
+	for _, k := range []string{"first_seen", "origin"} {
+		if _, has := updateProps[k]; has {
+			t.Errorf("update_props should not contain derived immutable key %q", k)
+		}
+	}
+	if _, has := updateProps["name"]; !has {
+		t.Error("update_props should retain the mutable 'name' property")
+	}
+}
+
+func TestNodeQueryFor_DerivedUnionExplicit(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
+	})
+
+	inst := graphResult.InstancesOf("Entity")[0]
+	ns := shape.Types["Entity"]
+	st, _ := s.Type("Entity")
+
+	// Explicit "name" unions with derived first_seen/origin: all three excluded.
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st, WithImmutableKeys("name"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateProps, ok := q.Params["update_props"].(map[string]any)
+	if !ok {
+		t.Fatal("update_props should be map[string]any")
+	}
+	for _, k := range []string{"first_seen", "origin", "name"} {
+		if _, has := updateProps[k]; has {
+			t.Errorf("update_props should exclude union member %q", k)
+		}
+	}
+}
+
+func TestNodeQueryFor_UnannotatedTypeUnchanged(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Plain": {{"id": "p1", "name": "n"}},
+	})
+
+	inst := graphResult.InstancesOf("Plain")[0]
+	ns := shape.Types["Plain"]
+	st, _ := s.Type("Plain")
+
+	// No annotations and no explicit keys → mutable shape, no update_props.
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
+		t.Errorf("Statement = %q; want mutable builder output %q", q.Statement, want)
+	}
+	if _, has := q.Params["update_props"]; has {
+		t.Error("update_props should be absent for an unannotated type with no explicit keys")
+	}
+}
+
+func TestNodeQueryFor_NilSchemaTypeIgnoresAnnotations(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
+	})
+
+	inst := graphResult.InstancesOf("Entity")[0]
+	ns := shape.Types["Entity"]
+
+	// A nil schemaType cannot derive annotations: with no explicit keys the shape
+	// stays mutable, matching the nil pass-through contract.
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
+		t.Errorf("Statement = %q; want mutable builder output %q (nil schemaType ignores annotations)", q.Statement, want)
+	}
+}
+
+func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
+		"Plain":  {{"id": "p1", "name": "n"}},
+	})
+
+	// No option: @writeOnce drives the shape per type. Entity → immutable split;
+	// Plain → mutable.
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byType := map[string]*BatchNodeQuery{}
+	for _, q := range queries {
+		switch {
+		case strings.Contains(q.Statement, "wo_test__Entity"):
+			byType["Entity"] = q
+		case strings.Contains(q.Statement, "wo_test__Plain"):
+			byType["Plain"] = q
+		}
+	}
+	entityQ, ok := byType["Entity"]
+	if !ok {
+		t.Fatal("no Entity query")
+	}
+	plainQ, ok := byType["Plain"]
+	if !ok {
+		t.Fatal("no Plain query")
+	}
+
+	entityNS := shape.Types["Entity"]
+	if want := BuildBatchNodeMergeQuery(entityNS.Label, entityNS.PrimaryKeys, ImmutableKeys); entityQ.Statement != want {
+		t.Errorf("Entity statement = %q; want immutable split %q", entityQ.Statement, want)
+	}
+	plainNS := shape.Types["Plain"]
+	if want := BuildBatchNodeMergeQuery(plainNS.Label, plainNS.PrimaryKeys, MutableKeys); plainQ.Statement != want {
+		t.Errorf("Plain statement = %q; want mutable %q", plainQ.Statement, want)
+	}
+
+	// Entity rows exclude the derived keys from update_props.
+	for _, row := range entityQ.Params["rows"].([]map[string]any) {
+		up, ok := row["update_props"].(map[string]any)
+		if !ok {
+			t.Fatal("Entity row missing update_props")
+		}
+		for _, k := range []string{"first_seen", "origin"} {
+			if _, has := up[k]; has {
+				t.Errorf("Entity update_props should exclude derived key %q", k)
+			}
+		}
+	}
+	// Plain rows carry no update_props (mutable shape).
+	for _, row := range plainQ.Params["rows"].([]map[string]any) {
+		if _, has := row["update_props"]; has {
+			t.Error("Plain row should have no update_props")
+		}
+	}
+}
+
+// TestBatchNodeQueries_ExplicitKeysStillSplitEveryType pins the back-compat
+// contract: a non-empty explicit key list produces the split shape for every
+// type, including an unannotated one — byte-for-byte today's behavior.
+func TestBatchNodeQueries_ExplicitKeysStillSplitEveryType(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
+		"Plain":  {{"id": "p1", "name": "n"}},
+	})
+
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("name"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range queries {
+		if !strings.Contains(q.Statement, "ON CREATE SET") {
+			t.Errorf("an explicit key should force the split shape for every type: %q", q.Statement)
+		}
+	}
+}
+
 func TestBatchNodeQueries_ImmutableKeyUnknown(t *testing.T) {
 	t.Parallel()
 	a, s, v, shape := setupWrite(t, "basic.yammm")
