@@ -33,6 +33,32 @@ func TestAnnotation_Builder_ValidAnnotationsExposed(t *testing.T) {
 	}
 }
 
+// Build is a pure function of builder state: pending property annotations are
+// attached to a per-build copy, never appended to the retained property decls.
+// Appending in place made the second Build see each annotation twice and fail
+// with a duplicate-annotation error on input the first Build accepted.
+func TestAnnotation_Builder_BuildIsRepeatable(t *testing.T) {
+	t.Parallel()
+	b := schema.NewBuilder().WithName("main")
+	b.AddType("Trade").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("origin", schema.NewStringConstraint()).
+		WithPropertyAnnotation("origin", "writeOnce")
+
+	for _, label := range []string{"first", "second"} {
+		s, res := b.Build()
+		if res.HasErrors() {
+			t.Fatalf("%s build should succeed, got: %v", label, res)
+		}
+		if s == nil {
+			t.Fatalf("%s build returned a nil schema", label)
+		}
+		if got := propAnnNames(typeProperty(t, schemaType(t, s, "Trade"), "origin")); len(got) != 1 || got[0] != "writeOnce" {
+			t.Errorf("%s build: origin annotations = %v, want [writeOnce]", label, got)
+		}
+	}
+}
+
 func TestAnnotation_Builder_UnknownPropertyTarget(t *testing.T) {
 	t.Parallel()
 	_, res := schema.NewBuilder().

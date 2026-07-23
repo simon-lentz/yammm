@@ -124,8 +124,7 @@ func runGen(cmd *cobra.Command, args []string) error {
 		moduleRootAbs = absRoot
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRootAbs, absSchemaPath), schemaResult)
+	if renderLoadDiagnostics(cmd, outputFormat, noColor, s, moduleRootAbs, absSchemaPath, schemaResult) {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 

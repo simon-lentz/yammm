@@ -123,7 +123,7 @@ var annotationRegistry = map[annotationKey]annotationSpec{
 	{PlacementProperty, "vector"}: {
 		name: "vector", placement: PlacementProperty,
 		doc:      "Approximate-nearest-neighbour vector index on a Vector property.",
-		argHint:  "cosine | euclidean",
+		argHint:  vectorArgHint,
 		validate: validateVectorProperty,
 	},
 	{PlacementProperty, "writeOnce"}: {
@@ -170,6 +170,9 @@ func (c *completer) validatePropertyAnnotations(t *Type, prop *Property) {
 			c.reportUnknownOrMisplaced(a, PlacementProperty)
 			continue
 		}
+		if a.argsMalformed {
+			continue // the syntax error owns the diagnosis; see Annotation.argsMalformed
+		}
 		spec.validate(c, t, prop, a)
 	}
 }
@@ -190,6 +193,9 @@ func (c *completer) validateTypeAnnotations(t *Type) {
 		if !ok {
 			c.reportUnknownOrMisplaced(a, PlacementType)
 			continue
+		}
+		if a.argsMalformed {
+			continue // the syntax error owns the diagnosis; see Annotation.argsMalformed
 		}
 		spec.validate(c, t, nil, a)
 	}
@@ -226,14 +232,20 @@ func (c *completer) duplicateAnnotation(dup, first *Annotation, format string, a
 // validateIndexProperty checks @index: no arguments, and a scalar-kind target
 // that is not the type's sole primary key (a composite-PK member is allowed —
 // the composite backing index does not serve single-property lookups on it).
+//
+// The sole-primary-key redundancy check defers when the type has an unresolved
+// supertype: an unresolved ancestor's members are not merged, so primaryKeyCount
+// would undercount a key that is actually composite once the ancestor resolves
+// (where @index on one member IS allowed). This mirrors the deferral its sibling
+// checks perform — validateIndexType's deferUnknown and validatePrimaryKeys.
 func validateIndexProperty(c *completer, t *Type, prop *Property, a *Annotation) {
 	if a.argCount() > 0 {
 		c.errorf(a.Span(), diag.E_INVALID_ANNOTATION,
 			"@index takes no arguments; for a composite index use @@index(...) at the type level")
 		return
 	}
-	if c.primaryKeyTypeDeferred(prop.Constraint()) {
-		return // target constraint bottoms out in an unresolved alias; owned by alias resolution
+	if c.annotationTargetTypeUnknown(prop.Constraint()) {
+		return // the target's type is already diagnosed; blaming the annotation would bury it
 	}
 	if !isIndexableScalar(prop.Constraint()) {
 		c.errorf(prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
@@ -241,7 +253,7 @@ func validateIndexProperty(c *completer, t *Type, prop *Property, a *Annotation)
 			prop.Name(), constraintKindName(prop.Constraint()))
 		return
 	}
-	if prop.IsPrimaryKey() && primaryKeyCount(t) == 1 {
+	if prop.IsPrimaryKey() && !c.hasUnresolvedSupertype(t) && primaryKeyCount(t) == 1 {
 		c.errorf(prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
 			"@index on sole primary-key property %q is redundant; its uniqueness constraint already backs an index",
 			prop.Name())
@@ -253,10 +265,10 @@ func validateIndexProperty(c *completer, t *Type, prop *Property, a *Annotation)
 func validateVectorProperty(c *completer, _ *Type, prop *Property, a *Annotation) {
 	if len(a.args) != 1 || a.args[0].isLiteral() || !isVectorSimilarity(a.args[0].text) {
 		c.errorf(a.Span(), diag.E_INVALID_ANNOTATION,
-			"@vector takes exactly one similarity keyword: cosine or euclidean")
+			"@vector takes exactly one similarity keyword: %s", strings.Join(vectorSimilarityFunctions, " or "))
 		return
 	}
-	if c.primaryKeyTypeDeferred(prop.Constraint()) {
+	if c.annotationTargetTypeUnknown(prop.Constraint()) {
 		return
 	}
 	if !isVectorConstraint(prop.Constraint()) {
@@ -318,7 +330,7 @@ func validateIndexType(c *completer, t *Type, _ *Property, a *Annotation) {
 			}
 			continue
 		}
-		if c.primaryKeyTypeDeferred(ref.Constraint()) {
+		if c.annotationTargetTypeUnknown(ref.Constraint()) {
 			continue
 		}
 		if !isIndexableScalar(ref.Constraint()) {
@@ -329,6 +341,20 @@ func validateIndexType(c *completer, t *Type, _ *Property, a *Annotation) {
 		}
 		a.setArgKind(i, ArgPropertyRef)
 	}
+}
+
+// annotationTargetTypeUnknown reports whether an annotation target's type cannot
+// be judged at annotation-validation time, in which case the eligibility check
+// must defer. Two shapes qualify, and both already carry their own diagnostic:
+//
+//   - A nil constraint, left by parse-error recovery on a property whose type
+//     failed to build (E_SYNTAX or E_INVALID_CONSTRAINT). Checking eligibility
+//     here would blame the annotation for the type's failure and describe a
+//     property that plainly declares a type as "missing type".
+//   - A constraint bottoming out in an unresolved alias (a deferred import, a
+//     cyclic local chain), which alias resolution owns.
+func (c *completer) annotationTargetTypeUnknown(constraint Constraint) bool {
+	return constraint == nil || c.primaryKeyTypeDeferred(constraint)
 }
 
 // isIndexableScalar reports whether a property constraint's underlying kind is a
@@ -371,10 +397,28 @@ func primaryKeyCount(t *Type) int {
 	return n
 }
 
+// vectorSimilarityFunctions is the blessed set of @vector similarity keywords —
+// the single source of truth consumed by isVectorSimilarity, the @vector
+// diagnostic, the registry arg hint, and (via VectorSimilarityFunctions) the LSP
+// completer. Adding or renaming a function is one edit here.
+var vectorSimilarityFunctions = []string{"cosine", "euclidean"}
+
+// vectorArgHint is the @vector completion hint, derived from
+// vectorSimilarityFunctions so the displayed set cannot drift from the accepted
+// one.
+var vectorArgHint = strings.Join(vectorSimilarityFunctions, " | ")
+
+// VectorSimilarityFunctions returns the similarity keywords the @vector
+// annotation accepts, in canonical order. Editor tooling sources its completion
+// set from this so a suggested keyword cannot drift from what the loader accepts.
+func VectorSimilarityFunctions() []string {
+	return slices.Clone(vectorSimilarityFunctions)
+}
+
 // isVectorSimilarity reports whether s is a recognised @vector similarity
 // keyword.
 func isVectorSimilarity(s string) bool {
-	return s == "cosine" || s == "euclidean"
+	return slices.Contains(vectorSimilarityFunctions, s)
 }
 
 // argList joins an annotation's argument texts for a diagnostic message.

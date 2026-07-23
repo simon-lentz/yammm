@@ -232,6 +232,10 @@ func (dt *defsTable) edgeDefName(rel *schema.Relation) (string, bool) {
 // dtPropName reports the datatype $defs key for a DataType-typed property.
 // Its signature satisfies schemaForProperty's dtRef callback.
 func (dt *defsTable) dtPropName(p *schema.Property) (string, bool) {
-	n, ok := dt.dtProps[p]
+	// Keyed by the DECLARED property (see the record loop above, which walks own
+	// property slices). Origin() bridges to it from a merged view, where a property
+	// whose annotations were unioned across ancestors is a synthesized copy that is
+	// in no type's own slice.
+	n, ok := dt.dtProps[p.Origin()]
 	return n, ok
 }

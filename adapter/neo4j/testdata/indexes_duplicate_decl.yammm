@@ -1,0 +1,8 @@
+schema "dup_decl_test"
+
+type Publisher {
+    pid  String primary
+    name String @index
+
+    @@index(name)
+}

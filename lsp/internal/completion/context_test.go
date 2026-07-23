@@ -34,7 +34,8 @@ func TestDetectContext_TopLevel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.expected, DetectContext(textToDoc(tt.text), tt.line, tt.char))
+			got, _ := DetectContext(textToDoc(tt.text), tt.line, tt.char)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -57,7 +58,8 @@ func TestDetectContext_TypeBody(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.expected, DetectContext(textToDoc(tt.text), tt.line, tt.char))
+			got, _ := DetectContext(textToDoc(tt.text), tt.line, tt.char)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -79,7 +81,8 @@ func TestDetectContext_Extends(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.expected, DetectContext(textToDoc(tt.text), tt.line, tt.char))
+			got, _ := DetectContext(textToDoc(tt.text), tt.line, tt.char)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -100,7 +103,8 @@ func TestDetectContext_PropertyType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.expected, DetectContext(textToDoc(tt.text), tt.line, tt.char))
+			got, _ := DetectContext(textToDoc(tt.text), tt.line, tt.char)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -122,7 +126,8 @@ func TestDetectContext_RelationTarget(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.expected, DetectContext(textToDoc(tt.text), tt.line, tt.char))
+			got, _ := DetectContext(textToDoc(tt.text), tt.line, tt.char)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -130,7 +135,8 @@ func TestDetectContext_RelationTarget(t *testing.T) {
 func TestDetectContext_Import(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, ImportPath, DetectContext(textToDoc("import "), 0, 7))
+	got, _ := DetectContext(textToDoc("import "), 0, 7)
+	assert.Equal(t, ImportPath, got)
 }
 
 func TestIsIdentifier(t *testing.T) {
@@ -453,7 +459,7 @@ func TestDetectContext_UTF8_MultiByteChars(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := DetectContext(textToDoc(text), tt.line, tt.charByte)
+			result, _ := DetectContext(textToDoc(text), tt.line, tt.charByte)
 			assert.GreaterOrEqual(t, int(result), int(Unknown))
 			assert.LessOrEqual(t, int(result), int(ImportPath))
 		})
@@ -480,7 +486,7 @@ func TestDetectContext_UTF8_Emoji(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := DetectContext(textToDoc(text), 0, tt.charByte)
+			result, _ := DetectContext(textToDoc(text), 0, tt.charByte)
 			assert.GreaterOrEqual(t, int(result), int(Unknown))
 			assert.LessOrEqual(t, int(result), int(ImportPath))
 		})

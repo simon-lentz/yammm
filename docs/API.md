@@ -205,8 +205,11 @@ Annotations declared in `.yammm` (or via the Builder methods above) are carried 
 - `Type.Annotations()` / `AllAnnotations()` (with `*Slice` variants) — a type's `@@` members (own, and own-plus-inherited).
 - `Annotation` exposes `Name()`, `Args() []AnnotationArg`, `Documentation()`, `Span()`; `AnnotationArg` exposes `Text()`, `Kind() AnnotationArgKind`, `Span()`.
 - `schema.AnnotationSpecs() []AnnotationSpec` returns the built-in registry for editor tooling — a read-only surface, not a registration API. Each `AnnotationSpec` exposes `Name()`, `Placement() AnnotationPlacement` (`PlacementProperty` or `PlacementType`), `Documentation()`, and `ArgHint()`.
+- `schema.VectorSimilarityFunctions() []string` returns the similarity keywords `@vector` accepts, so tooling cannot suggest one the loader rejects.
 
 Annotation structure and eligibility are validated at load; see [SPEC.md](SPEC.md#annotations) for the blessed set and the diagnostics they produce.
+
+**Merged views and property identity.** A property inherited from several ancestors carries the union of their annotations, so the entry in `Type.AllProperties()` / `AllPropertiesSlice()` may be a *synthesized* copy rather than the `*Property` its declaring type holds in `PropertiesSlice()`. `Property.Origin() *Property` returns the declared property — itself when nothing was merged — and is the correct key for any map built from declared properties and read back over a merged view. Everything `Origin()` discards is annotation state: name, constraint, datatype reference, optionality, primary-key status, span, and declaring scope are preserved on the copy.
 
 ## Instance Validation
 

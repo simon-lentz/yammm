@@ -92,3 +92,40 @@ type Document {
 		t.Errorf("want E_SYNTAX for a bare @ at type-body start, got: %v", res)
 	}
 }
+
+// ANTLR's error recovery leaves an argument context with no matched alternative
+// when an argument list is empty (`@index()`, itself a syntax error). Carrying
+// that as an argument used to drive a contradictory semantic diagnostic on top
+// of the syntax error: a zero-argument call told it has arguments, or a
+// composite blamed for referencing an empty-named property. The syntax error
+// owns the diagnosis; no annotation diagnostic may pile on.
+func TestAnnotation_Parse_EmptyArgListNoSemanticCascade(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"index", "\tx String @index()"},
+		{"vector", "\te Vector[8] @vector()"},
+		{"compositeIndex", "\tx String\n\t@@index()"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			res := loadStringErr(t, "schema \"main\"\ntype T {\n\tid String primary\n"+tt.body+"\n}")
+			if !res.HasCode(diag.E_SYNTAX) {
+				t.Fatalf("precondition: an empty argument list is a syntax error, got: %v", res)
+			}
+			counts := codeCounts(res)
+			for _, code := range []diag.Code{
+				diag.E_INVALID_ANNOTATION,
+				diag.E_INVALID_ANNOTATION_TARGET,
+				diag.E_UNKNOWN_ANNOTATION_TARGET,
+			} {
+				if n := counts[code]; n != 0 {
+					t.Errorf("a malformed argument list must not cascade into %d %s: %v", n, code, res)
+				}
+			}
+		})
+	}
+}

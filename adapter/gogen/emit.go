@@ -454,9 +454,12 @@ func (g *generator) goFieldType(owner *schema.Type, p *schema.Property) (string,
 	switch {
 	case isAlias(c):
 		// The DataType's Go name was resolved in the property's DECLARING schema by
-		// registerDataTypeFields (keyed by the property pointer), so a property
-		// inherited from a cross-schema parent still maps to the right named type.
-		name, ok := g.dtFieldNames[p]
+		// registerDataTypeFields (keyed by the declared property pointer), so a
+		// property inherited from a cross-schema parent still maps to the right named
+		// type. Origin() bridges the two views: a property whose annotations were
+		// merged across ancestors reaches emission as a synthesized copy that is not
+		// in any type's own slice, so keying by the raw pointer would miss it.
+		name, ok := g.dtFieldNames[p.Origin()]
 		if !ok {
 			dtName := "?"
 			if ac, isA := c.(schema.AliasConstraint); isA {

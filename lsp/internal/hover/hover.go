@@ -30,7 +30,7 @@ func AtPosition(
 	// so recognize @name / @@name under the cursor from the line text and return
 	// the registry documentation directly, before any symbol lookup (which would
 	// otherwise resolve to the enclosing type symbol).
-	if h := annotationHoverAt(doc, line, char); h != nil {
+	if h := annotationHoverAt(doc, line, char, enc); h != nil {
 		return h, nil
 	}
 
@@ -80,9 +80,11 @@ func AtPosition(
 
 // annotationHoverAt returns hover content for an annotation name under the
 // cursor, or nil if the cursor is not on one. It is a line heuristic — it reads
-// only the document text, so it works without a parsed schema. The char offset
-// is treated as a byte column (annotation names and their lines are ASCII).
-func annotationHoverAt(doc *docstate.Snapshot, line, char int) *protocol.Hover {
+// only the document text, so it works without a parsed schema. The LSP char is
+// UTF-16 (or the negotiated encoding), so it is converted to a byte column
+// before scanning; annotation names remain ASCII but a preceding token on the
+// line may be multi-byte.
+func annotationHoverAt(doc *docstate.Snapshot, line, char int, enc lsputil.PositionEncoding) *protocol.Hover {
 	if doc == nil {
 		return nil
 	}
@@ -91,8 +93,8 @@ func annotationHoverAt(doc *docstate.Snapshot, line, char int) *protocol.Hover {
 		return nil
 	}
 	l := lines[line]
-	col := min(char, len(l))
-	placement, name, start, end, ok := annotationTokenAt(l, col)
+	col := lsputil.CharToByteOnLine([]byte(l), char, enc)
+	placement, name, start, end, ok := annotationTokenAt(l, col, doc.LineStartsInBlockComment(line))
 	if !ok {
 		return nil
 	}
@@ -104,20 +106,39 @@ func annotationHoverAt(doc *docstate.Snapshot, line, char int) *protocol.Hover {
 	if spec.ArgHint() != "" {
 		value += "\n\n*Arguments:* " + spec.ArgHint()
 	}
+	// start/end are byte columns; the protocol wants the negotiated encoding, so
+	// they convert back out the same way SpanToLSPRange converts every other
+	// hover range. Annotation names are ASCII, but a preceding token on the line
+	// (a Pattern or Enum literal) may not be, and an un-converted byte column
+	// would put the client's highlight to the right of the token.
+	lineBytes := []byte(l)
 	return &protocol.Hover{
 		Contents: protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: value},
 		Range: &protocol.Range{
-			Start: protocol.Position{Line: lsputil.ToUInteger(line), Character: lsputil.ToUInteger(start)},
-			End:   protocol.Position{Line: lsputil.ToUInteger(line), Character: lsputil.ToUInteger(end)},
+			Start: protocol.Position{
+				Line:      lsputil.ToUInteger(line),
+				Character: lsputil.ToUInteger(lsputil.ByteLenToCharLen(lineBytes, start, enc)),
+			},
+			End: protocol.Position{
+				Line:      lsputil.ToUInteger(line),
+				Character: lsputil.ToUInteger(lsputil.ByteLenToCharLen(lineBytes, end, enc)),
+			},
 		},
 	}
 }
 
 // annotationTokenAt finds an @name / @@name token on the line spanning the byte
-// column, returning its placement, name, and start/end byte columns.
-func annotationTokenAt(line string, col int) (placement schema.AnnotationPlacement, name string, start, end int, ok bool) {
+// column, returning its placement, name, and start/end byte columns. An '@'
+// inside a string literal or comment is not an annotation token, so it is
+// skipped — startInBlockComment carries the block-comment state at the start of
+// the line.
+func annotationTokenAt(line string, col int, startInBlockComment bool) (placement schema.AnnotationPlacement, name string, start, end int, ok bool) {
 	for i := 0; i < len(line); {
 		if line[i] != '@' {
+			i++
+			continue
+		}
+		if docstate.InStringOrComment(line, i, startInBlockComment) {
 			i++
 			continue
 		}

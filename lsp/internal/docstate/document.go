@@ -33,3 +33,24 @@ type Snapshot struct {
 	Text      string
 	LineState *LineState // Cached brace depth per line (may be nil)
 }
+
+// LineStartsInBlockComment reports whether the given 0-based line begins inside
+// a block comment, read from the cached per-line state when it is present and
+// current. Returns false when no line state is available (before the first
+// analysis, or in a parse-independent test), which is the right answer for a
+// comment opened and closed on the same line.
+//
+// It is the single owner of that question for the token scanners that must skip
+// commented-out text — [InStringOrComment] can only see the line handed to it,
+// so a scanner that answers this for itself sees a continuation line as clean
+// code.
+func (s *Snapshot) LineStartsInBlockComment(line int) bool {
+	if s == nil || s.LineState == nil || s.LineState.Version != s.Version {
+		return false
+	}
+	prev := line - 1
+	if prev < 0 || prev >= len(s.LineState.InBlockComment) {
+		return false
+	}
+	return s.LineState.InBlockComment[prev]
+}

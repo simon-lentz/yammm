@@ -108,6 +108,11 @@ type Property struct {
 	isPrimaryKey bool
 	scope        DeclaringScope
 	annotations  []*Annotation // property-trailing @name(args) decorators, in source order
+
+	// origin points at the declared Property this one was synthesized from
+	// during inheritance merging, and is nil on a declared property. See
+	// [Property.Origin].
+	origin *Property
 }
 
 // newProperty creates a new Property.
@@ -228,6 +233,41 @@ func (p *Property) Annotation(name string) (*Annotation, bool) {
 		}
 	}
 	return nil, false
+}
+
+// Origin returns the property as declared: p itself for a property a type
+// declares, and the declaring ancestor's property for one synthesized while
+// merging a property inherited from several ancestors (a merged view carries the
+// union of those ancestors' annotations, which no single declared property
+// holds). Never nil.
+//
+// Use it as the key of any identity-keyed map built from declared properties
+// ([Type.PropertiesSlice], [Relation.PropertiesSlice]) and read back while
+// iterating a merged view ([Type.AllPropertiesSlice]): the two views are not
+// pointer-identical for a synthesized property, and Origin bridges them.
+// Everything Origin discards is annotation state; name, constraint, datatype
+// reference, optionality, primary-key status, span, and declaring scope are all
+// preserved on the synthesized copy.
+func (p *Property) Origin() *Property {
+	if p.origin != nil {
+		return p.origin
+	}
+	return p
+}
+
+// cloneWithAnnotations returns a shallow copy of p carrying the given annotation
+// set in place of p's own. Used during linearization to give a type a merged
+// view of a property inherited from multiple ancestors without mutating the
+// shared ancestor *Property; every other field is preserved from p.
+//
+// The copy records p's declared origin so identity-keyed consumers can recover
+// it (see [Property.Origin]). Origins are flattened, so a copy of a copy still
+// points at the declared property rather than at an intermediate merge result.
+func (p *Property) cloneWithAnnotations(anns []*Annotation) *Property {
+	clone := *p
+	clone.annotations = anns
+	clone.origin = p.Origin()
+	return &clone
 }
 
 // CanNarrowFrom reports whether this (child) property is a valid narrowing of

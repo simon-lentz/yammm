@@ -1,0 +1,8 @@
+schema "badident_multi_test"
+
+type Thing {
+    thing_id String primary
+    match    String @index
+    other    String
+    @@index(match, other)
+}

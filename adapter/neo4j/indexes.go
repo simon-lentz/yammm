@@ -3,6 +3,7 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"iter"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -18,6 +19,12 @@ const (
 	IndexRange  IndexKind = iota // Range (lookup) index over one or more scalar properties.
 	IndexVector                  // Approximate-nearest-neighbour vector index.
 )
+
+// allIndexKinds lists every [IndexKind], for the code that must enumerate the
+// enum rather than switch on one value — notably deciding which remote index
+// types the diff owns. [TestIndexKind_AllKindsMapToRemoteType] guards it against
+// drifting from [indexKindToRemoteType].
+var allIndexKinds = []IndexKind{IndexRange, IndexVector}
 
 // Index is a structured representation of a single Neo4j index derived from a
 // schema's @index, @@index, and @vector annotations.
@@ -86,30 +93,7 @@ func (a *Adapter) IndexesStructured(ctx context.Context, s *schema.Schema) ([]In
 	collector.Merge(a.DetectLabelCollisions(ctx, s))
 
 	var indexes []Index
-
-	for _, t := range s.TypesSlice() {
-		name := t.Name()
-		if name == "" || t.IsAbstract() {
-			continue
-		}
-
-		label := a.Label(ctx, s.Name(), name)
-		if label == "" {
-			continue
-		}
-
-		if err := ValidateIdentifier(label, fmt.Sprintf("type %q label", name)); err != nil {
-			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-				fmt.Sprintf("invalid label for type %q: %s", name, err)).
-				WithDetail(diag.DetailKeyFormat, "neo4j").
-				WithDetail(diag.DetailKeyTypeName, name).
-				WithDetail(detailKeyLabel, label).
-				WithDetail(diag.DetailKeyDetail, err.Error()).
-				Build()
-			collector.Collect(issue)
-			continue
-		}
-
+	for t, label := range a.emittableTypes(ctx, s, collector) {
 		indexes = append(indexes, indexesForType(t, label, collector)...)
 	}
 
@@ -122,41 +106,104 @@ func (a *Adapter) IndexesStructured(ctx context.Context, s *schema.Schema) ([]In
 	return indexes, result
 }
 
+// emittableTypes yields each (type, label) pair for the named, non-abstract
+// types of s whose label is a valid Neo4j identifier, in schema declaration
+// order. A type whose label fails identifier validation is skipped after
+// collecting E_NEO4J_INVALID_IDENTIFIER. This is the shared skeleton of
+// [Adapter.ConstraintsStructured], [Adapter.IndexesStructured], and
+// [Adapter.ShapeForSchema], which otherwise re-implement the same
+// name/abstract/label/validate gate verbatim.
+func (a *Adapter) emittableTypes(ctx context.Context, s *schema.Schema, collector *diag.Collector) iter.Seq2[*schema.Type, string] {
+	return func(yield func(*schema.Type, string) bool) {
+		for _, t := range s.TypesSlice() {
+			name := strings.TrimSpace(t.Name())
+			if name == "" || t.IsAbstract() {
+				continue
+			}
+			label := a.Label(ctx, s.Name(), name)
+			if label == "" {
+				continue
+			}
+			if err := ValidateIdentifier(label, fmt.Sprintf("type %q label", name)); err != nil {
+				collector.Collect(invalidLabelIssue(name, label, err))
+				continue
+			}
+			if !yield(t, label) {
+				return
+			}
+		}
+	}
+}
+
+// invalidLabelIssue builds the E_NEO4J_INVALID_IDENTIFIER diagnostic for a type
+// whose Neo4j label fails identifier validation. Shared by the emittable-type
+// gate so the constraint, index, and shape emitters report an invalid label
+// identically.
+func invalidLabelIssue(typeName, label string, err error) diag.Issue {
+	return diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
+		fmt.Sprintf("invalid label for type %q: %s", typeName, err)).
+		WithDetail(diag.DetailKeyFormat, "neo4j").
+		WithDetail(diag.DetailKeyTypeName, typeName).
+		WithDetail(detailKeyLabel, label).
+		WithDetail(diag.DetailKeyDetail, err.Error()).
+		Build()
+}
+
 // indexesForType generates all indexes for one emitted (non-abstract) type in
 // deterministic order: range indexes, then vector indexes (both in property
 // order), then composite @@index indexes (in annotation order).
+//
+// Two declarations that describe the SAME index — @index on a property plus a
+// single-property @@index over it, which load-time validation accepts because
+// neither placement's check inspects the other — collapse to one. Emitting both
+// would trip the name-collision check and leave a valid schema unable to emit any
+// index DDL, for two definitions that are not in conflict at all.
 func indexesForType(t *schema.Type, label string, collector *diag.Collector) []Index {
 	var indexes []Index
+	emitted := make(map[string]bool)
+	add := func(idx Index) {
+		key := desiredIndexKey(idx)
+		if emitted[key] {
+			return
+		}
+		emitted[key] = true
+		indexes = append(indexes, idx)
+	}
+
+	// A property named by more than one index annotation (e.g. a reserved
+	// keyword under both @index and @@index) must draw its invalid-identifier
+	// diagnostic once, not once per reference.
+	reportedInvalid := make(map[string]bool)
 
 	// 1. Range indexes from property-level @index.
-	for _, prop := range t.AllPropertiesSlice() {
+	for prop := range t.AllProperties() {
 		if _, ok := prop.Annotation("index"); !ok {
 			continue
 		}
-		if !validIndexProperty(t, prop.Name(), collector) {
+		if !validIndexProperty(t, prop.Name(), collector, reportedInvalid) {
 			continue
 		}
-		indexes = append(indexes, rangeIndex(label, []string{prop.Name()}))
+		add(rangeIndex(label, []string{prop.Name()}))
 	}
 
 	// 2. Vector indexes from property-level @vector.
-	for _, prop := range t.AllPropertiesSlice() {
+	for prop := range t.AllProperties() {
 		ann, ok := prop.Annotation("vector")
 		if !ok {
 			continue
 		}
-		if !validIndexProperty(t, prop.Name(), collector) {
+		if !validIndexProperty(t, prop.Name(), collector, reportedInvalid) {
 			continue
 		}
 		vc, ok := schema.ResolveAlias(prop.Constraint()).(schema.VectorConstraint)
 		if !ok {
 			continue // Load-time validation guarantees a Vector target; defensive.
 		}
-		indexes = append(indexes, vectorIndex(label, prop.Name(), vc.Dimension(), ann.Args()[0].Text()))
+		add(vectorIndex(label, prop.Name(), vc.Dimension(), ann.Args()[0].Text()))
 	}
 
 	// 3. Composite range indexes from type-level @@index.
-	for _, ann := range t.AllAnnotationsSlice() {
+	for ann := range t.AllAnnotations() {
 		if ann.Name() != "index" {
 			continue
 		}
@@ -164,7 +211,7 @@ func indexesForType(t *schema.Type, label string, collector *diag.Collector) []I
 		props := make([]string, 0, len(args))
 		valid := true
 		for _, arg := range args {
-			if !validIndexProperty(t, arg.Text(), collector) {
+			if !validIndexProperty(t, arg.Text(), collector, reportedInvalid) {
 				valid = false
 				continue
 			}
@@ -173,7 +220,7 @@ func indexesForType(t *schema.Type, label string, collector *diag.Collector) []I
 		if !valid || len(props) == 0 {
 			continue
 		}
-		indexes = append(indexes, rangeIndex(label, props))
+		add(rangeIndex(label, props))
 	}
 
 	return indexes
@@ -181,17 +228,21 @@ func indexesForType(t *schema.Type, label string, collector *diag.Collector) []I
 
 // validIndexProperty reports E_NEO4J_INVALID_IDENTIFIER and returns false when a
 // property name is not a valid Neo4j identifier. A valid DSL property name can
-// still be an invalid Neo4j identifier (e.g., a Cypher reserved keyword).
-func validIndexProperty(t *schema.Type, propName string, collector *diag.Collector) bool {
+// still be an invalid Neo4j identifier (e.g., a Cypher reserved keyword). The
+// reported set dedups the diagnostic across a property named by multiple index
+// annotations, so one invalid property yields one diagnostic per type.
+func validIndexProperty(t *schema.Type, propName string, collector *diag.Collector, reported map[string]bool) bool {
 	if err := ValidateIdentifier(propName, fmt.Sprintf("type %q property", t.Name())); err != nil {
-		issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-			fmt.Sprintf("invalid property %q on type %q: %s", propName, t.Name(), err)).
-			WithDetail(diag.DetailKeyFormat, "neo4j").
-			WithDetail(diag.DetailKeyTypeName, t.Name()).
-			WithDetail(diag.DetailKeyPropertyName, propName).
-			WithDetail(diag.DetailKeyDetail, err.Error()).
-			Build()
-		collector.Collect(issue)
+		if !reported[propName] {
+			reported[propName] = true
+			collector.Collect(diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
+				fmt.Sprintf("invalid property %q on type %q: %s", propName, t.Name(), err)).
+				WithDetail(diag.DetailKeyFormat, "neo4j").
+				WithDetail(diag.DetailKeyTypeName, t.Name()).
+				WithDetail(diag.DetailKeyPropertyName, propName).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build())
+		}
 		return false
 	}
 	return true

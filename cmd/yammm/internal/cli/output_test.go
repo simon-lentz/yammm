@@ -119,8 +119,8 @@ func TestRenderResult_Text_SurfacesTruncation(t *testing.T) {
 func TestRenderResult_Text_SurfacesTruncationOnOKResult(t *testing.T) {
 	t.Parallel()
 
-	// All-warning truncation: the result is OK (no errors) so no issues
-	// render, but the drop must still be visible.
+	// All-warning truncation: the result is OK (no errors), and the drop must be
+	// visible alongside the retained warnings.
 	res := truncatedResult(diag.Warning, 7, 5)
 	require.True(t, res.LimitReached())
 	require.True(t, res.OK())
@@ -149,9 +149,9 @@ func TestRenderResult_JSON_CarriesTruncationFields(t *testing.T) {
 func TestRenderResult_JSON_SurfacesTruncationOnOKResult(t *testing.T) {
 	t.Parallel()
 
-	// All-warning truncation: the result is OK, so the OK early-return path
-	// handles it — but JSON must still emit the truncation wire fields, or a
-	// machine consumer cannot distinguish a truncated result from a clean one.
+	// All-warning truncation: the result is OK, and JSON must emit the truncation
+	// wire fields, or a machine consumer cannot distinguish a truncated result
+	// from a clean one.
 	res := truncatedResult(diag.Warning, 8, 6)
 	require.True(t, res.LimitReached())
 	require.True(t, res.OK())
@@ -176,4 +176,36 @@ func TestExitError(t *testing.T) {
 
 	e3 := &ExitError{Code: ExitRuntime}
 	assert.Equal(t, "runtime error", e3.Error())
+}
+
+// A warnings-only result renders. A load warning exists because the loader chose
+// not to reject, so gating rendering on error severity would make every warning
+// unreachable from the CLI — including the only signal that an inherited
+// annotation was silently dropped.
+func TestRenderResult_Text_RendersWarningOnlyResult(t *testing.T) {
+	t.Parallel()
+
+	c := diag.NewCollectorUnlimited()
+	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, "dropped an inherited annotation").Build())
+	res := c.Result()
+	require.True(t, res.OK(), "precondition: a warnings-only result is OK")
+
+	renderer := diag.NewRenderer()
+	var buf bytes.Buffer
+	err := RenderResult(&buf, renderer, FormatText, res)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "dropped an inherited annotation")
+}
+
+func TestRenderResult_JSON_RendersWarningOnlyResult(t *testing.T) {
+	t.Parallel()
+
+	c := diag.NewCollectorUnlimited()
+	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, "dropped an inherited annotation").Build())
+
+	renderer := diag.NewRenderer()
+	var buf bytes.Buffer
+	err := RenderResult(&buf, renderer, FormatJSON, c.Result())
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), `"severity":"warning"`)
 }

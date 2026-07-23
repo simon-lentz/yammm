@@ -3,6 +3,7 @@ package schema
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -319,21 +320,10 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 func (b *Builder) convertTypes() []*typeDecl {
 	result := make([]*typeDecl, len(b.types))
 	for i, state := range b.types {
-		// Attach pending property-level annotations to their properties.
-		// validateInput has already reported any that name no property, so an
-		// unmatched entry here is simply skipped.
-		for _, pend := range state.pendingPropertyAnnotations {
-			for _, pd := range state.properties {
-				if pd.Name == pend.propertyName {
-					pd.Annotations = append(pd.Annotations, pend.decl)
-					break
-				}
-			}
-		}
 		result[i] = &typeDecl{
 			Name:          state.name,
 			Inherits:      state.inherits,
-			Properties:    state.properties,
+			Properties:    propertiesWithPendingAnnotations(state),
 			Relations:     state.relations,
 			Invariants:    state.invariants,
 			Annotations:   state.annotations,
@@ -344,6 +334,41 @@ func (b *Builder) convertTypes() []*typeDecl {
 		}
 	}
 	return result
+}
+
+// propertiesWithPendingAnnotations returns state's property declarations with
+// the annotations added via [TypeBuilder.WithPropertyAnnotation] attached to
+// their targets. validateInput has already reported any that name no property,
+// so an unmatched entry here is simply skipped, and — matching that check — an
+// annotation binds to the FIRST property of its name.
+//
+// A property that gains an annotation is copied, along with its annotation
+// slice, so nothing the Builder retains is mutated: Build is a pure function of
+// builder state and may be called repeatedly. Appending to the retained
+// declarations instead made every later Build see each annotation once more and
+// fail the duplicate-annotation check on input the first Build accepted.
+func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
+	if len(state.pendingPropertyAnnotations) == 0 {
+		return state.properties
+	}
+	out := slices.Clone(state.properties)
+	copied := make(map[int]bool, len(state.pendingPropertyAnnotations))
+	for _, pend := range state.pendingPropertyAnnotations {
+		for i, pd := range out {
+			if pd.Name != pend.propertyName {
+				continue
+			}
+			if !copied[i] {
+				dup := *pd
+				dup.Annotations = slices.Clone(pd.Annotations)
+				out[i] = &dup
+				copied[i] = true
+			}
+			out[i].Annotations = append(out[i].Annotations, pend.decl)
+			break
+		}
+	}
+	return out
 }
 
 // validateInput performs shallow validation of builder input before completion:

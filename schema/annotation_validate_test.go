@@ -295,3 +295,32 @@ type T {
 	}
 	t.Fatalf("expected an E_INVALID_ANNOTATION issue, got: %v", res)
 }
+
+// A property whose constraint never built — parse-error recovery leaves it nil —
+// must not draw a second, misleading annotation-target diagnostic on top of the
+// constraint error that is the real cause. The old phrasing blamed the
+// annotation and called a property that plainly declares a type "missing type".
+func TestAnnotation_Validation_UnbuiltConstraintNoTargetCascade(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"vector", "\te Vector[0] @vector(cosine)"},
+		{"index", "\te Vector[0] @index"},
+		{"compositeIndex", "\te Vector[0]\n\t@@index(e)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			res := loadStringErr(t, "schema \"main\"\ntype T {\n\tid String primary\n"+tt.body+"\n}")
+			if !res.HasCode(diag.E_INVALID_CONSTRAINT) {
+				t.Fatalf("precondition: the constraint error should be reported, got: %v", res)
+			}
+			if n := codeCounts(res)[diag.E_INVALID_ANNOTATION_TARGET]; n != 0 {
+				t.Errorf("an unbuilt constraint must not cascade into %d annotation-target error(s): %v",
+					n, res)
+			}
+		})
+	}
+}

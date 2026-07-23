@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -363,6 +364,12 @@ func (c *completer) resolveTypeID(id TypeID) *Type {
 // Identical properties from different ancestors are deduplicated (keep-first).
 // When a child re-declares a parent property, constraint narrowing is attempted:
 // the child's version is accepted if it narrows the parent's (via CanNarrowFrom).
+//
+// Whenever two ancestors contribute the same property — equal, or one narrowing
+// the other — the merged property carries the union of both ancestors'
+// annotations, so a semantic marker (e.g. @writeOnce) is never dropped by
+// extends order. Only a child's own re-declaration drops inherited annotations,
+// and that draws W_ANNOTATION_SHADOWED.
 func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Property {
 	// Start with own properties
 	result := t.PropertiesSlice()
@@ -372,6 +379,12 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 		seen[p.Name()] = p
 		ownProps[p.Name()] = true
 	}
+
+	// One inheritance conflict is one diagnostic. The loop below visits every
+	// linearized ancestor, and an ancestor that merely INHERITS the annotated
+	// property yields the same *Property its own ancestor declared, so the same
+	// annotation conflict is re-detected once per ancestor in the chain.
+	reportedConflicts := make(map[string]bool)
 
 	// Add inherited properties in linearized order
 	for _, superRef := range supers {
@@ -391,22 +404,31 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 			if p.Equal(existing) {
 				// An own declaration that re-declares an inherited property
 				// identically wins keep-first; warn if it drops the inherited
-				// annotations. Keep-first between two equal ancestors (ownProps
-				// false) is silent by design — the dedup exists to merge them.
+				// annotations.
 				if ownProps[p.Name()] {
 					c.warnShadowedAnnotations(existing, p)
+					continue
 				}
+				// Two Equal ancestors: union their annotation sets so a semantic
+				// marker (e.g. @writeOnce) is not silently dropped based on which
+				// ancestor is linearized first.
+				c.foldAnnotationsIntoSurvivor(t, result, seen, reportedConflicts, existing, p)
 				continue
 			}
 
 			// Check if existing (child's own or earlier ancestor) narrows the inherited
 			if existing.CanNarrowFrom(p) {
-				// A narrowing own declaration wins; warn if it drops the
-				// inherited annotations, same as the identical-re-declaration case.
 				if ownProps[p.Name()] {
+					// A narrowing own declaration wins; warn if it drops the
+					// inherited annotations, same as the identical-re-declaration case.
 					c.warnShadowedAnnotations(existing, p)
+					continue
 				}
-				continue // Existing narrower version is already in result
+				// An earlier ancestor's narrower property survives over a later
+				// ancestor's wider copy; union the dropped copy's annotations into
+				// it, same as the two-Equal-ancestors case.
+				c.foldAnnotationsIntoSurvivor(t, result, seen, reportedConflicts, existing, p)
+				continue
 			}
 
 			// Check if inherited narrows the existing (from another ancestor).
@@ -414,13 +436,14 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 			// from a different ancestor, NOT when it was declared by the child type
 			// itself. A child's explicit declaration that widens must be rejected.
 			if !ownProps[p.Name()] && p.CanNarrowFrom(existing) {
-				seen[p.Name()] = p
-				for i, r := range result {
-					if r.Name() == p.Name() {
-						result[i] = p
-						break
-					}
+				// The later ancestor's narrower property replaces the earlier,
+				// wider one; union the earlier one's annotations into the survivor
+				// so they are not lost by extends order.
+				survivor := p
+				if merged, changed := c.unionInheritedAnnotations(t, reportedConflicts, p, existing); changed {
+					survivor = p.cloneWithAnnotations(merged)
 				}
+				replaceMerged(result, seen, survivor)
 				continue
 			}
 
@@ -432,6 +455,79 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 	}
 
 	return result
+}
+
+// replaceMerged swaps the property named replacement.Name() in result and seen
+// for replacement. Both hold exactly one property of that name by construction,
+// so it updates the slice element in place (no append) and the index entry.
+func replaceMerged(result []*Property, seen map[string]*Property, replacement *Property) {
+	seen[replacement.Name()] = replacement
+	for i, r := range result {
+		if r.Name() == replacement.Name() {
+			result[i] = replacement
+			break
+		}
+	}
+}
+
+// foldAnnotationsIntoSurvivor unions dropped's annotations into survivor — the
+// property kept in the merged view, already present in result — and replaces it
+// with a synthesized copy only when the set grows. Used in the two merge
+// outcomes where an inherited property is kept and an equal-or-wider sibling
+// from another ancestor is dropped, so the dropped sibling's annotations survive
+// regardless of extends order.
+func (c *completer) foldAnnotationsIntoSurvivor(t *Type, result []*Property, seen map[string]*Property, reportedConflicts map[string]bool, survivor, dropped *Property) {
+	if merged, changed := c.unionInheritedAnnotations(t, reportedConflicts, survivor, dropped); changed {
+		replaceMerged(result, seen, survivor.cloneWithAnnotations(merged))
+	}
+}
+
+// unionInheritedAnnotations merges the annotations of the dropped inherited
+// property p into those of the surviving sibling property existing (both
+// inherited from different ancestors, whether Equal or one narrowing the other),
+// returning the merged set and whether it grew. A same-name annotation with
+// identical arguments is idempotent; a same-name annotation with different
+// arguments — only @vector similarities differ in practice, and only between
+// Equal Vector ancestors, since VectorConstraint.Equal ignores the similarity
+// keyword — is an unsatisfiable inheritance conflict, reported as
+// E_INVALID_ANNOTATION with existing's value kept. existing.annotations is never
+// mutated: it is cloned lazily on first growth, since it is shared with the
+// ancestor type.
+//
+// reportedConflicts holds the (property, annotation) pairs already blamed for
+// this type, so one conflict draws one diagnostic no matter how many ancestors
+// carry the property forward.
+func (c *completer) unionInheritedAnnotations(t *Type, reportedConflicts map[string]bool, existing, p *Property) ([]*Annotation, bool) {
+	if len(p.annotations) == 0 {
+		return existing.annotations, false
+	}
+	byName := make(map[string]*Annotation, len(existing.annotations)+len(p.annotations))
+	for _, a := range existing.annotations {
+		byName[a.name] = a
+	}
+	merged := existing.annotations
+	changed := false
+	for _, a := range p.annotations {
+		switch prior, ok := byName[a.name]; {
+		case !ok:
+			if !changed {
+				merged = slices.Clone(existing.annotations)
+				changed = true
+			}
+			merged = append(merged, a)
+			byName[a.name] = a
+		case prior.identity() != a.identity():
+			key := p.Name() + "\x00" + a.name
+			if reportedConflicts[key] {
+				continue
+			}
+			reportedConflicts[key] = true
+			c.errorf(t.Span(), diag.E_INVALID_ANNOTATION,
+				"type %q inherits conflicting @%s annotations for property %q from %s and %s",
+				t.Name(), a.name, p.Name(), existing.DeclaringScope(), p.DeclaringScope())
+		}
+	}
+	return merged, changed
 }
 
 // mergeInvariants merges own invariants with inherited invariants.

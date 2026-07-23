@@ -76,32 +76,8 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) (
 	collector.Merge(collisionResult)
 
 	var constraints []Constraint
-
-	for _, t := range s.TypesSlice() {
-		name := t.Name()
-		if name == "" || t.IsAbstract() {
-			continue
-		}
-
-		label := a.Label(ctx, s.Name(), name)
-		if label == "" {
-			continue
-		}
-
-		if err := ValidateIdentifier(label, fmt.Sprintf("type %q label", name)); err != nil {
-			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-				fmt.Sprintf("invalid label for type %q: %s", name, err)).
-				WithDetail(diag.DetailKeyFormat, "neo4j").
-				WithDetail(diag.DetailKeyTypeName, name).
-				WithDetail(detailKeyLabel, label).
-				WithDetail(diag.DetailKeyDetail, err.Error()).
-				Build()
-			collector.Collect(issue)
-			continue
-		}
-
-		typeConstraints := a.constraintsForType(ctx, t, label, collector)
-		constraints = append(constraints, typeConstraints...)
+	for t, label := range a.emittableTypes(ctx, s, collector) {
+		constraints = append(constraints, a.constraintsForType(ctx, t, label, collector)...)
 	}
 
 	// Edition gating: Community only supports UNIQUE.

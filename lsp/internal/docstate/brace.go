@@ -83,6 +83,56 @@ func (bs *BraceScanner) ScanLine(line string, maxCol int) int {
 	return bs.Depth
 }
 
+// InStringOrComment reports whether the byte at index pos on line falls inside a
+// string literal ("..." / '...'), a // line comment, or a /* */ block comment.
+// It shares BraceScanner's lexer rules so annotation tooling recognises exactly
+// the string/comment regions the brace scanner skips. startInBlockComment
+// carries the block-comment state at the start of the line
+// (LineState.InBlockComment of the preceding line); pass false for a standalone
+// line.
+//
+// Intended for classifying a content byte such as the '@' of an annotation; a
+// pos landing exactly on a multi-byte delimiter boundary (the '/' of a closing
+// "*/", a quote) is not specially handled, which such content bytes never do.
+func InStringOrComment(line string, pos int, startInBlockComment bool) bool {
+	inBlock := startInBlockComment
+	for i := 0; i < len(line); i++ {
+		if i == pos {
+			return inBlock
+		}
+		switch {
+		case inBlock:
+			if line[i] == '*' && i+1 < len(line) && line[i+1] == '/' {
+				inBlock = false
+				i++ // consume the '/'
+			}
+		case line[i] == '/' && i+1 < len(line) && line[i+1] == '/':
+			return pos > i // a line comment runs to end of line
+		case line[i] == '/' && i+1 < len(line) && line[i+1] == '*':
+			inBlock = true
+			i++ // consume the '*'
+		case line[i] == '"' || line[i] == '\'':
+			quote := line[i]
+			for i++; i < len(line); i++ {
+				if i == pos {
+					return true
+				}
+				if line[i] == '\\' && i+1 < len(line) {
+					i++ // skip the escaped byte
+					if i == pos {
+						return true
+					}
+					continue
+				}
+				if line[i] == quote {
+					break
+				}
+			}
+		}
+	}
+	return inBlock
+}
+
 // ComputeBraceDepths computes the brace nesting depth and block comment state
 // at the end of each line. This is used for completion context detection (isInsideTypeBody).
 // The function properly skips braces inside comments and string literals.

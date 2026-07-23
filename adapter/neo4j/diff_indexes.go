@@ -23,6 +23,21 @@ type IndexDiffResult struct {
 	// Drop contains schema-owned indexes in the database that have no
 	// corresponding declaration in the schema.
 	Drop []RemoteIndex
+
+	// Unverified contains indexes that exist in both by semantic key but whose
+	// full definition could not be compared because the database did not report
+	// the configuration needed. They are neither confirmed in sync nor confirmed
+	// drifted; folding them into Match would report an unchecked index as
+	// verified.
+	Unverified []IndexUnverified
+}
+
+// IndexUnverified pairs a desired index with an actual index whose configuration
+// could not be read, so no in-sync claim is made about it.
+type IndexUnverified struct {
+	Desired Index
+	Actual  RemoteIndex
+	Reason  string // Human-readable description of what could not be verified
 }
 
 // IndexMatch pairs a desired index with its matching actual index.
@@ -65,10 +80,11 @@ func (a *Adapter) DiffIndexes(
 		SanitizeIdentifier(schemaName) +
 		a.config.labelSeparator
 
-	// Filter actual indexes to schema-owned only.
+	// Filter actual indexes to those this schema both owns and could have
+	// declared.
 	var owned []RemoteIndex
 	for _, ri := range actual {
-		if isSchemaOwned(ri.LabelsOrTypes, labelPrefix) {
+		if isSchemaOwned(ri.LabelsOrTypes, labelPrefix) && declarableRemoteIndex(ri) {
 			owned = append(owned, ri)
 		}
 	}
@@ -89,6 +105,15 @@ func (a *Adapter) DiffIndexes(
 			continue
 		}
 		matchedKeys[key] = true
+
+		if reason, unverifiable := vectorConfigUnreadable(d, ri); unverifiable {
+			result.Unverified = append(result.Unverified, IndexUnverified{
+				Desired: d,
+				Actual:  ri,
+				Reason:  reason,
+			})
+			continue
+		}
 
 		if reason, drifted := vectorDrift(d, ri); drifted {
 			result.Drift = append(result.Drift, IndexDrift{
@@ -147,9 +172,57 @@ func indexKindToRemoteType(kind IndexKind) string {
 	}
 }
 
+// declarableRemoteIndex reports whether a remote index is one the schema could
+// have declared, and therefore one the diff owns.
+//
+// SHOW INDEXES reports every non-LOOKUP, non-constraint-backed index on a
+// schema-owned label — including kinds the DSL has no vocabulary for (FULLTEXT,
+// TEXT, POINT, and the Neo4j 4.x-historical BTREE) and relationship indexes,
+// which the adapter never emits. Classifying one of those as an undeclared drop
+// would report drift that no schema edit could resolve, leaving the
+// all-or-nothing constraints-only mode as the only escape.
+//
+// An unreported entityType is treated as NODE: the field is absent only where a
+// server or fixture does not report it, and every index the adapter emits is a
+// node index.
+func declarableRemoteIndex(ri RemoteIndex) bool {
+	if ri.EntityType != "" && ri.EntityType != "NODE" {
+		return false
+	}
+	for _, k := range allIndexKinds {
+		if ri.Type == indexKindToRemoteType(k) {
+			return true
+		}
+	}
+	return false
+}
+
+// vectorConfigUnreadable reports whether a matched VECTOR index cannot be
+// compared because the database reported no readable vector configuration — an
+// older server that omits options, or a driver shape the options parser does not
+// recognise.
+//
+// The semantic key matches on label, properties, and type alone, so a remote
+// index of the wrong dimension matches a desired one by key; without this the
+// pair would land in Match and report an unchecked index as in sync. It is a
+// distinct outcome from drift (nothing was proven different) and from a failed
+// introspection (there, nothing was compared at all).
+func vectorConfigUnreadable(d Index, ri RemoteIndex) (string, bool) {
+	if d.Kind != IndexVector {
+		return "", false
+	}
+	_, dimOK := ri.VectorDimensions()
+	_, simOK := ri.VectorSimilarity()
+	if dimOK && simOK {
+		return "", false
+	}
+	return "database reported no vector configuration; dimension and similarity not compared", true
+}
+
 // vectorDrift reports whether a matched VECTOR index differs in configuration.
-// If either side is missing config (an older server that does not report
-// options), no drift is claimed.
+// Callers must have established that the remote configuration is readable (see
+// [vectorConfigUnreadable]); an unreadable one claims no drift here, because
+// "unverifiable" is not "different".
 func vectorDrift(d Index, ri RemoteIndex) (string, bool) {
 	if d.Kind != IndexVector {
 		return "", false
@@ -163,7 +236,12 @@ func vectorDrift(d Index, ri RemoteIndex) (string, bool) {
 		return fmt.Sprintf("vector dimension mismatch: schema %d, database %d",
 			d.VectorDimensions, remoteDim), true
 	}
-	if d.VectorSimilarity != remoteSim {
+	// Case-insensitive: the schema side is lowercase (validation forces it) while
+	// Neo4j reports the similarity function uppercased ("COSINE"), so a
+	// case-sensitive compare would flag every in-sync vector index as drift. The
+	// two valid functions ("cosine", "euclidean") differ beyond case, so
+	// EqualFold cannot conflate them.
+	if !strings.EqualFold(d.VectorSimilarity, remoteSim) {
 		return fmt.Sprintf("vector similarity mismatch: schema %s, database %s",
 			d.VectorSimilarity, remoteSim), true
 	}

@@ -135,7 +135,11 @@ func TestDiffIndexes_VectorSimilarityDrift(t *testing.T) {
 // TestDiffIndexes_VectorMissingConfig_NoDrift pins that a remote vector index
 // without readable config is not claimed as drift (older-server tolerance): it
 // matches on the semantic key.
-func TestDiffIndexes_VectorMissingConfig_NoDrift(t *testing.T) {
+// TestDiffIndexes_VectorSimilarityCaseInsensitive pins that the similarity
+// comparison is case-insensitive: Neo4j reports the similarity function
+// uppercased ("COSINE"), while the schema side is lowercase ("cosine"), so a
+// case-sensitive compare would misclassify every in-sync vector index as drift.
+func TestDiffIndexes_VectorSimilarityCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -143,7 +147,7 @@ func TestDiffIndexes_VectorMissingConfig_NoDrift(t *testing.T) {
 		{Kind: IndexVector, Label: "test__Entity", Properties: []string{"embedding"}, VectorDimensions: 768, VectorSimilarity: "cosine"},
 	}
 	actual := []RemoteIndex{
-		{Name: "i1", Type: "VECTOR", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"}},
+		{Name: "i1", Type: "VECTOR", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"}, Options: vectorOptions(768, "COSINE")},
 	}
 
 	wantCounts(t, a.DiffIndexes(desired, actual, "test"), 1, 0, 0, 0)
@@ -183,4 +187,73 @@ func TestDiffIndexes_Empty(t *testing.T) {
 	t.Parallel()
 	a := New()
 	wantCounts(t, a.DiffIndexes(nil, nil, "test"), 0, 0, 0, 0)
+}
+
+// SHOW INDEXES reports every non-LOOKUP, non-constraint-backed index, including
+// kinds the DSL cannot express (FULLTEXT, TEXT, POINT, and 4.x BTREE) and
+// relationship indexes the adapter never emits. Classifying one as an undeclared
+// drop reports drift no schema edit can resolve.
+func TestDiffIndexes_IgnoresUndeclarableKinds(t *testing.T) {
+	t.Parallel()
+	a := New()
+
+	actual := []RemoteIndex{
+		{Name: "ft", Type: "FULLTEXT", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"body"}},
+		{Name: "tx", Type: "TEXT", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"state"}},
+		{Name: "pt", Type: "POINT", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"loc"}},
+		{Name: "bt", Type: "BTREE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"legacy"}},
+		{Name: "rel", Type: "RANGE", EntityType: "RELATIONSHIP", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"since"}},
+	}
+
+	wantCounts(t, a.DiffIndexes(nil, actual, "test"), 0, 0, 0, 0)
+}
+
+// A remote RANGE index on a schema-owned label with no declaration IS drift the
+// schema can resolve, so it stays a drop — the undeclarable-kind exemption must
+// not swallow the case the feature exists for.
+func TestDiffIndexes_UndeclaredRangeStillDrops(t *testing.T) {
+	t.Parallel()
+	a := New()
+
+	actual := []RemoteIndex{
+		{Name: "r", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"state"}},
+	}
+
+	wantCounts(t, a.DiffIndexes(nil, actual, "test"), 0, 0, 0, 1)
+}
+
+// Every IndexKind must map to a real remote type string, so the enumeration
+// declarableRemoteIndex walks cannot silently omit a newly added kind.
+func TestIndexKind_AllKindsMapToRemoteType(t *testing.T) {
+	t.Parallel()
+	for _, k := range allIndexKinds {
+		if got := indexKindToRemoteType(k); got == "" || got == "UNKNOWN" {
+			t.Errorf("IndexKind %v maps to %q; add it to indexKindToRemoteType", k, got)
+		}
+	}
+}
+
+// An index whose vector configuration the server does not report is classified
+// as unverified, not as a match: remoteIndexKey matches on label/properties/type
+// only, so a wrongly-dimensioned remote index would otherwise be reported as in
+// sync.
+func TestDiffIndexes_VectorMissingConfig_Unverified(t *testing.T) {
+	t.Parallel()
+	a := New()
+
+	desired := []Index{
+		{Kind: IndexVector, Label: "test__Entity", Properties: []string{"embedding"}, VectorDimensions: 768, VectorSimilarity: "cosine"},
+	}
+	actual := []RemoteIndex{
+		{Name: "i1", Type: "VECTOR", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"}},
+	}
+
+	got := a.DiffIndexes(desired, actual, "test")
+	wantCounts(t, got, 0, 0, 0, 0)
+	if len(got.Unverified) != 1 {
+		t.Fatalf("unverified = %d, want 1", len(got.Unverified))
+	}
+	if got.Unverified[0].Reason == "" {
+		t.Error("an unverified entry should carry a reason")
+	}
 }

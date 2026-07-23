@@ -79,7 +79,7 @@ func Complete(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char in
 		byteOffset = ComputeByteOffsetFromText(doc.Text, line, char, enc)
 	}
 
-	ctx := DetectContext(doc, line, byteOffset)
+	ctx, ann := DetectContext(doc, line, byteOffset)
 
 	logger.Debug("completion context", "context", ctx)
 
@@ -99,11 +99,9 @@ func Complete(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char in
 	case ImportPath:
 		items = ImportCompletions()
 	case AnnotationName:
-		placement, _, _, _ := annotationHead(LineBeforeCursor(doc, line, byteOffset))
-		items = AnnotationNameCompletions(placement)
+		items = AnnotationNameCompletions(ann.placement)
 	case AnnotationArgs:
-		_, name, _, _ := annotationHead(LineBeforeCursor(doc, line, byteOffset))
-		items = AnnotationArgCompletions(name)
+		items = AnnotationArgCompletions(ann.name)
 	default:
 		items = TopLevelCompletions()
 	}
@@ -337,13 +335,15 @@ func AnnotationNameCompletions(placement schema.AnnotationPlacement) []protocol.
 
 // AnnotationArgCompletions returns argument completions inside a recognized
 // annotation's parentheses. Only @vector offers a fixed keyword set in v1;
-// @@index property-reference completion is a deferred stretch goal.
+// @@index property-reference completion is a deferred stretch goal. The keyword
+// set is sourced from schema.VectorSimilarityFunctions so a suggested keyword
+// cannot drift from what the loader accepts.
 func AnnotationArgCompletions(name string) []protocol.CompletionItem {
 	if name != "vector" {
 		return nil
 	}
 	var items []protocol.CompletionItem
-	for _, kw := range []string{"cosine", "euclidean"} {
+	for _, kw := range schema.VectorSimilarityFunctions() {
 		kind := protocol.CompletionItemKindValue
 		detail := "vector similarity function"
 		sortText := "0_" + kw

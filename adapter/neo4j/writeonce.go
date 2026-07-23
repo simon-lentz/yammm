@@ -25,13 +25,20 @@ func ImmutableKeysFor(t *schema.Type) []string {
 	if t == nil {
 		return nil
 	}
+	// The dedup map is allocated lazily on the first @writeOnce hit, so the
+	// overwhelmingly common unannotated type — scanned once per NodeQueryFor
+	// call on the single-node write path — does an allocation-free scan and
+	// returns nil.
 	var keys []string
-	seen := make(map[string]bool)
+	var seen map[string]bool
 	for p := range t.AllProperties() {
 		if _, ok := p.Annotation("writeOnce"); !ok {
 			continue
 		}
 		name := p.Name()
+		if seen == nil {
+			seen = make(map[string]bool)
+		}
 		if seen[name] {
 			continue
 		}

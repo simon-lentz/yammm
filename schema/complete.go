@@ -632,7 +632,7 @@ func convertAnnotations(decls []*annotationDecl) []*Annotation {
 				})
 			}
 		}
-		anns = append(anns, newAnnotation(d.Name, args, d.Documentation, d.Span))
+		anns = append(anns, newAnnotation(d.Name, args, d.Documentation, d.Span, d.ArgsMalformed))
 	}
 	return anns
 }

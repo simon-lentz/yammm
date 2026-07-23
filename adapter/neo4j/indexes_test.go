@@ -110,3 +110,42 @@ func TestIndexes_InvalidPropertyIdentifier(t *testing.T) {
 		t.Fatalf("expected E_NEO4J_INVALID_IDENTIFIER, got: %v", result.Err())
 	}
 }
+
+// TestIndexes_InvalidPropertyIdentifierReportedOnce pins that a reserved-keyword
+// property referenced by multiple index annotations (here `match` via both
+// @index and @@index) yields exactly one E_NEO4J_INVALID_IDENTIFIER, not one per
+// reference — the report-each-error-once contract.
+func TestIndexes_InvalidPropertyIdentifierReportedOnce(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "indexes_bad_ident_multi.yammm")
+	_, result := New().IndexesStructured(context.Background(), s)
+	n := 0
+	for issue := range result.Issues() {
+		if issue.Code() == E_NEO4J_INVALID_IDENTIFIER {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly 1 E_NEO4J_INVALID_IDENTIFIER for the reserved property, got %d: %v", n, result.Err())
+	}
+}
+
+// TestIndexes_DuplicateDeclarationDedups pins that declaring the same index
+// twice — @index on a property plus a single-property @@index over it — emits
+// one index rather than tripping the name-collision check. Load-time validation
+// accepts both placements (neither checks the other), so a hard emit failure
+// would leave a schema the loader called valid unable to emit any index DDL.
+func TestIndexes_DuplicateDeclarationDedups(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "indexes_duplicate_decl.yammm")
+	indexes, result := New().IndexesStructured(context.Background(), s)
+	if result.HasErrors() {
+		t.Fatalf("identical duplicate declarations should emit cleanly, got: %v", result.Err())
+	}
+	if len(indexes) != 1 {
+		t.Fatalf("expected 1 emitted index, got %d: %+v", len(indexes), indexes)
+	}
+	if got := indexes[0].Properties; !slices.Equal(got, []string{"name"}) {
+		t.Errorf("emitted index properties = %v, want [name]", got)
+	}
+}

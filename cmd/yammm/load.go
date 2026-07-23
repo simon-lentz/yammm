@@ -50,8 +50,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 
 	// Load schema
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), schemaResult)
+	if renderLoadDiagnostics(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult) {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -85,6 +84,31 @@ func renderDiagnostics(cmd *cobra.Command, outputFormat cli.OutputFormat, noColo
 	}
 	renderer := cli.NewRenderer(outputFormat, isTTY, noColor, provider, moduleRoot)
 	_ = cli.RenderResult(w, renderer, outputFormat, result)
+}
+
+// renderLoadDiagnostics renders a schema load's diagnostics and reports whether
+// the load failed.
+//
+// It renders whenever the load produced anything to say — warnings included, not
+// only errors. A load warning exists precisely because the loader chose not to
+// reject (W_ANNOTATION_SHADOWED, for one, is the only signal that a subtype
+// silently dropped an inherited annotation), so a command that rendered only on
+// failure would make it unreachable. Diagnostics go to stderr, so surfacing them
+// leaves every command's stdout contract intact.
+//
+// explicitRoot is the command's module-root flag where it has one, and "" where
+// it does not; it selects the root diagnostics relativize against together with
+// the schema path (see [diagRootFor]).
+func renderLoadDiagnostics(
+	cmd *cobra.Command,
+	outputFormat cli.OutputFormat,
+	noColor bool,
+	s *schema.Schema,
+	explicitRoot, absSchemaPath string,
+	result diag.Result,
+) bool {
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, explicitRoot, absSchemaPath), result)
+	return result.HasErrors()
 }
 
 // diagRootFor selects the root that rendered diagnostic locations are

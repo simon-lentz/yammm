@@ -292,10 +292,12 @@ func (b *astBuilder) buildPropertyAnnotations(ctx *grammar.PropertyContext) []*a
 		if nameCtx == nil {
 			continue
 		}
+		args, malformed := b.buildAnnotationArgs(ac.Annotation_args())
 		decls = append(decls, &annotationDecl{
-			Name: nameCtx.GetText(),
-			Args: b.buildAnnotationArgs(ac.Annotation_args()),
-			Span: b.spans.FromContext(ac),
+			Name:          nameCtx.GetText(),
+			Args:          args,
+			ArgsMalformed: malformed,
+			Span:          b.spans.FromContext(ac),
 		})
 	}
 	return decls
@@ -305,12 +307,21 @@ func (b *astBuilder) buildPropertyAnnotations(ctx *grammar.PropertyContext) []*a
 // each argument was an identifier or a literal. String literals are unquoted;
 // other literals keep their source text (they exist only to draw a precise
 // "got a literal" diagnostic in completion, since no v1 annotation accepts one).
-func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext) []annotationArgDecl {
+//
+// malformed reports that at least one argument context matched no alternative.
+// The grammar requires an argument list to hold at least one argument, so an
+// empty one ("@index()") is a syntax error — but ANTLR's recovery still leaves a
+// context behind. Such a context is dropped rather than carried as a text-less
+// argument, and the flag lets completion skip semantic checks whose input never
+// parsed; a text-less argument otherwise produces diagnostics that contradict
+// the source (a zero-argument call reported as having arguments, a composite
+// blamed for referencing a property named "").
+func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext) (args []annotationArgDecl, malformed bool) {
 	if argsCtx == nil {
-		return nil
+		return nil, false
 	}
 	argCtxs := argsCtx.AllAnnotation_arg()
-	args := make([]annotationArgDecl, 0, len(argCtxs))
+	args = make([]annotationArgDecl, 0, len(argCtxs))
 	for _, ac := range argCtxs {
 		var (
 			text  string
@@ -333,6 +344,11 @@ func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext
 			} else {
 				text = raw
 			}
+		default:
+			// No alternative matched: an error-recovery artifact, not an argument.
+			// An empty string literal is NOT this case — it matches Literal().
+			malformed = true
+			continue
 		}
 		args = append(args, annotationArgDecl{
 			Text:  text,
@@ -340,7 +356,7 @@ func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext
 			Span:  b.spans.FromContext(ac),
 		})
 	}
-	return args
+	return args, malformed
 }
 
 // ExitDatatype is called when exiting the datatype production.
@@ -564,9 +580,11 @@ func (b *astBuilder) ExitType_annotation(ctx *grammar.Type_annotationContext) { 
 	if ctx.DOC_COMMENT() != nil {
 		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
 	}
+	args, malformed := b.buildAnnotationArgs(ctx.Annotation_args())
 	b.currentType.Annotations = append(b.currentType.Annotations, &annotationDecl{
 		Name:          nameCtx.GetText(),
-		Args:          b.buildAnnotationArgs(ctx.Annotation_args()),
+		Args:          args,
+		ArgsMalformed: malformed,
 		Documentation: doc,
 		Span:          b.spans.FromContext(ctx),
 	})

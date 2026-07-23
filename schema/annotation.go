@@ -71,12 +71,18 @@ type Annotation struct {
 	args []AnnotationArg
 	doc  string
 	span location.Span
+
+	// argsMalformed marks an annotation whose argument list failed to parse, so
+	// args does not faithfully record the source. Completion skips its
+	// registry-driven argument and target checks: those read a list that never
+	// parsed and can only contradict the syntax error already reported.
+	argsMalformed bool
 }
 
 // newAnnotation builds an annotation from parsed parts. Argument semantic kinds
 // start ArgUnvalidated and are stamped by completion before sealing.
-func newAnnotation(name string, args []AnnotationArg, doc string, span location.Span) *Annotation {
-	return &Annotation{name: name, args: args, doc: doc, span: span}
+func newAnnotation(name string, args []AnnotationArg, doc string, span location.Span, argsMalformed bool) *Annotation {
+	return &Annotation{name: name, args: args, doc: doc, span: span, argsMalformed: argsMalformed}
 }
 
 // Name returns the annotation name, without the @ / @@ sigil.

@@ -267,7 +267,9 @@ func (g *generator) propertyTable(t *schema.Type) string {
 		own[p] = true
 	}
 	// Inherited rows reuse the declaring ancestor's own *Property values, so
-	// the pointer map keys each row to its declarer.
+	// the pointer map keys each row to its declarer. A row whose annotations were
+	// merged across ancestors is a synthesized copy absent from every own slice,
+	// so both lookups go through Origin() to reach the declared property.
 	ownerOf := inheritedOwners(g, t, (*schema.Type).PropertiesSlice)
 
 	var b bytes.Buffer
@@ -280,8 +282,8 @@ func (g *generator) propertyTable(t *schema.Type) string {
 		case p.IsRequired():
 			mods = append(mods, "required")
 		}
-		if !own[p] {
-			owner, ok := ownerOf[p]
+		if !own[p.Origin()] {
+			owner, ok := ownerOf[p.Origin()]
 			if !ok {
 				owner = p.DeclaringScope().String()
 			}
