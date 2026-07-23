@@ -333,15 +333,27 @@ func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext
 		case ac.UC_WORD() != nil:
 			text = ac.UC_WORD().GetText()
 		case ac.Literal() != nil:
-			token = tokenLiteral
 			raw := ac.Literal().GetText()
-			if len(raw) > 0 && (raw[0] == '"' || raw[0] == '\'') {
+			switch {
+			case len(raw) > 0 && (raw[0] == '"' || raw[0] == '\''):
 				if unquoted, err := unquoteString(raw); err == nil {
+					// tokenString's contract is that its text is the UNQUOTED value,
+					// so only a successful unquote earns the label.
+					token = tokenString
 					text = unquoted
 				} else {
+					// The yammm STRING lexer accepts escapes Go's unquoter rejects
+					// (\u/\x/\0 with no hex digits), so a lexed string can fail here.
+					// Keep the raw source as a bare literal rather than a tokenString
+					// whose text is not actually unquoted: labelling it tokenString
+					// would break identity() (two distinct sources colliding on the
+					// same unquoted-looking bytes) and displayText (re-quoting the
+					// already-quoted raw). As a bare literal the raw IS its spelling.
+					token = tokenLiteral
 					text = raw
 				}
-			} else {
+			default:
+				token = tokenLiteral // bare literal: number, boolean, regex — raw IS the spelling
 				text = raw
 			}
 		default:

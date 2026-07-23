@@ -205,9 +205,21 @@ func (p *Property) DeclaringScope() DeclaringScope {
 	return p.scope
 }
 
-// Annotations returns an iterator over this property's annotations in source
-// order (the @name / @name(args) decorators trailing the property). Duplicate
+// Annotations returns an iterator over this property's annotations. Duplicate
 // names are rejected during completion, so each name appears at most once.
+//
+// Order depends on which view the property came from. On a DECLARED property
+// (one a type holds in [Type.PropertiesSlice]) it is source order: the
+// @name / @name(args) decorators trailing the declaration, left to right. On a
+// property read from a merged view ([Type.AllProperties]) the annotations may
+// have been gathered from several supertypes, and the order is then the order of
+// the READING type's own `extends` clause — not of any declaring type, which for
+// a property already means the ancestor that declared it. So the same schema
+// property can enumerate its annotations differently on two types that both
+// inherit it. Consumers that care
+// about a specific annotation should look it up by name with
+// [Property.Annotation]; consumers that emit in enumeration order should treat
+// the order as stable-per-load, not as authored order.
 func (p *Property) Annotations() iter.Seq[*Annotation] {
 	return func(yield func(*Annotation) bool) {
 		for _, a := range p.annotations {
@@ -310,8 +322,10 @@ func (p *Property) CanNarrowFrom(parent *Property) bool {
 // deduplication purposes during type completion—two ancestors may define
 // identical properties, and we want to merge them rather than flag a conflict.
 // Annotations are excluded so a child re-declaration that drops an inherited
-// annotation is still Equal (and the drop is surfaced by W_ANNOTATION_SHADOWED
-// during linearization, not treated as a structural conflict).
+// annotation is still Equal rather than a structural conflict. The drop is
+// surfaced separately, by W_ANNOTATION_SHADOWED — queued during linearization
+// and emitted after annotation validation, and suppressed when the annotation or
+// the re-declaration was itself rejected.
 func (p *Property) Equal(other *Property) bool {
 	if p == nil || other == nil {
 		return p == other

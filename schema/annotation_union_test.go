@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // Equal properties inherited from two ancestors union their annotations, so a
@@ -205,25 +203,5 @@ type C extends A, B {
 }`)
 	if n := codeCounts(res)[diag.E_INVALID_ANNOTATION]; n != 1 {
 		t.Errorf("one conflicting @vector inheritance should report exactly 1 E_INVALID_ANNOTATION, got %d: %v", n, res)
-	}
-}
-
-// A type that puts @index on its own sole primary key while extending an
-// unresolved (deferred, registry-less) supertype must NOT draw the
-// sole-primary-key redundancy error: the key may be composite once the ancestor
-// resolves. Mirrors the deferral its sibling checks (validateIndexType,
-// validatePrimaryKeys) already perform.
-func TestAnnotation_IndexOnPrimary_DeferredSupertype_NoRedundancyError(t *testing.T) {
-	t.Parallel()
-	_, res := schema.NewBuilder().
-		WithName("main").
-		AddType("Entity").
-		Extends(schema.NewTypeRef("ext", "Base", location.Span{})).
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithPropertyAnnotation("id", "index").
-		Done().
-		Build()
-	if res.HasCode(diag.E_INVALID_ANNOTATION_TARGET) {
-		t.Errorf("@index on a primary key under an unresolved supertype must not be flagged redundant, got: %v", res)
 	}
 }

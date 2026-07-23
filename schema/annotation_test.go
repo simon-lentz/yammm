@@ -1,11 +1,48 @@
 package schema_test
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
+
+// loadNoErr loads a schema that must complete without errors (warnings are
+// allowed) and returns both the schema and the result for warning inspection.
+// It lives here, with the other shared annotation helpers, because three of the
+// annotation test files depend on it.
+func loadNoErr(t *testing.T, source string) (*schema.Schema, diag.Result) {
+	t.Helper()
+	s, res := schema.LoadString(t.Context(), source, "main.yammm")
+	if res.HasErrors() {
+		t.Fatalf("schema should load without errors, got: %v", res)
+	}
+	if s == nil {
+		t.Fatal("schema returned nil despite no errors")
+	}
+	return s, res
+}
+
+// loadAnnotationImport writes base as base.yammm and main as main.yammm in a
+// temp module root and loads main, so a test can exercise annotation behaviour
+// across an import boundary. main should import the other as "./base".
+func loadAnnotationImport(t *testing.T, base, main string) (*schema.Schema, diag.Result) {
+	t.Helper()
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.yammm")
+	for path, content := range map[string]string{
+		filepath.Join(dir, "base.yammm"): base,
+		mainPath:                         main,
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	return schema.Load(t.Context(), mainPath, schema.WithModuleRoot(dir))
+}
 
 func schemaType(t *testing.T, s *schema.Schema, name string) *schema.Type {
 	t.Helper()
@@ -157,5 +194,25 @@ type Document {
 }`)
 	if got, want := schema.StructuralHash(annotated), schema.StructuralHash(bare); got != want {
 		t.Errorf("annotations must not affect StructuralHash:\n annotated=%s\n bare=%s", got, want)
+	}
+}
+
+// AnnotationArgKind.String renders each kind as a stable lowercase label, so a
+// consumer formatting one — or a test failure message — reads a name, not a bare
+// integer.
+func TestAnnotationArgKind_String(t *testing.T) {
+	t.Parallel()
+	cases := map[schema.AnnotationArgKind]string{
+		schema.ArgUnvalidated: "unvalidated",
+		schema.ArgPropertyRef: "property-ref",
+		schema.ArgKeyword:     "keyword",
+	}
+	for k, want := range cases {
+		if got := k.String(); got != want {
+			t.Errorf("AnnotationArgKind(%d).String() = %q, want %q", k, got, want)
+		}
+	}
+	if got := schema.AnnotationArgKind(99).String(); got != "unknown" {
+		t.Errorf("out-of-range String() = %q, want %q", got, "unknown")
 	}
 }

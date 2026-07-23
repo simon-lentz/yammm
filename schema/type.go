@@ -39,11 +39,19 @@ type Type struct {
 	// Inheritance
 	inherits   []TypeRef         // declared extends clause
 	superTypes []ResolvedTypeRef // linearized ancestors
-	subTypes   []ResolvedTypeRef // cross-schema subtypes
+	subTypes   []ResolvedTypeRef // LOCAL subtypes only; completeTypes records a subtype only where its supertype is in the same schema (a cross-schema descendant is invisible here — the known limit concreteEmitters and the @index redundancy rule depend on)
 
 	// O(1) lookup indices
 	propByName map[string]*Property
 	relByName  map[string]*Relation
+
+	// suppressedAnns records, per property name, the annotation names this
+	// type's inheritance DROPPED — a re-declaration that did not re-state what
+	// it inherited. Subtypes read it to tell a deliberate drop from a plain
+	// absence: absence unions, a drop that another supertype contradicts is an
+	// error. Nil for the overwhelming majority of types, which drop nothing.
+	// See [completer.inheritedAnnotations].
+	suppressedAnns map[string]map[string]bool
 
 	// Cached canonical property map (lowercase -> canonical name)
 	canonicalMap map[string]string
@@ -187,6 +195,29 @@ func (t *Type) PrimaryKeys() iter.Seq[*Property] {
 // PrimaryKeysSlice returns a defensive copy of primary key properties.
 func (t *Type) PrimaryKeysSlice() []*Property {
 	return slices.Clone(t.primaryKeys)
+}
+
+// primaryKeyCount returns the number of EXTRACTED primary keys without copying
+// the slice. Unexported and non-allocating, for the completer's per-type checks
+// on the load path; external callers use [Type.PrimaryKeysSlice].
+func (t *Type) primaryKeyCount() int {
+	return len(t.primaryKeys)
+}
+
+// hasRejectedPrimary reports whether the type declares a `primary` property that
+// key extraction did NOT accept — a primary whose datatype is ineligible
+// (E_INVALID_PRIMARY_KEY_TYPE), so the flag is set but the property is absent
+// from primaryKeys. Where this holds the key SHAPE is not yet settled: the user
+// intended a composite that currently reads as sole, so rules that turn on
+// soleness must defer rather than fire on the transient count.
+func (t *Type) hasRejectedPrimary() bool {
+	declared := 0
+	for _, p := range t.allProperties {
+		if p.IsPrimaryKey() {
+			declared++
+		}
+	}
+	return declared > len(t.primaryKeys)
 }
 
 // HasPrimaryKey reports whether this type has at least one primary key property.
@@ -526,6 +557,23 @@ func (t *Type) setInherits(inherits []TypeRef) {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.inherits = inherits
+}
+
+// setSuppressedAnnotations records the annotations this type's inheritance
+// dropped, per property (called during completion). A nil map is the normal
+// case and is stored as-is.
+func (t *Type) setSuppressedAnnotations(m map[string]map[string]bool) {
+	if t.sealed {
+		panic("schema: cannot mutate sealed type")
+	}
+	t.suppressedAnns = m
+}
+
+// suppressedAnnotations returns the set of annotation names this type's
+// inheritance dropped for the named property, or nil. Reading a nil map is
+// safe, so callers need no guard.
+func (t *Type) suppressedAnnotations(prop string) map[string]bool {
+	return t.suppressedAnns[prop]
 }
 
 // setAllProperties sets all properties including inherited (called during completion).

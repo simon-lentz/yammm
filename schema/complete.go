@@ -87,6 +87,8 @@ func completeModel(
 		// not nil an unrelated clean schema).
 		gate:                    newErrorGate(collector),
 		unresolvedSupertypeMemo: make(map[*Type]bool),
+		diagnosedAnnotations:    make(map[*Annotation]bool),
+		conflictedProperties:    make(map[*Property]bool),
 	}
 
 	return c.complete()
@@ -142,6 +144,21 @@ type completer struct {
 	// query it (validatePrimaryKeys, validateInvariantExpressions,
 	// validateAnnotations), so a type's answer cannot change between calls.
 	unresolvedSupertypeMemo map[*Type]bool
+
+	// pendingShadowed holds the annotations own re-declarations dropped, queued
+	// during linearization and emitted by [completer.flushShadowedAnnotations]
+	// once validation has established which of them are usable.
+	pendingShadowed []shadowedAnnotation
+
+	// diagnosedAnnotations marks the annotations that drew a diagnostic of their
+	// own during validation, so the shadow warning does not advise re-stating an
+	// annotation this same load rejects.
+	diagnosedAnnotations map[*Annotation]bool
+
+	// conflictedProperties marks own declarations that drew E_PROPERTY_CONFLICT,
+	// so the shadow warning does not advise editing a declaration the load has
+	// already rejected outright.
+	conflictedProperties map[*Property]bool
 }
 
 func (c *completer) complete() *Schema {
@@ -204,6 +221,12 @@ func (c *completer) complete() *Schema {
 	// Runs after linearization so property-reference arguments can resolve
 	// against inherited properties.
 	c.validateAnnotations()
+
+	// Phase 7d: Emit the shadowed-annotation warnings linearization queued. It
+	// must follow 7c: the warning tells the user to re-state the annotation, which
+	// is wrong advice for one this same load rejects, and only 7c knows which
+	// those are.
+	c.flushShadowedAnnotations()
 
 	// Final check for any errors THIS completion collected — its own error
 	// delta, not the shared collector's total: errors collected before this
@@ -1137,6 +1160,13 @@ func (c *completer) validatePrimaryKeys() {
 // hasDeclaredPrimary reports whether any merged property carries the
 // primary flag, independent of whether key extraction accepted it into
 // the type's primary keys.
+//
+// It short-circuits on the first primary rather than counting: the answer is a
+// bool, and a type with a hundred merged properties should not walk them all to
+// learn that its first one is a key. The @index redundancy rule, which once
+// shared a counting helper with this, now reads the EXTRACTED keys
+// ([Type.PrimaryKeys]) instead — a stricter question that this gate deliberately
+// does not ask, since a primary rejected for its type is still a declared one.
 func hasDeclaredPrimary(t *Type) bool {
 	for p := range t.AllProperties() {
 		if p.IsPrimaryKey() {

@@ -359,17 +359,25 @@ func (c *completer) resolveTypeID(id TypeID) *Type {
 	return t
 }
 
+// annotationSource pairs an inherited annotation with the direct supertype whose
+// merged view supplied it, so a conflict diagnostic can name where each side
+// reached the type from rather than reading a declaring scope off a merged
+// clone, which can name the same ancestor twice.
+type annotationSource struct {
+	from *Type
+	ann  *Annotation
+}
+
 // mergeProperties merges own properties with inherited properties.
 // Own properties come first, then inherited (left-to-right supertype order).
 // Identical properties from different ancestors are deduplicated (keep-first).
 // When a child re-declares a parent property, constraint narrowing is attempted:
 // the child's version is accepted if it narrows the parent's (via CanNarrowFrom).
 //
-// Whenever two ancestors contribute the same property — equal, or one narrowing
-// the other — the merged property carries the union of both ancestors'
-// annotations, so a semantic marker (e.g. @writeOnce) is never dropped by
-// extends order. Only a child's own re-declaration drops inherited annotations,
-// and that draws W_ANNOTATION_SHADOWED.
+// The walk decides STRUCTURE only — which *Property survives under each name.
+// Annotations are settled afterwards by [completer.resolveInheritedAnnotations],
+// which reads the DIRECT supertypes' already-merged views instead of re-deriving
+// anything from this transitively-closed list.
 func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Property {
 	// Start with own properties
 	result := t.PropertiesSlice()
@@ -381,10 +389,27 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 	}
 
 	// One inheritance conflict is one diagnostic. The loop below visits every
-	// linearized ancestor, and an ancestor that merely INHERITS the annotated
-	// property yields the same *Property its own ancestor declared, so the same
-	// annotation conflict is re-detected once per ancestor in the chain.
-	reportedConflicts := make(map[string]bool)
+	// linearized ancestor, and an ancestor that merely INHERITS the conflicting
+	// property carries the same declared *Property forward, so the same clash is
+	// re-detected once per ancestor in the chain.
+	//
+	// A conflict is between two narrowing LINEAGES of a property — sets of
+	// declarations that are mutually compatible (equal, or one narrowing another)
+	// within each set and incompatible across. EITHER side may have several
+	// members, so no single *Property, its Origin, or its kind identifies the
+	// conflict: a scalar key double-reports when the many-member side varies
+	// (survivor swap, or a narrowing chain on the conflicting side) or collapses
+	// two independent clashes that happen to share it. This is why keying by name,
+	// by the *Property pair, by the incomer Origin, and by the kind pair each
+	// failed in turn.
+	//
+	// The lineage-level identity is exact: two conflicts are the same iff their
+	// surviving sides are compatible AND their conflicting sides are compatible.
+	// reportedConflicts holds one (survivor, incomer) representative per distinct
+	// clash; a new clash is deduped against it by that pairwise compatibility. The
+	// list is per property name and holds at most one entry per genuinely
+	// independent clash, so the scan is negligible.
+	var reportedConflicts []conflictPair
 
 	// Add inherited properties in linearized order
 	for _, superRef := range supers {
@@ -401,60 +426,327 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 				continue
 			}
 
-			if p.Equal(existing) {
-				// An own declaration that re-declares an inherited property
-				// identically wins keep-first; warn if it drops the inherited
-				// annotations.
-				if ownProps[p.Name()] {
-					c.warnShadowedAnnotations(existing, p)
+			switch {
+			case p.Equal(existing), existing.CanNarrowFrom(p):
+				// The surviving copy wins keep-first: the child's own declaration,
+				// or an earlier ancestor's equal-or-narrower one.
+
+			case !ownProps[p.Name()] && p.CanNarrowFrom(existing):
+				// A later ancestor's narrower copy replaces the earlier, wider one.
+				// Restricted to inherited survivors: a child's own declaration that
+				// widens what it inherits must be rejected, not silently narrowed
+				// back by the parent.
+				replaceMerged(result, seen, p)
+
+			default:
+				if conflictAlreadyReported(reportedConflicts, existing, p) {
 					continue
 				}
-				// Two Equal ancestors: union their annotation sets so a semantic
-				// marker (e.g. @writeOnce) is not silently dropped based on which
-				// ancestor is linearized first.
-				c.foldAnnotationsIntoSurvivor(t, result, seen, reportedConflicts, existing, p)
-				continue
-			}
-
-			// Check if existing (child's own or earlier ancestor) narrows the inherited
-			if existing.CanNarrowFrom(p) {
+				reportedConflicts = append(reportedConflicts, conflictPair{survivor: existing, incomer: p})
 				if ownProps[p.Name()] {
-					// A narrowing own declaration wins; warn if it drops the
-					// inherited annotations, same as the identical-re-declaration case.
-					c.warnShadowedAnnotations(existing, p)
-					continue
+					c.conflictedProperties[existing] = true
 				}
-				// An earlier ancestor's narrower property survives over a later
-				// ancestor's wider copy; union the dropped copy's annotations into
-				// it, same as the two-Equal-ancestors case.
-				c.foldAnnotationsIntoSurvivor(t, result, seen, reportedConflicts, existing, p)
-				continue
+				c.errorf(t.Span(), diag.E_PROPERTY_CONFLICT,
+					"type %q inherits conflicting definitions of property %q from %s and %s",
+					t.Name(), p.Name(), existing.DeclaringScope(), p.DeclaringScope())
 			}
-
-			// Check if inherited narrows the existing (from another ancestor).
-			// This branch only applies when the existing property was inherited
-			// from a different ancestor, NOT when it was declared by the child type
-			// itself. A child's explicit declaration that widens must be rejected.
-			if !ownProps[p.Name()] && p.CanNarrowFrom(existing) {
-				// The later ancestor's narrower property replaces the earlier,
-				// wider one; union the earlier one's annotations into the survivor
-				// so they are not lost by extends order.
-				survivor := p
-				if merged, changed := c.unionInheritedAnnotations(t, reportedConflicts, p, existing); changed {
-					survivor = p.cloneWithAnnotations(merged)
-				}
-				replaceMerged(result, seen, survivor)
-				continue
-			}
-
-			// Incompatible
-			c.errorf(t.Span(), diag.E_PROPERTY_CONFLICT,
-				"type %q inherits conflicting definitions of property %q from %s and %s",
-				t.Name(), p.Name(), existing.DeclaringScope(), p.DeclaringScope())
 		}
 	}
 
+	c.resolveInheritedAnnotations(t, result, ownProps)
+
 	return result
+}
+
+// resolveInheritedAnnotations settles the annotation set of every merged
+// property, once mergeProperties has decided which *Property survives under each
+// name. The rule is one line:
+//
+//	effective(T, n) = T's own declaration's annotations, when T declares n
+//	                = union over T's DIRECT supertypes S of effective(S, n)
+//
+// It reads each direct supertype's already-merged view through [Type.Property]
+// (setAllProperties keys that index by the merged set), and supertypes complete
+// before their subtypes, so every view it reads is final.
+//
+// Reading direct supertypes rather than the linearized ancestor list is what
+// makes inheritance transitive in the ordinary sense. A direct supertype's view
+// already encodes ITS decisions about the property — including a deliberate
+// re-declaration that dropped an inherited annotation — so a grandparent's
+// annotation cannot reappear past a parent that shadowed it, while a union
+// across incomparable mixins still keeps every marker regardless of extends
+// order. The linearized list is transitively closed, so consulting it here would
+// re-admit that grandparent as though it were an independent sibling.
+//
+// Iteration is over result — a slice, in merged order — so every diagnostic this
+// emits is deterministically ordered.
+func (c *completer) resolveInheritedAnnotations(t *Type, result []*Property, ownProps map[string]bool) {
+	supers := c.directSuperTypes(t)
+	if len(supers) == 0 {
+		return // Nothing to inherit; own annotations stand as declared.
+	}
+
+	// One inherited-annotation conflict is one diagnostic, keyed by
+	// (property, annotation).
+	reported := make(map[string]bool)
+
+	// Annotation names this type's inheritance DROPPED, per property. Carried
+	// forward to subtypes so a drop stays a decision rather than decaying into a
+	// plain absence — see [completer.inheritedAnnotations].
+	var suppressed map[string]map[string]bool
+	suppress := func(prop string, names map[string]bool) {
+		if len(names) == 0 {
+			return
+		}
+		if suppressed == nil {
+			suppressed = make(map[string]map[string]bool)
+		}
+		suppressed[prop] = names
+	}
+
+	for i, p := range result {
+		name := p.Name()
+		if ownProps[name] {
+			// An own declaration's annotation set is authoritative; what it drops
+			// relative to its direct supertypes is what gets warned about — after
+			// validation, see [completer.recordShadowedAnnotations] — and is
+			// suppressed for every subtype.
+			suppress(name, c.recordShadowedAnnotations(p, supers))
+			continue
+		}
+
+		merged, supp := c.inheritedAnnotations(t, supers, name, reported)
+		suppress(name, supp)
+		if !slices.Equal(p.annotations, merged) {
+			result[i] = p.cloneWithAnnotations(merged)
+		}
+	}
+
+	t.setSuppressedAnnotations(suppressed)
+}
+
+// directSuperTypes resolves t's declared extends clause to the MAXIMAL direct
+// supertypes, in declaration order: those no other resolved supertype descends
+// from. A ref that does not resolve is skipped — the failure carries its own
+// diagnostic — and a type named twice is visited once.
+//
+// Maximality matters because an extends clause may be redundant: `extends Drop,
+// Base` where `Drop extends Base` is legal, and there Base is not a peer of Drop
+// but its ancestor. Drop's merged view already reflects Base with Drop's
+// decisions applied, so keeping Base would make the annotation resolver treat a
+// resolved chain as two rivals — a spurious disagreement. The reduction is over
+// the declared supertypes only (a handful), via [Type.IsSubTypeOf] against the
+// transitively-closed [Type.SuperTypes], so it is cheap; it is NOT the
+// closure-wide maximal scan that made an earlier design superlinear.
+func (c *completer) directSuperTypes(t *Type) []*Type {
+	var resolved []*Type
+	var seen map[TypeID]bool
+	for ref := range t.Inherits() {
+		s := c.resolveTypeRef(ref)
+		if s == nil {
+			continue
+		}
+		if seen == nil {
+			seen = make(map[TypeID]bool)
+		}
+		if seen[s.ID()] {
+			continue
+		}
+		seen[s.ID()] = true
+		resolved = append(resolved, s)
+	}
+	if len(resolved) < 2 {
+		return resolved
+	}
+
+	var out []*Type
+	for _, cand := range resolved {
+		subsumed := false
+		for _, other := range resolved {
+			if other != cand && other.IsSubTypeOf(cand.ID()) {
+				subsumed = true
+				break
+			}
+		}
+		if !subsumed {
+			out = append(out, cand)
+		}
+	}
+	return out
+}
+
+// inheritedAnnotations returns the annotations an inherited property carries in
+// t's merged view: the union across t's direct supertypes' merged views, in
+// direct-supertype declaration order, first occurrence of each name winning.
+//
+// Within ONE supertype a repeated annotation name is skipped rather than treated
+// as a rival: that is a load error reported against the declaration itself
+// (validatePropertyAnnotations), and comparing an annotation with its own
+// duplicate here would add a second, self-contradictory "inherits conflicting @x
+// … from S and S".
+//
+// Two supertypes DISAGREE about an annotation in two ways, both reported as
+// E_INVALID_ANNOTATION and both resolved by re-stating the annotation on the
+// subtype:
+//
+//   - Same name, different arguments — only differing @vector similarity
+//     keywords in practice, since Property.Equal excludes annotations and so
+//     lets two structurally equal ancestors disagree about them.
+//   - One supertype carries the annotation while another SUPPRESSED it: some
+//     type on that arm re-declared the property without it, and honouring
+//     either arm silently overrides the other's decision.
+//
+// The second is why a "drop" has to be tracked separately from an absence.
+// Never having declared an annotation is not an opinion — that is the ordinary
+// mixin case, where one ancestor contributes the marker, the other simply has
+// nothing to say, and the union is what stops extends order from deciding.
+// Dropping one IS an opinion, and two opinions in conflict have no correct
+// merge, so the loader refuses to pick.
+//
+// Both sides of a conflict are named by the CONTRIBUTING supertype, not by the
+// annotation's declaring scope: the conflict is about how the two reach t, and a
+// scope read off a merged clone can name the same ancestor twice. Related spans
+// point at each annotation's own declaration.
+//
+// reported holds the (property, annotation) pairs already blamed for this type,
+// so one conflict draws one diagnostic no matter how many supertypes carry the
+// property forward. It returns the merged set and the names t must itself
+// suppress for its own subtypes — every arm's suppression that no arm carries.
+func (c *completer) inheritedAnnotations(t *Type, supers []*Type, name string, reported map[string]bool) ([]*Annotation, map[string]bool) {
+	var merged []*Annotation
+	var byName map[string]annotationSource
+	var suppressed map[string]bool
+
+	// A suppression on any arm is a decision the whole subtree inherits.
+	for _, s := range supers {
+		for ann := range s.suppressedAnnotations(name) {
+			if suppressed == nil {
+				suppressed = make(map[string]bool)
+			}
+			suppressed[ann] = true
+		}
+	}
+
+	for _, s := range supers {
+		sp, ok := s.Property(name)
+		if !ok || len(sp.annotations) == 0 {
+			continue
+		}
+		var seenHere map[string]bool
+		for _, a := range sp.annotations {
+			if seenHere[a.name] {
+				continue // A duplicate on one declaration; its own diagnostic owns it.
+			}
+			if seenHere == nil {
+				seenHere = make(map[string]bool, len(sp.annotations))
+			}
+			seenHere[a.name] = true
+
+			if dropper := suppressingSuper(supers, s, name, a.name); dropper != nil {
+				c.reportAnnotationDisagreement(t, name, a, reported,
+					fmt.Sprintf("type %q inherits @%s for property %q from %s, but %s drops it; re-state or omit it on %s to decide",
+						t.Name(), a.name, name, s.Name(), dropper.Name(), t.Name()),
+					dropper.Span(), "dropped by this type's re-declaration")
+				continue
+			}
+
+			prior, dup := byName[a.name]
+			switch {
+			case !dup:
+				if byName == nil {
+					byName = make(map[string]annotationSource)
+				}
+				byName[a.name] = annotationSource{from: s, ann: a}
+				merged = append(merged, a)
+			case prior.ann.identity() == a.identity():
+				// The same annotation reaching t by two routes; idempotent.
+			default:
+				c.reportAnnotationDisagreement(t, name, a, reported,
+					fmt.Sprintf("type %q inherits conflicting @%s annotations for property %q from %s and %s",
+						t.Name(), a.name, name, prior.from.Name(), s.Name()),
+					prior.ann.Span(), "conflicting annotation declared here")
+			}
+		}
+	}
+	return merged, suppressed
+}
+
+// suppressingSuper returns the direct supertype, other than carrier, that
+// suppressed annotation ann on property name — the arm whose decision to drop it
+// contradicts carrier's decision to keep it.
+func suppressingSuper(supers []*Type, carrier *Type, name, ann string) *Type {
+	for _, s := range supers {
+		if s != carrier && s.suppressedAnnotations(name)[ann] {
+			return s
+		}
+	}
+	return nil
+}
+
+// reportAnnotationDisagreement reports one inherited-annotation disagreement,
+// deduplicated per (property, annotation), with a related span at the other
+// side.
+//
+// It does NOT mark the annotation in diagnosedAnnotations. That set exists to
+// stop the shadow warning from advising re-statement of an annotation rejected
+// AT ITS DECLARATION; a disagreement is the opposite — the annotation is
+// perfectly valid, and re-stating it is the RESOLUTION the message recommends.
+// Marking it would also be completer-wide, silencing a legitimate shadow warning
+// for the same *Annotation at an unrelated type. The disagreeing type re-declares
+// nothing (a re-declaration would resolve the disagreement), so it queues no
+// shadow warning of its own for the mark to suppress.
+func (c *completer) reportAnnotationDisagreement(
+	t *Type, prop string, a *Annotation, reported map[string]bool,
+	msg string, otherSpan location.Span, otherLabel string,
+) {
+	key := prop + "\x00" + a.name
+	if reported[key] {
+		return
+	}
+	reported[key] = true
+	c.collector.Collect(
+		diag.NewIssue(diag.Error, diag.E_INVALID_ANNOTATION, msg).
+			WithSpan(t.Span()).
+			WithRelated(
+				location.RelatedInfo{Span: a.Span(), Message: "annotation declared here"},
+				location.RelatedInfo{Span: otherSpan, Message: otherLabel},
+			).Build(),
+	)
+}
+
+// conflictPair is one reported property-inheritance conflict, kept as a
+// (survivor, incomer) representative so a later clash can be deduped against it
+// by lineage compatibility. See [conflictAlreadyReported].
+type conflictPair struct {
+	survivor *Property
+	incomer  *Property
+}
+
+// conflictAlreadyReported reports whether the clash between survivor and incomer
+// is the same one as an already-reported pair: same iff both sides are pairwise
+// compatible with that pair's corresponding sides, in either role assignment.
+// Compatibility (equal, or one narrowing the other) means "same narrowing
+// lineage", so this collapses a clash re-detected because a narrowing chain
+// (on the surviving OR conflicting side) contributed several members, while two
+// genuinely independent clashes — whose members narrow neither each other — stay
+// distinct.
+func conflictAlreadyReported(reported []conflictPair, survivor, incomer *Property) bool {
+	for _, r := range reported {
+		if propertiesCompatible(r.survivor, survivor) && propertiesCompatible(r.incomer, incomer) {
+			return true
+		}
+		if propertiesCompatible(r.survivor, incomer) && propertiesCompatible(r.incomer, survivor) {
+			return true
+		}
+	}
+	return false
+}
+
+// propertiesCompatible reports whether two same-named properties belong to one
+// narrowing lineage: equal, or one a valid narrowing of the other. Members of a
+// lineage do not conflict with each other; members of different lineages do.
+func propertiesCompatible(a, b *Property) bool {
+	return a.Equal(b) || a.CanNarrowFrom(b) || b.CanNarrowFrom(a)
 }
 
 // replaceMerged swaps the property named replacement.Name() in result and seen
@@ -470,64 +762,183 @@ func replaceMerged(result []*Property, seen map[string]*Property, replacement *P
 	}
 }
 
-// foldAnnotationsIntoSurvivor unions dropped's annotations into survivor — the
-// property kept in the merged view, already present in result — and replaces it
-// with a synthesized copy only when the set grows. Used in the two merge
-// outcomes where an inherited property is kept and an equal-or-wider sibling
-// from another ancestor is dropped, so the dropped sibling's annotations survive
-// regardless of extends order.
-func (c *completer) foldAnnotationsIntoSurvivor(t *Type, result []*Property, seen map[string]*Property, reportedConflicts map[string]bool, survivor, dropped *Property) {
-	if merged, changed := c.unionInheritedAnnotations(t, reportedConflicts, survivor, dropped); changed {
-		replaceMerged(result, seen, survivor.cloneWithAnnotations(merged))
-	}
+// shadowedAnnotation records one annotation that a type's own property
+// declaration dropped, together with the direct supertype it came through.
+// Queued during linearization and emitted after annotation validation — see
+// [completer.flushShadowedAnnotations].
+type shadowedAnnotation struct {
+	own  *Property
+	from *Type
+	ann  *Annotation
 }
 
-// unionInheritedAnnotations merges the annotations of the dropped inherited
-// property p into those of the surviving sibling property existing (both
-// inherited from different ancestors, whether Equal or one narrowing the other),
-// returning the merged set and whether it grew. A same-name annotation with
-// identical arguments is idempotent; a same-name annotation with different
-// arguments — only @vector similarities differ in practice, and only between
-// Equal Vector ancestors, since VectorConstraint.Equal ignores the similarity
-// keyword — is an unsatisfiable inheritance conflict, reported as
-// E_INVALID_ANNOTATION with existing's value kept. existing.annotations is never
-// mutated: it is cloned lazily on first growth, since it is shared with the
-// ancestor type.
+// shadowGroupKey groups queued shadow entries by (own declaration, contributing
+// supertype) for [completer.flushShadowedAnnotations].
+type shadowGroupKey struct {
+	own  *Property
+	from *Type
+}
+
+// recordShadowedAnnotations queues a W_ANNOTATION_SHADOWED for every annotation
+// an own declaration drops, one entry per (direct supertype, annotation).
 //
-// reportedConflicts holds the (property, annotation) pairs already blamed for
-// this type, so one conflict draws one diagnostic no matter how many ancestors
-// carry the property forward.
-func (c *completer) unionInheritedAnnotations(t *Type, reportedConflicts map[string]bool, existing, p *Property) ([]*Annotation, bool) {
-	if len(p.annotations) == 0 {
-		return existing.annotations, false
-	}
-	byName := make(map[string]*Annotation, len(existing.annotations)+len(p.annotations))
-	for _, a := range existing.annotations {
-		byName[a.name] = a
-	}
-	merged := existing.annotations
-	changed := false
-	for _, a := range p.annotations {
-		switch prior, ok := byName[a.name]; {
-		case !ok:
-			if !changed {
-				merged = slices.Clone(existing.annotations)
-				changed = true
-			}
-			merged = append(merged, a)
-			byName[a.name] = a
-		case prior.identity() != a.identity():
-			key := p.Name() + "\x00" + a.name
-			if reportedConflicts[key] {
-				continue
-			}
-			reportedConflicts[key] = true
-			c.errorf(t.Span(), diag.E_INVALID_ANNOTATION,
-				"type %q inherits conflicting @%s annotations for property %q from %s and %s",
-				t.Name(), a.name, p.Name(), existing.DeclaringScope(), p.DeclaringScope())
+// Per supertype, not per annotation name: two incomparable mixins that both
+// annotate the property are two independent declarations the re-declaration
+// dropped, and the user needs to be pointed at both — even when they happen to
+// use the SAME annotation name. Deduplication is by declared *Annotation
+// identity, so one annotation reaching t through both arms of a diamond is one
+// entry, while two mixins declaring their own @index are two.
+//
+// Comparison against the own set is name-level: re-stating an annotation of the
+// same name (any args) suppresses the warning for it.
+//
+// An annotation that any direct supertype SUPPRESSED is CONTESTED, and a
+// re-declaration dropping a contested annotation is resolving a disagreement,
+// not making a silent slip — that is precisely what the disagreement diagnostic
+// told the user to do. The warning exists for the accidental drop of a
+// uniformly-inherited annotation, so a contested one draws neither the warning
+// nor a suppression entry (the child's decision is now authoritative and
+// settled).
+//
+// It returns the annotation names this declaration suppresses for its own
+// subtypes: the uncontested annotations it dropped, plus its supertypes' still-
+// live suppressions, minus anything it re-states. A re-declaration that re-states
+// an annotation revives it for the whole subtree.
+func (c *completer) recordShadowedAnnotations(own *Property, supers []*Type) map[string]bool {
+	var have map[string]bool
+	if len(own.annotations) > 0 {
+		have = make(map[string]bool, len(own.annotations))
+		for _, a := range own.annotations {
+			have[a.name] = true
 		}
 	}
-	return merged, changed
+
+	// Annotation names some direct supertype dropped: contested, so this
+	// declaration settles them silently rather than warning.
+	var contested map[string]bool
+	for _, s := range supers {
+		for ann := range s.suppressedAnnotations(own.Name()) {
+			if contested == nil {
+				contested = make(map[string]bool)
+			}
+			contested[ann] = true
+		}
+	}
+
+	var suppressed map[string]bool
+	suppress := func(ann string) {
+		if suppressed == nil {
+			suppressed = make(map[string]bool)
+		}
+		suppressed[ann] = true
+	}
+	for ann := range contested {
+		if !have[ann] {
+			suppress(ann)
+		}
+	}
+
+	var seen map[*Annotation]bool
+	for _, s := range supers {
+		sp, ok := s.Property(own.Name())
+		if !ok {
+			continue
+		}
+		for _, a := range sp.annotations {
+			if have[a.name] || contested[a.name] {
+				continue // Re-stated, or a resolved disagreement: no warning, no drop.
+			}
+			suppress(a.name)
+			if seen[a] {
+				continue
+			}
+			if seen == nil {
+				seen = make(map[*Annotation]bool)
+			}
+			seen[a] = true
+			c.pendingShadowed = append(c.pendingShadowed,
+				shadowedAnnotation{own: own, from: s, ann: a})
+		}
+	}
+	return suppressed
+}
+
+// flushShadowedAnnotations emits the queued W_ANNOTATION_SHADOWED warnings, one
+// per (own declaration, contributing supertype), naming every annotation that
+// supertype contributed and dropping a related span on each.
+//
+// It runs after annotation validation rather than inside linearization because
+// the warning's advice — "re-state them on this declaration to keep them" — is
+// actively wrong for an annotation the same load rejects: following it produces
+// a second copy of the same error. Linearization cannot know that; only phase 7c
+// establishes which annotations are well-formed, known, correctly placed, and
+// eligible for their target. Any annotation that drew a diagnostic of its own,
+// or whose argument list failed to parse, is therefore skipped here — as is any
+// re-declaration that itself drew E_PROPERTY_CONFLICT, since a rejected
+// declaration cannot usefully be told to re-state anything.
+//
+// Re-statement is matched by NAME, so the advice stays followable even when two
+// supertypes contributed the same annotation name with different arguments:
+// re-stating either spelling settles it.
+//
+// Annotations inherited from another schema are always emitted: that schema
+// completed cleanly or the load already failed, so its annotations are valid.
+//
+// The queue is appended in type-completion order and then merged-property order,
+// so the emitted warnings are deterministically ordered.
+func (c *completer) flushShadowedAnnotations() {
+	type group struct {
+		own  *Property
+		from *Type
+		anns []*Annotation
+	}
+	var groups []*group
+	// A typed key rather than [2]any: the pair is (own property, contributing
+	// supertype), both comparable pointers, so boxing them into interfaces buys
+	// nothing and only risks an accidental type-mismatched lookup.
+	index := make(map[shadowGroupKey]*group)
+
+	for _, s := range c.pendingShadowed {
+		if s.ann.argsMalformed || c.diagnosedAnnotations[s.ann] {
+			continue // The annotation is not usable; advising its re-statement would mislead.
+		}
+		if c.conflictedProperties[s.own] {
+			continue // The re-declaration itself drew E_PROPERTY_CONFLICT; nothing to advise.
+		}
+		key := shadowGroupKey{own: s.own, from: s.from}
+		g, ok := index[key]
+		if !ok {
+			g = &group{own: s.own, from: s.from}
+			index[key] = g
+			groups = append(groups, g)
+		}
+		g.anns = append(g.anns, s.ann)
+	}
+
+	for _, g := range groups {
+		display := make([]string, len(g.anns))
+		related := make([]location.RelatedInfo, len(g.anns))
+		for i, a := range g.anns {
+			display[i] = "@" + a.name
+			related[i] = location.RelatedInfo{
+				Span:    a.Span(),
+				Message: "inherited annotation declared here",
+			}
+		}
+		// The contributing supertype is named because two incomparable mixins
+		// dropping the SAME annotation name otherwise produce two byte-identical
+		// warnings at one span, which reads as a duplicate rather than as two
+		// declarations the re-declaration shadowed.
+		msg := fmt.Sprintf(
+			"re-declaration of property %q drops annotation(s) %s inherited from %s; re-state them on this declaration to keep them",
+			g.own.Name(), strings.Join(display, ", "), g.from.Name(),
+		)
+		c.collector.Collect(
+			diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, msg).
+				WithSpan(g.own.Span()).
+				WithRelated(related...).Build(),
+		)
+	}
 }
 
 // mergeInvariants merges own invariants with inherited invariants.
@@ -566,9 +977,9 @@ func (c *completer) mergeInvariants(t *Type, supers []ResolvedTypeRef) []*Invari
 //
 // It deduplicates inherited-against-existing ONLY: an own-vs-own duplicate is
 // deliberately left in place — exactly as mergeInvariants leaves own duplicates
-// — so validateAnnotations can detect and report it against the raw own set
-// before any adapter reads the merged view. Collapsing own duplicates here
-// would make that diagnostic vanish silently.
+// — so the merged view an adapter reads reflects what the type body actually
+// declares. validateTypeAnnotations reports the duplicate independently, off the
+// raw own slice, so the two never interact.
 func (c *completer) mergeAnnotations(t *Type, supers []ResolvedTypeRef) []*Annotation {
 	result := t.AnnotationsSlice()
 	seen := make(map[string]bool)
@@ -582,7 +993,10 @@ func (c *completer) mergeAnnotations(t *Type, supers []ResolvedTypeRef) []*Annot
 			continue
 		}
 
-		for _, a := range superType.AllAnnotationsSlice() {
+		// AllAnnotations, not AllAnnotationsSlice: the sibling merge helpers
+		// iterate their ancestors' members rather than cloning a slice per
+		// ancestor only to discard it after the range.
+		for a := range superType.AllAnnotations() {
 			id := a.identity()
 			if seen[id] {
 				continue
@@ -595,59 +1009,6 @@ func (c *completer) mergeAnnotations(t *Type, supers []ResolvedTypeRef) []*Annot
 	return result
 }
 
-// warnShadowedAnnotations emits a Warning when a type's own property
-// declaration (surviving) drops annotations that the inherited property
-// (shadowed) carried. It is called from the two mergeProperties branches where
-// an own declaration wins over an inherited one — identical re-declaration or
-// narrowing — so a child shadowing the same property across N annotated
-// ancestors draws N warnings (once per shadowing ancestor). The Issue is built
-// directly on the collector with Warning severity and a related span at the
-// shadowed declaration; completer.errorf cannot serve here because it hardcodes
-// Error severity and exposes no related-info hook.
-func (c *completer) warnShadowedAnnotations(surviving, shadowed *Property) {
-	dropped := droppedAnnotationNames(surviving, shadowed)
-	if len(dropped) == 0 {
-		return
-	}
-	display := make([]string, len(dropped))
-	for i, name := range dropped {
-		display[i] = "@" + name
-	}
-	msg := fmt.Sprintf(
-		"re-declaration of property %q drops inherited annotation(s) %s; re-state them on this declaration to keep them",
-		surviving.Name(), strings.Join(display, ", "),
-	)
-	c.collector.Collect(
-		diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, msg).
-			WithSpan(surviving.Span()).
-			WithRelated(location.RelatedInfo{
-				Span:    shadowed.Span(),
-				Message: "inherited annotation declared here",
-			}).Build(),
-	)
-}
-
-// droppedAnnotationNames returns the names of annotations on shadowed that are
-// absent by name from surviving's annotation set — the annotations a
-// re-declaration drops. Comparison is name-level: re-stating an annotation of
-// the same name (any args) suppresses the warning for it.
-func droppedAnnotationNames(surviving, shadowed *Property) []string {
-	if len(shadowed.annotations) == 0 {
-		return nil
-	}
-	have := make(map[string]bool, len(surviving.annotations))
-	for _, a := range surviving.annotations {
-		have[a.name] = true
-	}
-	var dropped []string
-	for _, a := range shadowed.annotations {
-		if !have[a.name] {
-			dropped = append(dropped, a.name)
-		}
-	}
-	return dropped
-}
-
 // mergeRelations merges own relations with inherited relations.
 // Similar to mergeProperties but for relations of a specific kind.
 // Reports E_RELATION_COLLISION when an inherited relation conflicts
@@ -658,6 +1019,13 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 	for _, r := range result {
 		seen[r.FieldName()] = r
 	}
+
+	// One collision is one diagnostic, keyed by the PAIR of clashing relations —
+	// the same rule mergeProperties applies to E_PROPERTY_CONFLICT, for the same
+	// reason: an ancestor that merely INHERITS the relation carries the same
+	// *Relation forward, so the identical clash is re-detected once per ancestor
+	// in the chain, while two genuinely different rivals stay two diagnostics.
+	reportedCollisions := make(map[[2]*Relation]bool)
 
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
@@ -675,7 +1043,8 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 		for _, r := range inherited {
 			if existing, ok := seen[r.FieldName()]; ok {
 				// Check if they're compatible (same relation)
-				if !existing.Equal(r) {
+				if key := [2]*Relation{existing, r}; !existing.Equal(r) && !reportedCollisions[key] {
+					reportedCollisions[key] = true
 					c.errorf(t.Span(), diag.E_RELATION_COLLISION,
 						"type %q inherits conflicting definitions of relation %q from %s and %s",
 						t.Name(), r.FieldName(), existing.Owner(), r.Owner())

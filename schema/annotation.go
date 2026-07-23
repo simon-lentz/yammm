@@ -1,7 +1,9 @@
 package schema
 
 import (
+	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/location"
@@ -14,8 +16,14 @@ import (
 type AnnotationArgKind uint8
 
 const (
-	// ArgUnvalidated is the zero value: the argument's role is not yet known
-	// (before completion, or for an annotation that failed validation).
+	// ArgUnvalidated is the zero value: the argument's role is not known. It
+	// survives into a sealed schema in four cases — an annotation that failed
+	// validation, one whose argument list failed to parse, one whose check had to
+	// DEFER because the type has an unresolved supertype that may yet supply the
+	// referent (see validateIndexType), and one whose TARGET type could not be
+	// judged, where annotationTargetTypeUnknown returns before any kind is
+	// stamped. A consumer reading a sealed schema must therefore treat
+	// ArgUnvalidated as "not checked", never as "checked and found roleless".
 	ArgUnvalidated AnnotationArgKind = iota
 	// ArgPropertyRef marks an argument that resolves to a property of the type,
 	// e.g. a member of a @@index composite.
@@ -25,16 +33,38 @@ const (
 	ArgKeyword
 )
 
-// annotationTokenKind records whether a parsed argument was an identifier or a
-// literal. It is fixed at parse time and lets completion emit a precise
-// "expected a reference or keyword, got a literal" diagnostic without
-// reparsing. It is deliberately coarse: finer literal classification waits for
-// an annotation that accepts a literal argument.
+// String returns the canonical lowercase label for the argument kind, so a
+// consumer formatting one gets a name rather than a bare integer — matching
+// AnnotationPlacement and the other exported enums in the package.
+func (k AnnotationArgKind) String() string {
+	//exhaustive:enforce
+	switch k {
+	case ArgUnvalidated:
+		return "unvalidated"
+	case ArgPropertyRef:
+		return "property-ref"
+	case ArgKeyword:
+		return "keyword"
+	default:
+		return "unknown"
+	}
+}
+
+// annotationTokenKind records what lexical form a parsed argument had. It is
+// fixed at parse time and lets completion emit a precise "expected a reference
+// or keyword, got a literal" diagnostic without reparsing, and lets a diagnostic
+// echo the argument in its source spelling.
+//
+// A quoted string is distinguished from a bare literal (number, boolean, regex)
+// because only the string's text was unquoted, so only it must be re-quoted to
+// reproduce the source; the others are already their own spelling. Both are
+// "literals" for eligibility ([AnnotationArg.isLiteral]).
 type annotationTokenKind uint8
 
 const (
 	tokenIdentifier annotationTokenKind = iota
-	tokenLiteral
+	tokenLiteral                        // a bare literal: number, boolean, regex — text is the source spelling
+	tokenString                         // a quoted string literal — text is UNQUOTED, source adds the quotes
 )
 
 // AnnotationArg is one argument of an annotation. It is a value type; the
@@ -57,10 +87,22 @@ func (a AnnotationArg) Kind() AnnotationArgKind { return a.kind }
 // Span returns the source location of the argument.
 func (a AnnotationArg) Span() location.Span { return a.span }
 
-// isLiteral reports whether the argument was a literal token rather than an
-// identifier. Completion uses this to reject a literal where a property
-// reference or keyword is required.
-func (a AnnotationArg) isLiteral() bool { return a.tokenKind == tokenLiteral }
+// isLiteral reports whether the argument was a literal token — a bare literal or
+// a quoted string — rather than an identifier. Completion uses this to reject a
+// literal where a property reference or keyword is required.
+func (a AnnotationArg) isLiteral() bool {
+	return a.tokenKind == tokenLiteral || a.tokenKind == tokenString
+}
+
+// displayText returns the argument in its SOURCE spelling: a quoted string is
+// re-quoted (its stored text is unquoted), everything else is already its own
+// spelling. Used by diagnostics that echo an argument back to the user.
+func (a AnnotationArg) displayText() string {
+	if a.tokenKind == tokenString {
+		return strconv.Quote(a.text)
+	}
+	return a.text
+}
 
 // Annotation is a validated @name / @@name decorator carried on a property or
 // type. Meaning (DDL emission, write-shape derivation) lives in adapters; the
@@ -110,14 +152,29 @@ func (a *Annotation) setArgKind(i int, kind AnnotationArgKind) {
 }
 
 // identity returns the annotation's deduplication key: name followed by the
-// ordered argument texts, NUL-separated so a single arg "a,b" cannot collide
-// with two args "a", "b". Two type-level annotations are exact duplicates iff
-// their identities match (see mergeAnnotations).
+// ordered arguments, NUL-separated so a single arg "a,b" cannot collide with two
+// args "a", "b". Two type-level annotations are exact duplicates iff their
+// identities match (see mergeAnnotations).
+//
+// Each argument contributes its TOKEN KIND as well as its text, because text
+// alone is the unquoted value: a bare identifier `cosine` and the string literal
+// `"cosine"` are different source, mean different things to validation, and must
+// not compare equal — one is a keyword the loader accepts, the other a literal
+// it rejects.
+//
+// The encoding is length-prefixed rather than NUL-separated: an argument's text
+// is the UNQUOTED value of a string literal, which can itself contain a NUL byte
+// (written in source with a \x00 escape), so a NUL delimiter alone could be
+// forged to make two different argument lists produce the same key. Writing each
+// text's byte length before
+// its bytes makes the encoding self-delimiting and therefore injective,
+// whatever the text contains.
 func (a *Annotation) identity() string {
+	const sep = "\x00"
 	var b strings.Builder
 	b.WriteString(a.name)
 	for _, arg := range a.args {
-		b.WriteByte(0)
+		fmt.Fprintf(&b, "%s%d%s%d%s", sep, arg.tokenKind, sep, len(arg.text), sep)
 		b.WriteString(arg.text)
 	}
 	return b.String()

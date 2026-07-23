@@ -4,22 +4,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/schema"
 )
-
-// loadNoErr loads a schema that must complete without errors (warnings are
-// allowed) and returns both the schema and the result for warning inspection.
-func loadNoErr(t *testing.T, source string) (*schema.Schema, diag.Result) {
-	t.Helper()
-	s, res := schema.LoadString(t.Context(), source, "main.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema should load without errors, got: %v", res)
-	}
-	if s == nil {
-		t.Fatal("schema returned nil despite no errors")
-	}
-	return s, res
-}
 
 func TestAnnotation_Shadow_IdenticalRedeclarationDropsAndWarns(t *testing.T) {
 	t.Parallel()

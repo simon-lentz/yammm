@@ -6,12 +6,12 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 )
 
-// Grammar-level acceptance for schema annotations. Before the grammar carries
-// the annotation productions, '@' lexes as the AT token but appears in no rule,
-// so any '@'/'@@'-bearing schema is a syntax error. After, these load clean:
-// the annotations are collected onto the model but carry no semantics yet
-// (adapters in tracks 2/3 consume them; eligibility validation is a later
-// completion phase, exercised separately).
+// Grammar-level acceptance for schema annotations: these schemas must parse and
+// carry their annotations onto the model. The grammar assigns them no meaning —
+// eligibility is settled in a later completion phase ([completer.validateAnnotations],
+// exercised in annotation_validate_test.go) and the emitted DDL is the adapters'
+// concern (adapter/neo4j) — so a case here proves only that the shape reaches
+// the model intact.
 
 func TestAnnotation_Grammar_PropertyLevelParses(t *testing.T) {
 	t.Parallel()

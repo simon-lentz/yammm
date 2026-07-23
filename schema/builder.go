@@ -810,6 +810,11 @@ func (t *TypeBuilder) WithInvariant(name string, e expr.Expression, doc string) 
 // annotation that accepts one. Structure and eligibility are validated by the
 // shared completion phase, so a bad annotation reports the same diagnostic as
 // the parse front door.
+//
+// The parse front door additionally lets a type-level annotation carry a leading
+// doc comment ([Annotation.Documentation]); a Builder-constructed one is always
+// undocumented. Adding it here means an optional-doc entry point rather than a
+// changed signature, and no consumer has needed it yet.
 func (t *TypeBuilder) WithTypeAnnotation(name string, args ...string) *TypeBuilder {
 	t.state.annotations = append(t.state.annotations, builderAnnotationDecl(name, args))
 	return t

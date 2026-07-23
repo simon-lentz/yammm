@@ -31,6 +31,7 @@ func TestType_Seal_PreventsMutation(t *testing.T) {
 		{"SetAllCompositions", func(s *schema.Type) { schema.TestSetTypeAllCompositions(s, []*schema.Relation{}) }},
 		{"SetSuperTypes", func(s *schema.Type) { schema.TestSetTypeSuperTypes(s, []schema.ResolvedTypeRef{}) }},
 		{"SetSubTypes", func(s *schema.Type) { schema.TestSetTypeSubTypes(s, []schema.ResolvedTypeRef{}) }},
+		{"SetSuppressedAnnotations", func(s *schema.Type) { schema.TestSetTypeSuppressedAnnotat(s, nil) }},
 	}
 
 	for _, tt := range tests {
