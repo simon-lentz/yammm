@@ -33,7 +33,7 @@ func registerLabelFlags(cmd *cobra.Command) {
 func registerConstraintFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("named", true, "generate named constraints")
 	cmd.Flags().String("edition", "enterprise", "target Neo4j edition: enterprise or community")
-	cmd.Flags().Bool("node-keys", false, "emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise)")
+	cmd.Flags().Bool("node-keys", false, "emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise; degrades to UNIQUE on --edition community)")
 	cmd.Flags().Bool("scalar-types", true, "emit IS :: <TYPE> constraints for scalar properties")
 	cmd.Flags().Bool("required-only-types", false, "restrict type constraints to required properties")
 }

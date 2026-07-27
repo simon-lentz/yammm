@@ -233,7 +233,7 @@ Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 |------|---------|-------------|
 | `--edition` | `enterprise` | `enterprise` or `community` |
 | `--named` | `true` | Generate named constraints |
-| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise) |
+| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
 | `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
 | `--separator` | `__` | Label separator (schema__Type) |
@@ -268,7 +268,7 @@ Compares desired schema constraints **and indexes** against the live database (i
 | `--indexes` | `true` | Include index drift in the diff and the exit code; `--indexes=false` is constraints-only |
 | `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed, on **both** sides) |
 | `--named` | `true` | Named constraints; with `false` every pairing falls through to semantic identity |
-| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise) |
+| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
 | `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
 | `--separator` | `__` | Label separator (schema__Type) |

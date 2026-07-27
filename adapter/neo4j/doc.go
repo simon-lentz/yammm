@@ -294,7 +294,17 @@
 // [WithEdition] controls which constraint types are emitted. Enterprise
 // edition supports all constraint types (UNIQUE, NOT NULL, NODE KEY,
 // PROPERTY_TYPE). Community edition supports UNIQUE constraints only;
-// all other constraint types are silently omitted.
+// NOT NULL and PROPERTY_TYPE are silently omitted, having no Community
+// equivalent.
+//
+// NODE KEY is not omitted but DEGRADED. It is an encoding of UNIQUE + NOT NULL
+// rather than a guarantee of its own, so dropping it whole would discard the
+// UNIQUE half Community supports — which is what once left primary keys with no
+// constraint at all under [WithNodeKeyConstraints](true) plus [Community], since
+// the primary key's NOT NULL is skipped whenever a NODE KEY is meant to cover
+// it. Under Community the kind is chosen as UNIQUE up front and
+// [W_NEO4J_NODE_KEY_UNSUPPORTED] reports the substitution, so the flag cannot
+// change Community output.
 //
 // # Neo4j Version
 //

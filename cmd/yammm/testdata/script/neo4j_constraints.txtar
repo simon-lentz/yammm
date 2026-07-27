@@ -10,6 +10,24 @@ stdout 'UNIQUE'
 ! stdout 'IS NOT NULL'
 ! stdout 'IS :: STRING'
 
+# --node-keys asks for a kind Community cannot hold. The primary key is still
+# enforced — as UNIQUE, the strongest kind the edition affords — and the
+# substitution is reported. Before this was fixed the NODE KEY was emitted and
+# then filtered away, and the PK's NOT NULL had already been skipped as
+# redundant, so the command printed NO constraint for the primary key at all.
+exec yammm neo4j constraints --edition community --node-keys valid.yammm
+stdout 'REQUIRE n\.id IS UNIQUE'
+! stdout 'IS NODE KEY'
+stderr 'W_NEO4J_NODE_KEY_UNSUPPORTED'
+
+# A warning, not a failure: exit status stays 0 and the output is usable.
+exec yammm neo4j constraints --edition community --node-keys valid.yammm
+
+# Enterprise honors the request, and stays silent about it.
+exec yammm neo4j constraints --edition enterprise --node-keys valid.yammm
+stdout 'IS NODE KEY'
+! stderr 'W_NEO4J_NODE_KEY_UNSUPPORTED'
+
 ! exec yammm neo4j constraints --edition bogus valid.yammm
 
 -- valid.yammm --

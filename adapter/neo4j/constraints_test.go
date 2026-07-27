@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
@@ -117,6 +118,211 @@ func TestConstraints_NodeKeyComposite(t *testing.T) {
 
 	// Non-PK required should remain.
 	assertContains(t, stmts, "REQUIRE n.name IS NOT NULL")
+}
+
+// countCode returns how many issues in r carry code.
+func countCode(r diag.Result, code diag.Code) int {
+	n := 0
+	for issue := range r.Issues() {
+		if issue.Code() == code {
+			n++
+		}
+	}
+	return n
+}
+
+// TestConstraints_NodeKeyCommunity_DegradesToUnique pins the fix for a silent
+// total loss of primary-key enforcement: NODE KEY is Enterprise-only, so under
+// [Community] the emitter must fall back to the UNIQUE half rather than emit a
+// kind the edition filter then discards. Before the fix this fixture produced
+// ZERO constraints — the NODE KEY was filtered out and the PK's NOT NULL had
+// already been skipped on the assumption NODE KEY covered it — so a Community
+// user asking for STRONGER keys via WithNodeKeyConstraints got none at all.
+func TestConstraints_NodeKeyCommunity_DegradesToUnique(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "basic.yammm")
+	a := New(WithNodeKeyConstraints(true), WithEdition(Community))
+
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
+	}
+
+	// The PK is enforced, by the strongest kind Community supports.
+	assertContains(t, stmts, "REQUIRE n.id IS UNIQUE")
+	assertNotContains(t, stmts, "IS NODE KEY")
+
+	// Exactly the UNIQUE constraint survives: NOT NULL and TYPE are
+	// Enterprise-only and correctly dropped, matching plain Community.
+	if len(stmts) != 1 {
+		t.Errorf("expected exactly 1 constraint (UNIQUE), got %d: %v", len(stmts), stmts)
+	}
+}
+
+// TestConstraints_NodeKeyCommunity_MatchesPlainCommunity states the invariant
+// behind the degrade directly: on Community, asking for NODE KEY must produce
+// exactly what not asking produces. WithNodeKeyConstraints selects how primary
+// keys are ENCODED, and Community affords one encoding, so the flag cannot
+// change the output there.
+func TestConstraints_NodeKeyCommunity_MatchesPlainCommunity(t *testing.T) {
+	t.Parallel()
+	for _, fixture := range []string{"basic", "composite_pk", "multiple_types", "inheritance"} {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+			s := loadSchema(t, fixture+".yammm")
+
+			withNodeKeys, r1 := New(WithNodeKeyConstraints(true), WithEdition(Community)).
+				ConstraintsForSchema(context.Background(), s)
+			if err := r1.Err(); err != nil {
+				t.Fatalf("ConstraintsForSchema(node-keys): %v", err)
+			}
+			plain, r2 := New(WithEdition(Community)).
+				ConstraintsForSchema(context.Background(), s)
+			if err := r2.Err(); err != nil {
+				t.Fatalf("ConstraintsForSchema(plain): %v", err)
+			}
+
+			if !slices.Equal(withNodeKeys, plain) {
+				t.Errorf("Community output differs by node-keys flag:\n with: %v\n without: %v",
+					withNodeKeys, plain)
+			}
+		})
+	}
+}
+
+// TestConstraints_NodeKeyCommunity_Composite covers the tuple form, whose
+// suffix is built on a separate branch from the single-property form.
+func TestConstraints_NodeKeyCommunity_Composite(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "composite_pk.yammm")
+	a := New(WithNodeKeyConstraints(true), WithEdition(Community))
+
+	stmts, result := a.ConstraintsForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
+	}
+
+	assertContains(t, stmts, "REQUIRE (n.schema_id, n.record_id) IS UNIQUE")
+	assertNotContains(t, stmts, "IS NODE KEY")
+}
+
+// TestConstraints_NodeKeyCommunity_WarnsOncePerCall pins both that the degrade
+// is announced and that it is announced at configuration altitude. A per-type
+// warning would scale with schema size and bury the one fact being reported;
+// multiple_types exists precisely to catch that.
+func TestConstraints_NodeKeyCommunity_WarnsOncePerCall(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "multiple_types.yammm")
+	a := New(WithNodeKeyConstraints(true), WithEdition(Community))
+
+	_, result := a.ConstraintsForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema failed: %v", err)
+	}
+
+	// A warning, not an error: the caller still gets usable output.
+	if result.HasErrors() {
+		t.Errorf("degrade must not fail the call: %v", result)
+	}
+	if got := countCode(result, W_NEO4J_NODE_KEY_UNSUPPORTED); got != 1 {
+		t.Errorf("expected exactly 1 %s, got %d", W_NEO4J_NODE_KEY_UNSUPPORTED, got)
+	}
+
+	// Severity is asserted, not assumed. Warning is the contract: high enough
+	// that HasWarnings sees it and default renderers print it, low enough that it
+	// is not a failure. Info would still render and still carry the code, so
+	// every other assertion here passes at that severity too.
+	for issue := range result.Issues() {
+		if issue.Code() != W_NEO4J_NODE_KEY_UNSUPPORTED {
+			continue
+		}
+		if issue.Severity() != diag.Warning {
+			t.Errorf("%s severity = %v, want %v", issue.Code(), issue.Severity(), diag.Warning)
+		}
+	}
+	if !result.HasWarnings() {
+		t.Error("result carries no warning; the degrade is invisible to severity-gated callers")
+	}
+}
+
+// TestConstraintsForType_CommunityNodeKeyKeepsPrimaryKeyNotNull asserts the
+// coupling between the two emitters BEFORE the edition filter runs, which is the
+// only place it is observable.
+//
+// notNullConstraints skips a primary key's NOT NULL whenever a NODE KEY is
+// emitted to cover it. Post-filter that skip is invisible on Community — NOT
+// NULL is Enterprise-only and would be dropped anyway — so an emitter that
+// consulted the raw flag instead of the shared predicate would produce identical
+// output today and pass every other test here. It would also be one filter
+// change away from reinstating the original bug, where the primary key lost its
+// uniqueness to the filter and its NOT NULL to a skip that assumed a NODE KEY
+// that was never kept. Asserting pre-filter pins the invariant that actually
+// matters: the skip happens only where the covering NODE KEY does.
+func TestConstraintsForType_CommunityNodeKeyKeepsPrimaryKeyNotNull(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadSchema(t, "basic.yammm")
+	a := New(WithNodeKeyConstraints(true), WithEdition(Community))
+
+	collector := diag.NewCollector(0)
+	var unfiltered []Constraint
+	for typ, label := range a.emittableTypes(ctx, s, collector) {
+		unfiltered = append(unfiltered, a.constraintsForType(ctx, typ, label, collector)...)
+	}
+	if unfiltered == nil {
+		t.Fatal("no constraints emitted for basic.yammm")
+	}
+
+	var sawPKUnique, sawPKNotNull bool
+	for _, c := range unfiltered {
+		if !slices.Contains(c.Properties, "id") {
+			continue
+		}
+		switch c.Kind {
+		case ConstraintUnique:
+			sawPKUnique = true
+		case ConstraintNotNull:
+			sawPKNotNull = true
+		case ConstraintNodeKey:
+			t.Errorf("Community emitted a NODE KEY pre-filter: %s", c.Statement)
+		case ConstraintType:
+		}
+	}
+	if !sawPKUnique {
+		t.Error("no UNIQUE emitted for the primary key")
+	}
+	if !sawPKNotNull {
+		t.Error("primary key's NOT NULL was skipped, but no NODE KEY was emitted to cover it")
+	}
+}
+
+// TestConstraints_NodeKeyWarning_OnlyOnTheDegrade is the control: the warning
+// must fire on the combination that degrades and nowhere else, or it becomes
+// noise operators learn to ignore.
+func TestConstraints_NodeKeyWarning_OnlyOnTheDegrade(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		opts []Option
+	}{
+		{"enterprise with node-keys", []Option{WithNodeKeyConstraints(true)}},
+		{"community without node-keys", []Option{WithEdition(Community)}},
+		{"enterprise without node-keys", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := loadSchema(t, "basic.yammm")
+
+			_, result := New(tc.opts...).ConstraintsForSchema(context.Background(), s)
+			if err := result.Err(); err != nil {
+				t.Fatalf("ConstraintsForSchema failed: %v", err)
+			}
+			if result.HasCode(W_NEO4J_NODE_KEY_UNSUPPORTED) {
+				t.Errorf("unexpected %s: %v", W_NEO4J_NODE_KEY_UNSUPPORTED, result)
+			}
+		})
+	}
 }
 
 func TestConstraints_CommunityEdition(t *testing.T) {

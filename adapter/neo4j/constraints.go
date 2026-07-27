@@ -87,6 +87,11 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) (
 	collisionResult := a.DetectLabelCollisions(ctx, s)
 	collector.Merge(collisionResult)
 
+	// Reported once per call, not per type: the substitution is a fact about the
+	// adapter's configuration, and repeating it for every type would scale the
+	// noise with the schema while adding nothing.
+	a.warnNodeKeyDegraded(collector)
+
 	var constraints []Constraint
 	for t, label := range a.emittableTypes(ctx, s, collector) {
 		constraints = append(constraints, a.constraintsForType(ctx, t, label, collector)...)
@@ -135,6 +140,49 @@ func (a *Adapter) constraintsForType(_ context.Context, t *schema.Type, label st
 	return constraints
 }
 
+// useNodeKeyConstraints reports whether primary keys are encoded as NODE KEY.
+//
+// NODE KEY is Enterprise-only, so the request is honored only where the target
+// can hold it. This must be the SINGLE source of that decision: two emitters
+// consult it — [Adapter.primaryKeyConstraints] to choose the kind, and
+// [Adapter.notNullConstraints] to decide whether a primary key's NOT NULL is
+// already covered — and if they ever disagree, a primary key loses both its
+// uniqueness (filtered away as a kind the edition cannot declare) and its NOT
+// NULL (skipped as redundant), leaving it wholly unenforced.
+//
+// The edition cannot be consulted only in the post-emission filter. That filter
+// drops by kind, and by then the NODE KEY carries no record that it stood in for
+// UNIQUE + NOT NULL, so dropping it discards the UNIQUE half that Community
+// supports perfectly well. The substitution has to happen before the kind is
+// chosen, which is here. [TestConstraints_NodeKeyCommunity_MatchesPlainCommunity]
+// pins the resulting invariant.
+func (a *Adapter) useNodeKeyConstraints() bool {
+	return a.config.nodeKeyConstraints && a.config.edition != Community
+}
+
+// warnNodeKeyDegraded reports the NODE KEY → UNIQUE substitution when the
+// configuration asks for a kind the target edition cannot hold. Silence here
+// would reproduce the failure this fallback exists to fix, only one layer up:
+// the operator asked for stronger primary-key enforcement and must be told the
+// request was adjusted rather than honored.
+func (a *Adapter) warnNodeKeyDegraded(collector *diag.Collector) {
+	// Expressed as "asked for, and declined" rather than by re-deriving the
+	// edition test: whatever reasons [Adapter.useNodeKeyConstraints] comes to
+	// decline for, the warning follows automatically instead of silently falling
+	// out of step with it.
+	if !a.config.nodeKeyConstraints || a.useNodeKeyConstraints() {
+		return
+	}
+	issue := diag.NewIssue(diag.Warning, W_NEO4J_NODE_KEY_UNSUPPORTED,
+		"NODE KEY constraints require Neo4j Enterprise; emitting UNIQUE for primary keys instead").
+		WithDetail(diag.DetailKeyFormat, "neo4j").
+		WithDetail(diag.DetailKeyDetail,
+			"Community edition supports UNIQUE constraints only, so primary keys are enforced "+
+				"as unique but not as NOT NULL. Target Enterprise to emit NODE KEY.").
+		Build()
+	collector.Collect(issue)
+}
+
 // primaryKeyConstraints generates UNIQUE or NODE KEY constraints for primary keys.
 func (a *Adapter) primaryKeyConstraints(t *schema.Type, label string, collector *diag.Collector) []Constraint {
 	pks := t.PrimaryKeysSlice()
@@ -168,7 +216,7 @@ func (a *Adapter) primaryKeyConstraints(t *schema.Type, label string, collector 
 
 	kind := ConstraintUnique
 	suffix := "IS UNIQUE"
-	if a.config.nodeKeyConstraints {
+	if a.useNodeKeyConstraints() {
 		kind = ConstraintNodeKey
 		suffix = "IS NODE KEY"
 	}
@@ -201,9 +249,12 @@ func (a *Adapter) notNullConstraints(t *schema.Type, label string, collector *di
 	var constraints []Constraint
 	seen := make(map[string]struct{})
 
-	// Build set of PK property names for NODE KEY dedup.
+	// Build set of PK property names for NODE KEY dedup. Gated on the same
+	// predicate that chooses the kind: skipping a primary key's NOT NULL is only
+	// safe where a NODE KEY is actually emitted to cover it.
+	useNodeKey := a.useNodeKeyConstraints()
 	pkNames := make(map[string]struct{})
-	if a.config.nodeKeyConstraints {
+	if useNodeKey {
 		for _, pk := range t.PrimaryKeysSlice() {
 			pkNames[pk.Name()] = struct{}{}
 		}
@@ -218,7 +269,7 @@ func (a *Adapter) notNullConstraints(t *schema.Type, label string, collector *di
 			continue
 		}
 		// Skip PK properties when NODE KEY is used (NODE KEY implies NOT NULL).
-		if a.config.nodeKeyConstraints {
+		if useNodeKey {
 			if _, isPK := pkNames[propName]; isPK {
 				continue
 			}
