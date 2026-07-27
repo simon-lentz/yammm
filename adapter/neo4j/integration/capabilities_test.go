@@ -90,6 +90,94 @@ func TestAllConstraintKindsExecute(t *testing.T) {
 	t.Logf("constraint kinds live on the server: %v", slices.Sorted(maps.Keys(live)))
 }
 
+// TestNodeKeyRequest_EnforcesPrimaryKeyOnEitherEdition runs on BOTH editions by
+// design, and is the only capabilities test that does.
+//
+// WithNodeKeyConstraints(true) asks for a kind Community cannot hold. The
+// invariant that must survive the request either way is that the primary key is
+// ENFORCED — as NODE KEY where the edition affords it, as UNIQUE where it does
+// not. It regressed precisely because every existing NODE KEY assertion sits
+// behind requireEnterprise: the adapter emitted a NODE KEY, the edition filter
+// discarded it as undeclarable, the primary key's NOT NULL had already been
+// skipped as covered by it, and a Community user who asked for STRONGER keys got
+// no primary-key constraint at all. Nothing skipped here, so nothing hides that.
+//
+// Executing the statements is half the value: on Community the server itself
+// rejects a CREATE CONSTRAINT ... IS NODE KEY, so a regression that reinstated
+// the un-degraded kind would fail here even if the emitter's own assertions were
+// somehow satisfied.
+func TestNodeKeyRequest_EnforcesPrimaryKeyOnEitherEdition(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	dropAll(t, ctx)
+	t.Cleanup(func() { dropAll(t, ctx) })
+
+	enterprise := isEnterprise(t, ctx)
+	a := newAdapter(t, ctx, n4j.WithNodeKeyConstraints(true))
+	s := loadRoundTripSchema(t)
+
+	constraints, res := a.ConstraintsStructured(ctx, s)
+	if res.HasErrors() {
+		t.Fatalf("emitting constraints: %v", res.Err())
+	}
+
+	// The warning is the Community half's other half: the substitution must be
+	// announced there and stay silent on Enterprise.
+	switch gotWarning := res.HasCode(n4j.W_NEO4J_NODE_KEY_UNSUPPORTED); {
+	case enterprise && gotWarning:
+		t.Errorf("Enterprise honored the request but still warned: %v", res)
+	case !enterprise && !gotWarning:
+		t.Errorf("Community substituted UNIQUE for NODE KEY without warning: %v", res)
+	}
+
+	wantKind := n4j.ConstraintNodeKey
+	if !enterprise {
+		wantKind = n4j.ConstraintUnique
+	}
+
+	var emittedPK int
+	for _, c := range constraints {
+		if c.Kind == wantKind {
+			emittedPK++
+		}
+		if !enterprise && c.Kind == n4j.ConstraintNodeKey {
+			t.Errorf("Community emitted a NODE KEY the edition cannot hold: %s", c.Statement)
+		}
+		run(t, ctx, c.Statement)
+	}
+	awaitIndexes(t, ctx)
+
+	// Asserted emitted before asserted live, so a regression that stops emitting
+	// cannot pass this vacuously.
+	if emittedPK == 0 {
+		t.Fatalf("no %v constraint emitted for the schema's primary keys; primary keys are unenforced", wantKind)
+	}
+
+	// Liveness is asserted through the adapter's own diff rather than against a
+	// hand-written server type name. The server's spelling is generation- and
+	// edition-dependent (a uniqueness constraint reports NODE_PROPERTY_UNIQUENESS
+	// on some, UNIQUENESS on others) and the adapter already canonicalises it;
+	// re-encoding that knowledge here would make the test assert the fixture
+	// rather than the behaviour. A clean diff is also the operator-visible claim:
+	// what was emitted is present, owned, and needs no further action.
+	actual, err := n4j.ParseRemoteConstraints(query(t, ctx, n4j.IntrospectConstraintsQuery()))
+	if err != nil {
+		t.Fatalf("parsing constraints: %v", err)
+	}
+	cd := a.DiffConstraints(constraints, actual, a.OwnedLabels(ctx, s))
+	if len(cd.Match) != len(constraints) {
+		t.Errorf("matched %d of %d emitted constraints; drift=%d create=%d drop=%d unverified=%d",
+			len(cd.Match), len(constraints),
+			len(cd.Drift), len(cd.Create), len(cd.Drop), len(cd.Unverified))
+		for _, d := range cd.Drift {
+			t.Logf("  drift: %s", d.Reason)
+		}
+		for _, c := range cd.Create {
+			t.Logf("  create: %s", c.Statement)
+		}
+	}
+}
+
 // A TYPE constraint's propertyType must be reported, and must match what the
 // adapter emitted — otherwise every TYPE constraint lands in Unverified and
 // `yammm neo4j diff` exits 3 forever. This is the column that does not exist

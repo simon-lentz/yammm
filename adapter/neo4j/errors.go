@@ -36,6 +36,17 @@ var (
 	E_NEO4J_INVALID_INDEX_TARGET = diag.NewCode("E_NEO4J_INVALID_INDEX_TARGET", diag.CategoryAdapter)
 )
 
+// Warning-severity diagnostic codes for neo4j adapter degradations.
+var (
+	// W_NEO4J_NODE_KEY_UNSUPPORTED indicates [WithNodeKeyConstraints](true) was
+	// combined with [WithEdition]([Community]), which cannot hold a NODE KEY
+	// constraint. The emitter falls back to the UNIQUE half — the strongest
+	// primary-key enforcement Community affords — and reports this warning so the
+	// substitution is visible. A warning, not an error: the fallback is correct
+	// output, so failing the call would withhold a usable answer.
+	W_NEO4J_NODE_KEY_UNSUPPORTED = diag.NewCode("W_NEO4J_NODE_KEY_UNSUPPORTED", diag.CategoryAdapter)
+)
+
 // Sentinel errors for validation failures.
 var (
 	ErrEmptyIdentifier     = errors.New("neo4j adapter: identifier is empty")

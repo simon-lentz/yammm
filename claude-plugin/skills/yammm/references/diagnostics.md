@@ -213,3 +213,4 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |
 | `E_NEO4J_UNKNOWN_PROPERTY` | Neo4j | An index annotation names a property the type does not have |
 | `E_NEO4J_INVALID_INDEX_TARGET` | Neo4j | An index annotation names a property whose type cannot carry it (`@index` on a non-scalar, `@vector` on a non-Vector or a non-positive dimension) |
+| `W_NEO4J_NODE_KEY_UNSUPPORTED` | Neo4j | `WithNodeKeyConstraints(true)` combined with `WithEdition(Community)`; NODE KEY is Enterprise-only, so UNIQUE is emitted for primary keys instead (Warning, v0.9.1+) |

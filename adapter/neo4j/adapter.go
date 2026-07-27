@@ -109,7 +109,12 @@ func WithRequiredOnlyTypeConstraints(enabled bool) Option {
 // WithNodeKeyConstraints controls whether NODE KEY constraints are used instead
 // of separate UNIQUE + NOT NULL for primary keys. NODE KEY is semantically
 // equivalent but expressed as a single constraint. Requires Neo4j 5.7+.
-// Requires Enterprise edition.
+// Requires Enterprise edition. Under [WithEdition]([Community]) the request
+// cannot be honored — a Community server holds no NODE KEY — so primary keys
+// fall back to UNIQUE, the strongest kind that edition affords, and
+// [W_NEO4J_NODE_KEY_UNSUPPORTED] reports the substitution. Community output is
+// therefore identical whether or not this option is set.
+//
 // Default: false (generates separate UNIQUE + NOT NULL for broader compatibility).
 func WithNodeKeyConstraints(enabled bool) Option {
 	return func(c *adapterConfig) {
@@ -134,7 +139,12 @@ func WithNamedConstraints(enabled bool) Option {
 }
 
 // WithEdition sets the target Neo4j edition. Constraint types that require
-// Enterprise edition are silently omitted when Community is selected.
+// Enterprise edition are omitted when Community is selected — silently, since
+// they have no Community equivalent to fall back to. NODE KEY is the exception:
+// it stands in for UNIQUE + NOT NULL rather than expressing something of its
+// own, so under Community it degrades to its UNIQUE half instead of vanishing,
+// and [W_NEO4J_NODE_KEY_UNSUPPORTED] reports that it did. See
+// [WithNodeKeyConstraints].
 //
 // Community edition supports: UNIQUE constraints only.
 // Enterprise edition supports: UNIQUE, NOT NULL, NODE KEY, PROPERTY_TYPE.
