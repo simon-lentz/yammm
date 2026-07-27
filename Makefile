@@ -30,6 +30,21 @@ lint-fix:
 test-internal:
 	go test ./...
 
+# Round-trips the neo4j adapter against a real server in Docker: the emitted DDL
+# is executed, the introspection queries are run for real, and what comes back is
+# diffed against what was applied. Behind a build tag because it needs Docker,
+# which the pre-commit gate does not.
+#
+# Enterprise by default, started with the evaluation licence accepted, because
+# that is the edition the adapter targets: NOT NULL, TYPE, and NODE KEY
+# constraints and the propertyType column are all Enterprise-only. Override the
+# image to check Community behaviour, where those tests skip:
+#
+#   YAMMM_NEO4J_TEST_IMAGE=neo4j:2026.05.0-community make test-integration
+.PHONY: test-integration
+test-integration:
+	go test -tags neo4j_integration -timeout 15m ./adapter/neo4j/integration/
+
 # --- LSP Binary ---
 
 LSP_BINARY = yammm-lsp

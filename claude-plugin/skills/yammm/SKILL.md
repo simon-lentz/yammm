@@ -14,14 +14,22 @@ argument-hint: "[question about yammm]"
 
 # yammm
 
-YAMMM is a schema DSL, Go library, and CLI for typed data validation, graph construction, and multi-format export (JSON, CSV, Neo4j Cypher, generated Go). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and export to databases.
+YAMMM is a schema DSL, Go library, and CLI for typed data validation, graph construction, multi-format data export (JSON, CSV, Neo4j Cypher), and schema-driven artifact generation (Go source, JSON Schema, Markdown). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and export to databases.
 
 ```text
-.yammm file --> schema.Load() --> instance.Validate() --> graph.Add()
-                                                              |
-               adapter.Write() <-- snapshot.Marshal() <-- graph.Check()
-               (JSON/CSV/Neo4j)
+data path:
+  .yammm file --> schema.Load() --> instance.Validate() --> graph.Add()
+                                                                |
+                    adapter.Write() <-- snapshot.Marshal() <-- graph.Check()
+                    (JSON / CSV / Neo4j)
+
+generator path:
+  .yammm file --> schema.Load() --> gogen | jschema | markdown --> bytes
+                                    (Go source / JSON Schema / Markdown)
 ```
+
+The two paths are independent: the data path carries instances, while the
+generators are schema-in, bytes-out and never touch instance data.
 
 Every operation returns `(value, diag.Result)` with stable error codes and precise source locations. Loaded schemas, validated instances, and snapshots are immutable and thread-safe.
 
@@ -31,7 +39,7 @@ Every operation returns `(value, diag.Result)` with stable error codes and preci
 
 ### Write Schemas
 
-Define types, properties, relationships, invariants, and imports in `.yammm` files. The LSP (`yammm-lsp`) provides diagnostics, completions, hover, and go-to-definition.
+Define types, properties, relationships, invariants, annotations, and imports in `.yammm` files. The LSP (`yammm-lsp`) provides diagnostics, completions, hover, and go-to-definition.
 
 ### Use the Go Library
 
@@ -70,7 +78,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 |------|--------|-----------------|
 | `references/quick-reference.md` | Compact syntax cheat sheet | Quick DSL syntax lookup |
 | `references/common-mistakes.md` | 20 wrong/right patterns | Checking or fixing common errors |
-| `references/dsl-syntax.md` | Full grammar: types, properties, relationships, imports | Writing or modifying `.yammm` schemas |
+| `references/dsl-syntax.md` | Full grammar: types, properties, relationships, annotations, imports | Writing or modifying `.yammm` schemas |
 | `references/expressions.md` | Operators, pipeline, lambdas, all built-in functions | Writing invariants or understanding expression evaluation |
 | `references/type-system.md` | Constraint types, aliases, abstract/part, inheritance | Type system questions, narrowing rules, PK restrictions |
 | `references/patterns.md` | Common modeling patterns with examples | Looking for schema design patterns |
@@ -101,10 +109,12 @@ Before/after transformation examples: see `examples/` directory.
 
 ## Quick Pre-Merge Checklist
 
-- [ ] `yammm validate` clean on all modified `.yammm` files
+- [ ] `yammm validate` clean on all modified `.yammm` files -- and **read its stderr**: warnings do not change the exit code
+- [ ] No `W_ANNOTATION_SHADOWED` warnings (a re-declaration silently dropped an inherited `@index` / `@writeOnce`)
 - [ ] `yammm fmt` applied (deterministic formatting)
 - [ ] `yammm check` passes if instance data is available
 - [ ] Every concrete type has at least one `primary` field (one or more -- composite keys allowed)
 - [ ] Imported types use qualified references (`alias.TypeName`)
 - [ ] Optional fields guarded with nil checks in invariants
 - [ ] Constraint bounds explicit where the domain is known (no bare `String` for bounded fields)
+- [ ] Annotations reviewed: each `@index` / `@@index` serves a real lookup, `@@index` argument order matches it, and immutable-after-creation fields carry `@writeOnce`

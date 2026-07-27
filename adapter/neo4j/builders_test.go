@@ -42,7 +42,7 @@ func TestBuildBatchNodeMergeQuery_MutableKeys_Golden(t *testing.T) {
 	t.Parallel()
 	got := BuildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, MutableKeys)
 	want := "UNWIND $rows AS row\n" +
-		"MERGE (n:ns__Type {a: row.a, b: row.b})\n" +
+		"MERGE (n:ns__Type {a: row.key_a, b: row.key_b})\n" +
 		"SET n += row.props"
 	if got != want {
 		t.Errorf("MutableKeys batch shape mismatch\n got: %q\nwant: %q", got, want)
@@ -56,7 +56,7 @@ func TestBuildBatchNodeMergeQuery_ImmutableKeys_Golden(t *testing.T) {
 	t.Parallel()
 	got := BuildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, ImmutableKeys)
 	want := "UNWIND $rows AS row\n" +
-		"MERGE (n:ns__Type {a: row.a, b: row.b})\n" +
+		"MERGE (n:ns__Type {a: row.key_a, b: row.key_b})\n" +
 		"ON CREATE SET n += row.props\n" +
 		"ON MATCH SET n += row.update_props"
 	if got != want {
@@ -202,8 +202,8 @@ func TestBuildBatchNodeMergeQuery_NoReturn(t *testing.T) {
 // -----------------------------------------------------------------------------
 // Composite-key coverage — pins that the key-loop correctly interleaves
 // separators across two or more key fields in both the param form ($key_<name>)
-// and the batch form (row.<name>). Single-key variants are implicitly covered
-// by the smoke/golden tests above; this is the N≥2 case.
+// and the batch form (row.key_<name>). Single-key variants are implicitly
+// covered by the smoke/golden tests above; this is the N≥2 case.
 // -----------------------------------------------------------------------------
 
 func TestBuildNodeMergeQuery_CompositeKeys(t *testing.T) {
@@ -219,7 +219,7 @@ func TestBuildBatchNodeMergeQuery_CompositeKeys(t *testing.T) {
 	t.Parallel()
 	got := BuildBatchNodeMergeQuery("X", []string{"a", "b", "c"}, MutableKeys)
 	want := "UNWIND $rows AS row\n" +
-		"MERGE (n:X {a: row.a, b: row.b, c: row.c})\n" +
+		"MERGE (n:X {a: row.key_a, b: row.key_b, c: row.key_c})\n" +
 		"SET n += row.props"
 	if got != want {
 		t.Errorf("composite keys mismatch\n got: %q\nwant: %q", got, want)

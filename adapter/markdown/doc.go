@@ -126,6 +126,24 @@
 // [Marshal] is safe for concurrent use. It allocates fresh state per call
 // and shares no mutable package state.
 //
+// # Annotations
+//
+// Schema annotations do not appear in the emitted document — not in the
+// property tables, not in the class diagram. A schema that gains its first
+// annotation renders byte-identical Markdown. The generated reference describes
+// the data model; where a schema's annotations land as store DDL is
+// [github.com/simon-lentz/yammm/adapter/neo4j]'s output, and `yammm neo4j
+// indexes` renders it.
+//
+// They do reach the generator indirectly: a property inherited from several
+// ancestors carries the union of their annotations, so the merged view a
+// property table iterates yields a synthesized copy rather than the declared
+// *Property. The own-versus-inherited lookups therefore key through
+// [github.com/simon-lentz/yammm/schema.Property.Origin]; without it such a
+// row's provenance silently degrades from the ancestor's display name to the
+// declaring scope's bare name — "from A" where "from base.A" is meant, which
+// names a different type in any document with two schemas.
+//
 // # Dependencies
 //
 //	adapter/markdown  ──imports──▶  schema, location

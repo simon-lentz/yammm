@@ -144,7 +144,7 @@ func TestNewRelation(t *testing.T) {
 		End:    location.Position{Line: 10, Column: 50, Byte: 150},
 	}
 	props := []*schema.Property{
-		schema.TestNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
 	}
 
 	r := schema.TestNewRelation(
@@ -370,8 +370,8 @@ func TestRelation_Owner(t *testing.T) {
 
 func TestRelation_Properties_Iterator(t *testing.T) {
 	props := []*schema.Property{
-		schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
-		schema.TestNewProperty("role", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
+		schema.TestNewProperty("role", location.Span{}, "", nil, schema.DataTypeRef{}, true, false, schema.DeclaringScope{}, nil),
 	}
 
 	r := schema.TestNewRelation(
@@ -404,7 +404,7 @@ func TestRelation_Properties_Empty(t *testing.T) {
 
 func TestRelation_PropertiesSlice(t *testing.T) {
 	props := []*schema.Property{
-		schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
 	}
 
 	r := schema.TestNewRelation(
@@ -420,7 +420,7 @@ func TestRelation_PropertiesSlice(t *testing.T) {
 
 func TestRelation_PropertiesSlice_DefensiveCopy(t *testing.T) {
 	props := []*schema.Property{
-		schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
 	}
 
 	r := schema.TestNewRelation(
@@ -439,8 +439,8 @@ func TestRelation_PropertiesSlice_DefensiveCopy(t *testing.T) {
 
 func TestRelation_Property_Found(t *testing.T) {
 	props := []*schema.Property{
-		schema.TestNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
-		schema.TestNewProperty("role", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, true, false, schema.DeclaringScope{}),
+		schema.TestNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
+		schema.TestNewProperty("role", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, true, false, schema.DeclaringScope{}, nil),
 	}
 
 	r := schema.TestNewRelation(
@@ -509,7 +509,7 @@ func TestRelation_HasProperties(t *testing.T) {
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner",
 		[]*schema.Property{
-			schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+			schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
 		},
 	)
 	withoutProps := schema.TestNewRelation(
@@ -603,7 +603,7 @@ func TestRelation_Equal_DifferentPropertyCount(t *testing.T) {
 		schema.TypeRef{}, schema.TypeID{},
 		location.Span{}, "", false, false, "", false, false, "Owner",
 		[]*schema.Property{
-			schema.TestNewProperty("p1", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}),
+			schema.TestNewProperty("p1", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
 		},
 	)
 	r2 := schema.TestNewRelation(

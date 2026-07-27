@@ -193,7 +193,23 @@ free-form; import aliases are validated during completion (`E_INVALID_ALIAS`).
 | `AsAbstract()` | Mark the type as abstract |
 | `WithTypeDocumentation(doc)` | Set documentation for the type |
 | `WithInvariant(name, expr, doc)` | Add an invariant constraint |
+| `WithTypeAnnotation(name, args...)` | Add a type-level `@@name(args)` annotation |
+| `WithPropertyAnnotation(propertyName, name, args...)` | Add a `@name(args)` annotation to a property |
 | `Done()` | Complete the type definition and return to the parent `Builder` |
+
+### Annotations
+
+Annotations declared in `.yammm` (or via the Builder methods above) are carried on the loaded schema:
+
+- `Property.Annotations()` / `AnnotationsSlice()` / `Annotation(name) (*Annotation, bool)` — a property's `@name` annotations.
+- `Type.Annotations()` / `AllAnnotations()` (with `*Slice` variants) — a type's `@@` members (own, and own-plus-inherited).
+- `Annotation` exposes `Name()`, `Args() []AnnotationArg`, `Documentation()`, `Span()`; `AnnotationArg` exposes `Text()`, `Kind() AnnotationArgKind`, `Span()`.
+- `schema.AnnotationSpecs() []AnnotationSpec` returns the built-in registry for editor tooling — a read-only surface, not a registration API. Each `AnnotationSpec` exposes `Name()`, `Placement() AnnotationPlacement` (`PlacementProperty` or `PlacementType`), `Documentation()`, and `ArgHint()`.
+- `schema.VectorSimilarityFunctions() []string` returns the similarity keywords `@vector` accepts, so tooling cannot suggest one the loader rejects.
+
+Annotation structure and eligibility are validated at load; see [SPEC.md](SPEC.md#annotations) for the blessed set and the diagnostics they produce.
+
+**Merged views and property identity.** A property inherited from several ancestors carries the union of their annotations, so the entry in `Type.AllProperties()` / `AllPropertiesSlice()` may be a *synthesized* copy rather than the `*Property` its declaring type holds in `PropertiesSlice()`. `Property.Origin() *Property` returns the declared property — itself when nothing was merged — and is the correct key for any map built from declared properties and read back over a merged view. Everything `Origin()` discards is annotation state: name, constraint, datatype reference, optionality, primary-key status, span, and declaring scope are preserved on the copy.
 
 ## Instance Validation
 
@@ -531,7 +547,7 @@ hash := schema.StructuralHash(s) // returns "sha256:<hex>"
 
 `StructuralHash` computes a deterministic hash of a schema's structural shape. Two schemas produce the same hash if and only if they define the same types, properties, relations, compositions, data types, and constraints (by name, kind, and parameters).
 
-Invariants are deliberately excluded from the hash — they constrain runtime validation but do not affect structural shape.
+Invariants and annotations are deliberately excluded from the hash — they constrain runtime validation or downstream store DDL but do not affect structural shape (what instance data is valid).
 
 The hash is used by the `snapshot` package to verify that a persisted snapshot is compatible with the schema provided at load time. `StructuralHashVersion` (currently `1`) identifies the hashing algorithm version.
 
@@ -1018,6 +1034,24 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 
 The `Constraint` struct contains the constraint `Name`, `Kind` (`ConstraintUnique`, `ConstraintNotNull`, `ConstraintType`, `ConstraintNodeKey`), `Label`, `Properties`, `TypeExpr`, and the complete `Statement`.
 
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds the whole schema's DDL rather than emitting a partial script that looks complete. The one shape a *valid* schema can hit is a list whose element is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias. Those are legal yammm but Neo4j has no nested collection property type, so they report `E_NEO4J_UNSUPPORTED_TYPE`; model the inner collection as a `part type` reached by a composition if the model must export to Neo4j. A bare `Vector` is fine — it maps to `LIST<FLOAT NOT NULL>`.
+
+### Indexes
+
+Indexes are derived from a schema's `@index`, `@@index`, and `@vector` annotations:
+
+```go
+// Generate Cypher CREATE INDEX / CREATE VECTOR INDEX statements
+statements, result := adapter.IndexesForSchema(ctx, s)
+
+// Generate structured index descriptors
+indexes, result := adapter.IndexesStructured(ctx, s)
+```
+
+The `Index` struct contains `Name`, `Kind` (`IndexRange` or `IndexVector`), `Label`, `Properties` (declared order, significant for composites), `VectorDimensions`, `VectorSimilarity`, and the complete `Statement`. A property-level `@index` yields a single-property range index; a type-level `@@index(a, b)` yields a composite range index; a property-level `@vector(cosine|euclidean)` yields a vector index whose dimension comes from the property's `Vector[N]` constraint.
+
+Index names are always emitted (`{label}_{props}_idx` for range, `{label}_{prop}_vector_idx` for vector). The readable name is not injective — it joins on underscores, which property names may themselves contain — so two indexes whose names would collide each receive a short deterministic digest suffix. Only names that would actually clash are suffixed. Load-time validation defers eligibility whenever a target's type cannot be resolved, so the adapter re-checks: an annotation naming a property the type does not have reports `E_NEO4J_UNKNOWN_PROPERTY`, and one naming a property whose type cannot carry the index reports `E_NEO4J_INVALID_INDEX_TARGET`. Indexes are emitted for every edition (range and vector indexes are core query features on both Community and Enterprise); abstract types are skipped, part types are not. The emitted `CREATE VECTOR INDEX ... OPTIONS` statement form requires Neo4j 5.15+.
+
 ### Graph Shape
 
 ```go
@@ -1063,11 +1097,13 @@ All write methods return query structs (`NodeQuery`, `BatchNodeQuery`, `EdgeQuer
 
 | Option | Description |
 | ------ | ----------- |
-| `WithImmutableKeys` | Properties only set on creation, not updated. Node merges only. |
+| `WithImmutableKeys` | Properties only set on creation, not updated. Unions with schema-derived `@writeOnce` keys. Node merges only. |
 | `WithNodeChunkSize` | `UNWIND` batch size for node queries (default: 5000) |
 | `WithEdgeChunkSize` | `UNWIND` batch size for edge queries (default: 5000) |
 
-Immutable keys are validated against the schema at query-generation time: every key must name a declared property (own or inherited) of a node type being written. `NodeQueryFor` rejects a key that is not a property of its schema type (skipped when `schemaType` is nil); `BatchNodeQueries` rejects a key that is a property of no node type in the snapshot, while accepting a key real for at least one written type (it may legitimately apply to a subset of a multi-type snapshot). A mistyped key would otherwise be honored silently and the real property rewritten on every re-MERGE, defeating the write-once guarantee.
+Explicitly-passed immutable keys union with the immutable keys derived from a type's `@writeOnce` annotations, which `ShapeForSchema` records on each `NodeShape` as `ImmutableKeys`. Because they travel on the shape, `NodeQueryFor` honors `@writeOnce` even when called with a nil `*schema.Type` — the documented streaming call shape. `ImmutableKeysFor(t *schema.Type) []string` returns a type's `@writeOnce` properties (own and inherited); the effective immutable set per written type is the union of explicit and derived keys, and `BatchNodeQueries` selects the `ON CREATE` / `ON MATCH` split per type (a non-empty explicit list still splits every type, preserving the prior contract).
+
+Only the explicitly-passed keys are validated against the schema at query-generation time: every one must name a declared property (own or inherited) of a node type being written. `NodeQueryFor` rejects a key that is not a property of its schema type (and skips both derivation and the check when `schemaType` is nil); `BatchNodeQueries` rejects a key that is a property of no node type in the snapshot, while accepting a key real for at least one written type (it may legitimately apply to a subset of a multi-type snapshot). A mistyped key would otherwise be honored silently and the real property rewritten on every re-MERGE, defeating the write-once guarantee. Derived `@writeOnce` keys are schema-true by construction and are not re-validated.
 
 ### Cypher Builders
 
@@ -1130,17 +1166,34 @@ type ParamTypes map[string]schema.Constraint
 // List element type. Returns the first coercion error, naming the offending key.
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error)
 
-// ParamTypesForType derives a ParamTypes from a schema type's properties. Pass
-// prefix "" for top-level params, or an outer name (e.g. "rows") for a nested
-// param map — keys are dot-joined to match CoerceParams.
+// ParamTypesForType derives a ParamTypes from a schema type's properties, own
+// and inherited. Pass prefix "" for top-level params, or an outer name (e.g.
+// "rows") for a nested param map — keys are dot-joined to match CoerceParams.
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes
+
+// ParamTypesForMergeKeys derives a ParamTypes for the MERGE-key parameters the
+// node builders read: one entry per primary key under the `key_` namespace.
+// Prefix "" gives $key_<pk> (BuildNodeMergeQuery); "rows" gives row.key_<pk>
+// (BuildBatchNodeMergeQuery).
+func ParamTypesForMergeKeys(t *schema.Type, prefix string) ParamTypes
 ```
 
 Coercion rules: `Float` ← any Go integer width (`int`, `int8`…`int64`, `uint`…`uint64`) or `float32` → `float64` (a `float64` passes through); `Timestamp` ← a string parsed against the constraint's custom Go layout when it declares one (`Timestamp["…"]`) or RFC3339 / RFC3339Nano otherwise → `time.Time` (a `time.Time` passes through); `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date` (a `dbtype.Date` passes through); every other scalar kind passes through unchanged. `List<T>` values are coerced element-wise into the concrete typed slice (`List<Float>` of `int64`s → `[]float64`, `List<Date>` of strings → `[]dbtype.Date`, and so on); a `List<Timestamp["…"]>` honors the element's custom layout too.
 
 The three transforming kinds (`Float`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value always passes through; an unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
-**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one — it derives the element types lists need.
+**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.NodeQueryFor` / `BatchNodeQueries` / `EdgeQueriesFor` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion — those coerce their own merge keys and endpoint keys as well as their properties. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one; it derives the element types lists need.
+
+**Cover the merge key too.** `ParamTypesForType` describes ONE shape: a map keyed by property name. A hand-built parameter map for `BuildNodeMergeQuery` or `BuildBatchNodeMergeQuery` also carries merge keys, which do not sit where the properties sit — and the merge key is the one value the pattern matches on, so leaving it uncoerced is the failure with no error attached: a `Date` primary key reaching the driver as a string matches no node whose property is a `DATE`, and every re-run inserts a duplicate. Take those from `ParamTypesForMergeKeys` and merge the two:
+
+```go
+// $key_<pk> at the top level, properties nested under $props.
+pt := neo4j.ParamTypesForType(t, "props")
+maps.Copy(pt, neo4j.ParamTypesForMergeKeys(t, ""))
+params, err := neo4j.CoerceParams(params, pt)
+```
+
+Two functions rather than one because a type may declare a property literally named `key_<pk>`: in a flat row that spelling is the property, and in `BuildBatchNodeMergeQuery`'s row shape it is the merge key (the properties live nested under `row.props`). One map cannot answer both without silently choosing. `CoerceParams` walks one level of nesting, so a two-level map needs one call per nested map. The relationship builders key on two types and have no single-type equivalent; their spellings are `$from_key_<pk>` / `$to_key_<pk>` and `row.from_<pk>` / `row.to_<pk>`.
 
 ### Schema Inference
 
@@ -1154,11 +1207,46 @@ yammmSource, err := adapter.InferSchema(constraints, relationships, schemaFilter
 ### Constraint Diffing
 
 ```go
+// Ownership is exact set membership, computed once from the schema (see Index Diffing below)
+owned := adapter.OwnedLabels(ctx, s)
+
 // Compute the semantic diff between desired schema constraints and actual database constraints
-diff := adapter.DiffConstraints(desired, actual, schemaName)
+diff := adapter.DiffConstraints(desired, actual, owned)
 ```
 
-`DiffConstraints` returns a `*ConstraintDiffResult` with `Match` (identical), `Drift` (same key, different definition), `Create` (missing from database), and `Drop` (in database but not in schema) sets.
+`DiffConstraints` returns a `*ConstraintDiffResult` with **five** sets: `Match` (identical), `Drift` (same identity, different definition), `Create` (missing from database), `Drop` (in database but not in schema), and `Unverified` — constraints present on both sides whose definition could not be compared because the database did not report what was needed. A TYPE constraint's enforced type is not reported at all before Neo4j 5.9, so folding `Unverified` into `Match` reports an unchecked constraint as verified. A drift gate must count it as an incomplete check, exactly as on the index side.
+
+Both diff results also carry `Excluded int` — the number of remote objects that entered **no** set, because the comparison had nothing to say about them: the schema owns no label they carry, or they are of a kind this configuration cannot declare (a relationship constraint, a node constraint kind the DSL cannot express, and under `WithEdition(Community)` a NOT NULL or TYPE constraint). It is not drift; in a database shared with other applications a non-zero count is the normal state. It is there so that "0 to drop" cannot be read as "the database is accounted for": ownership is derived from the schema, so objects left behind by a type deleted or renamed since the last apply sit on a label no current type declares and nothing in the schema can name them. A caller reporting "in sync" should say how many objects were left out of that claim.
+
+`DiffIndexes` and `DiffConstraints` each take a variadic list of the other's remote objects (`alsoBlocking`). Index and constraint names share ONE Neo4j namespace, and a `CREATE ... IF NOT EXISTS` under a name the database already holds is a silent no-op, so a caller that introspected both should pass both — otherwise a blocked declaration reports as a create the server ignores on every run. A constraint backed by an index appears in `SHOW INDEXES` under the constraint's name and is seen automatically; NOT NULL and TYPE constraints have no backing index and reach the index diff only this way.
+
+Desired objects pair with remote ones in three phases, strongest evidence first: name **and** identity together, then identity alone, then name alone. Identity outranks a bare name match deliberately — a remote object whose name matches but whose definition does not is weaker evidence than one that realises the declaration exactly, so claiming by name first would let the misnamed object consume the declaration and leave the exact one reported as an orphan to drop. Within a phase, pairing is positional over the remaining candidates, which is reachable only when several are indistinguishable under that phase's evidence. The classification therefore does not depend on the order `SHOW CONSTRAINTS` or `SHOW INDEXES` returned rows in. `DiffIndexes` pairs identically.
+
+Ownership is decided before any of this, by set membership against `OwnedLabels` — never by a rule applied to a remote object's label string. A schema named `app` does not claim the objects of a sibling named `app__legacy` because `app__legacy`'s labels are simply not in `app`'s set, not because a prefix or segment test excluded them.
+
+### Index Diffing
+
+```go
+// Ownership is exact set membership, computed once from the schema
+owned := adapter.OwnedLabels(ctx, s)
+
+// Compute the semantic diff between desired schema indexes and actual database indexes
+diff := adapter.DiffIndexes(desired, actual, owned)
+```
+
+`OwnedLabels` is the set of labels this adapter emits for the schema. The diff entry points take it rather than a schema name because ownership cannot be recovered from a label string: `Label` composes a label from a caller-configurable prefix and separator around two sanitized free-form names, so for any rule that tries to read a schema back out of a label there is a configuration, or a sibling schema name, that satisfies the rule without belonging to the schema.
+
+`DiffIndexes` returns an `*IndexDiffResult` with **five** sets: `Match`, `Drift` (a vector index whose dimension or similarity differs, a definition change under a name the database already holds, or an index in a state that serves no queries), `Create`, `Drop`, and `Unverified`. Composite property order is significant, a deliberate divergence from `DiffConstraints`: a same-set/different-order remote index is a distinct index — create + drop when its name differs too, and drift when it holds the desired index's name (a `CREATE ... IF NOT EXISTS` under a name the database already holds is a silent no-op). A schema-owned remote index with no declaration is reported as a drop; drops are reported, never applied.
+
+`Unverified` holds indexes that exist on both sides but whose definition could **not** be compared — the database reported no readable vector configuration (the reason names which setting was unread), or the index is still `POPULATING`. A setting the database did disclose and that disagrees outranks a second setting being unreadable, so a demonstrably wrong dimension is reported as drift rather than downgraded to unverified. They are neither confirmed in sync nor confirmed drifted. A drift gate must therefore treat a non-empty `Unverified` as an incomplete check, not a pass:
+
+```go
+diff := adapter.DiffIndexes(desired, actual, owned)
+inSync := len(diff.Drift) == 0 && len(diff.Create) == 0 && len(diff.Drop) == 0 &&
+    len(diff.Unverified) == 0 // omitting this reports an unchecked index as verified
+```
+
+Every schema-owned remote index the caller passes in is accounted for exactly once: it either matches a desired index or is reported as a drop. Two remote indexes sharing one semantic identity (an operator-created index alongside the schema's own) are told apart by name — the schema's own index carries the name the adapter emits — so the redundant one is reported rather than absorbed, and which is which does not depend on the order the server returned rows in. `DiffConstraints` gives the same guarantee.
 
 ### Introspection Queries
 
@@ -1172,16 +1260,19 @@ This returns a parameterized Cypher query string and parameters — consumers ex
 | Function | Description |
 | -------- | ----------- |
 | `IntrospectConstraintsQuery()` | Static Cypher for `SHOW CONSTRAINTS YIELD *` |
-| `IntrospectIndexesQuery()` | Static Cypher for `SHOW INDEXES YIELD *` |
+| `IntrospectIndexesQuery()` | Static Cypher projecting `name, type, entityType, labelsOrTypes, properties, options, state, owningConstraint`, filtered to `type <> 'LOOKUP'` |
 | `IntrospectRelationshipsQuery(labelPrefix)` | Parameterized Cypher for relationship topology discovery |
 | `ParseRemoteConstraints(records)` | Parse driver output into `[]RemoteConstraint` |
+| `ParseRemoteIndexes(records)` | Parse driver output into `[]RemoteIndex` (including the options map) |
 | `ParseRemoteRelationships(records)` | Parse driver output into `[]RemoteRelationship` |
 
 The introspection types are:
 
-- `RemoteConstraint` — constraint metadata (name, type, entity type, labels/types, properties, property type)
+- `RemoteConstraint` — constraint metadata (name, type, entity type, labels/types, properties, property type). `Type` is verbatim what the server reported, and the node-uniqueness spelling **depends on the server generation**: Neo4j 5.x reports `UNIQUENESS`, 2026.x reports `NODE_PROPERTY_UNIQUENESS`. The other kinds are stable. `DiffConstraints` and `InferSchema` fold both spellings internally; a consumer switching on the field itself must accept both, or it silently stops recognising every UNIQUE constraint when the database is upgraded.
 - `RemoteRelationship` — relationship topology (relation type, source/target labels)
-- `RemoteIndex` — index metadata (name, type, entity type, labels/types, properties)
+- `RemoteIndex` — index metadata (name, type, entity type, labels/types, properties, options, state, owning constraint); `VectorDimensions()` and `VectorSimilarity()` read a vector index's configuration from the options map for drift detection, and `IsOnline()` reports whether the index is in a state that serves queries (an unreported state counts as online)
+
+`IntrospectIndexesQuery()` returns **constraint-backing indexes** as well as standalone ones — `RemoteIndex.OwningConstraint` identifies them. The diff needs them because a backing index holds its constraint's name against every `CREATE INDEX` and already serves the definition it covers, which are both conditions under which the server silently no-ops a declared index. A consumer filtering rows itself must test that field rather than assume the query excluded them.
 
 ### Utility Functions
 

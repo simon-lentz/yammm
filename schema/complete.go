@@ -87,6 +87,8 @@ func completeModel(
 		// not nil an unrelated clean schema).
 		gate:                    newErrorGate(collector),
 		unresolvedSupertypeMemo: make(map[*Type]bool),
+		diagnosedAnnotations:    make(map[*Annotation]bool),
+		conflictedProperties:    make(map[*Property]bool),
 	}
 
 	return c.complete()
@@ -139,9 +141,24 @@ type completer struct {
 
 	// unresolvedSupertypeMemo caches [completer.hasUnresolvedSupertype] per type:
 	// the inheritance graph and resolution state are fixed across the phases that
-	// query it (validatePrimaryKeys, validateInvariantExpressions), so a type's
-	// answer cannot change between calls.
+	// query it (validatePrimaryKeys, validateInvariantExpressions,
+	// validateAnnotations), so a type's answer cannot change between calls.
 	unresolvedSupertypeMemo map[*Type]bool
+
+	// pendingShadowed holds the annotations own re-declarations dropped, queued
+	// during linearization and emitted by [completer.flushShadowedAnnotations]
+	// once validation has established which of them are usable.
+	pendingShadowed []shadowedAnnotation
+
+	// diagnosedAnnotations marks the annotations that drew a diagnostic of their
+	// own during validation, so the shadow warning does not advise re-stating an
+	// annotation this same load rejects.
+	diagnosedAnnotations map[*Annotation]bool
+
+	// conflictedProperties marks own declarations that drew E_PROPERTY_CONFLICT,
+	// so the shadow warning does not advise editing a declaration the load has
+	// already rejected outright.
+	conflictedProperties map[*Property]bool
 }
 
 func (c *completer) complete() *Schema {
@@ -199,6 +216,17 @@ func (c *completer) complete() *Schema {
 
 	// Phase 7b: Validate invariant expressions (static property checking)
 	c.validateInvariantExpressions()
+
+	// Phase 7c: Validate annotations (name, placement, args, target eligibility).
+	// Runs after linearization so property-reference arguments can resolve
+	// against inherited properties.
+	c.validateAnnotations()
+
+	// Phase 7d: Emit the shadowed-annotation warnings linearization queued. It
+	// must follow 7c: the warning tells the user to re-state the annotation, which
+	// is wrong advice for one this same load rejects, and only 7c knows which
+	// those are.
+	c.flushShadowedAnnotations()
 
 	// Final check for any errors THIS completion collected — its own error
 	// delta, not the shared collector's total: errors collected before this
@@ -281,6 +309,9 @@ func (c *completer) indexTypes() {
 		// Convert and set invariants
 		invariants := c.convertInvariants(td.Invariants)
 		t.setInvariants(invariants)
+
+		// Convert and set type-level annotations (@@name members)
+		t.setAnnotations(convertAnnotations(td.Annotations))
 
 		c.typeIndex[td.Name] = t
 		types = append(types, t)
@@ -483,6 +514,7 @@ func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) [
 			pd.Optional,
 			pd.IsPrimaryKey,
 			scope,
+			convertAnnotations(pd.Annotations),
 		)
 		props = append(props, p)
 	}
@@ -539,6 +571,7 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 					pd.Optional,
 					pd.IsPrimaryKey,
 					scope,
+					nil, // relation edge properties take no annotations
 				)
 				props = append(props, p)
 			}
@@ -594,6 +627,40 @@ func (c *completer) convertInvariants(decls []*invariantDecl) []*Invariant {
 	}
 
 	return invs
+}
+
+// convertAnnotations turns parsed annotationDecls into model Annotations,
+// mirroring convertInvariants. Argument semantic kinds start ArgUnvalidated;
+// validateAnnotations stamps them after linearization, before sealing. Used for
+// both type-level annotations (in indexTypes) and property-trailing ones (in
+// convertProperties), so property and type annotations share one conversion.
+func convertAnnotations(decls []*annotationDecl) []*Annotation {
+	if len(decls) == 0 {
+		return nil
+	}
+	anns := make([]*Annotation, 0, len(decls))
+	for _, d := range decls {
+		if d == nil {
+			continue
+		}
+		var args []AnnotationArg
+		if len(d.Args) > 0 {
+			args = make([]AnnotationArg, 0, len(d.Args))
+			for _, a := range d.Args {
+				args = append(args, AnnotationArg{
+					text:      a.Text,
+					tokenKind: a.Token,
+					kind:      ArgUnvalidated,
+					span:      a.Span,
+					raw:       a.Raw,
+				})
+			}
+		}
+		ann := newAnnotation(d.Name, args, d.Documentation, d.Span, d.ArgsMalformed)
+		ann.setDetachedFrom(d.DetachedFromLine)
+		anns = append(anns, ann)
+	}
+	return anns
 }
 
 // resolveAliasConstraints resolves all AliasConstraint references in
@@ -1096,6 +1163,13 @@ func (c *completer) validatePrimaryKeys() {
 // hasDeclaredPrimary reports whether any merged property carries the
 // primary flag, independent of whether key extraction accepted it into
 // the type's primary keys.
+//
+// It short-circuits on the first primary rather than counting: the answer is a
+// bool, and a type with a hundred merged properties should not walk them all to
+// learn that its first one is a key. The @index redundancy rule, which once
+// shared a counting helper with this, now reads the EXTRACTED keys
+// ([Type.PrimaryKeys]) instead — a stricter question that this gate deliberately
+// does not ask, since a primary rejected for its type is still a declared one.
 func hasDeclaredPrimary(t *Type) bool {
 	for p := range t.AllProperties() {
 		if p.IsPrimaryKey() {
@@ -1117,9 +1191,10 @@ func hasDeclaredPrimary(t *Type) bool {
 //
 // Every type reached is memoized, not just the entry: the recursion routes back through
 // this method, so each supertype's answer is recorded as it is determined and a chain is
-// walked once across all queries rather than re-walked per query. The two phases that
-// call this (validatePrimaryKeys and validateInvariantExpressions) run after inheritance
-// and resolution are fixed, so a type's answer cannot change between calls.
+// walked once across all queries rather than re-walked per query. The three phases that
+// call this (validatePrimaryKeys, validateInvariantExpressions, and validateAnnotations)
+// run after inheritance and resolution are fixed, so a type's answer cannot change
+// between calls.
 //
 // detectCycles rejects inheritance cycles before this runs, so the graph is acyclic; the
 // memo is seeded false before recursing purely so the walk still terminates should that
@@ -1156,4 +1231,41 @@ func (c *completer) errorf(span location.Span, code diag.Code, format string, ar
 		issue = issue.WithSpan(span)
 	}
 	c.collector.Collect(issue.Build())
+}
+
+// errorfRelated is [completer.errorf] for a diagnostic that points at other
+// declarations as well as its own. Every completer site that emits related
+// locations routes through here so the span policy is decided once: a related
+// entry without a usable location is dropped rather than rendered.
+func (c *completer) errorfRelated(
+	span location.Span, code diag.Code, related []location.RelatedInfo, format string, args ...any,
+) {
+	msg := fmt.Sprintf(format, args...)
+	issue := diag.NewIssue(diag.Error, code, msg)
+	if !span.IsZero() {
+		issue = issue.WithSpan(span)
+	}
+	if located := locatedRelated(related); len(located) > 0 {
+		issue = issue.WithRelated(located...)
+	}
+	c.collector.Collect(issue.Build())
+}
+
+// locatedRelated returns the related entries that carry a usable location.
+//
+// A span-less entry is worse than no entry: the text renderer writes its
+// "note:" line and then suppresses the location, so the reader gets a bare
+// label pointing nowhere — and one per member, so a clash whose sides hold
+// several declarations renders as a stack of identical, information-free
+// lines. The LSP drops such entries outright, so the two surfaces disagree
+// about what the diagnostic even contains. Schemas built through
+// [Builder] carry no spans, which is where this arises.
+func locatedRelated(related []location.RelatedInfo) []location.RelatedInfo {
+	located := related[:0:0]
+	for _, r := range related {
+		if !r.Span.IsZero() {
+			located = append(located, r)
+		}
+	}
+	return located
 }

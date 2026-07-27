@@ -64,7 +64,7 @@ After edits to skill, hook, or LSP files, run `/reload-plugins` to pick up chang
 
 ### `yammm` (Primary)
 
-Holistic knowledge surface covering the full yammm ecosystem. Auto-triggers on any yammm-related question or when working with `.yammm` files. Includes an orientation layer and 9 reference files for progressive depth.
+Holistic knowledge surface covering the full yammm ecosystem. Auto-triggers on any yammm-related question or when working with `.yammm` files. Includes an orientation layer and 10 reference files for progressive depth.
 
 ### `/yammm:author-schema [description]`
 
@@ -72,7 +72,7 @@ Designs and writes `.yammm` schema files from requirements. Follows a 4-step pro
 
 ### `/yammm:review-schema [path]`
 
-Structured schema quality review. Compiles the schema, applies a 10-item review checklist, and produces an Errors/Warnings/Suggestions/Summary report. Also triggers on natural-language requests like "review my schema."
+Structured schema quality review. Compiles the schema, applies an 11-item review checklist, and produces an Errors/Warnings/Suggestions/Summary report. Also triggers on natural-language requests like "review my schema."
 
 ### `/yammm:setup [tool-name]`
 
@@ -82,7 +82,7 @@ Platform-aware toolchain installation guide. Detects your OS and currently insta
 
 ### PostToolUse: Auto-validation
 
-After any Edit or Write to a `.yammm` file, automatically runs `yammm validate` and feeds diagnostics back into the conversation. Requires `yammm` CLI and `jq`. Non-blocking (silently skips if tools are missing).
+After any Edit or Write to a `.yammm` file, automatically runs `yammm validate` and feeds diagnostics back into the conversation. Injection is gated on whether validate printed anything, not on its exit code, so warnings reach the conversation too — `W_ANNOTATION_SHADOWED` is the only signal that a re-declaration dropped an inherited annotation, and it exits `0`. Requires `yammm` CLI and `jq`. Non-blocking (silently skips if tools are missing).
 
 ### SessionStart: Environment check
 
@@ -92,12 +92,14 @@ On session start, checks for `yammm`, `yammm-lsp`, and `jq`. Reports missing too
 
 | File | Topic |
 | ---- | ----- |
-| `dsl-syntax.md` | Full grammar: types, properties, relationships, imports |
+| `quick-reference.md` | Compact syntax cheat sheet |
+| `common-mistakes.md` | Wrong/right pattern pairs for common errors |
+| `dsl-syntax.md` | Full grammar: types, properties, relationships, annotations, imports |
 | `expressions.md` | Operators, pipeline, lambdas, built-in functions |
 | `type-system.md` | Constraint types, aliases, abstract/part, inheritance |
 | `patterns.md` | Common modeling patterns with examples |
 | `api-pipeline.md` | Go API: load, validate, graph, snapshot |
-| `adapters.md` | JSON/CSV/Neo4j adapter usage |
+| `adapters.md` | JSON/CSV/Neo4j/gogen/jschema/markdown adapter usage |
 | `diagnostics.md` | Error codes and troubleshooting |
 | `cli.md` | CLI commands and workflows |
 

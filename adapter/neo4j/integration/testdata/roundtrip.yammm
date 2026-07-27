@@ -1,0 +1,47 @@
+schema "rt"
+
+abstract type Tracked {
+    first_seen Timestamp required @writeOnce
+
+    @@index(first_seen)
+}
+
+type Document extends Tracked {
+    doc_id       String    primary
+    state        String    @index
+    published_on Date      @index
+    embedding    Vector[4] @vector(cosine)
+    title        String    required
+
+    @@index(state, published_on)
+}
+
+type Note extends Tracked {
+    note_id String primary
+    body    String @index
+}
+
+/* Carries one property per Neo4j type expression the adapter can emit that
+   Document and Note do not already cover, so every expression is applied to a
+   real server and read back. A TYPE constraint is compared against the
+   server's propertyType by exact string, and the two only agree because the
+   adapter spells them the way Neo4j does — a claim that is worth checking
+   against a server rather than against the mapping that makes it.
+
+   Deliberately not extending Tracked: it stays out of the inheritance and
+   annotation round-trips so those keep asserting over the shapes they were
+   written for. */
+type Typed {
+    typed_id  UUID    primary
+    t_integer Integer required
+    t_float   Float   required
+    t_boolean Boolean required
+    t_enum    Enum["draft", "final"] required
+    t_pattern Pattern["^[a-z]+$"]    required
+
+    tl_string    List<String>    required
+    tl_integer   List<Integer>   required
+    tl_boolean   List<Boolean>   required
+    tl_date      List<Date>      required
+    tl_timestamp List<Timestamp> required
+}

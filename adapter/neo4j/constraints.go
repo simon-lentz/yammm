@@ -3,6 +3,7 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -18,6 +19,17 @@ const (
 	ConstraintType                          // Property type (scalar or list)
 	ConstraintNodeKey                       // Combined uniqueness + NOT NULL (NODE KEY)
 )
+
+// String returns the constraint kind's Neo4j remote type name, so a
+// [Constraint] renders legibly wherever it is printed — a diagnostic, a test
+// failure, or a consumer's log — instead of showing the bare iota ordinal.
+// Matches [IndexKind.String].
+func (k ConstraintKind) String() string {
+	if s := constraintKindToRemoteType(k); s != unknownRemoteConstraintType {
+		return s
+	}
+	return fmt.Sprintf("ConstraintKind(%d)", int(k))
+}
 
 // Constraint is a structured representation of a single Neo4j constraint.
 // Construct via [Adapter.ConstraintsStructured]; do not create directly.
@@ -76,39 +88,19 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) (
 	collector.Merge(collisionResult)
 
 	var constraints []Constraint
-
-	for _, t := range s.TypesSlice() {
-		name := t.Name()
-		if name == "" || t.IsAbstract() {
-			continue
-		}
-
-		label := a.Label(ctx, s.Name(), name)
-		if label == "" {
-			continue
-		}
-
-		if err := ValidateIdentifier(label, fmt.Sprintf("type %q label", name)); err != nil {
-			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-				fmt.Sprintf("invalid label for type %q: %s", name, err)).
-				WithDetail(diag.DetailKeyFormat, "neo4j").
-				WithDetail(diag.DetailKeyTypeName, name).
-				WithDetail(detailKeyLabel, label).
-				WithDetail(diag.DetailKeyDetail, err.Error()).
-				Build()
-			collector.Collect(issue)
-			continue
-		}
-
-		typeConstraints := a.constraintsForType(ctx, t, label, collector)
-		constraints = append(constraints, typeConstraints...)
+	for t, label := range a.emittableTypes(ctx, s, collector) {
+		constraints = append(constraints, a.constraintsForType(ctx, t, label, collector)...)
 	}
 
-	// Edition gating: Community only supports UNIQUE.
-	if a.config.edition == Community {
+	disambiguateConstraintNames(constraints)
+
+	// Edition gating, through the same list [Adapter.DiffConstraints] decides
+	// declarability by, so the desired side of a diff and its actual side are
+	// filtered identically.
+	if kinds := a.declarableConstraintKinds(); len(kinds) < len(allConstraintKinds) {
 		filtered := make([]Constraint, 0, len(constraints))
 		for _, c := range constraints {
-			if c.Kind == ConstraintUnique {
+			if slices.Contains(kinds, c.Kind) {
 				filtered = append(filtered, c)
 			}
 		}
@@ -413,7 +405,12 @@ func (a *Adapter) optionalName(label string, properties []string, kind Constrain
 
 // constraintName generates a deterministic constraint name: {label}_{prop1}_{prop2}_{kind}.
 func constraintName(label string, properties []string, kind ConstraintKind) string {
+	// //exhaustive:enforce because there is no default arm to fall into: a kind
+	// added without a case here leaves suffix empty and silently emits a name
+	// ending in a bare underscore, which then collides with every other unnamed
+	// kind on the same label and properties.
 	var suffix string
+	//exhaustive:enforce
 	switch kind {
 	case ConstraintUnique:
 		suffix = "unique"
@@ -452,6 +449,30 @@ func neo4jScalarType(c schema.Constraint) (string, bool) {
 	case schema.KindDate:
 		return "DATE", true
 	case schema.KindVector:
+		// A Vector maps to a list of floats, NOT to Neo4j's native vector
+		// property type, because a list of floats is what this adapter actually
+		// writes: the write path passes a Vector through as a driver-native list
+		// (the KindVector arm of [Coerce]), and valueType() on the stored property
+		// returns exactly LIST<FLOAT NOT NULL>.
+		//
+		// Neo4j 5.x has no vector property type at all. Neo4j 2026.x does — spelled
+		// VECTOR(<dimension>, <coordinate type>) — but a plain list of floats does
+		// NOT satisfy it; only a value built with vector(...) does. Emitting it
+		// here would therefore declare a constraint this adapter's own writes
+		// violate on every insert.
+		//
+		// The cost is that the declared dimension is not enforced by the
+		// constraint: a list of any length satisfies LIST<FLOAT NOT NULL>. The
+		// dimension still reaches the database through a @vector index's
+		// vector.dimensions, and instance validation rejects a wrong-length vector
+		// before it is ever written, so the store-level check is the redundant
+		// layer rather than the only one.
+		//
+		// Adopting the native type would need the write path to emit vector(...)
+		// values and version gating for the 5.x floor — and note that the type is
+		// WRITTEN as VECTOR(3, FLOAT32) but REPORTED by SHOW CONSTRAINTS as
+		// VECTOR<FLOAT32 NOT NULL>(3), so the diff's TypeExpr-to-propertyType
+		// comparison would need a normalizer, not just its case fold.
 		return "LIST<FLOAT NOT NULL>", true
 	case schema.KindList:
 		return "", false
@@ -486,5 +507,51 @@ func neo4jListElementType(c schema.Constraint) (string, error) {
 		return "", fmt.Errorf("%w: list element kind %v", ErrUnsupportedListElem, c.Kind())
 	default:
 		return "", fmt.Errorf("%w: unknown list element kind %v", ErrUnsupportedListElem, c.Kind())
+	}
+}
+
+// disambiguateConstraintNames gives every emitted constraint a unique name,
+// appending a short digest of its identity to each member of any group that
+// would otherwise share one.
+//
+// [constraintName] joins the label and property names with underscores, and
+// property names may themselves contain underscores, so the encoding is not
+// injective ACROSS TYPES: a property `a_b` on type `Item` and a property `b` on
+// type `Item_a` both render `{schema}__Item_a_b_not_null`. Because every emitted
+// statement carries IF NOT EXISTS, the second CREATE is silently skipped and
+// that constraint is never enforced — a NOT NULL or TYPE guarantee the schema
+// declares and the database does not have.
+//
+// Mirrors [disambiguateIndexNames], including the reasons only colliding names
+// are suffixed, why the digest is taken over the identity rather than a
+// position, and the reservation of non-colliding names via [uniqueDigestName] —
+// a suffixed name landing on a name some other constraint already holds
+// unsuffixed would recreate the collision it exists to break.
+//
+// The rename is substituted into the rendered statement rather than re-rendering
+// it. The name is the first thing after CREATE CONSTRAINT, so the first
+// occurrence is always the name — the label, which the name embeds, appears
+// later in the FOR clause.
+func disambiguateConstraintNames(constraints []Constraint) {
+	counts := make(map[string]int, len(constraints))
+	for _, c := range constraints {
+		if c.Name != "" {
+			counts[c.Name]++
+		}
+	}
+	taken := make(map[string]bool, len(constraints))
+	for _, c := range constraints {
+		if c.Name != "" && counts[c.Name] < 2 {
+			taken[c.Name] = true
+		}
+	}
+	for i, c := range constraints {
+		if c.Name == "" || counts[c.Name] < 2 {
+			continue
+		}
+		renamed := uniqueDigestName(c.Name, desiredSemanticKey(c), taken)
+		taken[renamed] = true
+		constraints[i].Name = renamed
+		constraints[i].Statement = strings.Replace(c.Statement, c.Name, renamed, 1)
 	}
 }

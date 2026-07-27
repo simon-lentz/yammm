@@ -36,6 +36,48 @@ func (c *SeverityCounts) add(sev Severity) {
 	}
 }
 
+// sub decrements the counter for sev, the inverse of [SeverityCounts.add]. Only
+// the collector's STORED tally shrinks (an evicted issue leaves storage but is
+// still an issue the collector saw), so this must never be applied to the
+// seen-severity counts that OK/HasErrors/ErrorCount read.
+func (c *SeverityCounts) sub(sev Severity) {
+	//exhaustive:enforce
+	switch sev {
+	case Fatal:
+		c.Fatal--
+	case Error:
+		c.Errors--
+	case Warning:
+		c.Warnings--
+	case Info:
+		c.Info--
+	case Hint:
+		c.Hints--
+	}
+}
+
+// leastSevere returns the least severe severity with a non-zero count, and
+// whether any count is non-zero. Read against the collector's stored tally, it
+// names the severity whose issues yield first when the issue limit forces a
+// choice — see [Collector.storeLocked]. The scan runs from the least severe
+// level down, so it is O(1) in the number of severities, not in issue count.
+func (c SeverityCounts) leastSevere() (Severity, bool) {
+	switch {
+	case c.Hints > 0:
+		return Hint, true
+	case c.Info > 0:
+		return Info, true
+	case c.Warnings > 0:
+		return Warning, true
+	case c.Errors > 0:
+		return Error, true
+	case c.Fatal > 0:
+		return Fatal, true
+	default:
+		return Fatal, false
+	}
+}
+
 // addCounts folds o into c field-wise, letting [Collector.Merge] carry a source
 // Result's whole seen-severity tally forward in one call.
 func (c *SeverityCounts) addCounts(o SeverityCounts) {

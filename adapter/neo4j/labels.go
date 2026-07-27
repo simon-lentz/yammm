@@ -13,6 +13,20 @@ import (
 // neo4jIdentifierRE matches valid Neo4j identifiers (labels, property names, relationship types).
 var neo4jIdentifierRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// identifierReplacer maps the characters [SanitizeIdentifier] rewrites to
+// underscores. strings.Replacer compiles a lookup on construction and is safe
+// for concurrent use, so it is built once rather than per call — the diff calls
+// SanitizeIdentifier once per type per walk.
+//
+//nolint:gochecknoglobals // Intentional: immutable, concurrency-safe lookup.
+var identifierReplacer = strings.NewReplacer(
+	" ", "_",
+	"-", "_",
+	".", "_",
+	"/", "_",
+	"\\", "_",
+)
+
 // cypherReservedKeywords contains Cypher reserved keywords that cannot be used
 // as unquoted identifiers in Neo4j queries. Keys are uppercase.
 // List based on Neo4j 5.x documentation:
@@ -55,15 +69,7 @@ func SanitizeIdentifier(s string) string {
 		return ""
 	}
 
-	// Replace common invalid characters with underscores.
-	replacer := strings.NewReplacer(
-		" ", "_",
-		"-", "_",
-		".", "_",
-		"/", "_",
-		"\\", "_",
-	)
-	result := replacer.Replace(trimmed)
+	result := identifierReplacer.Replace(trimmed)
 
 	// Ensure first character is valid (ASCII letter or underscore).
 	if len(result) > 0 && isASCIIDigit(rune(result[0])) {
@@ -159,19 +165,8 @@ func (a *Adapter) DetectLabelCollisions(ctx context.Context, s *schema.Schema) d
 	collector := diag.NewCollector(0)
 	labelToTypes := make(map[string][]string)
 
-	schemaName := s.Name()
-	for _, t := range s.TypesSlice() {
-		typeName := strings.TrimSpace(t.Name())
-		if typeName == "" || t.IsAbstract() {
-			continue
-		}
-
-		label := a.Label(ctx, schemaName, typeName)
-		if label == "" {
-			continue
-		}
-
-		labelToTypes[label] = append(labelToTypes[label], typeName)
+	for t, label := range a.labeledTypes(ctx, s) {
+		labelToTypes[label] = append(labelToTypes[label], strings.TrimSpace(t.Name()))
 	}
 
 	for label, types := range labelToTypes {

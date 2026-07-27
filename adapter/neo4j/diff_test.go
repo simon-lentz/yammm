@@ -21,7 +21,7 @@ func TestDiffConstraints_AllMatch(t *testing.T) {
 		{Name: "c2", Type: "NODE_PROPERTY_EXISTENCE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"name"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, "test")
+	result := a.DiffConstraints(desired, actual, testOwned())
 	assert.Len(t, result.Match, 2)
 	assert.Empty(t, result.Drift)
 	assert.Empty(t, result.Create)
@@ -42,7 +42,7 @@ func TestDiffConstraints_CreateNew(t *testing.T) {
 		{Name: "c1", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, "test")
+	result := a.DiffConstraints(desired, actual, testOwned())
 	assert.Len(t, result.Match, 1)
 	assert.Len(t, result.Create, 1)
 	assert.Equal(t, "STRING", result.Create[0].TypeExpr)
@@ -62,7 +62,7 @@ func TestDiffConstraints_DropOrphaned(t *testing.T) {
 		{Name: "c2", Type: "NODE_PROPERTY_EXISTENCE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"old_field"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, "test")
+	result := a.DiffConstraints(desired, actual, testOwned())
 	assert.Len(t, result.Match, 1)
 	assert.Len(t, result.Drop, 1)
 	assert.Equal(t, "old_field", result.Drop[0].Properties[0])
@@ -81,7 +81,7 @@ func TestDiffConstraints_TypeDrift(t *testing.T) {
 		{Name: "c1", Type: "NODE_PROPERTY_TYPE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"name"}, PropertyType: "INTEGER"},
 	}
 
-	result := a.DiffConstraints(desired, actual, "test")
+	result := a.DiffConstraints(desired, actual, testOwned())
 	assert.Empty(t, result.Match)
 	assert.Len(t, result.Drift, 1)
 	assert.Contains(t, result.Drift[0].Reason, "property type mismatch")
@@ -103,7 +103,7 @@ func TestDiffConstraints_FiltersNonOwnedConstraints(t *testing.T) {
 		{Name: "other", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"other_schema__Foo"}, Properties: []string{"id"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, "test")
+	result := a.DiffConstraints(desired, actual, testOwned())
 	assert.Len(t, result.Match, 1)
 	assert.Empty(t, result.Drop) // other_schema constraints not reported as drops
 }
@@ -111,7 +111,7 @@ func TestDiffConstraints_FiltersNonOwnedConstraints(t *testing.T) {
 func TestDiffConstraints_Empty(t *testing.T) {
 	t.Parallel()
 	a := New()
-	result := a.DiffConstraints(nil, nil, "test")
+	result := a.DiffConstraints(nil, nil, testOwned())
 	assert.Empty(t, result.Match)
 	assert.Empty(t, result.Drift)
 	assert.Empty(t, result.Create)
@@ -131,6 +131,6 @@ func TestDiffConstraints_CompositeKeys(t *testing.T) {
 		{Name: "c1", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"test__Record"}, Properties: []string{"record_id", "schema_id"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, "test")
+	result := a.DiffConstraints(desired, actual, testOwned())
 	require.Len(t, result.Match, 1)
 }

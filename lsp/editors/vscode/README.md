@@ -4,10 +4,10 @@ Language support for [YAMMM](https://github.com/simon-lentz/yammm) schema files 
 
 ## Features
 
-- **Syntax highlighting** for `.yammm` files, including fenced ` ```yammm ` code blocks in markdown.
+- **Syntax highlighting** for `.yammm` files, including fenced ` ```yammm ` code blocks in markdown and `@` / `@@` annotations.
 - **Diagnostics** as you type — parse errors and schema-rule violations with stable `E_*` codes and precise source locations.
-- **Completions** for keywords, types, and schema members.
-- **Hover** documentation for types and properties.
+- **Completions** for keywords, types, schema members, and annotations — annotation names and their arguments, offered per placement (`@` on a property, `@@` in a type body).
+- **Hover** documentation for types, properties, and annotations.
 - **Go to definition** for type references and imports.
 - **Document outline** (symbols) for navigating larger schemas.
 - **Formatting** in the canonical `yammm fmt` style.

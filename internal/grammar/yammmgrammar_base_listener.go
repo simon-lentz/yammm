@@ -98,6 +98,30 @@ func (s *BaseYammmGrammarListener) EnterProperty_name(ctx *Property_nameContext)
 // ExitProperty_name is called when production property_name is exited.
 func (s *BaseYammmGrammarListener) ExitProperty_name(ctx *Property_nameContext) {}
 
+// EnterAnnotation is called when production annotation is entered.
+func (s *BaseYammmGrammarListener) EnterAnnotation(ctx *AnnotationContext) {}
+
+// ExitAnnotation is called when production annotation is exited.
+func (s *BaseYammmGrammarListener) ExitAnnotation(ctx *AnnotationContext) {}
+
+// EnterType_annotation is called when production type_annotation is entered.
+func (s *BaseYammmGrammarListener) EnterType_annotation(ctx *Type_annotationContext) {}
+
+// ExitType_annotation is called when production type_annotation is exited.
+func (s *BaseYammmGrammarListener) ExitType_annotation(ctx *Type_annotationContext) {}
+
+// EnterAnnotation_args is called when production annotation_args is entered.
+func (s *BaseYammmGrammarListener) EnterAnnotation_args(ctx *Annotation_argsContext) {}
+
+// ExitAnnotation_args is called when production annotation_args is exited.
+func (s *BaseYammmGrammarListener) ExitAnnotation_args(ctx *Annotation_argsContext) {}
+
+// EnterAnnotation_arg is called when production annotation_arg is entered.
+func (s *BaseYammmGrammarListener) EnterAnnotation_arg(ctx *Annotation_argContext) {}
+
+// ExitAnnotation_arg is called when production annotation_arg is exited.
+func (s *BaseYammmGrammarListener) ExitAnnotation_arg(ctx *Annotation_argContext) {}
+
 // EnterData_type_ref is called when production data_type_ref is entered.
 func (s *BaseYammmGrammarListener) EnterData_type_ref(ctx *Data_type_refContext) {}
 

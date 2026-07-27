@@ -1,0 +1,21 @@
+# neo4j indexes: offline Cypher index generation from annotations.
+
+exec yammm neo4j indexes valid.yammm
+stdout 'CREATE INDEX test__Doc_state_idx IF NOT EXISTS FOR \(n:test__Doc\) ON \(n\.state\)'
+stdout 'CREATE VECTOR INDEX test__Doc_vec_vector_idx'
+stdout 'CREATE INDEX test__Doc_id_state_idx IF NOT EXISTS FOR \(n:test__Doc\) ON \(n\.id, n\.state\)'
+
+# A custom separator changes the label join.
+exec yammm neo4j indexes --separator _ valid.yammm
+stdout 'CREATE INDEX test_Doc_state_idx'
+
+-- valid.yammm --
+schema "test"
+
+type Doc {
+	id    String    primary
+	state String    @index
+	vec   Vector[8] @vector(cosine)
+
+	@@index(id, state)
+}

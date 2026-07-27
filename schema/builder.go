@@ -3,6 +3,7 @@ package schema
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -72,14 +73,26 @@ type Builder struct {
 
 // typeBuilderState holds the state for a type being built.
 type typeBuilderState struct {
-	name          string
-	inherits      []*astTypeRef
-	properties    []*propertyDecl
-	relations     []*relationDecl
-	invariants    []*invariantDecl
-	isPart        bool
-	isAbstract    bool
-	documentation string
+	name                       string
+	inherits                   []*astTypeRef
+	properties                 []*propertyDecl
+	relations                  []*relationDecl
+	invariants                 []*invariantDecl
+	annotations                []*annotationDecl // type-level @@name annotations
+	pendingPropertyAnnotations []pendingPropertyAnnotation
+	isPart                     bool
+	isAbstract                 bool
+	documentation              string
+}
+
+// pendingPropertyAnnotation holds a property-level annotation added via
+// WithPropertyAnnotation until convertTypes attaches it to the matching
+// property. The property may be added before or after the annotation, so the
+// binding is resolved by name at Build time; an unmatched name is reported by
+// validateInput.
+type pendingPropertyAnnotation struct {
+	propertyName string
+	decl         *annotationDecl
 }
 
 // NewBuilder creates a new schema builder.
@@ -310,9 +323,10 @@ func (b *Builder) convertTypes() []*typeDecl {
 		result[i] = &typeDecl{
 			Name:          state.name,
 			Inherits:      state.inherits,
-			Properties:    state.properties,
+			Properties:    propertiesWithPendingAnnotations(state),
 			Relations:     state.relations,
 			Invariants:    state.invariants,
+			Annotations:   state.annotations,
 			IsPart:        state.isPart,
 			IsAbstract:    state.isAbstract,
 			Documentation: state.documentation,
@@ -320,6 +334,43 @@ func (b *Builder) convertTypes() []*typeDecl {
 		}
 	}
 	return result
+}
+
+// propertiesWithPendingAnnotations returns state's property declarations with
+// the annotations added via [TypeBuilder.WithPropertyAnnotation] attached to
+// their targets. validateInput has already reported any that name no property,
+// so an unmatched entry here is simply skipped, and — matching that check — an
+// annotation binds to the FIRST property of its name.
+//
+// A property that gains an annotation is copied, along with its annotation
+// slice, so nothing the Builder retains is mutated: Build is a pure function of
+// builder state and may be called repeatedly. Appending to the retained
+// declarations instead made every later Build see each annotation once more and
+// fail the duplicate-annotation check on input the first Build accepted.
+func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
+	if len(state.pendingPropertyAnnotations) == 0 {
+		return state.properties
+	}
+	out := slices.Clone(state.properties)
+	for _, pend := range state.pendingPropertyAnnotations {
+		for i, pd := range out {
+			if pd.Name != pend.propertyName {
+				continue
+			}
+			// out starts as an element-wise clone of state.properties, so
+			// out[i] still being the retained pointer is exactly "not copied
+			// yet" — no separate bookkeeping, and no way for a second
+			// annotation on the same property to re-copy and discard the first.
+			if pd == state.properties[i] {
+				dup := *pd
+				dup.Annotations = slices.Clone(pd.Annotations)
+				out[i] = &dup
+			}
+			out[i].Annotations = append(out[i].Annotations, pend.decl)
+			break
+		}
+	}
+	return out
 }
 
 // validateInput performs shallow validation of builder input before completion:
@@ -406,6 +457,26 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 					fmt.Sprintf("invariant %q in type %q has nil expression", inv.Name, t.name)).
 					WithDetail(diag.DetailKeyTypeName, t.name).
 					WithDetail(diag.DetailKeyName, inv.Name).Build())
+				hasErrors = true
+			}
+		}
+
+		// A property-level annotation added via WithPropertyAnnotation must name
+		// a property of the type. This is the one Builder-only check; all other
+		// annotation validation flows through the shared completion phase.
+		for _, pend := range t.pendingPropertyAnnotations {
+			found := false
+			for _, p := range t.properties {
+				if p.Name == pend.propertyName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_ANNOTATION_TARGET,
+					fmt.Sprintf("annotation @%s names unknown property %q of type %q", pend.decl.Name, pend.propertyName, t.name)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyName, pend.propertyName).Build())
 				hasErrors = true
 			}
 		}
@@ -734,6 +805,44 @@ func (t *TypeBuilder) WithInvariant(name string, e expr.Expression, doc string) 
 		Span:          location.Span{}, // Synthetic - no source location
 	})
 	return t
+}
+
+// WithTypeAnnotation adds a type-level @@name(args) annotation. Arguments are
+// carried as identifier tokens; a literal-argument surface can wait for an
+// annotation that accepts one. Structure and eligibility are validated by the
+// shared completion phase, so a bad annotation reports the same diagnostic as
+// the parse front door.
+//
+// The parse front door additionally lets a type-level annotation carry a leading
+// doc comment ([Annotation.Documentation]); a Builder-constructed one is always
+// undocumented. Adding it here means an optional-doc entry point rather than a
+// changed signature, and no consumer has needed it yet.
+func (t *TypeBuilder) WithTypeAnnotation(name string, args ...string) *TypeBuilder {
+	t.state.annotations = append(t.state.annotations, builderAnnotationDecl(name, args))
+	return t
+}
+
+// WithPropertyAnnotation adds a @name(args) annotation to the named property of
+// this type. The property need not exist yet; the binding is resolved at Build
+// time. A name matching no property draws E_UNKNOWN_ANNOTATION_TARGET.
+func (t *TypeBuilder) WithPropertyAnnotation(propertyName, name string, args ...string) *TypeBuilder {
+	t.state.pendingPropertyAnnotations = append(t.state.pendingPropertyAnnotations,
+		pendingPropertyAnnotation{propertyName: propertyName, decl: builderAnnotationDecl(name, args)})
+	return t
+}
+
+// builderAnnotationDecl builds an annotationDecl from Builder inputs, tagging
+// every argument as an identifier token (the only kind the Builder surface
+// currently exposes).
+func builderAnnotationDecl(name string, args []string) *annotationDecl {
+	var argDecls []annotationArgDecl
+	if len(args) > 0 {
+		argDecls = make([]annotationArgDecl, len(args))
+		for i, a := range args {
+			argDecls[i] = annotationArgDecl{Text: a, Token: tokenIdentifier}
+		}
+	}
+	return &annotationDecl{Name: name, Args: argDecls}
 }
 
 // Done completes the type definition and returns to the parent Builder.

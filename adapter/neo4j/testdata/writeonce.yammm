@@ -1,0 +1,24 @@
+schema "wo_test"
+
+abstract type Tracked {
+    first_seen Timestamp required @writeOnce
+}
+
+type Entity extends Tracked {
+    id     String primary
+    name   String required
+    origin String @writeOnce
+
+    *-> NOTES (_:many) Note
+}
+
+type Plain {
+    id   String primary
+    name String required
+}
+
+part type Note {
+    note_id String    primary
+    body    String    required
+    added   Timestamp required @writeOnce
+}

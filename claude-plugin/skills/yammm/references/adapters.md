@@ -154,6 +154,25 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 // Each Constraint has: Name, Kind, Label, Properties, TypeExpr, Statement
 ```
 
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds the whole schema's DDL rather than emitting a partial script that looks complete. The one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so it reports `E_NEO4J_UNSUPPORTED_TYPE`. Model the inner collection as a `part type` reached by a composition. A bare `Vector` is fine; it maps to `LIST<FLOAT NOT NULL>`.
+
+### Index Generation
+
+```go
+// Generate index Cypher from @index / @@index / @vector annotations
+statements, result := adapter.IndexesForSchema(ctx, s)
+// statements is []string of CREATE INDEX / CREATE VECTOR INDEX IF NOT EXISTS ...
+
+// Structured index objects
+indexes, result := adapter.IndexesStructured(ctx, s)
+// Each Index has: Name, Kind (IndexRange|IndexVector), Label, Properties,
+// VectorDimensions, VectorSimilarity, Statement
+```
+
+Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. An index annotation naming a property the type does not have reports `E_NEO4J_UNKNOWN_PROPERTY`, and one naming a property whose type cannot carry the index reports `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+.
+
+`DiffIndexes` returns an `*IndexDiffResult` with **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). `DiffConstraints` has the same five sets, its `Unverified` covering a TYPE constraint whose enforced type the server did not report (Neo4j < 5.9). A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant, and a schema-owned remote index with no declaration reports as a drop. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
+
 ### Graph Shape Introspection
 
 ```go
@@ -178,7 +197,7 @@ edgeQueries, err := adapter.BatchEdgeQueries(ctx, snapshot, shape,
 
 Each `BatchNodeQuery` / `BatchEdgeQuery` contains a Cypher statement and parameters map ready for driver execution.
 
-Immutable keys are validated against the schema at query generation: every key must name a declared property (own or inherited) of a node type being written, otherwise the call errors — a mistyped key would silently defeat the write-once guarantee. The option affects node merges only (relationship merges have no ON CREATE / ON MATCH split).
+`WithImmutableKeys` unions with the immutable keys derived from a type's `@writeOnce` annotations (`ImmutableKeysFor(t)` returns a type's `@writeOnce` properties, own and inherited); the effective set per type drives the ON CREATE / ON MATCH split, selected per type in a batch. Only the explicitly-passed keys are validated against the schema at query generation: every one must name a declared property (own or inherited) of a node type being written, otherwise the call errors — a mistyped key would silently defeat the write-once guarantee. The option affects node merges only (relationship merges have no ON CREATE / ON MATCH split).
 
 ### Parameter Coercion (Direct-Cypher Path)
 
@@ -210,12 +229,41 @@ case-insensitive. Namespaced labels usually absorb reserved type names
 `ValidateIdentifier(name, context)` or by running `ConstraintsForSchema`
 before write time.
 
-### Constraint Diffing
+### Diffing Against a Live Database
+
+Both diffs are scoped by an `*OwnedLabels` — the exact set of labels the adapter
+emits for the schema. Build it once and pass it to both halves. The trailing
+variadic argument is the **other** side's remote objects: index and constraint
+names share one Neo4j namespace, and every emitted statement carries
+`IF NOT EXISTS`, so a declaration whose name the database already holds is a
+silent no-op rather than a create. Passing both sides lets each diff report that
+as drift naming the holder.
 
 ```go
-diff := adapter.DiffConstraints(desired, actual, "inventory")
-// diff.ToCreate, diff.ToDrop, diff.Unchanged
+owned := adapter.OwnedLabels(ctx, s)
+
+cDiff := adapter.DiffConstraints(desiredConstraints, actualConstraints, owned, actualIndexes...)
+iDiff := adapter.DiffIndexes(desiredIndexes, actualIndexes, owned, actualConstraints...)
+
+// Both results carry: Match, Drift, Create, Drop, Unverified, Excluded
+inSync := len(cDiff.Drift) == 0 && len(cDiff.Create) == 0 && len(cDiff.Drop) == 0 &&
+    len(cDiff.Unverified) == 0 // omitting Unverified reports an unchecked object as verified
 ```
+
+Ownership is set membership, not a prefix test on the remote object's label:
+`Label` composes a label from a caller-configurable prefix and separator around
+two sanitized free-form names and is not invertible, so any rule that tries to
+read a schema back out of a label can be satisfied by a sibling schema's labels.
+
+`Excluded` counts the remote objects that entered **no** set, because the
+comparison had nothing to say about them — the schema owns no label they carry,
+or they are of a kind this configuration cannot declare (a relationship
+constraint, a node constraint kind the DSL cannot express, and under
+`WithEdition(Community)` a NOT NULL or TYPE constraint). It is not drift; in a
+shared database a non-zero count is normal. It exists so "0 to drop" is not read
+as "the database is accounted for": ownership is derived from the schema in hand,
+so objects left behind by a type since deleted or renamed sit on a label no
+current type declares.
 
 ### Schema Inference (from Live Database)
 

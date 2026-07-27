@@ -1,0 +1,6 @@
+schema "badident_test"
+
+type Thing {
+    thing_id String primary
+    match    String @index
+}

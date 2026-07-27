@@ -154,6 +154,8 @@ matrix List<List<Float>>
 embeddings List<Vector[768]>[_, 10]
 ```
 
+**Neo4j export caveat.** The last two — a list whose *element* is itself a collection — are valid yammm but have no Neo4j equivalent, and constraint generation is all-or-nothing, so one such property makes `yammm neo4j constraints` emit **nothing for the entire schema** (`E_NEO4J_UNSUPPORTED_TYPE`). If the model must export to Neo4j, represent the inner collection as a `part type` reached by a composition. A bare `Vector[N]` is fine; only a `Vector` nested inside a `List` is not.
+
 ---
 
 ## Primary Key Types
@@ -238,7 +240,7 @@ part type Address {
 
 - Only referenced as targets of composition relationships (`*->`)
 - Cannot be instantiated directly at the top level
-- Cannot declare `primary` fields
+- Exempt from the primary-key requirement, but permitted to declare one. A composed child's identity is `[ParentKey, "COMPOSITION", ChildKeyOrIndex]`; without a key the slot is the child's 0-based array position, so prefer a `primary` in a `(many)` composition to keep identity stable across reordering
 - Cannot declare associations (`-->`) -- part types cannot have independent references
 - Associations (`-->`) from other types cannot target part types
 - Composition data is embedded inline in instance documents

@@ -3,6 +3,12 @@ version: "2"
 run:
   # Analyze tests as well.
   tests: true
+  # Build-tag-gated packages are compiled by nothing else in the gate: `go test
+  # ./...` skips them, so a type error or a dead assertion in one is invisible
+  # until someone runs it by hand. Naming the tags here is what puts them under
+  # the linter and its type checker.
+  build-tags:
+    - neo4j_integration
   # Don't let tools mutate go.mod/go.sum.
   modules-download-mode: readonly
 issues:

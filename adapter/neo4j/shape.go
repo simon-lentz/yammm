@@ -2,7 +2,6 @@ package neo4j
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -17,6 +16,28 @@ type NodeShape struct {
 	Label          string   // Sanitized Neo4j label (namespace + separator + type)
 	PrimaryKeys    []string // Property names forming the uniqueness constraint
 	RequiredFields []string // All required properties (including primary keys)
+
+	// ImmutableKeys are the type's @writeOnce properties (own and inherited),
+	// sorted and deduplicated — see [ImmutableKeysFor].
+	//
+	// Non-nil when [Adapter.ShapeForSchema] computed the set, including when the
+	// set is empty; nil marks a shape that never computed one. The write path
+	// honors @writeOnce from this field, so the guarantee holds for a caller
+	// passing a nil *schema.Type — the documented streaming call shape — and
+	// costs no per-node derivation.
+	ImmutableKeys []string
+
+	// keyConstraints maps each name in PrimaryKeys to the schema constraint its
+	// value must satisfy, so every write path coerces merge keys to the same
+	// driver-native types [propsToParamMap] produces for $props. A merge key
+	// bound raw where its property is coerced matches nothing: a Date primary
+	// key MERGEs on a string against DATE-valued nodes.
+	//
+	// Unexported, so it can only come from [Adapter.ShapeForSchema] — a shape
+	// built by hand, or restored from a serialization that cannot carry a
+	// [schema.Constraint], has none and its keys pass through unchanged, which
+	// is the behaviour of a shape that never declared their types.
+	keyConstraints map[string]schema.Constraint
 }
 
 // GraphShape maps yammm type names to their Neo4j node representations.
@@ -41,34 +62,25 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphS
 		Types: make(map[string]NodeShape),
 	}
 
-	for _, t := range s.TypesSlice() {
+	for t, label := range a.emittableTypes(ctx, s, collector) {
+		// Trimmed, matching the name the label was built from: a consumer that
+		// looks a shape up by the same name it used to derive the label must
+		// find it.
 		name := strings.TrimSpace(t.Name())
-		if name == "" || t.IsAbstract() {
-			continue
+
+		immutable := ImmutableKeysFor(t)
+		if immutable == nil {
+			immutable = []string{}
 		}
 
-		label := a.Label(ctx, s.Name(), name)
-		if label == "" {
-			continue
-		}
-
-		if err := ValidateIdentifier(label, fmt.Sprintf("type %q label", name)); err != nil {
-			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-				fmt.Sprintf("invalid label for type %q: %s", name, err)).
-				WithDetail(diag.DetailKeyFormat, "neo4j").
-				WithDetail(diag.DetailKeyTypeName, name).
-				WithDetail(detailKeyLabel, label).
-				WithDetail(diag.DetailKeyDetail, err.Error()).
-				Build()
-			collector.Collect(issue)
-			continue
-		}
-
-		// Extract primary keys.
+		// Extract primary keys, keeping each one's constraint so the write path
+		// can coerce the value the MERGE matches on.
 		var primary []string
+		keyConstraints := make(map[string]schema.Constraint)
 		for _, pk := range t.PrimaryKeysSlice() {
 			if pkName := strings.TrimSpace(pk.Name()); pkName != "" {
 				primary = append(primary, pkName)
+				keyConstraints[pkName] = pk.Constraint()
 			}
 		}
 
@@ -101,6 +113,11 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphS
 			Label:          label,
 			PrimaryKeys:    primary,
 			RequiredFields: required,
+			// Non-nil even when empty, so the write path can tell a shape that
+			// computed no @writeOnce keys from one that never computed any (a
+			// hand-built or pre-upgrade shape) and only falls back for the latter.
+			ImmutableKeys:  immutable,
+			keyConstraints: keyConstraints,
 		}
 	}
 

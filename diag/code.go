@@ -221,6 +221,32 @@ var (
 	// E_LOAD_IO_FAILURE indicates an I/O error during schema loading.
 	// Covers file read failures, path resolution errors, and other filesystem issues.
 	E_LOAD_IO_FAILURE = NewCode("E_LOAD_IO_FAILURE", CategorySchema)
+
+	// E_UNKNOWN_ANNOTATION indicates an annotation name absent from the built-in
+	// registry for its placement (@name on a property, @@name on a type).
+	E_UNKNOWN_ANNOTATION = NewCode("E_UNKNOWN_ANNOTATION", CategorySchema)
+
+	// E_UNKNOWN_ANNOTATION_TARGET indicates a property-reference argument of an
+	// annotation (such as a @@index member) that names no property of the type.
+	// It shares a failure class with E_UNKNOWN_PROPERTY on a different construct.
+	E_UNKNOWN_ANNOTATION_TARGET = NewCode("E_UNKNOWN_ANNOTATION_TARGET", CategorySchema)
+
+	// E_INVALID_ANNOTATION indicates a structural annotation violation: wrong
+	// placement, wrong arity, a bad argument kind or keyword, or a duplicate.
+	E_INVALID_ANNOTATION = NewCode("E_INVALID_ANNOTATION", CategorySchema)
+
+	// E_INVALID_ANNOTATION_TARGET indicates an annotation attached to an
+	// ineligible property — e.g. @index on a non-scalar or sole primary key,
+	// @vector on a non-Vector, or @writeOnce on a primary-key member.
+	E_INVALID_ANNOTATION_TARGET = NewCode("E_INVALID_ANNOTATION_TARGET", CategorySchema)
+
+	// W_ANNOTATION_SHADOWED indicates that a type's own property re-declaration
+	// (identical or narrowing) shadows an inherited property carrying
+	// annotations without re-stating them, so those annotations silently drop
+	// from the re-declaring type. Warning severity: it surfaces the resulting
+	// write-shape / index-shape regression without blocking the load. One
+	// warning is emitted per shadowed ancestor.
+	W_ANNOTATION_SHADOWED = NewCode("W_ANNOTATION_SHADOWED", CategorySchema)
 )
 
 // Syntax codes.

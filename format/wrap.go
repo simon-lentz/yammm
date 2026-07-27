@@ -643,7 +643,7 @@ func findEndOfInvariantMessage(trimmed string) int {
 // declaration. Hoisted to package level to avoid per-call slice allocation.
 var declarationPrefixes = []string{
 	"type ", "abstract ", "part ", "schema ", "import ",
-	"! ", "-->", "*->", "//", "/*", "}",
+	"! ", "-->", "*->", "//", "/*", "}", "@@", "@",
 }
 
 // isNewDeclarationStart checks if a trimmed line starts a new declaration.

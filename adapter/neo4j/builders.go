@@ -37,7 +37,7 @@ func BuildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) st
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: $key_%s", name, name)
+		fmt.Fprintf(&b, "%s: $%s%s", name, batchKeyParamPrefix, name)
 	}
 	b.WriteString("})")
 
@@ -50,13 +50,43 @@ func BuildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) st
 	return b.String()
 }
 
+// batchKeyParamPrefix namespaces MERGE-key entries away from the `props` and
+// `update_props` entries that share their map. Both builders and both parameter
+// assemblers spell it through this constant, so the two halves of each wire
+// contract cannot drift apart.
+const batchKeyParamPrefix = "key_"
+
+// The relationship endpoint-key prefixes, one pair per wire contract. Each
+// builder and its parameter assembler spell them through these constants for
+// the same reason [batchKeyParamPrefix] exists: a template reading a key the
+// assembler never writes yields a MATCH against null, which merges nothing and
+// reports no error.
+//
+// The single and batch contracts genuinely differ — `$from_key_<name>` against
+// `row.from_<name>` — because they are separate published parameter shapes, not
+// because one of them is stale. Nothing in an edge row can collide with an
+// endpoint key (a row holds only the two key sets and `rel_props`), so the batch
+// form has no reason to carry the extra segment.
+const (
+	relFromKeyParamPrefix = "from_key_"
+	relToKeyParamPrefix   = "to_key_"
+	relFromRowPrefix      = "from_"
+	relToRowPrefix        = "to_"
+)
+
 // BuildBatchNodeMergeQuery returns the UNWIND-batched variant of
 // [BuildNodeMergeQuery]. Parameter shape:
 //
-//	{rows: [{<key_1>: v, props: map, [update_props: map]}, ...]}
+//	{rows: [{key_<key_1>: v, props: map, [update_props: map]}, ...]}
 //
 // The `update_props` entry per row is required when keys == [ImmutableKeys]
 // and ignored when keys == [MutableKeys].
+//
+// Merge keys carry the same `key_` prefix the single-node builder gives its
+// parameters ([batchKeyParamPrefix]), so a row's key entries occupy a namespace
+// disjoint from `props` and `update_props`. That matters because `props` and
+// `update_props` are themselves legal DSL property names: without the prefix a
+// primary key so named would collide with the property map in the same row.
 //
 // Node batch merges do not emit a RETURN clause; see [BuildNodeMergeQuery]
 // for the rationale.
@@ -70,7 +100,7 @@ func BuildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutabilit
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: row.%s", name, name)
+		fmt.Fprintf(&b, "%s: row.%s%s", name, batchKeyParamPrefix, name)
 	}
 	b.WriteString("})")
 
@@ -118,7 +148,7 @@ func BuildRelationshipMergeQuery(
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: $from_key_%s", name, name)
+		fmt.Fprintf(&b, "%s: $%s%s", name, relFromKeyParamPrefix, name)
 	}
 	b.WriteString("})\n")
 
@@ -129,7 +159,7 @@ func BuildRelationshipMergeQuery(
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: $to_key_%s", name, name)
+		fmt.Fprintf(&b, "%s: $%s%s", name, relToKeyParamPrefix, name)
 	}
 	fmt.Fprintf(&b, "})\nMERGE (from)-[r:%s]->(to)", relType)
 
@@ -184,7 +214,7 @@ func BuildBatchRelationshipMergeQuery(
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: row.from_%s", name, name)
+		fmt.Fprintf(&b, "%s: row.%s%s", name, relFromRowPrefix, name)
 	}
 	b.WriteString("})\n")
 
@@ -195,7 +225,7 @@ func BuildBatchRelationshipMergeQuery(
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: row.to_%s", name, name)
+		fmt.Fprintf(&b, "%s: row.%s%s", name, relToRowPrefix, name)
 	}
 	fmt.Fprintf(&b, "})\nMERGE (from)-[r:%s]->(to)", relType)
 

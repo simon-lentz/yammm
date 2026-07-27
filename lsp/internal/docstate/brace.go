@@ -3,13 +3,39 @@ package docstate
 import "strings"
 
 // BraceScanner tracks brace nesting depth across lines, correctly skipping
-// braces inside line comments (//), block comments (/* */), and string literals.
+// braces inside line comments (//), block comments (/* */), string literals, and
+// regex literals (/.../).
 //
 // This is the single implementation of the comment/string/brace scanning state
 // machine used by ComputeBraceDepths, isInsideTypeBodyDirect, and depthAtColumn.
 type BraceScanner struct {
 	Depth          int
 	InBlockComment bool
+}
+
+// regexpEnd returns the index one past the closing '/' of a REGEXP literal
+// beginning at line[start], and whether the literal closes on this line.
+//
+// It mirrors the grammar's REGEXP token — an opening '/', then a run of escape
+// pairs and bytes that are neither '/' nor a newline, then a closing '/' — which
+// by construction cannot span lines. yammm's lexer resolves the resulting
+// ambiguity with the SLASH division operator by maximal munch (SLASH is one
+// byte, REGEXP at least two), so reading a slash pair as a literal is what the
+// parser does with the same text; a slash with no partner on the line stays
+// division.
+//
+// Callers must already have ruled out the comment openers "//" and "/*", which
+// win over REGEXP.
+func regexpEnd(line string, start int) (int, bool) {
+	for i := start + 1; i < len(line); i++ {
+		switch line[i] {
+		case '\\':
+			i++ // An escaped byte cannot close the literal.
+		case '/':
+			return i + 1, true
+		}
+	}
+	return 0, false
 }
 
 // ScanLine processes a single line up to maxCol bytes and updates the scanner's
@@ -52,6 +78,17 @@ func (bs *BraceScanner) ScanLine(line string, maxCol int) int {
 			continue
 		}
 
+		// Skip regex literals. A brace inside an invariant's /.../ pattern is
+		// pattern syntax, not nesting: counting it corrupts the depth for the
+		// whole rest of the document. An end past maxCol correctly consumes the
+		// remainder — every byte up to the boundary is inside the literal.
+		if ch == '/' {
+			if end, ok := regexpEnd(line, j); ok {
+				j = end
+				continue
+			}
+		}
+
 		// Skip string literals
 		if ch == '"' || ch == '\'' {
 			quote := ch
@@ -81,6 +118,70 @@ func (bs *BraceScanner) ScanLine(line string, maxCol int) int {
 	}
 
 	return bs.Depth
+}
+
+// InStringOrComment reports whether the byte at index pos on line falls inside a
+// string literal ("..." / '...'), a regex literal (/.../), a // line comment, or
+// a /* */ block comment. It shares BraceScanner's lexer rules so annotation
+// tooling recognises exactly the literal and comment regions the brace scanner
+// skips. startInBlockComment carries the block-comment state at the start of the
+// line (LineState.InBlockComment of the preceding line); pass false for a
+// standalone line.
+//
+// Regex literals are part of that vocabulary because '@' is ordinary inside one:
+// without them, the '@' of an email pattern in an invariant
+// (`! "bad" email =~ /^[a-z]+@example[.]com$/`) reads as an annotation sigil and
+// hijacks both hover and completion for the rest of the line.
+//
+// Intended for classifying a content byte such as the '@' of an annotation; a
+// pos landing exactly on a multi-byte delimiter boundary (the '/' of a closing
+// "*/", a quote) is not specially handled, which such content bytes never do.
+func InStringOrComment(line string, pos int, startInBlockComment bool) bool {
+	inBlock := startInBlockComment
+	for i := 0; i < len(line); i++ {
+		if i == pos {
+			return inBlock
+		}
+		switch {
+		case inBlock:
+			if line[i] == '*' && i+1 < len(line) && line[i+1] == '/' {
+				inBlock = false
+				i++ // consume the '/'
+			}
+		case line[i] == '/' && i+1 < len(line) && line[i+1] == '/':
+			return pos > i // a line comment runs to end of line
+		case line[i] == '/' && i+1 < len(line) && line[i+1] == '*':
+			inBlock = true
+			i++ // consume the '*'
+		case line[i] == '/':
+			end, ok := regexpEnd(line, i)
+			if !ok {
+				break // A slash with no partner on the line is division.
+			}
+			if pos > i && pos < end {
+				return true
+			}
+			i = end - 1 // the loop's i++ resumes just past the literal
+		case line[i] == '"' || line[i] == '\'':
+			quote := line[i]
+			for i++; i < len(line); i++ {
+				if i == pos {
+					return true
+				}
+				if line[i] == '\\' && i+1 < len(line) {
+					i++ // skip the escaped byte
+					if i == pos {
+						return true
+					}
+					continue
+				}
+				if line[i] == quote {
+					break
+				}
+			}
+		}
+	}
+	return inBlock
 }
 
 // ComputeBraceDepths computes the brace nesting depth and block comment state

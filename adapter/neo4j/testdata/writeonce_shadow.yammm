@@ -1,0 +1,10 @@
+schema "wo_shadow_test"
+
+abstract type Tracked {
+    first_seen Timestamp required @writeOnce
+}
+
+type Shadowed extends Tracked {
+    id         String    primary
+    first_seen Timestamp required
+}

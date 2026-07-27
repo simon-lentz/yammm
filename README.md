@@ -14,6 +14,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 - **Runtime validation**: Validate Go maps, structs, and JSON against compiled schemas
 - **Relationship modeling**: Associations (references) and compositions (ownership) with multiplicity
 - **Invariants**: Boolean constraint expressions evaluated at validation time
+- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@writeOnce` metadata that adapters turn into store DDL
 - **Graph construction**: Build in-memory graphs from validated instances with integrity checking
 - **Graph persistence**: Save, load, verify, inspect, and edit-metadata-in-place graph snapshots (`.ys` format)
 - **Batch assembly**: Concurrent-safe validate → add → check → snapshot pipeline surface, resumable from a prior snapshot
@@ -196,7 +197,8 @@ The module is organized into layers with strict dependency ordering:
 ```text
 Primary API (stable)     : schema, instance, graph, snapshot
 Foundation (stable)      : location, diag, immutable, format
-Adapter                  : adapter/json, adapter/csv, adapter/neo4j, adapter/gogen
+Adapter                  : adapter/json, adapter/csv, adapter/neo4j,
+                           adapter/gogen, adapter/jschema, adapter/markdown
 LSP                      : lsp (Language Server Protocol server)
 CLI                      : cmd/yammm, cmd/yammm-lsp
 Internal                 : internal/* (no compatibility guarantees)
@@ -217,7 +219,7 @@ Internal                 : internal/* (no compatibility guarantees)
 | `format` | Canonical `.yammm` file formatting |
 | `adapter/json` | JSON/JSONC parsing with location tracking |
 | `adapter/csv` | CSV data parsing and writing |
-| `adapter/neo4j` | Neo4j constraint generation and Cypher query building |
+| `adapter/neo4j` | Neo4j constraint + index generation and Cypher query building |
 | `adapter/gogen` | Go source generation from a schema (structs, enums, `EDGE_` structs, `Graph`) |
 | `adapter/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
 | `adapter/markdown` | Markdown + Mermaid documentation generation from a schema |
@@ -297,6 +299,31 @@ type Person {
 }
 ```
 
+### Annotations
+
+Annotations attach validated, store-agnostic metadata that adapters turn into store DDL. They do not change which instance data is valid, and they are excluded from the structural hash, so adding one never invalidates a persisted snapshot.
+
+```yammm
+type Document {
+    content_hash String      primary
+    state        String      @index
+    published_on Date
+    embedding    Vector[768] @vector(cosine)
+    first_seen   Timestamp   @writeOnce
+
+    @@index(state, published_on)
+}
+```
+
+| Annotation | Placement | Meaning |
+| ---------- | --------- | ------- |
+| `@index` | property | Single-property range index on a scalar |
+| `@@index(a, b, …)` | type | Composite range index; argument order is significant |
+| `@vector(cosine\|euclidean)` | property | ANN vector index on a `Vector[N]` property |
+| `@writeOnce` | property | Set on node creation, never rewritten |
+
+`yammm neo4j indexes <schema>` emits the index DDL; `yammm neo4j diff` compares it against a live database. See [SPEC.md](docs/SPEC.md#annotations) for eligibility rules and diagnostics.
+
 ### Data Types
 
 | Type | Description |
@@ -361,9 +388,17 @@ yammm snapshot info <file.ys>                            # metadata + stats
 yammm snapshot verify <schema> <file.ys>                 # schema-compatibility check
 yammm snapshot update-metadata --set k=v <file.ys>       # rewrite metadata keys in place (--set/--unset)
 yammm neo4j constraints <schema>                         # generate Neo4j constraint statements
-yammm neo4j diff <schema>                                # compare schema constraints against a live database
+yammm neo4j indexes <schema>                             # generate Neo4j index statements from annotations
+yammm neo4j diff <schema>                                # compare schema constraints and indexes against a live database
 yammm neo4j introspect                                   # inspect a live database's schema
 ```
+
+Every command writes its diagnostics to **stderr**, at every severity, and its
+results to stdout. A warning is not a failure — a run that prints warnings and
+nothing else still exits `0` — so do not read a zero exit code as "no
+diagnostics." (Before v0.9.0 a warnings-only result printed nothing at all, so
+an unchanged schema may emit new stderr output; the `Result` a library caller
+receives is unchanged.)
 
 ## IDE Support
 
@@ -371,8 +406,8 @@ The [`lsp/`](lsp/) package provides a Language Server Protocol server for YAMMM 
 
 - Real-time diagnostics (parse errors, semantic errors, import issues)
 - Go-to-definition for types, properties, and imports
-- Hover information with documentation and constraints
-- Completion for keywords, types, and snippets
+- Hover information with documentation, constraints, and annotations
+- Completion for keywords, types, snippets, and annotations (names and arguments, sourced from the built-in registry)
 - Document symbols for outline and breadcrumbs
 - Formatting with canonical style
 

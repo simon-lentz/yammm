@@ -18,7 +18,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 
 ## Process
 
-1. **Compile the schema.** Run `yammm validate <file>` and `yammm check <file>` if data is available. Report any compiler diagnostics before proceeding to the manual checklist.
+1. **Compile the schema.** Run `yammm validate <file>` and `yammm check <file>` if data is available. Report any compiler diagnostics before proceeding to the manual checklist. Diagnostics go to **stderr at every severity**, and a warning does not change the exit code -- capture stderr and read it rather than trusting exit 0.
 
 2. **Apply the review checklist** below against every type, property, relationship, and invariant in the schema. Read any imported schemas referenced by the file.
 
@@ -39,7 +39,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 
 - Every concrete type (not abstract, not part) has at least one field marked `primary` (multiple `primary` fields form a composite key).
 - Abstract types are not required to declare a `primary` field; when they do, concrete subtypes inherit it (otherwise each concrete subtype supplies its own key).
-- Part types do not declare `primary` fields (they are identified by their parent composition).
+- Part types are exempt from the primary-key requirement (they are identified through their parent composition) but are permitted to declare one. Do not report a keyed part type as an error; in a `(many)` composition it is preferable, giving each child a stable identity rather than a positional index.
 - Primary key types are restricted to `String`, `UUID`, `Date`, and `Timestamp`. `Integer`, `Float`, `Boolean`, `Enum`, `Pattern`, `Vector`, and `List` are rejected. DataType aliases are resolved before checking.
 
 ### 3. Field Modifiers
@@ -81,7 +81,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 - Part types are declared with `part type`, not plain `type`.
 - Part types are only referenced as targets of composition edges (`*->`), never associations (`-->`).
 - Associations (`-->`) target a concrete type only -- never an abstract type (which has no instances to reference) and never a part type.
-- Part types do not declare `primary` fields.
+- Part types may declare a `primary` field, and are exempt from being required to. Flag an unkeyed part type in a `(many)` composition as a suggestion, never an error.
 - Part types cannot declare associations (`-->`).
 
 ### 8. Imports
@@ -102,7 +102,20 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 - Enum narrowing: child enum values must be a subset of parent enum values.
 - Invariants are inherited from parents (deduplicated by name, child overrides parent).
 
-### 10. Common Anti-Patterns
+### 10. Annotations
+
+The loader rejects a structurally wrong annotation, so these are the checks it cannot make.
+
+- Every `@index` and `@@index` serves a stated lookup. An index nobody queries is a permanent write-time and storage cost. Ask what reads it; flag the ones with no answer.
+- `@@index` argument **order is significant** -- it is the declared order, and the emitted composite index is built in it. Flag a composite whose order does not match how callers narrow the query.
+- Flag a single-property `@index` whose property is also a `@@index` member, and confirm both are wanted. The loader accepts the pair; whether it is redundant depends on the store's composite-index behaviour, not on the schema.
+- **Shadowed annotations are a review error, not a warning.** A subtype re-declaring an inherited property (identically or narrowing) drops that property's annotations unless they are re-stated. The load only warns (`W_ANNOTATION_SHADOWED`) and still succeeds, so it is easy to ship. Run `yammm validate` and read **stderr** -- a warning does not change the exit code.
+- `@writeOnce` is a data-integrity decision, not a hint: it makes the Neo4j write path set the property on create only. Flag creation-time fields that lack it (`created_at`, `first_seen`, an origin identifier), and flag any that carry it but are legitimately updated.
+- **The sole-primary-key redundancy rule has a known blind spot.** `@index` on a primary-key property is rejected only when every *visible* concrete type keying on it keys on it alone, and descendants declared in **other schema files** are invisible to that check. The same model is therefore accepted when split across files and rejected when written in one. Check annotated abstract mixins by hand.
+- `@vector(cosine|euclidean)` requires a `Vector[N]` property; the emitted index dimension comes from `N`, so confirm `N` matches the embedding model actually in use. A mismatch is not a schema error -- it is a silent retrieval failure.
+- Annotations are excluded from the structural hash, so adding, removing, or changing one never invalidates a persisted `.ys` snapshot. Do not flag annotation churn as a migration concern.
+
+### 11. Common Anti-Patterns
 
 - **Bare String everywhere**: Flag fields using plain `String` that clearly have a bounded domain. Suggest adding bounds.
 - **Missing invariants**: Flag types with multiple related fields but no cross-field invariants (e.g., `start_date` + `end_date` without ordering).

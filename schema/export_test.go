@@ -48,20 +48,23 @@ var (
 
 // Type mutators.
 var (
-	TestSetTypeSchemaName      = (*Type).setSchemaName
-	TestSetTypeNameSpan        = (*Type).setNameSpan
-	TestSetTypeProperties      = (*Type).setProperties
-	TestSetTypeAssociations    = (*Type).setAssociations
-	TestSetTypeCompositions    = (*Type).setCompositions
-	TestSetTypeInvariants      = (*Type).setInvariants
-	TestSetTypeAllInvariants   = (*Type).setAllInvariants
-	TestSetTypeInherits        = (*Type).setInherits
-	TestSetTypeAllProperties   = (*Type).setAllProperties
-	TestSetTypePrimaryKeys     = (*Type).setPrimaryKeys
-	TestSetTypeAllAssociations = (*Type).setAllAssociations
-	TestSetTypeAllCompositions = (*Type).setAllCompositions
-	TestSetTypeSuperTypes      = (*Type).setSuperTypes
-	TestSetTypeSubTypes        = (*Type).setSubTypes
+	TestSetTypeSchemaName            = (*Type).setSchemaName
+	TestSetTypeNameSpan              = (*Type).setNameSpan
+	TestSetTypeProperties            = (*Type).setProperties
+	TestSetTypeAssociations          = (*Type).setAssociations
+	TestSetTypeCompositions          = (*Type).setCompositions
+	TestSetTypeInvariants            = (*Type).setInvariants
+	TestSetTypeAllInvariants         = (*Type).setAllInvariants
+	TestSetTypeAnnotations           = (*Type).setAnnotations
+	TestSetTypeAllAnnotations        = (*Type).setAllAnnotations
+	TestSetTypeInherits              = (*Type).setInherits
+	TestSetTypeAllProperties         = (*Type).setAllProperties
+	TestSetTypePrimaryKeys           = (*Type).setPrimaryKeys
+	TestSetTypeAllAssociations       = (*Type).setAllAssociations
+	TestSetTypeAllCompositions       = (*Type).setAllCompositions
+	TestSetTypeSuppressedAnnotations = (*Type).setSuppressedAnnotations
+	TestSetTypeSuperTypes            = (*Type).setSuperTypes
+	TestSetTypeSubTypes              = (*Type).setSubTypes
 )
 
 // Relation mutators.

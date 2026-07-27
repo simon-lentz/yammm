@@ -6,10 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestTokenStream_NoChanges(t *testing.T) {
@@ -152,6 +153,7 @@ func TestTokenStream_GoldenFixtures(t *testing.T) {
 		"expressions",
 		"edge_cases",
 		"comprehensive",
+		"annotations",
 	}
 
 	for _, name := range fixtures {
@@ -183,6 +185,7 @@ func TestTokenStream_GoldenIdempotentAll(t *testing.T) {
 		"expressions.yammm.golden",
 		"edge_cases.yammm.golden",
 		"comprehensive.yammm.golden",
+		"annotations.yammm.golden",
 	}
 
 	for _, name := range goldenFiles {

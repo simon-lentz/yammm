@@ -28,3 +28,49 @@ jobs:
         # etiquette; -shuffle=on surfaces inter-test order coupling, which
         # large-scale test dedup/merging is most likely to introduce.
         run: go test -v -race -shuffle=on ./...
+  # The adapter compares its own literals against strings a Neo4j server fills
+  # in. Those strings change between server generations — the node uniqueness
+  # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS
+  # by 2026.x — and a stale comparison fails SILENTLY, reporting a correct
+  # database as drifted. Running one server per supported generation is what
+  # turns "supports Neo4j 5.0+" from a claim in the docs into a tested one, and
+  # it is why accepting both spellings is required rather than renaming to the
+  # newer one.
+  #
+  # Behind the neo4j_integration build tag, so `go test ./...` above stays
+  # Docker-free.
+  integration:
+    name: Neo4j ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Every combination runs: knowing that a change breaks the OLD server but
+      # not the new one is the whole point, and fail-fast would hide it.
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest generation the adapter claims to support. Its constraint
+          # vocabulary differs from current, so this entry is the one that
+          # catches a fix applied only to the newer spelling.
+          - image: neo4j:5.26-enterprise
+            label: 5.26 Enterprise
+          # The pinned default, matching adapter/neo4j/integration's defaultImage.
+          - image: neo4j:2026.05.0-enterprise
+            label: 2026.05 Enterprise
+          # Community exercises the edition gating: the emitter drops to UNIQUE
+          # alone, and the Enterprise-only capability tests skip rather than fail.
+          - image: neo4j:2026.05.0-community
+            label: 2026.05 Community
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Integration tests
+        env:
+          YAMMM_NEO4J_TEST_IMAGE: ${{ matrix.image }}
+        # -count=1 because the environment variable that selects the image is
+        # read at run time: a cached result from another matrix entry would be
+        # reported as this entry's pass.
+        run: go test -count=1 -tags neo4j_integration -timeout 20m -v ./adapter/neo4j/integration/

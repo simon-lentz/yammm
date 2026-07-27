@@ -1,0 +1,12 @@
+schema "collision_test"
+
+type Item {
+    item_id String primary
+    a       String
+    b_c     String
+    a_b     String
+    c       String
+
+    @@index(a, b_c)
+    @@index(a_b, c)
+}

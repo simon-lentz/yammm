@@ -1,0 +1,10 @@
+schema "shadowed"
+
+abstract type Base {
+    id         String    primary
+    first_seen Timestamp @writeOnce
+}
+
+type Doc extends Base {
+    first_seen Timestamp
+}

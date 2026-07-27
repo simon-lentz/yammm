@@ -18,7 +18,7 @@
 //
 // # Formatting Pipeline
 //
-// The formatter applies four phases in order:
+// The formatter applies five phases in order:
 //
 //  1. Token-stream rewriting: canonical spacing between tokens, indentation
 //     normalization, expression region preservation.
@@ -27,6 +27,24 @@
 //  3. Line wrapping: wraps long lines (enums, extends clauses, invariants)
 //     at the [LineWidthThreshold] (100 columns).
 //  4. Column alignment: aligns property types and modifiers within type blocks.
+//  5. Text finalization: trims trailing whitespace from each line, removes
+//     trailing blank lines, and ensures the file ends with a newline.
+//
+// # Annotation Spacing
+//
+// An annotation is written tight: no space between the @ / @@ sigil and the
+// name that follows it, and none between the name and its argument list. The
+// second rule is decided from token-stream state rather than from the token
+// pair alone, because a name followed by "(" is also a relation multiplicity
+// (`worksAt (one)`), which keeps its space.
+//
+// A line beginning with a sigil is a declaration in its own right, so line
+// wrapping never folds it into the line above as a continuation, and a
+// type-level @@ member keeps its own indented line inside the type body.
+//
+// Annotations are not aligned into a column of their own: each trails the
+// property it decorates by a single space, whatever the width of the
+// surrounding declarations.
 //
 // # Additional Functions
 //

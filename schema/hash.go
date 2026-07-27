@@ -21,8 +21,11 @@ const StructuralHashVersion = 1
 // define the same types, properties, relations, compositions, data types,
 // and constraints (by name, kind, and parameters).
 //
-// Invariants are deliberately excluded — they constrain runtime validation
-// but do not affect the structural shape.
+// Invariants and annotations are deliberately excluded — they constrain
+// runtime validation or downstream store DDL but do not affect the structural
+// shape, i.e. what instance data is valid. Excluding annotations also keeps
+// every persisted .ys snapshot hash stable when a schema first gains an
+// annotation, so no header-hash cross-check breaks.
 //
 // The returned string has the format "sha256:<hex>".
 //

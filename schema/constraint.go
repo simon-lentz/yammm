@@ -709,26 +709,34 @@ func (c AliasConstraint) String() string {
 
 // Equal compares the resolved underlying constraints, not the alias names.
 // This enables inheritance deduplication with different alias names but same constraint.
-// For unresolved aliases, compares by datatype name.
+//
+// An alias chain that does not bottom out in a terminal constraint — an
+// unresolvable datatype, or a cycle — has no underlying constraint to compare,
+// so equality cannot be decided structurally and two such aliases are equal
+// only when they reference the SAME datatype. Referencing different datatypes
+// stays unequal even if both are unresolvable: nothing here can show they mean
+// the same thing.
+//
+// That same-datatype case is not a special case, it is what keeps Equal
+// REFLEXIVE. Callers treat Equal as an equivalence relation, and inheritance
+// merging is one of them: a property whose constraint is not equal to itself is
+// re-detected as conflicting with itself, yielding a diagnostic that names one
+// declaration as both sides of its own conflict, once per carrying ancestor.
 //
 // This method is cycle-safe: it uses ResolveAlias() to unwrap alias chains before
 // delegating to the terminal constraint's Equal method.
 func (c AliasConstraint) Equal(other Constraint) bool {
-	if c.resolved == nil {
-		// Two unresolved aliases are equal if they reference the same datatype name
-		if otherAlias, ok := other.(AliasConstraint); ok && otherAlias.resolved == nil {
-			return c.dataTypeName == otherAlias.dataTypeName
+	if _, undecidable := ResolveAlias(c).(AliasConstraint); undecidable {
+		o, ok := other.(AliasConstraint)
+		if !ok {
+			return false
 		}
-		return false // Unresolved alias is never equal to non-alias or resolved alias
+		if _, alsoUndecidable := ResolveAlias(o).(AliasConstraint); !alsoUndecidable {
+			return false
+		}
+		return c.dataTypeName == o.dataTypeName
 	}
-	// Use ResolveAlias for cycle-safety before delegating.
-	// If ResolveAlias returns an AliasConstraint, a cycle was detected
-	// and we cannot determine equality - return false.
-	term := ResolveAlias(c.resolved)
-	if _, ok := term.(AliasConstraint); ok {
-		return false // cycle or unresolved alias chain
-	}
-	return term.Equal(other)
+	return ResolveAlias(c).Equal(other)
 }
 
 // NarrowsTo delegates to the resolved underlying constraint's NarrowsTo method.

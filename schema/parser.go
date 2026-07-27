@@ -270,11 +270,124 @@ func (b *astBuilder) ExitProperty(ctx *grammar.PropertyContext) {
 		Optional:      !isRequired,
 		IsPrimaryKey:  isPrimary,
 		Documentation: doc,
+		Annotations:   b.buildPropertyAnnotations(ctx),
 		Span:          b.spans.FromContext(ctx),
 	}
 	b.currentType.Properties = append(b.currentType.Properties, prop)
 	b.currentDT = nil
 	b.currentDTRef = DataTypeRef{} // Clear for next property
+}
+
+// buildPropertyAnnotations collects the property-trailing @name(args)
+// decorators into their decls. Order is preserved (the deterministic base for
+// AllAnnotations ordering).
+func (b *astBuilder) buildPropertyAnnotations(ctx *grammar.PropertyContext) []*annotationDecl {
+	annCtxs := ctx.AllAnnotation()
+	if len(annCtxs) == 0 {
+		return nil
+	}
+	// The line the property itself is declared on. `annotation*` is postfix and
+	// whitespace is not significant, so an annotation written on a LATER line
+	// still binds here — to the property ABOVE it, not the one below it that a
+	// reader coming from a prefix-decorator language would expect. Record the
+	// mismatch for completion to report; the parse itself is unambiguous.
+	propLine := 0
+	if nameCtx := ctx.Property_name(); nameCtx != nil {
+		propLine = b.spans.FromContext(nameCtx).Start.Line
+	}
+
+	decls := make([]*annotationDecl, 0, len(annCtxs))
+	for _, ac := range annCtxs {
+		nameCtx := ac.GetName()
+		if nameCtx == nil {
+			continue
+		}
+		args, malformed := b.buildAnnotationArgs(ac.Annotation_args())
+		span := b.spans.FromContext(ac)
+		detached := 0
+		if propLine > 0 && span.Start.Line > propLine {
+			detached = propLine
+		}
+		decls = append(decls, &annotationDecl{
+			Name:             nameCtx.GetText(),
+			Args:             args,
+			ArgsMalformed:    malformed,
+			Span:             span,
+			DetachedFromLine: detached,
+		})
+	}
+	return decls
+}
+
+// buildAnnotationArgs collects an annotation's argument list, recording whether
+// each argument was an identifier or a literal. String literals are unquoted;
+// other literals keep their source text (they exist only to draw a precise
+// "got a literal" diagnostic in completion, since no v1 annotation accepts one).
+//
+// malformed reports that at least one argument context matched no alternative.
+// The grammar requires an argument list to hold at least one argument, so an
+// empty one ("@index()") is a syntax error — but ANTLR's recovery still leaves a
+// context behind. Such a context is dropped rather than carried as a text-less
+// argument, and the flag lets completion skip semantic checks whose input never
+// parsed; a text-less argument otherwise produces diagnostics that contradict
+// the source (a zero-argument call reported as having arguments, a composite
+// blamed for referencing a property named "").
+func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext) (args []annotationArgDecl, malformed bool) {
+	if argsCtx == nil {
+		return nil, false
+	}
+	argCtxs := argsCtx.AllAnnotation_arg()
+	args = make([]annotationArgDecl, 0, len(argCtxs))
+	for _, ac := range argCtxs {
+		var (
+			text    string
+			rawText string
+			token   = tokenIdentifier
+		)
+		switch {
+		case ac.Property_name() != nil:
+			text = ac.Property_name().GetText()
+		case ac.UC_WORD() != nil:
+			text = ac.UC_WORD().GetText()
+		case ac.Literal() != nil:
+			raw := ac.Literal().GetText()
+			switch {
+			case len(raw) > 0 && (raw[0] == '"' || raw[0] == '\''):
+				if unquoted, err := unquoteString(raw); err == nil {
+					// tokenString's contract is that its text is the UNQUOTED value,
+					// so only a successful unquote earns the label.
+					token = tokenString
+					text = unquoted
+					rawText = raw
+				} else {
+					// The yammm STRING lexer accepts escapes Go's unquoter rejects
+					// (\u/\x/\0 with no hex digits), so a lexed string can fail here.
+					// Keep the raw source as a bare literal rather than a tokenString
+					// whose text is not actually unquoted: labelling it tokenString
+					// would break identity() (two distinct sources colliding on the
+					// same unquoted-looking bytes) and displayText (re-quoting the
+					// already-quoted raw). As a bare literal the raw IS its spelling.
+					token = tokenLiteral
+					text = raw
+				}
+			default:
+				token = tokenLiteral // bare literal: number, boolean, regex — raw IS the spelling
+				text = raw
+			}
+		default:
+			// No alternative matched: an error-recovery artifact, not an argument.
+			// An empty string literal is NOT this case — it matches Literal().
+			malformed = true
+			continue
+		}
+		args = append(args, annotationArgDecl{
+			Text:  text,
+			Token: token,
+			Span:  b.spans.FromContext(ac),
+			Raw:   rawText,
+		})
+	}
+	return args, malformed
 }
 
 // ExitDatatype is called when exiting the datatype production.
@@ -482,6 +595,30 @@ func (b *astBuilder) ExitInvariant(ctx *grammar.InvariantContext) {
 		Span:          b.spans.FromContext(ctx),
 	}
 	b.currentType.Invariants = append(b.currentType.Invariants, inv)
+}
+
+// ExitType_annotation collects a type-level @@name(args) member, with its
+// optional leading doc comment, onto the current type in document order.
+func (b *astBuilder) ExitType_annotation(ctx *grammar.Type_annotationContext) { //nolint:revive // ANTLR-generated name
+	if b.currentType == nil {
+		return
+	}
+	nameCtx := ctx.GetName()
+	if nameCtx == nil {
+		return
+	}
+	var doc string
+	if ctx.DOC_COMMENT() != nil {
+		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
+	}
+	args, malformed := b.buildAnnotationArgs(ctx.Annotation_args())
+	b.currentType.Annotations = append(b.currentType.Annotations, &annotationDecl{
+		Name:          nameCtx.GetText(),
+		Args:          args,
+		ArgsMalformed: malformed,
+		Documentation: doc,
+		Span:          b.spans.FromContext(ctx),
+	})
 }
 
 // boundSpan returns a span covering a bound value, including the optional

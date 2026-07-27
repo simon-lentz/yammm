@@ -8,8 +8,8 @@ Wrong/right reference for frequent schema authoring errors. Each entry shows the
 
 `primary` already implies required. The grammar treats them as mutually exclusive -- combining them is a **parse error**.
 
-```yammm-snippet
-// WRONG -- parse error
+```yammm-invalid
+// WRONG -- parse error: E_SYNTAX
 id UUID primary required
 ```
 
@@ -24,8 +24,8 @@ id UUID primary
 
 Types referenced by `*->` must be declared as `part type`. Using a plain `type` produces a semantic error.
 
-```yammm-snippet
-// WRONG -- Address is not a part type
+```yammm-invalid
+// WRONG -- Address is not a part type: E_INVALID_COMPOSITION_TARGET
 type Address {
     street String required
 }
@@ -56,7 +56,7 @@ type Person {
 Optional fields can be nil. An unguarded comparison against a nil field evaluates to false, tripping the invariant (`E_INVARIANT_FAIL`) on every instance where the optional field is absent.
 
 ```yammm-snippet
-// WRONG -- fails when end_date is nil
+// WRONG -- loads clean; trips at validation time on every nil end_date
 ! "date_order" end_date > start_date
 ```
 
@@ -71,8 +71,8 @@ Optional fields can be nil. An unguarded comparison against a nil field evaluate
 
 Imported types must be prefixed with their alias. Bare names resolve only within the current schema.
 
-```yammm-snippet
-// WRONG -- User is not in scope without prefix
+```yammm-invalid
+// WRONG -- User is not in scope without prefix: E_UNKNOWN_TYPE
 import "./users" as users
 --> CREATED_BY (one) User
 ```
@@ -89,8 +89,8 @@ import "./users" as users
 
 Only `String`, `UUID`, `Date`, and `Timestamp` are valid primary key types. `Integer`, `Float`, `Boolean`, `Enum`, `Pattern`, `Vector`, and `List` are rejected.
 
-```yammm-snippet
-// WRONG -- Integer cannot be a primary key
+```yammm-invalid
+// WRONG -- Integer cannot be a primary key: E_INVALID_PRIMARY_KEY_TYPE
 type Record {
     id Integer primary
 }
@@ -133,8 +133,8 @@ type User {
 
 Enums require at least two options. A single-option Enum is a parse error.
 
-```yammm-snippet
-// WRONG -- only one option
+```yammm-invalid
+// WRONG -- only one option: E_INVALID_CONSTRAINT
 status Enum["active"]
 ```
 
@@ -149,8 +149,8 @@ status Enum["active", "inactive"]
 
 When brackets are present, both bounds are required. Use `_` for unbounded sides.
 
-```yammm-snippet
-// WRONG -- single bound
+```yammm-invalid
+// WRONG -- single bound: E_SYNTAX
 name String[255]
 count Integer[0]
 ```
@@ -167,9 +167,11 @@ count Integer[0, _]
 
 Associations (`-->`) connect independently existing types. Part types can only be referenced via compositions (`*->`).
 
-```yammm-snippet
-// WRONG -- association to a part type
-part type LineItem { ... }
+```yammm-invalid
+// WRONG -- association to a part type: E_INVALID_ASSOCIATION_TARGET
+part type LineItem {
+    sku String[1, 40] primary
+}
 
 type Order {
     id UUID primary
@@ -179,7 +181,9 @@ type Order {
 
 ```yammm-snippet
 // RIGHT -- composition
-part type LineItem { ... }
+part type LineItem {
+    sku String[1, 40] primary
+}
 
 type Order {
     id UUID primary
@@ -189,25 +193,37 @@ type Order {
 
 ---
 
-## 10. Part Type Declaring a Primary Field
+## 10. Unkeyed Part Type in a `(many)` Composition
 
-Part types are identified by their parent composition. They cannot have primary keys.
+Part types are **exempt** from the primary-key requirement — they are identified
+through their parent composition, so they may omit one. They are not *barred*
+from declaring one, and in a `(many)` composition declaring one is usually the
+better choice.
+
+A composed child's identity is `[ParentKey, "COMPOSITION", ChildKeyOrIndex]`.
+Without a primary key the child slot is its **0-based position in the array**, so
+reordering the children — or inserting one — changes the identity of every child
+after that point. With a primary key the child slot is that key, and identity
+survives reordering.
 
 ```yammm-snippet
-// WRONG
-part type Address {
-    id UUID primary
-    street String[1, 200] required
+// RISKY -- identity is positional; reordering renumbers every later child
+part type LineItem {
+    sku String[1, 40] required
+    qty Integer[1, _] required
 }
 ```
 
 ```yammm-snippet
-// RIGHT
-part type Address {
-    street String[1, 200] required
-    city String[1, 100] required
+// BETTER -- stable identity independent of array order
+part type LineItem {
+    sku String[1, 40] primary
+    qty Integer[1, _] required
 }
 ```
+
+A `(one)` composition has a single child and no index, so a key adds nothing
+there; omitting it is fine.
 
 ---
 
@@ -215,7 +231,7 @@ part type Address {
 
 Part types cannot have independent relationships. Only the parent type holds associations.
 
-```yammm-snippet
+```yammm-invalid
 // WRONG
 part type LineItem {
     quantity Integer[1, _] required
@@ -242,8 +258,8 @@ type Order {
 
 Every concrete type must declare or inherit at least one `primary` field (`E_NO_PRIMARY_KEY`). Abstract types MAY declare a primary field — concrete subtypes inherit it — but are not required to; when no ancestor declares one, the concrete type must.
 
-```yammm-snippet
-// WRONG -- Document neither declares nor inherits a primary key
+```yammm-invalid
+// WRONG -- Document neither declares nor inherits a primary key: E_NO_PRIMARY_KEY
 abstract type Auditable {
     created_at Timestamp required
 }
@@ -272,8 +288,8 @@ abstract type Identified {
 
 Yammm uses space separation, not colons. This is a common mistake when coming from JSON Schema or TypeScript.
 
-```yammm-snippet
-// WRONG -- not JSON syntax
+```yammm-invalid
+// WRONG -- not JSON syntax: E_SYNTAX
 name: String required
 age: Integer
 ```
@@ -288,10 +304,13 @@ age Integer
 
 ## 14. Lowercase Built-in Function Names
 
-All built-in functions in invariants are capitalized. Lowercase names are resolved as property references.
+All built-in functions in invariants are capitalized. A lowercase name is not a
+built-in, so the schema still **loads clean** — the failure surfaces at
+validation time (`E_UNKNOWN_BUILTIN` / `E_EVAL_ERROR`), not at load. Nothing
+catches this for you at compile time.
 
 ```yammm-snippet
-// WRONG -- lowercase function names
+// WRONG -- loads clean; fails at validation time
 ! "check_len" name -> len > 0
 ! "all_valid" ITEMS -> all |$i| { $i.qty > 0 }
 ! "has_name" name -> contains("test")
@@ -310,8 +329,8 @@ All built-in functions in invariants are capitalized. Lowercase names are resolv
 
 Relationship property blocks cannot use `Vector` or `List` types.
 
-```yammm-snippet
-// WRONG -- List not allowed in edge properties
+```yammm-invalid
+// WRONG -- List not allowed in edge properties: E_LIST_ON_EDGE
 --> RATED (many) Product {
     score Float[0.0, 5.0] required
     tags List<String>
@@ -332,8 +351,8 @@ Relationship property blocks cannot use `Vector` or `List` types.
 
 A child type can narrow inherited constraints but never widen them.
 
-```yammm-snippet
-// WRONG -- widens parent bounds
+```yammm-invalid
+// WRONG -- widens parent bounds: E_PROPERTY_CONFLICT
 abstract type Base {
     age Integer[18, 65]
 }
@@ -360,8 +379,8 @@ type Restricted extends Base {
 
 Multiplicity uses parentheses. Square brackets are for type bounds.
 
-```yammm-snippet
-// WRONG -- brackets
+```yammm-invalid
+// WRONG -- brackets: E_SYNTAX
 --> MANAGES [many] Department
 --> BELONGS_TO [one] Team
 ```
@@ -398,18 +417,28 @@ type User {
 
 ---
 
-## 19. Duplicate Invariant Error IDs
+## 19. Reusing an Invariant Message
 
-Invariant error IDs must be unique within a type. Duplicates cause a semantic error.
+An invariant's string is its **message** and doubles as its **name**. Reusing one
+is not an error — the schema loads clean and both invariants evaluate — but the
+name is load-bearing in two ways, so a duplicate costs you something.
+
+Within a type, two invariants sharing a message produce two failures reporting
+the same text, and nothing in the diagnostic says which expression tripped.
+
+Across inheritance it matters more: invariants merge by name, keep-first, so a
+subtype declaring a parent's message **overrides** the parent's invariant rather
+than adding to it. That is the intended way to refine an inherited rule — and a
+silent surprise if the collision was accidental.
 
 ```yammm-snippet
-// WRONG -- "check" used twice
+// RISKY -- both evaluate; both failures read "check"
 ! "check" name -> Len > 0
 ! "check" email -> Len > 0
 ```
 
 ```yammm-snippet
-// RIGHT -- unique IDs
+// BETTER -- each failure names the rule that tripped
 ! "name_not_empty" name -> Len > 0
 ! "email_not_empty" email -> Len > 0
 ```
@@ -432,4 +461,29 @@ tags List<String[1, 50]>[0, 20]
 // OR
 tags List<String[1, 50]>
 ! "tag_limit" tags -> Len <= 100
+```
+
+---
+
+## 21. Single `@` for a Composite Index
+
+`@index` is a property-level annotation that takes no arguments. A composite (multi-property) index is a type-level `@@index(...)` member. Writing `@index(a, b)` on a property is an error (`E_INVALID_ANNOTATION`).
+
+```yammm-invalid
+// WRONG -- @index takes no arguments: E_INVALID_ANNOTATION
+type Document {
+    content_hash String primary
+    state        String @index(state, published_on)
+}
+```
+
+```yammm-snippet
+// RIGHT -- a single-property index trails the property; a composite is a @@ member
+type Document {
+    content_hash String primary
+    state        String @index
+    published_on Date
+
+    @@index(state, published_on)
+}
 ```

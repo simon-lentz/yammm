@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // Context represents the context for completion.
@@ -17,14 +18,27 @@ const (
 	PropertyType           // At property type position
 	RelationTarget         // After --> or *-> relation arrow
 	ImportPath             // In an import statement's path portion
+	AnnotationName         // After @ / @@ — an annotation name is being typed
+	AnnotationArgs         // Inside a recognized annotation's argument list
 )
 
-// DetectContext analyzes text around cursor to determine context.
-// It accepts a documentSnapshot to leverage cached lineState for O(1) type body detection.
-func DetectContext(doc *docstate.Snapshot, line, character int) Context {
+// AnnotationContext is the parsed annotation head DetectContext recovers when it
+// classifies an AnnotationName / AnnotationArgs context. It is threaded out to
+// Complete so the head is parsed once per completion request instead of being
+// re-parsed there; it is the zero value for every non-annotation context.
+type AnnotationContext struct {
+	placement schema.AnnotationPlacement
+	name      string
+}
+
+// DetectContext analyzes text around cursor to determine context, returning the
+// context and — for an annotation context — the parsed annotation head so the
+// caller need not re-parse it. It accepts a documentSnapshot to leverage cached
+// lineState for O(1) type body detection.
+func DetectContext(doc *docstate.Snapshot, line, character int) (Context, AnnotationContext) {
 	lines := strings.Split(doc.Text, "\n")
 	if line < 0 || line >= len(lines) {
-		return Unknown
+		return Unknown, AnnotationContext{}
 	}
 
 	currentLine := lines[line]
@@ -37,33 +51,45 @@ func DetectContext(doc *docstate.Snapshot, line, character int) Context {
 
 	// Check for import path context (before property type to avoid "import " matching)
 	if isImportContext(beforeCursor) {
-		return ImportPath
+		return ImportPath, AnnotationContext{}
 	}
 
 	// Check for extends context
 	if isExtendsContext(beforeCursor, lines, line) {
-		return Extends
+		return Extends, AnnotationContext{}
 	}
 
 	// Check for relation target context (after --> or *->)
 	if isRelationTargetContext(beforeCursor) {
-		return RelationTarget
+		return RelationTarget, AnnotationContext{}
+	}
+
+	// Check for annotation contexts (after @ / @@, or inside a recognized
+	// annotation's argument list). Before the property-type check because
+	// @-prefixed text is not a bare identifier and would otherwise fall through
+	// to the generic type-body member completions.
+	if placement, name, inArgs, ok := annotationHead(beforeCursor, doc.LineStartsInBlockComment(line)); ok {
+		ann := AnnotationContext{placement: placement, name: name}
+		if inArgs {
+			return AnnotationArgs, ann
+		}
+		return AnnotationName, ann
 	}
 
 	// Check for property type context (identifier followed by space)
 	if isPropertyTypeContext(beforeCursor) {
-		return PropertyType
+		return PropertyType, AnnotationContext{}
 	}
 
 	// Check if we're inside a type body using cached lineState (O(1))
 	// Falls back to direct computation if lineState is unavailable.
 	// Pass character offset to handle cursor before closing brace on same line.
 	if IsInsideTypeBody(doc, lines, line, character) {
-		return TypeBody
+		return TypeBody, AnnotationContext{}
 	}
 
 	// Default to top-level
-	return TopLevel
+	return TopLevel, AnnotationContext{}
 }
 
 // isExtendsContext checks if cursor is after "extends" keyword.
@@ -128,6 +154,59 @@ func isPropertyTypeContext(beforeCursor string) bool {
 	}
 
 	return false
+}
+
+// annotationHead parses the annotation being typed from the text before the
+// cursor: the sigil placement, the partial name, and whether the cursor is
+// inside the argument list. startInBlockComment carries the block-comment state
+// at the start of the line. ok is false when the cursor is not on an annotation
+// head.
+//
+// It anchors on the LAST '@' that starts a sigil. Two conditions define that:
+//
+//   - It is not preceded by another '@', so the second '@' of a '@@' cannot
+//     anchor and mis-report a type-level annotation as property-level.
+//   - It is not inside a string literal or a comment, so an '@' in a value
+//     (`Pattern[" @x"]`) or in commented-out text is ignored. This is the whole
+//     of the protection: yammm's WS is on the hidden channel, so an annotation
+//     needs no whitespace before it — `state String@index` is valid — and
+//     requiring whitespace would silently withhold completions from it while
+//     anchoring `@a@b` on the wrong sigil.
+//
+// An argument list containing spaces ("@vector( ") is still recognized, because
+// the "cursor moved past the head" test only applies once the list is closed.
+func annotationHead(beforeCursor string, startInBlockComment bool) (placement schema.AnnotationPlacement, name string, inArgs, ok bool) {
+	at := -1
+	for i := range len(beforeCursor) {
+		if beforeCursor[i] == '@' &&
+			(i == 0 || beforeCursor[i-1] != '@') &&
+			!docstate.InStringOrComment(beforeCursor, i, startInBlockComment) {
+			at = i
+		}
+	}
+	if at < 0 {
+		return 0, "", false, false
+	}
+	placement = schema.PlacementProperty
+	body := beforeCursor[at+1:]
+	if strings.HasPrefix(body, "@") {
+		placement = schema.PlacementType
+		body = body[1:]
+	}
+	// An open paren with no matching close means the cursor is inside the
+	// argument list; the annotation name is the text before the paren.
+	if open := strings.IndexByte(body, '('); open >= 0 {
+		if strings.IndexByte(body[open:], ')') >= 0 {
+			return 0, "", false, false // the argument list is already closed
+		}
+		return placement, body[:open], true, true
+	}
+	// Otherwise the name is the remaining run; whitespace after it means the
+	// cursor has moved past the annotation head.
+	if strings.ContainsAny(body, " \t") {
+		return 0, "", false, false
+	}
+	return placement, body, false, true
 }
 
 // isImportContext checks if cursor is in an import statement's path portion.

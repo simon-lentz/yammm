@@ -27,11 +27,24 @@ alias_name: UC_WORD | LC_WORD ;
 type_ref: (qualifier=alias_name PERIOD)? name=type_name ;
 
 extends_types: 'extends' type_ref (COMMA type_ref)* COMMA? ;
-type_body: (property | association | composition | invariant)* ;
+type_body: (property | association | composition | invariant | type_annotation)* ;
 
-property: DOC_COMMENT? property_name data_type_ref (is_primary = 'primary' | is_required = 'required')?;
+property: DOC_COMMENT? property_name data_type_ref (is_primary = 'primary' | is_required = 'required')? annotation*;
 rel_property: DOC_COMMENT? property_name data_type_ref is_required = 'required'?;
 property_name: LC_WORD | lc_keyword;
+
+// Annotations decorate properties (@name / @name(args)) and types
+// (@@name(args)) with validated metadata that downstream adapters turn into
+// store DDL such as indexes and write-once markers. Args parse permissively
+// (identifiers and literals); their kind and arity are enforced semantically
+// during schema completion, so violations draw rich E_ diagnostics with spans
+// rather than a bare E_SYNTAX. The @ vs @@ split is forced, not stylistic:
+// with WS on the hidden channel, a greedy property-trailing annotation* would
+// otherwise swallow a standalone type-level annotation written after a property.
+annotation: AT name=property_name annotation_args? ;
+type_annotation: DOC_COMMENT? ATAT name=property_name annotation_args? ;
+annotation_args: LPAR args+=annotation_arg (COMMA args+=annotation_arg)* COMMA? RPAR ;
+annotation_arg: property_name | UC_WORD | literal ;
 
 data_type_ref: built_in | qualified_alias ;
 // Data type aliases may be qualified (e.g., "common.Money").
@@ -133,6 +146,7 @@ ARROW: '->';
 SLASH: '/';
 USCORE: '_';
 STAR: '*';
+ATAT: '@@';
 AT: '@';
 EXCLAMATION: '!';
 PLUS: '+';

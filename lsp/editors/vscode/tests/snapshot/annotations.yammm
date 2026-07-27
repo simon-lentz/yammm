@@ -1,0 +1,12 @@
+// Grammar snapshot: annotation scopes (@name property-level, @@name type-level).
+
+schema "annotations_snapshot"
+
+type Document {
+	content_hash String      primary
+	state        String      @index
+	embedding    Vector[768] @vector(cosine)
+	first_seen   Timestamp   @writeOnce
+
+	@@index(state, content_hash)
+}

@@ -51,8 +51,8 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 
 	// Load schema.
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), schemaResult)
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -70,9 +70,11 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	// Verify.
-	result := snapshot.Verify(cmd.Context(), data, s, opts...)
+	verifyResult := snapshot.Verify(cmd.Context(), data, s, opts...)
 
-	// Render diagnostics.
+	// Render diagnostics — the load's residual warnings folded in, so one
+	// invocation writes one result (and in JSON, one document).
+	result := cli.MergeResults(pending, verifyResult)
 	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 
 	exitCode := cli.ExitForResult(result)

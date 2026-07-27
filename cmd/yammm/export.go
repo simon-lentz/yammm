@@ -13,6 +13,7 @@ import (
 	adapterjson "github.com/simon-lentz/yammm/adapter/json"
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -68,8 +69,8 @@ func runExport(cmd *cobra.Command, args []string) error {
 
 	// Load schema
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	if schemaResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), schemaResult)
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -81,18 +82,21 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 
 	if isSnapshot {
-		return exportFromSnapshot(cmd, s, dataPath, outputFormat, noColor, absSchemaPath, toFormat, outputPath, outputDir)
+		return exportFromSnapshot(cmd, s, pending, dataPath, outputFormat, noColor, absSchemaPath, toFormat, outputPath, outputDir)
 	}
 
 	// Parse, validate, and build graph
-	result, g, err := loadGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
+	graphResult, g, err := loadGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return &cli.ExitError{Code: cli.ExitUsage}
 	}
 
+	// One invocation writes one result: the load's residual warnings fold into
+	// the data phase's diagnostics rather than rendering separately.
+	result := cli.MergeResults(pending, graphResult)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 	if result.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -262,17 +266,23 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 	return nil
 }
 
-func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, dataPath string, outputFormat cli.OutputFormat, noColor bool, absSchemaPath string, toFormat, outputPath, outputDir string) error {
-	snap, result, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
+// exportFromSnapshot exports a persisted .ys snapshot. pending carries the
+// schema load's residual diagnostics so they render with the snapshot's rather
+// than as a second document.
+func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, pending diag.Result, dataPath string, outputFormat cli.OutputFormat, noColor bool, absSchemaPath string, toFormat, outputPath, outputDir string) error {
+	snap, snapResult, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return &cli.ExitError{Code: cli.ExitRuntime}
 	}
 
-	// Render warnings (e.g., unsupported hash algorithm).
-	if !result.OK() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
-	}
+	// Render unconditionally. A warning here — an unsupported snapshot hash
+	// algorithm, a provenance path that would not parse — means integrity was
+	// NOT fully verified, and gating on error severity left the operator
+	// shipping an export believing it had been. RenderResult writes nothing for
+	// an empty result, so no gate is needed.
+	result := cli.MergeResults(pending, snapResult)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 	if result.HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}

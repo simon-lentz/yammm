@@ -136,6 +136,11 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_INVALID_PRIMARY_KEY_TYPE` | Type not allowed as primary key |
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
 | `E_LOAD_IO_FAILURE` | I/O error during schema loading |
+| `E_UNKNOWN_ANNOTATION` | Annotation name not in the built-in registry for its placement |
+| `E_UNKNOWN_ANNOTATION_TARGET` | Annotation property-reference argument names no property of the type |
+| `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation |
+| `E_INVALID_ANNOTATION_TARGET` | Annotation attached to an ineligible property |
+| `W_ANNOTATION_SHADOWED` | A re-declaration silently drops an inherited property's annotations (warning) |
 
 ### Instance Validation
 
@@ -206,3 +211,5 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
 | `E_NEO4J_INVALID_IDENTIFIER` | Neo4j | Name not valid as Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |
+| `E_NEO4J_UNKNOWN_PROPERTY` | Neo4j | An index annotation names a property the type does not have |
+| `E_NEO4J_INVALID_INDEX_TARGET` | Neo4j | An index annotation names a property whose type cannot carry it (`@index` on a non-scalar, `@vector` on a non-Vector or a non-positive dimension) |

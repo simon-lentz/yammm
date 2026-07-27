@@ -1,6 +1,9 @@
 package schema
 
 import (
+	"iter"
+	"slices"
+
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -104,6 +107,12 @@ type Property struct {
 	optional     bool
 	isPrimaryKey bool
 	scope        DeclaringScope
+	annotations  []*Annotation // property-trailing @name(args) decorators, in source order
+
+	// origin points at the declared Property this one was synthesized from
+	// during inheritance merging, and is nil on a declared property. See
+	// [Property.Origin].
+	origin *Property
 }
 
 // newProperty creates a new Property.
@@ -126,6 +135,7 @@ func newProperty(
 	optional bool,
 	isPrimaryKey bool,
 	scope DeclaringScope,
+	annotations []*Annotation,
 ) *Property {
 	return &Property{
 		name:         name,
@@ -136,6 +146,7 @@ func newProperty(
 		optional:     optional,
 		isPrimaryKey: isPrimaryKey,
 		scope:        scope,
+		annotations:  annotations,
 	}
 }
 
@@ -194,6 +205,83 @@ func (p *Property) DeclaringScope() DeclaringScope {
 	return p.scope
 }
 
+// Annotations returns an iterator over this property's annotations. Duplicate
+// names are rejected during completion, so each name appears at most once.
+//
+// Order depends on which view the property came from. On a DECLARED property
+// (one a type holds in [Type.PropertiesSlice]) it is source order: the
+// @name / @name(args) decorators trailing the declaration, left to right. On a
+// property read from a merged view ([Type.AllProperties]) the annotations may
+// have been gathered from several supertypes, and the order is then the order of
+// the READING type's own `extends` clause — not of any declaring type, which for
+// a property already means the ancestor that declared it. So the same schema
+// property can enumerate its annotations differently on two types that both
+// inherit it. Consumers that care
+// about a specific annotation should look it up by name with
+// [Property.Annotation]; consumers that emit in enumeration order should treat
+// the order as stable-per-load, not as authored order.
+func (p *Property) Annotations() iter.Seq[*Annotation] {
+	return func(yield func(*Annotation) bool) {
+		for _, a := range p.annotations {
+			if !yield(a) {
+				return
+			}
+		}
+	}
+}
+
+// AnnotationsSlice returns a defensive copy of this property's annotations.
+func (p *Property) AnnotationsSlice() []*Annotation {
+	return slices.Clone(p.annotations)
+}
+
+// Annotation returns the annotation with the given name, if present. The result
+// is unambiguous because duplicate annotation names on one property are a load
+// error.
+func (p *Property) Annotation(name string) (*Annotation, bool) {
+	for _, a := range p.annotations {
+		if a.name == name {
+			return a, true
+		}
+	}
+	return nil, false
+}
+
+// Origin returns the property as declared: p itself for a property a type
+// declares, and the declaring ancestor's property for one synthesized while
+// merging a property inherited from several ancestors (a merged view carries the
+// union of those ancestors' annotations, which no single declared property
+// holds). Never nil.
+//
+// Use it as the key of any identity-keyed map built from declared properties
+// ([Type.PropertiesSlice], [Relation.PropertiesSlice]) and read back while
+// iterating a merged view ([Type.AllPropertiesSlice]): the two views are not
+// pointer-identical for a synthesized property, and Origin bridges them.
+// Everything Origin discards is annotation state; name, constraint, datatype
+// reference, optionality, primary-key status, span, and declaring scope are all
+// preserved on the synthesized copy.
+func (p *Property) Origin() *Property {
+	if p.origin != nil {
+		return p.origin
+	}
+	return p
+}
+
+// cloneWithAnnotations returns a shallow copy of p carrying the given annotation
+// set in place of p's own. Used during linearization to give a type a merged
+// view of a property inherited from multiple ancestors without mutating the
+// shared ancestor *Property; every other field is preserved from p.
+//
+// The copy records p's declared origin so identity-keyed consumers can recover
+// it (see [Property.Origin]). Origins are flattened, so a copy of a copy still
+// points at the declared property rather than at an intermediate merge result.
+func (p *Property) cloneWithAnnotations(anns []*Annotation) *Property {
+	clone := *p
+	clone.annotations = anns
+	clone.origin = p.Origin()
+	return &clone
+}
+
 // CanNarrowFrom reports whether this (child) property is a valid narrowing of
 // the parent property. A child narrows its parent when:
 //   - Names match (case-sensitive)
@@ -229,10 +317,15 @@ func (p *Property) CanNarrowFrom(parent *Property) bool {
 
 // Equal reports whether two properties are structurally equal.
 // Compares: name (case-sensitive), optionality, PK status, constraint.
-// NOT compared: span, docs, scope. Scope is excluded because properties
-// inherited from different ancestors should be considered equal for
+// NOT compared: span, docs, scope, annotations. Scope is excluded because
+// properties inherited from different ancestors should be considered equal for
 // deduplication purposes during type completion—two ancestors may define
 // identical properties, and we want to merge them rather than flag a conflict.
+// Annotations are excluded so a child re-declaration that drops an inherited
+// annotation is still Equal rather than a structural conflict. The drop is
+// surfaced separately, by W_ANNOTATION_SHADOWED — queued during linearization
+// and emitted after annotation validation, and suppressed when the annotation or
+// the re-declaration was itself rejected.
 func (p *Property) Equal(other *Property) bool {
 	if p == nil || other == nil {
 		return p == other

@@ -69,14 +69,17 @@ func RenderResult(w io.Writer, renderer *diag.Renderer, format OutputFormat, res
 	case FormatJSON:
 		// The JSON wire object carries limit/limitReached/droppedCount, so it is
 		// the single truncation surface for JSON: emit it whenever there is
-		// anything to report — errors, or a truncation that a clean result would
-		// otherwise render as nothing.
-		if result.OK() && !result.LimitReached() {
+		// anything to report — any issue at any severity, or a truncation that an
+		// issue-free result would otherwise render as nothing.
+		if result.Len() == 0 && !result.LimitReached() {
 			return nil
 		}
 		return writeResultJSON(w, renderer, result)
 	default:
-		if !result.OK() {
+		// Every retained issue renders, not only failures: a Warning or Info is
+		// reported precisely because the loader chose not to reject, so gating on
+		// error severity would make it unreachable in every command.
+		if result.Len() > 0 {
 			if text := renderer.FormatResult(result); text != "" {
 				if _, err := fmt.Fprintln(w, text); err != nil {
 					return err

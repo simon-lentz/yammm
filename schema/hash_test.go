@@ -47,7 +47,7 @@ func buildMinimalSchema(
 
 // makeProp creates a property with the given name, constraint, and optional/pk flags.
 func makeProp(name string, c schema.Constraint, optional, pk bool) *schema.Property {
-	return schema.TestNewProperty(name, zeroSpan, "", c, schema.DataTypeRef{}, optional, pk, schema.DeclaringScope{})
+	return schema.TestNewProperty(name, zeroSpan, "", c, schema.DataTypeRef{}, optional, pk, schema.DeclaringScope{}, nil)
 }
 
 // makeAssoc creates an association relation.

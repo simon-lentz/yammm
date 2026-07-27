@@ -53,6 +53,7 @@ type typeDecl struct {
 	Properties    []*propertyDecl
 	Relations     []*relationDecl
 	Invariants    []*invariantDecl
+	Annotations   []*annotationDecl // Type-level @@name(args) members
 	IsPart        bool
 	IsAbstract    bool
 	Documentation string
@@ -75,6 +76,7 @@ type propertyDecl struct {
 	Optional      bool
 	IsPrimaryKey  bool
 	Documentation string
+	Annotations   []*annotationDecl // Property-trailing @name(args) decorators
 	Span          location.Span
 }
 
@@ -103,4 +105,38 @@ type invariantDecl struct {
 	Expr          expr.Expression // Compiled expression (nil indicates parse failure)
 	Documentation string
 	Span          location.Span
+}
+
+// annotationDecl is the parsed form of a @name / @@name annotation, before
+// semantic validation. Documentation is only populated for type-level (@@)
+// annotations, which may carry a leading doc comment.
+type annotationDecl struct {
+	Name string
+	Args []annotationArgDecl
+	// ArgsMalformed reports that the argument list failed to parse, so Args is
+	// not a faithful record of what the source wrote. Semantic checks over the
+	// argument list are skipped for such an annotation — the syntax error owns
+	// the diagnosis.
+	ArgsMalformed bool
+	Documentation string
+	Span          location.Span
+
+	// DetachedFromLine is the source line of the property this annotation was
+	// parsed as trailing, set only when the annotation begins on a LATER line
+	// — the shape where what the author wrote and what the grammar binds can
+	// disagree. Zero for a same-line annotation and for every type-level one.
+	DetachedFromLine int
+}
+
+// annotationArgDecl is one parsed annotation argument. Token records whether
+// the argument was an identifier or a literal so completion can distinguish
+// "expected a reference, got a literal" from a bad identifier.
+type annotationArgDecl struct {
+	Text  string
+	Token annotationTokenKind
+	Span  location.Span
+
+	// Raw is the source spelling of a quoted string, whose Text holds the
+	// unquoted value; empty for every other kind.
+	Raw string
 }

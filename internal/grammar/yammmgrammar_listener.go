@@ -46,6 +46,18 @@ type YammmGrammarListener interface {
 	// EnterProperty_name is called when entering the property_name production.
 	EnterProperty_name(c *Property_nameContext)
 
+	// EnterAnnotation is called when entering the annotation production.
+	EnterAnnotation(c *AnnotationContext)
+
+	// EnterType_annotation is called when entering the type_annotation production.
+	EnterType_annotation(c *Type_annotationContext)
+
+	// EnterAnnotation_args is called when entering the annotation_args production.
+	EnterAnnotation_args(c *Annotation_argsContext)
+
+	// EnterAnnotation_arg is called when entering the annotation_arg production.
+	EnterAnnotation_arg(c *Annotation_argContext)
+
 	// EnterData_type_ref is called when entering the data_type_ref production.
 	EnterData_type_ref(c *Data_type_refContext)
 
@@ -225,6 +237,18 @@ type YammmGrammarListener interface {
 
 	// ExitProperty_name is called when exiting the property_name production.
 	ExitProperty_name(c *Property_nameContext)
+
+	// ExitAnnotation is called when exiting the annotation production.
+	ExitAnnotation(c *AnnotationContext)
+
+	// ExitType_annotation is called when exiting the type_annotation production.
+	ExitType_annotation(c *Type_annotationContext)
+
+	// ExitAnnotation_args is called when exiting the annotation_args production.
+	ExitAnnotation_args(c *Annotation_argsContext)
+
+	// ExitAnnotation_arg is called when exiting the annotation_arg production.
+	ExitAnnotation_arg(c *Annotation_argContext)
 
 	// ExitData_type_ref is called when exiting the data_type_ref production.
 	ExitData_type_ref(c *Data_type_refContext)

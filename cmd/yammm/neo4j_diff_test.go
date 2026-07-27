@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
 func TestPrintDiffResult_AllMatch(t *testing.T) {
@@ -51,6 +54,51 @@ func TestPrintDiffResult_WithDrift(t *testing.T) {
 	assert.Contains(t, buf.String(), "create: CREATE CONSTRAINT c2")
 }
 
+func TestPrintIndexDiffResult_AllMatch(t *testing.T) {
+	t.Parallel()
+
+	diff := &adaptern4j.IndexDiffResult{
+		Match: []adaptern4j.IndexMatch{
+			{Desired: adaptern4j.Index{Name: "i1"}, Actual: adaptern4j.RemoteIndex{Name: "i1"}},
+		},
+	}
+
+	var buf bytes.Buffer
+	printIndexDiffResult(&buf, diff, nil)
+
+	assert.Contains(t, buf.String(), "matched: 1 indexes")
+	assert.Contains(t, buf.String(), "0 to create")
+	assert.Contains(t, buf.String(), "0 to drop")
+}
+
+func TestPrintIndexDiffResult_DriftCreateDrop(t *testing.T) {
+	t.Parallel()
+
+	diff := &adaptern4j.IndexDiffResult{
+		Drift: []adaptern4j.IndexDrift{
+			{
+				Desired: adaptern4j.Index{Name: "i1"},
+				Actual:  adaptern4j.RemoteIndex{Name: "i1"},
+				Reason:  "vector dimension mismatch",
+			},
+		},
+		Create: []adaptern4j.Index{
+			{Name: "i2", Statement: "CREATE INDEX i2 IF NOT EXISTS ..."},
+		},
+		Drop: []adaptern4j.RemoteIndex{
+			{Name: "i3", Type: "RANGE", LabelsOrTypes: []string{"test__Foo"}},
+		},
+	}
+
+	var buf bytes.Buffer
+	printIndexDiffResult(&buf, diff, nil)
+
+	assert.Contains(t, buf.String(), "index drift: i1")
+	assert.Contains(t, buf.String(), "vector dimension mismatch")
+	assert.Contains(t, buf.String(), "index create: CREATE INDEX i2")
+	assert.Contains(t, buf.String(), "index drop: i3")
+}
+
 func TestNeo4jDiff_EnvVarSatisfiesURI(t *testing.T) {
 	// Cannot run in parallel due to env var mutation.
 	//
@@ -65,4 +113,100 @@ func TestNeo4jDiff_EnvVarSatisfiesURI(t *testing.T) {
 	// The command progresses past URI validation but fails at connection.
 	// Exit code 1 (validation) not 2 (usage) proves the env var was picked up.
 	assert.NotEqual(t, 2, code)
+}
+
+// TestNeo4jDiff_AcceptsConfigFlags proves the --edition, --separator, and
+// --named flags are wired (mirroring the constraints command): the command
+// proceeds past flag parsing to the connection attempt (which fails on the
+// refused loopback port), so the exit code is not the usage code. The targeted
+// "invalid edition" message (written to os.Stderr, which in-process cobra
+// buffers cannot capture) is asserted by the neo4j_diff_bad_edition.txtar
+// script instead.
+func TestNeo4jDiff_AcceptsConfigFlags(t *testing.T) {
+	t.Parallel()
+	code := executeCmd(t, "neo4j", "diff", "--uri", "neo4j://127.0.0.1:1",
+		"--edition", "community", "--separator", "__", "--named=false", "testdata/valid.yammm")
+	assert.NotEqual(t, 2, code)
+}
+
+// TestNeo4jDiff_IndexesFlag proves the --indexes opt-out is wired: with
+// --indexes=false the command parses the flag and proceeds to the connection
+// attempt (which fails on the refused loopback port), so the exit code is not
+// the usage code.
+func TestNeo4jDiff_IndexesFlag(t *testing.T) {
+	t.Parallel()
+	code := executeCmd(t, "neo4j", "diff", "--uri", "neo4j://127.0.0.1:1",
+		"--indexes=false", "testdata/valid.yammm")
+	assert.NotEqual(t, 2, code)
+}
+
+// TestNeo4jDiffExit pins the exit-code contract of the two diff halves. The
+// load-bearing rows are the two incomplete comparisons — "unavailable"
+// (introspection failed) and "unverified" (an index whose configuration the
+// server would not disclose). Both keep the printed constraint diff but must not
+// report success: a drift gate would otherwise read exit 0 as "no drift" from a
+// comparison that never ran.
+func TestNeo4jDiffExit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                 string
+		constraintDrift      bool
+		constraintUnverified bool
+		indexes              indexDiffOutcome
+		want                 int
+	}{
+		{"all clean", false, false, indexDiffClean, cli.ExitOK},
+		{"opted out of index diffing", false, false, indexDiffSkipped, cli.ExitOK},
+		{"constraint drift", true, false, indexDiffClean, cli.ExitValidation},
+		{"index drift", false, false, indexDiffDrifted, cli.ExitValidation},
+		{"both drifted", true, false, indexDiffDrifted, cli.ExitValidation},
+		{"index diff unavailable", false, false, indexDiffUnavailable, cli.ExitRuntime},
+		{"constraint drift outranks unavailable", true, false, indexDiffUnavailable, cli.ExitValidation},
+		{"index unverified", false, false, indexDiffUnverified, cli.ExitRuntime},
+		{"constraint drift outranks unverified", true, false, indexDiffUnverified, cli.ExitValidation},
+		// A constraint the server would not fully describe is unverified in the
+		// same sense an index is, and must not exit 0 — even when the index half
+		// is clean, and even when the caller opted out of index diffing entirely.
+		{"constraint unverified", false, true, indexDiffClean, cli.ExitRuntime},
+		{"constraint unverified with indexes skipped", false, true, indexDiffSkipped, cli.ExitRuntime},
+		{"constraint drift outranks constraint unverified", true, true, indexDiffClean, cli.ExitValidation},
+		{"index drift outranks constraint unverified", false, true, indexDiffDrifted, cli.ExitValidation},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := neo4jDiffExit(tt.constraintDrift, tt.constraintUnverified, tt.indexes); got != tt.want {
+				t.Errorf("neo4jDiffExit(%v, %v, %v) = %d, want %d",
+					tt.constraintDrift, tt.constraintUnverified, tt.indexes, got, tt.want)
+			}
+		})
+	}
+}
+
+// An index whose configuration the database did not report is printed as
+// unverified, never folded into the matched count: "we could not check this" and
+// "this is in sync" are different claims.
+func TestPrintIndexDiffResult_Unverified(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	printIndexDiffResult(&buf, &adaptern4j.IndexDiffResult{
+		Unverified: []adaptern4j.IndexUnverified{{
+			Desired: adaptern4j.Index{Name: "test__Entity_embedding_vector_idx"},
+			Reason:  "database reported no vector configuration",
+		}},
+	}, nil)
+
+	out := buf.String()
+	if !strings.Contains(out, "index unverified: test__Entity_embedding_vector_idx") {
+		t.Errorf("unverified index should be listed; got:\n%s", out)
+	}
+	if !strings.Contains(out, "index note: 1 index(es) could not be fully verified") {
+		t.Errorf("unverified count should be noted; got:\n%s", out)
+	}
+	if strings.Contains(out, "matched: 1") {
+		t.Errorf("an unverified index must not be counted as matched; got:\n%s", out)
+	}
 }

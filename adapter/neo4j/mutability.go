@@ -9,12 +9,14 @@ package neo4j
 // changes output shape.
 //
 // Layering. KeyMutability is a per-call query-shape selector. The
-// per-adapter [WithImmutableKeys] option carries the *property-name
-// filter* that feeds the `update_props` parameter at write time; the
-// two are complementary, not overlapping. [Adapter.NodeQueryFor] and
-// [Adapter.BatchNodeQueries] derive the enum from
-// `len(cfg.immutableKeys) > 0` so the pair stays consistent at the
-// public-wrapper layer. Direct [BuildNodeMergeQuery] /
+// effective immutable-key set — [WithImmutableKeys] unioned with a
+// type's derived @writeOnce keys — carries the *property-name filter*
+// that feeds the `update_props` parameter at write time; the two are
+// complementary, not overlapping. [Adapter.NodeQueryFor] and
+// [Adapter.BatchNodeQueries] derive the enum from whether that
+// effective set is non-empty (per type, for the batch path) so the
+// pair stays consistent at the public-wrapper layer. Direct
+// [BuildNodeMergeQuery] /
 // [BuildBatchNodeMergeQuery] callers are responsible for supplying the
 // matching parameter map themselves: [ImmutableKeys] requires the
 // caller to pass both `$props` and `$update_props`; [MutableKeys]
@@ -27,9 +29,14 @@ const (
 	// `SET n += $props` (or `SET n += row.props` for the batch form).
 	MutableKeys KeyMutability = iota
 
-	// ImmutableKeys declares primary-key fields and properties in
-	// [WithImmutableKeys] are set once at node creation and must not
-	// be rewritten on MATCH. Generates the split form:
+	// ImmutableKeys declares primary-key fields and every property in the
+	// EFFECTIVE immutable set — the keys passed to [WithImmutableKeys]
+	// unioned with the type's schema-derived @writeOnce keys (see
+	// [ImmutableKeysFor] and [NodeShape.ImmutableKeys]) — are set once at
+	// node creation and must not be rewritten on MATCH. A caller building
+	// `$update_props` from the [WithImmutableKeys] list alone rewrites every
+	// @writeOnce property on each MERGE, silently defeating the guarantee
+	// the annotation exists to provide. Generates the split form:
 	// `ON CREATE SET n += $props` + `ON MATCH SET n += $update_props`
 	// (or the `row.props` / `row.update_props` batch variants).
 	//

@@ -26,6 +26,7 @@ type Type struct {
 	associations []*Relation
 	compositions []*Relation
 	invariants   []*Invariant
+	annotations  []*Annotation // type-level @@name(args) members, in source order
 
 	// Computed at completion (linearized order)
 	allProperties   []*Property
@@ -33,15 +34,24 @@ type Type struct {
 	allAssociations []*Relation
 	allCompositions []*Relation
 	allInvariants   []*Invariant
+	allAnnotations  []*Annotation // own type-level annotations then inherited, deduped keep-first
 
 	// Inheritance
 	inherits   []TypeRef         // declared extends clause
 	superTypes []ResolvedTypeRef // linearized ancestors
-	subTypes   []ResolvedTypeRef // cross-schema subtypes
+	subTypes   []ResolvedTypeRef // LOCAL subtypes only; completeTypes records a subtype only where its supertype is in the same schema (a cross-schema descendant is invisible here — the known limit concreteEmitters and the @index redundancy rule depend on)
 
 	// O(1) lookup indices
 	propByName map[string]*Property
 	relByName  map[string]*Relation
+
+	// suppressedAnns records, per property name, the annotation names this
+	// type's inheritance DROPPED — a re-declaration that did not re-state what
+	// it inherited. Subtypes read it to tell a deliberate drop from a plain
+	// absence: absence unions, a drop that another supertype contradicts is an
+	// error. Nil for the overwhelming majority of types, which drop nothing.
+	// See [completer.inheritedAnnotations].
+	suppressedAnns map[string]map[string]bool
 
 	// Cached canonical property map (lowercase -> canonical name)
 	canonicalMap map[string]string
@@ -187,6 +197,29 @@ func (t *Type) PrimaryKeysSlice() []*Property {
 	return slices.Clone(t.primaryKeys)
 }
 
+// primaryKeyCount returns the number of EXTRACTED primary keys without copying
+// the slice. Unexported and non-allocating, for the completer's per-type checks
+// on the load path; external callers use [Type.PrimaryKeysSlice].
+func (t *Type) primaryKeyCount() int {
+	return len(t.primaryKeys)
+}
+
+// hasRejectedPrimary reports whether the type declares a `primary` property that
+// key extraction did NOT accept — a primary whose datatype is ineligible
+// (E_INVALID_PRIMARY_KEY_TYPE), so the flag is set but the property is absent
+// from primaryKeys. Where this holds the key SHAPE is not yet settled: the user
+// intended a composite that currently reads as sole, so rules that turn on
+// soleness must defer rather than fire on the transient count.
+func (t *Type) hasRejectedPrimary() bool {
+	declared := 0
+	for _, p := range t.allProperties {
+		if p.IsPrimaryKey() {
+			declared++
+		}
+	}
+	return declared > len(t.primaryKeys)
+}
+
 // HasPrimaryKey reports whether this type has at least one primary key property.
 func (t *Type) HasPrimaryKey() bool {
 	return len(t.primaryKeys) > 0
@@ -295,6 +328,44 @@ func (t *Type) AllInvariantsSlice() []*Invariant {
 	return slices.Clone(t.allInvariants)
 }
 
+// Annotations returns an iterator over the type-level annotations declared in
+// this type body (@@name(args) members). Does NOT include inherited
+// annotations; use AllAnnotations for that.
+func (t *Type) Annotations() iter.Seq[*Annotation] {
+	return func(yield func(*Annotation) bool) {
+		for _, a := range t.annotations {
+			if !yield(a) {
+				return
+			}
+		}
+	}
+}
+
+// AnnotationsSlice returns a defensive copy of the type-level annotations
+// declared in this type body.
+func (t *Type) AnnotationsSlice() []*Annotation {
+	return slices.Clone(t.annotations)
+}
+
+// AllAnnotations returns an iterator over all type-level annotations (own and
+// inherited) in linearized order: own first, then inherited, with exact
+// duplicates deduplicated keep-first.
+func (t *Type) AllAnnotations() iter.Seq[*Annotation] {
+	return func(yield func(*Annotation) bool) {
+		for _, a := range t.allAnnotations {
+			if !yield(a) {
+				return
+			}
+		}
+	}
+}
+
+// AllAnnotationsSlice returns a defensive copy of all type-level annotations
+// (own and inherited).
+func (t *Type) AllAnnotationsSlice() []*Annotation {
+	return slices.Clone(t.allAnnotations)
+}
+
 // Inherits returns an iterator over the declared extends clause (syntactic refs).
 func (t *Type) Inherits() iter.Seq[TypeRef] {
 	return func(yield func(TypeRef) bool) {
@@ -328,7 +399,13 @@ func (t *Type) SuperTypesSlice() []ResolvedTypeRef {
 	return slices.Clone(t.superTypes)
 }
 
-// SubTypes returns an iterator over known subtypes (may include cross-schema types).
+// SubTypes returns an iterator over this type's known subtypes, which are
+// LOCAL to the declaring schema. Completion records a subtype only when the
+// supertype lives in the schema being completed, so a concrete descendant
+// declared in an importing schema does not appear here. Consumers that emit
+// per-label output for every concrete descendant of an abstract type must walk
+// the closure ([Schema.Closure]) rather than rely on this iterator, or they
+// will silently skip cross-schema descendants.
 func (t *Type) SubTypes() iter.Seq[ResolvedTypeRef] {
 	return func(yield func(ResolvedTypeRef) bool) {
 		for _, ref := range t.subTypes {
@@ -339,7 +416,9 @@ func (t *Type) SubTypes() iter.Seq[ResolvedTypeRef] {
 	}
 }
 
-// SubTypesSlice returns a defensive copy of known subtypes.
+// SubTypesSlice returns a defensive copy of known subtypes. As with
+// [Type.SubTypes], these are LOCAL to the declaring schema — see that method
+// for why a cross-schema descendant is absent and what to walk instead.
 func (t *Type) SubTypesSlice() []ResolvedTypeRef {
 	return slices.Clone(t.subTypes)
 }
@@ -462,12 +541,47 @@ func (t *Type) setAllInvariants(all []*Invariant) {
 	t.allInvariants = all
 }
 
+// setAnnotations sets the type-level annotations declared in this body
+// (called during completion).
+func (t *Type) setAnnotations(annotations []*Annotation) {
+	if t.sealed {
+		panic("schema: cannot mutate sealed type")
+	}
+	t.annotations = annotations
+}
+
+// setAllAnnotations sets all type-level annotations including inherited
+// (called during completion).
+func (t *Type) setAllAnnotations(all []*Annotation) {
+	if t.sealed {
+		panic("schema: cannot mutate sealed type")
+	}
+	t.allAnnotations = all
+}
+
 // setInherits sets the declared extends clause (called during completion).
 func (t *Type) setInherits(inherits []TypeRef) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
 	t.inherits = inherits
+}
+
+// setSuppressedAnnotations records the annotations this type's inheritance
+// dropped, per property (called during completion). A nil map is the normal
+// case and is stored as-is.
+func (t *Type) setSuppressedAnnotations(m map[string]map[string]bool) {
+	if t.sealed {
+		panic("schema: cannot mutate sealed type")
+	}
+	t.suppressedAnns = m
+}
+
+// suppressedAnnotations returns the set of annotation names this type's
+// inheritance dropped for the named property, or nil. Reading a nil map is
+// safe, so callers need no guard.
+func (t *Type) suppressedAnnotations(prop string) map[string]bool {
+	return t.suppressedAnns[prop]
 }
 
 // setAllProperties sets all properties including inherited (called during completion).
