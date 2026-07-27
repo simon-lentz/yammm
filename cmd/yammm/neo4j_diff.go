@@ -125,6 +125,10 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "error: parse constraints: %v\n", err)
 		return &cli.ExitError{Code: cli.ExitRuntime}
 	}
+	if n := untypedRemoteObjects(len(actual), func(i int) string { return actual[i].Type }); n > 0 {
+		reportUnreadableProjection(os.Stderr, n, len(actual), "constraint", "SHOW CONSTRAINTS")
+		return &cli.ExitError{Code: cli.ExitRuntime}
+	}
 
 	// Fetch actual indexes BEFORE diffing constraints, and do it whatever
 	// --indexes says: index and constraint names share one namespace, so the
@@ -149,6 +153,10 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "warning: indexes could NOT be read (parse indexes: %v); a constraint whose name an index holds is reported as a create that will not take effect\n", parseErr)
 			indexFetchFailed = true
 			break
+		}
+		if n := untypedRemoteObjects(len(parsed), func(i int) string { return parsed[i].Type }); n > 0 {
+			reportUnreadableProjection(os.Stderr, n, len(parsed), "index", "SHOW INDEXES")
+			return &cli.ExitError{Code: cli.ExitRuntime}
 		}
 		actualIndexes = parsed
 	}
@@ -190,6 +198,50 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 		return &cli.ExitError{Code: code}
 	}
 	return nil
+}
+
+// untypedRemoteObjects counts parsed remote objects that carry a name but no
+// type, reading each object's type through typeAt.
+//
+// A named object with no type is not something a server produces: the parsers
+// reject a record with no name, so a record that got that far and still has an
+// empty type means the TYPE COLUMN did not arrive — a renamed or absent column
+// in the projection this command issued. That is the one unambiguous symptom of
+// the introspection query having gone stale against the server.
+//
+// It is checked here rather than in the parsers because the parsers are a public
+// surface that accepts records from any source, including a caller projecting
+// fewer columns on purpose; only this command knows it asked for the full
+// projection and is therefore entitled to treat a missing column as broken.
+//
+// A count of EXCLUDED objects would be the wrong signal despite looking sharper.
+// The diffs fold "not on a label this schema owns" and "of a kind this
+// configuration cannot declare" into one Excluded counter, so an all-excluded
+// comparison is also what a first provision against a database shared with other
+// applications looks like — healthy, and every declaration a legitimate create.
+func untypedRemoteObjects(n int, typeAt func(int) string) int {
+	untyped := 0
+	for i := range n {
+		if typeAt(i) == "" {
+			untyped++
+		}
+	}
+	return untyped
+}
+
+// reportUnreadableProjection explains an unreadable type column and what it
+// costs, on stderr. The caller exits ExitRuntime: every such object is
+// unclassifiable, so the comparison silently shrinks to the ones that did parse
+// and would otherwise print a confident plan built from a partial reading —
+// the same "a comparison that never ran must not report success" rule the
+// unverified and failed-introspection paths already follow.
+func reportUnreadableProjection(w io.Writer, untyped, total int, object, query string) {
+	fmt.Fprintf(w,
+		"error: %d of %d %s record(s) came back with no type; the %s projection this command issues did not return a readable 'type' column\n",
+		untyped, total, object, query)
+	fmt.Fprintf(w,
+		"       every such %s is unclassifiable, so no comparison is reported rather than one built from a partial reading; this usually means the server is newer than this yammm build\n",
+		object)
 }
 
 // indexDiffOutcome records what the index half of a diff produced, so the exit

@@ -31,7 +31,7 @@ Every operation returns `(value, diag.Result)` with stable error codes and preci
 
 ### Write Schemas
 
-Define types, properties, relationships, invariants, and imports in `.yammm` files. The LSP (`yammm-lsp`) provides diagnostics, completions, hover, and go-to-definition.
+Define types, properties, relationships, invariants, annotations, and imports in `.yammm` files. The LSP (`yammm-lsp`) provides diagnostics, completions, hover, and go-to-definition.
 
 ### Use the Go Library
 
@@ -70,7 +70,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 |------|--------|-----------------|
 | `references/quick-reference.md` | Compact syntax cheat sheet | Quick DSL syntax lookup |
 | `references/common-mistakes.md` | 20 wrong/right patterns | Checking or fixing common errors |
-| `references/dsl-syntax.md` | Full grammar: types, properties, relationships, imports | Writing or modifying `.yammm` schemas |
+| `references/dsl-syntax.md` | Full grammar: types, properties, relationships, annotations, imports | Writing or modifying `.yammm` schemas |
 | `references/expressions.md` | Operators, pipeline, lambdas, all built-in functions | Writing invariants or understanding expression evaluation |
 | `references/type-system.md` | Constraint types, aliases, abstract/part, inheritance | Type system questions, narrowing rules, PK restrictions |
 | `references/patterns.md` | Common modeling patterns with examples | Looking for schema design patterns |
@@ -101,10 +101,12 @@ Before/after transformation examples: see `examples/` directory.
 
 ## Quick Pre-Merge Checklist
 
-- [ ] `yammm validate` clean on all modified `.yammm` files
+- [ ] `yammm validate` clean on all modified `.yammm` files -- and **read its stderr**: warnings do not change the exit code
+- [ ] No `W_ANNOTATION_SHADOWED` warnings (a re-declaration silently dropped an inherited `@index` / `@writeOnce`)
 - [ ] `yammm fmt` applied (deterministic formatting)
 - [ ] `yammm check` passes if instance data is available
 - [ ] Every concrete type has at least one `primary` field (one or more -- composite keys allowed)
 - [ ] Imported types use qualified references (`alias.TypeName`)
 - [ ] Optional fields guarded with nil checks in invariants
 - [ ] Constraint bounds explicit where the domain is known (no bare `String` for bounded fields)
+- [ ] Annotations reviewed: each `@index` / `@@index` serves a real lookup, `@@index` argument order matches it, and immutable-after-creation fields carry `@writeOnce`

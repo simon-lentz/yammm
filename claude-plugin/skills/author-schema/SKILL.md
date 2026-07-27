@@ -25,7 +25,7 @@ If `$ARGUMENTS` provides a description, use it as the starting point for step 1.
 
 3. **Write the .yammm file.** Produce the complete schema using correct syntax. Place it in the location the user specifies, or propose a sensible path.
 
-4. **Verify.** After writing, run `yammm validate <file>` to compile-check the schema. Fix any reported errors before finishing.
+4. **Verify.** After writing, run `yammm validate <file>` to compile-check the schema. Fix any reported errors before finishing. Diagnostics go to **stderr at every severity** and a warning does not change the exit code, so read the output rather than trusting exit 0 -- `W_ANNOTATION_SHADOWED` in particular means a re-declaration silently dropped an inherited annotation.
 
 ---
 
@@ -41,6 +41,12 @@ If `$ARGUMENTS` provides a description, use it as the starting point for step 1.
 - **Lists**: Use `List<ElementType>` for ordered multi-value fields. Add length bounds when the domain has known limits.
 - **Invariants**: Add `! "error_id" expression` for business rules. Use capitalized built-in functions: `Len`, `All`, `Any`, `Contains`, etc.
 - **Using `primary required` together is a parse error** -- `primary` already implies required.
+- **Annotations**: Declare store-level intent the model implies. They do not affect which data is valid, and they are excluded from the structural hash, so adding one never invalidates a persisted snapshot.
+  - `@index` on a property the domain says will be filtered or sorted on. Scalars only. Not on a sole primary key -- its uniqueness constraint already backs an index, and the loader rejects it.
+  - `@@index(a, b)` at the type level for a composite lookup. Argument **order is significant** and should match the intended query shape; write it in the order a caller narrows.
+  - `@vector(cosine)` or `@vector(euclidean)` on a `Vector[N]` property. `N` is the embedding model's dimension, so pick the model before writing the type.
+  - `@writeOnce` on anything set at creation and never rewritten -- `created_at`, `first_seen`, an origin identifier. It makes the Neo4j write path set the property `ON CREATE` only. Never on a primary-key member: a merge match key is already immutable, and the loader rejects it.
+  - Do not annotate speculatively. Every index is a write-time and storage cost the model is committing the deployment to.
 
 ---
 
@@ -48,7 +54,8 @@ If `$ARGUMENTS` provides a description, use it as the starting point for step 1.
 
 For detailed syntax, patterns, and expression language, consult the `yammm` skill's reference files:
 
-- `references/dsl-syntax.md` -- full grammar for types, properties, relationships, imports
+- `references/dsl-syntax.md` -- full grammar for types, properties, relationships, annotations, imports
 - `references/type-system.md` -- constraint types, aliases, abstract/part, inheritance rules
 - `references/patterns.md` -- common modeling patterns with examples
 - `references/expressions.md` -- operators, pipeline, lambdas, built-in functions for invariants
+- `references/quick-reference.md` -- compact syntax cheat sheet, including the blessed annotation set

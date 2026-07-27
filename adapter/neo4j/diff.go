@@ -208,8 +208,16 @@ func (a *Adapter) DiffConstraints(
 		}
 
 		// Check for drift (type expression mismatch on TYPE constraints).
+		//
+		// EqualFold for the reason every other server-string comparison in this
+		// package folds: the column is canonically upper-case, and so is the
+		// emitted expression, but a case difference is not a difference in the
+		// enforced type — reporting one as drift would tell an operator to
+		// replace a constraint that already enforces exactly what the schema
+		// declares. No two Neo4j type expressions differ only by case, so the
+		// fold cannot conflate distinct types.
 		if d.Kind == ConstraintType && d.TypeExpr != "" && rc.PropertyType != "" {
-			if d.TypeExpr != rc.PropertyType {
+			if !strings.EqualFold(d.TypeExpr, rc.PropertyType) {
 				result.Drift = append(result.Drift, ConstraintDrift{
 					Desired: d,
 					Actual:  rc,
@@ -291,16 +299,56 @@ func desiredSemanticKey(c Constraint) string {
 // the label that made it schema-owned, sorting members to mirror
 // [desiredSemanticKey].
 //
-// Type is upper-cased because [declarableRemoteConstraint] admits it
-// case-insensitively while [desiredSemanticKey] embeds the canonical upper-case
-// [constraintKindToRemoteType]. Without the fold here a constraint the
-// declarability gate accepts could never pair by identity, so a remote realising
-// a declared constraint would read as an unrelated object to drop.
+// Type goes through [canonicalRemoteConstraintType] because
+// [declarableRemoteConstraint] admits it under the same fold while
+// [desiredSemanticKey] embeds the canonical [constraintKindToRemoteType].
+// Without the fold here a constraint the declarability gate accepts could never
+// pair by identity, so a remote realising a declared constraint would read as an
+// unrelated object to drop.
 func remoteSemanticKey(o scoped[RemoteConstraint]) string {
 	props := slices.Sorted(slices.Values(o.obj.Properties))
 	return identityKey(append(
-		[]string{o.label, strings.ToUpper(o.obj.Type)}, props...,
+		[]string{o.label, canonicalRemoteConstraintType(o.obj.Type)}, props...,
 	)...)
+}
+
+// canonicalRemoteConstraintType folds a server-reported constraint type onto the
+// spelling [constraintKindToRemoteType] produces, upper-casing on the way.
+//
+// Neo4j renamed the node uniqueness constraint type between server generations:
+// 5.x reports UNIQUENESS, 2026.x reports NODE_PROPERTY_UNIQUENESS — aligning it
+// with the NODE_PROPERTY_EXISTENCE and NODE_PROPERTY_TYPE spellings it has
+// always used. Both name the same constraint and this adapter targets both
+// generations, so every comparison against a remote type must accept either.
+// Comparing raw strings makes a 2026.x server's uniqueness constraints
+// undeclarable, and the whole diff then misreports: the actual side excludes
+// them, the desired side finds its name taken and reports the schema's OWN
+// constraint as drift to be dropped, and [Adapter.InferSchema] marks no primary
+// key at all, scaffolding a schema that cannot load.
+//
+// The fold is for COMPARISON only. [RemoteConstraint.Type] keeps exactly what
+// the server reported, because drift messages echo it — naming a constraint kind
+// the operator's database does not use would be its own confusion.
+func canonicalRemoteConstraintType(remoteType string) string {
+	upper := strings.ToUpper(remoteType)
+	if canonical, aliased := remoteConstraintTypeAliases[upper]; aliased {
+		return canonical
+	}
+	return upper
+}
+
+// remoteConstraintTypeAliases maps a non-canonical server spelling onto the one
+// [constraintKindToRemoteType] emits. Keys are upper-case, since the map is
+// consulted after upper-casing.
+//
+// Only NODE constraint spellings belong here. The relationship ones
+// (RELATIONSHIP_UNIQUENESS and its siblings) are deliberately absent: folding
+// one onto a node kind would make [Adapter.declarableRemoteConstraint] admit a
+// relationship constraint, whose LabelsOrTypes holds a relationship TYPE rather
+// than a label, so ownership would be decided against the wrong namespace
+// entirely.
+var remoteConstraintTypeAliases = map[string]string{
+	"NODE_PROPERTY_UNIQUENESS": "UNIQUENESS",
 }
 
 // constraintKindToRemoteType maps a ConstraintKind to the corresponding
@@ -357,11 +405,15 @@ func (a *Adapter) declarableRemoteConstraint(rc RemoteConstraint) bool {
 	if rc.EntityType != "" && !strings.EqualFold(rc.EntityType, "NODE") {
 		return false
 	}
-	// EqualFold for the same reason as [declarableRemoteIndex]: the column is
+	// The fold covers case (as [declarableRemoteIndex] does — the column is
 	// canonically upper-case, but a case difference must not hide a declarable
-	// constraint from matching and dropping.
+	// constraint from matching and dropping) and the cross-generation spelling
+	// of the uniqueness type. Both must be absorbed here and in
+	// [remoteSemanticKey] identically, or a constraint admitted by one is
+	// unpairable by the other.
+	canonical := canonicalRemoteConstraintType(rc.Type)
 	for _, k := range a.declarableConstraintKinds() {
-		if strings.EqualFold(rc.Type, constraintKindToRemoteType(k)) {
+		if canonical == constraintKindToRemoteType(k) {
 			return true
 		}
 	}

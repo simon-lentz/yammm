@@ -4,10 +4,29 @@
 // The LSP server provides IDE features including:
 //   - Real-time diagnostics (parse errors, semantic errors, import issues)
 //   - Go-to-definition for types, properties, and imports
-//   - Hover information with documentation and constraints
-//   - Completion for keywords and types
+//   - Hover information with documentation, constraints, and annotations
+//   - Completion for keywords, types, and annotations
 //   - Document symbols for outline and breadcrumbs
 //   - Formatting with canonical style (tabs, LF)
+//
+// # Annotation Support
+//
+// Annotation names and their arguments complete, and an annotation name hovers
+// with its description and argument hint. Both read the built-in registry
+// through [github.com/simon-lentz/yammm/schema.AnnotationSpecs] and
+// [github.com/simon-lentz/yammm/schema.VectorSimilarityFunctions] rather than
+// hard-coding a list, so the editor cannot offer an annotation or a keyword the
+// loader rejects.
+//
+// Completion is placement-aware: a property context offers the property-level
+// names, a @@ context the type-level ones, and a name that takes arguments
+// inserts its parentheses with the cursor inside, where argument completion
+// takes over. Argument completion covers the @vector similarity keywords;
+// @@index property references are not completed.
+//
+// Annotation hover is parse-independent — it scans the line rather than the
+// analysis snapshot — so it still answers while the document does not compile,
+// which is when a reader is most likely to be asking what an annotation means.
 //
 // The server communicates via JSON-RPC 2.0 over stdio (using creachadair/jrpc2)
 // and implements LSP 3.16. It leverages the schema package's Load functions

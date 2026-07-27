@@ -45,6 +45,8 @@ func extractCodeBlocks(source string) []codeBlock {
 			current = &codeBlock{tag: "yammm", line: i + 1}
 		case "```yammm-snippet":
 			current = &codeBlock{tag: "yammm-snippet", line: i + 1}
+		case "```yammm-schema":
+			current = &codeBlock{tag: "yammm-schema", line: i + 1}
 		}
 	}
 	return blocks

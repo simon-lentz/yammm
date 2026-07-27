@@ -91,6 +91,64 @@ func TestEmittedDDLExecutes(t *testing.T) {
 	}
 }
 
+// everyTypeExpression is every Neo4j type expression the adapter emits for a
+// TYPE constraint. A TYPE constraint is compared against the server's
+// propertyType column, so each of these is a claim that the adapter spells a
+// type the way Neo4j does — checkable only against a server.
+//
+// It is the CHECKLIST, not a derived value: adding a mapping means adding the
+// expression here, and [assertEveryTypeExpressionExercised] then fails until
+// testdata/roundtrip.yammm grows a property that emits it. Deriving this from
+// the adapter's own mapping would make it agree with whatever that mapping says
+// and prove nothing about the server.
+var everyTypeExpression = []string{
+	"BOOLEAN",
+	"DATE",
+	"FLOAT",
+	"INTEGER",
+	"STRING",
+	"ZONED DATETIME",
+	"LIST<BOOLEAN NOT NULL>",
+	"LIST<DATE NOT NULL>",
+	"LIST<FLOAT NOT NULL>",
+	"LIST<INTEGER NOT NULL>",
+	"LIST<STRING NOT NULL>",
+	"LIST<ZONED DATETIME NOT NULL>",
+}
+
+// assertEveryTypeExpressionExercised fails when the fixture stops covering the
+// full set, in either direction: a missing expression means the round-trip no
+// longer proves that spelling against a server, and an unexpected one means the
+// adapter emits a spelling nobody has listed.
+//
+// Enterprise only. TYPE constraints are an Enterprise capability, so under
+// Community [newAdapter] configures the emitter to produce UNIQUE alone and
+// there is no propertyType to round-trip at all — the coverage claim is about
+// the Enterprise emitter, and asserting it against Community would fail a mode
+// this suite documents as supported.
+func assertEveryTypeExpressionExercised(t *testing.T, ctx context.Context, desired []n4j.Constraint) {
+	t.Helper()
+	if !isEnterprise(t, ctx) {
+		return
+	}
+
+	emitted := make(map[string]bool, len(desired))
+	for _, c := range desired {
+		if c.TypeExpr != "" {
+			emitted[c.TypeExpr] = true
+		}
+	}
+	for _, want := range everyTypeExpression {
+		if !emitted[want] {
+			t.Errorf("no fixture property emits the type expression %q; add one to testdata/roundtrip.yammm so it is applied to a real server", want)
+		}
+		delete(emitted, want)
+	}
+	for extra := range emitted {
+		t.Errorf("fixture emits type expression %q, which is not in everyTypeExpression; add it there once it is confirmed against a server", extra)
+	}
+}
+
 // Applying the schema's own DDL and then diffing against the database must
 // report everything as matched. This exercises ownership, identity, and pairing
 // end to end against real introspection output — if any of the three disagrees
@@ -108,6 +166,8 @@ func TestRoundTripDiffIsClean(t *testing.T) {
 	owned := a.OwnedLabels(ctx, s)
 
 	desiredConstraints, _ := a.ConstraintsStructured(ctx, s)
+	assertEveryTypeExpressionExercised(t, ctx, desiredConstraints)
+
 	actualConstraints, err := n4j.ParseRemoteConstraints(query(t, ctx, n4j.IntrospectConstraintsQuery()))
 	if err != nil {
 		t.Fatalf("parsing constraints: %v", err)
@@ -371,11 +431,33 @@ func TestIntrospectConstraintsQuery_ShapeIsAsParsed(t *testing.T) {
 				t.Errorf("column %q absent from SHOW CONSTRAINTS YIELD *; ParseRemoteConstraints reads it", col)
 			}
 		}
+		// The parsers reach every field through a type assertion that yields the
+		// ZERO VALUE on a mismatch rather than an error, so a driver returning a
+		// column as another Go type empties that field on every record and the
+		// object silently drops out of the comparison. Asserted here for the same
+		// reason the index counterpart does it: presence alone does not establish
+		// that the value is readable.
+		assertType[string](t, rec, "name")
+		assertType[string](t, rec, "type")
+		assertType[string](t, rec, "entityType")
+		assertType[string](t, rec, "createStatement")
+		assertSliceOfString(t, rec, "labelsOrTypes")
+		assertSliceOfString(t, rec, "properties")
+		// propertyType is deliberately NOT required: it does not exist before
+		// Neo4j 5.9 and is null for every non-TYPE constraint. Where it is
+		// present it must still be a string, since that is what the parser
+		// asserts.
+		if v, present := rec["propertyType"]; present && v != nil {
+			assertType[string](t, rec, "propertyType")
+		}
 	}
 
 	parsed, err := n4j.ParseRemoteConstraints(records)
 	if err != nil {
 		t.Fatalf("ParseRemoteConstraints on live records: %v", err)
+	}
+	if len(parsed) != len(records) {
+		t.Errorf("parsed %d of %d live records", len(parsed), len(records))
 	}
 	for _, rc := range parsed {
 		if rc.Name == "" || rc.Type == "" || len(rc.LabelsOrTypes) == 0 {

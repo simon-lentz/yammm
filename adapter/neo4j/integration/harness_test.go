@@ -15,8 +15,11 @@ import (
 	tcneo4j "github.com/testcontainers/testcontainers-go/modules/neo4j"
 )
 
-// defaultImage is an LTS release comfortably past the 5.15 floor the emitted
-// CREATE VECTOR INDEX ... OPTIONS form requires.
+// defaultImage is a current calendar-versioned release, comfortably past the
+// 5.15 floor the emitted CREATE VECTOR INDEX ... OPTIONS form requires. Pinned
+// rather than floating on `latest` so a suite failure is attributable to a code
+// change and not to whatever the registry served that morning; the pin is
+// expected to be bumped deliberately.
 //
 // Enterprise, because Enterprise is what the adapter targets by default:
 // NOT NULL, TYPE, and NODE KEY constraints are Enterprise-only, and so is the
@@ -24,7 +27,7 @@ import (
 // turns on. On Community the adapter's edition gating emits UNIQUE alone, so
 // three of its four constraint kinds and an entire diff classification would
 // never execute. The container accepts the evaluation licence below.
-const defaultImage = "neo4j:5.26-enterprise"
+const defaultImage = "neo4j:2026.05.0-enterprise"
 
 const adminPassword = "yammm-integration"
 

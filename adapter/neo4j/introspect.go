@@ -10,8 +10,20 @@ import (
 //
 // Parse from database output via [ParseRemoteConstraints].
 type RemoteConstraint struct {
-	Name            string   // Constraint name
-	Type            string   // e.g., "UNIQUENESS", "NODE_PROPERTY_EXISTENCE", "NODE_PROPERTY_TYPE", "NODE_KEY"
+	Name string // Constraint name
+
+	// Type is verbatim what the server reported, and its spelling for a node
+	// uniqueness constraint DEPENDS ON THE SERVER GENERATION: Neo4j 5.x reports
+	// "UNIQUENESS", 2026.x reports "NODE_PROPERTY_UNIQUENESS". The other kinds
+	// ("NODE_PROPERTY_EXISTENCE", "NODE_PROPERTY_TYPE", "NODE_KEY") are stable.
+	//
+	// A consumer switching on this field must accept both uniqueness spellings,
+	// or it silently stops recognising every UNIQUE constraint the moment the
+	// database is upgraded. The diff and [Adapter.InferSchema] fold them
+	// internally; this field is deliberately not folded, so a diagnostic echoes
+	// the kind the operator's own database reports.
+	Type string
+
 	EntityType      string   // "NODE" or "RELATIONSHIP"
 	LabelsOrTypes   []string // Labels or relationship types
 	Properties      []string // Constrained properties
@@ -123,6 +135,23 @@ func (ri RemoteIndex) indexConfig() (map[string]any, bool) {
 // IntrospectConstraintsQuery returns the Cypher query for fetching all constraints.
 // Execute this query against a Neo4j database and pass the results to
 // [ParseRemoteConstraints].
+//
+// YIELD * is REQUIRED here and must not be narrowed to an explicit projection,
+// which is the obvious-looking hardening and would break the adapter's supported
+// server range.
+//
+// SHOW CONSTRAINTS rejects a YIELD naming a column the server does not have —
+// it is an error, not an empty column — and propertyType does not exist before
+// Neo4j 5.9. On 5.8 the statement yields exactly id, name, type, entityType,
+// labelsOrTypes, properties, ownedIndex, options and createStatement; a
+// projection listing propertyType fails outright there, while YIELD * simply
+// returns no such key and [ConstraintDiffResult.Unverified] represents the
+// resulting gap. Trading that for a hard failure on every 5.0-5.8 server is a
+// bad exchange.
+//
+// [IntrospectIndexesQuery] is explicit for the opposite reason: every column it
+// names has been present across the supported range, so it can state its
+// dependencies without narrowing what it works against.
 func IntrospectConstraintsQuery() string {
 	return "SHOW CONSTRAINTS YIELD *"
 }

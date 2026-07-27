@@ -4,8 +4,16 @@
 # Invoked by Claude Code for every Write/Edit tool call. Reads the tool
 # input as JSON on stdin, extracts the file path, and — if it is a
 # `.yammm` file — runs `yammm validate` on it. When validation reports
-# errors, emits a JSON control object with hookSpecificOutput.additionalContext
-# so the errors are surfaced to Claude as context on the tool result.
+# anything at all, emits a JSON control object with
+# hookSpecificOutput.additionalContext so the diagnostics are surfaced to
+# Claude as context on the tool result.
+#
+# Injection is gated on OUTPUT, not on exit status. `yammm validate` exits 0
+# for a warnings-only schema while still printing the warnings to stderr, and
+# some of those warnings report a silent regression the author needs to see —
+# W_ANNOTATION_SHADOWED, for one, is the only signal that a subtype's property
+# re-declaration dropped an inherited @writeOnce or @index annotation. Gating
+# on exit status would discard exactly those.
 #
 # Per the Claude Code hooks reference (code.claude.com/docs/en/hooks),
 # plain-text stdout from a PostToolUse command hook is written to the
@@ -18,17 +26,20 @@
 #       } }
 #
 # This script exits 0 on every path so it never blocks the tool call.
-# Silent success (clean schema, non-.yammm file, yammm not installed,
+# Silent success (diagnostic-free schema, non-.yammm file, yammm not installed,
 # validate-failed-with-no-output) emits no stdout, which the hook runner
 # treats as "no context to inject."
 #
 # Independently testable without loading the plugin:
 #
-#     # Valid schema, silent success expected:
+#     # Diagnostic-free schema, silent success expected:
 #     echo '{"tool_input":{"file_path":"/tmp/clean.yammm"}}' | ./validate-yammm.sh
 #
 #     # Invalid schema, JSON control object expected:
 #     echo '{"tool_input":{"file_path":"/tmp/broken.yammm"}}' | ./validate-yammm.sh | jq .
+#
+#     # Warnings-only schema (exits 0), JSON control object still expected:
+#     echo '{"tool_input":{"file_path":"/tmp/warns.yammm"}}' | ./validate-yammm.sh | jq .
 #
 #     # Non-yammm file, silent exit expected:
 #     echo '{"tool_input":{"file_path":"/tmp/foo.go"}}' | ./validate-yammm.sh
@@ -75,25 +86,21 @@ if ! command -v yammm >/dev/null 2>&1; then
 fi
 
 # Run yammm validate and capture combined output (stdout + stderr).
-# The `if cmd; then` idiom does not trip errexit on non-zero exit, so a
-# failed validation falls through to the error-handling branch without
-# terminating the script. Variable assignment in the command substitution
-# captures the output regardless of exit status.
-if validate_output=$(yammm validate "$file_path" 2>&1); then
-  # Exit 0 — clean schema (or warnings-only, which yammm considers
-  # non-fatal) — nothing to inject.
-  exit 0
-fi
+# Diagnostics go to stderr at every severity, so both streams are captured.
+#
+# `|| true` keeps errexit from terminating the script on a non-zero exit; the
+# status is deliberately discarded, because what decides whether there is
+# something to report is whether validate SAID anything, not how it exited.
+validate_output=$(yammm validate "$file_path" 2>&1) || true
 
-# yammm validate exited non-zero. If it produced no output (unusual but
-# possible — e.g., yammm crashes before emitting diagnostics), there's
-# nothing useful to tell Claude, so exit silently rather than injecting
-# an empty additionalContext.
+# Nothing printed — either the schema is diagnostic-free, or validate failed
+# before emitting anything (unusual, but possible). Either way there is nothing
+# useful to tell Claude, so exit silently rather than injecting empty context.
 if [ -z "$validate_output" ]; then
   exit 0
 fi
 
-# Emit JSON control object with the validation errors as additionalContext.
+# Emit JSON control object with the validation diagnostics as additionalContext.
 # jq -cn constructs a fresh compact JSON document; --arg safely embeds the
 # captured output, handling newlines, quotes, backslashes, and all other
 # special characters that would break manual JSON string construction.

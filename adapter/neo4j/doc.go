@@ -34,6 +34,21 @@
 // [ConstraintType], and [ConstraintNodeKey]. Generation is controlled by
 // adapter options (see Configuration below).
 //
+// Generation is ALL-OR-NOTHING: any validation error returns (nil, result), so
+// one unemittable property withholds the whole schema's DDL. That is deliberate
+// — a partial script looks complete and silently drops the guarantees it omits —
+// but it means the diagnostic is all the user gets, so each one names the
+// property and the reason.
+//
+// The one shape a valid schema can hit here is a list whose ELEMENT is itself a
+// collection: List<List<T>>, List<Vector[N]>, or a list of a list-typed alias.
+// Those are legal yammm and validate normally, but Neo4j has no nested
+// collection property type, so [ErrUnsupportedListElem] surfaces as
+// [E_NEO4J_UNSUPPORTED_TYPE]. A model that must export to Neo4j represents the
+// inner collection as a part type reached by a composition instead. (A bare
+// Vector is fine — it maps to LIST<FLOAT NOT NULL>; it is only a Vector nested
+// INSIDE a list that has no expression.)
+//
 // # Index Generation
 //
 // [Adapter.IndexesForSchema] returns index statements as raw Cypher strings
@@ -179,6 +194,43 @@
 //
 // [Adapter.InferSchema] generates a .yammm DSL scaffold from remote
 // constraints and relationships discovered via introspection.
+//
+// # Diff Scope and Name Blocking
+//
+// Both diff entry points take an [*OwnedLabels] — the exact set of labels this
+// adapter emits for a schema, built once with [Adapter.OwnedLabels] and passed
+// to both halves:
+//
+//	owned := adapter.OwnedLabels(ctx, s)
+//	cDiff := adapter.DiffConstraints(desiredConstraints, actualConstraints, owned, actualIndexes...)
+//	iDiff := adapter.DiffIndexes(desiredIndexes, actualIndexes, owned, actualConstraints...)
+//
+// Ownership is set membership, not a rule applied to a remote object's label
+// string. [Adapter.Label] composes a label from a caller-configurable prefix and
+// separator around two sanitized free-form names and is not invertible, so for
+// any rule that reads a schema back out of a label there is a configuration, or
+// a sibling schema name, that satisfies the rule without belonging to the
+// schema. See [OwnedLabels] for what the set covers and what it cannot see.
+//
+// Both results carry an Excluded count — the remote objects that entered NO
+// bucket, because the comparison had nothing to say about them: the schema owns
+// no label they carry, or they are of a kind this configuration cannot declare.
+// It is deliberately not drift; in a database shared with other applications a
+// non-zero count is the normal state. It exists so that "0 to drop" cannot be
+// read as "the database is accounted for": ownership is derived from the schema
+// in hand, so objects left behind by a type deleted or renamed since the last
+// apply sit on a label no current type declares and nothing can name them.
+//
+// The trailing variadic argument is the OTHER side's remote objects. Index and
+// constraint names share ONE Neo4j namespace, and every emitted statement
+// carries IF NOT EXISTS, so a declaration whose name the database already holds
+// is a silent no-op rather than a create. Passing both sides lets each diff
+// report such a declaration as drift naming the holder. A constraint backed by
+// an index appears in SHOW INDEXES under the constraint's name and is seen
+// automatically; NOT NULL and TYPE constraints have no backing index and reach
+// [Adapter.DiffIndexes] only this way. Omitting the argument is safe but weaker
+// — the blocked declaration then reports as a create the server ignores on
+// every run.
 //
 // # Constraint Diffing
 //

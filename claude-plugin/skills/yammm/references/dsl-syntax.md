@@ -238,6 +238,8 @@ type Document {
 - Parentheses, when present, hold at least one argument — `@index`, never `@index()`.
 - Annotations do not survive a property re-declaration (identical or narrowing) unless re-stated on the surviving declaration; the load then warns with `W_ANNOTATION_SHADOWED`.
 
+---
+
 ## Invariants
 
 Business logic constraints evaluated after type checking:

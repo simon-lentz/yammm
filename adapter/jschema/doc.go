@@ -170,6 +170,19 @@
 // [Marshal] is safe for concurrent use. It allocates fresh state per call
 // and shares no mutable package state.
 //
+// # Annotations
+//
+// Schema annotations do not affect the emitted document. They describe
+// store-level concerns — index shape, write-once behaviour — and this package
+// emits a contract about which instance DATA is valid, which annotations
+// deliberately do not constrain. A schema that gains its first annotation emits
+// byte-identical JSON Schema.
+//
+// They do reach the generator indirectly: a property inherited from several
+// ancestors carries the union of their annotations, so the merged view yields a
+// synthesized copy rather than the declared *Property. The $defs lookup
+// therefore keys through [github.com/simon-lentz/yammm/schema.Property.Origin].
+//
 // # Dependencies
 //
 //	adapter/jschema  ──imports──▶  schema, location

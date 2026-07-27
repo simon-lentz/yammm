@@ -27,7 +27,13 @@ func (a *Adapter) InferSchema(
 	schemaName := schemaFilter
 
 	for _, rc := range constraints {
-		if rc.EntityType != "NODE" || len(rc.LabelsOrTypes) == 0 {
+		// EqualFold, matching [Adapter.DiffConstraints] and
+		// [Adapter.DiffIndexes]: the column is canonically upper-case, but the
+		// two commands read the SAME column and must agree about it. A stricter
+		// test here would let `neo4j diff` keep working while `neo4j introspect`
+		// silently skipped every constraint — scaffolding a schema with no
+		// primary keys and no required properties, which then fails to load.
+		if (rc.EntityType != "" && !strings.EqualFold(rc.EntityType, "NODE")) || len(rc.LabelsOrTypes) == 0 {
 			continue
 		}
 
@@ -49,7 +55,10 @@ func (a *Adapter) InferSchema(
 			it.ensureProperty(prop)
 		}
 
-		switch rc.Type {
+		// Folded rather than matched raw: a 2026.x server spells the uniqueness
+		// type NODE_PROPERTY_UNIQUENESS, and an unrecognised type here marks no
+		// primary key, scaffolding a schema that fails to load on E_NO_PRIMARY_KEY.
+		switch canonicalRemoteConstraintType(rc.Type) {
 		case "UNIQUENESS":
 			for _, prop := range rc.Properties {
 				it.markPrimaryKey(prop)
@@ -113,8 +122,14 @@ func parseLabel(label, separator string) (schemaName, typeName string) {
 // reverseNeo4jType maps a Neo4j propertyType string back to a yammm type name.
 // Returns the yammm type name and whether the mapping is exact.
 // exact=false for STRING (could be UUID, Pattern, or Enum).
+//
+// Upper-cased first, for the same reason [Adapter.DiffConstraints] folds the
+// column: an unrecognised spelling here is silent — the property keeps the
+// String fallback its declaration started with — so a case difference would
+// scaffold Integer, Float, Boolean and every List property as String, and the
+// generated schema would look plausible while being wrong.
 func reverseNeo4jType(propertyType string) (yammmType string, exact bool) {
-	switch propertyType {
+	switch strings.ToUpper(propertyType) {
 	case "STRING":
 		return "String", false
 	case "INTEGER":

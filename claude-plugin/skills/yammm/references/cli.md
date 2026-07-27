@@ -233,7 +233,11 @@ Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 |------|---------|-------------|
 | `--edition` | `enterprise` | `enterprise` or `community` |
 | `--named` | `true` | Generate named constraints |
+| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise) |
+| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar properties |
+| `--required-only-types` | `false` | Restrict type constraints to required properties |
 | `--separator` | `__` | Label separator (schema__Type) |
+| `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
 
 ### neo4j indexes
 
@@ -241,11 +245,12 @@ Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 yammm neo4j indexes schema.yammm
 ```
 
-Generates `CREATE INDEX` / `CREATE VECTOR INDEX IF NOT EXISTS` Cypher statements from a schema's `@index` / `@@index` / `@vector` annotations. Index names are always emitted and indexes apply to every edition, so there is no `--edition` or `--named` flag.
+Generates `CREATE INDEX` / `CREATE VECTOR INDEX IF NOT EXISTS` Cypher statements from a schema's `@index` / `@@index` / `@vector` annotations. Index names are always emitted and indexes apply to every edition, so this command takes the label flags but none of the constraint-shape flags (`--edition`, `--named`, `--node-keys`, `--scalar-types`, `--required-only-types`).
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--separator` | `__` | Label separator (schema__Type) |
+| `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
 
 ### neo4j diff
 
@@ -256,16 +261,20 @@ yammm neo4j diff --uri bolt://localhost:7687 --edition community --separator __ 
 
 Compares desired schema constraints **and indexes** against the live database (index diffing is on by default; `--indexes=false` restores the pre-v0.9.0 constraints-only behaviour, exit code included). Reports constraints and indexes to create, drop, and those already present. A schema-owned remote index with no declaration surfaces as a drop until it is annotated.
 
-Set `--edition` and `--separator` to match how the target graph was generated, so the desired side uses the same labels and edition-gated constraints — otherwise a differently-configured graph reports spurious drift.
+`diff` computes its desired side exactly as `constraints` and `indexes` emit it, so it takes **the same flags** — set every one of them to match how the target graph was generated. A flag left at its default when the graph was built with another value makes the desired side disagree with the database by construction, and the plan reports drift the operator never introduced.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed) |
-| `--separator` | `__` | Label separator (schema__Type) |
-| `--named` | `true` | Named constraints in the create output (does not affect diff matching) |
 | `--indexes` | `true` | Include index drift in the diff and the exit code; `--indexes=false` is constraints-only |
+| `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed, on **both** sides) |
+| `--named` | `true` | Named constraints; with `false` every pairing falls through to semantic identity |
+| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise) |
+| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar properties |
+| `--required-only-types` | `false` | Restrict type constraints to required properties |
+| `--separator` | `__` | Label separator (schema__Type) |
+| `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
 
-Exit codes: `0` only when everything compared came back in sync. Drift, creates, or drops (constraints or indexes) exit `1`. An index half that could not be completed exits `3` — either introspection failed, or an index's configuration could not be read and it was reported as **unverified**. Neither is reported as success: a drift gate must not read "no drift" from a comparison that never ran.
+Exit codes: `0` only when everything compared came back in sync. Drift, creates, or drops (constraints or indexes) exit `1`. A definition that could **not** be verified exits `3` — an index whose configuration the server did not report, a TYPE constraint whose enforced type it did not report, or an index introspection that failed outright and degraded the run to constraints-only. None is reported as success: a drift gate must not read "no drift" from a comparison that never ran. Drift outranks unverified, so a run with both exits `1`.
 
 ### neo4j introspect
 
@@ -299,3 +308,35 @@ yammm export --to cypher schema.yammm data.json | cypher-shell -u neo4j
 | 1 | Errors in input (validation failures, constraint violations) |
 | 2 | Usage error (bad flags, missing arguments) |
 | 3 | Runtime error (connection failure, I/O error) |
+
+---
+
+## Diagnostics Go to stderr, at Every Severity
+
+Since v0.9.0 every command prints whatever its run produced — errors, warnings,
+info, hints — to **stderr**. Before v0.9.0 a warnings-only result printed
+nothing at all, in any command, `yammm validate` included.
+
+Two consequences worth knowing:
+
+- **Exit codes are unchanged.** A warning is not a failure: a command that
+  prints warnings and nothing else still exits `0`. Scripting that gates on the
+  exit code is unaffected; scripting that gates on "did it print anything" is
+  not. Each command's stdout contract (generated Cypher, Go source, exported
+  data) is untouched — diagnostics have always been separate from it.
+- **An unchanged, still-passing schema may emit new stderr output.** Warnings
+  that already existed but that no command printed are now visible. The
+  `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before
+  `_` (unbounded) has no effect") is the common one; `yammm snapshot verify`,
+  `yammm export`, and `yammm snapshot save --into` additionally surface the
+  snapshot decoder's `E_SNAPSHOT_PATH_FALLBACK` and
+  `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` on otherwise unchanged `.ys` files.
+
+This is what makes `W_ANNOTATION_SHADOWED` reachable — the only signal that a
+subtype's property re-declaration dropped an inherited `@writeOnce` or `@index`
+annotation. **Do not read a zero exit code as "no diagnostics."** Read the
+output.
+
+With `--format json`, each invocation writes exactly one JSON document to
+stderr, so a warnings-only run now produces a wire object where it previously
+produced nothing.

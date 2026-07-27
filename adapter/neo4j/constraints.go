@@ -449,6 +449,30 @@ func neo4jScalarType(c schema.Constraint) (string, bool) {
 	case schema.KindDate:
 		return "DATE", true
 	case schema.KindVector:
+		// A Vector maps to a list of floats, NOT to Neo4j's native vector
+		// property type, because a list of floats is what this adapter actually
+		// writes: the write path passes a Vector through as a driver-native list
+		// (the KindVector arm of [Coerce]), and valueType() on the stored property
+		// returns exactly LIST<FLOAT NOT NULL>.
+		//
+		// Neo4j 5.x has no vector property type at all. Neo4j 2026.x does — spelled
+		// VECTOR(<dimension>, <coordinate type>) — but a plain list of floats does
+		// NOT satisfy it; only a value built with vector(...) does. Emitting it
+		// here would therefore declare a constraint this adapter's own writes
+		// violate on every insert.
+		//
+		// The cost is that the declared dimension is not enforced by the
+		// constraint: a list of any length satisfies LIST<FLOAT NOT NULL>. The
+		// dimension still reaches the database through a @vector index's
+		// vector.dimensions, and instance validation rejects a wrong-length vector
+		// before it is ever written, so the store-level check is the redundant
+		// layer rather than the only one.
+		//
+		// Adopting the native type would need the write path to emit vector(...)
+		// values and version gating for the 5.x floor — and note that the type is
+		// WRITTEN as VECTOR(3, FLOAT32) but REPORTED by SHOW CONSTRAINTS as
+		// VECTOR<FLOAT32 NOT NULL>(3), so the diff's TypeExpr-to-propertyType
+		// comparison would need a normalizer, not just its case fold.
 		return "LIST<FLOAT NOT NULL>", true
 	case schema.KindList:
 		return "", false

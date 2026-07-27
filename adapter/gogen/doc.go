@@ -176,6 +176,25 @@
 // [Marshal] is safe for concurrent use. It allocates a fresh generator per call and
 // shares no mutable state; the package-level acronym set is cloned, never mutated.
 //
+// # Annotations
+//
+// Schema annotations do not shape the generated Go: no struct field, tag, enum,
+// or method reflects them. They describe store-level concerns — index shape,
+// write-once behaviour — that a Go type does not express, and
+// [github.com/simon-lentz/yammm/adapter/neo4j] is where they are read.
+//
+// They do survive in [SerializedModel], which embeds the schema source
+// verbatim. A schema re-loaded from that constant therefore carries its
+// annotations, and the store DDL derived from the re-loaded schema matches the
+// DDL derived from the original files — the whole point of embedding the source
+// rather than a reduction of it. Adding an annotation to a schema changes that
+// one constant and nothing else in the emitted file.
+//
+// They do reach the generator indirectly: a property inherited from several
+// ancestors carries the union of their annotations, so the merged view yields a
+// synthesized copy rather than the declared *Property. Every pointer-keyed
+// lookup here therefore goes through [github.com/simon-lentz/yammm/schema.Property.Origin].
+//
 // # Dependencies
 //
 //	adapter/gogen  ──imports──▶  schema, location, internal/ident

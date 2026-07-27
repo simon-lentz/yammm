@@ -298,6 +298,31 @@ type Person {
 }
 ```
 
+### Annotations
+
+Annotations attach validated, store-agnostic metadata that adapters turn into store DDL. They do not change which instance data is valid, and they are excluded from the structural hash, so adding one never invalidates a persisted snapshot.
+
+```yammm
+type Document {
+    content_hash String      primary
+    state        String      @index
+    published_on Date
+    embedding    Vector[768] @vector(cosine)
+    first_seen   Timestamp   @writeOnce
+
+    @@index(state, published_on)
+}
+```
+
+| Annotation | Placement | Meaning |
+| ---------- | --------- | ------- |
+| `@index` | property | Single-property range index on a scalar |
+| `@@index(a, b, …)` | type | Composite range index; argument order is significant |
+| `@vector(cosine\|euclidean)` | property | ANN vector index on a `Vector[N]` property |
+| `@writeOnce` | property | Set on node creation, never rewritten |
+
+`yammm neo4j indexes <schema>` emits the index DDL; `yammm neo4j diff` compares it against a live database. See [SPEC.md](docs/SPEC.md#annotations) for eligibility rules and diagnostics.
+
 ### Data Types
 
 | Type | Description |
@@ -367,14 +392,21 @@ yammm neo4j diff <schema>                                # compare schema constr
 yammm neo4j introspect                                   # inspect a live database's schema
 ```
 
+Every command writes its diagnostics to **stderr**, at every severity, and its
+results to stdout. A warning is not a failure — a run that prints warnings and
+nothing else still exits `0` — so do not read a zero exit code as "no
+diagnostics." (Before v0.9.0 a warnings-only result printed nothing at all, so
+an unchanged schema may emit new stderr output; the `Result` a library caller
+receives is unchanged.)
+
 ## IDE Support
 
 The [`lsp/`](lsp/) package provides a Language Server Protocol server for YAMMM schema files, with the binary entry point at [`cmd/yammm-lsp/`](cmd/yammm-lsp/):
 
 - Real-time diagnostics (parse errors, semantic errors, import issues)
 - Go-to-definition for types, properties, and imports
-- Hover information with documentation and constraints
-- Completion for keywords, types, and snippets
+- Hover information with documentation, constraints, and annotations
+- Completion for keywords, types, snippets, and annotations (names and arguments, sourced from the built-in registry)
 - Document symbols for outline and breadcrumbs
 - Formatting with canonical style
 

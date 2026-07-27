@@ -1034,6 +1034,8 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 
 The `Constraint` struct contains the constraint `Name`, `Kind` (`ConstraintUnique`, `ConstraintNotNull`, `ConstraintType`, `ConstraintNodeKey`), `Label`, `Properties`, `TypeExpr`, and the complete `Statement`.
 
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds the whole schema's DDL rather than emitting a partial script that looks complete. The one shape a *valid* schema can hit is a list whose element is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias. Those are legal yammm but Neo4j has no nested collection property type, so they report `E_NEO4J_UNSUPPORTED_TYPE`; model the inner collection as a `part type` reached by a composition if the model must export to Neo4j. A bare `Vector` is fine — it maps to `LIST<FLOAT NOT NULL>`.
+
 ### Indexes
 
 Indexes are derived from a schema's `@index`, `@@index`, and `@vector` annotations:
@@ -1205,6 +1207,9 @@ yammmSource, err := adapter.InferSchema(constraints, relationships, schemaFilter
 ### Constraint Diffing
 
 ```go
+// Ownership is exact set membership, computed once from the schema (see Index Diffing below)
+owned := adapter.OwnedLabels(ctx, s)
+
 // Compute the semantic diff between desired schema constraints and actual database constraints
 diff := adapter.DiffConstraints(desired, actual, owned)
 ```
@@ -1234,7 +1239,7 @@ diff := adapter.DiffIndexes(desired, actual, owned)
 `Unverified` holds indexes that exist on both sides but whose definition could **not** be compared — the database reported no readable vector configuration (the reason names which setting was unread), or the index is still `POPULATING`. A setting the database did disclose and that disagrees outranks a second setting being unreadable, so a demonstrably wrong dimension is reported as drift rather than downgraded to unverified. They are neither confirmed in sync nor confirmed drifted. A drift gate must therefore treat a non-empty `Unverified` as an incomplete check, not a pass:
 
 ```go
-diff := adapter.DiffIndexes(desired, actual, schemaName)
+diff := adapter.DiffIndexes(desired, actual, owned)
 inSync := len(diff.Drift) == 0 && len(diff.Create) == 0 && len(diff.Drop) == 0 &&
     len(diff.Unverified) == 0 // omitting this reports an unchecked index as verified
 ```
@@ -1253,7 +1258,7 @@ This returns a parameterized Cypher query string and parameters — consumers ex
 | Function | Description |
 | -------- | ----------- |
 | `IntrospectConstraintsQuery()` | Static Cypher for `SHOW CONSTRAINTS YIELD *` |
-| `IntrospectIndexesQuery()` | Static Cypher for `SHOW INDEXES YIELD *` |
+| `IntrospectIndexesQuery()` | Static Cypher projecting `name, type, entityType, labelsOrTypes, properties, options, state, owningConstraint`, filtered to `type <> 'LOOKUP'` |
 | `IntrospectRelationshipsQuery(labelPrefix)` | Parameterized Cypher for relationship topology discovery |
 | `ParseRemoteConstraints(records)` | Parse driver output into `[]RemoteConstraint` |
 | `ParseRemoteIndexes(records)` | Parse driver output into `[]RemoteIndex` (including the options map) |
@@ -1261,9 +1266,11 @@ This returns a parameterized Cypher query string and parameters — consumers ex
 
 The introspection types are:
 
-- `RemoteConstraint` — constraint metadata (name, type, entity type, labels/types, properties, property type)
+- `RemoteConstraint` — constraint metadata (name, type, entity type, labels/types, properties, property type). `Type` is verbatim what the server reported, and the node-uniqueness spelling **depends on the server generation**: Neo4j 5.x reports `UNIQUENESS`, 2026.x reports `NODE_PROPERTY_UNIQUENESS`. The other kinds are stable. `DiffConstraints` and `InferSchema` fold both spellings internally; a consumer switching on the field itself must accept both, or it silently stops recognising every UNIQUE constraint when the database is upgraded.
 - `RemoteRelationship` — relationship topology (relation type, source/target labels)
-- `RemoteIndex` — index metadata (name, type, entity type, labels/types, properties, options); `VectorDimensions()` and `VectorSimilarity()` read a vector index's configuration from the options map for drift detection
+- `RemoteIndex` — index metadata (name, type, entity type, labels/types, properties, options, state, owning constraint); `VectorDimensions()` and `VectorSimilarity()` read a vector index's configuration from the options map for drift detection, and `IsOnline()` reports whether the index is in a state that serves queries (an unreported state counts as online)
+
+`IntrospectIndexesQuery()` returns **constraint-backing indexes** as well as standalone ones — `RemoteIndex.OwningConstraint` identifies them. The diff needs them because a backing index holds its constraint's name against every `CREATE INDEX` and already serves the definition it covers, which are both conditions under which the server silently no-ops a declared index. A consumer filtering rows itself must test that field rather than assume the query excluded them.
 
 ### Utility Functions
 

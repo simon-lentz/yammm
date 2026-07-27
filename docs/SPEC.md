@@ -207,7 +207,7 @@ in                                  // membership
 ->                                  // pipeline/function call
 -->                                 // association
 *->                                 // composition
-@     @@                             // annotation (property / type level)
+@     @@                            // annotation (property / type level)
 .                                   // property access
 ?                                   // ternary conditional
 {     }                             // braces
@@ -867,6 +867,8 @@ Validation accepts JSON arrays where each element passes the element type's cons
 - List types cannot be used as primary keys (see [Primary Key Types](#primary-key-types)).
 - List types cannot be used in relationship (edge) properties.
 
+**Export portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm neo4j constraints` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE`, and because constraint generation is all-or-nothing it emits **nothing for the whole schema**, not just for that property. Model the inner collection as a `part type` reached by a composition if the model must export to Neo4j.
+
 **Narrowing:**
 
 When a child type re-declares a parent's List property, both the element constraint and the length bounds must narrow (element values form a subset, length range is a subrange):
@@ -1083,7 +1085,7 @@ Annotations attach validated, store-agnostic metadata to properties and types. T
 
 A **property-level** annotation trails a property, after its datatype and any `primary`/`required` modifier. A property may carry zero or more:
 
-```
+```yammm-schema
 state        String      @index
 first_seen   Timestamp   @writeOnce
 embedding    Vector[768] @vector(cosine)
@@ -1091,7 +1093,7 @@ embedding    Vector[768] @vector(cosine)
 
 A **type-level** annotation is a type-body member written with the doubled sigil `@@`, optionally preceded by a doc comment. It may appear anywhere in the body:
 
-```
+```yammm-schema
 type Document {
   content_hash String primary
   state        String
@@ -1136,9 +1138,9 @@ Annotations are validated at load, after inheritance linearization. Violations p
 - `E_INVALID_ANNOTATION` — a structural violation: wrong placement (e.g. `@@writeOnce`), a property annotation written on a line other than its property's, wrong arity, a literal where a reference or keyword is required, an unknown similarity keyword, or a duplicate.
 - `E_UNKNOWN_ANNOTATION_TARGET` — a `@@index` reference names no property of the type (the same failure class as `E_UNKNOWN_PROPERTY`, on a different construct).
 - `E_INVALID_ANNOTATION_TARGET` — the annotation is attached to an ineligible property (a non-scalar `@index`, a non-`Vector` `@vector`, `@writeOnce` on a primary key, and so on).
-- `W_ANNOTATION_SHADOWED` — a warning (not an error): a subtype re-declaration drops an inherited property's annotations without re-stating them (see [Inheritance](#inheritance)). The load still succeeds.
+- `W_ANNOTATION_SHADOWED` — a warning (not an error): a subtype re-declaration drops an inherited property's annotations without re-stating them (see [Annotation Inheritance](#annotation-inheritance)). The load still succeeds.
 
-### Inheritance
+### Annotation Inheritance
 
 Property-level annotations travel with the property they decorate: a subtype that inherits a property unchanged inherits its annotations. Type-level annotations linearize like invariants — the subtype's own annotations first, then inherited ones, with exact duplicates (same name and argument list) deduplicated keep-first. Two `@@index` members differing only in argument list are distinct indexes and both survive.
 

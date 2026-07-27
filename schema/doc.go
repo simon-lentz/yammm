@@ -129,6 +129,25 @@
 // that gains its first annotation still hashes identically and every persisted
 // snapshot header hash stays valid. See [StructuralHash] for the full rule.
 //
+// # Merged Views and Property Identity
+//
+// A property inherited from several ancestors carries the UNION of their
+// annotations, which no single declared property holds. Such an entry in
+// [Type.AllProperties] / [Type.AllPropertiesSlice] is therefore a synthesized
+// copy, not the *Property its declaring type holds in [Type.PropertiesSlice].
+//
+// [Property.Origin] bridges the two views: it returns the property as declared,
+// and p itself when nothing was merged. Any map keyed by declared properties
+// and read back while iterating a merged view must look up through it —
+//
+//	name, ok := dtFieldNames[p.Origin()]
+//
+// — or the synthesized entry misses the table and the consumer silently
+// degrades. Everything Origin discards is annotation state; name, constraint,
+// datatype reference, optionality, primary-key status, span, and declaring
+// scope are all preserved on the copy, so a consumer that reads only those
+// needs nothing.
+//
 // # Immutability
 //
 // All schema types are immutable after loading. This provides:

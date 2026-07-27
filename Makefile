@@ -40,7 +40,7 @@ test-internal:
 # constraints and the propertyType column are all Enterprise-only. Override the
 # image to check Community behaviour, where those tests skip:
 #
-#   YAMMM_NEO4J_TEST_IMAGE=neo4j:5.26-community make test-integration
+#   YAMMM_NEO4J_TEST_IMAGE=neo4j:2026.05.0-community make test-integration
 .PHONY: test-integration
 test-integration:
 	go test -tags neo4j_integration -timeout 15m ./adapter/neo4j/integration/
