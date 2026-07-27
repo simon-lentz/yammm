@@ -64,7 +64,7 @@ func TestPrintIndexDiffResult_AllMatch(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printIndexDiffResult(&buf, diff)
+	printIndexDiffResult(&buf, diff, nil)
 
 	assert.Contains(t, buf.String(), "matched: 1 indexes")
 	assert.Contains(t, buf.String(), "0 to create")
@@ -91,7 +91,7 @@ func TestPrintIndexDiffResult_DriftCreateDrop(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printIndexDiffResult(&buf, diff)
+	printIndexDiffResult(&buf, diff, nil)
 
 	assert.Contains(t, buf.String(), "index drift: i1")
 	assert.Contains(t, buf.String(), "vector dimension mismatch")
@@ -141,32 +141,45 @@ func TestNeo4jDiff_IndexesFlag(t *testing.T) {
 }
 
 // TestNeo4jDiffExit pins the exit-code contract of the two diff halves. The
-// load-bearing row is "index diff unavailable": degrading to constraints-only
-// keeps the printed constraint diff, but must not report success — a drift gate
-// would otherwise read exit 0 as "no drift" from a comparison that never ran.
+// load-bearing rows are the two incomplete comparisons — "unavailable"
+// (introspection failed) and "unverified" (an index whose configuration the
+// server would not disclose). Both keep the printed constraint diff but must not
+// report success: a drift gate would otherwise read exit 0 as "no drift" from a
+// comparison that never ran.
 func TestNeo4jDiffExit(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name            string
-		constraintDrift bool
-		indexes         indexDiffOutcome
-		want            int
+		name                 string
+		constraintDrift      bool
+		constraintUnverified bool
+		indexes              indexDiffOutcome
+		want                 int
 	}{
-		{"all clean", false, indexDiffClean, cli.ExitOK},
-		{"opted out of index diffing", false, indexDiffSkipped, cli.ExitOK},
-		{"constraint drift", true, indexDiffClean, cli.ExitValidation},
-		{"index drift", false, indexDiffDrifted, cli.ExitValidation},
-		{"both drifted", true, indexDiffDrifted, cli.ExitValidation},
-		{"index diff unavailable", false, indexDiffUnavailable, cli.ExitRuntime},
-		{"constraint drift outranks unavailable", true, indexDiffUnavailable, cli.ExitValidation},
+		{"all clean", false, false, indexDiffClean, cli.ExitOK},
+		{"opted out of index diffing", false, false, indexDiffSkipped, cli.ExitOK},
+		{"constraint drift", true, false, indexDiffClean, cli.ExitValidation},
+		{"index drift", false, false, indexDiffDrifted, cli.ExitValidation},
+		{"both drifted", true, false, indexDiffDrifted, cli.ExitValidation},
+		{"index diff unavailable", false, false, indexDiffUnavailable, cli.ExitRuntime},
+		{"constraint drift outranks unavailable", true, false, indexDiffUnavailable, cli.ExitValidation},
+		{"index unverified", false, false, indexDiffUnverified, cli.ExitRuntime},
+		{"constraint drift outranks unverified", true, false, indexDiffUnverified, cli.ExitValidation},
+		// A constraint the server would not fully describe is unverified in the
+		// same sense an index is, and must not exit 0 — even when the index half
+		// is clean, and even when the caller opted out of index diffing entirely.
+		{"constraint unverified", false, true, indexDiffClean, cli.ExitRuntime},
+		{"constraint unverified with indexes skipped", false, true, indexDiffSkipped, cli.ExitRuntime},
+		{"constraint drift outranks constraint unverified", true, true, indexDiffClean, cli.ExitValidation},
+		{"index drift outranks constraint unverified", false, true, indexDiffDrifted, cli.ExitValidation},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := neo4jDiffExit(tt.constraintDrift, tt.indexes); got != tt.want {
-				t.Errorf("neo4jDiffExit(%v, %v) = %d, want %d", tt.constraintDrift, tt.indexes, got, tt.want)
+			if got := neo4jDiffExit(tt.constraintDrift, tt.constraintUnverified, tt.indexes); got != tt.want {
+				t.Errorf("neo4jDiffExit(%v, %v, %v) = %d, want %d",
+					tt.constraintDrift, tt.constraintUnverified, tt.indexes, got, tt.want)
 			}
 		})
 	}
@@ -184,7 +197,7 @@ func TestPrintIndexDiffResult_Unverified(t *testing.T) {
 			Desired: adaptern4j.Index{Name: "test__Entity_embedding_vector_idx"},
 			Reason:  "database reported no vector configuration",
 		}},
-	})
+	}, nil)
 
 	out := buf.String()
 	if !strings.Contains(out, "index unverified: test__Entity_embedding_vector_idx") {

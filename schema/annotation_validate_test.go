@@ -385,6 +385,10 @@ func TestAnnotation_DuplicateDisplay_FaithfulSpelling(t *testing.T) {
 		{"string literal arg", "id String primary\n\t@@index(\"a\")\n\t@@index(\"a\")", `@@index("a")`},
 		// A bare literal (number) must be shown as its own spelling, NOT re-quoted.
 		{"bare literal arg", "id String primary\n\t@@index(3)\n\t@@index(3)", "@@index(3)"},
+		// The lexer accepts either delimiter, so a single-quoted argument must be
+		// echoed with the quotes the source actually used, not normalised to
+		// double quotes by re-quoting through strconv.
+		{"single-quoted arg", "id String primary\n\t@@index('a')\n\t@@index('a')", "@@index('a')"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -446,6 +450,70 @@ type T {
 	for i := range res.Issues() {
 		if strings.Contains(i.Message(), "more than once") {
 			t.Errorf("distinct source literals must not be reported as duplicates: %s", i.Message())
+		}
+	}
+}
+
+// A property annotation written on its own line binds to the property ABOVE
+// it, because the grammar's property-trailing annotation* ignores line breaks.
+// A reader coming from a prefix-decorator language means the property BELOW,
+// and nothing else in the load tells the two readings apart — the schema was
+// accepted and the wrong property carried the marker into the emitted DDL.
+func TestAnnotation_DetachedFromProperty_IsRejected(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, `schema "main"
+type Doc {
+	id String primary
+	state String
+	@index
+	published_on Date
+}`)
+	wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_ANNOTATION: 1})
+	var msg string
+	for i := range res.Issues() {
+		msg = i.Message()
+	}
+	// The message must name the property it actually attached to, so the user
+	// can see which reading the loader took.
+	for _, want := range []string{"@index", "own line", `"state"`, "@@index"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message should mention %q; got %q", want, msg)
+		}
+	}
+}
+
+// The same-line forms stay valid — the rule must not cost the ordinary syntax.
+func TestAnnotation_SameLine_StaysValid(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{
+		"id String primary\n\tpublished_on Date @index",
+		"id String primary\n\tfirst_seen Timestamp @writeOnce @index",
+	} {
+		if _, res := loadNoErr(t, "schema \"main\"\ntype Doc {\n\t"+body+"\n}"); res.Len() != 0 {
+			t.Errorf("same-line annotations must load clean, got: %v", res)
+		}
+	}
+}
+
+// identity() is the key for both duplicate detection and inherited-annotation
+// dedup, so it must be injective. The name is the first field and needs its own
+// length prefix: without one its bytes run into the first argument's encoding,
+// and a name spelled to imitate that encoding collides with an unrelated
+// annotation. Reachable only through the Builder, which takes the name as a
+// plain string.
+func TestAnnotation_Identity_NameIsDelimited(t *testing.T) {
+	t.Parallel()
+	_, res := schema.NewBuilder().WithName("main").
+		AddType("U").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("a", schema.NewStringConstraint()).
+		WithTypeAnnotation("index\x000\x001\x00a").
+		WithTypeAnnotation("index", "a").
+		Done().
+		Build()
+	for i := range res.Issues() {
+		if strings.Contains(i.Message(), "more than once") {
+			t.Errorf("two structurally different annotations must not collide as duplicates: %s", i.Message())
 		}
 	}
 }

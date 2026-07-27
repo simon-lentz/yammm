@@ -211,8 +211,14 @@ func (c *completer) completeTypes() {
 
 		t.setSuperTypes(supers)
 
-		// Merge properties from ancestors
+		// Merge properties from ancestors, then settle their annotations.
+		// The order is load-bearing: resolveInheritedAnnotations replaces
+		// entries of allProps with annotation-merged clones, and
+		// setAllProperties snapshots those pointers into the by-name index, so
+		// indexing first would leave Type.Property returning the structural
+		// survivor with one ancestor's annotations instead of the union.
 		allProps := c.mergeProperties(t, supers)
+		c.resolveInheritedAnnotations(t, allProps)
 		t.setAllProperties(allProps)
 
 		// Extract primary keys. mergeProperties emits t's own properties first
@@ -388,28 +394,49 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 		ownProps[p.Name()] = true
 	}
 
-	// One inheritance conflict is one diagnostic. The loop below visits every
-	// linearized ancestor, and an ancestor that merely INHERITS the conflicting
-	// property carries the same declared *Property forward, so the same clash is
-	// re-detected once per ancestor in the chain.
+	// One inheritance conflict is one diagnostic per affected type; see
+	// [propertyClash] for what makes two detections the same conflict, and
+	// [completer.mergeProperties]'s emission loop below for what each
+	// diagnostic names. This state is local to one call because clash identity
+	// is only well-defined within a single merge — see [propertyClash.matches].
 	//
-	// A conflict is between two narrowing LINEAGES of a property — sets of
-	// declarations that are mutually compatible (equal, or one narrowing another)
-	// within each set and incompatible across. EITHER side may have several
-	// members, so no single *Property, its Origin, or its kind identifies the
-	// conflict: a scalar key double-reports when the many-member side varies
-	// (survivor swap, or a narrowing chain on the conflicting side) or collapses
-	// two independent clashes that happen to share it. This is why keying by name,
-	// by the *Property pair, by the incomer Origin, and by the kind pair each
-	// failed in turn.
+	// One flat list covers every property name rather than a map keyed by name:
+	// the branch that scans it is reached only on a schema that already fails
+	// to load, and only once per conflicting declaration, so the scan is
+	// bounded by the number of distinct conflicting names on this one type.
+	var clashes []*propertyClash
+
+	// mergedInto records, per property name, every declaration that merged into
+	// the surviving position: the survivor a merge branch acted on, plus each
+	// declaration the walk folded into it — one the keep-first branch absorbed
+	// as equal-or-wider, or one that took over as the narrower survivor. It is
+	// per NAME rather than per clash because the walk keeps exactly one
+	// survivor under a name at a time, so every clash on that name shares the
+	// same surviving side.
 	//
-	// The lineage-level identity is exact: two conflicts are the same iff their
-	// surviving sides are compatible AND their conflicting sides are compatible.
-	// reportedConflicts holds one (survivor, incomer) representative per distinct
-	// clash; a new clash is deduped against it by that pairwise compatibility. The
-	// list is per property name and holds at most one entry per genuinely
-	// independent clash, so the scan is negligible.
-	var reportedConflicts []conflictPair
+	// These are the declarations a fix might have to touch on the surviving
+	// side, so a conflict diagnostic names all of them. Recording only the
+	// survivor as of a detection would omit both an equal sibling absorbed
+	// before the conflict and a narrower declaration installed after it —
+	// leaving the user to fix what they were shown and meet the rest on the
+	// next load.
+	//
+	// Entries are declared origins, unique, in arrival order, and the map is
+	// built lazily: a name that never reaches a merge branch never allocates.
+	var mergedInto map[string][]*Property
+	noteMerged := func(name string, survivor, folded *Property) {
+		chain, seeded := mergedInto[name]
+		if !seeded {
+			if mergedInto == nil {
+				mergedInto = make(map[string][]*Property)
+			}
+			chain = []*Property{survivor.Origin()}
+		}
+		if folded != nil {
+			chain = appendOrigin(chain, folded)
+		}
+		mergedInto[name] = chain
+	}
 
 	// Add inherited properties in linearized order
 	for _, superRef := range supers {
@@ -429,31 +456,79 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 			switch {
 			case p.Equal(existing), existing.CanNarrowFrom(p):
 				// The surviving copy wins keep-first: the child's own declaration,
-				// or an earlier ancestor's equal-or-narrower one.
+				// or an earlier ancestor's equal-or-narrower one. p still merged
+				// into the survivor, so it belongs to the surviving side.
+				noteMerged(p.Name(), existing, p)
 
 			case !ownProps[p.Name()] && p.CanNarrowFrom(existing):
 				// A later ancestor's narrower copy replaces the earlier, wider one.
 				// Restricted to inherited survivors: a child's own declaration that
 				// widens what it inherits must be rejected, not silently narrowed
-				// back by the parent.
+				// back by the parent. Both the outgoing and incoming survivor are
+				// on the surviving side.
+				noteMerged(p.Name(), existing, p)
 				replaceMerged(result, seen, p)
 
 			default:
-				if conflictAlreadyReported(reportedConflicts, existing, p) {
-					continue
-				}
-				reportedConflicts = append(reportedConflicts, conflictPair{survivor: existing, incomer: p})
+				// A rejected own declaration is marked on every detection,
+				// before the clash lookup: whether this detection opens a new
+				// clash or joins a recorded one, the shadow warning must stay
+				// suppressed for a declaration the load rejects.
 				if ownProps[p.Name()] {
 					c.conflictedProperties[existing] = true
 				}
-				c.errorf(t.Span(), diag.E_PROPERTY_CONFLICT,
-					"type %q inherits conflicting definitions of property %q from %s and %s",
-					t.Name(), p.Name(), existing.DeclaringScope(), p.DeclaringScope())
+				// The survivor is on the surviving side; p is the conflict.
+				noteMerged(p.Name(), existing, nil)
+				matched := false
+				for _, cl := range clashes {
+					if cl.matches(p.Name(), p) {
+						cl.incomers = appendOrigin(cl.incomers, p)
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					clashes = append(clashes, &propertyClash{
+						name:     p.Name(),
+						incomers: []*Property{p.Origin()},
+					})
+				}
 			}
 		}
 	}
 
-	c.resolveInheritedAnnotations(t, result, ownProps)
+	// Emit one diagnostic per recorded clash, in detection order, once the walk
+	// has seen every carrier. Deferring to here is what lets a diagnostic name
+	// declarations that arrive AFTER the conflict is detected — a narrower
+	// survivor installed later is still on the surviving side. Nothing else
+	// collects diagnostics between the loop above and this point, so the
+	// deferral changes no diagnostic ordering.
+	//
+	// The message names the declaration that actually survived the merge and
+	// the first declaration that clashed with it; the related spans name every
+	// declaration on both sides, which for a chain is more than the two the
+	// message can carry.
+	for _, cl := range clashes {
+		survivors := mergedInto[cl.name]
+		final := seen[cl.name].Origin()
+		first := cl.incomers[0]
+		related := make([]location.RelatedInfo, 0, len(survivors)+len(cl.incomers))
+		for _, m := range survivors {
+			related = append(related, location.RelatedInfo{
+				Span:    m.Span(),
+				Message: "merged into the surviving definition here",
+			})
+		}
+		for _, m := range cl.incomers {
+			related = append(related, location.RelatedInfo{
+				Span:    m.Span(),
+				Message: "conflicting definition declared here",
+			})
+		}
+		c.errorfRelated(t.Span(), diag.E_PROPERTY_CONFLICT, related,
+			"type %q inherits conflicting definitions of property %q from %s and %s",
+			t.Name(), cl.name, final.DeclaringScope(), first.DeclaringScope())
+	}
 
 	return result
 }
@@ -480,10 +555,15 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 //
 // Iteration is over result — a slice, in merged order — so every diagnostic this
 // emits is deterministically ordered.
-func (c *completer) resolveInheritedAnnotations(t *Type, result []*Property, ownProps map[string]bool) {
+func (c *completer) resolveInheritedAnnotations(t *Type, result []*Property) {
 	supers := c.directSuperTypes(t)
 	if len(supers) == 0 {
 		return // Nothing to inherit; own annotations stand as declared.
+	}
+
+	ownProps := make(map[string]bool, len(t.properties))
+	for _, p := range t.properties {
+		ownProps[p.Name()] = true
 	}
 
 	// One inherited-annotation conflict is one diagnostic, keyed by
@@ -507,6 +587,17 @@ func (c *completer) resolveInheritedAnnotations(t *Type, result []*Property, own
 	for i, p := range result {
 		name := p.Name()
 		if ownProps[name] {
+			// A re-declaration the load REJECTED decides nothing. Letting it
+			// record a suppression would carry its opinion to every subtype,
+			// where an arm that still carries the annotation reads as
+			// disagreeing with it — a second error derived from a declaration
+			// that is already an error, pointing the user at a subtype when the
+			// only real fix is at the rejected declaration. The same set
+			// suppresses its shadow warning in
+			// [completer.flushShadowedAnnotations], for the same reason.
+			if c.conflictedProperties[p] {
+				continue
+			}
 			// An own declaration's annotation set is authoritative; what it drops
 			// relative to its direct supertypes is what gets warned about — after
 			// validation, see [completer.recordShadowedAnnotations] — and is
@@ -611,7 +702,13 @@ func (c *completer) directSuperTypes(t *Type) []*Type {
 // reported holds the (property, annotation) pairs already blamed for this type,
 // so one conflict draws one diagnostic no matter how many supertypes carry the
 // property forward. It returns the merged set and the names t must itself
-// suppress for its own subtypes — every arm's suppression that no arm carries.
+// suppress for its own subtypes: the union of every arm's suppressions, not
+// filtered by what another arm carries. A name that one arm suppresses and
+// another carries is a disagreement, which this same pass reports and which
+// fails the load, so no sealed schema is ever observed with such a name in the
+// map. If that rule is ever relaxed so the carrying arm wins, this union must
+// be filtered here or the annotation would silently read as dropped for the
+// whole subtree.
 func (c *completer) inheritedAnnotations(t *Type, supers []*Type, name string, reported map[string]bool) ([]*Annotation, map[string]bool) {
 	var merged []*Annotation
 	var byName map[string]annotationSource
@@ -704,47 +801,81 @@ func (c *completer) reportAnnotationDisagreement(
 		return
 	}
 	reported[key] = true
-	c.collector.Collect(
-		diag.NewIssue(diag.Error, diag.E_INVALID_ANNOTATION, msg).
-			WithSpan(t.Span()).
-			WithRelated(
-				location.RelatedInfo{Span: a.Span(), Message: "annotation declared here"},
-				location.RelatedInfo{Span: otherSpan, Message: otherLabel},
-			).Build(),
-	)
+	c.errorfRelated(t.Span(), diag.E_INVALID_ANNOTATION, []location.RelatedInfo{
+		{Span: a.Span(), Message: "annotation declared here"},
+		{Span: otherSpan, Message: otherLabel},
+	}, "%s", msg)
 }
 
-// conflictPair is one reported property-inheritance conflict, kept as a
-// (survivor, incomer) representative so a later clash can be deduped against it
-// by lineage compatibility. See [conflictAlreadyReported].
-type conflictPair struct {
-	survivor *Property
-	incomer  *Property
+// propertyClash is one recorded property-inheritance conflict on the named
+// property: the chain of declarations that clashed with the surviving one,
+// held as declared origins, unique, in detection order.
+//
+// Only the conflicting side lives here. The surviving side belongs to the
+// property NAME, not to any one clash — the walk keeps exactly one survivor
+// under a name at a time, so every clash on that name shares it — and
+// [completer.mergeProperties] tracks it separately as the declarations merged
+// into the surviving position.
+//
+// The two sides are not necessarily incompatible with each other: an own
+// declaration that widens an inherited one clashes with a property it is
+// compatible with, because the walk refuses to narrow an own declaration back
+// to what it inherits. The only invariant across the sides is that every
+// recorded detection failed to unify in the walk.
+type propertyClash struct {
+	name     string
+	incomers []*Property
 }
 
-// conflictAlreadyReported reports whether the clash between survivor and incomer
-// is the same one as an already-reported pair: same iff both sides are pairwise
-// compatible with that pair's corresponding sides, in either role assignment.
-// Compatibility (equal, or one narrowing the other) means "same narrowing
-// lineage", so this collapses a clash re-detected because a narrowing chain
-// (on the surviving OR conflicting side) contributed several members, while two
-// genuinely independent clashes — whose members narrow neither each other — stay
-// distinct.
-func conflictAlreadyReported(reported []conflictPair, survivor, incomer *Property) bool {
-	for _, r := range reported {
-		if propertiesCompatible(r.survivor, survivor) && propertiesCompatible(r.incomer, incomer) {
-			return true
-		}
-		if propertiesCompatible(r.survivor, incomer) && propertiesCompatible(r.incomer, survivor) {
-			return true
+// matches reports whether a conflicting declaration re-detects this clash: it
+// must be on the same property, and compatible with EVERY member recorded on
+// the conflicting side.
+//
+// The whole-side quantifier is load-bearing. Compatibility is not transitive,
+// so matching a single stored member would admit a declaration the side's
+// other members do not chain with, silently fusing two distinct conflicts into
+// one report.
+//
+// The survivor plays no part. Within one merge the survivor sequence under a
+// name descends — an own declaration survives from the start, and otherwise
+// replaceMerged fires only when the incomer narrows the current survivor — so
+// the survivor at any detection narrows every survivor recorded earlier and a
+// survivor-side test could only ever succeed. What it did do was reject other
+// properties' clashes, since propertiesCompatible is false across names; that
+// is now the explicit name test, which cannot silently become vacuous if the
+// compatibility rule changes.
+//
+// Clash identity holds only within one merge. Across merges the roles do swap:
+// sibling types with reversed extends clauses re-detect one clash with
+// survivor and conflict exchanged, which is why the caller keeps this state
+// per call rather than completer-wide.
+func (cl *propertyClash) matches(name string, incomer *Property) bool {
+	if cl.name != name {
+		return false
+	}
+	for _, m := range cl.incomers {
+		if !propertiesCompatible(m, incomer) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
-// propertiesCompatible reports whether two same-named properties belong to one
-// narrowing lineage: equal, or one a valid narrowing of the other. Members of a
-// lineage do not conflict with each other; members of different lineages do.
+// appendOrigin appends p's declared origin to side unless already present.
+func appendOrigin(side []*Property, p *Property) []*Property {
+	o := p.Origin()
+	if slices.Contains(side, o) {
+		return side
+	}
+	return append(side, o)
+}
+
+// propertiesCompatible reports whether two same-named properties are pairwise
+// compatible: equal, or one a valid narrowing of the other — the relation the
+// merge walk itself unifies by. It is not transitive, and compatible does not
+// mean conflict-free: an own declaration that widens an inherited property is
+// compatible with it yet still clashes, because the walk refuses to narrow an
+// own declaration back to what it inherits.
 func propertiesCompatible(a, b *Property) bool {
 	return a.Equal(b) || a.CanNarrowFrom(b) || b.CanNarrowFrom(a)
 }
@@ -796,9 +927,12 @@ type shadowGroupKey struct {
 // re-declaration dropping a contested annotation is resolving a disagreement,
 // not making a silent slip — that is precisely what the disagreement diagnostic
 // told the user to do. The warning exists for the accidental drop of a
-// uniformly-inherited annotation, so a contested one draws neither the warning
-// nor a suppression entry (the child's decision is now authoritative and
-// settled).
+// uniformly-inherited annotation, so a contested one draws no warning.
+//
+// It DOES still draw a suppression entry when this declaration does not
+// re-state it: the child's decision is now authoritative and has to bind its
+// own subtypes, or they would re-derive the annotation from the carrying arm
+// and re-raise the disagreement the child just settled.
 //
 // It returns the annotation names this declaration suppresses for its own
 // subtypes: the uncontested annotations it dropped, plus its supertypes' still-
@@ -870,7 +1004,7 @@ func (c *completer) recordShadowedAnnotations(own *Property, supers []*Type) map
 // It runs after annotation validation rather than inside linearization because
 // the warning's advice — "re-state them on this declaration to keep them" — is
 // actively wrong for an annotation the same load rejects: following it produces
-// a second copy of the same error. Linearization cannot know that; only phase 7c
+// a second copy of the same error. Linearization cannot know that; only [completer.validateAnnotations]
 // establishes which annotations are well-formed, known, correctly placed, and
 // eligible for their target. Any annotation that drew a diagnostic of its own,
 // or whose argument list failed to parse, is therefore skipped here — as is any
@@ -933,11 +1067,14 @@ func (c *completer) flushShadowedAnnotations() {
 			"re-declaration of property %q drops annotation(s) %s inherited from %s; re-state them on this declaration to keep them",
 			g.own.Name(), strings.Join(display, ", "), g.from.Name(),
 		)
-		c.collector.Collect(
-			diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, msg).
-				WithSpan(g.own.Span()).
-				WithRelated(related...).Build(),
-		)
+		issue := diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, msg)
+		if span := g.own.Span(); !span.IsZero() {
+			issue = issue.WithSpan(span)
+		}
+		if located := locatedRelated(related); len(located) > 0 {
+			issue = issue.WithRelated(located...)
+		}
+		c.collector.Collect(issue.Build())
 	}
 }
 
@@ -1020,12 +1157,21 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 		seen[r.FieldName()] = r
 	}
 
-	// One collision is one diagnostic, keyed by the PAIR of clashing relations —
-	// the same rule mergeProperties applies to E_PROPERTY_CONFLICT, for the same
-	// reason: an ancestor that merely INHERITS the relation carries the same
-	// *Relation forward, so the identical clash is re-detected once per ancestor
-	// in the chain, while two genuinely different rivals stay two diagnostics.
-	reportedCollisions := make(map[[2]*Relation]bool)
+	// One collision is one diagnostic per affected type. Ancestors that merely
+	// INHERIT a relation carry the same *Relation forward, and two ancestors
+	// may independently declare rivals that are structurally identical; both
+	// are re-detections of one collision, and one edit to the surviving
+	// declaration clears them together.
+	//
+	// Rivals group by [Relation.Equal], which — unlike the property side's
+	// compatibility relation — is a true equivalence: structural field-by-field
+	// equality, so it is transitive and testing a group's first member decides
+	// the whole group. Relations also merge keep-first with no narrowing, so
+	// the survivor under a field name never changes mid-walk and there is no
+	// surviving chain to track. Those two properties are what make relation
+	// collisions simpler than property clashes ([propertyClash]), not an
+	// oversight.
+	var collisions []*relationClash
 
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
@@ -1042,12 +1188,21 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 
 		for _, r := range inherited {
 			if existing, ok := seen[r.FieldName()]; ok {
-				// Check if they're compatible (same relation)
-				if key := [2]*Relation{existing, r}; !existing.Equal(r) && !reportedCollisions[key] {
-					reportedCollisions[key] = true
-					c.errorf(t.Span(), diag.E_RELATION_COLLISION,
-						"type %q inherits conflicting definitions of relation %q from %s and %s",
-						t.Name(), r.FieldName(), existing.Owner(), r.Owner())
+				if !existing.Equal(r) {
+					matched := false
+					for _, cl := range collisions {
+						if cl.matches(r) {
+							cl.rivals = appendUniqueRelation(cl.rivals, r)
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						collisions = append(collisions, &relationClash{
+							survivor: existing,
+							rivals:   []*Relation{r},
+						})
+					}
 				}
 				continue
 			}
@@ -1056,5 +1211,56 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 		}
 	}
 
+	// Emit once the walk has seen every carrier, so a diagnostic can name every
+	// rival declaration — including ones that arrive after the collision is
+	// first detected. Collapsing identical rivals into one report is only safe
+	// because the report points at all of them; naming just the first would
+	// leave the user to fix what they were shown and meet the rest on reload.
+	for _, cl := range collisions {
+		related := make([]location.RelatedInfo, 0, len(cl.rivals)+1)
+		related = append(related, location.RelatedInfo{
+			Span:    cl.survivor.Span(),
+			Message: "surviving definition declared here",
+		})
+		for _, rival := range cl.rivals {
+			related = append(related, location.RelatedInfo{
+				Span:    rival.Span(),
+				Message: "conflicting definition declared here",
+			})
+		}
+		c.errorfRelated(t.Span(), diag.E_RELATION_COLLISION, related,
+			"type %q inherits conflicting definitions of relation %q from %s and %s",
+			t.Name(), cl.survivor.FieldName(), cl.survivor.Owner(), cl.rivals[0].Owner())
+	}
+
 	return result
+}
+
+// relationClash is one recorded relation collision: the relation that survived
+// keep-first under a field name, and the rival declarations that could not
+// merge with it. Rivals are structurally identical to each other — one edit to
+// the survivor resolves all of them — and unique by declaration, since the
+// linearized closure re-presents each rival once per carrying ancestor.
+type relationClash struct {
+	survivor *Relation
+	rivals   []*Relation
+}
+
+// matches reports whether a rival re-detects this collision: same field, and
+// structurally equal to the rivals already recorded. Testing only the first
+// recorded rival is sound because [Relation.Equal] is a true equivalence
+// relation — structural equality, hence transitive — so every recorded rival
+// answers identically. The property side cannot take this shortcut: its
+// compatibility relation is not transitive, so it must test every member.
+func (cl *relationClash) matches(rival *Relation) bool {
+	return cl.survivor.FieldName() == rival.FieldName() && cl.rivals[0].Equal(rival)
+}
+
+// appendUniqueRelation appends r to rivals unless the same declaration is
+// already recorded.
+func appendUniqueRelation(rivals []*Relation, r *Relation) []*Relation {
+	if slices.Contains(rivals, r) {
+		return rivals
+	}
+	return append(rivals, r)
 }

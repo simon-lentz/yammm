@@ -52,7 +52,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Load schema
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	if renderLoadDiagnostics(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult) {
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -91,8 +92,9 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Validate instances
 	_, validateResult := cli.ValidateInstances(cmd.Context(), s, parsed)
 
-	// Merge results
-	result := cli.MergeResults(parseResult, validateResult)
+	// Merge results — the schema load's residual warnings included, so one
+	// invocation writes one result (and in JSON, one document).
+	result := cli.MergeResults(pending, parseResult, validateResult)
 
 	// Render
 	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)

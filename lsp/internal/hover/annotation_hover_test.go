@@ -107,3 +107,20 @@ func TestAtPosition_AnnotationHover_InCommentNoHover(t *testing.T) {
 		t.Errorf("no annotation hover expected inside a comment, got %q", h.Contents.Value)
 	}
 }
+
+// TestAtPosition_AnnotationHover_InRegexNoHover pins that an @name inside a
+// regex literal is not treated as an annotation. REGEXP is reachable from the
+// =~ / !~ operators in invariants, and '@' is an ordinary byte inside one — so
+// hovering an email pattern popped the @index registry entry, shadowing the real
+// symbol lookup for the rest of the line.
+func TestAtPosition_AnnotationHover_InRegexNoHover(t *testing.T) {
+	t.Parallel()
+	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\t! \"bad\" tag =~ /^@index$/\n}\n"}
+	h, err := AtPosition(nil, doc, 2, 20, lsputil.PositionEncodingUTF16, discardLogger())
+	if err != nil {
+		t.Fatalf("hover error: %v", err)
+	}
+	if h != nil {
+		t.Errorf("no annotation hover expected inside a regex literal, got %q", h.Contents.Value)
+	}
+}

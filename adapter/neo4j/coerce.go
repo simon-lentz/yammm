@@ -281,21 +281,71 @@ func coerceNested(outer string, m map[string]any, types ParamTypes) (map[string]
 	return out, nil
 }
 
-// ParamTypesForType derives a ParamTypes from a schema type's properties.
-// For top-level params pass prefix ""; keys are bare property names. For a
-// nested param map pass the outer param name (e.g. "rows" / "updates"); each
-// key is joined to its property name with the same "outer.inner" dot-notation
-// CoerceParams uses, so ParamTypesForType(t, "rows") yields keys like
-// "rows.unit_price" that coerceNested looks up. Lets callers avoid
-// hand-listing each property's constraint.
+// paramKey joins a param prefix to a name using the "outer.inner" dot-notation
+// [CoerceParams] walks. An empty prefix addresses the top-level param map.
+func paramKey(prefix, name string) string {
+	if prefix == "" {
+		return name
+	}
+	return prefix + "." + name
+}
+
+// ParamTypesForType derives a ParamTypes from a schema type's properties, own
+// and inherited. It describes ONE shape: a map whose keys are property names.
+// For top-level params pass prefix ""; for a nested param map pass the outer
+// param name (e.g. "props" / "update_props" / "rows"), and each key is joined
+// with the "outer.inner" dot-notation [CoerceParams] uses — so
+// ParamTypesForType(t, "rows") yields keys like "rows.unit_price". Lets callers
+// avoid hand-listing each property's constraint.
+//
+// [CoerceParams] walks one level of nesting, so a two-level parameter map needs
+// one call per nested map, merged into a single ParamTypes:
+//
+//	pt := ParamTypesForType(t, "props")
+//	maps.Copy(pt, ParamTypesForType(t, "update_props"))
+//
+// MERGE keys are NOT included, because they do not sit where the properties sit
+// and describing both in one map means guessing which of the two a colliding
+// name belongs to: in a flat row `key_id` is a property so named, while in
+// [BuildBatchNodeMergeQuery]'s row shape `key_id` is the merge key for `id` and
+// the properties live nested under row.props. Take them from
+// [ParamTypesForMergeKeys], which describes that shape, and merge the two when
+// the caller's own shape is the one that carries both.
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
 	pt := make(ParamTypes)
-	for p := range t.Properties() {
-		key := p.Name()
-		if prefix != "" {
-			key = prefix + "." + p.Name()
-		}
-		pt[key] = p.Constraint()
+	// AllProperties, not Properties: an inherited property is as present in a
+	// param map as an own one.
+	for p := range t.AllProperties() {
+		pt[paramKey(prefix, p.Name())] = p.Constraint()
+	}
+	return pt
+}
+
+// ParamTypesForMergeKeys derives a ParamTypes for the MERGE-key parameters the
+// adapter's node builders read — one entry per primary key, own or inherited,
+// under the `key_` namespace ([batchKeyParamPrefix]).
+//
+// One call describes one builder's shape:
+//
+//	ParamTypesForMergeKeys(t, "")      // $key_<pk>, what BuildNodeMergeQuery binds
+//	ParamTypesForMergeKeys(t, "rows")  // row.key_<pk>, what BuildBatchNodeMergeQuery reads
+//
+// The merge key is the one value the MERGE matches on, so leaving it uncoerced
+// is the failure with no error attached: a Date primary key reaching the driver
+// as a string matches no node whose property is a DATE, and every re-ingestion
+// inserts a duplicate. Callers going through [Adapter.NodeQueryFor] or
+// [Adapter.BatchNodeQueries] need none of this — those coerce their own keys
+// from [NodeShape].
+//
+// The relationship builders key on TWO types, so they have no single-type
+// equivalent. Their spellings are $from_key_<pk> / $to_key_<pk>
+// ([BuildRelationshipMergeQuery]) and row.from_<pk> / row.to_<pk>
+// ([BuildBatchRelationshipMergeQuery]); a caller assembling those by hand lists
+// each endpoint type's primary-key constraints under the matching prefix.
+func ParamTypesForMergeKeys(t *schema.Type, prefix string) ParamTypes {
+	pt := make(ParamTypes)
+	for _, pk := range t.PrimaryKeysSlice() {
+		pt[paramKey(prefix, batchKeyParamPrefix+pk.Name())] = pk.Constraint()
 	}
 	return pt
 }

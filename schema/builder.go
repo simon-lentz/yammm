@@ -352,17 +352,19 @@ func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
 		return state.properties
 	}
 	out := slices.Clone(state.properties)
-	copied := make(map[int]bool, len(state.pendingPropertyAnnotations))
 	for _, pend := range state.pendingPropertyAnnotations {
 		for i, pd := range out {
 			if pd.Name != pend.propertyName {
 				continue
 			}
-			if !copied[i] {
+			// out starts as an element-wise clone of state.properties, so
+			// out[i] still being the retained pointer is exactly "not copied
+			// yet" — no separate bookkeeping, and no way for a second
+			// annotation on the same property to re-copy and discard the first.
+			if pd == state.properties[i] {
 				dup := *pd
 				dup.Annotations = slices.Clone(pd.Annotations)
 				out[i] = &dup
-				copied[i] = true
 			}
 			out[i].Annotations = append(out[i].Annotations, pend.decl)
 			break

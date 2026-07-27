@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -661,5 +662,104 @@ func TestCoerceParams_ListValueUnderScalarConstraintErrors(t *testing.T) {
 	types := ParamTypes{"score": schema.NewFloatConstraint()}
 	if _, err := CoerceParams(params, types); err == nil {
 		t.Fatal("want error for a list value under a scalar Float constraint, got nil")
+	}
+}
+
+// The adapter's single-node parameter shape is two-level — the merge key at the
+// top level, the properties nested under $props — and each level is described by
+// its own call. Merged, the two cover every value the query binds, and the merge
+// key reaches the driver as the same type the property does: a MERGE on one
+// representation followed by a SET of another never re-matches.
+func TestParamTypes_CoverBothHalvesOfTheNodeShape(t *testing.T) {
+	s := loadSchema(t, "temporal_pk.yammm")
+	st, ok := s.Type("Doc")
+	if !ok {
+		t.Fatal("Doc type not found in temporal_pk.yammm")
+	}
+
+	// Exactly the map NodeQueryFor builds.
+	params := map[string]any{
+		"key_created_on": "2024-01-02",
+		"props": map[string]any{
+			"created_on": "2024-01-02",
+			"updated_on": "2024-03-04",
+			"title":      "t",
+		},
+	}
+
+	pt := ParamTypesForType(st, "props")
+	maps.Copy(pt, ParamTypesForMergeKeys(st, ""))
+
+	got, err := CoerceParams(params, pt)
+	if err != nil {
+		t.Fatalf("CoerceParams: %v", err)
+	}
+
+	if _, ok := got["key_created_on"].(dbtype.Date); !ok {
+		t.Errorf("key_created_on = %T; the merge key must reach the driver as a DATE, or it matches no stored node", got["key_created_on"])
+	}
+	props, _ := got["props"].(map[string]any)
+	if _, ok := props["created_on"].(dbtype.Date); !ok {
+		t.Errorf("props.created_on = %T; want dbtype.Date", props["created_on"])
+	}
+	if _, ok := props["updated_on"].(dbtype.Date); !ok {
+		t.Errorf("props.updated_on = %T; want dbtype.Date", props["updated_on"])
+	}
+
+	if got["key_created_on"] != props["created_on"] {
+		t.Errorf("merge key %v and property %v disagree; the second write would insert a duplicate",
+			got["key_created_on"], props["created_on"])
+	}
+}
+
+// The batch shape puts the merge key one level down, under the row prefix, so
+// ParamTypesForMergeKeys is called with that prefix.
+func TestParamTypesForMergeKeys_CoversTheBatchRowKey(t *testing.T) {
+	s := loadSchema(t, "temporal_pk.yammm")
+	st, _ := s.Type("Doc")
+
+	got, err := CoerceParams(map[string]any{
+		"rows": []map[string]any{{"key_created_on": "2024-01-02"}},
+	}, ParamTypesForMergeKeys(st, "rows"))
+	if err != nil {
+		t.Fatalf("CoerceParams: %v", err)
+	}
+	rows, _ := got["rows"].([]map[string]any)
+	if _, ok := rows[0]["key_created_on"].(dbtype.Date); !ok {
+		t.Errorf("rows[0].key_created_on = %T; want dbtype.Date", rows[0]["key_created_on"])
+	}
+}
+
+// A type declaring a property literally named key_<pk> is the case one map
+// cannot describe: at the batch row prefix that spelling is the merge key, and
+// in a flat row it is the property. Each function answers for its own shape, so
+// neither ever returns the other's constraint.
+func TestParamTypes_KeyNamedPropertyBelongsToWhicheverShapeAsks(t *testing.T) {
+	s := loadSchema(t, "temporal_pk.yammm")
+	st, ok := s.Type("Order")
+	if !ok {
+		t.Fatal("Order type not found in temporal_pk.yammm")
+	}
+
+	// The property shape: rows.key_id is the declared String property, at the
+	// batch prefix as well as any other.
+	for _, prefix := range []string{"", "props", "rows"} {
+		props := ParamTypesForType(st, prefix)
+		if got := schema.ResolveAlias(props[paramKey(prefix, "key_id")]).Kind(); got != schema.KindString {
+			t.Errorf("ParamTypesForType(Order, %q)[%q] = %v; want KindString",
+				prefix, paramKey(prefix, "key_id"), got)
+		}
+	}
+
+	// The merge-key shape: the same spelling is the Date primary key `id`.
+	for _, prefix := range []string{"", "rows"} {
+		keys := ParamTypesForMergeKeys(st, prefix)
+		if got := schema.ResolveAlias(keys[paramKey(prefix, "key_id")]).Kind(); got != schema.KindDate {
+			t.Errorf("ParamTypesForMergeKeys(Order, %q)[%q] = %v; want KindDate",
+				prefix, paramKey(prefix, "key_id"), got)
+		}
+		if len(keys) != 1 {
+			t.Errorf("ParamTypesForMergeKeys(Order, %q) = %v; want the primary key alone", prefix, keys)
+		}
 	}
 }

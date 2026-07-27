@@ -510,7 +510,7 @@ Inheritance rules:
 
 - Properties, associations, and compositions are inherited from parent types
 - Child types may override inherited properties with compatible narrower constraints
-- Relationship definitions must be unique after inheritance; duplicate name/target pairs are reported as errors
+- Relationship definitions must be unique after inheritance; duplicate name/target pairs are reported as errors. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
 
 **Linearization order:** Ancestors are linearized using depth-first, left-to-right traversal with keep-first deduplication. The resulting order determines property and invariant precedence:
 
@@ -525,6 +525,8 @@ Inheritance rules:
 | Child re-declares with narrower constraint | Child's version is used |
 | Inherited property narrows an earlier ancestor's | Narrower version replaces wider |
 | Two inherited properties are incompatible | `E_PROPERTY_CONFLICT` is emitted |
+
+`E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. Each subtype that inherits a conflicting combination re-detects and reports it independently.
 
 **Invariant merging:** Own invariants come first, then inherited invariants in linearization order. If a child declares an invariant with the same name as an inherited one, the child's version takes precedence.
 
@@ -1101,6 +1103,8 @@ type Document {
 
 The single/double sigil split is required, not stylistic. Because whitespace — including newlines — is not significant to the parser, a standalone type-level annotation written with a single `@` after a property would be parsed as another annotation on that property; the `@@` sigil disambiguates.
 
+**Placement on the line.** A property-level annotation must be written on the same line as the property it annotates. Because whitespace is not significant, an annotation on a line of its own still binds to the property **above** it — never the one below — so writing it prefix-style, as decorators are written in Python, TypeScript, or Java, would silently mark the wrong property and emit the wrong store DDL. That shape is rejected with `E_INVALID_ANNOTATION` naming the property it would have attached to. A property may carry several annotations, all on its own line (`first_seen Timestamp @writeOnce @index`); a marker meant for the type as a whole is written `@@name` on its own line.
+
 **Ordering.** A property-level annotation must follow the datatype and any modifier: `state String @index` is valid, but `state String @index primary` is a syntax error — the modifier must precede the annotation. Recovery is not targeted. Because `primary` is also a legal property name, the parser reads the trailing modifier as the *next* property's name and then fails looking for that property's datatype, so the reported `E_SYNTAX` lists the datatype keywords it expected and is anchored at whatever comes next — typically the type body's closing brace, a line below the mistake.
 
 **Arguments** are positional. When parentheses are present they must hold at least one argument — `@index()` is a syntax error; a no-argument annotation is written without parentheses (`@index`). A trailing comma is allowed.
@@ -1109,12 +1113,18 @@ The single/double sigil split is required, not stylistic. Because whitespace —
 
 | Annotation | Placement | Arguments | Eligible target | Meaning |
 |---|---|---|---|---|
-| `@index` | property | none | a scalar property (String, UUID, Enum, Pattern, Integer, Float, Boolean, Date, Timestamp) that is not the type's sole primary key | single-property range index |
+| `@index` | property | none | a scalar property (String, UUID, Enum, Pattern, Integer, Float, Boolean, Date, Timestamp); rejected only when it is the sole primary key of every type that emits a constraint for it (see below) | single-property range index |
 | `@@index(p1, p2, …)` | type | one or more property references, ordered, no duplicates | each reference a scalar property of the type (own or inherited); primary-key members allowed | composite range index (order significant) |
 | `@vector(similarity)` | property | exactly one keyword: `cosine` or `euclidean` | a `Vector[N]` property | vector (approximate-nearest-neighbour) index |
 | `@writeOnce` | property | none | any non-primary-key property | marks the property immutable after node creation |
 
-A member of a **composite** primary key may carry `@index` (the composite backing index does not serve single-property lookups on it); the type's **sole** primary key may not, because its uniqueness constraint already backs an index. `@writeOnce` is rejected on every primary-key member, sole or composite.
+A member of a **composite** primary key may carry `@index`: the composite backing index does not serve single-property lookups on it. A **sole** primary key may not, because its uniqueness constraint already backs an index.
+
+Which of the two applies is decided over the types that actually **emit** the constraint — the annotated type when it is concrete, plus its concrete descendants — not over the type carrying the annotation. An abstract type emits nothing, and its key is only settled once a concrete type assembles it, so a key split across two abstract mixins is composite where it lands even though each mixin declares one member.
+
+`@index` is rejected only when **every** emitter keys on the property alone. When emitters disagree — one keys on it alone while another keys on it compositely and genuinely needs the index — no edit satisfies both, so the annotation is accepted and the redundant index ships on the sole-keyed emitter; `yammm neo4j diff` surfaces it against a live database. Descendants declared in **other schema files** are not visible to this check, so the same model can be accepted when split across files and rejected when written in one; that is a known limit, not a contract.
+
+`@writeOnce` is rejected on every primary-key member, sole or composite.
 
 Annotation eligibility is independent of type category: `abstract`, `part`, and concrete types are validated identically.
 
@@ -1123,7 +1133,7 @@ Annotation eligibility is independent of type category: `abstract`, `part`, and 
 Annotations are validated at load, after inheritance linearization. Violations produce these diagnostics:
 
 - `E_UNKNOWN_ANNOTATION` — the name is not a blessed annotation for its placement.
-- `E_INVALID_ANNOTATION` — a structural violation: wrong placement (e.g. `@@writeOnce`), wrong arity, a literal where a reference or keyword is required, an unknown similarity keyword, or a duplicate.
+- `E_INVALID_ANNOTATION` — a structural violation: wrong placement (e.g. `@@writeOnce`), a property annotation written on a line other than its property's, wrong arity, a literal where a reference or keyword is required, an unknown similarity keyword, or a duplicate.
 - `E_UNKNOWN_ANNOTATION_TARGET` — a `@@index` reference names no property of the type (the same failure class as `E_UNKNOWN_PROPERTY`, on a different construct).
 - `E_INVALID_ANNOTATION_TARGET` — the annotation is attached to an ineligible property (a non-scalar `@index`, a non-`Vector` `@vector`, `@writeOnce` on a primary key, and so on).
 - `W_ANNOTATION_SHADOWED` — a warning (not an error): a subtype re-declaration drops an inherited property's annotations without re-stating them (see [Inheritance](#inheritance)). The load still succeeds.
@@ -1132,7 +1142,27 @@ Annotations are validated at load, after inheritance linearization. Violations p
 
 Property-level annotations travel with the property they decorate: a subtype that inherits a property unchanged inherits its annotations. Type-level annotations linearize like invariants — the subtype's own annotations first, then inherited ones, with exact duplicates (same name and argument list) deduplicated keep-first. Two `@@index` members differing only in argument list are distinct indexes and both survive.
 
-Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype and the load reports `W_ANNOTATION_SHADOWED` (a warning; the load still succeeds). Re-state the annotations on the re-declaration to keep them. When two ancestors contribute the same property — equal, or one narrowing the other — and the subtype does not re-declare it, the subtype inherits the **union** of their annotation sets, independent of `extends` order — so a `@writeOnce` (or any annotation) on either ancestor's copy survives, carried by whichever version wins the narrowing. Two ancestors annotating the same property with the same annotation name but conflicting arguments — in practice only differing `@vector` similarities, since a `Vector[N]` property is equal regardless of its similarity keyword — is an unsatisfiable conflict, reported as `E_INVALID_ANNOTATION`.
+Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype and the load reports `W_ANNOTATION_SHADOWED` (a warning; the load still succeeds). Re-state the annotations on the re-declaration to keep them.
+
+When a subtype does not re-declare an inherited property, its annotations are the **union across its direct supertypes' own resolved views**, independent of `extends` order. Because each supertype's view already reflects that supertype's decisions, this is transitive in the ordinary sense:
+
+- **Mixins** both contribute, so a `@writeOnce` on either ancestor's copy survives.
+- **A chain** contributes only its most-derived member. A type's decision binds its own subtypes: if `Mid extends Base` re-declares `Base`'s annotated property without the annotation, then `Leaf extends Mid` sees `Mid`'s version — the annotation does not reappear further down.
+
+**Never declaring an annotation is not the same as dropping one.** An ancestor that simply never mentioned `@writeOnce` has no opinion about it, which is why the mixin union above is silent. An ancestor that *inherited* it and re-declared the property without it has made a decision, and that decision is carried forward to every subtype.
+
+When those two meet — one direct supertype carries an annotation while another **dropped** it — the supertypes **disagree**, and there is no merge that honours both. This is reported as `E_INVALID_ANNOTATION`:
+
+```yammm
+abstract type Base    { first_seen Timestamp @writeOnce }
+abstract type Mutable extends Base { first_seen Timestamp }   // drops it — a decision
+abstract type Other   extends Base { tag String }             // carries it
+type Doc extends Mutable, Other { id String primary }         // E_INVALID_ANNOTATION
+```
+
+Resolve it on the subtype, which is authoritative: re-declare the property **with** the annotation to keep it, or **without** it to drop it. Two arms that both drop it agree, and are silent. `Leaf` draws no `W_ANNOTATION_SHADOWED` of its own if it re-declares the property, because by then there is nothing left to drop.
+
+Two nearest ancestors annotating the same property with the same annotation name but conflicting arguments — in practice only differing `@vector` similarities, since a `Vector[N]` property is equal regardless of its similarity keyword — is an unsatisfiable conflict, reported as `E_INVALID_ANNOTATION`. One shadowed annotation, and one such conflict, draws exactly one diagnostic however many ancestors carry the property forward.
 
 ## Expressions and Invariants
 

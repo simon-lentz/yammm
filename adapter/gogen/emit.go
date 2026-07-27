@@ -504,9 +504,15 @@ func (g *generator) goFieldType(owner *schema.Type, p *schema.Property) (string,
 // elements carry no such entry and fall back to goBaseType — named element enums are
 // deferred. A property whose whole type is a named List DataType (type Codes =
 // List<String>) is handled by the isAlias branch in goFieldType, not here.
+//
+// The lookup keys by Origin() for the same reason goFieldType's isAlias branch
+// does: a property whose annotations were merged across ancestors reaches
+// emission as a synthesized copy that is in no type's own slice, so the raw
+// pointer misses the table and the field degrades to []string while the same
+// property on its ancestors emits []Name.
 func (g *generator) goListType(p *schema.Property, lc schema.ListConstraint) (string, error) {
 	if isAlias(lc.Element()) {
-		if name, ok := g.dtFieldNames[p]; ok {
+		if name, ok := g.dtFieldNames[p.Origin()]; ok {
 			return "[]" + name, nil
 		}
 	}

@@ -652,10 +652,13 @@ func convertAnnotations(decls []*annotationDecl) []*Annotation {
 					tokenKind: a.Token,
 					kind:      ArgUnvalidated,
 					span:      a.Span,
+					raw:       a.Raw,
 				})
 			}
 		}
-		anns = append(anns, newAnnotation(d.Name, args, d.Documentation, d.Span, d.ArgsMalformed))
+		ann := newAnnotation(d.Name, args, d.Documentation, d.Span, d.ArgsMalformed)
+		ann.setDetachedFrom(d.DetachedFromLine)
+		anns = append(anns, ann)
 	}
 	return anns
 }
@@ -1228,4 +1231,41 @@ func (c *completer) errorf(span location.Span, code diag.Code, format string, ar
 		issue = issue.WithSpan(span)
 	}
 	c.collector.Collect(issue.Build())
+}
+
+// errorfRelated is [completer.errorf] for a diagnostic that points at other
+// declarations as well as its own. Every completer site that emits related
+// locations routes through here so the span policy is decided once: a related
+// entry without a usable location is dropped rather than rendered.
+func (c *completer) errorfRelated(
+	span location.Span, code diag.Code, related []location.RelatedInfo, format string, args ...any,
+) {
+	msg := fmt.Sprintf(format, args...)
+	issue := diag.NewIssue(diag.Error, code, msg)
+	if !span.IsZero() {
+		issue = issue.WithSpan(span)
+	}
+	if located := locatedRelated(related); len(located) > 0 {
+		issue = issue.WithRelated(located...)
+	}
+	c.collector.Collect(issue.Build())
+}
+
+// locatedRelated returns the related entries that carry a usable location.
+//
+// A span-less entry is worse than no entry: the text renderer writes its
+// "note:" line and then suppresses the location, so the reader gets a bare
+// label pointing nowhere — and one per member, so a clash whose sides hold
+// several declarations renders as a stack of identical, information-free
+// lines. The LSP drops such entries outright, so the two surfaces disagree
+// about what the diagnostic even contains. Schemas built through
+// [Builder] carry no spans, which is where this arises.
+func locatedRelated(related []location.RelatedInfo) []location.RelatedInfo {
+	located := related[:0:0]
+	for _, r := range related {
+		if !r.Span.IsZero() {
+			located = append(located, r)
+		}
+	}
+	return located
 }

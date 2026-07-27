@@ -25,38 +25,25 @@ func ImmutableKeysFor(t *schema.Type) []string {
 	if t == nil {
 		return nil
 	}
-	// The dedup map is allocated lazily on the first @writeOnce hit, so the
-	// overwhelmingly common unannotated type — scanned once per NodeQueryFor
-	// call on the single-node write path — does an allocation-free scan and
-	// returns nil.
 	var keys []string
-	var seen map[string]bool
 	for p := range t.AllProperties() {
 		if _, ok := p.Annotation("writeOnce"); !ok {
 			continue
 		}
-		name := p.Name()
-		if seen == nil {
-			seen = make(map[string]bool)
-		}
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		keys = append(keys, name)
+		keys = append(keys, p.Name())
 	}
 	slices.Sort(keys)
-	return keys
+	return slices.Compact(keys)
 }
 
 // effectiveImmutableKeys returns the union of explicitly-passed immutable keys
-// and the schema-derived @writeOnce keys of the type, deduplicated. A nil
-// schemaType contributes no derived keys, so the result is the explicit set
-// unchanged — matching the explicit-only pass-through contract of
-// [Adapter.NodeQueryFor]. When there are no derived keys the explicit slice is
-// returned as-is, so an explicit-only call is byte-for-byte unchanged.
-func effectiveImmutableKeys(explicit []string, schemaType *schema.Type) []string {
-	derived := ImmutableKeysFor(schemaType)
+// and a type's derived @writeOnce keys, deduplicated and in that order.
+//
+// The derived side comes from [NodeShape.ImmutableKeys], computed once when the
+// shape was built, so the write path does no per-node derivation. When there
+// are no derived keys the explicit slice is returned as-is, so an explicit-only
+// call allocates nothing and its parameter map is byte-for-byte unchanged.
+func effectiveImmutableKeys(explicit, derived []string) []string {
 	if len(derived) == 0 {
 		return explicit
 	}
@@ -65,17 +52,26 @@ func effectiveImmutableKeys(explicit []string, schemaType *schema.Type) []string
 	}
 	seen := make(map[string]bool, len(explicit)+len(derived))
 	union := make([]string, 0, len(explicit)+len(derived))
-	for _, k := range explicit {
-		if !seen[k] {
-			seen[k] = true
-			union = append(union, k)
-		}
-	}
-	for _, k := range derived {
+	for _, k := range slices.Concat(explicit, derived) {
 		if !seen[k] {
 			seen[k] = true
 			union = append(union, k)
 		}
 	}
 	return union
+}
+
+// derivedImmutableKeys returns a type's @writeOnce keys for the write path.
+//
+// [Adapter.ShapeForSchema] records them on the shape, which every write entry
+// point receives, so the guarantee holds even for a caller passing a nil schema
+// type — the documented streaming call shape. A nil ImmutableKeys means the
+// shape never computed them (hand-built, or built before the field existed)
+// rather than "this type has none"; only then is the schema type consulted, so
+// the common unannotated type costs no per-node walk.
+func derivedImmutableKeys(shape *NodeShape, schemaType *schema.Type) []string {
+	if shape != nil && shape.ImmutableKeys != nil {
+		return shape.ImmutableKeys
+	}
+	return ImmutableKeysFor(schemaType)
 }

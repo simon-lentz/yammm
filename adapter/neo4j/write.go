@@ -95,9 +95,9 @@ func defaultWriteConfig() writeConfig {
 // the snapshot. A mistyped key would otherwise be honored silently — the real
 // property would stay in $update_props and be rewritten on every re-MERGE,
 // defeating the write-once guarantee with no diagnostic. Derived @writeOnce keys
-// are schema-true by construction and are not re-validated. [Adapter.NodeQueryFor]
-// skips derivation and the check when called with a nil schema type, matching its
-// nil pass-through coercion behavior.
+// are schema-true by construction and are not re-validated. A nil schema type
+// skips this validation, matching the nil pass-through coercion behavior; the
+// derived keys are unaffected, since they travel on the shape.
 //
 // The option affects node merges only: relationship merges have no
 // ON CREATE / ON MATCH split, so edge query generation ignores it.
@@ -139,14 +139,26 @@ type NodeSource interface {
 // @writeOnce keys — the query uses ON CREATE SET / ON MATCH SET to preserve
 // those values.
 //
-// schemaType provides constraint metadata for schema-aware slice coercion
-// (e.g., converting []any to []string for List<String> properties) and is the
-// source of derived @writeOnce immutable keys. This matches the coercion
-// behavior of [Adapter.BatchNodeQueries].
+// schemaType provides constraint metadata for schema-aware coercion of $props
+// (e.g., converting []any to []string for List<String> properties), matching the
+// coercion behavior of [Adapter.BatchNodeQueries]. Derived @writeOnce keys come
+// from the shape, not from this argument; schemaType is consulted for them only
+// when the shape carries none, which is the case for a hand-built one.
+//
+// The MERGE keys are coerced from the shape, not from schemaType, so a nil
+// schemaType still binds them as the driver-native types the properties are
+// stored as — see [NodeShape] and [coerceKey].
 //
 // Explicitly-passed immutable keys (see [WithImmutableKeys]) are validated
 // against schemaType: a key that names no property (own or inherited) of the
-// type is an error. A nil schemaType skips derivation, validation, and coercion.
+// type is an error. A nil schemaType skips that validation and skips $props
+// coercion.
+//
+// It does NOT skip the @writeOnce guarantee. The derived keys travel on
+// [NodeShape.ImmutableKeys], which every call already supplies, so a @writeOnce
+// property is excluded from $update_props whichever way this is called. There is
+// no argument that opts out of it: [WithImmutableKeys] only ever adds to the
+// effective set.
 //
 // Any type satisfying [NodeSource] may be passed — both [*graph.Instance]
 // (graph-based path) and [*instance.ValidInstance] (streaming path) work.
@@ -170,7 +182,7 @@ func (a *Adapter) NodeQueryFor(
 		}
 	}
 
-	keyProps, err := extractKeyProps(inst.Properties(), shape.PrimaryKeys)
+	keyProps, err := extractKeyProps(inst.Properties(), shape)
 	if err != nil {
 		return nil, fmt.Errorf("type %q: %w", inst.TypeName(), err)
 	}
@@ -182,14 +194,17 @@ func (a *Adapter) NodeQueryFor(
 
 	params := make(map[string]any)
 	for k, v := range keyProps {
-		params["key_"+k] = v
+		params[batchKeyParamPrefix+k] = v
 	}
 	params["props"] = props
 
 	// Effective immutable set: explicitly-passed keys union the type's derived
-	// @writeOnce keys. A nil schemaType contributes no derived keys, preserving
-	// the explicit-only pass-through behavior.
-	immutableKeys := effectiveImmutableKeys(cfg.immutableKeys, schemaType)
+	// @writeOnce keys. The shape carries them, which is what makes the guarantee
+	// hold for a caller passing a nil schema type — the documented streaming call
+	// shape. A shape built before that field existed, or by hand, carries none;
+	// deriving from schemaType then keeps the guarantee rather than silently
+	// dropping it, since the authoritative type is already in hand.
+	immutableKeys := effectiveImmutableKeys(cfg.immutableKeys, derivedImmutableKeys(shape, schemaType))
 	km := MutableKeys
 	if len(immutableKeys) > 0 {
 		km = ImmutableKeys
@@ -249,7 +264,7 @@ func (a *Adapter) BatchNodeQueries(
 		// Effective immutable set is per type: explicit keys union the type's
 		// derived @writeOnce keys. A non-empty explicit list still splits every
 		// type (today's contract); an annotated type splits individually.
-		immutableKeys := effectiveImmutableKeys(cfg.immutableKeys, schemaType)
+		immutableKeys := effectiveImmutableKeys(cfg.immutableKeys, derivedImmutableKeys(&nodeShape, schemaType))
 		km := MutableKeys
 		if len(immutableKeys) > 0 {
 			km = ImmutableKeys
@@ -259,7 +274,7 @@ func (a *Adapter) BatchNodeQueries(
 		var rows []map[string]any
 
 		for _, inst := range instances {
-			keyProps, err := extractKeyProps(inst.Properties(), nodeShape.PrimaryKeys)
+			keyProps, err := extractKeyProps(inst.Properties(), &nodeShape)
 			if err != nil {
 				return nil, fmt.Errorf("type %q: %w", typeName, err)
 			}
@@ -268,8 +283,13 @@ func (a *Adapter) BatchNodeQueries(
 			if err != nil {
 				return nil, fmt.Errorf("type %q: %w", typeName, err)
 			}
+			// Key entries are prefixed to keep them in a namespace disjoint from
+			// `props` and `update_props`; see [BuildBatchNodeMergeQuery], whose
+			// template reads them back as row.key_<name>.
 			row := make(map[string]any, len(keyProps)+2)
-			maps.Copy(row, keyProps)
+			for k, v := range keyProps {
+				row[batchKeyParamPrefix+k] = v
+			}
 			row["props"] = props
 			if len(immutableKeys) > 0 {
 				row["update_props"] = removeKeys(props, immutableKeys)
@@ -291,12 +311,15 @@ func (a *Adapter) BatchNodeQueries(
 
 // EdgeQueryFor generates a single relationship MERGE query for a graph edge.
 //
-// Edge properties are passed through uncoerced: EdgeQueryFor takes a resolved
-// [*graph.Edge] with no schema handle, so unlike the schema-aware
-// [Adapter.EdgeQueriesFor] and [Adapter.BatchEdgeQueries] it cannot map typed
-// relationship properties (Timestamp/Date/Float) to driver-native types. No
-// current schema declares typed relationship properties, so this is latent;
-// thread a [*schema.Relation] through this signature when one first does.
+// Endpoint keys are coerced against the shapes' declared key constraints, so a
+// Date- or Timestamp-keyed endpoint is MATCHed as the driver-native type its
+// nodes are stored as. EDGE properties, by contrast, are passed through
+// uncoerced: EdgeQueryFor takes a resolved [*graph.Edge] with no schema handle,
+// so unlike the schema-aware [Adapter.EdgeQueriesFor] and
+// [Adapter.BatchEdgeQueries] it cannot map typed relationship properties
+// (Timestamp/Date/Float) to driver-native types. No current schema declares
+// typed relationship properties, so this is latent; thread a [*schema.Relation]
+// through this signature when one first does.
 //
 //nolint:revive // opts reserved for future edge-level write options
 func (a *Adapter) EdgeQueryFor(
@@ -318,21 +341,21 @@ func (a *Adapter) EdgeQueryFor(
 		return nil, fmt.Errorf("no shape for target type %q", edge.Target().TypeName())
 	}
 
-	srcKeys, err := extractKeyProps(edge.Source().Properties(), srcShape.PrimaryKeys)
+	srcKeys, err := extractKeyProps(edge.Source().Properties(), &srcShape)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", edge.Source().TypeName(), err)
 	}
-	tgtKeys, err := extractKeyProps(edge.Target().Properties(), tgtShape.PrimaryKeys)
+	tgtKeys, err := extractKeyProps(edge.Target().Properties(), &tgtShape)
 	if err != nil {
 		return nil, fmt.Errorf("target %q: %w", edge.Target().TypeName(), err)
 	}
 
 	params := make(map[string]any)
 	for k, v := range srcKeys {
-		params["from_key_"+k] = v
+		params[relFromKeyParamPrefix+k] = v
 	}
 	for k, v := range tgtKeys {
-		params["to_key_"+k] = v
+		params[relToKeyParamPrefix+k] = v
 	}
 
 	hasProps := edge.HasProperties()
@@ -396,23 +419,23 @@ func (a *Adapter) EdgeQueriesFor(
 			return nil, fmt.Errorf("no shape for target type %q (relation %q)", targetTypeName, relationName)
 		}
 
-		srcKeys, err := extractKeyProps(inst.Properties(), srcShape.PrimaryKeys)
+		srcKeys, err := extractKeyProps(inst.Properties(), &srcShape)
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", inst.TypeName(), err)
 		}
 
 		for target := range edgeData.TargetsIter() {
-			tgtKeys, err := extractKeyFromImmutableKey(target.TargetKey(), tgtShape.PrimaryKeys)
+			tgtKeys, err := extractKeyFromImmutableKey(target.TargetKey(), &tgtShape)
 			if err != nil {
 				return nil, fmt.Errorf("target %q (relation %q): %w", targetTypeName, relationName, err)
 			}
 
 			params := make(map[string]any)
 			for k, v := range srcKeys {
-				params["from_key_"+k] = v
+				params[relFromKeyParamPrefix+k] = v
 			}
 			for k, v := range tgtKeys {
-				params["to_key_"+k] = v
+				params[relToKeyParamPrefix+k] = v
 			}
 
 			hasProps := target.HasProperties()
@@ -516,21 +539,21 @@ func (a *Adapter) BatchEdgeQueries(
 
 		var rows []map[string]any
 		for _, edge := range sigEdges {
-			srcKeys, err := extractKeyProps(edge.Source().Properties(), srcShape.PrimaryKeys)
+			srcKeys, err := extractKeyProps(edge.Source().Properties(), &srcShape)
 			if err != nil {
 				return nil, fmt.Errorf("source %q: %w", sig.sourceType, err)
 			}
-			tgtKeys, err := extractKeyProps(edge.Target().Properties(), tgtShape.PrimaryKeys)
+			tgtKeys, err := extractKeyProps(edge.Target().Properties(), &tgtShape)
 			if err != nil {
 				return nil, fmt.Errorf("target %q: %w", sig.targetType, err)
 			}
 
 			row := make(map[string]any)
 			for k, v := range srcKeys {
-				row["from_"+k] = v
+				row[relFromRowPrefix+k] = v
 			}
 			for k, v := range tgtKeys {
-				row["to_"+k] = v
+				row[relToRowPrefix+k] = v
 			}
 			if hasProps {
 				if edge.HasProperties() {
@@ -801,9 +824,29 @@ func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 	return props, nil
 }
 
-// extractKeyProps extracts named primary key properties from immutable properties.
-// All keys must be present and non-nil.
-func extractKeyProps(props immutable.Properties, keyNames []string) (map[string]any, error) {
+// coerceKey converts one primary-key value to the driver-native type its
+// declared constraint requires, using the same [coerceValue] chokepoint the
+// property path uses.
+//
+// A MERGE binds the key and SETs the property from two different maps, so a key
+// left raw where its property is coerced makes the two carry different Go types
+// for every transforming kind (Date, Timestamp, Float): the pattern matches no
+// stored node, and each write inserts another duplicate. A shape carrying no
+// constraint for the key passes the value through, which is what a shape that
+// never declared the key's type can honestly do.
+func coerceKey(shape *NodeShape, name string, raw any) (any, error) {
+	cv, err := coerceValue(shape.keyConstraints[name], raw)
+	if err != nil {
+		return nil, fmt.Errorf("primary key %q: %w", name, err)
+	}
+	return cv, nil
+}
+
+// extractKeyProps extracts the shape's primary key properties from immutable
+// properties, coercing each against its declared constraint. All keys must be
+// present and non-nil.
+func extractKeyProps(props immutable.Properties, shape *NodeShape) (map[string]any, error) {
+	keyNames := shape.PrimaryKeys
 	if len(keyNames) == 0 {
 		return nil, errors.New("no primary keys defined")
 	}
@@ -823,7 +866,11 @@ func extractKeyProps(props immutable.Properties, keyNames []string) (map[string]
 			nilKeys = append(nilKeys, name)
 			continue
 		}
-		result[name] = unwrapped
+		cv, err := coerceKey(shape, name, unwrapped)
+		if err != nil {
+			return nil, err
+		}
+		result[name] = cv
 	}
 
 	if len(missing) > 0 && len(nilKeys) > 0 {
@@ -838,9 +885,12 @@ func extractKeyProps(props immutable.Properties, keyNames []string) (map[string]
 	return result, nil
 }
 
-// extractKeyFromImmutableKey extracts named key properties from a positional immutable.Key.
-// It zips key components with the provided names. The key must have exactly len(keyNames) components.
-func extractKeyFromImmutableKey(key immutable.Key, keyNames []string) (map[string]any, error) {
+// extractKeyFromImmutableKey extracts the shape's key properties from a
+// positional immutable.Key, coercing each against its declared constraint as
+// [extractKeyProps] does. It zips key components with the shape's key names, so
+// the key must have exactly that many components.
+func extractKeyFromImmutableKey(key immutable.Key, shape *NodeShape) (map[string]any, error) {
+	keyNames := shape.PrimaryKeys
 	if len(keyNames) == 0 {
 		return nil, errors.New("no primary keys defined")
 	}
@@ -856,7 +906,11 @@ func extractKeyFromImmutableKey(key immutable.Key, keyNames []string) (map[strin
 			nilKeys = append(nilKeys, name)
 			continue
 		}
-		result[name] = val
+		cv, err := coerceKey(shape, name, val)
+		if err != nil {
+			return nil, err
+		}
+		result[name] = cv
 	}
 	if len(nilKeys) > 0 {
 		return nil, fmt.Errorf("nil primary key(s): %v", nilKeys)

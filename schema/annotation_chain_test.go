@@ -1,11 +1,14 @@
 package schema_test
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // A subtype's deliberate shadowing binds its OWN subtypes too: the annotation
@@ -535,14 +538,27 @@ type Doc extends M1, M2 { id String primary }`)
 	}
 }
 
-// The E_PROPERTY_CONFLICT dedup must report one diagnostic per pair of
-// incompatible narrowing LINEAGES, whatever member of a lineage is the survivor
-// or the incomer at the point of detection. This one table pins every shape that
-// broke a previous keying scheme (property name, [2]*Property pair, incomer
-// Origin, constraint-kind pair), so a regression to any of them fails here.
+// The E_PROPERTY_CONFLICT dedup must report one diagnostic per clash — a pair
+// of narrowing chains the walk could not unify — whatever member of a chain is
+// the survivor or the incomer at the point of detection. This one table pins
+// every shape that breaks a weaker dedup scheme: a scalar key (property name,
+// [2]*Property pair, incomer Origin, constraint-kind pair) double-reports one
+// clash or collapses two, and single-representative matching with a role swap
+// silently DROPS conflicts two ways — through a wide own survivor pairwise-
+// compatible with both of two disjoint incomers, and through a survivor swap
+// bridging two clashes with no own declaration involved. The rows therefore
+// span the two dimensions every scheme must get right: an own re-declaration
+// of the conflicted property (present and absent), and cross-clash
+// compatibility bridges (own-widening and own-free).
 //
-// A conflict count that is stable across extends-clause order is the load-bearing
-// property: an earlier key made narrow-conflict report 2 or 1 depending on order.
+// Counts are deterministic for a given schema, and for these pinned shapes
+// stable across extends-clause order — with the one declared exception the two
+// butterfly rows pin: grouping is first-fit, so three or more mutually tangled
+// same-name declarations partition differently under different extends orders,
+// and the count moves with the partition (3 here, then 2). Both partitions are
+// sound — each side is a chain, so no report ever absorbs a conflict
+// incompatible with the one it names — so the variance changes how finely
+// conflicts are split, never whether one is reported.
 func TestAnnotation_Chain_ConflictDedupByLineage(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -617,6 +633,172 @@ abstract type D { x Enum["e", "f"] }
 type C extends A, B, D { id String primary }`,
 			want: 2,
 		},
+		{
+			// An own declaration that widens two DISJOINT inherited definitions
+			// is rejected against each: two clashes, even though the own
+			// survivor is pairwise compatible with both incomers. Matching a
+			// stored representative in either role assignment bridges these
+			// into one report, hiding the second conflict until the first is
+			// fixed.
+			name: "own widens two disjoint incomers",
+			schema: `abstract type M1 { x Integer[0,10] }
+abstract type M2 { x Integer[20,30] }
+type T extends M1, M2 {
+	id String primary
+	x Integer[0,100]
+}`,
+			want: 2,
+		},
+		{
+			// No own declaration anywhere: the survivor narrows mid-walk
+			// ([0,50] to [40,50]) and the second clash's members each chain
+			// with one side of the FIRST clash, role-crossed ([0,30] under
+			// [0,50]; [40,50] under [40,90]). Role-fixed whole-side matching
+			// keeps the two clashes distinct; a role-swapped check bridges
+			// them into one.
+			name: "own-free cross-clash bridge",
+			schema: `abstract type MS1 { x Integer[0,50] }
+abstract type MP1 { x Integer[40,90] }
+abstract type MS2 { x Integer[40,50] }
+abstract type MP2 { x Integer[0,30] }
+type T extends MS1, MP1, MS2, MP2 { id String primary }`,
+			want: 2,
+		},
+		{
+			// The same four mixins in a different extends order. First-fit
+			// grouping partitions them differently — MP2 narrows the survivor
+			// before MS2 arrives, so MS2 chains with the recorded MP1 and joins
+			// that clash instead of opening its own. One report, and the
+			// related spans still name all four (pinned by
+			// [TestAnnotation_Chain_ConflictNamesEveryDeclarationUnderPermutation]).
+			// Pinning BOTH orders is the point: the count is order-dependent
+			// and that must be visible here rather than discovered downstream.
+			name: "own-free cross-clash bridge, permuted",
+			schema: `abstract type MS1 { x Integer[0,50] }
+abstract type MP1 { x Integer[40,90] }
+abstract type MS2 { x Integer[40,50] }
+abstract type MP2 { x Integer[0,30] }
+type T extends MS1, MP1, MP2, MS2 { id String primary }`,
+			want: 1,
+		},
+		{
+			// The conflicting side accretes only members that chain with EVERY
+			// recorded member: String-required and String[9,] each chain with
+			// the plain String but not with each other, so they are two
+			// clashes. Matching against a stored representative alone
+			// collapses them into one.
+			name: "representative is not the side",
+			schema: `abstract type A { x Integer }
+abstract type B { x String }
+abstract type C { x String required }
+abstract type D { x String[9,] }
+type T extends A, B, C, D { id String primary }`,
+			want: 2,
+		},
+		{
+			// Own widens two incomers that chain with EACH OTHER: one clash —
+			// the conflicting side is one chain under the shared own survivor.
+			name: "own widens one incomer chain",
+			schema: `abstract type M1 { x Integer[0,10] }
+abstract type M2 { x Integer[0,50] }
+type T extends M1, M2 {
+	id String primary
+	x Integer[0,100]
+}`,
+			want: 1,
+		},
+		{
+			// Overlapping-but-incomparable incomers under a wide own survivor:
+			// neither contains the other, so two clashes — even though a
+			// single narrower own declaration (their meet, [5,10]) would
+			// satisfy both. Finding that meet requires seeing both intervals,
+			// which is exactly what one bridged report hides.
+			name: "own widens overlapping-incomparable incomers",
+			schema: `abstract type M1 { x Integer[0,10] }
+abstract type M2 { x Integer[5,15] }
+type T extends M1, M2 {
+	id String primary
+	x Integer[0,100]
+}`,
+			want: 2,
+		},
+		{
+			// Declarations from UNRELATED types chain: the walk unifies by
+			// constraint compatibility, not by declaring-type relatedness, and
+			// clash identity must match it — B and C share no ancestor yet
+			// form one conflicting chain against the Integer survivor.
+			name: "unrelated compatible incomers chain",
+			schema: `abstract type A { x Integer }
+abstract type B { x String }
+abstract type C { x String required }
+type T extends A, B, C { id String primary }`,
+			want: 1,
+		},
+		{
+			// Two unrelated declarations that are structurally EQUAL are one
+			// chain: one clash, with both declarations named by its related
+			// spans.
+			name: "equal unrelated incomers",
+			schema: `abstract type M1 { x String }
+abstract type M2 { x String }
+abstract type W { x Integer }
+type T extends W, M1, M2 { id String primary }`,
+			want: 1,
+		},
+		{
+			// Both sides are chains: the survivor narrows [0,50] to [0,40]
+			// before the first detection, then [70,80] chains with the
+			// recorded [60,90]. One clash. Related-span completeness for this
+			// shape is pinned by [TestAnnotation_Chain_ConflictRelatedSpans].
+			name: "two chains collapse",
+			schema: `abstract type M1 { x Integer[0,50] }
+abstract type M2 { x Integer[0,40] }
+abstract type M3 { x Integer[60,90] }
+abstract type M4 { x Integer[70,80] }
+type T extends M1, M2, M3, M4 { id String primary }`,
+			want: 1,
+		},
+		{
+			// A clash is reported once per affected type: at the type that
+			// introduces it and again at each descendant whose own merge
+			// re-detects it from the raw ancestors.
+			name: "descendant re-reports",
+			schema: `abstract type M1 { x String }
+abstract type M2 { x Integer }
+abstract type C extends M1, M2 { c String }
+type D extends C { id String primary }`,
+			want: 2,
+		},
+		{
+			// First-fit grouping under one extends order: B2 chains with A1
+			// (recorded first) but not with A2, which then opens its own
+			// clash, and B1 chains with neither recorded side. Three clashes.
+			name: "butterfly order splits",
+			schema: `abstract type A1 { x String[0,20] }
+abstract type A2 { x String[5,10] }
+abstract type B1 { x String required }
+abstract type B2 { x String[1,3] required }
+type T extends A1, B2, A2, B1 {
+	id String primary
+	x Integer
+}`,
+			want: 3,
+		},
+		{
+			// The same four mixins grouped along chain lines by a different
+			// order: {A1, A2} and {B1, B2}. Reordering an extends clause can
+			// split groups (more reports, each genuine), never merge them.
+			name: "butterfly order chains",
+			schema: `abstract type A1 { x String[0,20] }
+abstract type A2 { x String[5,10] }
+abstract type B1 { x String required }
+abstract type B2 { x String[1,3] required }
+type T extends A1, A2, B1, B2 {
+	id String primary
+	x Integer
+}`,
+			want: 2,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -626,6 +808,200 @@ type C extends A, B, D { id String primary }`,
 				t.Errorf("E_PROPERTY_CONFLICT count: got %d, want %d\n%v", got, tc.want, res)
 			}
 		})
+	}
+}
+
+// EVERY declaration on both sides is named by exactly one related span,
+// labeled by side, so collapsing chains into one report never hides a
+// declaration a fix might touch.
+//
+// The surviving side is the whole merged-into chain, not just the survivor at
+// the moment of detection. M1's [0,50] is the first survivor and M2's [0,40]
+// replaces it before any conflict is detected; both are on the surviving side,
+// because narrowing either one is a way to resolve the clash and widening
+// either one re-opens it. Recording only the survivor as of a detection omitted
+// M1 here, and in the mirror case — where the narrower declaration arrives
+// AFTER the conflict — omitted the declaration that actually survives.
+func TestAnnotation_Chain_ConflictRelatedSpans(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, `schema "main"
+abstract type M1 { x Integer[0,50] }
+abstract type M2 { x Integer[0,40] }
+abstract type M3 { x Integer[60,90] }
+abstract type M4 { x Integer[70,80] }
+type T extends M1, M2, M3, M4 { id String primary }`)
+	wantCounts(t, res, map[diag.Code]int{diag.E_PROPERTY_CONFLICT: 1})
+
+	// One declaration per line: M1 on 2 and M2 on 3 merged into the survivor;
+	// M3 on 4 and M4 on 5 are the conflicting chain.
+	gotLines := make(map[int]int)
+	sideByLine := make(map[int]string)
+	for i := range res.Issues() {
+		if i.Code() == diag.E_PROPERTY_CONFLICT {
+			for _, r := range i.Related() {
+				gotLines[r.Span.Start.Line]++
+				sideByLine[r.Span.Start.Line] = r.Message
+			}
+		}
+	}
+	if wantLines := map[int]int{2: 1, 3: 1, 4: 1, 5: 1}; !maps.Equal(gotLines, wantLines) {
+		t.Errorf("related-span lines: got %v, want exactly one at each of %v", gotLines, wantLines)
+	}
+	wantSides := map[int]string{
+		2: "merged into the surviving definition here",
+		3: "merged into the surviving definition here",
+		4: "conflicting definition declared here",
+		5: "conflicting definition declared here",
+	}
+	if !maps.Equal(sideByLine, wantSides) {
+		t.Errorf("related-span side labels by line: got %v, want %v", sideByLine, wantSides)
+	}
+}
+
+// The schema-level manifestation of constraint-equality reflexivity
+// ([TestAliasConstraint_Equal_ReflexiveWhenUndecidable]): a property whose
+// datatype cannot be resolved must merge with itself as the closure re-presents
+// it, not be reported as conflicting with its own declaration. The Builder
+// reaches this shape because it accepts an alias-of-alias datatype the DSL
+// grammar cannot express.
+func TestAnnotation_Chain_UnresolvableDatatypeDoesNotSelfConflict(t *testing.T) {
+	t.Parallel()
+	b := schema.NewBuilder().WithName("main")
+	b.AddDataType("Money", schema.NewAliasConstraint("ext.Amount", nil))
+	b.AddType("A").WithProperty("amount", schema.NewAliasConstraint("Money", nil))
+	b.AddType("B").Extends(schema.NewTypeRef("", "A", location.Span{}))
+	b.AddType("C").Extends(schema.NewTypeRef("", "B", location.Span{}))
+	b.AddType("D").Extends(schema.NewTypeRef("", "A", location.Span{})).
+		Extends(schema.NewTypeRef("", "B", location.Span{})).
+		Extends(schema.NewTypeRef("", "C", location.Span{})).
+		WithPrimaryKey("id", schema.NewStringConstraint())
+	_, res := b.Build()
+
+	for i := range res.Issues() {
+		if i.Code() == diag.E_PROPERTY_CONFLICT {
+			t.Errorf("one declaration must not conflict with itself: %s", i.Message())
+		}
+	}
+}
+
+// Two ancestors declaring structurally identical rivals are ONE collision —
+// one edit to the surviving declaration clears both — so they draw one
+// diagnostic, and that diagnostic names every rival. Reporting once while
+// naming only the first would send the user to fix B and meet C on reload.
+func TestAnnotation_Chain_EqualRelationRivalsCollapseAndAreAllNamed(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, `schema "main"
+type U { id String primary }
+type V { id String primary }
+abstract type A { --> Rel (one) U }
+abstract type B { --> Rel (one) V }
+abstract type C { --> Rel (one) V }
+type T extends A, B, C { id String primary }`)
+	wantCounts(t, res, map[diag.Code]int{diag.E_RELATION_COLLISION: 1})
+
+	gotLines := make(map[int]string)
+	for i := range res.Issues() {
+		if i.Code() == diag.E_RELATION_COLLISION {
+			for _, r := range i.Related() {
+				gotLines[r.Span.Start.Line] = r.Message
+			}
+		}
+	}
+	want := map[int]string{
+		4: "surviving definition declared here",
+		5: "conflicting definition declared here",
+		6: "conflicting definition declared here",
+	}
+	if !maps.Equal(gotLines, want) {
+		t.Errorf("related spans: got %v, want %v (both rivals B and C must be named)", gotLines, want)
+	}
+}
+
+// Rivals that are NOT equal to each other stay separate collisions: two
+// different targets are two problems, and one edit cannot resolve both.
+func TestAnnotation_Chain_DistinctRelationRivalsStaySeparate(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, `schema "main"
+type U { id String primary }
+type V { id String primary }
+type W { id String primary }
+abstract type A { --> Rel (one) U }
+abstract type B { --> Rel (one) V }
+abstract type C { --> Rel (one) W }
+type T extends A, B, C { id String primary }`)
+	wantCounts(t, res, map[diag.Code]int{diag.E_RELATION_COLLISION: 2})
+}
+
+// The third way a declaration reaches the surviving side: absorbed by the
+// keep-first branch as structurally equal, never a survivor and never a
+// conflict. M2 is byte-identical to M1 and merges silently, but it is a
+// declaration a fix must touch — narrowing only M1 leaves M2 behind and the
+// next load reports M1-vs-M2. Nothing is superseded here, which is what makes
+// this distinct from the survivor-swap cases either side of it.
+func TestAnnotation_Chain_ConflictNamesAbsorbedEqualSibling(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, `schema "main"
+abstract type M1 { x String }
+abstract type M2 { x String }
+abstract type M3 { x Integer }
+type T extends M1, M2, M3 { id String primary }`)
+	wantCounts(t, res, map[diag.Code]int{diag.E_PROPERTY_CONFLICT: 1})
+
+	gotLines := make(map[int]string)
+	for i := range res.Issues() {
+		if i.Code() == diag.E_PROPERTY_CONFLICT {
+			for _, r := range i.Related() {
+				gotLines[r.Span.Start.Line] = r.Message
+			}
+		}
+	}
+	want := map[int]string{
+		2: "merged into the surviving definition here",
+		3: "merged into the surviving definition here",
+		4: "conflicting definition declared here",
+	}
+	if !maps.Equal(gotLines, want) {
+		t.Errorf("related spans: got %v, want %v (M2 on line 3 was absorbed as equal and must still be named)",
+			gotLines, want)
+	}
+}
+
+// The mirror of the case above, and the one a detection-time record cannot get
+// right at all: the narrower declaration that becomes the survivor arrives
+// AFTER the conflict is detected. A2 is what type C actually inherits, so a
+// report that names only A1 and B1 points the user at a declaration that did
+// not survive and hides the one that did — they narrow A1, reload, and meet a
+// conflict between A1 and A2 the first load never mentioned.
+func TestAnnotation_Chain_ConflictNamesLateSurvivor(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, `schema "main"
+abstract type A1 { x String[5,_] }
+abstract type B1 { x Integer }
+abstract type A2 { x String[10,_] }
+type C extends A1, B1, A2 { id String primary }`)
+	wantCounts(t, res, map[diag.Code]int{diag.E_PROPERTY_CONFLICT: 1})
+
+	var msg string
+	gotLines := make(map[int]string)
+	for i := range res.Issues() {
+		if i.Code() == diag.E_PROPERTY_CONFLICT {
+			msg = i.Message()
+			for _, r := range i.Related() {
+				gotLines[r.Span.Start.Line] = r.Message
+			}
+		}
+	}
+	want := map[int]string{
+		2: "merged into the surviving definition here",
+		4: "merged into the surviving definition here",
+		3: "conflicting definition declared here",
+	}
+	if !maps.Equal(gotLines, want) {
+		t.Errorf("related spans: got %v, want %v (A2 on line 4 is the survivor and must be named)", gotLines, want)
+	}
+	// The message names what survived — A2 — not the superseded A1.
+	if !strings.Contains(msg, "A2") {
+		t.Errorf("message should name the surviving declaration A2; got %q", msg)
 	}
 }
 
@@ -644,5 +1020,78 @@ type Leaf extends `+order+` { id String primary }`)
 		if res.HasCode(diag.E_INVALID_ANNOTATION) {
 			t.Errorf("extends %s: an ancestor listed beside its descendant is a chain, not a disagreement: %v", order, res)
 		}
+	}
+}
+
+// Grouping is order-dependent, but COMPLETENESS is not: whichever way the
+// partition falls, every participating declaration is named. This is what makes
+// the order variance cost precision rather than information, and it is the
+// property that must hold for collapsing chains into one report to be safe.
+func TestAnnotation_Chain_ConflictNamesEveryDeclarationUnderPermutation(t *testing.T) {
+	t.Parallel()
+	const mixins = `abstract type MS1 { x Integer[0,50] }
+abstract type MP1 { x Integer[40,90] }
+abstract type MS2 { x Integer[40,50] }
+abstract type MP2 { x Integer[0,30] }
+`
+	for _, order := range []string{"MS1, MP1, MS2, MP2", "MS1, MP1, MP2, MS2"} {
+		res := loadStringErr(t, "schema \"main\"\n"+mixins+"type T extends "+order+" { id String primary }")
+		named := make(map[int]bool)
+		for i := range res.Issues() {
+			if i.Code() == diag.E_PROPERTY_CONFLICT {
+				for _, r := range i.Related() {
+					named[r.Span.Start.Line] = true
+				}
+			}
+		}
+		for line := 2; line <= 5; line++ {
+			if !named[line] {
+				t.Errorf("extends order %q: declaration on line %d is never named (named: %v)", order, line, named)
+			}
+		}
+	}
+}
+
+// A re-declaration the load REJECTED decides nothing about annotations. Letting
+// it record a suppression made every subtype derive a disagreement from it,
+// pointing the user at the subtype when the only real fix is at the rejected
+// declaration.
+func TestAnnotation_Chain_RejectedRedeclarationSuppressesNothing(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, `schema "main"
+abstract type Base { x String @index }
+abstract type Mark { x String @index }
+abstract type Mid extends Base { x Integer }
+type Leaf extends Mid, Mark { id String primary }`)
+	wantCounts(t, res, map[diag.Code]int{diag.E_PROPERTY_CONFLICT: 2})
+}
+
+// A related location with no span renders as a bare "note:" line pointing
+// nowhere and is dropped outright by the LSP, so the two surfaces disagree
+// about what the diagnostic contains. Builder-built schemas carry no spans,
+// which is where this arises.
+func TestAnnotation_Chain_SpanlessRelatedLocationsAreOmitted(t *testing.T) {
+	t.Parallel()
+	b := schema.NewBuilder().WithName("main")
+	b.AddType("A").WithProperty("x", schema.NewStringConstraint())
+	b.AddType("B").WithProperty("x", schema.NewIntegerConstraint())
+	b.AddType("C").
+		Extends(schema.NewTypeRef("", "A", location.Span{})).
+		Extends(schema.NewTypeRef("", "B", location.Span{})).
+		WithPrimaryKey("id", schema.NewStringConstraint())
+	_, res := b.Build()
+
+	saw := false
+	for i := range res.Issues() {
+		if i.Code() != diag.E_PROPERTY_CONFLICT {
+			continue
+		}
+		saw = true
+		if n := len(i.Related()); n != 0 {
+			t.Errorf("span-less related locations must be omitted, got %d", n)
+		}
+	}
+	if !saw {
+		t.Fatal("expected the conflict this case exists to describe")
 	}
 }

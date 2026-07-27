@@ -286,6 +286,16 @@ func (b *astBuilder) buildPropertyAnnotations(ctx *grammar.PropertyContext) []*a
 	if len(annCtxs) == 0 {
 		return nil
 	}
+	// The line the property itself is declared on. `annotation*` is postfix and
+	// whitespace is not significant, so an annotation written on a LATER line
+	// still binds here — to the property ABOVE it, not the one below it that a
+	// reader coming from a prefix-decorator language would expect. Record the
+	// mismatch for completion to report; the parse itself is unambiguous.
+	propLine := 0
+	if nameCtx := ctx.Property_name(); nameCtx != nil {
+		propLine = b.spans.FromContext(nameCtx).Start.Line
+	}
+
 	decls := make([]*annotationDecl, 0, len(annCtxs))
 	for _, ac := range annCtxs {
 		nameCtx := ac.GetName()
@@ -293,11 +303,17 @@ func (b *astBuilder) buildPropertyAnnotations(ctx *grammar.PropertyContext) []*a
 			continue
 		}
 		args, malformed := b.buildAnnotationArgs(ac.Annotation_args())
+		span := b.spans.FromContext(ac)
+		detached := 0
+		if propLine > 0 && span.Start.Line > propLine {
+			detached = propLine
+		}
 		decls = append(decls, &annotationDecl{
-			Name:          nameCtx.GetText(),
-			Args:          args,
-			ArgsMalformed: malformed,
-			Span:          b.spans.FromContext(ac),
+			Name:             nameCtx.GetText(),
+			Args:             args,
+			ArgsMalformed:    malformed,
+			Span:             span,
+			DetachedFromLine: detached,
 		})
 	}
 	return decls
@@ -324,8 +340,9 @@ func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext
 	args = make([]annotationArgDecl, 0, len(argCtxs))
 	for _, ac := range argCtxs {
 		var (
-			text  string
-			token = tokenIdentifier
+			text    string
+			rawText string
+			token   = tokenIdentifier
 		)
 		switch {
 		case ac.Property_name() != nil:
@@ -341,6 +358,7 @@ func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext
 					// so only a successful unquote earns the label.
 					token = tokenString
 					text = unquoted
+					rawText = raw
 				} else {
 					// The yammm STRING lexer accepts escapes Go's unquoter rejects
 					// (\u/\x/\0 with no hex digits), so a lexed string can fail here.
@@ -366,6 +384,7 @@ func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext
 			Text:  text,
 			Token: token,
 			Span:  b.spans.FromContext(ac),
+			Raw:   rawText,
 		})
 	}
 	return args, malformed

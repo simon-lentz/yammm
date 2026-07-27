@@ -262,8 +262,12 @@ func (g *generator) propertyTable(t *schema.Type) string {
 		return ""
 	}
 
-	own := make(map[*schema.Property]bool, len(t.PropertiesSlice()))
-	for _, p := range t.PropertiesSlice() {
+	// One PropertiesSlice call: it clones the type's property slice, so calling
+	// it again just to size the map allocates and discards a whole slice per
+	// rendered type.
+	ownProps := t.PropertiesSlice()
+	own := make(map[*schema.Property]bool, len(ownProps))
+	for _, p := range ownProps {
 		own[p] = true
 	}
 	// Inherited rows reuse the declaring ancestor's own *Property values, so

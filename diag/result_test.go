@@ -94,8 +94,12 @@ func TestResult_HasCode_ReflectsRetainedIssuesUnderTruncation(t *testing.T) {
 	// the limit reads false. The seen-based severity gate stays truthful — a
 	// dropped Error still fails OK()/HasErrors() — so the two families are
 	// deliberately distinct, not in conflict.
+	//
+	// Both issues are Errors so the second is genuinely dropped: an incoming
+	// issue only displaces a stored one when it is MORE severe (see
+	// Collector.storeLocked), and equal severity does not displace.
 	c := NewCollector(1)
-	c.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "fills the limit").Build())
 	c.Collect(NewIssue(Error, E_INTERNAL, "dropped past the limit").Build())
 	r := c.Result()
 
@@ -110,9 +114,79 @@ func TestResult_HasCode_ReflectsRetainedIssuesUnderTruncation(t *testing.T) {
 	if r.OK() || !r.HasErrors() {
 		t.Errorf("OK=%v HasErrors=%v; want false/true — the dropped Error must still fail the gate", r.OK(), r.HasErrors())
 	}
+	if got := r.SeverityCounts().Errors; got != 2 {
+		t.Errorf("SeverityCounts().Errors = %d; want 2 — the dropped Error is still an Error the collector saw", got)
+	}
 	// The retained issue's code is enumerable.
 	if !r.HasCode(E_SYNTAX) {
 		t.Error("HasCode(E_SYNTAX) = false; want true (the retained issue)")
+	}
+}
+
+// A flood of warnings must not starve the errors that explain a failure: once
+// the budget is full, an incoming Error displaces a stored Warning. Schema
+// completion collects W_ANNOTATION_SHADOWED during linearization — ahead of
+// every error-producing phase — so severity-blind truncation left a failing load
+// reporting only warnings, with nothing naming what broke it.
+func TestCollector_LimitRetainsMostSevere(t *testing.T) {
+	c := NewCollector(3)
+	for range 5 {
+		c.Collect(NewIssue(Warning, E_SYNTAX, "shadowed annotation").Build())
+	}
+	c.Collect(NewIssue(Error, E_INTERNAL, "the error that explains the failure").Build())
+	r := c.Result()
+
+	if !r.HasCode(E_INTERNAL) {
+		t.Error("the Error must be retained in place of a Warning, not dropped at the cap")
+	}
+	if got := r.Len(); got != 3 {
+		t.Errorf("Len() = %d; want 3 — the cap still bounds storage", got)
+	}
+	// 6 issues seen, 3 retained: the 3 not retained are dropped, whether the
+	// incoming one was rejected or a stored one was evicted for it.
+	if got := r.DroppedCount(); got != 3 {
+		t.Errorf("DroppedCount() = %d; want 3 (seen minus retained)", got)
+	}
+	if got := r.SeverityCounts(); got.Warnings != 5 || got.Errors != 1 {
+		t.Errorf("SeverityCounts() = %+v; want 5 warnings / 1 error seen", got)
+	}
+}
+
+// Eviction keeps the earliest-arrived issues of a given severity, so a caller
+// that reads a truncated result sees the first errors reported, not the last.
+func TestCollector_LimitEvictsLatestOfLeastSevere(t *testing.T) {
+	c := NewCollector(2)
+	c.Collect(NewIssue(Warning, E_SYNTAX, "first warning").Build())
+	c.Collect(NewIssue(Warning, E_INTERNAL, "second warning").Build())
+	c.Collect(NewIssue(Error, E_LIMIT_REACHED, "error displaces the LAST warning").Build())
+	r := c.Result()
+
+	if !r.HasCode(E_SYNTAX) {
+		t.Error("the first warning should survive; eviction takes the latest of the least severe")
+	}
+	if r.HasCode(E_INTERNAL) {
+		t.Error("the second warning should have been evicted")
+	}
+	if !r.HasCode(E_LIMIT_REACHED) {
+		t.Error("the error should be retained")
+	}
+}
+
+// Merge routes through the same storage path, so merging an error-bearing result
+// into a warning-saturated collector retains the errors.
+func TestCollector_MergeRetainsMostSevere(t *testing.T) {
+	full := NewCollector(2)
+	full.Collect(NewIssue(Warning, E_SYNTAX, "w1").Build())
+	full.Collect(NewIssue(Warning, E_SYNTAX, "w2").Build())
+
+	errs := NewCollectorUnlimited()
+	errs.Collect(NewIssue(Error, E_INTERNAL, "the real failure").Build())
+
+	full.Merge(errs.Result())
+	r := full.Result()
+
+	if !r.HasCode(E_INTERNAL) {
+		t.Error("a merged Error must displace a stored Warning at the limit")
 	}
 }
 

@@ -76,6 +76,12 @@ type AnnotationArg struct {
 	tokenKind annotationTokenKind
 	kind      AnnotationArgKind
 	span      location.Span
+
+	// raw is the argument's source text for a quoted string, whose text field
+	// holds the UNQUOTED value; empty for every other kind (their text is
+	// already the source spelling) and for Builder-constructed arguments,
+	// which have no source. Read only by [AnnotationArg.displayText].
+	raw string
 }
 
 // Text returns the source text of the argument (a string literal is unquoted).
@@ -94,11 +100,18 @@ func (a AnnotationArg) isLiteral() bool {
 	return a.tokenKind == tokenLiteral || a.tokenKind == tokenString
 }
 
-// displayText returns the argument in its SOURCE spelling: a quoted string is
-// re-quoted (its stored text is unquoted), everything else is already its own
-// spelling. Used by diagnostics that echo an argument back to the user.
+// displayText returns the argument in its SOURCE spelling. A quoted string
+// carries its raw source text (text alone is the unquoted value), so the echo
+// keeps the delimiter the author actually wrote — the yammm lexer accepts both
+// ' and ", and re-quoting through strconv would report a single-quoted
+// argument back to the user in double quotes. Everything else is already its
+// own spelling. Used by diagnostics that echo an argument back to the user.
 func (a AnnotationArg) displayText() string {
 	if a.tokenKind == tokenString {
+		if a.raw != "" {
+			return a.raw
+		}
+		// Builder-constructed arguments have no source text to preserve.
 		return strconv.Quote(a.text)
 	}
 	return a.text
@@ -114,6 +127,14 @@ type Annotation struct {
 	doc  string
 	span location.Span
 
+	// detachedFrom is the line of the property this annotation binds to, set
+	// only when the annotation was written on a LATER line. Property
+	// annotations are postfix and whitespace is not significant, so an
+	// annotation on its own line binds to the PRECEDING property rather than
+	// the following one a reader would expect; completion reports that rather
+	// than letting the two readings diverge silently.
+	detachedFrom int
+
 	// argsMalformed marks an annotation whose argument list failed to parse, so
 	// args does not faithfully record the source. Completion skips its
 	// registry-driven argument and target checks: those read a list that never
@@ -126,6 +147,10 @@ type Annotation struct {
 func newAnnotation(name string, args []AnnotationArg, doc string, span location.Span, argsMalformed bool) *Annotation {
 	return &Annotation{name: name, args: args, doc: doc, span: span, argsMalformed: argsMalformed}
 }
+
+// setDetachedFrom records that this annotation was written on a later line
+// than the property it binds to. See [Annotation.detachedFromLine].
+func (a *Annotation) setDetachedFrom(line int) { a.detachedFrom = line }
 
 // Name returns the annotation name, without the @ / @@ sigil.
 func (a *Annotation) Name() string { return a.name }
@@ -172,6 +197,13 @@ func (a *Annotation) setArgKind(i int, kind AnnotationArgKind) {
 func (a *Annotation) identity() string {
 	const sep = "\x00"
 	var b strings.Builder
+	// The NAME is length-prefixed for the same reason the arguments are: it is
+	// the first field, so without a length its bytes run straight into the
+	// first argument's encoding and a name chosen to look like that encoding
+	// makes two different annotations produce one key. The DSL grammar cannot
+	// spell such a name, but [TypeBuilder.WithTypeAnnotation] and
+	// [TypeBuilder.WithPropertyAnnotation] take one as a plain string.
+	fmt.Fprintf(&b, "%d%s", len(a.name), sep)
 	b.WriteString(a.name)
 	for _, arg := range a.args {
 		fmt.Fprintf(&b, "%s%d%s%d%s", sep, arg.tokenKind, sep, len(arg.text), sep)

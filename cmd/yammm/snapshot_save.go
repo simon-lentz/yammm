@@ -88,11 +88,16 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 
 	// Load schema.
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	if renderLoadDiagnostics(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult) {
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
-	// Load existing snapshot if --into is set.
+	// Load existing snapshot if --into is set. Its diagnostics join the pending
+	// set rather than rendering on their own: a warning here (an unsupported
+	// hash algorithm, say) means the imported snapshot's integrity was not fully
+	// verified, and it must reach the operator without turning one invocation
+	// into two rendered results.
 	var g *graph.Graph
 	if intoPath != "" {
 		snap, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
@@ -100,8 +105,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "error: %v\n", loadErr)
 			return &cli.ExitError{Code: cli.ExitRuntime}
 		}
+		pending = cli.MergeResults(pending, loadResult)
 		if loadResult.HasErrors() {
-			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), loadResult)
+			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), pending)
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 		g = graph.NewFromSnapshot(s, snap)
@@ -125,10 +131,12 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 		g, graphResult = cli.BuildGraph(cmd.Context(), s, valids)
 	}
 
-	// Merge all diagnostics.
-	result := cli.MergeResults(parseResult, validateResult, graphResult)
+	// Merge all diagnostics and render once, whatever their severity: the
+	// pending set carries load and imported-snapshot warnings that are only
+	// reachable here.
+	result := cli.MergeResults(pending, parseResult, validateResult, graphResult)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 	if result.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 

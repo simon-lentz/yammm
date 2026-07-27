@@ -1,0 +1,14 @@
+schema "inherit_test"
+
+abstract type Auditable {
+    audited_at Timestamp required @index
+    vec        Vector[128]        @vector(cosine)
+}
+
+type Alpha extends Auditable {
+    alpha_id String primary
+}
+
+type Beta extends Auditable {
+    beta_id String primary
+}

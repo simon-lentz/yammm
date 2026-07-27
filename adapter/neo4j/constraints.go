@@ -3,6 +3,7 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -18,6 +19,17 @@ const (
 	ConstraintType                          // Property type (scalar or list)
 	ConstraintNodeKey                       // Combined uniqueness + NOT NULL (NODE KEY)
 )
+
+// String returns the constraint kind's Neo4j remote type name, so a
+// [Constraint] renders legibly wherever it is printed — a diagnostic, a test
+// failure, or a consumer's log — instead of showing the bare iota ordinal.
+// Matches [IndexKind.String].
+func (k ConstraintKind) String() string {
+	if s := constraintKindToRemoteType(k); s != unknownRemoteConstraintType {
+		return s
+	}
+	return fmt.Sprintf("ConstraintKind(%d)", int(k))
+}
 
 // Constraint is a structured representation of a single Neo4j constraint.
 // Construct via [Adapter.ConstraintsStructured]; do not create directly.
@@ -80,11 +92,15 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) (
 		constraints = append(constraints, a.constraintsForType(ctx, t, label, collector)...)
 	}
 
-	// Edition gating: Community only supports UNIQUE.
-	if a.config.edition == Community {
+	disambiguateConstraintNames(constraints)
+
+	// Edition gating, through the same list [Adapter.DiffConstraints] decides
+	// declarability by, so the desired side of a diff and its actual side are
+	// filtered identically.
+	if kinds := a.declarableConstraintKinds(); len(kinds) < len(allConstraintKinds) {
 		filtered := make([]Constraint, 0, len(constraints))
 		for _, c := range constraints {
-			if c.Kind == ConstraintUnique {
+			if slices.Contains(kinds, c.Kind) {
 				filtered = append(filtered, c)
 			}
 		}
@@ -389,7 +405,12 @@ func (a *Adapter) optionalName(label string, properties []string, kind Constrain
 
 // constraintName generates a deterministic constraint name: {label}_{prop1}_{prop2}_{kind}.
 func constraintName(label string, properties []string, kind ConstraintKind) string {
+	// //exhaustive:enforce because there is no default arm to fall into: a kind
+	// added without a case here leaves suffix empty and silently emits a name
+	// ending in a bare underscore, which then collides with every other unnamed
+	// kind on the same label and properties.
 	var suffix string
+	//exhaustive:enforce
 	switch kind {
 	case ConstraintUnique:
 		suffix = "unique"
@@ -462,5 +483,51 @@ func neo4jListElementType(c schema.Constraint) (string, error) {
 		return "", fmt.Errorf("%w: list element kind %v", ErrUnsupportedListElem, c.Kind())
 	default:
 		return "", fmt.Errorf("%w: unknown list element kind %v", ErrUnsupportedListElem, c.Kind())
+	}
+}
+
+// disambiguateConstraintNames gives every emitted constraint a unique name,
+// appending a short digest of its identity to each member of any group that
+// would otherwise share one.
+//
+// [constraintName] joins the label and property names with underscores, and
+// property names may themselves contain underscores, so the encoding is not
+// injective ACROSS TYPES: a property `a_b` on type `Item` and a property `b` on
+// type `Item_a` both render `{schema}__Item_a_b_not_null`. Because every emitted
+// statement carries IF NOT EXISTS, the second CREATE is silently skipped and
+// that constraint is never enforced — a NOT NULL or TYPE guarantee the schema
+// declares and the database does not have.
+//
+// Mirrors [disambiguateIndexNames], including the reasons only colliding names
+// are suffixed, why the digest is taken over the identity rather than a
+// position, and the reservation of non-colliding names via [uniqueDigestName] —
+// a suffixed name landing on a name some other constraint already holds
+// unsuffixed would recreate the collision it exists to break.
+//
+// The rename is substituted into the rendered statement rather than re-rendering
+// it. The name is the first thing after CREATE CONSTRAINT, so the first
+// occurrence is always the name — the label, which the name embeds, appears
+// later in the FOR clause.
+func disambiguateConstraintNames(constraints []Constraint) {
+	counts := make(map[string]int, len(constraints))
+	for _, c := range constraints {
+		if c.Name != "" {
+			counts[c.Name]++
+		}
+	}
+	taken := make(map[string]bool, len(constraints))
+	for _, c := range constraints {
+		if c.Name != "" && counts[c.Name] < 2 {
+			taken[c.Name] = true
+		}
+	}
+	for i, c := range constraints {
+		if c.Name == "" || counts[c.Name] < 2 {
+			continue
+		}
+		renamed := uniqueDigestName(c.Name, desiredSemanticKey(c), taken)
+		taken[renamed] = true
+		constraints[i].Name = renamed
+		constraints[i].Statement = strings.Replace(c.Statement, c.Name, renamed, 1)
 	}
 }

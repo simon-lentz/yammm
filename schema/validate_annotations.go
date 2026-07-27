@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"fmt"
 	"iter"
 	"slices"
 	"strings"
@@ -22,6 +21,7 @@ const (
 
 // String returns the annotation sigil for the placement ("@" or "@@").
 func (p AnnotationPlacement) String() string {
+	//exhaustive:enforce
 	switch p {
 	case PlacementProperty:
 		return "@"
@@ -161,6 +161,21 @@ func (c *completer) validateAnnotations() {
 func (c *completer) validatePropertyAnnotations(t *Type, prop *Property) {
 	seen := make(map[string]*Annotation)
 	for _, a := range prop.annotations {
+		// An annotation on a line of its own binds to the property ABOVE it,
+		// because the grammar's property-trailing annotation* does not care
+		// about line breaks. A reader used to prefix decorators writes it
+		// expecting the property BELOW, and nothing else in the load
+		// distinguishes the two readings: the schema is accepted and the wrong
+		// property carries the marker into the emitted store DDL. Refuse to
+		// pick between the readings instead.
+		if a.detachedFrom > 0 {
+			c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
+				"annotation @%s is written on its own line but attaches to property %q declared on line %d; "+
+					"put it on that property's line, or use @@%s for a type-level annotation",
+				a.name, prop.Name(), a.detachedFrom, a.name)
+			continue
+		}
+
 		spec, known := annotationRegistry[annotationKey{PlacementProperty, a.name}]
 
 		if a.argsMalformed {
@@ -250,11 +265,7 @@ func (c *completer) annotationErrorf(a *Annotation, span location.Span, code dia
 // (pointing at the first occurrence) and a redundancy (pointing at the emitter).
 func (c *completer) annotationErrorWithRelated(a *Annotation, span location.Span, code diag.Code, related []location.RelatedInfo, format string, args ...any) {
 	c.diagnosedAnnotations[a] = true
-	c.collector.Collect(
-		diag.NewIssue(diag.Error, code, fmt.Sprintf(format, args...)).
-			WithSpan(span).
-			WithRelated(related...).Build(),
-	)
+	c.errorfRelated(span, code, related, format, args...)
 }
 
 // reportUnknownOrMisplaced reports a placement mismatch when the name is

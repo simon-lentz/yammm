@@ -274,7 +274,15 @@ func TestNodeQueryFor_UnannotatedTypeUnchanged(t *testing.T) {
 	}
 }
 
-func TestNodeQueryFor_NilSchemaTypeIgnoresAnnotations(t *testing.T) {
+// A nil schemaType is the documented streaming call shape — a caller holding an
+// instance but not the *schema.Type. It skips $props coercion and explicit-key
+// validation, but it must NOT skip the @writeOnce guarantee: the immutable keys
+// come from the NodeShape, which was built from the schema and is always in
+// hand. A caller that got the mutable shape here would overwrite every
+// @writeOnce property on each re-ingestion MERGE — destroying exactly the
+// first-observation values the annotation exists to protect, with no error and
+// no warning.
+func TestNodeQueryFor_NilSchemaTypeStillHonorsWriteOnce(t *testing.T) {
 	t.Parallel()
 	a, s, v, shape := setupWrite(t, "writeonce.yammm")
 
@@ -285,14 +293,50 @@ func TestNodeQueryFor_NilSchemaTypeIgnoresAnnotations(t *testing.T) {
 	inst := graphResult.InstancesOf("Entity")[0]
 	ns := shape.Types["Entity"]
 
-	// A nil schemaType cannot derive annotations: with no explicit keys the shape
-	// stays mutable, matching the nil pass-through contract.
+	q, err := a.NodeQueryFor(context.Background(), &ns, inst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, ImmutableKeys); q.Statement != want {
+		t.Errorf("Statement = %q; want immutable split %q even with a nil schemaType", q.Statement, want)
+	}
+	updateProps, ok := q.Params["update_props"].(map[string]any)
+	if !ok {
+		t.Fatal("update_props should be present when the shape carries @writeOnce keys")
+	}
+	for _, k := range []string{"first_seen", "origin"} {
+		if _, has := updateProps[k]; has {
+			t.Errorf("update_props should exclude derived immutable key %q", k)
+		}
+	}
+	if _, has := updateProps["name"]; !has {
+		t.Error("update_props should retain the mutable 'name' property")
+	}
+}
+
+// An unannotated type still gets the mutable shape through the same nil-type
+// path, so the fix above turns on the schema's annotations rather than on the
+// nil argument itself.
+func TestNodeQueryFor_NilSchemaTypeUnannotatedStaysMutable(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Plain": {{"id": "p1", "name": "n"}},
+	})
+
+	inst := graphResult.InstancesOf("Plain")[0]
+	ns := shape.Types["Plain"]
+
 	q, err := a.NodeQueryFor(context.Background(), &ns, inst, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
-		t.Errorf("Statement = %q; want mutable builder output %q (nil schemaType ignores annotations)", q.Statement, want)
+		t.Errorf("Statement = %q; want mutable builder output %q", q.Statement, want)
+	}
+	if _, has := q.Params["update_props"]; has {
+		t.Error("update_props should be absent for an unannotated type with no explicit keys")
 	}
 }
 
@@ -1621,7 +1665,9 @@ func TestExtractKeyFromImmutableKey(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := extractKeyFromImmutableKey(immutable.WrapKey(tc.components), tc.keyNames)
+			got, err := extractKeyFromImmutableKey(
+				immutable.WrapKey(tc.components), &NodeShape{PrimaryKeys: tc.keyNames},
+			)
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("want error containing %q, got nil", tc.wantErr)
@@ -1706,5 +1752,302 @@ func TestCoerceSlice_IntegerOverflowErrors(t *testing.T) {
 	raw := []any{uint64(9223372036854775808)}
 	if _, err := coerceSlice(raw, schema.NewListConstraint(schema.NewIntegerConstraint())); err == nil {
 		t.Fatal("want error for a uint64 exceeding int64 max, got nil")
+	}
+}
+
+// An INHERITED primary key is the value the MERGE matches on just as an own one
+// is, and an inherited property is as present in a param map as an own one, so
+// both helpers must see the merged view rather than the type's own declarations.
+func TestParamTypes_CoverInheritedMembers(t *testing.T) {
+	t.Parallel()
+	s, res := schema.LoadString(context.Background(), `schema "inh"
+abstract type Base { created_on Date primary }
+type Doc extends Base { title String required }
+`, "p.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	dt, ok := s.Type("Doc")
+	if !ok {
+		t.Fatal("type Doc not found")
+	}
+
+	if _, ok := ParamTypesForMergeKeys(dt, "rows")["rows.key_created_on"]; !ok {
+		t.Error("no rows.key_created_on entry; the batch template matches on row.key_created_on")
+	}
+	if _, ok := ParamTypesForMergeKeys(dt, "")["key_created_on"]; !ok {
+		t.Error("no key_created_on entry; the single-node template binds $key_created_on")
+	}
+	if _, ok := ParamTypesForType(dt, "rows")["rows.created_on"]; !ok {
+		t.Error("no rows.created_on entry; an inherited property belongs in a flat row too")
+	}
+}
+
+// A shape that computed no @writeOnce keys must be distinguishable from one that
+// never computed any, so the write path falls back to the schema type only for a
+// hand-built shape — and does no per-node property walk for the overwhelmingly
+// common unannotated type.
+func TestShapeForSchema_ImmutableKeysNonNilWhenEmpty(t *testing.T) {
+	t.Parallel()
+	_, s, _, shape := setupWrite(t, "writeonce.yammm")
+	_ = s
+	plain := shape.Types["Plain"]
+	if plain.ImmutableKeys == nil {
+		t.Error("Plain has no @writeOnce properties, but its ImmutableKeys is nil — indistinguishable from a shape that never computed them")
+	}
+	if len(plain.ImmutableKeys) != 0 {
+		t.Errorf("Plain.ImmutableKeys = %v; want empty", plain.ImmutableKeys)
+	}
+}
+
+// The batch path honours @writeOnce from a hand-built shape via the schema type,
+// exactly as the single-node path does.
+func TestBatchNodeQueries_HandBuiltShapeStillHonorsWriteOnce(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
+	})
+
+	// A shape as a pre-upgrade caller would have built it: no ImmutableKeys.
+	stale := &GraphShape{Types: map[string]NodeShape{}}
+	for name, ns := range shape.Types {
+		ns.ImmutableKeys = nil
+		stale.Types[name] = ns
+	}
+
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range queries {
+		if !strings.Contains(q.Statement, "wo_test__Entity") {
+			continue
+		}
+		if !strings.Contains(q.Statement, "ON CREATE SET") {
+			t.Errorf("a hand-built shape dropped the @writeOnce split: %q", q.Statement)
+		}
+		for _, row := range q.Params["rows"].([]map[string]any) {
+			up, ok := row["update_props"].(map[string]any)
+			if !ok {
+				t.Fatal("Entity row missing update_props")
+			}
+			if _, has := up["first_seen"]; has {
+				t.Error("update_props should exclude the derived @writeOnce key")
+			}
+		}
+	}
+}
+
+// The batch row's merge-key entries and the template that reads them are two
+// halves of one wire contract, so the row must carry exactly the prefixed entry
+// the template reads and no unprefixed one.
+func TestBatchNodeQueries_RowCarriesTheKeyTheTemplateReads(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Plain": {{"id": "p1", "name": "n"}},
+	})
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ns := shape.Types["Plain"]
+	var checked int
+	for _, q := range queries {
+		if !strings.Contains(q.Statement, ns.Label) {
+			continue
+		}
+		for _, pk := range ns.PrimaryKeys {
+			// The template must read exactly the entry the row writes.
+			want := "row." + batchKeyParamPrefix + pk
+			if !strings.Contains(q.Statement, want) {
+				t.Errorf("statement does not read %q:\n%s", want, q.Statement)
+			}
+			for _, row := range q.Params["rows"].([]map[string]any) {
+				if _, has := row[batchKeyParamPrefix+pk]; !has {
+					t.Errorf("row has no %q entry; the MERGE would match on null: %v",
+						batchKeyParamPrefix+pk, row)
+				}
+				if _, unprefixed := row[pk]; unprefixed {
+					t.Errorf("row carries an unprefixed %q entry, which shares the namespace with props", pk)
+				}
+				checked++
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no rows were checked; the assertion would be vacuous")
+	}
+}
+
+// A MERGE key must reach the driver as the same Neo4j-native type $props stores
+// the property as. A Date primary key bound as a string matches no node whose
+// property is a DATE, so each write inserts another duplicate.
+func TestNodeQueryFor_CoercesMergeKey(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "temporal_pk.yammm")
+
+	valid := validateInstance(t, v, "Doc", map[string]any{
+		"created_on": "2024-01-02",
+		"updated_on": "2024-03-04",
+		"title":      "t",
+	})
+
+	ns := shape.Types["Doc"]
+	st, _ := s.Type("Doc")
+	q, err := a.NodeQueryFor(context.Background(), &ns, valid, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key := q.Params[batchKeyParamPrefix+"created_on"]
+	if _, isDate := key.(dbtype.Date); !isDate {
+		t.Errorf("$%screated_on = %#v (%T); want dbtype.Date", batchKeyParamPrefix, key, key)
+	}
+	// Control: the property the MERGE key is drawn from carries the same type,
+	// which is the invariant — the two maps must agree.
+	props := q.Params["props"].(map[string]any)
+	if props["created_on"] != key {
+		t.Errorf("key %#v and property %#v disagree; the MERGE matches nothing",
+			key, props["created_on"])
+	}
+}
+
+// The batch path carries the same guarantee as the single-node path: both read
+// the key out of the same instance, so both must coerce it.
+func TestBatchNodeQueries_CoercesMergeKey(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "temporal_pk.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Doc": {{"created_on": "2024-01-02", "updated_on": "2024-03-04", "title": "t"}},
+	})
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var checked int
+	for _, q := range queries {
+		if !strings.Contains(q.Statement, shape.Types["Doc"].Label) {
+			continue
+		}
+		for _, row := range q.Params["rows"].([]map[string]any) {
+			key := row[batchKeyParamPrefix+"created_on"]
+			if _, isDate := key.(dbtype.Date); !isDate {
+				t.Errorf("row.%screated_on = %#v (%T); want dbtype.Date",
+					batchKeyParamPrefix, key, key)
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no rows were checked; the assertion would be vacuous")
+	}
+}
+
+// An endpoint key is MATCHed against nodes the node path already wrote, so it
+// must be coerced the same way. Bound raw it matches nothing, the MERGE never
+// executes, and matched_rows is a legitimate-looking 0 with no error.
+func TestEdgeQueriesFor_CoercesEndpointKeys(t *testing.T) {
+	t.Parallel()
+	a, s, v, shapes := setupWrite(t, "temporal_pk.yammm")
+
+	valid := validateInstance(t, v, "Citation", map[string]any{
+		"citation_id": "c1",
+		"cites":       map[string]any{"_target_created_on": "2024-01-02"},
+	})
+
+	st, _ := s.Type("Citation")
+	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 1 {
+		t.Fatalf("got %d queries; want 1", len(queries))
+	}
+
+	to := queries[0].Params[relToKeyParamPrefix+"created_on"]
+	if _, isDate := to.(dbtype.Date); !isDate {
+		t.Errorf("$%screated_on = %#v (%T); want dbtype.Date", relToKeyParamPrefix, to, to)
+	}
+	// Control: the source key is a String, which coerces to itself — so the
+	// assertion above turns on the Date endpoint, not on coercion running at all.
+	from := queries[0].Params[relFromKeyParamPrefix+"citation_id"]
+	if from != "c1" {
+		t.Errorf("$%scitation_id = %#v; want the String key unchanged", relFromKeyParamPrefix, from)
+	}
+}
+
+// Both edge paths that hold a resolved graph must coerce both endpoints.
+func TestEdgeQueries_CoerceEndpointKeysFromAGraph(t *testing.T) {
+	t.Parallel()
+	a, s, v, shapes := setupWrite(t, "temporal_pk.yammm")
+
+	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Doc":      {{"created_on": "2024-01-02", "updated_on": "2024-03-04", "title": "t"}},
+		"Citation": {{"citation_id": "c1", "cites": map[string]any{"_target_created_on": "2024-01-02"}}},
+	})
+
+	edges := graphResult.Edges()
+	if len(edges) != 1 {
+		t.Fatalf("got %d edges; want 1", len(edges))
+	}
+
+	single, err := a.EdgeQueryFor(context.Background(), edges[0], shapes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if to := single.Params[relToKeyParamPrefix+"created_on"]; !isDateValue(to) {
+		t.Errorf("EdgeQueryFor $%screated_on = %#v (%T); want dbtype.Date",
+			relToKeyParamPrefix, to, to)
+	}
+
+	batches, err := a.BatchEdgeQueries(context.Background(), graphResult, shapes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batches) != 1 {
+		t.Fatalf("got %d batch queries; want 1", len(batches))
+	}
+	rows := batches[0].Params["rows"].([]map[string]any)
+	if to := rows[0][relToRowPrefix+"created_on"]; !isDateValue(to) {
+		t.Errorf("BatchEdgeQueries row.%screated_on = %#v (%T); want dbtype.Date",
+			relToRowPrefix, to, to)
+	}
+}
+
+func isDateValue(v any) bool {
+	_, ok := v.(dbtype.Date)
+	return ok
+}
+
+// A shape carrying no key constraints — hand-built, or restored from a
+// serialization that cannot hold one — passes keys through rather than failing,
+// which is the behaviour of a shape that never declared their types.
+func TestNodeQueryFor_ShapeWithoutKeyConstraintsPassesKeysThrough(t *testing.T) {
+	t.Parallel()
+	a, s, v, shape := setupWrite(t, "temporal_pk.yammm")
+
+	valid := validateInstance(t, v, "Doc", map[string]any{
+		"created_on": "2024-01-02",
+		"updated_on": "2024-03-04",
+		"title":      "t",
+	})
+
+	handBuilt := shape.Types["Doc"]
+	handBuilt.keyConstraints = nil
+	st, _ := s.Type("Doc")
+	q, err := a.NodeQueryFor(context.Background(), &handBuilt, valid, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := q.Params[batchKeyParamPrefix+"created_on"]; got != "2024-01-02" {
+		t.Errorf("$%screated_on = %#v; want the raw value passed through",
+			batchKeyParamPrefix, got)
 	}
 }

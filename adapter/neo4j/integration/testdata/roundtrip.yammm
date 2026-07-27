@@ -1,0 +1,22 @@
+schema "rt"
+
+abstract type Tracked {
+    first_seen Timestamp required @writeOnce
+
+    @@index(first_seen)
+}
+
+type Document extends Tracked {
+    doc_id       String    primary
+    state        String    @index
+    published_on Date      @index
+    embedding    Vector[4] @vector(cosine)
+    title        String    required
+
+    @@index(state, published_on)
+}
+
+type Note extends Tracked {
+    note_id String primary
+    body    String @index
+}

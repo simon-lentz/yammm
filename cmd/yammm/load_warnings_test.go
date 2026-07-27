@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -17,8 +18,8 @@ import (
 // unprinted, and the property mutable on every re-ingestion.
 //
 // The exit code stays ExitOK: a warning is not a failure. Every command that
-// loads a schema routes through renderLoadDiagnostics; these are the ones a
-// schema path alone can drive.
+// loads a schema routes through reportSchemaLoad; these are the ones a schema
+// path alone can drive.
 func TestLoadWarningsRenderedByEveryCommand(t *testing.T) {
 	t.Parallel()
 
@@ -42,6 +43,56 @@ func TestLoadWarningsRenderedByEveryCommand(t *testing.T) {
 			}
 			if !strings.Contains(stderr, "W_ANNOTATION_SHADOWED") {
 				t.Errorf("the shadowed-annotation warning must reach stderr; got:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// TestJSONDiagnosticsAreOneDocumentPerInvocation pins the JSON wire contract: a
+// command writes AT MOST ONE JSON document to stderr, whatever phases it runs.
+//
+// Two-phase commands rendered the schema load's diagnostics and then their own,
+// which in --format json wrote two complete JSON objects back to back. Once load
+// warnings became reachable, any schema carrying one plus a data phase that
+// reported anything produced output that json.Unmarshal, json.loads, and
+// JSON.parse all reject with a trailing-data error.
+func TestJSONDiagnosticsAreOneDocumentPerInvocation(t *testing.T) {
+	t.Parallel()
+
+	const (
+		schemaPath = "testdata/annotation_shadowed.yammm"
+		dataPath   = "testdata/annotation_shadowed_bad.json"
+	)
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"check", []string{"check", "--format", "json", schemaPath, dataPath}},
+		{"load", []string{"load", "--format", "json", schemaPath, dataPath}},
+		{"export", []string{"export", "--format", "json", "--to", "json", schemaPath, dataPath}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, stderr := executeCmdStderr(t, tt.args...)
+
+			dec := json.NewDecoder(strings.NewReader(stderr))
+			var doc json.RawMessage
+			if err := dec.Decode(&doc); err != nil {
+				t.Fatalf("stderr is not a JSON document: %v\ngot:\n%s", err, stderr)
+			}
+			if dec.More() {
+				t.Errorf("stderr carries more than one JSON document; got:\n%s", stderr)
+			}
+
+			// The single document must carry BOTH phases' diagnostics — folding
+			// must not silently discard the load's warning.
+			if !strings.Contains(string(doc), "W_ANNOTATION_SHADOWED") {
+				t.Errorf("the one document should carry the load warning; got:\n%s", doc)
+			}
+			if !strings.Contains(string(doc), "E_CONSTRAINT_FAIL") {
+				t.Errorf("the one document should carry the data-phase error; got:\n%s", doc)
 			}
 		})
 	}

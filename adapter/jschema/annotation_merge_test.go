@@ -24,9 +24,14 @@ type C extends A, B {}
 `
 
 // TestMarshal_MergedAnnotationProperty pins that a property whose annotations
-// were merged across ancestors still resolves its $defs key. Keying the table by
-// the raw merged pointer instead of the declared one made Marshal fail with "no
-// registered $defs key for datatype property" on a schema that loads clean.
+// were merged across ancestors resolves its named DataType, because the $defs
+// table is keyed by the declared property and read through [schema.Property.Origin].
+//
+// The assertion is the emitted $ref, not the property name: the name appears
+// whether the property rendered as a reference to Money or as an inlined
+// {"type":"number","minimum":0}, so checking for it alone would still pass if a
+// future change silently degraded every merged DataType property to an inline
+// constraint — losing the $defs indirection the generator exists to emit.
 func TestMarshal_MergedAnnotationProperty(t *testing.T) {
 	s := loadFixture(t, mergedAnnotationSchema, "probe.yammm")
 
@@ -34,7 +39,11 @@ func TestMarshal_MergedAnnotationProperty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if !strings.Contains(string(got), `"amount"`) {
-		t.Errorf("generated schema should carry the amount property; got:\n%s", got)
+	out := string(got)
+	if !strings.Contains(out, `"amount"`) {
+		t.Errorf("generated schema should carry the amount property; got:\n%s", out)
+	}
+	if !strings.Contains(out, `"#/$defs/Money"`) {
+		t.Errorf("amount should render as a $ref to the Money datatype; got:\n%s", out)
 	}
 }

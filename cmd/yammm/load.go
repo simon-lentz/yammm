@@ -50,18 +50,21 @@ func runLoad(cmd *cobra.Command, args []string) error {
 
 	// Load schema
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	if renderLoadDiagnostics(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult) {
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
 	// Parse, validate, and build graph
-	result, _, err := loadGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
+	graphResult, _, err := loadGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return &cli.ExitError{Code: cli.ExitUsage}
 	}
 
-	// Render diagnostics
+	// Render diagnostics — the load's residual warnings folded in, so one
+	// invocation writes one result (and in JSON, one document).
+	result := cli.MergeResults(pending, graphResult)
 	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 
 	exitCode := cli.ExitForResult(result)
@@ -86,29 +89,37 @@ func renderDiagnostics(cmd *cobra.Command, outputFormat cli.OutputFormat, noColo
 	_ = cli.RenderResult(w, renderer, outputFormat, result)
 }
 
-// renderLoadDiagnostics renders a schema load's diagnostics and reports whether
-// the load failed.
+// reportSchemaLoad reports whether a schema load failed, rendering its
+// diagnostics when it did.
 //
-// It renders whenever the load produced anything to say — warnings included, not
-// only errors. A load warning exists precisely because the loader chose not to
-// reject (W_ANNOTATION_SHADOWED, for one, is the only signal that a subtype
-// silently dropped an inherited annotation), so a command that rendered only on
-// failure would make it unreachable. Diagnostics go to stderr, so surfacing them
-// leaves every command's stdout contract intact.
+// On success it renders NOTHING and returns the load's residual diagnostics for
+// the caller to fold into the one result it renders (via [cli.MergeResults]).
+// Those residuals matter — a load warning exists precisely because the loader
+// chose not to reject, and W_ANNOTATION_SHADOWED is the only signal that a
+// subtype silently dropped an inherited annotation — but they must not be
+// rendered separately: in --format json every render writes one complete JSON
+// document, and two documents concatenated on stderr are not parseable by any
+// JSON reader. One invocation renders one result.
+//
+// The name and signature differ from the render-immediately helper this replaced
+// so that no call site can keep the old two-render shape by accident.
 //
 // explicitRoot is the command's module-root flag where it has one, and "" where
 // it does not; it selects the root diagnostics relativize against together with
 // the schema path (see [diagRootFor]).
-func renderLoadDiagnostics(
+func reportSchemaLoad(
 	cmd *cobra.Command,
 	outputFormat cli.OutputFormat,
 	noColor bool,
 	s *schema.Schema,
 	explicitRoot, absSchemaPath string,
 	result diag.Result,
-) bool {
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, explicitRoot, absSchemaPath), result)
-	return result.HasErrors()
+) (pending diag.Result, failed bool) {
+	if result.HasErrors() {
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, explicitRoot, absSchemaPath), result)
+		return diag.OK(), true
+	}
+	return result, false
 }
 
 // diagRootFor selects the root that rendered diagnostic locations are

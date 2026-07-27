@@ -21,6 +21,13 @@
 //   - [Import]: Cross-schema import declaration with alias
 //   - [TypeID]: Canonical type identity tuple (SourceID, name) for cross-schema resolution
 //   - [TypeRef]: Syntactic type reference preserving user's original syntax
+//   - [Annotation]: Validated @name / @@name decorator on a property or type,
+//     carrying [AnnotationArg] values whose semantic [AnnotationArgKind] is
+//     stamped during completion
+//
+// Editor tooling reads the curated annotation registry through
+// [AnnotationSpecs] and [VectorSimilarityFunctions] rather than hard-coding
+// names, so it cannot offer an annotation or keyword the loader rejects.
 //
 // # Loading Schemas
 //
@@ -116,6 +123,11 @@
 // [StructuralHash] computes a deterministic SHA-256 hash of a schema's
 // structure (types, properties, relations, constraints). Used by the
 // snapshot package for compatibility verification.
+//
+// Annotations are deliberately EXCLUDED from the hash: they drive downstream
+// store DDL and write shape, not which instance data is valid, so a schema
+// that gains its first annotation still hashes identically and every persisted
+// snapshot header hash stays valid. See [StructuralHash] for the full rule.
 //
 // # Immutability
 //

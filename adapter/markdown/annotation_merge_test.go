@@ -11,6 +11,7 @@ import (
 // pointer-keyed owner lookup misses it and silently falls back to the declaring
 // scope's bare name — "A" instead of the document's display name "base.A".
 func TestPropertyTable_MergedAnnotationProperty(t *testing.T) {
+	t.Parallel()
 	s := loadSources(t, map[string][]byte{
 		"entry.yammm": []byte(`schema "main"
 

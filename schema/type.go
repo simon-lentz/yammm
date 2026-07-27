@@ -399,7 +399,13 @@ func (t *Type) SuperTypesSlice() []ResolvedTypeRef {
 	return slices.Clone(t.superTypes)
 }
 
-// SubTypes returns an iterator over known subtypes (may include cross-schema types).
+// SubTypes returns an iterator over this type's known subtypes, which are
+// LOCAL to the declaring schema. Completion records a subtype only when the
+// supertype lives in the schema being completed, so a concrete descendant
+// declared in an importing schema does not appear here. Consumers that emit
+// per-label output for every concrete descendant of an abstract type must walk
+// the closure ([Schema.Closure]) rather than rely on this iterator, or they
+// will silently skip cross-schema descendants.
 func (t *Type) SubTypes() iter.Seq[ResolvedTypeRef] {
 	return func(yield func(ResolvedTypeRef) bool) {
 		for _, ref := range t.subTypes {
@@ -410,7 +416,9 @@ func (t *Type) SubTypes() iter.Seq[ResolvedTypeRef] {
 	}
 }
 
-// SubTypesSlice returns a defensive copy of known subtypes.
+// SubTypesSlice returns a defensive copy of known subtypes. As with
+// [Type.SubTypes], these are LOCAL to the declaring schema — see that method
+// for why a cross-schema descendant is absent and what to walk instead.
 func (t *Type) SubTypesSlice() []ResolvedTypeRef {
 	return slices.Clone(t.subTypes)
 }

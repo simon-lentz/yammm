@@ -20,10 +20,12 @@ func newNeo4jIndexesCmd() *cobra.Command {
 		RunE:  runNeo4jIndexes,
 	}
 
-	// Index names are always emitted and indexes apply to every edition, so
-	// there is no --named or --edition flag; --separator mirrors the
-	// constraints command.
-	cmd.Flags().String("separator", "__", "label separator between schema name and type name")
+	// Index names are always emitted and indexes apply to every edition, so the
+	// constraint-shape flags do not apply here. The label flags do: a graph
+	// generated with a prefix or a different separator carries labels this
+	// command must reproduce exactly, or `yammm neo4j diff` compares index DDL
+	// against a disjoint set of labels.
+	registerLabelFlags(cmd)
 
 	return cmd
 }
@@ -31,7 +33,6 @@ func newNeo4jIndexesCmd() *cobra.Command {
 func runNeo4jIndexes(cmd *cobra.Command, args []string) error {
 	formatStr, _ := cmd.Flags().GetString("format")
 	noColor, _ := cmd.Flags().GetBool("no-color")
-	separator, _ := cmd.Flags().GetString("separator")
 
 	outputFormat, err := cli.ParseOutputFormat(formatStr)
 	if err != nil {
@@ -47,17 +48,20 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string) error {
 
 	// Load schema
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	if renderLoadDiagnostics(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult) {
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
 	// Configure adapter
-	adapter := neo4j.New(neo4j.WithLabelSeparator(separator))
+	adapter := neo4j.New(labelOptions(cmd)...)
 
-	// Generate index statements
-	statements, result := adapter.IndexesForSchema(cmd.Context(), s)
+	// Generate index statements. The load's residual warnings fold in so one
+	// invocation writes one result on either path.
+	statements, indexResult := adapter.IndexesForSchema(cmd.Context(), s)
+	result := cli.MergeResults(pending, indexResult)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
 	if result.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, nil, "", result)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 

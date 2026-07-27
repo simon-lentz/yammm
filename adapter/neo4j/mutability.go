@@ -29,9 +29,14 @@ const (
 	// `SET n += $props` (or `SET n += row.props` for the batch form).
 	MutableKeys KeyMutability = iota
 
-	// ImmutableKeys declares primary-key fields and properties in
-	// [WithImmutableKeys] are set once at node creation and must not
-	// be rewritten on MATCH. Generates the split form:
+	// ImmutableKeys declares primary-key fields and every property in the
+	// EFFECTIVE immutable set — the keys passed to [WithImmutableKeys]
+	// unioned with the type's schema-derived @writeOnce keys (see
+	// [ImmutableKeysFor] and [NodeShape.ImmutableKeys]) — are set once at
+	// node creation and must not be rewritten on MATCH. A caller building
+	// `$update_props` from the [WithImmutableKeys] list alone rewrites every
+	// @writeOnce property on each MERGE, silently defeating the guarantee
+	// the annotation exists to provide. Generates the split form:
 	// `ON CREATE SET n += $props` + `ON MATCH SET n += $update_props`
 	// (or the `row.props` / `row.update_props` batch variants).
 	//

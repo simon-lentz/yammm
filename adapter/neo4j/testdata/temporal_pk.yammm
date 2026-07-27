@@ -1,0 +1,24 @@
+schema "tpk_test"
+
+// A Date primary key makes coercion observable: a String primary key coerces to
+// itself, so a test built on one cannot tell a coerced merge key from a raw one.
+type Doc {
+    created_on Date primary
+    updated_on Date required
+    title      String required
+}
+
+// Declares a property literally named key_<the primary key>. In a flat parameter
+// map that name is the property's; in the batch row shape the same spelling is
+// the merge key for `id`, so the two shapes cannot be described by one map.
+type Order {
+    id     Date   primary
+    key_id String required
+}
+
+// Associates to a Date-keyed type, so the endpoint key the MATCH binds is a
+// value the node path stores as a Neo4j DATE.
+type Citation {
+    citation_id String primary
+    --> CITES (_:one) Doc
+}

@@ -120,6 +120,12 @@ type annotationDecl struct {
 	ArgsMalformed bool
 	Documentation string
 	Span          location.Span
+
+	// DetachedFromLine is the source line of the property this annotation was
+	// parsed as trailing, set only when the annotation begins on a LATER line
+	// — the shape where what the author wrote and what the grammar binds can
+	// disagree. Zero for a same-line annotation and for every type-level one.
+	DetachedFromLine int
 }
 
 // annotationArgDecl is one parsed annotation argument. Token records whether
@@ -129,4 +135,8 @@ type annotationArgDecl struct {
 	Text  string
 	Token annotationTokenKind
 	Span  location.Span
+
+	// Raw is the source spelling of a quoted string, whose Text holds the
+	// unquoted value; empty for every other kind.
+	Raw string
 }

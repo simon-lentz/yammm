@@ -1,0 +1,46 @@
+# The three neo4j subcommands compose labels and emit constraints from ONE flag
+# set, because `diff` computes its desired side exactly as `constraints` and
+# `indexes` emit it. A flag one command has and another lacks is a plan
+# reporting drift the operator never introduced.
+
+# --prefix applies to constraints AND indexes, so a graph generated with a
+# prefix can be regenerated and diffed against.
+exec yammm neo4j constraints --prefix app_ valid.yammm
+stdout 'app_test__Person'
+
+exec yammm neo4j indexes --prefix app_ valid.yammm
+stdout 'CREATE INDEX app_test__Person_name_idx IF NOT EXISTS FOR \(n:app_test__Person\)'
+
+# --separator likewise, on both.
+exec yammm neo4j constraints --separator _ valid.yammm
+stdout 'test_Person'
+
+exec yammm neo4j indexes --separator _ valid.yammm
+stdout 'test_Person_name_idx'
+
+# The constraint-shape flags reach `constraints`, so a graph generated with
+# NODE KEY can be reproduced.
+exec yammm neo4j constraints --node-keys valid.yammm
+stdout 'IS NODE KEY'
+! stdout 'IS UNIQUE'
+
+exec yammm neo4j constraints --scalar-types=false valid.yammm
+! stdout 'IS :: STRING'
+stdout 'IS NOT NULL'
+
+exec yammm neo4j constraints --required-only-types valid.yammm
+! stdout 'age IS :: INTEGER'
+
+# `diff` accepts every one of them, so its desired side can be configured to
+# match. It fails on connection, not on flag parsing.
+! exec yammm neo4j diff --uri neo4j://127.0.0.1:1 --prefix app_ --node-keys --scalar-types=false --required-only-types --separator _ valid.yammm
+! stderr 'unknown flag'
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String  primary
+	name String  required @index
+	age  Integer
+}

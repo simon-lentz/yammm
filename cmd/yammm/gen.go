@@ -124,9 +124,13 @@ func runGen(cmd *cobra.Command, args []string) error {
 		moduleRootAbs = absRoot
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	if renderLoadDiagnostics(cmd, outputFormat, noColor, s, moduleRootAbs, absSchemaPath, schemaResult) {
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRootAbs, absSchemaPath, schemaResult)
+	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
+	// The load's residual warnings are this command's only diagnostics — nothing
+	// downstream reports through diag — so they render here, once.
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRootAbs, absSchemaPath), pending)
 
 	var data []byte
 	switch target {

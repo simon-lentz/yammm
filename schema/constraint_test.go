@@ -1279,3 +1279,31 @@ func TestListConstraint_Accessors(t *testing.T) {
 		assert.False(t, hasMax)
 	})
 }
+
+// Equal is an equivalence relation, so it must be reflexive for every alias
+// shape — including a chain that cannot be resolved to a terminal constraint.
+// Callers rely on it: inheritance merging treats a property that is not equal
+// to itself as conflicting with itself, and reports one declaration as both
+// sides of its own conflict.
+//
+// Stdlib-only by design; this file's testify imports are grandfathered and new
+// assertions must not add to them.
+func TestAliasConstraint_Equal_ReflexiveWhenUndecidable(t *testing.T) {
+	unresolved := schema.NewAliasConstraint("ext.Amount", nil)
+	nested := schema.NewAliasConstraint("Money", unresolved)
+	deep := schema.NewAliasConstraint("Wrapper", nested)
+	cyclic := schema.NewAliasConstraint("Loop", schema.NewAliasConstraint("Loop", nil))
+
+	for _, c := range []schema.Constraint{unresolved, nested, deep, cyclic} {
+		//nolint:gocritic // Comparing a constraint with itself IS the property under test.
+		if !c.Equal(c) {
+			t.Errorf("%T(%s) must equal itself", c, c.String())
+		}
+	}
+
+	// Distinct datatypes stay unequal: nothing here can show two unresolvable
+	// aliases mean the same thing, so undecidable must not collapse to "equal".
+	if nested.Equal(schema.NewAliasConstraint("Cash", unresolved)) {
+		t.Error("aliases naming different datatypes must not compare equal merely because both are unresolvable")
+	}
+}

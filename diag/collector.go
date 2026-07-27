@@ -14,9 +14,12 @@ import (
 // Collector is thread-safe and can be used from multiple goroutines. It provides
 // O(1) severity queries via precomputed counts that are updated during collection.
 //
-// Limit behavior: When the issue limit is reached, additional issues are dropped
-// but [Collector.OK] is not affected. Use [Collector.LimitReached] to detect
-// truncated results. This design allows callers to handle truncated results
+// Limit behavior: the retained set is the `limit` most severe issues seen, ties
+// broken by arrival order. Once the store is full an incoming issue that is more
+// severe than the least severe stored one takes its slot (see storeLocked), so a
+// flood of warnings can never starve the errors that explain why an operation
+// failed. Truncation never affects [Collector.OK]; use [Collector.LimitReached]
+// to detect it. This design allows callers to handle truncated results
 // appropriately without forcing failure semantics.
 //
 // Create a Collector with [NewCollector], then use [Collector.Collect] to add
@@ -33,6 +36,12 @@ type Collector struct {
 	// queries stay truthful under truncation.
 	counts SeverityCounts
 
+	// Severity counts over the STORED issues only. Unlike counts, these shrink
+	// when an issue is evicted, so storeLocked can answer "which severity is
+	// currently the least severe stored?" in O(1) and only scan the slice when an
+	// eviction actually happens.
+	storedCounts SeverityCounts
+
 	// Cached sorted result (invalidated on Collect)
 	cachedResult *Result
 }
@@ -46,8 +55,10 @@ const NoLimit = 0
 // NewCollector creates a collector with an optional issue limit.
 //
 // A limit of 0 means no limit (use [NoLimit] constant for clarity). Negative
-// values are normalized to 0. When the limit is reached, additional issues
-// are counted as dropped and can be queried via [Result.DroppedCount].
+// values are normalized to 0. Once the limit is reached the collector retains
+// the most severe issues it has seen — evicting a stored issue for a more severe
+// incoming one — and counts the rest as dropped, queryable via
+// [Result.DroppedCount]. See [Collector.storeLocked] for the retention rule.
 func NewCollector(limit int) *Collector {
 	if limit < 0 {
 		limit = 0
@@ -178,20 +189,59 @@ func (c *Collector) collectLocked(issue Issue) {
 	c.storeLocked(issue)
 }
 
-// storeLocked appends an issue to the stored slice unless the issue limit has
-// been reached, in which case the issue is dropped and the truncation flags are
-// set. Caller must hold c.mu and must have already updated the severity counts:
-// storeLocked governs storage, not counting, so a dropped issue still shows up
+// storeLocked appends an issue to the stored slice, or — once the limit is
+// reached — retains it in place of a less severe stored issue. Caller must hold
+// c.mu and must have already updated the seen-severity counts: storeLocked
+// governs storage, not counting, so an issue that is not retained still shows up
 // in the severity totals (and thus in HasErrors/OK/ErrorCount).
+//
+// The retained set is the `limit` most severe issues seen, ties broken by
+// arrival order. Truncation that simply dropped whatever arrived after the cap
+// let a producer starve its own errors: a load collects warnings during
+// inheritance linearization and errors in every later phase, so a schema with
+// enough shadowed annotations filled the budget with warnings and stored none of
+// the errors explaining why it failed to load. Eviction makes the budget a
+// severity floor rather than an arrival-order race.
+//
+// droppedCount counts every issue not retained, whether the incoming one was
+// rejected or a stored one was evicted, so it remains "seen minus retained" and
+// [Result.TruncationNote] stays accurate.
 func (c *Collector) storeLocked(issue Issue) {
-	// At the limit, the issue is counted (by the caller) but not stored.
 	if c.limit > 0 && len(c.issues) >= c.limit {
 		c.limitReached = true
 		c.droppedCount++
+
+		idx, ok := c.evictionSlotLocked(issue.Severity())
+		if !ok {
+			return // Nothing stored is less severe; the incoming issue is the drop.
+		}
+		c.storedCounts.sub(c.issues[idx].Severity())
+		c.storedCounts.add(issue.Severity())
+		// Overwrite in place: Result sorts before returning, so slice position
+		// carries no meaning and the retained SET is the whole contract.
+		c.issues[idx] = issue
 		return
 	}
 
 	c.issues = append(c.issues, issue)
+	c.storedCounts.add(issue.Severity())
+}
+
+// evictionSlotLocked returns the index of the stored issue that must yield to an
+// incoming issue of severity sev, and whether one exists. The victim is the
+// LAST-stored issue of the least severe stored severity, so among equally severe
+// issues the earliest-arrived are the ones retained. Caller must hold c.mu.
+func (c *Collector) evictionSlotLocked(sev Severity) (int, bool) {
+	victim, ok := c.storedCounts.leastSevere()
+	if !ok || !sev.IsMoreSevereThan(victim) {
+		return 0, false
+	}
+	for i := len(c.issues) - 1; i >= 0; i-- {
+		if c.issues[i].Severity() == victim {
+			return i, true
+		}
+	}
+	return 0, false // Unreachable: storedCounts said one exists.
 }
 
 // Result produces a sorted, immutable snapshot.

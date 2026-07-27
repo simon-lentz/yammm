@@ -211,4 +211,5 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
 | `E_NEO4J_INVALID_IDENTIFIER` | Neo4j | Name not valid as Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |
-| `E_NEO4J_INDEX_NAME_COLLISION` | Neo4j | Two emitted indexes would share a name |
+| `E_NEO4J_UNKNOWN_PROPERTY` | Neo4j | An index annotation names a property the type does not have |
+| `E_NEO4J_INVALID_INDEX_TARGET` | Neo4j | An index annotation names a property whose type cannot carry it (`@index` on a non-scalar, `@vector` on a non-Vector or a non-positive dimension) |

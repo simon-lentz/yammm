@@ -181,3 +181,32 @@ func TestDetectContext_AnnotationWithoutLeadingWhitespace(t *testing.T) {
 		})
 	}
 }
+
+// TestDetectContext_AnnotationNotInRegex pins that an '@' inside a regex literal
+// is not an annotation head. An email-validation pattern in an invariant is the
+// canonical case: anchoring on its '@' replaced the expression and property
+// completions with the annotation list for the rest of the line.
+func TestDetectContext_AnnotationNotInRegex(t *testing.T) {
+	t.Parallel()
+	text := "schema \"m\"\ntype T {\n\t! \"bad\" email =~ /^[a-z]+@example[.]com$/"
+	lines := strings.Split(text, "\n")
+	line := len(lines) - 1
+	char := len(lines[line])
+	if got, _ := DetectContext(annDoc(text), line, char); got == AnnotationName || got == AnnotationArgs {
+		t.Errorf("annotation context must not fire inside a regex literal, got %v", got)
+	}
+}
+
+// A slash with no partner on the line is the division operator, so an annotation
+// after it still completes — the regex rule must not swallow the rest of a line
+// that merely divides.
+func TestDetectContext_AnnotationAfterDivisionSlash(t *testing.T) {
+	t.Parallel()
+	text := "schema \"m\"\ntype T {\n\tratio Float\n\tstate String @ind"
+	lines := strings.Split(text, "\n")
+	line := len(lines) - 1
+	char := len(lines[line])
+	if got, _ := DetectContext(annDoc(text), line, char); got != AnnotationName {
+		t.Errorf("annotation head after ordinary text should still fire, got %v", got)
+	}
+}

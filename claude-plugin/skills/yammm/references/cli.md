@@ -254,7 +254,7 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 yammm neo4j diff --uri bolt://localhost:7687 --edition community --separator __ schema.yammm
 ```
 
-Compares desired schema constraints **and indexes** against the live database (index diffing is always on). Reports constraints and indexes to create, drop, and those already present. A schema-owned remote index with no declaration surfaces as a drop until it is annotated.
+Compares desired schema constraints **and indexes** against the live database (index diffing is on by default; `--indexes=false` restores the pre-v0.9.0 constraints-only behaviour, exit code included). Reports constraints and indexes to create, drop, and those already present. A schema-owned remote index with no declaration surfaces as a drop until it is annotated.
 
 Set `--edition` and `--separator` to match how the target graph was generated, so the desired side uses the same labels and edition-gated constraints — otherwise a differently-configured graph reports spurious drift.
 
@@ -263,6 +263,9 @@ Set `--edition` and `--separator` to match how the target graph was generated, s
 | `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed) |
 | `--separator` | `__` | Label separator (schema__Type) |
 | `--named` | `true` | Named constraints in the create output (does not affect diff matching) |
+| `--indexes` | `true` | Include index drift in the diff and the exit code; `--indexes=false` is constraints-only |
+
+Exit codes: `0` only when everything compared came back in sync. Drift, creates, or drops (constraints or indexes) exit `1`. An index half that could not be completed exits `3` — either introspection failed, or an index's configuration could not be read and it was reported as **unverified**. Neither is reported as success: a drift gate must not read "no drift" from a comparison that never ran.
 
 ### neo4j introspect
 
