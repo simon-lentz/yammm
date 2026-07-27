@@ -198,7 +198,7 @@ type Order {
 }
 ```
 
-**What changed:** `LineItem` becomes a `part type` (no independent existence, no primary key). The association (`-->`) becomes a composition (`*->`). The multiplicity changes to `(one:many)` to require at least one item. Collection invariants enforce business rules on the embedded items.
+**What changed:** `LineItem` becomes a `part type` (no independent existence; identified through its parent composition). The association (`-->`) becomes a composition (`*->`). The multiplicity changes to `(one:many)` to require at least one item. Collection invariants enforce business rules on the embedded items.
 
 ---
 

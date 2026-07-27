@@ -1676,7 +1676,7 @@ Each compiled schema has a deterministic structural hash (SHA-256) computed over
 - Type names, properties (with constraints and modifiers), relations (with targets and cardinalities), and inheritance edges
 - Data type names and constraints
 
-Invariants are deliberately excluded — they affect runtime validation but not structural shape. The hash is deterministic: all inputs are sorted lexicographically before hashing.
+Invariants and annotations are deliberately excluded — invariants affect runtime validation and annotations drive downstream store DDL and write shape, but neither changes structural shape (what instance data is valid). A schema that gains its first annotation therefore hashes identically, so every persisted `.ys` snapshot header hash stays valid. The hash is deterministic: all inputs are sorted lexicographically before hashing.
 
 The hash format is `sha256:<hex>`. A structural hash version (currently `1`) is bumped when the algorithm changes. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
 

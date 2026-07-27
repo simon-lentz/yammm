@@ -197,7 +197,8 @@ The module is organized into layers with strict dependency ordering:
 ```text
 Primary API (stable)     : schema, instance, graph, snapshot
 Foundation (stable)      : location, diag, immutable, format
-Adapter                  : adapter/json, adapter/csv, adapter/neo4j, adapter/gogen
+Adapter                  : adapter/json, adapter/csv, adapter/neo4j,
+                           adapter/gogen, adapter/jschema, adapter/markdown
 LSP                      : lsp (Language Server Protocol server)
 CLI                      : cmd/yammm, cmd/yammm-lsp
 Internal                 : internal/* (no compatibility guarantees)

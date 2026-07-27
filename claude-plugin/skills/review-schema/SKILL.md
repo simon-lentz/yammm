@@ -39,7 +39,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 
 - Every concrete type (not abstract, not part) has at least one field marked `primary` (multiple `primary` fields form a composite key).
 - Abstract types are not required to declare a `primary` field; when they do, concrete subtypes inherit it (otherwise each concrete subtype supplies its own key).
-- Part types do not declare `primary` fields (they are identified by their parent composition).
+- Part types are exempt from the primary-key requirement (they are identified through their parent composition) but are permitted to declare one. Do not report a keyed part type as an error; in a `(many)` composition it is preferable, giving each child a stable identity rather than a positional index.
 - Primary key types are restricted to `String`, `UUID`, `Date`, and `Timestamp`. `Integer`, `Float`, `Boolean`, `Enum`, `Pattern`, `Vector`, and `List` are rejected. DataType aliases are resolved before checking.
 
 ### 3. Field Modifiers
@@ -81,7 +81,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 - Part types are declared with `part type`, not plain `type`.
 - Part types are only referenced as targets of composition edges (`*->`), never associations (`-->`).
 - Associations (`-->`) target a concrete type only -- never an abstract type (which has no instances to reference) and never a part type.
-- Part types do not declare `primary` fields.
+- Part types may declare a `primary` field, and are exempt from being required to. Flag an unkeyed part type in a `(many)` composition as a suggestion, never an error.
 - Part types cannot declare associations (`-->`).
 
 ### 8. Imports

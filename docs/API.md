@@ -1220,7 +1220,9 @@ Both diff results also carry `Excluded int` — the number of remote objects tha
 
 `DiffIndexes` and `DiffConstraints` each take a variadic list of the other's remote objects (`alsoBlocking`). Index and constraint names share ONE Neo4j namespace, and a `CREATE ... IF NOT EXISTS` under a name the database already holds is a silent no-op, so a caller that introspected both should pass both — otherwise a blocked declaration reports as a create the server ignores on every run. A constraint backed by an index appears in `SHOW INDEXES` under the constraint's name and is seen automatically; NOT NULL and TYPE constraints have no backing index and reach the index diff only this way.
 
-Desired constraints pair with remote ones by emitted name first and by semantic identity second, so the classification does not depend on the order `SHOW CONSTRAINTS` returned rows in. Ownership is anchored to one type-name segment after the schema's label prefix, so a schema named `app` does not claim the objects of a schema named `app__legacy`.
+Desired objects pair with remote ones in three phases, strongest evidence first: name **and** identity together, then identity alone, then name alone. Identity outranks a bare name match deliberately — a remote object whose name matches but whose definition does not is weaker evidence than one that realises the declaration exactly, so claiming by name first would let the misnamed object consume the declaration and leave the exact one reported as an orphan to drop. Within a phase, pairing is positional over the remaining candidates, which is reachable only when several are indistinguishable under that phase's evidence. The classification therefore does not depend on the order `SHOW CONSTRAINTS` or `SHOW INDEXES` returned rows in. `DiffIndexes` pairs identically.
+
+Ownership is decided before any of this, by set membership against `OwnedLabels` — never by a rule applied to a remote object's label string. A schema named `app` does not claim the objects of a sibling named `app__legacy` because `app__legacy`'s labels are simply not in `app`'s set, not because a prefix or segment test excluded them.
 
 ### Index Diffing
 

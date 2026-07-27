@@ -101,7 +101,7 @@ Parentheses override precedence as usual.
 
 The `->` operator chains function calls. The left-hand side becomes the implicit first argument to the function on the right.
 
-```yammm-snippet
+```text
 name -> Upper -> Trim
 name -> Replace("old", "new") -> Lower
 items -> Filter |$x| { $x.active } -> Map |$x| { $x.name }
@@ -122,14 +122,14 @@ Lambdas define inline functions with `|...|` parameters and `{...}` body.
 
 **Single parameter:**
 
-```yammm-snippet
+```text
 items -> Filter |$x| { $x.active }
 items -> Map |$item| { $item.price * $item.quantity }
 ```
 
 **Multiple parameters** (used with `Reduce`):
 
-```yammm-snippet
+```text
 values -> Reduce(0) |$acc, $val| { $acc + $val }
 ```
 
@@ -141,7 +141,7 @@ Lambda parameters shadow outer variables within their body.
 
 Properties are accessed with dot notation or bare names:
 
-```yammm-snippet
+```text
 name                // implicit property reference
 $self.name          // explicit self reference
 $item.price         // lambda parameter property
@@ -154,7 +154,7 @@ Property access on existing instances returns **nil** for properties not present
 
 ## Indexing
 
-```yammm-snippet
+```text
 items[0]            // first element
 items[2]            // third element
 ```

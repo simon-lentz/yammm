@@ -240,7 +240,7 @@ part type Address {
 
 - Only referenced as targets of composition relationships (`*->`)
 - Cannot be instantiated directly at the top level
-- Cannot declare `primary` fields
+- Exempt from the primary-key requirement, but permitted to declare one. A composed child's identity is `[ParentKey, "COMPOSITION", ChildKeyOrIndex]`; without a key the slot is the child's 0-based array position, so prefer a `primary` in a `(many)` composition to keep identity stable across reordering
 - Cannot declare associations (`-->`) -- part types cannot have independent references
 - Associations (`-->`) from other types cannot target part types
 - Composition data is embedded inline in instance documents

@@ -151,7 +151,7 @@ Only `String`, `UUID`, `Date`, and `Timestamp` may be primary keys. `Integer`, `
 
 References between independently existing types:
 
-```yammm-snippet
+```text
 --> REL_NAME (multiplicity) TargetType
 --> REL_NAME (multiplicity) alias.TargetType        // cross-schema
 ```

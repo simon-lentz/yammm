@@ -14,14 +14,22 @@ argument-hint: "[question about yammm]"
 
 # yammm
 
-YAMMM is a schema DSL, Go library, and CLI for typed data validation, graph construction, and multi-format export (JSON, CSV, Neo4j Cypher, generated Go). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and export to databases.
+YAMMM is a schema DSL, Go library, and CLI for typed data validation, graph construction, multi-format data export (JSON, CSV, Neo4j Cypher), and schema-driven artifact generation (Go source, JSON Schema, Markdown). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and export to databases.
 
 ```text
-.yammm file --> schema.Load() --> instance.Validate() --> graph.Add()
-                                                              |
-               adapter.Write() <-- snapshot.Marshal() <-- graph.Check()
-               (JSON/CSV/Neo4j)
+data path:
+  .yammm file --> schema.Load() --> instance.Validate() --> graph.Add()
+                                                                |
+                    adapter.Write() <-- snapshot.Marshal() <-- graph.Check()
+                    (JSON / CSV / Neo4j)
+
+generator path:
+  .yammm file --> schema.Load() --> gogen | jschema | markdown --> bytes
+                                    (Go source / JSON Schema / Markdown)
 ```
+
+The two paths are independent: the data path carries instances, while the
+generators are schema-in, bytes-out and never touch instance data.
 
 Every operation returns `(value, diag.Result)` with stable error codes and precise source locations. Loaded schemas, validated instances, and snapshots are immutable and thread-safe.
 

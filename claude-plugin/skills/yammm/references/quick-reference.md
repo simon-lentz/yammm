@@ -6,7 +6,7 @@ Compact syntax overview for `.yammm` schema files. For the full grammar, see `ds
 
 ## Schema Structure
 
-```yammm-snippet
+```text
 schema "name"
 import "./path" as alias         // alias optional, auto-derived from path
 type AliasName = BuiltInType     // custom data type alias
@@ -18,7 +18,7 @@ Reserved keywords: `schema`, `import`, `as`, `type`, `datatype`, `abstract`, `pa
 
 ## Type Definitions
 
-```yammm-snippet
+```text
 type Concrete { ... }                              // instantiable
 abstract type Shared { ... }                       // must be extended
 part type Owned { ... }                            // composition-only
@@ -61,7 +61,7 @@ Primary key types: `String`, `UUID`, `Date`, `Timestamp` only. Aliases that reso
 
 ## Relationships
 
-```yammm-snippet
+```text
 --> REL_NAME (multiplicity) TargetType              // association
 --> REL_NAME (multiplicity) TargetType { props }    // with edge properties
 --> REL_NAME (many) Target / reverse_name (one)     // reverse clause

@@ -36,7 +36,7 @@ If `$ARGUMENTS` provides a description, use it as the starting point for step 1.
 - **Constraint bounds**: Use bounded types to enforce data integrity. `String[1, 255]` is better than bare `String`. Use `_` for unbounded sides.
 - **Type aliases**: Define `type Email = Pattern["..."]` to reduce repetition and improve readability.
 - **Abstract types**: Use `abstract type` for shared field sets (e.g., audit fields). Concrete types extend them with `extends`.
-- **Part types and compositions**: Declare `part type` for entities that have no independent existence. Reference them only via `*->`. Part types cannot have `primary` fields or associations.
+- **Part types and compositions**: Declare `part type` for entities that have no independent existence. Reference them only via `*->`. Part types cannot declare associations (`-->`), and cannot be the target of one. They are exempt from the primary-key requirement, but may declare a `primary` — prefer one in a `(many)` composition, where it gives each child a stable identity instead of a positional index.
 - **Associations**: Use `-->` for relationships between independent types. An association must target a concrete type (not abstract or part) — its edge is resolved by the target's primary key, which only concrete instances have. Edge properties cannot use `Vector` or `List` types.
 - **Lists**: Use `List<ElementType>` for ordered multi-value fields. Add length bounds when the domain has known limits.
 - **Invariants**: Add `! "error_id" expression` for business rules. Use capitalized built-in functions: `Len`, `All`, `Any`, `Contains`, etc.
