@@ -30,8 +30,13 @@ type buildError struct {
 	typ    string // bound type name (b.typeName); always populated
 	target string // property name, relation name, or composition name
 	detail string // free-form expected-vs-got detail; may be empty
-	caller string // "file:line" from runtime.Callers; empty when not applicable
 	child  error  // non-nil iff kind == kindChildError
+
+	// callerPC is the raw program counter of the user's call site, resolved to
+	// "file:line" by [symbolizePC] only when this error is rendered. Zero when
+	// not applicable. Storing the PC rather than the string is what keeps the
+	// builder's success path allocation-free — see [capturePC].
+	callerPC uintptr
 }
 
 // Error returns the formatted error message. Callers of SchemaBuilder.Build
@@ -39,8 +44,8 @@ type buildError struct {
 // Godoc but not on this private type.
 func (e *buildError) Error() string {
 	var b strings.Builder
-	if e.caller != "" {
-		b.WriteString(e.caller)
+	if caller := symbolizePC(e.callerPC); caller != "" {
+		b.WriteString(caller)
 		b.WriteString(": ")
 	}
 	b.WriteString(e.typ)
@@ -119,19 +124,46 @@ func (e *buildError) Unwrap() error {
 	return e.child
 }
 
-// captureCaller returns the "file:line" of the call site one level above
-// the SchemaBuilder method that invoked it — i.e. the user's source line.
+// capturePC returns the program counter of the call site one level above the
+// SchemaBuilder method that invoked it — i.e. the user's source line.
+//
 // Frame math, following runtime.Callers's "0 identifies Callers itself"
-// semantics: 0 = runtime.Callers, 1 = captureCaller, 2 = the SchemaBuilder
-// method, 3 = user code. A zero-length string means the stack was too
+// semantics: 0 = runtime.Callers, 1 = capturePC, 2 = the SchemaBuilder method,
+// 3 = user code. Every caller must therefore invoke this DIRECTLY from the
+// public builder method; routing it through a helper shifts the attributed
+// line with no compile-time signal. A zero return means the stack was too
 // shallow to recover (vanishingly rare in practice; a benign degradation).
-func captureCaller() string {
+//
+// Only the stack walk happens here. Resolving the PC to a file and line costs
+// three allocations and roughly half the total latency, and on the success path
+// — the overwhelmingly common case — the result is discarded unread, so that
+// half is deferred to [symbolizePC] on the error-render path. PCs stay
+// resolvable for the life of the process, so deferring is safe.
+func capturePC() uintptr {
 	var pcs [1]uintptr
 	const userFrameSkip = 3
-	n := runtime.Callers(userFrameSkip, pcs[:])
-	if n == 0 {
+	if runtime.Callers(userFrameSkip, pcs[:]) == 0 {
+		return 0
+	}
+	return pcs[0]
+}
+
+// symbolizePC resolves a PC captured by [capturePC] to "file:line", returning
+// "" for the zero PC.
+//
+// It must resolve through runtime.CallersFrames, never runtime.FuncForPC:
+// runtime.Callers records RETURN addresses, and CallersFrames applies the
+// pc-1 adjustment that maps one back to the calling instruction. FuncForPC
+// does not, so it would silently attribute the line following the call —
+// off-by-one in the common case, and the wrong function entirely when a call
+// is the last instruction of one.
+func symbolizePC(pc uintptr) string {
+	if pc == 0 {
 		return ""
 	}
-	frame, _ := runtime.CallersFrames(pcs[:1]).Next()
+	frame, _ := runtime.CallersFrames([]uintptr{pc}).Next()
+	if frame.File == "" {
+		return ""
+	}
 	return frame.File + ":" + strconv.Itoa(frame.Line)
 }
