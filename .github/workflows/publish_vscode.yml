@@ -56,8 +56,14 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          BUILD_VERSION: ${{ inputs.version || '0.0.0-dev' }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
+          # Stamp the bundled server with the version the VSIX publishes at:
+          # the explicit input, or package.json's version when the input is
+          # empty. Normalized to a leading "v" to match the release archives'
+          # github.ref_name stamping.
+          BUILD_VERSION="${INPUT_VERSION:-$(jq -r .version lsp/editors/vscode/package.json)}"
+          BUILD_VERSION="v${BUILD_VERSION#v}"
           mkdir -p lsp/editors/vscode/bin/${{ matrix.bin_dir }}
           go build -trimpath -ldflags="-s -w -X main.version=${BUILD_VERSION}" \
             -o lsp/editors/vscode/bin/${{ matrix.bin_dir }}/yammm-lsp${{ matrix.ext }} \
