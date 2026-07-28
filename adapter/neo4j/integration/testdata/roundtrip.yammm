@@ -11,9 +11,10 @@ type Document extends Tracked {
     state        String    @index
     published_on Date      @index
     embedding    Vector[4] @vector(cosine)
-    title        String    required
+    title        String    required @fulltext
 
     @@index(state, published_on)
+    @@fulltext(title, state)
 }
 
 type Note extends Tracked {

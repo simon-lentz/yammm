@@ -159,7 +159,7 @@ Generation is **all-or-nothing**: any validation error returns `(nil, result)`, 
 ### Index Generation
 
 ```go
-// Generate index Cypher from @index / @@index / @vector annotations
+// Generate index Cypher from @index / @@index / @vector / @fulltext / @@fulltext annotations
 statements, result := adapter.IndexesForSchema(ctx, s)
 // statements is []string of CREATE INDEX / CREATE VECTOR INDEX IF NOT EXISTS ...
 
@@ -169,7 +169,7 @@ indexes, result := adapter.IndexesStructured(ctx, s)
 // VectorDimensions, VectorSimilarity, Statement
 ```
 
-Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. An index annotation naming a property the type does not have reports `E_NEO4J_UNKNOWN_PROPERTY`, and one naming a property whose type cannot carry the index reports `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+.
+Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint); property-level `@fulltext` and type-level `@@fulltext(a, b)` fulltext indexes (`CREATE FULLTEXT INDEX ... ON EACH [...]`). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. An index annotation naming a property the type does not have reports `E_NEO4J_UNKNOWN_PROPERTY`, and one naming a property whose type cannot carry the index reports `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+.
 
 `DiffIndexes` returns an `*IndexDiffResult` with **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). `DiffConstraints` has the same five sets, its `Unverified` covering a TYPE constraint whose enforced type the server did not report (Neo4j < 5.9). A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant, and a schema-owned remote index with no declaration reports as a drop. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
 

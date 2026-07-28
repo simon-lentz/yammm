@@ -117,4 +117,4 @@ Before/after transformation examples: see `examples/` directory.
 - [ ] Imported types use qualified references (`alias.TypeName`)
 - [ ] Optional fields guarded with nil checks in invariants
 - [ ] Constraint bounds explicit where the domain is known (no bare `String` for bounded fields)
-- [ ] Annotations reviewed: each `@index` / `@@index` serves a real lookup, `@@index` argument order matches it, and immutable-after-creation fields carry `@writeOnce`
+- [ ] Annotations reviewed: each `@index` / `@@index` serves a real lookup, `@@index` argument order matches it, `@fulltext` / `@@fulltext` target genuinely searchable text (not identifiers), and immutable-after-creation fields carry `@writeOnce`

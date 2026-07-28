@@ -28,11 +28,11 @@ type IndexDiffResult struct {
 
 	// Drop contains schema-owned indexes in the database that have no
 	// corresponding declaration in the schema AND that the schema could have
-	// declared. A kind the DSL has no vocabulary for (FULLTEXT, TEXT, POINT), a
-	// relationship index, and a constraint's backing index are all left out even
-	// on an owned label: none is something a schema edit could account for, so
-	// reporting them would be drift that never clears. See
-	// [declarableRemoteIndex].
+	// declared. A kind the DSL has no vocabulary for (TEXT, POINT), a
+	// multi-label FULLTEXT index, a relationship index, and a constraint's
+	// backing index are all left out even on an owned label: none is something
+	// a schema edit could account for, so reporting them would be drift that
+	// never clears. See [declarableRemoteIndex].
 	Drop []RemoteIndex
 
 	// Unverified contains indexes that exist in both by semantic key but whose
@@ -44,10 +44,10 @@ type IndexDiffResult struct {
 
 	// Excluded counts the remote indexes that entered no bucket at all, because
 	// the comparison had nothing to say about them: the schema owns no label they
-	// carry, or they are of a kind it cannot declare (FULLTEXT, TEXT, POINT, a
-	// relationship index, a constraint's backing index). See
-	// [ConstraintDiffResult.Excluded], which carries the same meaning and the
-	// same reason for existing.
+	// carry, or they are of a shape it cannot declare (TEXT, POINT, a
+	// multi-label FULLTEXT, a relationship index, a constraint's backing
+	// index). See [ConstraintDiffResult.Excluded], which carries the same
+	// meaning and the same reason for existing.
 	Excluded int
 }
 
@@ -134,6 +134,15 @@ func (a *Adapter) DiffIndexes(
 		// definition. Type is upper-cased to meet [desiredIndexKey]'s canonical
 		// spelling, which is what this map is looked up by.
 		if ri.EntityType != "" && !strings.EqualFold(ri.EntityType, "NODE") {
+			continue
+		}
+		// A multi-label node index serves no single-label declaration either:
+		// the server creates the declaration beside it, so keying it here would
+		// report a create the server actually performs as blocked. Its NAME
+		// still blocks, through byName above. FULLTEXT is the only kind the
+		// server creates multi-label today; the guard is on the count so that
+		// stays true by construction rather than by enumeration.
+		if len(ri.LabelsOrTypes) > 1 {
 			continue
 		}
 		def := identityKey(append(
@@ -376,6 +385,8 @@ func indexKindToRemoteType(kind IndexKind) string {
 		return "RANGE"
 	case IndexVector:
 		return "VECTOR"
+	case IndexFulltext:
+		return "FULLTEXT"
 	default:
 		return unknownRemoteIndexType
 	}
@@ -385,11 +396,19 @@ func indexKindToRemoteType(kind IndexKind) string {
 // have declared, and therefore one the diff owns.
 //
 // SHOW INDEXES reports every non-LOOKUP, non-constraint-backed index on a
-// schema-owned label — including kinds the DSL has no vocabulary for (FULLTEXT,
-// TEXT, POINT, and the Neo4j 4.x-historical BTREE) and relationship indexes,
-// which the adapter never emits. Classifying one of those as an undeclared drop
+// schema-owned label — including kinds the DSL has no vocabulary for (TEXT,
+// POINT, and the Neo4j 4.x-historical BTREE) and relationship indexes, which
+// the adapter never emits. Classifying one of those as an undeclared drop
 // would report drift that no schema edit could resolve, leaving the
 // all-or-nothing constraints-only mode as the only escape.
+//
+// A multi-label node index — FULLTEXT is the only kind the server creates that
+// way (`FOR (n:A|B)`) — is likewise not declarable: an annotation is per-type,
+// so a declaration always targets exactly one label, and a multi-label object
+// is a different index the server creates a single-label declaration beside.
+// The guard is on the label count, not the kind, so a future
+// multi-label-capable kind cannot silently escape it. The row's NAME still
+// blocks every CREATE — blockers are collected before this filter.
 //
 // A constraint's backing index is likewise not declarable: it is created and
 // dropped with its constraint, so reporting one as an undeclared orphan advises
@@ -406,6 +425,9 @@ func indexKindToRemoteType(kind IndexKind) string {
 // index is undetected drift.
 func declarableRemoteIndex(ri RemoteIndex) bool {
 	if ri.OwningConstraint != "" {
+		return false
+	}
+	if len(ri.LabelsOrTypes) > 1 {
 		return false
 	}
 	if ri.EntityType != "" && !strings.EqualFold(ri.EntityType, "NODE") {
@@ -495,11 +517,12 @@ func vectorDrift(d Index, ri RemoteIndex) (string, bool) {
 	return "", false
 }
 
-// firstLabel returns the label a remote object's DEFINITION is keyed by. A node
-// index reports several labels only when it is FULLTEXT, whose remote type
-// upper-cases to a string no [desiredIndexKey] can equal, so such a row can
-// never be looked up under this key and which label is chosen cannot change a
-// classification. Use [describeLabels] wherever a message names the object.
+// firstLabel returns the label a remote object's DEFINITION is keyed by. Only
+// single-label rows are keyed — [Adapter.DiffIndexes] skips a multi-label row
+// before computing its definition key, because a multi-label index serves no
+// single-label declaration — so the "first" label is the row's only label; the
+// function merely stays total for the empty slice a hand-built record can
+// carry. Use [describeLabels] wherever a message names the object.
 func firstLabel(labels []string) string {
 	if len(labels) == 0 {
 		return ""

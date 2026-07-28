@@ -52,7 +52,8 @@
 // # Index Generation
 //
 // [Adapter.IndexesForSchema] returns index statements as raw Cypher strings
-// derived from a schema's @index, @@index, and @vector annotations.
+// derived from a schema's @index, @@index, @vector, @fulltext, and @@fulltext
+// annotations.
 // [Adapter.IndexesStructured] returns [Index] values with parsed metadata
 // (kind, label, properties, vector configuration):
 //
@@ -261,7 +262,8 @@
 // differs; a definition change under a name the database already holds; an index
 // in a state that serves no queries; and a desired index the server would refuse
 // to create, because its name or its whole definition is already taken — there
-// the Actual is the blocker, which may be a FULLTEXT, TEXT, or POINT index, an
+// the Actual is the blocker, which may be a TEXT, POINT, or multi-label
+// FULLTEXT index, an
 // index on a label this schema does not own, or a constraint's backing index. Composite property order is
 // significant, a deliberate divergence from [Adapter.DiffConstraints]: a
 // same-set/different-order remote index is a distinct index — create + drop when

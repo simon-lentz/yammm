@@ -130,6 +130,16 @@ var annotationRegistry = map[annotationKey]annotationSpec{
 		argHint:  vectorArgHint,
 		validate: validateVectorProperty,
 	},
+	{PlacementProperty, "fulltext"}: {
+		doc:      "Single-property fulltext index on a text property (String, Pattern, or Enum).",
+		argHint:  "",
+		validate: validateFulltextProperty,
+	},
+	{PlacementType, "fulltext"}: {
+		doc:      "Fulltext index over one or more text properties, scored across fields.",
+		argHint:  "property, …",
+		validate: validateFulltextType,
+	},
 	{PlacementProperty, "writeOnce"}: {
 		doc:      "Marks a property immutable after node creation (set on create only).",
 		argHint:  "",
@@ -481,6 +491,79 @@ func validateWriteOnceProperty(c *completer, _ *Type, prop *Property, a *Annotat
 	}
 }
 
+// validateFulltextProperty checks @fulltext: no arguments, and a text-kind
+// target. Primary-key members are allowed, sole or composite: a uniqueness
+// constraint's backing index is a range index and cannot serve fulltext
+// queries, so a fulltext index over a primary key is a distinct, legitimate
+// object — the @index sole-key redundancy rule does not transfer.
+func validateFulltextProperty(c *completer, _ *Type, prop *Property, a *Annotation) {
+	if a.argCount() > 0 {
+		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
+			"@fulltext takes no arguments; for a multi-property fulltext index use @@fulltext(...) at the type level")
+		return
+	}
+	if c.annotationTargetTypeUnknown(prop.Constraint()) {
+		return // the target's type is already diagnosed; blaming the annotation would bury it
+	}
+	if !isFulltextEligible(prop.Constraint()) {
+		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
+			"@fulltext requires a text property (String, Pattern, or Enum); property %q is %s",
+			prop.Name(), constraintKindName(prop.Constraint()))
+	}
+}
+
+// validateFulltextType checks @@fulltext: at least one property-reference
+// argument, no duplicate references, and each reference resolving to a text
+// property of the type (own or inherited; primary-key members are allowed —
+// see validateFulltextProperty for why the @index redundancy rule does not
+// transfer). Unknown-property reporting defers when the type has an unresolved
+// supertype, mirroring validateIndexType.
+//
+// Literal arguments are rejected, and that rejection is a reserved surface,
+// not just hygiene: a trailing string literal is the extension slot for a
+// future analyzer option, which stays additive only while v1 refuses it.
+func validateFulltextType(c *completer, t *Type, _ *Property, a *Annotation) {
+	if a.argCount() == 0 {
+		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION, "@@fulltext requires at least one property reference")
+		return
+	}
+	deferUnknown := c.hasUnresolvedSupertype(t)
+	seenRef := make(map[string]bool)
+	for i := range a.args {
+		arg := a.args[i]
+		if arg.isLiteral() {
+			c.annotationErrorf(a, arg.span, diag.E_INVALID_ANNOTATION,
+				"@@fulltext arguments must be property references, not literals")
+			continue
+		}
+		if seenRef[arg.text] {
+			c.annotationErrorf(a, arg.span, diag.E_INVALID_ANNOTATION,
+				"@@fulltext references property %q more than once", arg.text)
+			continue
+		}
+		seenRef[arg.text] = true
+
+		ref, ok := t.Property(arg.text)
+		if !ok {
+			if !deferUnknown {
+				c.annotationErrorf(a, arg.span, diag.E_UNKNOWN_ANNOTATION_TARGET,
+					"@@fulltext references unknown property %q of type %q", arg.text, t.Name())
+			}
+			continue
+		}
+		if c.annotationTargetTypeUnknown(ref.Constraint()) {
+			continue
+		}
+		if !isFulltextEligible(ref.Constraint()) {
+			c.annotationErrorf(a, arg.span, diag.E_INVALID_ANNOTATION_TARGET,
+				"@@fulltext member %q must be a text property (String, Pattern, or Enum); it is %s",
+				arg.text, constraintKindName(ref.Constraint()))
+			continue
+		}
+		a.setArgKind(i, ArgPropertyRef)
+	}
+}
+
 // validateIndexType checks @@index: at least one property-reference argument,
 // no duplicate references, and each reference resolving to a scalar property of
 // the type (own or inherited; primary-key members are allowed). Unknown-property
@@ -570,6 +653,28 @@ func isIndexableScalar(constraint Constraint) bool {
 		KindFloat, KindBoolean, KindDate, KindTimestamp:
 		return true
 	case KindVector, KindList, KindAlias:
+		return false
+	default:
+		return false
+	}
+}
+
+// isFulltextEligible reports whether a property constraint's underlying kind is
+// text and therefore eligible for a fulltext index: String, Pattern, and Enum —
+// the subset of the range-indexable scalars whose values a fulltext analyzer
+// tokenizes. UUID is deliberately excluded: it is stored as a string but is an
+// opaque identifier, not tokenized text. Aliases are resolved to their terminal
+// first.
+func isFulltextEligible(constraint Constraint) bool {
+	if constraint == nil {
+		return false
+	}
+	//exhaustive:enforce
+	switch ResolveAlias(constraint).Kind() {
+	case KindString, KindPattern, KindEnum:
+		return true
+	case KindUUID, KindInteger, KindFloat, KindBoolean, KindDate,
+		KindTimestamp, KindVector, KindList, KindAlias:
 		return false
 	default:
 		return false

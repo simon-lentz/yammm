@@ -1372,3 +1372,35 @@ func TestMarkdownIntegration_DocumentSymbolsNilSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, symbols, "expected nil when all snapshots are nil")
 }
+
+// TestIntegration_FulltextAnnotationsAnalyzeClean pins that a schema using both
+// fulltext placements analyzes with zero diagnostics end to end through the
+// server, and that the emptiness is not vacuous: replacing the target with an
+// ineligible kind draws a diagnostic through the same pipeline.
+func TestIntegration_FulltextAnnotationsAnalyzeClean(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	h, server := newTestHarnessWithServer(t, tmpDir)
+	defer h.Close()
+
+	valid := "schema \"test\"\n\ntype Doc {\n\tid String primary\n\ttitle String @fulltext\n\tbody String\n\t@@fulltext(title, body)\n}\n"
+	require.NoError(t, h.OpenDocument("test.yammm", valid))
+	h.Sync()
+
+	uri := testutil.PathToURI(filepath.Join(tmpDir, "test.yammm"))
+	require.Eventually(t, func() bool {
+		h.Sync()
+		return server.Workspace().LatestSnapshot(uri) != nil
+	}, analysisTimeout, 10*time.Millisecond, "snapshot should exist after open")
+	assert.Empty(t, h.Diagnostics(uri), "fulltext placements should produce zero diagnostics")
+
+	// Control: @fulltext on an Integer draws E_INVALID_ANNOTATION_TARGET, so an
+	// analyzer that silently stopped validating annotations cannot pass this test.
+	invalid := "schema \"test\"\n\ntype Doc {\n\tid String primary\n\tviews Integer @fulltext\n}\n"
+	require.NoError(t, h.ChangeDocument("test.yammm", invalid, 2))
+	require.Eventually(t, func() bool {
+		h.Sync()
+		return len(h.Diagnostics(uri)) > 0
+	}, analysisTimeout, 10*time.Millisecond, "an ineligible @fulltext target should produce a diagnostic")
+}

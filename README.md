@@ -14,7 +14,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 - **Runtime validation**: Validate Go maps, structs, and JSON against compiled schemas
 - **Relationship modeling**: Associations (references) and compositions (ownership) with multiplicity
 - **Invariants**: Boolean constraint expressions evaluated at validation time
-- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@writeOnce` metadata that adapters turn into store DDL
+- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` / `@writeOnce` metadata that adapters turn into store DDL
 - **Graph construction**: Build in-memory graphs from validated instances with integrity checking
 - **Graph persistence**: Save, load, verify, inspect, and edit-metadata-in-place graph snapshots (`.ys` format)
 - **Batch assembly**: Concurrent-safe validate → add → check → snapshot pipeline surface, resumable from a prior snapshot
@@ -307,11 +307,13 @@ Annotations attach validated, store-agnostic metadata that adapters turn into st
 type Document {
     content_hash String      primary
     state        String      @index
+    title        String      @fulltext
     published_on Date
     embedding    Vector[768] @vector(cosine)
     first_seen   Timestamp   @writeOnce
 
     @@index(state, published_on)
+    @@fulltext(title, state)
 }
 ```
 
@@ -320,6 +322,8 @@ type Document {
 | `@index` | property | Single-property range index on a scalar |
 | `@@index(a, b, …)` | type | Composite range index; argument order is significant |
 | `@vector(cosine\|euclidean)` | property | ANN vector index on a `Vector[N]` property |
+| `@fulltext` | property | Single-property fulltext index on a text property (`String`, `Pattern`, `Enum`) |
+| `@@fulltext(a, b, …)` | type | Fulltext index scored across the referenced text properties |
 | `@writeOnce` | property | Set on node creation, never rewritten |
 
 `yammm neo4j indexes <schema>` emits the index DDL; `yammm neo4j diff` compares it against a live database. See [SPEC.md](docs/SPEC.md#annotations) for eligibility rules and diagnostics.

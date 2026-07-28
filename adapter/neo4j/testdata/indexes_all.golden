@@ -1,7 +1,9 @@
 CREATE INDEX index_test__Document_state_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.state)
 CREATE INDEX index_test__Document_published_on_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.published_on)
 CREATE VECTOR INDEX index_test__Document_embedding_vector_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.embedding) OPTIONS {indexConfig: {`vector.dimensions`: 768, `vector.similarity_function`: 'cosine'}}
+CREATE FULLTEXT INDEX index_test__Document_title_fulltext_idx IF NOT EXISTS FOR (n:index_test__Document) ON EACH [n.title]
 CREATE INDEX index_test__Document_state_published_on_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.state, n.published_on)
+CREATE FULLTEXT INDEX index_test__Document_title_state_fulltext_idx IF NOT EXISTS FOR (n:index_test__Document) ON EACH [n.title, n.state]
 CREATE INDEX index_test__Document_first_seen_idx IF NOT EXISTS FOR (n:index_test__Document) ON (n.first_seen)
 CREATE INDEX index_test__Note_body_idx IF NOT EXISTS FOR (n:index_test__Note) ON (n.body)
 CREATE INDEX index_test__Note_first_seen_idx IF NOT EXISTS FOR (n:index_test__Note) ON (n.first_seen)

@@ -324,8 +324,11 @@ func TestTypeConstraint_MissingPropertyTypeIsUnverified(t *testing.T) {
 	}
 }
 
-// Index kinds the DSL cannot express must not be reported as drops: no schema
-// edit could resolve one, so the diff would never converge.
+// Index shapes the DSL cannot express must not be reported as drops: no schema
+// edit could resolve one, so the diff would never converge. Single-label
+// FULLTEXT is deliberately absent — it IS declarable now, and an undeclared one
+// is a drop ([TestUndeclaredFulltextIndex_IsDropped]); the fulltext shape the
+// DSL still cannot express is the multi-label form.
 func TestUndeclarableIndexKinds_AreNotDropped(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
@@ -336,8 +339,8 @@ func TestUndeclarableIndexKinds_AreNotDropped(t *testing.T) {
 	s := loadRoundTripSchema(t)
 	applySchemaDDL(t, ctx, a, s)
 
-	// Hand-create kinds the schema has no vocabulary for, on a label it owns.
-	run(t, ctx, "CREATE FULLTEXT INDEX rt_ft IF NOT EXISTS FOR (n:rt__Document) ON EACH [n.title]")
+	// Hand-create shapes the schema has no vocabulary for, on a label it owns.
+	run(t, ctx, "CREATE FULLTEXT INDEX rt_ft IF NOT EXISTS FOR (n:rt__Document|rt__Note) ON EACH [n.body]")
 	run(t, ctx, "CREATE TEXT INDEX rt_text IF NOT EXISTS FOR (n:rt__Document) ON (n.state)")
 	run(t, ctx, "CREATE POINT INDEX rt_point IF NOT EXISTS FOR (n:rt__Document) ON (n.location)")
 	awaitIndexes(t, ctx)
@@ -942,4 +945,149 @@ type Item_a { item_a_id String primary
 		t.Error("a node missing the required property b was accepted; Item_a.b is not NOT NULL-enforced")
 	}
 	t.Cleanup(func() { run(t, ctx, "MATCH (n:cc__Item_a) DETACH DELETE n") })
+}
+
+// A hand-named fulltext index whose definition equals a declaration is claimed
+// by identity pairing under its legacy name: Match, no rename, no DDL. This is
+// the zero-op adoption a schema-first consumer migrating a hand-maintained
+// fulltext registry relies on — the live counterpart of the operator's-ad-hoc-
+// name case the pairing documents.
+func TestHandNamedFulltextIndex_IsClaimedByIdentity(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	dropAll(t, ctx)
+	t.Cleanup(func() { dropAll(t, ctx) })
+
+	a := newAdapter(t, ctx)
+	s := loadRoundTripSchema(t)
+
+	// The operator's index exists FIRST, under a hand-picked name, exactly as a
+	// migration from a hand-maintained registry finds it.
+	run(t, ctx, "CREATE FULLTEXT INDEX legacy_title_ft IF NOT EXISTS FOR (n:rt__Document) ON EACH [n.title]")
+	awaitIndexes(t, ctx)
+
+	desired, res := a.IndexesStructured(ctx, s)
+	if res.HasErrors() {
+		t.Fatalf("emitting indexes: %v", res.Err())
+	}
+	var ft n4j.Index
+	for _, d := range desired {
+		if d.Kind == n4j.IndexFulltext && len(d.Properties) == 1 && d.Properties[0] == "title" {
+			ft = d
+			break
+		}
+	}
+	if ft.Name == "" {
+		t.Fatal("no single-property fulltext declaration in the fixture")
+	}
+
+	parsed, err := n4j.ParseRemoteIndexes(query(t, ctx, n4j.IntrospectIndexesQuery()))
+	if err != nil {
+		t.Fatalf("ParseRemoteIndexes: %v", err)
+	}
+	diff := a.DiffIndexes([]n4j.Index{ft}, parsed, a.OwnedLabels(ctx, s))
+	if len(diff.Match) != 1 {
+		t.Fatalf("match = %d, want 1 (the legacy index claimed by identity)", len(diff.Match))
+	}
+	if got := diff.Match[0].Actual.Name; got != "legacy_title_ft" {
+		t.Errorf("claimed remote name = %q; want the legacy name kept as-is", got)
+	}
+	if actionable := len(diff.Drift) + len(diff.Create) + len(diff.Drop); actionable != 0 {
+		t.Errorf("actionable = %d, want 0: drift %d, create %d, drop %d",
+			actionable, len(diff.Drift), len(diff.Create), len(diff.Drop))
+	}
+}
+
+// The declarability flip, live: an owned single-label FULLTEXT row with no
+// declaration is a Drop — the definition-drift authority the fulltext
+// annotations exist to provide.
+func TestUndeclaredFulltextIndex_IsDropped(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	dropAll(t, ctx)
+	t.Cleanup(func() { dropAll(t, ctx) })
+
+	a := newAdapter(t, ctx)
+	s := loadRoundTripSchema(t)
+	applySchemaDDL(t, ctx, a, s)
+
+	// The schema declares fulltext over [title] and [title, state]; [state]
+	// alone is undeclared.
+	run(t, ctx, "CREATE FULLTEXT INDEX rt_adhoc_ft IF NOT EXISTS FOR (n:rt__Document) ON EACH [n.state]")
+	awaitIndexes(t, ctx)
+
+	desired, _ := a.IndexesStructured(ctx, s)
+	parsed, err := n4j.ParseRemoteIndexes(query(t, ctx, n4j.IntrospectIndexesQuery()))
+	if err != nil {
+		t.Fatalf("ParseRemoteIndexes: %v", err)
+	}
+	diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
+	if len(diff.Drop) != 1 || diff.Drop[0].Name != "rt_adhoc_ft" {
+		t.Errorf("drops = %d; want exactly the undeclared rt_adhoc_ft", len(diff.Drop))
+		for _, d := range diff.Drop {
+			t.Logf("  drop: %s (%s)", d.Name, d.Type)
+		}
+	}
+}
+
+// A multi-label FULLTEXT index does not stop the server from creating a
+// single-label fulltext index over the same property — they are different
+// objects — which is why the diff keeps multi-label rows out of the
+// definition-blocker map and out of declarability, while their names keep
+// blocking. Assert what the server actually does; the exclusion's safety
+// argument depends on it.
+func TestMultiLabelFulltext_DoesNotBlockSingleLabelCreate(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	dropAll(t, ctx)
+	t.Cleanup(func() { dropAll(t, ctx) })
+
+	a := newAdapter(t, ctx)
+	s := loadRoundTripSchema(t)
+
+	desired, res := a.IndexesStructured(ctx, s)
+	if res.HasErrors() {
+		t.Fatalf("emitting indexes: %v", res.Err())
+	}
+	var ft n4j.Index
+	for _, d := range desired {
+		if d.Kind == n4j.IndexFulltext && len(d.Properties) == 1 && d.Properties[0] == "title" {
+			ft = d
+			break
+		}
+	}
+	if ft.Name == "" {
+		t.Fatal("no single-property fulltext declaration in the fixture")
+	}
+
+	// The multi-label object exists first; the declared statement must still
+	// create the single-label index beside it.
+	run(t, ctx, "CREATE FULLTEXT INDEX rt_multi_ft IF NOT EXISTS FOR (n:rt__Document|rt__Note) ON EACH [n.title]")
+	run(t, ctx, ft.Statement)
+	awaitIndexes(t, ctx)
+
+	present := make(map[string]bool)
+	for _, rec := range query(t, ctx, "SHOW INDEXES YIELD name, type") {
+		if name, _ := rec["name"].(string); name != "" {
+			present[name] = true
+		}
+	}
+	if !present["rt_multi_ft"] || !present[ft.Name] {
+		t.Fatalf("want both the multi-label index and the declared one to exist; got %v", present)
+	}
+
+	parsed, err := n4j.ParseRemoteIndexes(query(t, ctx, n4j.IntrospectIndexesQuery()))
+	if err != nil {
+		t.Fatalf("ParseRemoteIndexes: %v", err)
+	}
+	diff := a.DiffIndexes([]n4j.Index{ft}, parsed, a.OwnedLabels(ctx, s))
+	if len(diff.Match) != 1 {
+		t.Errorf("match = %d, want 1 (the declared single-label index)", len(diff.Match))
+	}
+	if len(diff.Drop) != 0 {
+		t.Errorf("drops = %d, want 0: the multi-label object is excluded, not dropped", len(diff.Drop))
+	}
+	if diff.Excluded != 1 {
+		t.Errorf("Excluded = %d; want the multi-label row counted", diff.Excluded)
+	}
 }

@@ -69,7 +69,7 @@ func TestDetectContext_AnnotationNotInString(t *testing.T) {
 func TestAnnotationNameCompletions_Property(t *testing.T) {
 	t.Parallel()
 	labels := completionLabels(AnnotationNameCompletions(schema.PlacementProperty))
-	for _, want := range []string{"index", "vector", "writeOnce"} {
+	for _, want := range []string{"index", "vector", "writeOnce", "fulltext"} {
 		if !slices.Contains(labels, want) {
 			t.Errorf("property annotation completions missing %q; got %v", want, labels)
 		}
@@ -79,8 +79,10 @@ func TestAnnotationNameCompletions_Property(t *testing.T) {
 func TestAnnotationNameCompletions_Type(t *testing.T) {
 	t.Parallel()
 	labels := completionLabels(AnnotationNameCompletions(schema.PlacementType))
-	if !slices.Contains(labels, "index") {
-		t.Errorf("type annotation completions should include index; got %v", labels)
+	for _, want := range []string{"index", "fulltext"} {
+		if !slices.Contains(labels, want) {
+			t.Errorf("type annotation completions missing %q; got %v", want, labels)
+		}
 	}
 	if slices.Contains(labels, "writeOnce") {
 		t.Errorf("type annotation completions should not include property-only writeOnce; got %v", labels)

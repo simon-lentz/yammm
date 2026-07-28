@@ -79,15 +79,23 @@ func TestEmittedDDLExecutes(t *testing.T) {
 	applySchemaDDL(t, ctx, a, s)
 
 	// The CREATE VECTOR INDEX ... OPTIONS form is the one with a stated version
-	// floor, so confirm the server really did create a VECTOR index.
-	var sawVector bool
+	// floor, and the CREATE FULLTEXT INDEX ... ON EACH form is the one whose
+	// list syntax differs from the range tuple — so confirm the server really
+	// did create one of each.
+	var sawVector, sawFulltext bool
 	for _, rec := range query(t, ctx, "SHOW INDEXES YIELD name, type") {
-		if typ, _ := rec["type"].(string); typ == "VECTOR" {
+		switch typ, _ := rec["type"].(string); typ {
+		case "VECTOR":
 			sawVector = true
+		case "FULLTEXT":
+			sawFulltext = true
 		}
 	}
 	if !sawVector {
 		t.Error("no VECTOR index exists after applying the schema's DDL")
+	}
+	if !sawFulltext {
+		t.Error("no FULLTEXT index exists after applying the schema's DDL")
 	}
 }
 

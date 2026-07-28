@@ -2,7 +2,8 @@ schema "dup_decl_test"
 
 type Publisher {
     pid  String primary
-    name String @index
+    name String @index @fulltext
 
     @@index(name)
+    @@fulltext(name)
 }

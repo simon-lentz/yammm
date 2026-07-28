@@ -14,9 +14,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/buildversion"
 	lsp "github.com/simon-lentz/yammm/lsp"
 )
 
+// version is the ldflags-injected release version; [buildversion.Resolve]
+// falls back to the build-info module version for `go install pkg@tag` builds,
+// which never receive ldflags.
 var version = "dev"
 
 // LevelTrace is a custom log level below debug for verbose tracing.
@@ -83,8 +87,10 @@ func run(stdout io.Writer, args []string) error {
 		return fmt.Errorf("parse flags: %w", err)
 	}
 
+	resolved := buildversion.Resolve(version)
+
 	if *showVer {
-		fmt.Fprintf(stdout, "yammm-lsp %s\n", version)
+		fmt.Fprintf(stdout, "yammm-lsp %s\n", resolved)
 		return nil
 	}
 
@@ -100,7 +106,7 @@ func run(stdout io.Writer, args []string) error {
 	// warns about module root issues without failing (graceful degradation).
 	cfg := lsp.Config{
 		ModuleRoot:    *moduleRoot,
-		Version:       version,
+		Version:       resolved,
 		DebounceDelay: *debounceDelay,
 	}
 	if err := cfg.Validate(logger); err != nil {

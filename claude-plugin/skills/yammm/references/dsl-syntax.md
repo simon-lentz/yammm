@@ -206,29 +206,41 @@ Validated metadata that downstream adapters turn into store DDL (indexes, write-
 
 ```yammm-snippet
 state        String      @index
+title        String      @fulltext
 embedding    Vector[768] @vector(cosine)
 first_seen   Timestamp   @writeOnce
 @@index(state, published_on)
+@@fulltext(title, state)
 ```
 
-Blessed annotations (v1):
+Blessed annotations:
 
 | Annotation | Placement | Arguments | Target |
 |---|---|---|---|
 | `@index` | property | none | a scalar property that is not the sole primary key |
 | `@@index(p, …)` | type | one or more property references (ordered) | scalar properties; primary-key members allowed |
 | `@vector(sim)` | property | `cosine` \| `euclidean` | a `Vector[N]` property |
+| `@fulltext` | property | none | a text property (`String`, `Pattern`, `Enum`); primary keys allowed |
+| `@@fulltext(p, …)` | type | one or more property references (ordered) | text properties; primary-key members allowed |
 | `@writeOnce` | property | none | any non-primary-key property |
+
+`@fulltext` allows primary keys where `@index` rejects the sole-key case: a
+uniqueness constraint's backing index is a range index and cannot serve
+fulltext queries, so no fulltext declaration is ever redundant with it. UUID is
+range-indexable but not fulltext-eligible — it is an opaque identifier, not
+tokenized text.
 
 ```yammm
 type Document {
     content_hash String      primary
     state        String      @index
+    title        String      @fulltext
     published_on Date        @index
     embedding    Vector[768] @vector(cosine)
     first_seen   Timestamp   @writeOnce
 
     @@index(state, published_on)
+    @@fulltext(title, state)
 }
 ```
 
