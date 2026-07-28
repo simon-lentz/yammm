@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -110,6 +111,94 @@ type T {
 			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1},
 		},
 		{
+			name: "@fulltext takes no arguments",
+			source: `schema "main"
+type T {
+	id String primary
+	x String @fulltext(id)
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION: 1},
+		},
+		{
+			name: "@fulltext on non-text scalar (Integer)",
+			source: `schema "main"
+type T {
+	id String primary
+	n Integer @fulltext
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1},
+		},
+		{
+			// The sharpest text-only boundary: UUID is range-indexable but is an
+			// opaque identifier, not tokenized text.
+			name: "@fulltext on UUID",
+			source: `schema "main"
+type T {
+	id String primary
+	u UUID @fulltext
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1},
+		},
+		{
+			name: "@fulltext on Vector",
+			source: `schema "main"
+type T {
+	id String primary
+	v Vector[4] @fulltext
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1},
+		},
+		{
+			name: "@@fulltext with no arguments",
+			source: `schema "main"
+type T {
+	id String primary
+	x String
+	@@fulltext
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION: 1},
+		},
+		{
+			name: "@@fulltext unknown property",
+			source: `schema "main"
+type T {
+	id String primary
+	@@fulltext(ghost)
+}`,
+			want: map[diag.Code]int{diag.E_UNKNOWN_ANNOTATION_TARGET: 1},
+		},
+		{
+			name: "@@fulltext duplicate reference",
+			source: `schema "main"
+type T {
+	id String primary
+	x String
+	@@fulltext(x, x)
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION: 1},
+		},
+		{
+			name: "@@fulltext non-text member (Date)",
+			source: `schema "main"
+type T {
+	id String primary
+	x String
+	d Date
+	@@fulltext(x, d)
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1},
+		},
+		{
+			name: "@@fulltext literal argument",
+			source: `schema "main"
+type T {
+	id String primary
+	x String
+	@@fulltext("x")
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION: 1},
+		},
+		{
 			name: "@vector wrong keyword",
 			source: `schema "main"
 type T {
@@ -205,6 +294,110 @@ type Document {
 	first_seen Timestamp @writeOnce
 	@@index(state, published_on)
 }`)
+}
+
+// Every text kind is fulltext-eligible, through an alias too, and @fulltext
+// composes with @index on the same property (distinct annotation names).
+func TestAnnotation_Fulltext_ValidKindsLoadClean(t *testing.T) {
+	t.Parallel()
+	loadOK(t, `schema "main"
+type Email = Pattern["^[^@]+@[^@]+$"]
+type Document {
+	content_hash String primary
+	title String required @fulltext
+	body String @fulltext @index
+	state Enum["draft", "published"] @fulltext
+	contact Email @fulltext
+	@@fulltext(title, body)
+}`)
+}
+
+// Primary keys are fulltext-eligible for both placements, sole or composite:
+// the uniqueness constraint's backing index is a range index and cannot serve
+// fulltext queries, so no redundancy rule applies — the deliberate contrast
+// with @index over a sole key.
+func TestAnnotation_Fulltext_PrimaryKeyAllowed(t *testing.T) {
+	t.Parallel()
+	loadOK(t, `schema "main"
+type Sole {
+	id String primary @fulltext
+	@@fulltext(id)
+}
+type Composite {
+	a String primary @fulltext
+	b String primary
+}`)
+}
+
+func TestAnnotation_Fulltext_InheritedPropertyRefResolves(t *testing.T) {
+	t.Parallel()
+	loadOK(t, `schema "main"
+abstract type Base {
+	id String primary
+	title String
+}
+type Derived extends Base {
+	summary String
+	@@fulltext(title, summary)
+}`)
+}
+
+// An unresolved supertype defers the unknown-reference report: the property may
+// live on a not-yet-visible cross-schema ancestor.
+func TestAnnotation_Fulltext_DeferredSupertype_UnknownRefSilent(t *testing.T) {
+	t.Parallel()
+	_, res := schema.NewBuilder().
+		WithName("main").
+		AddType("Entity").
+		Extends(schema.NewTypeRef("ext", "Base", location.Span{})).
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithTypeAnnotation("fulltext", "ghost").
+		Done().
+		Build()
+	if res.HasCode(diag.E_UNKNOWN_ANNOTATION_TARGET) {
+		t.Errorf("@@fulltext under an unresolved supertype must defer the unknown-reference report, got: %v", res)
+	}
+}
+
+// @@fulltext arguments are stamped as property references on success.
+func TestAnnotation_Fulltext_StampsArgKinds(t *testing.T) {
+	t.Parallel()
+	s := loadOK(t, `schema "main"
+type T {
+	id String primary
+	title String
+	@@fulltext(id, title)
+}`)
+	ty := schemaType(t, s, "T")
+	all := ty.AllAnnotationsSlice()
+	if len(all) == 0 {
+		t.Fatal("T should carry the @@fulltext annotation")
+	}
+	for i, arg := range all[0].Args() {
+		if arg.Kind() != schema.ArgPropertyRef {
+			t.Errorf("@@fulltext arg %d kind: got %v, want ArgPropertyRef", i, arg.Kind())
+		}
+	}
+}
+
+// @fulltext's arity error names the @@fulltext multi-property form, matching
+// the @index arity hint's shape.
+func TestAnnotation_Fulltext_ArityHintsTypeLevel(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, `schema "main"
+type T {
+	id String primary
+	x String @fulltext(id)
+}`)
+	for issue := range res.Issues() {
+		if issue.Code() == diag.E_INVALID_ANNOTATION {
+			if !strings.Contains(issue.Message(), "@@fulltext") {
+				t.Errorf("arity message should hint the @@fulltext form, got: %q", issue.Message())
+			}
+			return
+		}
+	}
+	t.Fatalf("expected an E_INVALID_ANNOTATION issue, got: %v", res)
 }
 
 func TestAnnotation_Validation_CompositePKMemberIndexAllowed(t *testing.T) {

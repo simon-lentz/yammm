@@ -83,14 +83,18 @@ Validated metadata for adapters (indexes, write-once). Property-level `@name`, t
 
 ```yammm-snippet
 state      String      @index                // single-property range index
+title      String      @fulltext             // single-property fulltext index
 embedding  Vector[768] @vector(cosine)       // cosine | euclidean
 first_seen Timestamp   @writeOnce            // set on create only
 @@index(state, published_on)                 // composite range index (ordered)
+@@fulltext(title, state)                     // multi-property fulltext index
 ```
 
 - `@index` — a scalar property that is not the sole primary key.
 - `@@index(p, …)` — one or more scalar references (order matters); primary-key members allowed.
 - `@vector(sim)` — a `Vector[N]` property; `sim` is `cosine` or `euclidean`.
+- `@fulltext` — a text property (`String`, `Pattern`, `Enum`); primary keys allowed (the range-index redundancy rule does not apply).
+- `@@fulltext(p, …)` — one or more text references (order matters); primary-key members allowed.
 - `@writeOnce` — any non-primary-key property.
 - An annotation trails the datatype and any modifier; `@index()` (empty parens) is a syntax error.
 

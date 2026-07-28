@@ -13,13 +13,13 @@ import (
 )
 
 // IndexKind enumerates the categories of index the adapter emits from schema
-// annotations. Full-text and point indexes are deferred; the enum is the
-// extension point.
+// annotations. Point indexes are deferred; the enum is the extension point.
 type IndexKind int
 
 const (
-	IndexRange  IndexKind = iota // Range (lookup) index over one or more scalar properties.
-	IndexVector                  // Approximate-nearest-neighbour vector index.
+	IndexRange    IndexKind = iota // Range (lookup) index over one or more scalar properties.
+	IndexVector                    // Approximate-nearest-neighbour vector index.
+	IndexFulltext                  // Fulltext index over one or more text properties.
 )
 
 // allIndexKinds lists every [IndexKind], for the code that must enumerate the
@@ -34,24 +34,24 @@ const (
 // below IndexRange or at a non-contiguous value escapes that assumption
 // silently. [TestIndexKind_EnumerationIsComplete] sweeps a numeric range instead,
 // so it can find a kind this list omits wherever the kind sits.
-var allIndexKinds = []IndexKind{IndexRange, IndexVector}
+var allIndexKinds = []IndexKind{IndexRange, IndexVector, IndexFulltext}
 
 // Index is a structured representation of a single Neo4j index derived from a
-// schema's @index, @@index, and @vector annotations.
+// schema's @index, @@index, @vector, @fulltext, and @@fulltext annotations.
 // Construct via [Adapter.IndexesStructured]; do not create directly.
 type Index struct {
 	// Deterministic index name: {label}_{props}_idx for range,
-	// {label}_{prop}_vector_idx for vector, plus a short hex digest suffix when
-	// two indexes would otherwise share a name (see [disambiguateIndexNames]).
-	// Reconstructing the name from label and properties is therefore not safe;
-	// read it from here.
+	// {label}_{prop}_vector_idx for vector, {label}_{props}_fulltext_idx for
+	// fulltext, plus a short hex digest suffix when two indexes would otherwise
+	// share a name (see [disambiguateIndexNames]). Reconstructing the name from
+	// label and properties is therefore not safe; read it from here.
 	Name             string
 	Kind             IndexKind // Index category
 	Label            string    // Fully qualified Neo4j label (e.g., "book_catalog__Publisher")
 	Properties       []string  // Indexed properties in declared order (order is significant for composites)
-	VectorDimensions int       // Vector dimension (0 for range indexes)
-	VectorSimilarity string    // Vector similarity function, "cosine" or "euclidean" (empty for range indexes)
-	Statement        string    // Complete CREATE [VECTOR] INDEX ... IF NOT EXISTS Cypher statement
+	VectorDimensions int       // Vector dimension (0 for range and fulltext indexes)
+	VectorSimilarity string    // Vector similarity function, "cosine" or "euclidean" (empty for range and fulltext indexes)
+	Statement        string    // Complete CREATE [VECTOR|FULLTEXT] INDEX ... IF NOT EXISTS Cypher statement
 }
 
 // IndexesForSchema generates Neo4j index statements from a yammm schema's
@@ -84,13 +84,15 @@ func (k IndexKind) String() string {
 }
 
 // IndexesStructured generates Neo4j index statements from a yammm schema's
-// @index, @@index, and @vector annotations and returns them as structured
-// [Index] values.
+// @index, @@index, @vector, @fulltext, and @@fulltext annotations and returns
+// them as structured [Index] values.
 //
 // Property-level @index yields a single-property range index; type-level
 // @@index yields a composite range index (declared order significant);
 // property-level @vector yields an ANN vector index whose dimension comes from
-// the property's Vector[N] constraint. Load-time validation guarantees target
+// the property's Vector[N] constraint; property-level @fulltext and type-level
+// @@fulltext yield fulltext indexes over text properties. Load-time validation
+// guarantees target
 // eligibility wherever it can resolve the type's full member set; where it must
 // defer — a supertype that never resolved, and every qualified reference in a
 // registry-less [schema.NewBuilder] schema — the adapter re-checks that each
@@ -104,8 +106,9 @@ func (k IndexKind) String() string {
 // each concrete or part subtype's own label, matching how constraints treat
 // inherited properties.
 //
-// Unlike constraints, indexes are emitted for every edition: range and vector
-// indexes are core query features on both Community and Enterprise.
+// Unlike constraints, indexes are emitted for every edition: range, vector,
+// and fulltext indexes are core query features on both Community and
+// Enterprise.
 //
 // Index names are always emitted; diff and DROP tooling need stable names and
 // a new surface has no unnamed back-compat to preserve. Because statements
@@ -116,8 +119,9 @@ func (k IndexKind) String() string {
 // made injective.
 //
 // Returns the index statements in deterministic order: types in schema
-// declaration order; within each type range indexes then vector indexes (both
-// in property order), then composites (in annotation order).
+// declaration order; within each type range indexes, then vector indexes, then
+// fulltext indexes (each in property order), then type-level composites —
+// @@index and @@fulltext interleaved, in annotation order.
 //
 // If validation errors are found, returns (nil, result) where result contains
 // all issues. Issues use [E_NEO4J_LABEL_COLLISION], [E_NEO4J_INVALID_IDENTIFIER],
@@ -224,15 +228,18 @@ func invalidLabelIssue(typeName, label string, err error) diag.Issue {
 }
 
 // indexesForType generates all indexes for one emitted (non-abstract) type in
-// deterministic order: range indexes, then vector indexes (both in property
-// order), then composite @@index indexes (in annotation order).
+// deterministic order: range indexes, then vector indexes, then fulltext
+// indexes (each in property order), then type-level composites — @@index and
+// @@fulltext interleaved, in annotation order.
 //
 // Two declarations that describe the SAME index — @index on a property plus a
-// single-property @@index over it, which load-time validation accepts because
-// neither placement's check inspects the other — collapse to one. Emitting both
-// would put two identical definitions in the output, which
-// [disambiguateIndexNames] would then give two different names, so the schema
-// would ask the database for the same index twice.
+// single-property @@index over it, or @fulltext plus a single-property
+// @@fulltext, which load-time validation accepts because neither placement's
+// check inspects the other — collapse to one. Emitting both would put two
+// identical definitions in the output, which [disambiguateIndexNames] would
+// then give two different names, so the schema would ask the database for the
+// same index twice. The dedup key carries the kind, so @index and @fulltext on
+// one property stay two distinct indexes.
 func indexesForType(t *schema.Type, label string, collector *diag.Collector, reported reportedTargets) []Index {
 	var indexes []Index
 	emitted := make(map[string]bool)
@@ -245,14 +252,20 @@ func indexesForType(t *schema.Type, label string, collector *diag.Collector, rep
 		indexes = append(indexes, idx)
 	}
 
-	// 1 & 2. Property-level @index and @vector, collected in one walk of the
-	// merged property set and emitted range-before-vector to preserve the
-	// documented order.
-	var vectorIndexes []Index
+	// 1-3. Property-level @index, @vector, and @fulltext, collected in one walk
+	// of the merged property set. Ranges add inline; vector and fulltext defer
+	// to their own slices so the documented range-vector-fulltext order holds.
+	var vectorIndexes, fulltextIndexes []Index
 	for prop := range t.AllProperties() {
 		if ann, ok := prop.Annotation("index"); ok {
 			if validScalarTarget(t, prop, ann, collector, reported) {
 				add(rangeIndex(label, []string{prop.Name()}))
+			}
+		}
+		if ann, ok := prop.Annotation("fulltext"); ok {
+			if validFulltextTarget(t, prop, ann, collector, reported) {
+				fulltextIndexes = append(fulltextIndexes,
+					fulltextIndex(label, []string{prop.Name()}))
 			}
 		}
 		ann, ok := prop.Annotation("vector")
@@ -272,10 +285,16 @@ func indexesForType(t *schema.Type, label string, collector *diag.Collector, rep
 	for _, idx := range vectorIndexes {
 		add(idx)
 	}
+	for _, idx := range fulltextIndexes {
+		add(idx)
+	}
 
-	// 3. Composite range indexes from type-level @@index.
+	// 4. Type-level composites from @@index and @@fulltext — ONE walk branching
+	// on the name, so the two kinds emit interleaved in annotation order rather
+	// than grouped by kind.
 	for ann := range t.AllAnnotations() {
-		if ann.Name() != "index" {
+		isFulltext := ann.Name() == "fulltext"
+		if ann.Name() != "index" && !isFulltext {
 			continue
 		}
 		args := ann.Args()
@@ -292,7 +311,13 @@ func indexesForType(t *schema.Type, label string, collector *diag.Collector, rep
 				valid = false
 				continue
 			}
-			if !validScalarTarget(t, prop, ann, collector, reported) {
+			var memberValid bool
+			if isFulltext {
+				memberValid = validFulltextTarget(t, prop, ann, collector, reported)
+			} else {
+				memberValid = validScalarTarget(t, prop, ann, collector, reported)
+			}
+			if !memberValid {
 				valid = false
 				continue
 			}
@@ -301,7 +326,11 @@ func indexesForType(t *schema.Type, label string, collector *diag.Collector, rep
 		if !valid || len(props) == 0 {
 			continue
 		}
-		add(rangeIndex(label, props))
+		if isFulltext {
+			add(fulltextIndex(label, props))
+		} else {
+			add(rangeIndex(label, props))
+		}
 	}
 
 	return indexes
@@ -475,6 +504,54 @@ func validVectorTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 	return true
 }
 
+// validFulltextTarget reports whether a property named by @fulltext or
+// @@fulltext can be emitted: a usable Neo4j identifier, and a text type the
+// loader's own rule accepts.
+//
+// The type check is not redundant with load-time validation for the same
+// reason [validScalarTarget]'s is not: the loader defers its eligibility check
+// whenever the target's type cannot be resolved, so a schema can seal cleanly
+// with @fulltext on an unresolved alias. Trusting the sealed model there would
+// emit a fulltext index over a property the DSL's own rule forbids.
+func validFulltextTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
+	collector *diag.Collector, reported reportedTargets,
+) bool {
+	if !validIndexName(t, prop, ann, collector, reported) {
+		return false
+	}
+	if fulltextEligibleScalar(prop.Constraint()) {
+		return true
+	}
+	reportIndexTarget(collector, reported,
+		indexTargetRef{ann: ann, name: prop.Name(), code: E_NEO4J_INVALID_INDEX_TARGET},
+		ann, E_NEO4J_INVALID_INDEX_TARGET, targetScope(t, prop),
+		fmt.Sprintf("fulltext annotation names property %q, which is not a text property", prop.Name()),
+		"a fulltext index requires a String, Pattern, or Enum property; the loader could not check this target because its type never resolved")
+	return false
+}
+
+// fulltextEligibleScalar mirrors the loader's @fulltext / @@fulltext
+// eligibility rule (String, Pattern, Enum — the text kinds) so the adapter
+// re-checks exactly what the loader would have checked had the target's type
+// resolved. An unresolved alias resolves to KindAlias and is correctly
+// ineligible: nothing is known about it, so nothing licenses emitting DDL.
+func fulltextEligibleScalar(c schema.Constraint) bool {
+	if c == nil {
+		return false
+	}
+	//exhaustive:enforce
+	switch schema.ResolveAlias(c).Kind() {
+	case schema.KindString, schema.KindPattern, schema.KindEnum:
+		return true
+	case schema.KindUUID, schema.KindInteger, schema.KindFloat, schema.KindBoolean,
+		schema.KindDate, schema.KindTimestamp, schema.KindVector, schema.KindList,
+		schema.KindAlias:
+		return false
+	default:
+		return false
+	}
+}
+
 // indexableScalar mirrors the loader's @index / @@index eligibility rule so the
 // adapter re-checks exactly what the loader would have checked had the target's
 // type resolved. An unresolved alias resolves to KindAlias and is correctly
@@ -503,6 +580,18 @@ func rangeIndex(label string, props []string) Index {
 	return Index{
 		Name:       indexName(label, props, IndexRange),
 		Kind:       IndexRange,
+		Label:      label,
+		Properties: props,
+	}
+}
+
+// fulltextIndex builds a fulltext Index over the given properties (declared
+// order). Statement is filled in by [renderIndexStatement] once naming has
+// settled; see [disambiguateIndexNames].
+func fulltextIndex(label string, props []string) Index {
+	return Index{
+		Name:       indexName(label, props, IndexFulltext),
+		Kind:       IndexFulltext,
 		Label:      label,
 		Properties: props,
 	}
@@ -537,20 +626,33 @@ func renderIndexStatement(idx Index) string {
 	for i, p := range idx.Properties {
 		refs[i] = "n." + p
 	}
+	// Fulltext uses the ON EACH list form; range uses the ON tuple form.
+	if idx.Kind == IndexFulltext {
+		return fmt.Sprintf("CREATE FULLTEXT INDEX %s IF NOT EXISTS FOR (n:%s) ON EACH [%s]",
+			idx.Name, idx.Label, strings.Join(refs, ", "))
+	}
 	return fmt.Sprintf("CREATE INDEX %s IF NOT EXISTS FOR (n:%s) ON (%s)",
 		idx.Name, idx.Label, strings.Join(refs, ", "))
 }
 
 // indexName builds a deterministic index name:
 //
-//	range:  {label}_{prop1}_{prop2}_idx
-//	vector: {label}_{prop}_vector_idx
+//	range:    {label}_{prop1}_{prop2}_idx
+//	vector:   {label}_{prop}_vector_idx
+//	fulltext: {label}_{prop1}_{prop2}_fulltext_idx
 func indexName(label string, props []string, kind IndexKind) string {
 	joined := label + "_" + strings.Join(props, "_")
-	if kind == IndexVector {
+	//exhaustive:enforce
+	switch kind {
+	case IndexRange:
+		return joined + "_idx"
+	case IndexVector:
 		return joined + "_vector_idx"
+	case IndexFulltext:
+		return joined + "_fulltext_idx"
+	default:
+		return joined + "_idx"
 	}
-	return joined + "_idx"
 }
 
 // disambiguateIndexNames gives every emitted index a unique name, appending a

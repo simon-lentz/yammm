@@ -47,6 +47,38 @@ func TestAtPosition_TypeAnnotationHover(t *testing.T) {
 	}
 }
 
+func TestAtPosition_FulltextAnnotationHover(t *testing.T) {
+	t.Parallel()
+	// Cursor on "fulltext" of a property @fulltext.
+	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\ttitle String @fulltext\n}\n"}
+	h, err := AtPosition(nil, doc, 2, 18, lsputil.PositionEncodingUTF16, discardLogger())
+	if err != nil {
+		t.Fatalf("hover error: %v", err)
+	}
+	if h == nil {
+		t.Fatal("expected annotation hover for @fulltext, got nil")
+	}
+	if !strings.Contains(h.Contents.Value, "@fulltext") {
+		t.Errorf("hover content should mention @fulltext; got %q", h.Contents.Value)
+	}
+}
+
+func TestAtPosition_FulltextTypeAnnotationHover(t *testing.T) {
+	t.Parallel()
+	// Cursor on "fulltext" of a type-level @@fulltext member.
+	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\ttitle String\n\t@@fulltext(title)\n}\n"}
+	h, err := AtPosition(nil, doc, 3, 5, lsputil.PositionEncodingUTF16, discardLogger())
+	if err != nil {
+		t.Fatalf("hover error: %v", err)
+	}
+	if h == nil {
+		t.Fatal("expected annotation hover for @@fulltext, got nil")
+	}
+	if !strings.Contains(h.Contents.Value, "@@fulltext") {
+		t.Errorf("hover content should mention @@fulltext; got %q", h.Contents.Value)
+	}
+}
+
 // TestAtPosition_AnnotationHover_MultibytePrefix pins that the LSP char is
 // converted to a byte column: with multi-byte runes before @index, treating the
 // UTF-16 char as a byte offset would land the scan left of the annotation. The

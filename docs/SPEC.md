@@ -1087,6 +1087,7 @@ A **property-level** annotation trails a property, after its datatype and any `p
 
 ```yammm-schema
 state        String      @index
+title        String      @fulltext
 first_seen   Timestamp   @writeOnce
 embedding    Vector[768] @vector(cosine)
 ```
@@ -1097,9 +1098,11 @@ A **type-level** annotation is a type-body member written with the doubled sigil
 type Document {
   content_hash String primary
   state        String
+  title        String
   published_on Date
 
   @@index(state, published_on)
+  @@fulltext(title, state)
 }
 ```
 
@@ -1118,6 +1121,8 @@ The single/double sigil split is required, not stylistic. Because whitespace —
 | `@index` | property | none | a scalar property (String, UUID, Enum, Pattern, Integer, Float, Boolean, Date, Timestamp); rejected only when it is the sole primary key of every type that emits a constraint for it (see below) | single-property range index |
 | `@@index(p1, p2, …)` | type | one or more property references, ordered, no duplicates | each reference a scalar property of the type (own or inherited); primary-key members allowed | composite range index (order significant) |
 | `@vector(similarity)` | property | exactly one keyword: `cosine` or `euclidean` | a `Vector[N]` property | vector (approximate-nearest-neighbour) index |
+| `@fulltext` | property | none | a text property (String, Pattern, Enum); primary keys allowed, sole or composite (see below) | single-property fulltext index |
+| `@@fulltext(p1, p2, …)` | type | one or more property references, ordered, no duplicates | each reference a text property of the type (own or inherited); primary-key members allowed | fulltext index over the referenced properties (order significant) |
 | `@writeOnce` | property | none | any non-primary-key property | marks the property immutable after node creation |
 
 A member of a **composite** primary key may carry `@index`: the composite backing index does not serve single-property lookups on it. A **sole** primary key may not, because its uniqueness constraint already backs an index.
@@ -1128,6 +1133,8 @@ Which of the two applies is decided over the types that actually **emit** the co
 
 `@writeOnce` is rejected on every primary-key member, sole or composite.
 
+`@fulltext` and `@@fulltext` are narrower than the index pair: fulltext applies to **text**, so the eligible kinds are `String`, `Pattern`, and `Enum`. `UUID` is deliberately excluded — it is stored as a string but is an opaque identifier, not tokenized text. **Primary keys are allowed for both fulltext placements, with no redundancy rule**: a uniqueness constraint's backing index is a range index and cannot serve fulltext queries, so a fulltext index over a sole primary key is a distinct, legitimate object — the `@index` sole-key rule deliberately does not transfer.
+
 Annotation eligibility is independent of type category: `abstract`, `part`, and concrete types are validated identically.
 
 ### Validation
@@ -1136,8 +1143,8 @@ Annotations are validated at load, after inheritance linearization. Violations p
 
 - `E_UNKNOWN_ANNOTATION` — the name is not a blessed annotation for its placement.
 - `E_INVALID_ANNOTATION` — a structural violation: wrong placement (e.g. `@@writeOnce`), a property annotation written on a line other than its property's, wrong arity, a literal where a reference or keyword is required, an unknown similarity keyword, or a duplicate.
-- `E_UNKNOWN_ANNOTATION_TARGET` — a `@@index` reference names no property of the type (the same failure class as `E_UNKNOWN_PROPERTY`, on a different construct).
-- `E_INVALID_ANNOTATION_TARGET` — the annotation is attached to an ineligible property (a non-scalar `@index`, a non-`Vector` `@vector`, `@writeOnce` on a primary key, and so on).
+- `E_UNKNOWN_ANNOTATION_TARGET` — a `@@index` or `@@fulltext` reference names no property of the type (the same failure class as `E_UNKNOWN_PROPERTY`, on a different construct).
+- `E_INVALID_ANNOTATION_TARGET` — the annotation is attached to an ineligible property (a non-scalar `@index`, a non-`Vector` `@vector`, a non-text `@fulltext`, `@writeOnce` on a primary key, and so on).
 - `W_ANNOTATION_SHADOWED` — a warning (not an error): a subtype re-declaration drops an inherited property's annotations without re-stating them (see [Annotation Inheritance](#annotation-inheritance)). The load still succeeds.
 
 ### Annotation Inheritance

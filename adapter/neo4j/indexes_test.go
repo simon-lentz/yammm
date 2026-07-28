@@ -47,6 +47,14 @@ func TestIndexesStructured_Metadata(t *testing.T) {
 			Kind: IndexVector, Label: "index_test__Document", Properties: []string{"embedding"},
 			VectorDimensions: 768, VectorSimilarity: "cosine",
 		}},
+		// Property-level @fulltext.
+		{"index_test__Document_title_fulltext_idx", Index{
+			Kind: IndexFulltext, Label: "index_test__Document", Properties: []string{"title"},
+		}},
+		// Type-level @@fulltext composite; declared order preserved.
+		{"index_test__Document_title_state_fulltext_idx", Index{
+			Kind: IndexFulltext, Label: "index_test__Document", Properties: []string{"title", "state"},
+		}},
 		// An inherited @@index emits on each concrete subtype's own label.
 		{"index_test__Note_first_seen_idx", Index{
 			Kind: IndexRange, Label: "index_test__Note", Properties: []string{"first_seen"},
@@ -259,10 +267,13 @@ func TestIndexes_InvalidPropertyIdentifierReportedOnce(t *testing.T) {
 }
 
 // TestIndexes_DuplicateDeclarationDedups pins that declaring the same index
-// twice — @index on a property plus a single-property @@index over it — emits
-// one index rather than tripping the name-collision check. Load-time validation
-// accepts both placements (neither checks the other), so a hard emit failure
-// would leave a schema the loader called valid unable to emit any index DDL.
+// twice — @index on a property plus a single-property @@index over it, and
+// @fulltext plus a single-property @@fulltext — emits one index per KIND
+// rather than tripping the name-collision check. Load-time validation accepts
+// both placements (neither checks the other), so a hard emit failure would
+// leave a schema the loader called valid unable to emit any index DDL. The
+// dedup key carries the kind, so the range and fulltext declarations over one
+// property stay two distinct indexes.
 func TestIndexes_DuplicateDeclarationDedups(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes_duplicate_decl.yammm")
@@ -270,11 +281,45 @@ func TestIndexes_DuplicateDeclarationDedups(t *testing.T) {
 	if result.HasErrors() {
 		t.Fatalf("identical duplicate declarations should emit cleanly, got: %v", result.Err())
 	}
-	if len(indexes) != 1 {
-		t.Fatalf("expected 1 emitted index, got %d: %+v", len(indexes), indexes)
+	if len(indexes) != 2 {
+		t.Fatalf("expected 1 range + 1 fulltext index, got %d: %+v", len(indexes), indexes)
 	}
-	if got := indexes[0].Properties; !slices.Equal(got, []string{"name"}) {
-		t.Errorf("emitted index properties = %v, want [name]", got)
+	kinds := map[IndexKind]bool{}
+	for _, idx := range indexes {
+		kinds[idx.Kind] = true
+		if got := idx.Properties; !slices.Equal(got, []string{"name"}) {
+			t.Errorf("emitted index properties = %v, want [name]", got)
+		}
+	}
+	if !kinds[IndexRange] || !kinds[IndexFulltext] {
+		t.Errorf("emitted kinds = %v; want one IndexRange and one IndexFulltext", kinds)
+	}
+}
+
+// A fulltext name can collide with a range name through the underscore join —
+// @fulltext on `body` and @index on `body_fulltext` both render
+// {label}_body_fulltext_idx — and must disambiguate exactly as range-range
+// collisions do.
+func TestIndexes_FulltextRangeNameCollisionDisambiguated(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "indexes_fulltext_collision.yammm")
+	indexes, result := New().IndexesStructured(context.Background(), s)
+	if result.HasErrors() {
+		t.Fatalf("a name collision should disambiguate, not fail: %v", result.Err())
+	}
+	if len(indexes) != 2 {
+		t.Fatalf("expected both indexes emitted, got %d: %+v", len(indexes), indexes)
+	}
+	if indexes[0].Name == indexes[1].Name {
+		t.Errorf("colliding indexes still share the name %q", indexes[0].Name)
+	}
+	for _, idx := range indexes {
+		if !strings.Contains(idx.Statement, idx.Name) {
+			t.Errorf("statement does not carry the disambiguated name %q: %s", idx.Name, idx.Statement)
+		}
+		if err := ValidateIdentifier(idx.Name, "index name"); err != nil {
+			t.Errorf("disambiguated name %q is not a valid Neo4j identifier: %v", idx.Name, err)
+		}
 	}
 }
 
@@ -306,6 +351,109 @@ func TestIndexesStructured_UnknownCompositeProperty_Reported(t *testing.T) {
 	for _, idx := range indexes {
 		if slices.Contains(idx.Properties, "missingProp") {
 			t.Errorf("emitted DDL for an undeclared property: %s", idx.Statement)
+		}
+	}
+}
+
+// Both Builder entry points round-trip to emitted fulltext DDL: a schema built
+// with WithPropertyAnnotation("...", "fulltext") and WithTypeAnnotation
+// ("fulltext", ...) emits the same two indexes the DSL spellings would.
+func TestIndexesStructured_BuilderFulltextRoundTrip(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("probe").
+		AddType("Entity").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("title", schema.NewStringConstraint()).
+		WithProperty("summary", schema.NewStringConstraint()).
+		WithPropertyAnnotation("title", "fulltext").
+		WithTypeAnnotation("fulltext", "title", "summary").
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("builder schema should seal cleanly: %v", res)
+	}
+
+	indexes, result := New().IndexesStructured(context.Background(), s)
+	if result.HasErrors() {
+		t.Fatalf("IndexesStructured: %v", result.Err())
+	}
+	var fulltext []Index
+	for _, idx := range indexes {
+		if idx.Kind == IndexFulltext {
+			fulltext = append(fulltext, idx)
+		}
+	}
+	if len(fulltext) != 2 {
+		t.Fatalf("expected the property-level and type-level fulltext indexes, got %d: %+v", len(fulltext), indexes)
+	}
+	if got := fulltext[0].Properties; !slices.Equal(got, []string{"title"}) {
+		t.Errorf("property-level fulltext properties = %v, want [title]", got)
+	}
+	if got := fulltext[1].Properties; !slices.Equal(got, []string{"title", "summary"}) {
+		t.Errorf("type-level fulltext properties = %v, want [title summary]", got)
+	}
+	for _, idx := range fulltext {
+		if !strings.Contains(idx.Statement, "CREATE FULLTEXT INDEX") || !strings.Contains(idx.Statement, "ON EACH") {
+			t.Errorf("statement is not the fulltext form: %s", idx.Statement)
+		}
+	}
+}
+
+// The fulltext sibling of the unknown-composite-property case: a registry-less
+// builder schema seals cleanly with @@fulltext naming nothing, and the adapter
+// must refuse to emit DDL for the property that does not exist.
+func TestIndexesStructured_UnknownFulltextProperty_Reported(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("probe").
+		AddType("Entity").
+		Extends(schema.NewTypeRef("common", "Base", location.Span{})).
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithTypeAnnotation("fulltext", "missingProp").
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("precondition: the deferred-supertype path should seal cleanly, got: %v", res)
+	}
+
+	indexes, result := New().IndexesStructured(context.Background(), s)
+	if !result.HasCode(E_NEO4J_UNKNOWN_PROPERTY) {
+		t.Errorf("want E_NEO4J_UNKNOWN_PROPERTY for @@fulltext on an undeclared property, got: %v", result)
+	}
+	for _, idx := range indexes {
+		if slices.Contains(idx.Properties, "missingProp") {
+			t.Errorf("emitted DDL for an undeclared property: %s", idx.Statement)
+		}
+	}
+}
+
+// @fulltext on a property whose type never resolved (an unresolved qualified
+// alias in a registry-less builder schema) is the deferred-validation hole the
+// adapter re-check covers: the loader deferred its eligibility check, so
+// trusting the sealed model would emit fulltext DDL over a property the DSL's
+// own rule may forbid.
+func TestIndexesStructured_UnresolvedAliasFulltextTarget_Reported(t *testing.T) {
+	t.Parallel()
+	s, res := schema.NewBuilder().
+		WithName("probe").
+		AddType("Entity").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("blob", schema.NewAliasConstraint("common.Text", nil)).
+		WithPropertyAnnotation("blob", "fulltext").
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("precondition: the unresolved-alias path should seal cleanly, got: %v", res)
+	}
+
+	indexes, result := New().IndexesStructured(context.Background(), s)
+	if !result.HasCode(E_NEO4J_INVALID_INDEX_TARGET) {
+		t.Errorf("want E_NEO4J_INVALID_INDEX_TARGET for @fulltext on an unresolved alias, got: %v", result)
+	}
+	for _, idx := range indexes {
+		if slices.Contains(idx.Properties, "blob") {
+			t.Errorf("emitted DDL for a property whose type never resolved: %s", idx.Statement)
 		}
 	}
 }

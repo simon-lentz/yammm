@@ -9,10 +9,12 @@ abstract type Tracked {
 type Document extends Tracked {
     content_hash String      primary
     state        String      @index
+    title        String      @fulltext
     published_on Date        @index
     embedding    Vector[768] @vector(cosine)
 
     @@index(state, published_on)
+    @@fulltext(title, state)
 
     *-> SECTIONS (_:many) Section
 }

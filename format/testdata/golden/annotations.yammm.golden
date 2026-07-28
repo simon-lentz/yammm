@@ -3,10 +3,12 @@ schema "annotations"
 type Document {
 	content_hash String primary
 	state        String @index
+	title        String @fulltext
 	published_on Date @index
 	embedding    Vector[768] @vector(cosine)
 	first_seen   Timestamp @writeOnce
 
 	/* composite lookup */
 	@@index(state, published_on)
+	@@fulltext(title, state)
 }

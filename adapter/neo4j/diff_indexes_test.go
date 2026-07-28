@@ -208,15 +208,18 @@ func TestDiffIndexes_Empty(t *testing.T) {
 }
 
 // SHOW INDEXES reports every non-LOOKUP, non-constraint-backed index, including
-// kinds the DSL cannot express (FULLTEXT, TEXT, POINT, and 4.x BTREE) and
-// relationship indexes the adapter never emits. Classifying one as an undeclared
-// drop reports drift no schema edit can resolve.
+// kinds the DSL cannot express (TEXT, POINT, and 4.x BTREE), multi-label
+// FULLTEXT indexes (a declaration always targets one label), and relationship
+// indexes the adapter never emits. Classifying one as an undeclared drop
+// reports drift no schema edit can resolve. Single-label FULLTEXT is
+// deliberately absent here: it IS declarable — see
+// [TestDiffIndexes_UndeclaredFulltextDrops].
 func TestDiffIndexes_IgnoresUndeclarableKinds(t *testing.T) {
 	t.Parallel()
 	a := New()
 
 	actual := []RemoteIndex{
-		{Name: "ft", Type: "FULLTEXT", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"body"}},
+		{Name: "ft", Type: "FULLTEXT", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity", "other__Thing"}, Properties: []string{"body"}},
 		{Name: "tx", Type: "TEXT", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"state"}},
 		{Name: "pt", Type: "POINT", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"loc"}},
 		{Name: "bt", Type: "BTREE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"legacy"}},
@@ -702,8 +705,9 @@ func TestDiffIndexes_ExcludedCountsWhatWasNotCompared(t *testing.T) {
 	t.Parallel()
 	actual := []RemoteIndex{
 		{Name: "mine", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}},
-		// A kind the DSL cannot express, on an owned label.
-		{Name: "ft", Type: "FULLTEXT", EntityType: "NODE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"body"}},
+		// A shape the DSL cannot declare: a multi-label FULLTEXT on an owned
+		// label. (A single-label FULLTEXT would be a Drop, not excluded.)
+		{Name: "ft", Type: "FULLTEXT", EntityType: "NODE", LabelsOrTypes: []string{"app__T", "other__Thing"}, Properties: []string{"body"}},
 		// A label no current type declares.
 		{Name: "stale", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"app__Publisher"}, Properties: []string{"id"}},
 	}
@@ -713,6 +717,140 @@ func TestDiffIndexes_ExcludedCountsWhatWasNotCompared(t *testing.T) {
 	)
 	wantCounts(t, got, 1, 0, 0, 0, 0)
 	if got.Excluded != 2 {
-		t.Errorf("Excluded = %d; want the FULLTEXT and stale-label indexes counted", got.Excluded)
+		t.Errorf("Excluded = %d; want the multi-label FULLTEXT and stale-label indexes counted", got.Excluded)
 	}
+}
+
+// The fulltext acceptance criterion for a schema-first consumer migrating a
+// hand-named registry: a remote FULLTEXT row whose (label, kind, properties)
+// equal a declaration's pairs by identity in phase two regardless of its name —
+// Match under the legacy name, no rename, no DDL.
+func TestDiffIndexes_FulltextIdentityPairingUnderForeignName(t *testing.T) {
+	t.Parallel()
+	desired := []Index{{
+		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
+		Label: "app__Doc", Properties: []string{"body"},
+	}}
+	actual := []RemoteIndex{{
+		Name: "legacy_body_fulltext", Type: "FULLTEXT", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__Doc"}, Properties: []string{"body"},
+	}}
+	got := New().DiffIndexes(desired, actual, ownedSet("app__Doc"))
+	wantCounts(t, got, 1, 0, 0, 0, 0)
+	if len(got.Match) == 1 && got.Match[0].Actual.Name != "legacy_body_fulltext" {
+		t.Errorf("Match.Actual.Name = %q; want the legacy name claimed as-is", got.Match[0].Actual.Name)
+	}
+}
+
+// The declarability flip: an owned, undeclared, single-label FULLTEXT row is a
+// Drop — the drift authority the fulltext annotations exist to provide. Before
+// FULLTEXT became declarable such a row was merely Excluded.
+func TestDiffIndexes_UndeclaredFulltextDrops(t *testing.T) {
+	t.Parallel()
+	actual := []RemoteIndex{{
+		Name: "orphan_ft", Type: "FULLTEXT", EntityType: "NODE",
+		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"body"},
+	}}
+	wantCounts(t, New().DiffIndexes(nil, actual, testOwned()), 0, 0, 0, 1, 0)
+}
+
+// A fulltext name held under a different definition is drift, exactly as for
+// range: the CREATE carries IF NOT EXISTS and would silently no-op.
+func TestDiffIndexes_FulltextNameOnlyPairingIsDrift(t *testing.T) {
+	t.Parallel()
+	desired := []Index{{
+		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
+		Label: "app__Doc", Properties: []string{"body"},
+	}}
+	actual := []RemoteIndex{{
+		Name: "app__Doc_body_fulltext_idx", Type: "FULLTEXT", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__Doc"}, Properties: []string{"title"},
+	}}
+	got := New().DiffIndexes(desired, actual, ownedSet("app__Doc"))
+	wantCounts(t, got, 0, 1, 0, 0, 0)
+	if len(got.Drift) == 1 && !strings.Contains(got.Drift[0].Reason, "FULLTEXT") {
+		t.Errorf("Reason = %q; want the shapes rendered with their FULLTEXT kind", got.Drift[0].Reason)
+	}
+}
+
+// A multi-label FULLTEXT row is a different object from any single-label
+// declaration: it stays out of identity pairing and out of the definition
+// map — the server creates the declaration beside it, so the declaration is a
+// genuine Create — and it is counted in Excluded, not dropped.
+func TestDiffIndexes_MultiLabelFulltextExcludedAndDoesNotBlockDefinition(t *testing.T) {
+	t.Parallel()
+	desired := []Index{{
+		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
+		Label: "app__Doc", Properties: []string{"body"},
+	}}
+	actual := []RemoteIndex{{
+		Name: "combined_ft", Type: "FULLTEXT", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__Doc", "other__Thing"}, Properties: []string{"body"},
+	}}
+	got := New().DiffIndexes(desired, actual, ownedSet("app__Doc"))
+	wantCounts(t, got, 0, 0, 1, 0, 0)
+	if got.Excluded != 1 {
+		t.Errorf("Excluded = %d; want the multi-label row counted", got.Excluded)
+	}
+}
+
+// A multi-label FULLTEXT row's NAME still blocks every CREATE — blockers are
+// collected before the declarability filter — and the blocker message names
+// every label the object carries.
+func TestDiffIndexes_MultiLabelFulltextNameStillBlocks(t *testing.T) {
+	t.Parallel()
+	desired := []Index{{
+		Name: "held_name", Kind: IndexFulltext, Label: "app__Doc", Properties: []string{"body"},
+	}}
+	actual := []RemoteIndex{{
+		Name: "held_name", Type: "FULLTEXT", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__Doc", "other__Thing"}, Properties: []string{"other"},
+	}}
+	got := New().DiffIndexes(desired, actual, ownedSet("app__Doc"))
+	wantCounts(t, got, 0, 1, 0, 0, 0)
+	if got.Excluded != 1 {
+		t.Errorf("Excluded = %d; want the multi-label row counted", got.Excluded)
+	}
+	if len(got.Drift) == 1 && !strings.Contains(got.Drift[0].Reason, "app__Doc|other__Thing") {
+		t.Errorf("Reason = %q; want every label the blocker carries", got.Drift[0].Reason)
+	}
+}
+
+// Index state applies to fulltext exactly as to range: FAILED is actionable
+// drift, POPULATING is unverified.
+func TestDiffIndexes_FulltextStateProblems(t *testing.T) {
+	t.Parallel()
+	desired := []Index{{
+		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
+		Label: "app__Doc", Properties: []string{"body"},
+	}}
+	remote := func(state string) []RemoteIndex {
+		return []RemoteIndex{{
+			Name: "app__Doc_body_fulltext_idx", Type: "FULLTEXT", EntityType: "NODE",
+			LabelsOrTypes: []string{"app__Doc"}, Properties: []string{"body"}, State: state,
+		}}
+	}
+	wantCounts(t, New().DiffIndexes(desired, remote("FAILED"), ownedSet("app__Doc")), 0, 1, 0, 0, 0)
+	wantCounts(t, New().DiffIndexes(desired, remote("POPULATING"), ownedSet("app__Doc")), 0, 0, 0, 0, 1)
+}
+
+// Analyzer configuration is a documented known limit, not compared: the schema
+// cannot declare one, so a remote fulltext row with a custom analyzer but
+// matching (label, properties) reads as Match — the vector config probes are
+// kind-gated and must not fire on a FULLTEXT pair.
+func TestDiffIndexes_FulltextAnalyzerNotCompared(t *testing.T) {
+	t.Parallel()
+	desired := []Index{{
+		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
+		Label: "app__Doc", Properties: []string{"body"},
+	}}
+	actual := []RemoteIndex{{
+		Name: "app__Doc_body_fulltext_idx", Type: "FULLTEXT", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__Doc"}, Properties: []string{"body"},
+		Options: map[string]any{"indexConfig": map[string]any{
+			"fulltext.analyzer":              "swedish",
+			"fulltext.eventually_consistent": false,
+		}},
+	}}
+	wantCounts(t, New().DiffIndexes(desired, actual, ownedSet("app__Doc")), 1, 0, 0, 0, 0)
 }

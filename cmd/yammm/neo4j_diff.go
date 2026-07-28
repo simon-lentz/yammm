@@ -21,7 +21,7 @@ func newNeo4jDiffCmd() *cobra.Command {
 		Long: "Performs a semantic five-way diff between desired schema constraints and indexes and their actual database state:\n" +
 			"matched, drifted, to-create, to-drop, and unverified (present, but the server did not report enough to compare it).\n\n" +
 			"Any drift, missing definition, or undeclared schema-owned definition exits 1; an unverifiable definition exits 3; nothing is applied. " +
-			"An index in the database that the schema does not declare counts as drift — declare it with @index/@@index/@vector, " +
+			"An index in the database that the schema does not declare counts as drift — declare it with @index/@@index/@vector/@fulltext/@@fulltext, " +
 			"or pass --indexes=false for a constraints-only diff.",
 		Args: cobra.ExactArgs(1),
 		RunE: runNeo4jDiff,

@@ -1,0 +1,7 @@
+schema "col"
+
+type Item {
+    id            String primary
+    body          String @fulltext
+    body_fulltext String @index
+}

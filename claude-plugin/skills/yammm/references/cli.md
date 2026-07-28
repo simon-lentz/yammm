@@ -245,7 +245,7 @@ Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 yammm neo4j indexes schema.yammm
 ```
 
-Generates `CREATE INDEX` / `CREATE VECTOR INDEX IF NOT EXISTS` Cypher statements from a schema's `@index` / `@@index` / `@vector` annotations. Index names are always emitted and indexes apply to every edition, so this command takes the label flags but none of the constraint-shape flags (`--edition`, `--named`, `--node-keys`, `--scalar-types`, `--required-only-types`).
+Generates `CREATE INDEX` / `CREATE VECTOR INDEX` / `CREATE FULLTEXT INDEX ... IF NOT EXISTS` Cypher statements from a schema's `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` annotations. Index names are always emitted and indexes apply to every edition, so this command takes the label flags but none of the constraint-shape flags (`--edition`, `--named`, `--node-keys`, `--scalar-types`, `--required-only-types`).
 
 | Flag | Default | Description |
 |------|---------|-------------|

@@ -1040,19 +1040,21 @@ Generation is **all-or-nothing**: any validation error returns `(nil, result)`, 
 
 ### Indexes
 
-Indexes are derived from a schema's `@index`, `@@index`, and `@vector` annotations:
+Indexes are derived from a schema's `@index`, `@@index`, `@vector`, `@fulltext`, and `@@fulltext` annotations:
 
 ```go
-// Generate Cypher CREATE INDEX / CREATE VECTOR INDEX statements
+// Generate Cypher CREATE INDEX / CREATE VECTOR INDEX / CREATE FULLTEXT INDEX statements
 statements, result := adapter.IndexesForSchema(ctx, s)
 
 // Generate structured index descriptors
 indexes, result := adapter.IndexesStructured(ctx, s)
 ```
 
-The `Index` struct contains `Name`, `Kind` (`IndexRange` or `IndexVector`), `Label`, `Properties` (declared order, significant for composites), `VectorDimensions`, `VectorSimilarity`, and the complete `Statement`. A property-level `@index` yields a single-property range index; a type-level `@@index(a, b)` yields a composite range index; a property-level `@vector(cosine|euclidean)` yields a vector index whose dimension comes from the property's `Vector[N]` constraint.
+The `Index` struct contains `Name`, `Kind` (`IndexRange`, `IndexVector`, or `IndexFulltext`), `Label`, `Properties` (declared order, significant for composites), `VectorDimensions`, `VectorSimilarity`, and the complete `Statement`. A property-level `@index` yields a single-property range index; a type-level `@@index(a, b)` yields a composite range index; a property-level `@vector(cosine|euclidean)` yields a vector index whose dimension comes from the property's `Vector[N]` constraint; a property-level `@fulltext` and a type-level `@@fulltext(a, b)` yield fulltext indexes rendered with the `CREATE FULLTEXT INDEX ... FOR (n:Label) ON EACH [n.a, n.b]` list form.
 
-Index names are always emitted (`{label}_{props}_idx` for range, `{label}_{prop}_vector_idx` for vector). The readable name is not injective — it joins on underscores, which property names may themselves contain — so two indexes whose names would collide each receive a short deterministic digest suffix. Only names that would actually clash are suffixed. Load-time validation defers eligibility whenever a target's type cannot be resolved, so the adapter re-checks: an annotation naming a property the type does not have reports `E_NEO4J_UNKNOWN_PROPERTY`, and one naming a property whose type cannot carry the index reports `E_NEO4J_INVALID_INDEX_TARGET`. Indexes are emitted for every edition (range and vector indexes are core query features on both Community and Enterprise); abstract types are skipped, part types are not. The emitted `CREATE VECTOR INDEX ... OPTIONS` statement form requires Neo4j 5.15+.
+Index names are always emitted (`{label}_{props}_idx` for range, `{label}_{prop}_vector_idx` for vector, `{label}_{props}_fulltext_idx` for fulltext). The readable name is not injective — it joins on underscores, which property names may themselves contain — so two indexes whose names would collide each receive a short deterministic digest suffix. Only names that would actually clash are suffixed. Load-time validation defers eligibility whenever a target's type cannot be resolved, so the adapter re-checks: an annotation naming a property the type does not have reports `E_NEO4J_UNKNOWN_PROPERTY`, and one naming a property whose type cannot carry the index reports `E_NEO4J_INVALID_INDEX_TARGET`. Indexes are emitted for every edition (range, vector, and fulltext indexes are core query features on both Community and Enterprise); abstract types are skipped, part types are not. The emitted `CREATE VECTOR INDEX ... OPTIONS` statement form requires Neo4j 5.15+.
+
+A declared fulltext index carries no analyzer or `eventually_consistent` configuration — no `OPTIONS` clause is emitted, so the server default applies — and the diff therefore does not compare analyzer configuration: a remote fulltext index with a custom analyzer but matching (label, properties) reads as a Match. That is a documented known limit of the v1 fulltext surface, not an accident.
 
 ### Graph Shape
 
@@ -1240,6 +1242,8 @@ diff := adapter.DiffIndexes(desired, actual, owned)
 
 `DiffIndexes` returns an `*IndexDiffResult` with **five** sets: `Match`, `Drift` (a vector index whose dimension or similarity differs, a definition change under a name the database already holds, or an index in a state that serves no queries), `Create`, `Drop`, and `Unverified`. Composite property order is significant, a deliberate divergence from `DiffConstraints`: a same-set/different-order remote index is a distinct index — create + drop when its name differs too, and drift when it holds the desired index's name (a `CREATE ... IF NOT EXISTS` under a name the database already holds is a silent no-op). A schema-owned remote index with no declaration is reported as a drop; drops are reported, never applied.
 
+Fulltext rows participate in that classification exactly as range and vector rows do — **with one exclusion**: a multi-label fulltext index (`FOR (n:A|B)`) is a shape no per-type annotation can declare, so it is never matched, never dropped, and never treated as serving a single-label declaration's definition (the server creates the declaration beside it); it is counted in `Excluded`, while its **name** still blocks every `CREATE`.
+
 `Unverified` holds indexes that exist on both sides but whose definition could **not** be compared — the database reported no readable vector configuration (the reason names which setting was unread), or the index is still `POPULATING`. A setting the database did disclose and that disagrees outranks a second setting being unreadable, so a demonstrably wrong dimension is reported as drift rather than downgraded to unverified. They are neither confirmed in sync nor confirmed drifted. A drift gate must therefore treat a non-empty `Unverified` as an incomplete check, not a pass:
 
 ```go
@@ -1248,7 +1252,7 @@ inSync := len(diff.Drift) == 0 && len(diff.Create) == 0 && len(diff.Drop) == 0 &
     len(diff.Unverified) == 0 // omitting this reports an unchecked index as verified
 ```
 
-Every schema-owned remote index the caller passes in is accounted for exactly once: it either matches a desired index or is reported as a drop. Two remote indexes sharing one semantic identity (an operator-created index alongside the schema's own) are told apart by name — the schema's own index carries the name the adapter emits — so the redundant one is reported rather than absorbed, and which is which does not depend on the order the server returned rows in. `DiffConstraints` gives the same guarantee.
+Every schema-owned remote index the caller passes in is accounted for exactly once: it matches a desired index, is reported as a drop, or — for a shape the schema cannot declare (TEXT, POINT, a multi-label FULLTEXT, a relationship index, a constraint's backing index) — is counted in `Excluded`. Two remote indexes sharing one semantic identity (an operator-created index alongside the schema's own) are told apart by name — the schema's own index carries the name the adapter emits — so the redundant one is reported rather than absorbed, and which is which does not depend on the order the server returned rows in. `DiffConstraints` gives the same guarantee.
 
 ### Introspection Queries
 
