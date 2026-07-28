@@ -45,6 +45,8 @@ If `$ARGUMENTS` provides a description, use it as the starting point for step 1.
   - `@index` on a property the domain says will be filtered or sorted on. Scalars only. Not on a sole primary key -- its uniqueness constraint already backs an index, and the loader rejects it.
   - `@@index(a, b)` at the type level for a composite lookup. Argument **order is significant** and should match the intended query shape; write it in the order a caller narrows.
   - `@vector(cosine)` or `@vector(euclidean)` on a `Vector[N]` property. `N` is the embedding model's dimension, so pick the model before writing the type.
+  - `@fulltext` on a text property (`String`, `Pattern`, or `Enum`) the domain says will be searched by content -- tokenized match, not the exact filtering `@index` serves. Fine on a primary-key member: the key's uniqueness constraint backs a range index, which cannot serve fulltext queries, so the `@index` redundancy rule does not apply.
+  - `@@fulltext(a, b)` at the type level to search across several text fields with one index. No analyzer is declarable; the store's default analyzer applies.
   - `@writeOnce` on anything set at creation and never rewritten -- `created_at`, `first_seen`, an origin identifier. It makes the Neo4j write path set the property `ON CREATE` only. Never on a primary-key member: a merge match key is already immutable, and the loader rejects it.
   - Do not annotate speculatively. Every index is a write-time and storage cost the model is committing the deployment to.
 

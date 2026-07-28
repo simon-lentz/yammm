@@ -2,7 +2,7 @@
   "name": "yammm",
   "displayName": "YAMMM",
   "description": "Language support for YAMMM schema files",
-  "version": "0.3.1",
+  "version": "0.10.0",
   "publisher": "simon-lentz",
   "license": "MIT",
   "icon": "icon.png",
@@ -63,7 +63,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "Path to the yammm-lsp binary. If empty, uses the bundled binary."
+          "description": "Path to the yammm-lsp binary. If empty, uses the bundled binary, falling back to a PATH lookup."
         },
         "yammm.lsp.logFile": {
           "type": "string",
