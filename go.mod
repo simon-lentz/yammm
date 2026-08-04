@@ -3,6 +3,7 @@ module github.com/simon-lentz/yammm
 go 1.26
 
 require (
+	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/antlr4-go/antlr/v4 v4.13.1
 	github.com/creachadair/jrpc2 v1.3.5
 	github.com/google/go-cmp v0.7.0

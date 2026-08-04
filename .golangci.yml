@@ -105,6 +105,10 @@ linters:
         linters:
           - revive
       # Package names matching domain concepts (not stdlib collisions).
+      - path: "^internal/parse/.*"
+        text: "avoid package names that conflict"
+        linters:
+          - revive
       - path: "adapter/json/.*"
         text: "avoid package names that conflict"
         linters:
