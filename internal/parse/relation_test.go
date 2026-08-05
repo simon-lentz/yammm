@@ -140,6 +140,12 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 	if rels[0].Backref != "car" {
 		t.Errorf("backref = %q, want car", rels[0].Backref)
 	}
+	// The composition arm of multiplicityOf has no other reader: without this,
+	// a to-many composition reaches the graph model as to-one.
+	if !rels[0].Optional || !rels[0].Many {
+		t.Errorf("(many) → optional=%v many=%v, want optional=true many=true",
+			rels[0].Optional, rels[0].Many)
+	}
 
 	_, issues = Parse([]byte(relSource("*-> WHEELS (many) Wheel { note String }")), location.NewSourceID("s.yammm"))
 	if len(issues) == 0 {

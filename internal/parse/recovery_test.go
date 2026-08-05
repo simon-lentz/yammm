@@ -200,6 +200,65 @@ func TestRecovery_UnclosedBodyReportsAtEOF(t *testing.T) {
 	}
 }
 
+// TestRecovery_ImportFailureIsAnError covers the third of the loop's four
+// recovery sites. The other three are pinned elsewhere, and a downgrade here
+// would let a malformed import load clean.
+func TestRecovery_ImportFailureIsAnError(t *testing.T) {
+	src := "schema \"s\"\nimport 123\n"
+	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 1 {
+		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
+	}
+	if issues[0].Code() != diag.E_SYNTAX || issues[0].Severity() != diag.Error {
+		t.Errorf("got %s at %v, want E_SYNTAX at error", issues[0].Code(), issues[0].Severity())
+	}
+	if want := `unexpected token "123" in an import declaration`; issues[0].Message() != want {
+		t.Errorf("message = %q, want %q", issues[0].Message(), want)
+	}
+}
+
+// TestRecovery_UnterminatedGroupsAreReported pins that every delimited group
+// rejects a missing closing token. Each closer below can be made optional with
+// nothing else in the package going red, and the malformed source then loads
+// with no diagnostic at all.
+func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
+	tests := []struct {
+		name      string
+		member    string
+		wantProps int
+	}{
+		{"length bounds", "s String[1, 2", 0},
+		{"numeric bounds", "n Integer[1, 2", 0},
+		{"enum values", "e Enum[\"a\", \"b\"", 0},
+		{"pattern list", "p Pattern[\"^a$\"", 0},
+		{"vector dimensions", "v Vector[128", 0},
+		{"list element", "l List<String", 0},
+		// The only one inside the lookahead window: the group is abandoned, so
+		// the property survives and the leftover text draws its own diagnostic.
+		{"annotation arguments", "id String primary @a(x", 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "schema \"s\"\ntype T {\n\t" + tc.member + "\n}\n"
+			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			if len(issues) == 0 {
+				t.Fatal("no diagnostic: an unterminated group must be rejected")
+			}
+			for i, iss := range issues {
+				if iss.Code() != diag.E_SYNTAX {
+					t.Errorf("issue %d is %s, want E_SYNTAX", i, iss.Code())
+				}
+			}
+			if len(file.Types) != 1 {
+				t.Fatalf("got %d types, want 1", len(file.Types))
+			}
+			if got := len(file.Types[0].Properties); got != tc.wantProps {
+				t.Errorf("recorded %d properties, want %d", got, tc.wantProps)
+			}
+		})
+	}
+}
+
 // TestRecovery_HeaderFailureIsFatalAndFlagged pins the two facts a loader
 // needs: the schema has no usable name, and the rest of the file still parsed.
 func TestRecovery_HeaderFailureIsFatalAndFlagged(t *testing.T) {

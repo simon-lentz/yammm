@@ -47,13 +47,6 @@
 // Parse always returns a file node. A source that fails entirely yields an
 // empty node plus diagnostics, never nil.
 //
-// An optional group is not abandoned when its inner parse fails. Each one
-// parses itself and records absent, parsed, or entered-and-failed, so the
-// error is reported against the token inside the group that failed rather than
-// against the marker the group begins with, and the enclosing declaration
-// survives. [TestGroups_FailureNamesItsConstructAndAnchorsInsideIt] is the
-// acceptance criterion.
-//
 // One rule overrides the diagnostic a failed construct would otherwise carry:
 // a malformed numeric literal anywhere inside the construct owns the
 // diagnosis. "0x10 is not a number" explains the failure, where the token the
@@ -72,14 +65,38 @@
 // type body. [TestParse_DiagnosticsNameNoGrammarTypes] holds the rule, deriving
 // the banned names from the grammar itself so a node added later is covered.
 //
-// An optional group written '@@?' is abandoned whole when its inner parse
-// fails, so its diagnostic names the enclosing construct and anchors on the
-// group's opening marker rather than the token inside it that failed —
-// Timestamp["x" reports the '[' in a type body, not the unterminated string.
-// The group's own text is then re-reported by the recovery loop. Naming the
-// group instead is a known divergence from the ANTLR parser, measured and
-// pinned by [TestAbandonment_GroupsReportAgainstTheEnclosingConstruct]; every
-// such site still emits E_SYNTAX, so no malformed source loads either way.
+// An optional group written '@@?' fails in one of two ways, and which one
+// decides whether the construct around it survives. participle abandons the
+// group when the inner parse fails inside the lookahead window — two tokens,
+// set by UseLookahead(2) where the parsers are built. Past that window it
+// commits to the branch and propagates the error instead, so the enclosing
+// construct fails as well. The rule is participle's group.Parse and
+// parseContext.Stop, not this package's.
+//
+// Three outcomes follow, and all three are observable:
+//
+//   - Abandoned and absorbed. The construct completes without the group, and
+//     the group's text is left behind for the recovery loop to report. So
+//     Timestamp["x" records a format-less Timestamp and reports the '['.
+//   - Abandoned, then fatal to the construct around it. That construct resumes
+//     at text it cannot match and fails too, so the member or the whole
+//     declaration is dropped. So '--> r (many:one) B' records no relation.
+//   - Committed. A delimited group with no closing token runs past the window,
+//     so its member is dropped and the diagnostic lands wherever the enclosing
+//     production stopped. For 's String[1, 2' that is the type's own closing
+//     brace on the next line.
+//
+// The diagnostic names the region the recovery loop was in, by the rule above,
+// and not the construct that failed. An abandoned import alias and a failed
+// extends clause both report "in a declaration", because the loop that owns
+// them has already moved on. Where recovery restarts inside the member it just
+// left, the same defect draws a second diagnostic; Integer[abc, 2] and the
+// multiplicity case are the two sites where that happens today.
+//
+// Naming the group instead is a known divergence from the ANTLR parser.
+// [TestAbandonment_GroupsReportAgainstTheEnclosingConstruct] measures all ten
+// sites, and every one reports E_SYNTAX at diag.Error, so no malformed source
+// loads through any of them.
 //
 // # Spans
 //

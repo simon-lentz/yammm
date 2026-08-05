@@ -281,6 +281,45 @@ func TestParse_DataTypeConstraintIsForwarded(t *testing.T) {
 	}
 }
 
+// TestParse_AnnotationWithArgumentsRecordsItsParens pins Annotation.HasParens
+// on the true side. node.go defines false as "no argument list was parsed", so
+// a consumer that tells @name from @name(args) reads a wrong flag as bare.
+func TestParse_AnnotationWithArgumentsRecordsItsParens(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary @vector(1536)\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %v", issues)
+	}
+	anns := file.Types[0].Properties[0].Annotations
+	if len(anns) != 1 {
+		t.Fatalf("Annotations = %d, want 1", len(anns))
+	}
+	if !anns[0].HasParens {
+		t.Error("HasParens = false for @vector(1536), want true")
+	}
+	if len(anns[0].Args) != 1 {
+		t.Errorf("Args = %d, want 1", len(anns[0].Args))
+	}
+}
+
+// TestParse_ImportAliasSpanCoversTheAlias pins AliasSpan to the identifier
+// alone. Its other readers check only self-consistency, so a widened span
+// would make an LSP rename replace the whole import statement.
+func TestParse_ImportAliasSpanCoversTheAlias(t *testing.T) {
+	src := "schema \"s\"\nimport \"x.yammm\" as alpha\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %v", issues)
+	}
+	if len(file.Imports) != 1 {
+		t.Fatalf("Imports = %d, want 1", len(file.Imports))
+	}
+	sp := file.Imports[0].AliasSpan
+	if got := src[sp.Start.Byte:sp.End.Byte]; got != "alpha" {
+		t.Errorf("AliasSpan covers %q, want %q", got, "alpha")
+	}
+}
+
 // TestParse_DetachedAnnotationRecordsItsPropertyLine pins the mechanism that
 // reports an annotation whose written position and grammatical binding
 // disagree: a trailing annotation binds to the property above it even across a

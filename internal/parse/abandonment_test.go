@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -17,6 +18,7 @@ var abandonedGroups = []struct {
 	want   string // the first diagnostic's message
 	anchor string // the source text its span covers
 	types  int    // declarations surviving in the tree
+	count  int    // diagnostics the input draws
 }{
 	{
 		name:   "length bounds on String",
@@ -24,6 +26,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "[" in a type body`,
 		anchor: "[",
 		types:  1,
+		count:  1,
 	},
 	{
 		name:   "length bounds on List",
@@ -31,6 +34,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "[" in a type body`,
 		anchor: "[",
 		types:  1,
+		count:  1,
 	},
 	{
 		name:   "numeric bounds",
@@ -38,6 +42,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "[" in a type body`,
 		anchor: "[",
 		types:  1,
+		count:  2,
 	},
 	{
 		name:   "timestamp format",
@@ -45,6 +50,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "[" in a type body`,
 		anchor: "[",
 		types:  1,
+		count:  1,
 	},
 	{
 		name:   "import alias",
@@ -52,6 +58,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "as" in a declaration`,
 		anchor: "as",
 		types:  0,
+		count:  1,
 	},
 	{
 		name:   "reverse clause",
@@ -59,6 +66,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "/" in a type body`,
 		anchor: "/",
 		types:  1,
+		count:  1,
 	},
 	{
 		name:   "relation body",
@@ -66,6 +74,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "{" in a type body`,
 		anchor: "{",
 		types:  1,
+		count:  1,
 	},
 	{
 		name:   "annotation arguments",
@@ -73,6 +82,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "(" in a type body`,
 		anchor: "(",
 		types:  1,
+		count:  1,
 	},
 	{
 		name:   "multiplicity",
@@ -80,6 +90,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "(" in a type body`,
 		anchor: "(",
 		types:  1,
+		count:  2,
 	},
 	{
 		name:   "extends clause",
@@ -87,6 +98,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "extends" in a declaration`,
 		anchor: "extends",
 		types:  0,
+		count:  1,
 	},
 }
 
@@ -94,8 +106,14 @@ func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 	for _, tc := range abandonedGroups {
 		t.Run(tc.name, func(t *testing.T) {
 			f, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
-			if len(issues) == 0 {
-				t.Fatal("no diagnostic: an abandoned group must still be reported")
+			if len(issues) != tc.count {
+				t.Fatalf("got %d diagnostics, want %d: %v", len(issues), tc.count, issues)
+			}
+			// diag.Result.OK() counts only Fatal and Error, so a severity
+			// downgrade here would let every one of these sources load clean.
+			if issues[0].Code() != diag.E_SYNTAX || issues[0].Severity() != diag.Error {
+				t.Errorf("first diagnostic is %s at %v, want E_SYNTAX at error",
+					issues[0].Code(), issues[0].Severity())
 			}
 			if issues[0].Message() != tc.want {
 				t.Errorf("message = %q, want %q", issues[0].Message(), tc.want)
