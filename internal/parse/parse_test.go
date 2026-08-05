@@ -284,14 +284,19 @@ func TestParse_DataTypeConstraintIsForwarded(t *testing.T) {
 // TestParse_AnnotationWithArgumentsRecordsItsParens pins Annotation.HasParens
 // on the true side. node.go defines false as "no argument list was parsed", so
 // a consumer that tells @name from @name(args) reads a wrong flag as bare.
+// This package has no annotation registry, so the name here is arbitrary and
+// carries no claim that the layer above accepts it.
 func TestParse_AnnotationWithArgumentsRecordsItsParens(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary @a(1)\n}\n"
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
-	if len(file.Types) != 1 || len(file.Types[0].Properties) != 1 {
-		t.Fatalf("got %d types, want one carrying one property", len(file.Types))
+	if len(file.Types) != 1 {
+		t.Fatalf("got %d types, want 1", len(file.Types))
+	}
+	if got := len(file.Types[0].Properties); got != 1 {
+		t.Fatalf("got %d properties, want 1", got)
 	}
 	anns := file.Types[0].Properties[0].Annotations
 	if len(anns) != 1 {

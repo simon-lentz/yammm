@@ -65,46 +65,24 @@
 // type body. [TestParse_DiagnosticsNameNoGrammarTypes] holds the rule, deriving
 // the banned names from the grammar itself so a node added later is covered.
 //
-// participle decides how far a failed parse propagates, and this package
-// inherits that decision rather than making it. When a branch fails,
-// parseContext.Stop commits to it once the branch has advanced further than
-// the lookahead window — two tokens, set by UseLookahead(2) where the parsers
-// are built. Inside the window the branch is discarded and the enclosing
-// production carries on; past it the error propagates. Both group.Parse and
-// disjunction.Parse take that path, so the rule governs optional groups and
-// the datatype disjunction alike: 'v Vector[128' loses its property because
-// builtinNode's disjunction committed, and no group was involved at all.
+// How far a failed parse propagates is participle's decision, not this
+// package's: see group.Parse, disjunction.Parse and parseContext.Stop at the
+// pinned version. A failed optional part is sometimes discarded, leaving the
+// construct around it intact, and sometimes takes that construct down with it.
+// This package does not restate the rule that picks between them — three
+// attempts to paraphrase it were each found wrong, and the behaviour is
+// recorded by measurement instead.
 //
-// Three outcomes follow, and the token count decides which one, not the shape
-// of the construct:
+// [TestAbandonment_GroupsReportAgainstTheEnclosingConstruct] and
+// [TestRecovery_UnterminatedGroupsAreReported] hold what the parser does at the
+// sites those tables reach: the diagnostic, its anchor, and what survives into
+// the tree. They are measured baselines, not a specification of the grammar and
+// not a survey of it — a site absent from them is unmeasured, not exempt. Every
+// row reports E_SYNTAX at diag.Error, so no malformed source loads through the
+// sites they cover.
 //
-//   - Discarded, and the enclosing production resumes. 'Timestamp["x"' records
-//     a format-less Timestamp and reports the '['. The property survives.
-//   - Discarded, then fatal anyway, because the production resumes at text it
-//     cannot match. '--> r (many:one) B' records no relation.
-//   - Committed. The error propagates and the enclosing construct fails with
-//     it. Inside a type body that costs the member: 's String[1, 2' drops the
-//     property and reports on the type's own closing brace. At declaration
-//     level it costs the declaration: 'type Code = String [5, 5' records no
-//     datatype.
-//
-// The first two outcomes are both discards, so a discarded branch is not by
-// itself safe for the construct around it.
-//
-// The diagnostic names the region the recovery loop was in, not the construct
-// that failed. 'import "a.yammm" as one' reports "in a declaration" because
-// parseImports finished and parseDecls then met the leftover 'as'; 'type T
-// extends {' reports the same words for a different reason, because parseDecls
-// is itself the loop that failed. Where recovery restarts inside the member it
-// just left, one defect draws a second diagnostic: 'Integer[abc, 2]', the
-// multiplicity case and '@a(x' all do so today.
-//
-// [TestAbandonment_GroupsReportAgainstTheEnclosingConstruct] records what ten
-// of these sites do. It is a measured baseline rather than a survey: the
-// grammar carries thirteen '@@?' fields plus the two parenthesised optional
-// groups importNode.Alias and timC.Format, and the table does not reach every
-// one. Each row it does carry reports E_SYNTAX at diag.Error, so no malformed
-// source loads through those sites.
+// Naming the recovery region rather than the construct that failed is a known
+// divergence from the ANTLR parser, which names the construct.
 //
 // # Spans
 //

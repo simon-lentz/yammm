@@ -143,9 +143,12 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 	// The composition arm of multiplicityOf has no other reader. (one) is the
 	// spelling to assert: (many) is (true, true), which a hardcoded pair also
 	// satisfies, so it cannot tell a real read of c.Mult from a constant.
-	one, issues := Parse([]byte(relSource("*-> PARTS (one) Part / owner")), location.NewSourceID("s.yammm"))
+	one, issues := Parse([]byte(relSource("*-> PARTS (one) Wheel / owner")), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
+	}
+	if len(one.Types) == 0 || len(one.Types[0].Relations) != 1 {
+		t.Fatalf("got %d types, want one carrying one relation", len(one.Types))
 	}
 	if got := one.Types[0].Relations[0]; got.Optional || got.Many {
 		t.Errorf("(one) → optional=%v many=%v, want both false", got.Optional, got.Many)

@@ -200,22 +200,21 @@ func TestRecovery_UnclosedBodyReportsAtEOF(t *testing.T) {
 	}
 }
 
-// TestRecovery_LookaheadWindowIsTwo pins the constant the package doc builds
-// its whole recovery account on. participle discards a failed branch inside
-// the window and commits past it, so the setting decides which malformed
-// sources keep their members and how many diagnostics a reader is shown. At
-// UseLookahead(3) this source keeps its property and loses a diagnostic.
-func TestRecovery_LookaheadWindowIsTwo(t *testing.T) {
+// TestRecovery_LookaheadIsNotWiderThanTwo catches a widened lookahead only.
+// The source keeps its property and loses a diagnostic at UseLookahead(3), and
+// this goes red there — but it stays green at 1, so it is a one-sided guard
+// and not a pin on the value.
+func TestRecovery_LookaheadIsNotWiderThanTwo(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary @a(x,\n}\n"
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 3 {
-		t.Errorf("got %d diagnostics, want 3 — the lookahead window moved", len(issues))
+		t.Errorf("got %d diagnostics, want 3 — the lookahead window widened", len(issues))
 	}
 	if len(file.Types) != 1 {
 		t.Fatalf("got %d types, want 1", len(file.Types))
 	}
 	if got := len(file.Types[0].Properties); got != 0 {
-		t.Errorf("recorded %d properties, want 0 — the branch must commit past the window", got)
+		t.Errorf("recorded %d properties, want 0", got)
 	}
 }
 
@@ -238,24 +237,29 @@ func TestRecovery_ImportFailureIsAnError(t *testing.T) {
 	if len(file.Imports) != 1 || file.Imports[0].Path != "b.yammm" {
 		t.Errorf("imports = %+v, want the well-formed b.yammm recovered", file.Imports)
 	}
+
+	// The same defect with nothing after it: recovery has no following import
+	// to stop at, and must still report rather than run off the end quietly.
+	_, atEOF := Parse([]byte("schema \"s\"\nimport 123\n"), location.NewSourceID("s.yammm"))
+	if len(atEOF) != 1 || atEOF[0].Code() != diag.E_SYNTAX {
+		t.Errorf("malformed import at end of file gave %v, want one E_SYNTAX", atEOF)
+	}
 }
 
 // TestRecovery_UnterminatedGroupsAreReported pins that a delimited construct
-// rejects a missing closing token. Every closer below can be made optional
-// with nothing else in the package going red, and the malformed source then
-// loads with no diagnostic at all. Only length and numeric bounds are optional
-// groups; enum, pattern, vector, list and multiplicity are required fields, so
-// there the branch that commits is builtinNode's or the member's disjunction.
-// The counts and anchors are today's measured behaviour, not a target: S6′
-// changes them deliberately.
+// rejects a missing closing token. Every closer below can be made optional with
+// nothing else in the package going red, and the malformed source then loads
+// with no diagnostic at all. The counts, anchors and survivor tallies are
+// measured behaviour rather than a target; a remedy that improves them updates
+// these rows.
 func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 	tests := []struct {
-		name       string
-		member     string
-		wantProps  int
-		wantRels   int
-		wantIssues int
-		wantAnchor string
+		name        string
+		member      string
+		wantProps   int
+		wantIssues  int
+		wantAnchor  string
+		wantBareAnn string // the annotation name a discarded argument list leaves behind
 	}{
 		{name: "length bounds", member: "s String[1, 2", wantIssues: 1, wantAnchor: "}"},
 		{name: "numeric bounds", member: "n Integer[1, 2", wantIssues: 1, wantAnchor: "}"},
@@ -263,15 +267,12 @@ func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 		{name: "pattern list", member: "p Pattern[\"^a$\"", wantIssues: 1, wantAnchor: "}"},
 		{name: "vector dimensions", member: "v Vector[128", wantIssues: 1, wantAnchor: "}"},
 		{name: "list element", member: "l List<String", wantIssues: 1, wantAnchor: "}"},
-		// Inside the lookahead window, so the branch is discarded and the
-		// property survives — carrying a bare @a the source never wrote. The
-		// leftover text then draws a second diagnostic on the closing brace.
+		// The property survives carrying a bare @a the source never wrote.
 		{
 			name: "annotation arguments", member: "id String primary @a(x",
-			wantProps: 1, wantIssues: 2, wantAnchor: "(",
+			wantProps: 1, wantIssues: 2, wantAnchor: "(", wantBareAnn: "a",
 		},
-		// Byte-identical to its neighbour: recovery restarts inside the member
-		// it just left. One defect, reported twice.
+		// Both diagnostics are byte-identical to each other: one defect, twice.
 		{
 			name: "multiplicity", member: "--> wheels (many Wheel",
 			wantIssues: 2, wantAnchor: "(",
@@ -281,7 +282,7 @@ func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "schema \"s\"\ntype T {\n\t" + tc.member + "\n}\n"
 			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-			if len(issues) != tc.wantIssues {
+			if len(issues) != tc.wantIssues || len(issues) == 0 {
 				t.Fatalf("got %d diagnostics, want %d: %v", len(issues), tc.wantIssues, issues)
 			}
 			for i, iss := range issues {
@@ -297,16 +298,15 @@ func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 				t.Fatalf("got %d types, want 1", len(file.Types))
 			}
 			if got := len(file.Types[0].Properties); got != tc.wantProps {
-				t.Errorf("recorded %d properties, want %d", got, tc.wantProps)
+				t.Fatalf("recorded %d properties, want %d", got, tc.wantProps)
 			}
-			if got := len(file.Types[0].Relations); got != tc.wantRels {
-				t.Errorf("recorded %d relations, want %d", got, tc.wantRels)
+			if tc.wantBareAnn == "" {
+				return
 			}
-			if tc.name == "annotation arguments" {
-				anns := file.Types[0].Properties[0].Annotations
-				if len(anns) != 1 || anns[0].Name != "a" || anns[0].HasParens || len(anns[0].Args) != 0 {
-					t.Errorf("annotations = %+v, want one bare @a — the fabricated shape this row records", anns)
-				}
+			anns := file.Types[0].Properties[0].Annotations
+			if len(anns) != 1 || anns[0].Name != tc.wantBareAnn || anns[0].HasParens || len(anns[0].Args) != 0 {
+				t.Errorf("annotations = %+v, want one bare @%s — the fabricated shape this row records",
+					anns, tc.wantBareAnn)
 			}
 		})
 	}

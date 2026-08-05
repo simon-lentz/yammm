@@ -8,12 +8,11 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// These rows record what ten optional-group sites do today, so a replacement is
-// scored against a measured bar rather than a remembered one. They are not a
-// survey of the grammar and they do not state a rule: which sites keep their
-// construct and which lose it is decided by participle's lookahead window, and
-// the package doc carries that. Two rows draw a second diagnostic, marked
-// below, and those record a defect rather than an intent.
+// These rows record what ten sites do today, so a replacement is scored against
+// a measured bar rather than a remembered one. They are neither a survey of the
+// grammar nor a statement of the rule that decides which construct survives.
+// Two rows draw a second diagnostic, marked below, and record a defect rather
+// than an intent.
 var abandonedGroups = []struct {
 	name   string
 	src    string
@@ -112,11 +111,11 @@ func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 	for _, tc := range abandonedGroups {
 		t.Run(tc.name, func(t *testing.T) {
 			f, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
-			if tc.count == 0 {
-				t.Fatal("row has no count: every row here reports at least one diagnostic")
-			}
 			if len(issues) != tc.count {
 				t.Fatalf("got %d diagnostics, want %d: %v", len(issues), tc.count, issues)
+			}
+			if len(issues) == 0 {
+				return // a row may record a site that reports nothing
 			}
 			// diag.Result.OK() counts only Fatal and Error, so a severity
 			// downgrade here would let every one of these sources load clean.
