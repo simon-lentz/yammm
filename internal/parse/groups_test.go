@@ -110,13 +110,11 @@ func TestGroups_FailureNamesItsConstructAndAnchorsInsideIt(t *testing.T) {
 	}
 }
 
-// TestGroups_ConstructNamesAreDistinct keeps two groups from reporting under one
-// name, which would leave a diagnostic ambiguous about what the author got
-// wrong. It reads the names off the criterion table, so a group added there
-// without its own wording fails.
+// TestGroups_EveryCaptureHasARow holds the criterion table to the registered
+// captures in both directions: a capture with no row is scored by nothing, and a
+// row naming no capture scores nothing.
 func TestGroups_EveryCaptureHasARow(t *testing.T) {
-	// The nine optional groups buildParsers registers a capture for. A capture
-	// added without a row here would be scored by nothing.
+	// The nine optional groups buildParsers registers a capture for.
 	captures := []string{
 		"numBounds", "lenBounds", "timFormat", "alias", "reverse",
 		"relBody", "args", "mult", "extends",
@@ -136,6 +134,10 @@ func TestGroups_EveryCaptureHasARow(t *testing.T) {
 	}
 }
 
+// TestGroups_ConstructNamesAreDistinct keeps two groups from reporting under one
+// name, which would leave a diagnostic ambiguous about what the author got
+// wrong. It reads the names off the criterion table, so a group added there
+// without its own wording fails.
 func TestGroups_ConstructNamesAreDistinct(t *testing.T) {
 	nameOf := map[string]string{}
 	groupOf := map[string]string{}
