@@ -33,7 +33,7 @@ func Parse(src []byte, sourceID location.SourceID) (*File, []diag.Issue) {
 
 	b := &builder{
 		ps: ps, src: text, sourceID: sourceID, toks: toks,
-		lineStarts: lineStarts(text), file: &File{},
+		lineStarts: lineStarts(text), abandoned: map[int]markedGroup{}, file: &File{},
 	}
 	b.parseFile(plex)
 	slices.SortStableFunc(b.issues, compareIssues)
@@ -85,6 +85,10 @@ type builder struct {
 	// lineStarts lets positionAt binary-search rather than count newlines
 	// from zero on every call, which made a parse quadratic in file size.
 	lineStarts []int
+
+	// abandoned maps the offset a marker was left standing at to the optional
+	// group that left it, so the diagnostic can name the construct.
+	abandoned map[int]markedGroup
 
 	file   *File
 	issues []diag.Issue
@@ -158,6 +162,7 @@ func (b *builder) parseImports(plex *lexer.PeekingLexer) {
 			})
 			continue
 		}
+		b.noteAbandoned(plex, importGroups(imp))
 		b.addImport(imp)
 	}
 }
@@ -253,6 +258,7 @@ func (b *builder) parseMembers(plex *lexer.PeekingLexer, nt *TypeDecl) int {
 			b.failed(plex, err, diag.Error, "in a type body", func() { b.resyncMember(plex) })
 			continue
 		}
+		b.noteAbandoned(plex, memberGroups(m))
 		b.addMember(nt, m)
 	}
 }
@@ -467,6 +473,129 @@ func (b *builder) typeRef(r *typeRefNode) *TypeRef {
 	return out
 }
 
+// ---- abandoned optional groups ----
+
+// markedGroup is one optional group participle abandons instead of failing:
+// the token it leaves standing, the construct to name in a diagnostic, and the
+// parser that reports what really went wrong inside it.
+type markedGroup struct {
+	marker    string
+	construct string
+	reparse   func(ps *parsers, plex *lexer.PeekingLexer) error
+}
+
+func group[G any](marker, construct string, pick func(*parsers) *participle.Parser[G]) markedGroup {
+	return markedGroup{marker, construct, func(ps *parsers, plex *lexer.PeekingLexer) error {
+		_, err := pick(ps).ParseFromLexer(plex, participle.AllowTrailing(true))
+		return err //nolint:wrapcheck // the caller inspects participle's error type to place the diagnostic
+	}}
+}
+
+var (
+	numBoundsGroup = group("[", "in a numeric bound list", func(p *parsers) *participle.Parser[numBoundsC] { return p.numBounds })
+	lenBoundsGroup = group("[", "in a length bound list", func(p *parsers) *participle.Parser[lenBoundsC] { return p.lenBounds })
+	timFormatGroup = group("[", "in a timestamp format", func(p *parsers) *participle.Parser[timFormatNode] { return p.timFormat })
+	aliasGroup     = group("as", "in an import alias", func(p *parsers) *participle.Parser[aliasGroupNode] { return p.aliasTail })
+	reverseGroup   = group("/", "in a reverse clause", func(p *parsers) *participle.Parser[reverseNode] { return p.reverse })
+	relBodyGroup   = group("{", "in a relation body", func(p *parsers) *participle.Parser[relBodyNode] { return p.relBody })
+	argsGroup      = group("(", "in an annotation argument list", func(p *parsers) *participle.Parser[argsNode] { return p.args })
+	extendsGroup   = group("extends", "in an extends clause", func(p *parsers) *participle.Parser[extendsNode] { return p.extends })
+)
+
+// markerOnlyGroups are the groups whose marker identifies them without context.
+// They are reached when the enclosing construct failed outright rather than
+// abandoning, so no successful parse recorded them: 'extends' fails typeHead at
+// the keyword, because a required '{' follows the group it gave up on.
+var markerOnlyGroups = map[string]markedGroup{"extends": extendsGroup}
+
+// noteAbandoned records the optional group the construct just parsed left
+// behind, keyed on the offset the recovery loop is about to fail at. participle
+// discards an abandoned group without consuming it, so the marker it would have
+// begun with is the very next token.
+func (b *builder) noteAbandoned(plex *lexer.PeekingLexer, groups []markedGroup) {
+	t := plex.Peek()
+	if t.EOF() {
+		return
+	}
+	for _, g := range groups {
+		if t.Value == g.marker {
+			b.abandoned[t.Pos.Offset] = g
+			return
+		}
+	}
+}
+
+// reparseAbandoned re-runs the group abandoned at offset and returns the error
+// it raises, under the construct name to report it with. A nil error means
+// nothing was abandoned there, or the group reads cleanly on its own.
+func (b *builder) reparseAbandoned(offset int) (string, error) {
+	i, found := slices.BinarySearchFunc(b.toks, offset, func(t lexer.Token, target int) int {
+		return t.Pos.Offset - target
+	})
+	if !found {
+		return "", nil
+	}
+	g, ok := b.abandoned[offset]
+	if !ok {
+		if g, ok = markerOnlyGroups[b.toks[i].Value]; !ok {
+			return "", nil
+		}
+	}
+	// Parse upgraded the whole of this slice already, so a suffix of it cannot
+	// fail; a failure here is a defect in this package, as it is there.
+	plex, err := lexer.Upgrade(&sliceLexer{toks: b.toks[i:]}, b.ps.elide...)
+	if err != nil {
+		panic("parse: " + err.Error())
+	}
+	return g.construct, g.reparse(b.ps, plex)
+}
+
+// memberGroups lists the optional groups a parsed member may have abandoned, in
+// the order their markers could appear.
+func memberGroups(m *memberNode) []markedGroup {
+	switch {
+	case m.Prop != nil:
+		out := constraintGroups(&m.Prop.Type)
+		if n := len(m.Prop.Anns); n > 0 && m.Prop.Anns[n-1].Args == nil {
+			out = append(out, argsGroup)
+		}
+		return out
+	case m.TAnn != nil:
+		if m.TAnn.Args == nil {
+			return []markedGroup{argsGroup}
+		}
+	case m.Assoc != nil:
+		var out []markedGroup
+		if m.Assoc.Reverse == nil {
+			out = append(out, reverseGroup)
+		}
+		if m.Assoc.Body == nil {
+			out = append(out, relBodyGroup)
+		}
+		return out
+	case m.Comp != nil:
+		if m.Comp.Reverse == nil {
+			return []markedGroup{reverseGroup}
+		}
+	}
+	return nil
+}
+
+func constraintGroups(c *constraintNode) []markedGroup {
+	if c.B == nil {
+		return nil
+	}
+	switch {
+	case c.B.Int != nil && c.B.Int.Bounds == nil, c.B.Flt != nil && c.B.Flt.Bounds == nil:
+		return []markedGroup{numBoundsGroup}
+	case c.B.Str != nil && c.B.Str.Bounds == nil, c.B.Lst != nil && c.B.Lst.Bounds == nil:
+		return []markedGroup{lenBoundsGroup}
+	case c.B.Tim != nil && c.B.Tim.Format == nil:
+		return []markedGroup{timFormatGroup}
+	}
+	return nil
+}
+
 // ---- recovery ----
 
 // tryParse attempts one construct, restoring the lexer on failure so re-sync
@@ -591,6 +720,16 @@ func (b *builder) syntaxErr(sev diag.Severity, err error, what string, from, to 
 	}
 	var ut *participle.UnexpectedTokenError
 	if errors.As(err, &ut) {
+		// An abandoned optional group fails the enclosing parse at the marker it
+		// left standing, which says nothing about what the author got wrong.
+		// Parsing the group again moves the anchor onto the token that really
+		// failed and names the construct it belongs to.
+		if construct, inner := b.reparseAbandoned(ut.Unexpected.Pos.Offset); inner != nil {
+			var innerUT *participle.UnexpectedTokenError
+			if errors.As(inner, &innerUT) {
+				ut, what = innerUT, construct
+			}
+		}
 		start := ut.Unexpected.Pos.Offset
 		span := b.spanFromOffsets(start, start+len(ut.Unexpected.Value))
 		b.report(sev, diag.E_SYNTAX, span, fmt.Sprintf("unexpected token %q %s", ut.Unexpected, what))
@@ -714,4 +853,12 @@ func (a *anyNameNode) value() string {
 		return *a.UC
 	}
 	return ""
+}
+
+// importGroups lists the optional groups a parsed import may have abandoned.
+func importGroups(imp *importNode) []markedGroup {
+	if imp.Alias == nil {
+		return []markedGroup{aliasGroup}
+	}
+	return nil
 }

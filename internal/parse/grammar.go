@@ -367,6 +367,18 @@ type aliasC struct {
 	Name   ucWordNode `parser:"(?! 'Integer' | 'Float' | 'Boolean' | 'String' | 'Enum' | 'Pattern' | 'Timestamp' | 'Date' | 'UUID' | 'Vector' | 'List') @@"`
 }
 
+// timFormatNode and aliasGroupNode exist only so the two optional groups that
+// are written inline rather than as a node have something to re-parse. An
+// abandoned group is diagnosed by parsing it again from its marker, and
+// participle needs a type to build a parser for.
+type timFormatNode struct {
+	F strTok `parser:"'[' @@ ']'"`
+}
+
+type aliasGroupNode struct {
+	A anyNameNode `parser:"'as' @@"`
+}
+
 // exprCapture is the interface ParseTypeWith is registered for. The concrete
 // exprResult carries the compiled expression, its byte extent, and any
 // diagnostics raised while compiling literals.
@@ -392,6 +404,17 @@ type parsers struct {
 	dtDecl     *participle.Parser[dtDeclNode]
 	typeHead   *participle.Parser[typeHeadNode]
 	member     *participle.Parser[memberNode]
+
+	// The optional groups participle abandons, each buildable on its own so a
+	// site left standing can be parsed again for the error it really raised.
+	numBounds *participle.Parser[numBoundsC]
+	lenBounds *participle.Parser[lenBoundsC]
+	timFormat *participle.Parser[timFormatNode]
+	aliasTail *participle.Parser[aliasGroupNode]
+	reverse   *participle.Parser[reverseNode]
+	relBody   *participle.Parser[relBodyNode]
+	args      *participle.Parser[argsNode]
+	extends   *participle.Parser[extendsNode]
 }
 
 // mustParsers returns the shared parser set, building it on first use. A
@@ -470,6 +493,24 @@ func buildParsers() {
 	if built.typeHead, err = participle.Build[typeHeadNode](opts...); err != nil {
 		sharedErr = fmt.Errorf("build type-header parser: %w", err)
 		return
+	}
+	for _, b := range []struct {
+		name  string
+		build func() error
+	}{
+		{"numeric bounds", func() (e error) { built.numBounds, e = participle.Build[numBoundsC](opts...); return }},
+		{"length bounds", func() (e error) { built.lenBounds, e = participle.Build[lenBoundsC](opts...); return }},
+		{"timestamp format", func() (e error) { built.timFormat, e = participle.Build[timFormatNode](opts...); return }},
+		{"import alias", func() (e error) { built.aliasTail, e = participle.Build[aliasGroupNode](opts...); return }},
+		{"reverse clause", func() (e error) { built.reverse, e = participle.Build[reverseNode](opts...); return }},
+		{"relation body", func() (e error) { built.relBody, e = participle.Build[relBodyNode](opts...); return }},
+		{"annotation arguments", func() (e error) { built.args, e = participle.Build[argsNode](opts...); return }},
+		{"extends clause", func() (e error) { built.extends, e = participle.Build[extendsNode](opts...); return }},
+	} {
+		if err := b.build(); err != nil {
+			sharedErr = fmt.Errorf("build %s parser: %w", b.name, err)
+			return
+		}
 	}
 	if built.member, err = participle.Build[memberNode](opts...); err != nil {
 		sharedErr = fmt.Errorf("build member parser: %w", err)
