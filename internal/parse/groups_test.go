@@ -7,8 +7,9 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// groupSites is the acceptance criterion for the optional-group captures: one
-// row per group, written so its inner parse fails. Each pins that the
+// groupSites is the acceptance criterion for the optional-group captures. Every
+// capture appears, and one that is reachable from two sites appears once per
+// site. Each row is written so the group's inner parse fails, and pins that the
 // diagnostic names that group's construct and anchors on the token inside it
 // that failed, not on the marker the group begins with.
 var groupSites = []struct {
@@ -65,6 +66,16 @@ var groupSites = []struct {
 		want: `unexpected token "nil" in a relation body`,
 	},
 	{
+		name: "annotation arguments", group: "args", marker: "(", anchor: "*",
+		src:  "schema \"s\"\ntype T {\n\tid String primary @a(*)\n}\n",
+		want: `unexpected token "*" in an annotation argument list`,
+	},
+	{
+		name: "multiplicity", group: "mult", marker: "(", anchor: ":",
+		src:  "schema \"s\"\ntype T {\n\tid String primary\n\t--> r (many:one) B\n}\n",
+		want: `unexpected token ":" in a multiplicity`,
+	},
+	{
 		name: "extends clause", group: "extends", marker: "extends", anchor: "{",
 		src:  "schema \"s\"\ntype T extends {\n\tid String primary\n}\n",
 		want: `unexpected token "{" in an extends clause`,
@@ -103,6 +114,28 @@ func TestGroups_FailureNamesItsConstructAndAnchorsInsideIt(t *testing.T) {
 // name, which would leave a diagnostic ambiguous about what the author got
 // wrong. It reads the names off the criterion table, so a group added there
 // without its own wording fails.
+func TestGroups_EveryCaptureHasARow(t *testing.T) {
+	// The nine optional groups buildParsers registers a capture for. A capture
+	// added without a row here would be scored by nothing.
+	captures := []string{
+		"numBounds", "lenBounds", "timFormat", "alias", "reverse",
+		"relBody", "args", "mult", "extends",
+	}
+	covered := map[string]bool{}
+	for _, tc := range groupSites {
+		covered[tc.group] = true
+	}
+	for _, c := range captures {
+		if !covered[c] {
+			t.Errorf("capture %q has no row in groupSites", c)
+		}
+		delete(covered, c)
+	}
+	for extra := range covered {
+		t.Errorf("groupSites has a row for %q, which is not a registered capture", extra)
+	}
+}
+
 func TestGroups_ConstructNamesAreDistinct(t *testing.T) {
 	nameOf := map[string]string{}
 	groupOf := map[string]string{}
