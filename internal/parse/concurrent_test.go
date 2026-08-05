@@ -182,7 +182,6 @@ func TestRender_Discriminates(t *testing.T) {
 			"schema \"a\"\ntype A {\n\tt List<String> primary\n\t! \"m\" t -> Contains(\"y\")\n}\n",
 		},
 		{
-			// Reaches the ParamsLiteral branch.
 			"lambda parameters",
 			"schema \"a\"\ntype A {\n\tt List<Integer> primary\n\t! \"m\" t -> Count |$x| { $x > 0 }\n}\n",
 			"schema \"a\"\ntype A {\n\tt List<Integer> primary\n\t! \"m\" t -> Count |$y| { $y > 0 }\n}\n",

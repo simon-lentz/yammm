@@ -16,8 +16,8 @@ import (
 // grammarRoots are the types the parser set is built from. Walking the field
 // graph from here reaches every node the grammar can use, so a node added
 // without being wired to a parser is correctly out of scope. The optional
-// groups are roots in their own right: each has its own parser, and the field
-// that holds one is an interface the walk cannot see through.
+// groups need no root of their own: the field that holds one is a pointer the
+// walk follows.
 func grammarRoots() []reflect.Type {
 	return []reflect.Type{
 		reflect.TypeFor[schemaHeadNode](),
@@ -25,15 +25,6 @@ func grammarRoots() []reflect.Type {
 		reflect.TypeFor[dtDeclNode](),
 		reflect.TypeFor[typeHeadNode](),
 		reflect.TypeFor[memberNode](),
-		reflect.TypeFor[numBoundsC](),
-		reflect.TypeFor[lenBoundsC](),
-		reflect.TypeFor[timFormatNode](),
-		reflect.TypeFor[aliasGroupNode](),
-		reflect.TypeFor[reverseNode](),
-		reflect.TypeFor[relBodyNode](),
-		reflect.TypeFor[argsNode](),
-		reflect.TypeFor[extendsNode](),
-		reflect.TypeFor[multNode](),
 	}
 }
 

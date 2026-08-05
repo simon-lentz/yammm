@@ -173,12 +173,10 @@ func (b *builder) addImport(imp *importNode) {
 		PathSpan: b.spanOf(imp.Path.Pos, imp.Path.EndPos),
 		Span:     b.spanOf(imp.Pos, imp.EndPos),
 	}
-	if got := outcome[aliasOutcome](imp.Alias); got.Err != nil {
-		b.reportGroupFailure(got.At, got.Err, "in an import alias")
-	} else if got.V != nil {
+	if imp.Alias != nil {
 		n.HasAlias = true
-		n.Alias = got.V.A.value()
-		n.AliasSpan = b.spanOf(got.V.A.Pos, got.V.A.EndPos)
+		n.Alias = imp.Alias.value()
+		n.AliasSpan = b.spanOf(imp.Alias.Pos, imp.Alias.EndPos)
 	}
 	b.file.Imports = append(b.file.Imports, n)
 }
@@ -225,11 +223,9 @@ func (b *builder) parseTypeBody(plex *lexer.PeekingLexer, head *typeHeadNode) {
 		IsPart:     head.Part,
 		Doc:        stripDoc(head.Doc),
 	}
-	if got := outcome[extendsOutcome](head.Extends); got.Err != nil {
-		b.reportGroupFailure(got.At, got.Err, "in an extends clause")
-	} else if got.V != nil {
-		for i := range got.V.Refs {
-			nt.Extends = append(nt.Extends, b.typeRef(&got.V.Refs[i]))
+	if head.Extends != nil {
+		for i := range head.Extends.Refs {
+			nt.Extends = append(nt.Extends, b.typeRef(&head.Extends.Refs[i]))
 		}
 	}
 
@@ -288,13 +284,11 @@ func (b *builder) addAssociation(nt *TypeDecl, a *assocNode) {
 		Doc:      stripDoc(a.Doc),
 		Span:     b.spanOf(a.Pos, a.EndPos),
 	}
-	rel.Optional, rel.Many = b.multiplicity(a.Mult)
+	rel.Optional, rel.Many = multiplicityOf(a.Mult)
 	b.applyReverse(rel, a.Reverse)
-	if got := outcome[relBodyOutcome](a.Body); got.Err != nil {
-		b.reportGroupFailure(got.At, got.Err, "in a relation body")
-	} else if got.V != nil {
-		for i := range got.V.Props {
-			rel.Properties = append(rel.Properties, b.edgeProp(&got.V.Props[i]))
+	if a.Body != nil {
+		for i := range a.Body.Props {
+			rel.Properties = append(rel.Properties, b.edgeProp(&a.Body.Props[i]))
 		}
 	}
 	nt.Relations = append(nt.Relations, rel)
@@ -316,26 +310,21 @@ func (b *builder) addComposition(nt *TypeDecl, c *compNode) {
 		Doc:      stripDoc(c.Doc),
 		Span:     b.spanOf(c.Pos, c.EndPos),
 	}
-	rel.Optional, rel.Many = b.multiplicity(c.Mult)
+	rel.Optional, rel.Many = multiplicityOf(c.Mult)
 	b.applyReverse(rel, c.Reverse)
 	nt.Relations = append(nt.Relations, rel)
 }
 
 // applyReverse fills the backward direction. With no reverse written, the edge
 // is reachable optionally and singly from the far side.
-func (b *builder) applyReverse(rel *Relation, capture reverseCapture) {
-	got := outcome[reverseOutcome](capture)
-	if got.Err != nil {
-		b.reportGroupFailure(got.At, got.Err, "in a reverse clause")
-	}
-	rev := got.V
+func (b *builder) applyReverse(rel *Relation, rev *reverseNode) {
 	if rev == nil {
 		rel.ReverseOptional, rel.ReverseMany = true, false
 		return
 	}
 	rel.Backref = rev.Name.value()
 	rel.BackrefSpan = b.spanOf(rev.Name.Pos, rev.Name.EndPos)
-	rel.ReverseOptional, rel.ReverseMany = b.multiplicity(rev.Mult)
+	rel.ReverseOptional, rel.ReverseMany = multiplicityOf(rev.Mult)
 }
 
 func (b *builder) edgeProp(p *relPropNode) *Property {
@@ -349,18 +338,10 @@ func (b *builder) edgeProp(p *relPropNode) *Property {
 	}
 }
 
-// multiplicity reads the seven spellings the grammar admits. An omitted
+// multiplicityOf reads the seven spellings the grammar admits. An omitted
 // multiplicity means optional and single. The final return is unreachable —
 // Head is "_" or "one" whenever Many is false — and exists because Go requires
 // a return there.
-func (b *builder) multiplicity(capture multCapture) (optional, many bool) {
-	got := outcome[multOutcome](capture)
-	if got.Err != nil {
-		b.reportGroupFailure(got.At, got.Err, "in a multiplicity")
-	}
-	return multiplicityOf(got.V)
-}
-
 func multiplicityOf(m *multNode) (optional, many bool) {
 	if m == nil {
 		return true, false
@@ -409,7 +390,7 @@ func (b *builder) addProp(nt *TypeDecl, p *propNode) {
 	nt.Properties = append(nt.Properties, np)
 }
 
-func (b *builder) annotation(name lcWordNode, capture argsCapture, doc string, span location.Span, detached int) *Annotation {
+func (b *builder) annotation(name lcWordNode, args *argsNode, doc string, span location.Span, detached int) *Annotation {
 	na := &Annotation{
 		Name:             name.Value,
 		NameSpan:         b.spanOf(name.Pos, name.EndPos),
@@ -417,16 +398,12 @@ func (b *builder) annotation(name lcWordNode, capture argsCapture, doc string, s
 		DetachedFromLine: detached,
 		Span:             span,
 	}
-	got := outcome[argsOutcome](capture)
-	if got.Err != nil {
-		b.reportGroupFailure(got.At, got.Err, "in an annotation argument list")
-	}
-	if got.V == nil {
+	if args == nil {
 		return na
 	}
 	na.HasParens = true
-	for i := range got.V.Args {
-		na.Args = append(na.Args, b.arg(&got.V.Args[i]))
+	for i := range args.Args {
+		na.Args = append(na.Args, b.arg(&args.Args[i]))
 	}
 	return na
 }
@@ -488,25 +465,6 @@ func (b *builder) typeRef(r *typeRefNode) *TypeRef {
 		out.Qualifier = *r.Qual
 	}
 	return out
-}
-
-// reportGroupFailure reports the error an optional group raised inside itself,
-// anchored on the token that failed rather than on the group's marker. A
-// malformed numeric literal inside the group owns the diagnosis instead, which
-// is the anchor production already uses.
-func (b *builder) reportGroupFailure(at int, err error, construct string) {
-	var ut *participle.UnexpectedTokenError
-	if !errors.As(err, &ut) {
-		return
-	}
-	start := ut.Unexpected.Pos.Offset
-	if bad := b.firstInvalidNumber(at, start+len(ut.Unexpected.Value)); bad != nil {
-		b.report(diag.Error, diag.E_SYNTAX, b.tokenSpan(bad), InvalidNumberMessage(bad.Value))
-		return
-	}
-	span := b.spanFromOffsets(start, start+len(ut.Unexpected.Value))
-	b.report(diag.Error, diag.E_SYNTAX, span,
-		fmt.Sprintf("unexpected token %q %s", ut.Unexpected, construct))
 }
 
 // ---- recovery ----

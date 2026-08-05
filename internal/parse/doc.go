@@ -67,12 +67,19 @@
 // its own expected-set as the EBNF of this package's node structs, which names
 // nothing in the YAMMM language and changes shape whenever a struct or a
 // struct tag is edited. Each site passes the construct it was parsing and the
-// unexpected token is reported against that: a recovery site names the region
-// it was in — the schema header, an import declaration, a declaration, a type
-// body — and an optional group names itself, so a failure inside a bound list,
-// a reverse clause or an extends clause says so.
-// [TestParse_DiagnosticsNameNoGrammarTypes] holds the rule, deriving the
-// banned names from the grammar itself so a node added later is covered.
+// unexpected token is reported against that, naming the region the recovery
+// loop was in: the schema header, an import declaration, a declaration, or a
+// type body. [TestParse_DiagnosticsNameNoGrammarTypes] holds the rule, deriving
+// the banned names from the grammar itself so a node added later is covered.
+//
+// An optional group written '@@?' is abandoned whole when its inner parse
+// fails, so its diagnostic names the enclosing construct and anchors on the
+// group's opening marker rather than the token inside it that failed —
+// Timestamp["x" reports the '[' in a type body, not the unterminated string.
+// The group's own text is then re-reported by the recovery loop. Naming the
+// group instead is a known divergence from the ANTLR parser, measured and
+// pinned by [TestAbandonment_GroupsReportAgainstTheEnclosingConstruct]; every
+// such site still emits E_SYNTAX, so no malformed source loads either way.
 //
 // # Spans
 //

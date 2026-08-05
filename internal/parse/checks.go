@@ -74,28 +74,9 @@ func (b *builder) builtin(c *builtinNode, span location.Span) *Constraint {
 	return &Constraint{Span: span}
 }
 
-// numBounds and lenBounds unwrap a bound-list capture, reporting the failure
-// the group recorded. A nil return means no usable bound list, either because
-// none was written or because the one written did not parse.
-func (b *builder) numBounds(capture numBoundsCapture) *numBoundsC {
-	got := outcome[numBoundsOutcome](capture)
-	if got.Err != nil {
-		b.reportGroupFailure(got.At, got.Err, "in a numeric bound list")
-	}
-	return got.V
-}
-
-func (b *builder) lenBounds(capture lenBoundsCapture) *lenBoundsC {
-	got := outcome[lenBoundsOutcome](capture)
-	if got.Err != nil {
-		b.reportGroupFailure(got.At, got.Err, "in a length bound list")
-	}
-	return got.V
-}
-
 func (b *builder) intConstraint(c *intC, span location.Span) *Constraint {
 	out := &Constraint{Kind: ConstraintInteger, Span: span}
-	bounds := b.numBounds(c.Bounds)
+	bounds := c.Bounds
 	if bounds == nil {
 		return out
 	}
@@ -134,7 +115,7 @@ func (b *builder) intBound(t *boundTok) (*int64, bool) {
 
 func (b *builder) floatConstraint(c *fltC, span location.Span) *Constraint {
 	out := &Constraint{Kind: ConstraintFloat, Span: span}
-	bounds := b.numBounds(c.Bounds)
+	bounds := c.Bounds
 	if bounds == nil {
 		return out
 	}
@@ -181,7 +162,7 @@ func (b *builder) warnPointlessMinus(t *boundTok) {
 
 func (b *builder) stringConstraint(c *strC, span location.Span) *Constraint {
 	out := &Constraint{Kind: ConstraintString, Span: span}
-	bounds := b.lenBounds(c.Bounds)
+	bounds := c.Bounds
 	if bounds == nil {
 		return out
 	}
@@ -195,7 +176,7 @@ func (b *builder) listConstraint(c *lstC, span location.Span) *Constraint {
 	if c.Elem != nil {
 		out.Elem = b.constraint(c.Elem)
 	}
-	bounds := b.lenBounds(c.Bounds)
+	bounds := c.Bounds
 	if bounds == nil {
 		return out
 	}
@@ -297,14 +278,10 @@ func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
 
 func (b *builder) timestampConstraint(c *timC, span location.Span) *Constraint {
 	out := &Constraint{Kind: ConstraintTimestamp, Span: span}
-	got := outcome[timFormatOutcome](c.Format)
-	if got.Err != nil {
-		b.reportGroupFailure(got.At, got.Err, "in a timestamp format")
-	}
-	if got.V == nil {
+	if c.Format == nil {
 		return out
 	}
-	f := &got.V.F
+	f := c.Format
 	lit := Literal{Raw: f.Raw, Span: b.spanOf(f.Pos, f.EndPos)}
 	text, err := unquote(f.Raw)
 	if err != nil {

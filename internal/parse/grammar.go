@@ -51,7 +51,7 @@ type importNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
 	Path   strTok       `parser:"'import' @@"`
-	Alias  aliasCapture `parser:"@@"`
+	Alias  *anyNameNode `parser:"('as' @@)?"`
 }
 
 // anyNameNode is a word in a position that admits either case and refuses
@@ -74,12 +74,12 @@ type dtDeclNode struct {
 type typeHeadNode struct {
 	Pos      lexer.Position
 	EndPos   lexer.Position
-	Doc      *string        `parser:"@DOC_COMMENT?"`
-	Abstract bool           `parser:"( @'abstract'"`
-	Part     bool           `parser:"| @'part' )?"`
-	Name     ucWordNode     `parser:"'type' (?! 'Integer' | 'Float' | 'Boolean' | 'String' | 'Enum' | 'Pattern' | 'Timestamp' | 'Date' | 'UUID' | 'Vector' | 'List') @@"`
-	Extends  extendsCapture `parser:"@@"`
-	Open     bool           `parser:"@'{'"`
+	Doc      *string      `parser:"@DOC_COMMENT?"`
+	Abstract bool         `parser:"( @'abstract'"`
+	Part     bool         `parser:"| @'part' )?"`
+	Name     ucWordNode   `parser:"'type' (?! 'Integer' | 'Float' | 'Boolean' | 'String' | 'Enum' | 'Pattern' | 'Timestamp' | 'Date' | 'UUID' | 'Vector' | 'List') @@"`
+	Extends  *extendsNode `parser:"@@?"`
+	Open     bool         `parser:"@'{'"`
 }
 
 type extendsNode struct {
@@ -110,86 +110,30 @@ type memberNode struct {
 type assocNode struct {
 	Pos     lexer.Position
 	EndPos  lexer.Position
-	Doc     *string        `parser:"@DOC_COMMENT?"`
-	Name    anyNameNode    `parser:"'-->' @@"`
-	Mult    multCapture    `parser:"@@"`
-	Target  typeRefNode    `parser:"@@"`
-	Reverse reverseCapture `parser:"@@"`
-	Body    relBodyCapture `parser:"@@"`
+	Doc     *string      `parser:"@DOC_COMMENT?"`
+	Name    anyNameNode  `parser:"'-->' @@"`
+	Mult    *multNode    `parser:"@@?"`
+	Target  typeRefNode  `parser:"@@"`
+	Reverse *reverseNode `parser:"@@?"`
+	Body    *relBodyNode `parser:"@@?"`
 }
 
 type compNode struct {
 	Pos     lexer.Position
 	EndPos  lexer.Position
-	Doc     *string        `parser:"@DOC_COMMENT?"`
-	Name    anyNameNode    `parser:"'*->' @@"`
-	Mult    multCapture    `parser:"@@"`
-	Target  typeRefNode    `parser:"@@"`
-	Reverse reverseCapture `parser:"@@"`
+	Doc     *string      `parser:"@DOC_COMMENT?"`
+	Name    anyNameNode  `parser:"'*->' @@"`
+	Mult    *multNode    `parser:"@@?"`
+	Target  typeRefNode  `parser:"@@"`
+	Reverse *reverseNode `parser:"@@?"`
 }
 
 type reverseNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
 	Name   anyNameNode `parser:"'/' @@"`
-	Mult   multCapture `parser:"@@"`
+	Mult   *multNode   `parser:"@@?"`
 }
-
-// reverseCapture is the reverse clause's outcome.
-type reverseCapture interface{ reverseCapture() }
-
-type reverseOutcome struct{ groupOutcome[reverseNode] }
-
-func (reverseOutcome) reverseCapture() {}
-
-// numBoundsCapture is the numeric bound list's outcome.
-type numBoundsCapture interface{ numBoundsCapture() }
-
-type numBoundsOutcome struct{ groupOutcome[numBoundsC] }
-
-func (numBoundsOutcome) numBoundsCapture() {}
-
-// timFormatCapture is the timestamp format's outcome.
-type timFormatCapture interface{ timFormatCapture() }
-
-type timFormatOutcome struct{ groupOutcome[timFormatNode] }
-
-func (timFormatOutcome) timFormatCapture() {}
-
-// aliasCapture is the import alias's outcome.
-type aliasCapture interface{ aliasCapture() }
-
-type aliasOutcome struct{ groupOutcome[aliasGroupNode] }
-
-func (aliasOutcome) aliasCapture() {}
-
-// relBodyCapture is the association body's outcome.
-type relBodyCapture interface{ relBodyCapture() }
-
-type relBodyOutcome struct{ groupOutcome[relBodyNode] }
-
-func (relBodyOutcome) relBodyCapture() {}
-
-// argsCapture is the annotation argument list's outcome.
-type argsCapture interface{ argsCapture() }
-
-type argsOutcome struct{ groupOutcome[argsNode] }
-
-func (argsOutcome) argsCapture() {}
-
-// extendsCapture is the extends clause's outcome.
-type extendsCapture interface{ extendsCapture() }
-
-type extendsOutcome struct{ groupOutcome[extendsNode] }
-
-func (extendsOutcome) extendsCapture() {}
-
-// multCapture is the multiplicity group's outcome.
-type multCapture interface{ multCapture() }
-
-type multOutcome struct{ groupOutcome[multNode] }
-
-func (multOutcome) multCapture() {}
 
 // multNode admits exactly seven spellings. '_' and 'one' each take an optional
 // ':one' or ':many' tail; 'many' takes none, so "(many:one)" is not a
@@ -230,9 +174,9 @@ type invNode struct {
 type typeAnnNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Doc    *string     `parser:"@DOC_COMMENT?"`
-	Name   lcWordNode  `parser:"'@@' (?! 'as' | 'part' | 'in' | 'nil' | 'true' | 'false') @@"`
-	Args   argsCapture `parser:"@@"`
+	Doc    *string    `parser:"@DOC_COMMENT?"`
+	Name   lcWordNode `parser:"'@@' (?! 'as' | 'part' | 'in' | 'nil' | 'true' | 'false') @@"`
+	Args   *argsNode  `parser:"@@?"`
 }
 
 // propNode's modifier alternatives carry a two-token lookahead. Without it a
@@ -252,8 +196,8 @@ type propNode struct {
 type annNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Name   lcWordNode  `parser:"'@' (?! 'as' | 'part' | 'in' | 'nil' | 'true' | 'false') @@"`
-	Args   argsCapture `parser:"@@"`
+	Name   lcWordNode `parser:"'@' (?! 'as' | 'part' | 'in' | 'nil' | 'true' | 'false') @@"`
+	Args   *argsNode  `parser:"@@?"`
 }
 
 type argsNode struct {
@@ -299,15 +243,15 @@ type builtinNode struct {
 type intC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool             `parser:"@'Integer'"`
-	Bounds numBoundsCapture `parser:"@@"`
+	Kw     bool        `parser:"@'Integer'"`
+	Bounds *numBoundsC `parser:"@@?"`
 }
 
 type fltC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool             `parser:"@'Float'"`
-	Bounds numBoundsCapture `parser:"@@"`
+	Kw     bool        `parser:"@'Float'"`
+	Bounds *numBoundsC `parser:"@@?"`
 }
 
 // numBoundsC is the signed numeric bound pair. Each bound keeps its own extent
@@ -335,16 +279,9 @@ type booC struct {
 type strC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool             `parser:"@'String'"`
-	Bounds lenBoundsCapture `parser:"@@"`
+	Kw     bool        `parser:"@'String'"`
+	Bounds *lenBoundsC `parser:"@@?"`
 }
-
-// lenBoundsCapture is the outcome of the optional length-bound group.
-type lenBoundsCapture interface{ lenBoundsCapture() }
-
-type lenBoundsOutcome struct{ groupOutcome[lenBoundsC] }
-
-func (lenBoundsOutcome) lenBoundsCapture() {}
 
 // lenBoundsC is the unsigned length bound pair. Length bounds admit no leading
 // minus, which is why they have no negation group.
@@ -386,8 +323,8 @@ type strTok struct {
 type timC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool             `parser:"@'Timestamp'"`
-	Format timFormatCapture `parser:"@@"`
+	Kw     bool    `parser:"@'Timestamp'"`
+	Format *strTok `parser:"('[' @@ ']')?"`
 }
 
 type datC struct {
@@ -418,9 +355,9 @@ type intTok struct {
 type lstC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool             `parser:"@'List'"`
-	Elem   *constraintNode  `parser:"'<' @@ '>'"`
-	Bounds lenBoundsCapture `parser:"@@"`
+	Kw     bool            `parser:"@'List'"`
+	Elem   *constraintNode `parser:"'<' @@ '>'"`
+	Bounds *lenBoundsC     `parser:"@@?"`
 }
 
 type aliasC struct {
@@ -428,98 +365,6 @@ type aliasC struct {
 	EndPos lexer.Position
 	Qual   *string    `parser:"(((?! 'schema' | 'type' | 'datatype' | 'required' | 'primary' | 'extends' | 'includes' | 'abstract' | 'one' | 'many' | 'import' | 'as' | 'part' | 'in' | 'nil' | 'true' | 'false') @LC_WORD | (?! 'Integer' | 'Float' | 'Boolean' | 'String' | 'Enum' | 'Pattern' | 'Timestamp' | 'Date' | 'UUID' | 'Vector' | 'List') @UC_WORD) '.')?"`
 	Name   ucWordNode `parser:"(?! 'Integer' | 'Float' | 'Boolean' | 'String' | 'Enum' | 'Pattern' | 'Timestamp' | 'Date' | 'UUID' | 'Vector' | 'List') @@"`
-}
-
-// timFormatNode and aliasGroupNode give a node to the two groups the grammar
-// would otherwise write inline, because a capture needs a type to parse into.
-type timFormatNode struct {
-	F strTok `parser:"'[' @@ ']'"`
-}
-
-type aliasGroupNode struct {
-	A anyNameNode `parser:"'as' @@"`
-}
-
-// An optional group written '@@?' is abandoned whole when its inner parse
-// fails, so the enclosing node succeeds as though the author wrote nothing and
-// the real error is lost. Every such group is instead a capture that always
-// succeeds and records which of three things happened. Absence and failure stop
-// being the same value, which is what '?' cannot express.
-
-// outcome unwraps a capture field. A capture is populated by its own parse
-// function, so the zero outcome only appears where a sub-production's parser
-// carries the field but never reaches it.
-func outcome[O any](capture any) O {
-	o, ok := capture.(O)
-	if !ok {
-		var zero O
-		return zero
-	}
-	return o
-}
-
-// groupOutcome is one optional group's result: V when it parsed, Err and the
-// marker offset when it was entered and failed, both zero when it was absent.
-type groupOutcome[T any] struct {
-	V   *T
-	Err error
-	At  int
-}
-
-// resyncFunc leaves the lexer where the enclosing construct can keep parsing
-// after its group failed. cp is the position the marker was seen at.
-type resyncFunc func(lx *lexer.PeekingLexer, cp lexer.Checkpoint)
-
-// enterGroup runs the group's own parser when its marker is present. A group
-// that is entered always reports: participle's own error, at the token inside
-// the group that raised it.
-func enterGroup[T any](lx *lexer.PeekingLexer, marker string, p *participle.Parser[T], resync resyncFunc) groupOutcome[T] {
-	t := lx.Peek()
-	if t.Value != marker {
-		return groupOutcome[T]{}
-	}
-	at := t.Pos.Offset
-	cp := lx.MakeCheckpoint()
-	v, err := p.ParseFromLexer(lx, participle.AllowTrailing(true))
-	if err != nil {
-		resync(lx, cp)
-		return groupOutcome[T]{Err: err, At: at}
-	}
-	return groupOutcome[T]{V: v}
-}
-
-// skipTo resyncs a delimited group by restoring its start and consuming through
-// its closing token, EOF ending the scan. No group nests inside itself, so the
-// first closer is always the group's own. An unterminated group therefore
-// consumes the enclosing construct's closer, which is what production does.
-func skipTo(closer string) resyncFunc {
-	return func(lx *lexer.PeekingLexer, cp lexer.Checkpoint) {
-		lx.LoadCheckpoint(cp)
-		for !lx.Peek().EOF() {
-			if lx.Next().Value == closer {
-				return
-			}
-		}
-	}
-}
-
-// keepFailure resyncs a group with no closing token: what the inner parse
-// consumed stays consumed, and the token it failed on goes with it, so the
-// enclosing construct does not re-report the same spot.
-func keepFailure(lx *lexer.PeekingLexer, _ lexer.Checkpoint) {
-	if t := lx.Peek(); !t.EOF() && t.Value != "}" {
-		lx.Next()
-	}
-}
-
-// dropMarker resyncs a group whose enclosing construct still needs the token
-// the inner parse failed on. Only the marker is consumed, so the construct
-// carries on and its declaration survives the group's failure.
-func dropMarker(lx *lexer.PeekingLexer, cp lexer.Checkpoint) {
-	lx.LoadCheckpoint(cp)
-	if !lx.Peek().EOF() {
-		lx.Next()
-	}
 }
 
 // exprCapture is the interface ParseTypeWith is registered for. The concrete
@@ -547,18 +392,6 @@ type parsers struct {
 	dtDecl     *participle.Parser[dtDeclNode]
 	typeHead   *participle.Parser[typeHeadNode]
 	member     *participle.Parser[memberNode]
-
-	// One parser per optional group, so a group can parse itself and report
-	// what failed inside it rather than being abandoned whole.
-	numBounds *participle.Parser[numBoundsC]
-	lenBounds *participle.Parser[lenBoundsC]
-	timFormat *participle.Parser[timFormatNode]
-	aliasTail *participle.Parser[aliasGroupNode]
-	reverse   *participle.Parser[reverseNode]
-	relBody   *participle.Parser[relBodyNode]
-	args      *participle.Parser[argsNode]
-	extends   *participle.Parser[extendsNode]
-	mult      *participle.Parser[multNode]
 }
 
 // mustParsers returns the shared parser set, building it on first use. A
@@ -616,43 +449,12 @@ func buildParsers() {
 		}
 		return exprResult{E: e, Diags: diags, Start: start, End: p.lastEnd}, nil
 	})
-	brackets, parens, braces := skipTo("]"), skipTo(")"), skipTo("}")
-	groupOpts := []participle.Option{
-		participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (lenBoundsCapture, error) {
-			return lenBoundsOutcome{enterGroup(lx, "[", built.lenBounds, brackets)}, nil
-		}),
-		participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (numBoundsCapture, error) {
-			return numBoundsOutcome{enterGroup(lx, "[", built.numBounds, brackets)}, nil
-		}),
-		participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (timFormatCapture, error) {
-			return timFormatOutcome{enterGroup(lx, "[", built.timFormat, brackets)}, nil
-		}),
-		participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (argsCapture, error) {
-			return argsOutcome{enterGroup(lx, "(", built.args, parens)}, nil
-		}),
-		participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (multCapture, error) {
-			return multOutcome{enterGroup(lx, "(", built.mult, parens)}, nil
-		}),
-		participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (relBodyCapture, error) {
-			return relBodyOutcome{enterGroup(lx, "{", built.relBody, braces)}, nil
-		}),
-		participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (reverseCapture, error) {
-			return reverseOutcome{enterGroup(lx, "/", built.reverse, keepFailure)}, nil
-		}),
-		participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (aliasCapture, error) {
-			return aliasOutcome{enterGroup(lx, "as", built.aliasTail, keepFailure)}, nil
-		}),
-		participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (extendsCapture, error) {
-			return extendsOutcome{enterGroup(lx, "extends", built.extends, dropMarker)}, nil
-		}),
-	}
 	opts := []participle.Option{
 		participle.Lexer(def),
 		participle.Elide(elidedTokens...),
 		exprOpt,
 		participle.UseLookahead(2),
 	}
-	opts = append(opts, groupOpts...)
 	if built.schemaHead, err = participle.Build[schemaHeadNode](opts...); err != nil {
 		sharedErr = fmt.Errorf("build schema-header parser: %w", err)
 		return
@@ -668,25 +470,6 @@ func buildParsers() {
 	if built.typeHead, err = participle.Build[typeHeadNode](opts...); err != nil {
 		sharedErr = fmt.Errorf("build type-header parser: %w", err)
 		return
-	}
-	for _, b := range []struct {
-		name  string
-		build func() error
-	}{
-		{"numeric bounds", func() (e error) { built.numBounds, e = participle.Build[numBoundsC](opts...); return }},
-		{"length bounds", func() (e error) { built.lenBounds, e = participle.Build[lenBoundsC](opts...); return }},
-		{"timestamp format", func() (e error) { built.timFormat, e = participle.Build[timFormatNode](opts...); return }},
-		{"import alias", func() (e error) { built.aliasTail, e = participle.Build[aliasGroupNode](opts...); return }},
-		{"reverse clause", func() (e error) { built.reverse, e = participle.Build[reverseNode](opts...); return }},
-		{"relation body", func() (e error) { built.relBody, e = participle.Build[relBodyNode](opts...); return }},
-		{"annotation arguments", func() (e error) { built.args, e = participle.Build[argsNode](opts...); return }},
-		{"extends clause", func() (e error) { built.extends, e = participle.Build[extendsNode](opts...); return }},
-		{"multiplicity", func() (e error) { built.mult, e = participle.Build[multNode](opts...); return }},
-	} {
-		if err := b.build(); err != nil {
-			sharedErr = fmt.Errorf("build %s parser: %w", b.name, err)
-			return
-		}
 	}
 	if built.member, err = participle.Build[memberNode](opts...); err != nil {
 		sharedErr = fmt.Errorf("build member parser: %w", err)
