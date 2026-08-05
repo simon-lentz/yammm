@@ -8,10 +8,12 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// An optional group whose inner parse fails is abandoned whole, so the
-// diagnostic names the enclosing construct and anchors on the group's opening
-// marker rather than the token inside it that failed. These rows pin that,
-// giving any replacement a measured bar instead of a remembered one.
+// These rows record what ten optional-group sites do today, so a replacement is
+// scored against a measured bar rather than a remembered one. They are not a
+// survey of the grammar and they do not state a rule: which sites keep their
+// construct and which lose it is decided by participle's lookahead window, and
+// the package doc carries that. Two rows draw a second diagnostic, marked
+// below, and those record a defect rather than an intent.
 var abandonedGroups = []struct {
 	name   string
 	src    string
@@ -37,6 +39,8 @@ var abandonedGroups = []struct {
 		count:  1,
 	},
 	{
+		// The second diagnostic lands on the ',' inside the member recovery
+		// just left. Recorded, not endorsed: it is one defect reported twice.
 		name:   "numeric bounds",
 		src:    "schema \"s\"\ntype T {\n\tn Integer[abc, 2]\n}\n",
 		want:   `unexpected token "[" in a type body`,
@@ -85,6 +89,8 @@ var abandonedGroups = []struct {
 		count:  1,
 	},
 	{
+		// Both diagnostics are byte-identical — same code, span and text — so
+		// a reader sees one error twice. Recorded, not endorsed.
 		name:   "multiplicity",
 		src:    "schema \"s\"\ntype T {\n\t--> r (many:one) B\n}\n",
 		want:   `unexpected token "(" in a type body`,
@@ -106,14 +112,19 @@ func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 	for _, tc := range abandonedGroups {
 		t.Run(tc.name, func(t *testing.T) {
 			f, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			if tc.count == 0 {
+				t.Fatal("row has no count: every row here reports at least one diagnostic")
+			}
 			if len(issues) != tc.count {
 				t.Fatalf("got %d diagnostics, want %d: %v", len(issues), tc.count, issues)
 			}
 			// diag.Result.OK() counts only Fatal and Error, so a severity
 			// downgrade here would let every one of these sources load clean.
-			if issues[0].Code() != diag.E_SYNTAX || issues[0].Severity() != diag.Error {
-				t.Errorf("first diagnostic is %s at %v, want E_SYNTAX at error",
-					issues[0].Code(), issues[0].Severity())
+			for i, iss := range issues {
+				if iss.Code() != diag.E_SYNTAX || iss.Severity() != diag.Error {
+					t.Errorf("diagnostic %d is %s at %v, want E_SYNTAX at error",
+						i, iss.Code(), iss.Severity())
+				}
 			}
 			if issues[0].Message() != tc.want {
 				t.Errorf("message = %q, want %q", issues[0].Message(), tc.want)

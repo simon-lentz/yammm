@@ -140,11 +140,18 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 	if rels[0].Backref != "car" {
 		t.Errorf("backref = %q, want car", rels[0].Backref)
 	}
-	// The composition arm of multiplicityOf has no other reader: without this,
-	// a to-many composition reaches the graph model as to-one.
+	// The composition arm of multiplicityOf has no other reader. (one) is the
+	// spelling to assert: (many) is (true, true), which a hardcoded pair also
+	// satisfies, so it cannot tell a real read of c.Mult from a constant.
+	one, issues := Parse([]byte(relSource("*-> PARTS (one) Part / owner")), location.NewSourceID("s.yammm"))
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %v", issues)
+	}
+	if got := one.Types[0].Relations[0]; got.Optional || got.Many {
+		t.Errorf("(one) → optional=%v many=%v, want both false", got.Optional, got.Many)
+	}
 	if !rels[0].Optional || !rels[0].Many {
-		t.Errorf("(many) → optional=%v many=%v, want optional=true many=true",
-			rels[0].Optional, rels[0].Many)
+		t.Errorf("(many) → optional=%v many=%v, want both true", rels[0].Optional, rels[0].Many)
 	}
 
 	_, issues = Parse([]byte(relSource("*-> WHEELS (many) Wheel { note String }")), location.NewSourceID("s.yammm"))

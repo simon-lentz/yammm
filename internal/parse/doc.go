@@ -65,38 +65,46 @@
 // type body. [TestParse_DiagnosticsNameNoGrammarTypes] holds the rule, deriving
 // the banned names from the grammar itself so a node added later is covered.
 //
-// An optional group written '@@?' fails in one of two ways, and which one
-// decides whether the construct around it survives. participle abandons the
-// group when the inner parse fails inside the lookahead window — two tokens,
-// set by UseLookahead(2) where the parsers are built. Past that window it
-// commits to the branch and propagates the error instead, so the enclosing
-// construct fails as well. The rule is participle's group.Parse and
-// parseContext.Stop, not this package's.
+// participle decides how far a failed parse propagates, and this package
+// inherits that decision rather than making it. When a branch fails,
+// parseContext.Stop commits to it once the branch has advanced further than
+// the lookahead window — two tokens, set by UseLookahead(2) where the parsers
+// are built. Inside the window the branch is discarded and the enclosing
+// production carries on; past it the error propagates. Both group.Parse and
+// disjunction.Parse take that path, so the rule governs optional groups and
+// the datatype disjunction alike: 'v Vector[128' loses its property because
+// builtinNode's disjunction committed, and no group was involved at all.
 //
-// Three outcomes follow, and all three are observable:
+// Three outcomes follow, and the token count decides which one, not the shape
+// of the construct:
 //
-//   - Abandoned and absorbed. The construct completes without the group, and
-//     the group's text is left behind for the recovery loop to report. So
-//     Timestamp["x" records a format-less Timestamp and reports the '['.
-//   - Abandoned, then fatal to the construct around it. That construct resumes
-//     at text it cannot match and fails too, so the member or the whole
-//     declaration is dropped. So '--> r (many:one) B' records no relation.
-//   - Committed. A delimited group with no closing token runs past the window,
-//     so its member is dropped and the diagnostic lands wherever the enclosing
-//     production stopped. For 's String[1, 2' that is the type's own closing
-//     brace on the next line.
+//   - Discarded, and the enclosing production resumes. 'Timestamp["x"' records
+//     a format-less Timestamp and reports the '['. The property survives.
+//   - Discarded, then fatal anyway, because the production resumes at text it
+//     cannot match. '--> r (many:one) B' records no relation.
+//   - Committed. The error propagates and the enclosing construct fails with
+//     it. Inside a type body that costs the member: 's String[1, 2' drops the
+//     property and reports on the type's own closing brace. At declaration
+//     level it costs the declaration: 'type Code = String [5, 5' records no
+//     datatype.
 //
-// The diagnostic names the region the recovery loop was in, by the rule above,
-// and not the construct that failed. An abandoned import alias and a failed
-// extends clause both report "in a declaration", because the loop that owns
-// them has already moved on. Where recovery restarts inside the member it just
-// left, the same defect draws a second diagnostic; Integer[abc, 2] and the
-// multiplicity case are the two sites where that happens today.
+// The first two outcomes are both discards, so a discarded branch is not by
+// itself safe for the construct around it.
 //
-// Naming the group instead is a known divergence from the ANTLR parser.
-// [TestAbandonment_GroupsReportAgainstTheEnclosingConstruct] measures all ten
-// sites, and every one reports E_SYNTAX at diag.Error, so no malformed source
-// loads through any of them.
+// The diagnostic names the region the recovery loop was in, not the construct
+// that failed. 'import "a.yammm" as one' reports "in a declaration" because
+// parseImports finished and parseDecls then met the leftover 'as'; 'type T
+// extends {' reports the same words for a different reason, because parseDecls
+// is itself the loop that failed. Where recovery restarts inside the member it
+// just left, one defect draws a second diagnostic: 'Integer[abc, 2]', the
+// multiplicity case and '@a(x' all do so today.
+//
+// [TestAbandonment_GroupsReportAgainstTheEnclosingConstruct] records what ten
+// of these sites do. It is a measured baseline rather than a survey: the
+// grammar carries thirteen '@@?' fields plus the two parenthesised optional
+// groups importNode.Alias and timC.Format, and the table does not reach every
+// one. Each row it does carry reports E_SYNTAX at diag.Error, so no malformed
+// source loads through those sites.
 //
 // # Spans
 //

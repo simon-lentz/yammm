@@ -200,12 +200,32 @@ func TestRecovery_UnclosedBodyReportsAtEOF(t *testing.T) {
 	}
 }
 
-// TestRecovery_ImportFailureIsAnError covers the third of the loop's four
-// recovery sites. The other three are pinned elsewhere, and a downgrade here
-// would let a malformed import load clean.
+// TestRecovery_LookaheadWindowIsTwo pins the constant the package doc builds
+// its whole recovery account on. participle discards a failed branch inside
+// the window and commits past it, so the setting decides which malformed
+// sources keep their members and how many diagnostics a reader is shown. At
+// UseLookahead(3) this source keeps its property and loses a diagnostic.
+func TestRecovery_LookaheadWindowIsTwo(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary @a(x,\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 3 {
+		t.Errorf("got %d diagnostics, want 3 — the lookahead window moved", len(issues))
+	}
+	if len(file.Types) != 1 {
+		t.Fatalf("got %d types, want 1", len(file.Types))
+	}
+	if got := len(file.Types[0].Properties); got != 0 {
+		t.Errorf("recorded %d properties, want 0 — the branch must commit past the window", got)
+	}
+}
+
+// TestRecovery_ImportFailureIsAnError covers the second of the loop's four
+// recovery sites, in order: schema header, import declaration, declaration,
+// type body. A downgrade here would let a malformed import load clean, and a
+// resync that did not stop on "import" would swallow the one that follows.
 func TestRecovery_ImportFailureIsAnError(t *testing.T) {
-	src := "schema \"s\"\nimport 123\n"
-	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	src := "schema \"s\"\nimport 123\nimport \"b.yammm\" as bee\ntype T {\n\tid String primary\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 1 {
 		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
 	}
@@ -215,45 +235,78 @@ func TestRecovery_ImportFailureIsAnError(t *testing.T) {
 	if want := `unexpected token "123" in an import declaration`; issues[0].Message() != want {
 		t.Errorf("message = %q, want %q", issues[0].Message(), want)
 	}
+	if len(file.Imports) != 1 || file.Imports[0].Path != "b.yammm" {
+		t.Errorf("imports = %+v, want the well-formed b.yammm recovered", file.Imports)
+	}
 }
 
-// TestRecovery_UnterminatedGroupsAreReported pins that every delimited group
-// rejects a missing closing token. Each closer below can be made optional with
-// nothing else in the package going red, and the malformed source then loads
-// with no diagnostic at all.
+// TestRecovery_UnterminatedGroupsAreReported pins that a delimited construct
+// rejects a missing closing token. Every closer below can be made optional
+// with nothing else in the package going red, and the malformed source then
+// loads with no diagnostic at all. Only length and numeric bounds are optional
+// groups; enum, pattern, vector, list and multiplicity are required fields, so
+// there the branch that commits is builtinNode's or the member's disjunction.
+// The counts and anchors are today's measured behaviour, not a target: S6′
+// changes them deliberately.
 func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 	tests := []struct {
-		name      string
-		member    string
-		wantProps int
+		name       string
+		member     string
+		wantProps  int
+		wantRels   int
+		wantIssues int
+		wantAnchor string
 	}{
-		{"length bounds", "s String[1, 2", 0},
-		{"numeric bounds", "n Integer[1, 2", 0},
-		{"enum values", "e Enum[\"a\", \"b\"", 0},
-		{"pattern list", "p Pattern[\"^a$\"", 0},
-		{"vector dimensions", "v Vector[128", 0},
-		{"list element", "l List<String", 0},
-		// The only one inside the lookahead window: the group is abandoned, so
-		// the property survives and the leftover text draws its own diagnostic.
-		{"annotation arguments", "id String primary @a(x", 1},
+		{name: "length bounds", member: "s String[1, 2", wantIssues: 1, wantAnchor: "}"},
+		{name: "numeric bounds", member: "n Integer[1, 2", wantIssues: 1, wantAnchor: "}"},
+		{name: "enum values", member: "e Enum[\"a\", \"b\"", wantIssues: 1, wantAnchor: "}"},
+		{name: "pattern list", member: "p Pattern[\"^a$\"", wantIssues: 1, wantAnchor: "}"},
+		{name: "vector dimensions", member: "v Vector[128", wantIssues: 1, wantAnchor: "}"},
+		{name: "list element", member: "l List<String", wantIssues: 1, wantAnchor: "}"},
+		// Inside the lookahead window, so the branch is discarded and the
+		// property survives — carrying a bare @a the source never wrote. The
+		// leftover text then draws a second diagnostic on the closing brace.
+		{
+			name: "annotation arguments", member: "id String primary @a(x",
+			wantProps: 1, wantIssues: 2, wantAnchor: "(",
+		},
+		// Byte-identical to its neighbour: recovery restarts inside the member
+		// it just left. One defect, reported twice.
+		{
+			name: "multiplicity", member: "--> wheels (many Wheel",
+			wantIssues: 2, wantAnchor: "(",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "schema \"s\"\ntype T {\n\t" + tc.member + "\n}\n"
 			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-			if len(issues) == 0 {
-				t.Fatal("no diagnostic: an unterminated group must be rejected")
+			if len(issues) != tc.wantIssues {
+				t.Fatalf("got %d diagnostics, want %d: %v", len(issues), tc.wantIssues, issues)
 			}
 			for i, iss := range issues {
 				if iss.Code() != diag.E_SYNTAX {
 					t.Errorf("issue %d is %s, want E_SYNTAX", i, iss.Code())
 				}
 			}
+			sp := issues[0].Span()
+			if got := src[sp.Start.Byte:sp.End.Byte]; got != tc.wantAnchor {
+				t.Errorf("first diagnostic anchored on %q, want %q", got, tc.wantAnchor)
+			}
 			if len(file.Types) != 1 {
 				t.Fatalf("got %d types, want 1", len(file.Types))
 			}
 			if got := len(file.Types[0].Properties); got != tc.wantProps {
 				t.Errorf("recorded %d properties, want %d", got, tc.wantProps)
+			}
+			if got := len(file.Types[0].Relations); got != tc.wantRels {
+				t.Errorf("recorded %d relations, want %d", got, tc.wantRels)
+			}
+			if tc.name == "annotation arguments" {
+				anns := file.Types[0].Properties[0].Annotations
+				if len(anns) != 1 || anns[0].Name != "a" || anns[0].HasParens || len(anns[0].Args) != 0 {
+					t.Errorf("annotations = %+v, want one bare @a — the fabricated shape this row records", anns)
+				}
 			}
 		})
 	}
