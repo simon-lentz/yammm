@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // TestParsersBuild proves the grammar and rule table compile, which is the
@@ -250,6 +251,134 @@ func TestParse_DiagnosticsNameNoGrammarTypes(t *testing.T) {
 	}
 }
 
+// TestParse_DataTypeConstraintIsForwarded pins that a datatype declaration
+// carries the constraint its right-hand side built. The promoted checks run
+// inside builtin, so a declaration that stopped forwarding would ship
+// String[1, 8] as an unbounded Integer and report no inverted bounds at all.
+func TestParse_DataTypeConstraintIsForwarded(t *testing.T) {
+	src := "schema \"s\"\ntype Code = String[1, 8]\ntype Bad = Integer[9, 2]\n"
+
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+
+	if len(file.DataTypes) != 2 {
+		t.Fatalf("DataTypes = %d, want 2", len(file.DataTypes))
+	}
+	code := file.DataTypes[0].Constraint
+	if code == nil || code.Kind != ConstraintString {
+		t.Fatalf("Code constraint = %+v, want a String", code)
+	}
+	if code.LenMin == nil || *code.LenMin != 1 || code.LenMax == nil || *code.LenMax != 8 {
+		t.Errorf("Code bounds = %+v/%+v, want 1..8", code.LenMin, code.LenMax)
+	}
+	if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_CONSTRAINT {
+		t.Fatalf("got %v, want one E_INVALID_CONSTRAINT for Bad", issues)
+	}
+}
+
+// TestParse_DetachedAnnotationRecordsItsPropertyLine pins the mechanism that
+// reports an annotation whose written position and grammatical binding
+// disagree: a trailing annotation binds to the property above it even across a
+// line break, and the tree records which property it left.
+func TestParse_DetachedAnnotationRecordsItsPropertyLine(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{
+			"on its own line",
+			"schema \"s\"\ntype T {\n\tid String primary\n\t@index\n}\n",
+			3,
+		},
+		{
+			"on the property's line",
+			"schema \"s\"\ntype T {\n\tid String primary @index\n}\n",
+			0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			file, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			if len(issues) != 0 {
+				t.Fatalf("unexpected issues: %v", issues)
+			}
+			anns := file.Types[0].Properties[0].Annotations
+			if len(anns) != 1 {
+				t.Fatalf("Annotations = %d, want 1", len(anns))
+			}
+			if got := anns[0].DetachedFromLine; got != tc.want {
+				t.Errorf("DetachedFromLine = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParse_InvariantExprSpanCoversTheExpression pins the extent a formatter
+// slices to leave an invariant's own spacing untouched. A collapsed span reads
+// as an empty string and deletes the expression on rewrite.
+func TestParse_InvariantExprSpanCoversTheExpression(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tn Integer primary\n\t! \"m\" n > 0\n}\n"
+
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %v", issues)
+	}
+	inv := file.Types[0].Invariants[0]
+	if got := src[inv.ExprSpan.Start.Byte:inv.ExprSpan.End.Byte]; got != "n > 0" {
+		t.Errorf("ExprSpan covers %q, want %q", got, "n > 0")
+	}
+}
+
+// TestParse_EmptyCallArgumentsAreNonNil pins that a zero-argument call carries
+// an empty argument slice rather than a nil one, which is what
+// exprcomp.VisitArguments builds. cmp and reflect.DeepEqual report the two as
+// unequal, so a nil here makes the A/B differential mismatch on every
+// zero-argument call and buries the real mismatches.
+func TestParse_EmptyCallArgumentsAreNonNil(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id->lower()\n}\n"
+
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %v", issues)
+	}
+	lists := argsLiterals(file.Types[0].Invariants[0].Expr)
+	if len(lists) != 1 {
+		t.Fatalf("found %d argument lists, want 1", len(lists))
+	}
+	if lists[0] == nil {
+		t.Error("a zero-argument call carries a nil argument slice, want an empty one")
+	}
+	if len(lists[0]) != 0 {
+		t.Errorf("argument list = %v, want empty", lists[0])
+	}
+}
+
+// argsLiterals collects every call-argument slice in an expression tree, in
+// the order the walk reaches them.
+func argsLiterals(e expr.Expression) [][]expr.Expression {
+	var out [][]expr.Expression
+	var walk func(expr.Expression)
+	walk = func(n expr.Expression) {
+		if n == nil {
+			return
+		}
+		if args, ok := expr.ArgsLiteral(n); ok {
+			out = append(out, args)
+			for _, a := range args {
+				walk(a)
+			}
+			return
+		}
+		for _, c := range n.Children() {
+			walk(c)
+		}
+	}
+	walk(e)
+	return out
+}
+
 // TestParse_PositionsMatchTheSourceRegistry pins this package's line rule to
 // internal/source, which is where every other yammm position comes from and
 // what lsputil.SpanToLSPRange ultimately reports. The participle lexer breaks
@@ -435,5 +564,47 @@ func TestParse_CategorySeparatesSyntaxFromConstraints(t *testing.T) {
 	}
 	if len(rest) != 1 || rest[0].Code() != diag.E_INVALID_CONSTRAINT {
 		t.Errorf("other issues = %v, want exactly one E_INVALID_CONSTRAINT", rest)
+	}
+}
+
+// TestParse_ReportsEveryDocumentedCode pins the third code the package doc
+// names. E_INVALID_INVARIANT is diag.CategorySchema, so it survives neither
+// the category filter above nor a caller enumerating the other two codes — a
+// P2a adapter written to a two-code contract drops every malformed literal
+// inside an invariant expression.
+func TestParse_ReportsEveryDocumentedCode(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want diag.Code
+	}{
+		{
+			"E_SYNTAX",
+			"schema \"s\"\ntype T {\n\t@\n}\n",
+			diag.E_SYNTAX,
+		},
+		{
+			"E_INVALID_CONSTRAINT",
+			"schema \"s\"\ntype T {\n\tn Integer[9, 2]\n}\n",
+			diag.E_INVALID_CONSTRAINT,
+		},
+		{
+			"E_INVALID_INVARIANT",
+			"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id != 'ab'\n}\n",
+			diag.E_INVALID_INVARIANT,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, issues := Parse([]byte(tc.src), location.SourceID{})
+			if len(issues) != 1 || issues[0].Code() != tc.want {
+				t.Fatalf("got %v, want exactly one %s", issues, tc.want)
+			}
+		})
+	}
+
+	if got := diag.E_INVALID_INVARIANT.Category(); got != diag.CategorySchema {
+		t.Errorf("E_INVALID_INVARIANT category = %v, want %v — the doc's warning "+
+			"about the CategorySyntax filter no longer holds", got, diag.CategorySchema)
 	}
 }

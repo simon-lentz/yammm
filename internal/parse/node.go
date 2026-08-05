@@ -138,8 +138,11 @@ type Invariant struct {
 	Span location.Span
 }
 
-// Annotation is one '@name(args)' or '@@name(args)' member. HasParens
-// distinguishes "@name" from "@name()". DetachedFromLine records the shape
+// Annotation is one '@name(args)' or '@@name(args)' member. HasParens reports
+// whether an argument list was parsed, so it is true exactly when Args is
+// non-empty: the grammar requires at least one argument inside parentheses, so
+// "@name()" does not parse and records the same shape as a bare "@name" plus
+// its own E_SYNTAX. DetachedFromLine records the shape
 // where what the author wrote and what the grammar binds can disagree: a
 // trailing annotation binds to the property above it even across a line break,
 // so an annotation starting on a later line carries that property's line

@@ -16,18 +16,23 @@
 //
 // # What Parse reports and what it does not
 //
-// Parse reports the diagnostics a reader of the source alone can justify:
-// E_SYNTAX for text that does not fit the grammar, and E_INVALID_CONSTRAINT
-// for a constraint whose written arguments contradict themselves — inverted
-// bounds, an unparseable bound, a duplicate enum value, a regex that does not
-// compile. It never reports anything that needs another declaration, another
-// file, or a resolved name to decide.
+// Parse reports the diagnostics a reader of the source alone can justify, and
+// it emits three codes. E_SYNTAX covers text that does not fit the grammar.
+// E_INVALID_CONSTRAINT covers a constraint whose written arguments contradict
+// themselves — inverted bounds, an unparseable bound, a duplicate enum value,
+// a regex that does not compile. E_INVALID_INVARIANT covers a literal inside
+// an invariant expression that will not convert, such as a malformed number or
+// an unquotable string. Parse never reports anything that needs another
+// declaration, another file, or a resolved name to decide.
 //
-// Two consequences are worth stating because callers depend on them. Callers
-// that want syntax errors alone must filter on the code category
+// Three consequences are worth stating because callers depend on them.
+// Callers that want syntax errors alone must filter on the code category
 // (diag.CategorySyntax), not on the presence of any diagnostic at all.
-// And callers must not assume a diagnostic-free parse means a valid schema;
-// it means a well-formed one.
+// E_INVALID_INVARIANT is diag.CategorySchema, so that filter excludes it and
+// a caller enumerating only the first two codes drops it entirely — consume
+// the whole slice unless a narrower set is what you mean. And callers must not
+// assume a diagnostic-free parse means a valid schema; it means a well-formed
+// one.
 //
 // # Recovery
 //

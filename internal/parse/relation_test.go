@@ -149,6 +149,31 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 
 // TestRelation_EdgePropertiesRejectPrimary pins that an edge property admits
 // 'required' and nothing else.
+// TestRelation_EdgePropertyConstraintIsForwarded pins that an edge property
+// carries the constraint its datatype built. Nothing else reads it, so an
+// edge property that stopped forwarding would reach the graph model as an
+// Integer whatever the source declared.
+func TestRelation_EdgePropertyConstraintIsForwarded(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> r B { since Timestamp[\"2006\"] }\n}\n"
+
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %v", issues)
+	}
+	props := file.Types[0].Relations[0].Properties
+	if len(props) != 1 {
+		t.Fatalf("edge properties = %d, want 1", len(props))
+	}
+	c := props[0].Constraint
+	if c == nil || c.Kind != ConstraintTimestamp {
+		t.Fatalf("edge property constraint = %+v, want a Timestamp", c)
+	}
+	if got, ok := c.Format(); !ok || got != "2006" {
+		t.Errorf("format = %q ok=%v, want \"2006\" true", got, ok)
+	}
+}
+
 func TestRelation_EdgePropertiesRejectPrimary(t *testing.T) {
 	_, issues := Parse([]byte(relSource("--> wheels Wheel {\n\t\tnote String primary\n\t}")), location.NewSourceID("s.yammm"))
 	if len(issues) == 0 {

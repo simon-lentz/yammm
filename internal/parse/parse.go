@@ -409,9 +409,9 @@ func (b *builder) annotation(name lcWordNode, args *argsNode, doc string, span l
 }
 
 // arg classifies one annotation argument. A quoted string that will not
-// unquote degrades to a literal carrying its raw text rather than drawing a
-// diagnostic: the value is preserved as written, and whatever made the literal
-// unquotable is reported by the check that owns it.
+// unquote degrades to a literal carrying its raw spelling as Text, with Raw
+// empty, and draws no diagnostic at all — no check owns an annotation
+// argument. The value is preserved as written so a later phase can decide.
 func (b *builder) arg(a *argNode) Arg {
 	out := Arg{Span: b.spanOf(a.Pos, a.EndPos)}
 	switch {
