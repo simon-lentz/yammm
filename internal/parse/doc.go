@@ -28,9 +28,10 @@
 // Three consequences are worth stating because callers depend on them.
 // Callers that want syntax errors alone must filter on the code category
 // (diag.CategorySyntax), not on the presence of any diagnostic at all.
-// E_INVALID_INVARIANT is diag.CategorySchema, so that filter excludes it and
-// a caller enumerating only the first two codes drops it entirely — consume
-// the whole slice unless a narrower set is what you mean. And callers must not
+// Only E_SYNTAX is diag.CategorySyntax: both E_INVALID_CONSTRAINT and
+// E_INVALID_INVARIANT are diag.CategorySchema, so that filter keeps one code
+// of the three and drops every constraint and invariant defect — consume the
+// whole slice unless a narrower set is what you mean. And callers must not
 // assume a diagnostic-free parse means a valid schema; it means a well-formed
 // one.
 //
@@ -46,6 +47,13 @@
 // Parse always returns a file node. A source that fails entirely yields an
 // empty node plus diagnostics, never nil.
 //
+// An optional group is not abandoned when its inner parse fails. Each one
+// parses itself and records absent, parsed, or entered-and-failed, so the
+// error is reported against the token inside the group that failed rather than
+// against the marker the group begins with, and the enclosing declaration
+// survives. [TestGroups_FailureNamesItsConstructAndAnchorsInsideIt] is the
+// acceptance criterion.
+//
 // One rule overrides the diagnostic a failed construct would otherwise carry:
 // a malformed numeric literal anywhere inside the construct owns the
 // diagnosis. "0x10 is not a number" explains the failure, where the token the
@@ -58,9 +66,11 @@
 // Diagnostic text names the construct, never the grammar. participle renders
 // its own expected-set as the EBNF of this package's node structs, which names
 // nothing in the YAMMM language and changes shape whenever a struct or a
-// struct tag is edited. Each recovery site passes the construct it was parsing
-// — the schema header, an import declaration, a declaration, a type body — and
-// the unexpected token is reported against that.
+// struct tag is edited. Each site passes the construct it was parsing and the
+// unexpected token is reported against that: a recovery site names the region
+// it was in — the schema header, an import declaration, a declaration, a type
+// body — and an optional group names itself, so a failure inside a bound list,
+// a reverse clause or an extends clause says so.
 // [TestParse_DiagnosticsNameNoGrammarTypes] holds the rule, deriving the
 // banned names from the grammar itself so a node added later is covered.
 //

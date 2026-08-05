@@ -225,6 +225,12 @@ func TestParse_DiagnosticsNameNoGrammarTypes(t *testing.T) {
 		"schema \"s\"\ntype T {\n\t--> rel 123\n}\n",
 		"schema \"s\"\nimport \"a.yammm\" as one\n",
 		"schema \"s\"\ntype T {\n\tn Integer[99999999999999999999, 5]\n}\n",
+		// The Pratt parser's failures are the only ones that reach syntaxErr's
+		// participle.Error and fallback branches, which pass a message through
+		// untouched — the one channel by which a Go type name can leak.
+		"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" +\n}\n",
+		"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id ->\n}\n",
+		"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" 1 +* 2\n}\n",
 		"schema \"s\"\ntype T {\n\tf Float[1e999, 2]\n}\n",
 		"schema \"s\"\ntype T {\n\ts String[99999999999999999999, 2]\n}\n",
 		"schema \"s\"\ntype T {\n\tv Vector(99999999999999999999)\n}\n",
@@ -295,6 +301,13 @@ func TestParse_DetachedAnnotationRecordsItsPropertyLine(t *testing.T) {
 			"schema \"s\"\ntype T {\n\tid String primary @index\n}\n",
 			0,
 		},
+		{
+			// A bare CR is a line break to internal/source and to the LSP, but
+			// not to the lexer, so reading the lexer's own line misses it.
+			"on its own line, bare CR",
+			"schema \"s\"\rtype T {\r\tid String primary\r\t@index\r}\r",
+			3,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -336,22 +349,33 @@ func TestParse_InvariantExprSpanCoversTheExpression(t *testing.T) {
 // unequal, so a nil here makes the A/B differential mismatch on every
 // zero-argument call and buries the real mismatches.
 func TestParse_EmptyCallArgumentsAreNonNil(t *testing.T) {
-	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id->lower()\n}\n"
+	// Two sites build the empty list, and only one is reached per spelling:
+	// exprListUntil when the parentheses are written, fcall's own fallback
+	// when they are not.
+	tests := []struct{ name, call string }{
+		{"empty parentheses", "id->lower()"},
+		{"no parentheses", "id->lower"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + tc.call + "\n}\n"
 
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 
-	if len(issues) != 0 {
-		t.Fatalf("unexpected issues: %v", issues)
-	}
-	lists := argsLiterals(file.Types[0].Invariants[0].Expr)
-	if len(lists) != 1 {
-		t.Fatalf("found %d argument lists, want 1", len(lists))
-	}
-	if lists[0] == nil {
-		t.Error("a zero-argument call carries a nil argument slice, want an empty one")
-	}
-	if len(lists[0]) != 0 {
-		t.Errorf("argument list = %v, want empty", lists[0])
+			if len(issues) != 0 {
+				t.Fatalf("unexpected issues: %v", issues)
+			}
+			lists := argsLiterals(file.Types[0].Invariants[0].Expr)
+			if len(lists) != 1 {
+				t.Fatalf("found %d argument lists, want 1", len(lists))
+			}
+			if lists[0] == nil {
+				t.Error("a zero-argument call carries a nil argument slice, want an empty one")
+			}
+			if len(lists[0]) != 0 {
+				t.Errorf("argument list = %v, want empty", lists[0])
+			}
+		})
 	}
 }
 
@@ -422,11 +446,19 @@ func TestParse_PositionsMatchTheSourceRegistry(t *testing.T) {
 					span location.Span
 				}{fmt.Sprintf("enum literal %d", i), lit.Span})
 			}
+			// Both ends, not only starts: an end taking the start's own line
+			// and column agrees with the registry on any span within one line.
 			for _, s := range spans {
-				want := reg.PositionAt(id, s.span.Start.Byte)
-				if got := s.span.Start; got.Line != want.Line || got.Column != want.Column {
-					t.Errorf("%s at byte %d: parse says %d:%d, the registry says %d:%d",
-						s.what, s.span.Start.Byte, got.Line, got.Column, want.Line, want.Column)
+				for _, end := range []struct {
+					which string
+					pos   location.Position
+				}{{"start", s.span.Start}, {"end", s.span.End}} {
+					want := reg.PositionAt(id, end.pos.Byte)
+					if end.pos.Line != want.Line || end.pos.Column != want.Column {
+						t.Errorf("%s %s at byte %d: parse says %d:%d, the registry says %d:%d",
+							s.what, end.which, end.pos.Byte,
+							end.pos.Line, end.pos.Column, want.Line, want.Column)
+					}
 				}
 			}
 		})

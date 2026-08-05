@@ -147,8 +147,6 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 	}
 }
 
-// TestRelation_EdgePropertiesRejectPrimary pins that an edge property admits
-// 'required' and nothing else.
 // TestRelation_EdgePropertyConstraintIsForwarded pins that an edge property
 // carries the constraint its datatype built. Nothing else reads it, so an
 // edge property that stopped forwarding would reach the graph model as an
@@ -174,6 +172,8 @@ func TestRelation_EdgePropertyConstraintIsForwarded(t *testing.T) {
 	}
 }
 
+// TestRelation_EdgePropertiesRejectPrimary pins that an edge property admits
+// 'required' and nothing else.
 func TestRelation_EdgePropertiesRejectPrimary(t *testing.T) {
 	_, issues := Parse([]byte(relSource("--> wheels Wheel {\n\t\tnote String primary\n\t}")), location.NewSourceID("s.yammm"))
 	if len(issues) == 0 {

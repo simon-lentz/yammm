@@ -162,6 +162,28 @@ func TestRecovery_SpanOfClampsAnInvertedPair(t *testing.T) {
 	}
 }
 
+// TestRecovery_PositionAtClampsAnOutOfRangeOffset covers the guard that keeps
+// positionAt from slicing past the source. Every offset-derived span funnels
+// through it, so an unclamped one indexes b.src out of range and panics out of
+// Parse rather than returning a position.
+func TestRecovery_PositionAtClampsAnOutOfRangeOffset(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n}\n"
+	b := &builder{
+		src:        src,
+		sourceID:   location.NewSourceID("s.yammm"),
+		lineStarts: lineStarts(src),
+	}
+	for _, offset := range []int{-1, len(src), len(src) + 100} {
+		got := b.positionAt(offset)
+		if got.Offset < 0 || got.Offset > len(src) {
+			t.Errorf("positionAt(%d).Offset = %d, want it inside [0,%d]", offset, got.Offset, len(src))
+		}
+		if got.Line < 1 || got.Column < 1 {
+			t.Errorf("positionAt(%d) = %d:%d, want a 1-based position", offset, got.Line, got.Column)
+		}
+	}
+}
+
 // TestRecovery_UnclosedBodyReportsAtEOF pins that an unterminated type body is
 // reported rather than silently accepted.
 func TestRecovery_UnclosedBodyReportsAtEOF(t *testing.T) {

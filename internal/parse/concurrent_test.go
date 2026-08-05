@@ -21,6 +21,12 @@ func TestParse_ConcurrentCallsShareTheParsersSafely(t *testing.T) {
 		"schema \"a\"\ntype A {\n\tid String primary\n}\n",
 		"schema \"b\"\ntype B {\n\tid String primary\n\t! \"m\" id != nil\n}\n",
 		"schema \"c\"\ntype C {\n\tbroken @\n}\n",
+		// Pipeline arguments and lambda parameters render through
+		// fingerprint.expr's two special cases. Without them the generic
+		// branch prints an Expression pointer, so the same source renders
+		// differently on every parse and this test is what notices.
+		"schema \"d\"\ntype D {\n\tt List<String> primary\n\t! \"m\" t -> Contains(\"x\")\n}\n",
+		"schema \"e\"\ntype E {\n\tt List<Integer> primary\n\t! \"m\" t -> Count |$x| { $x > 0 }\n}\n",
 		"not a schema at all",
 		"",
 	}
@@ -97,9 +103,89 @@ func TestRender_Discriminates(t *testing.T) {
 			"schema \"a\"\ntype A {\n\tid String primary @vector(32)\n}\n",
 		},
 		{
+			// Both sides must parse clean. Inverted bounds differ in their
+			// diagnostic too, so the issue loop alone told the old pair apart.
 			"constraint value",
-			"schema \"a\"\ntype A {\n\tn Integer[9, 2]\n}\n",
-			"schema \"a\"\ntype A {\n\tn Integer[8, 2]\n}\n",
+			"schema \"a\"\ntype A {\n\tn Integer[1, 9]\n}\n",
+			"schema \"a\"\ntype A {\n\tn Integer[1, 8]\n}\n",
+		},
+		{
+			"datatype name",
+			"schema \"a\"\ntype C = String[1, 8]\n",
+			"schema \"a\"\ntype D = String[1, 8]\n",
+		},
+		{
+			"datatype constraint",
+			"schema \"a\"\ntype C = String[1, 8]\n",
+			"schema \"a\"\ntype C = String[1, 9]\n",
+		},
+		{
+			"import path",
+			"schema \"a\"\nimport \"x.yammm\" as alpha\ntype A {\n\tid String primary\n}\n",
+			"schema \"a\"\nimport \"y.yammm\" as alpha\ntype A {\n\tid String primary\n}\n",
+		},
+		{
+			"abstract flag",
+			"schema \"a\"\ntype A {\n\tid String primary\n}\n",
+			"schema \"a\"\nabstract type A {\n\tid String primary\n}\n",
+		},
+		{
+			"part flag",
+			"schema \"a\"\ntype A {\n\tid String primary\n}\n",
+			"schema \"a\"\npart type A {\n\tid String primary\n}\n",
+		},
+		{
+			"extends target",
+			"schema \"a\"\ntype A extends B {\n\tid String primary\n}\n",
+			"schema \"a\"\ntype A extends C {\n\tid String primary\n}\n",
+		},
+		{
+			"required flag",
+			"schema \"a\"\ntype A {\n\tid String primary\n\tn Integer\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\tn Integer required\n}\n",
+		},
+		{
+			"relation multiplicity",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r (one) B\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r (many) B\n}\n",
+		},
+		{
+			"relation backref",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B /alpha\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B /gamma\n}\n",
+		},
+		{
+			"relation target",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r C\n}\n",
+		},
+		{
+			"edge property",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B { since Timestamp }\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B { until Timestamp }\n}\n",
+		},
+		{
+			"annotation detached line",
+			"schema \"a\"\ntype A {\n\tid String primary @index\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t@index\n}\n",
+		},
+		{
+			"invariant message",
+			"schema \"a\"\ntype A {\n\tn Integer primary\n\t! \"alpha\" n > 0\n}\n",
+			"schema \"a\"\ntype A {\n\tn Integer primary\n\t! \"gamma\" n > 0\n}\n",
+		},
+		{
+			// Reaches fingerprint.expr's ArgsLiteral branch, which no other
+			// pair enters.
+			"pipeline call arguments",
+			"schema \"a\"\ntype A {\n\tt List<String> primary\n\t! \"m\" t -> Contains(\"x\")\n}\n",
+			"schema \"a\"\ntype A {\n\tt List<String> primary\n\t! \"m\" t -> Contains(\"y\")\n}\n",
+		},
+		{
+			// Reaches the ParamsLiteral branch.
+			"lambda parameters",
+			"schema \"a\"\ntype A {\n\tt List<Integer> primary\n\t! \"m\" t -> Count |$x| { $x > 0 }\n}\n",
+			"schema \"a\"\ntype A {\n\tt List<Integer> primary\n\t! \"m\" t -> Count |$y| { $y > 0 }\n}\n",
 		},
 	}
 	for _, tc := range tests {
@@ -133,6 +219,45 @@ func TestRender_CarriesEveryDiagnostic(t *testing.T) {
 			if !strings.Contains(got, want) {
 				t.Errorf("fingerprint omits %q for %s", want, iss.Code())
 			}
+		}
+	}
+}
+
+// TestRender_CarriesEveryNodeField covers the fields no discrimination pair can
+// isolate. Changing a source to flip one of them also moves the spans around
+// it, so the pair differs either way and proves nothing about the field. This
+// asserts the rendered value appears instead.
+func TestRender_CarriesEveryNodeField(t *testing.T) {
+	src := "schema \"a\"\n" +
+		"import \"x.yammm\" as alpha\n" +
+		"abstract type Base {\n\tid String primary\n}\n" +
+		"part type A extends Base {\n" +
+		"\tid String primary\n" +
+		"\tn Integer required\n" +
+		"\t@index\n" +
+		"\t--> r (many) B /back { since Timestamp }\n" +
+		"}\n"
+
+	file, issues := Parse([]byte(src), location.NewSourceID("c.yammm"))
+	if len(issues) != 0 {
+		t.Fatalf("fixture must parse clean: %v", issues)
+	}
+	got := render(file, issues)
+
+	for _, want := range []struct{ what, text string }{
+		{"import path", "x.yammm"},
+		{"import alias", "alpha"},
+		{"abstract flag", "Base/truefalse"},
+		{"part flag", "A/falsetrue"},
+		{"extends target", "^.Base"},
+		{"primary and required flags", "n/falsetrue"},
+		{"relation name and multiplicity", "/r/truetrue/back"},
+		{"relation target", ">.B"},
+		{"edge property", "since/falsefalse"},
+		{"annotation detached line", "@index/false/8"},
+	} {
+		if !strings.Contains(got, want.text) {
+			t.Errorf("fingerprint omits the %s: no %q in\n%s", want.what, want.text, got)
 		}
 	}
 }
@@ -266,10 +391,10 @@ func (fp fingerprint) constraint(c *Constraint) {
 	fp.out.WriteByte('}')
 }
 
-// expr renders an expression tree. Argument lists are handled before the
-// generic branch because their values are Expression pointers, whose addresses
-// differ between parses of the same source and would make every fingerprint
-// unique.
+// expr renders an expression tree. An argument list is handled before the
+// generic branch because its Literal is a slice of Expression pointers, whose
+// addresses differ between parses and would make every fingerprint unique.
+// Lambda parameters need no such case: their Literal is a []string.
 func (fp fingerprint) expr(e expr.Expression) {
 	if e == nil {
 		fp.out.WriteString("<nil>")
@@ -282,10 +407,6 @@ func (fp fingerprint) expr(e expr.Expression) {
 			fp.out.WriteByte(' ')
 		}
 		fp.out.WriteByte(')')
-		return
-	}
-	if params, ok := expr.ParamsLiteral(e); ok {
-		fmt.Fprintf(fp.out, "params%v", params)
 		return
 	}
 	fmt.Fprintf(fp.out, "%s|%v", e.Op(), e.Literal())
