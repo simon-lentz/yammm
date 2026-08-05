@@ -110,12 +110,10 @@ func TestRecovery_MalformedNumberOwnsTheDiagnosis(t *testing.T) {
 	}
 }
 
-// TestRecovery_SpansAreNeverInverted pins the invariant that keeps a malformed
-// input from crashing the parser. The inversion half is asserted by the
-// absence of a panic: location.RangeWithBytes rejects an end before its start,
-// so an inverted span never returns to be compared and a comparison here would
-// be unreachable. The helpers below carry the half that panic cannot cover — a
-// span that is ordered and still runs past the end of the source.
+// TestRecovery_SpansAreNeverInverted walks a malformed corpus and asserts every
+// span it produces stays inside the source. No source here reaches spanOf with
+// an end behind its start, so the clamp that keeps location.RangeWithBytes from
+// panicking is covered by TestRecovery_SpanOfClampsAnInvertedPair instead.
 func TestRecovery_SpansAreNeverInverted(t *testing.T) {
 	sources := []string{
 		"", "{", "}", "schema", "schema \"s\"\ntype", "schema \"s\"\ntype T {",
@@ -140,6 +138,27 @@ func TestRecovery_SpansAreNeverInverted(t *testing.T) {
 			assertSpansWithinSource(t, src, issues)
 			assertNodeSpansWithinSource(t, src, file)
 		})
+	}
+}
+
+// TestRecovery_SpanOfClampsAnInvertedPair covers the clamp no source reaches.
+// location.RangeWithBytes panics when an end precedes its start, so a clamp
+// that stops working takes Parse — and an LSP server on a keystroke — down
+// with it.
+func TestRecovery_SpanOfClampsAnInvertedPair(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n}\n"
+	b := &builder{
+		src:        src,
+		sourceID:   location.NewSourceID("s.yammm"),
+		lineStarts: lineStarts(src),
+	}
+	const start, end = 30, 4
+
+	got := b.spanOf(b.positionAt(start), b.positionAt(end))
+
+	if got.Start.Byte != start || got.End.Byte != start {
+		t.Errorf("spanOf(%d, %d) = [%d,%d), want it collapsed to [%d,%d)",
+			start, end, got.Start.Byte, got.End.Byte, start, start)
 	}
 }
 

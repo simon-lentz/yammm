@@ -406,6 +406,12 @@ func mustParsers() *parsers {
 	return shared
 }
 
+// elidedTokens names the kinds the grammar never sees. Both the Elide option
+// and the token types Parse hands participle are derived from this one list,
+// because participle reads its elide set off the PeekingLexer the caller
+// built — so a second hand-kept copy would silently be the live one.
+var elidedTokens = []string{"WS", "SL_COMMENT"}
+
 func buildParsers() {
 	def, err := definition()
 	if err != nil {
@@ -417,6 +423,15 @@ func buildParsers() {
 	if err != nil {
 		sharedErr = err
 		return
+	}
+	elide := make([]lexer.TokenType, 0, len(elidedTokens))
+	for _, name := range elidedTokens {
+		tt, ok := syms[name]
+		if !ok {
+			sharedErr = fmt.Errorf("elided token %q is not in the rule table", name)
+			return
+		}
+		elide = append(elide, tt)
 	}
 	exprOpt := participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (exprCapture, error) {
 		var diags []exprDiag
@@ -430,7 +445,7 @@ func buildParsers() {
 	})
 	opts := []participle.Option{
 		participle.Lexer(def),
-		participle.Elide("WS", "SL_COMMENT"),
+		participle.Elide(elidedTokens...),
 		exprOpt,
 		participle.UseLookahead(2),
 	}
@@ -438,7 +453,7 @@ func buildParsers() {
 		def:   def,
 		tok:   tok,
 		names: tokenNames(syms),
-		elide: []lexer.TokenType{tok.ws, tok.slComment},
+		elide: elide,
 	}
 	if built.schemaHead, err = participle.Build[schemaHeadNode](opts...); err != nil {
 		sharedErr = fmt.Errorf("build schema-header parser: %w", err)

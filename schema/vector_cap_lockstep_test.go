@@ -13,7 +13,10 @@ import (
 // bounds and the text they report. The root internal/parse package carries its
 // own copy of both, and while the two parsers ship side by side a cap raised in
 // one alone makes the same schema valid under the CLI and invalid under the
-// LSP. Its copy is pinned by TestChecks_ConstraintDiagnostics.
+// LSP. Its copy is pinned by TestChecks_ConstraintDiagnostics for the
+// rejecting cases and TestChecks_VectorDimensionBoundariesAreAccepted for the
+// accepting ones; both sides need both, since a rejecting case alone leaves
+// the boundary comparison free to move.
 func TestVectorDimensionCaps_ArePinned(t *testing.T) {
 	tests := []struct {
 		name string

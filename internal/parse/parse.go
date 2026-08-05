@@ -91,16 +91,25 @@ type builder struct {
 }
 
 // lineStarts returns the byte offset of each line's first byte, starting at 0.
+// It breaks on "\n", on "\r\n" as one break, and on a bare "\r", which is
+// internal/source's computeLineOffsets rule — the mapper every other yammm
+// position is derived from, and the one the LSP reads.
 func lineStarts(src string) []int {
 	starts := []int{0}
-	for off := 0; ; {
-		i := strings.IndexByte(src[off:], '\n')
-		if i < 0 {
-			return starts
+	for i := 0; i < len(src); i++ {
+		switch src[i] {
+		case '\n':
+			starts = append(starts, i+1)
+		case '\r':
+			if i+1 < len(src) && src[i+1] == '\n' {
+				starts = append(starts, i+2)
+				i++
+				continue
+			}
+			starts = append(starts, i+1)
 		}
-		off += i + 1
-		starts = append(starts, off)
 	}
+	return starts
 }
 
 // parseFile walks the file's three regions in order: the header, the imports,
@@ -367,11 +376,11 @@ func (b *builder) addProp(nt *TypeDecl, p *propNode) {
 		Doc:          stripDoc(p.Doc),
 		Span:         b.spanOf(p.Pos, p.EndPos),
 	}
-	nameLine := p.Name.Pos.Line
+	nameLine := b.positionAt(p.Name.Pos.Offset).Line
 	for i := range p.Anns {
 		a := &p.Anns[i]
 		detached := 0
-		if a.Pos.Line > nameLine {
+		if b.positionAt(a.Pos.Offset).Line > nameLine {
 			detached = nameLine
 		}
 		np.Annotations = append(np.Annotations, b.annotation(
@@ -638,25 +647,25 @@ func compareIssues(a, c diag.Issue) int {
 
 // ---- spans ----
 
-// spanOf builds a span between two lexer positions. It forces start before end
-// because location.RangeWithBytes panics on an inverted range and recovery can
-// leave an end position behind its start.
+// spanOf builds a span between two lexer positions. Only their byte offsets are
+// read: the lexer counts lines on "\n" alone, so its own line and column
+// disagree with every other yammm position in a source holding a bare "\r".
 func (b *builder) spanOf(start, end lexer.Position) location.Span {
-	if end.Offset < start.Offset {
-		end = start
-	}
-	return location.RangeWithBytes(b.sourceID,
-		start.Line, start.Column, start.Offset,
-		end.Line, end.Column, end.Offset)
+	return b.spanFromOffsets(start.Offset, end.Offset)
 }
 
-// spanFromOffsets builds a span from byte offsets alone, deriving line and
-// column from the source text.
+// spanFromOffsets builds a span from byte offsets, deriving line and column
+// from the source text. It forces start before end because
+// location.RangeWithBytes panics on an inverted range and recovery can leave an
+// end behind its start.
 func (b *builder) spanFromOffsets(start, end int) location.Span {
-	if end < start {
-		end = start
+	s, e := b.positionAt(start), b.positionAt(end)
+	if e.Offset < s.Offset {
+		e = s
 	}
-	return b.spanOf(b.positionAt(start), b.positionAt(end))
+	return location.RangeWithBytes(b.sourceID,
+		s.Line, s.Column, s.Offset,
+		e.Line, e.Column, e.Offset)
 }
 
 func (b *builder) pointAt(pos lexer.Position) location.Span {

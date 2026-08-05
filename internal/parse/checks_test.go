@@ -181,6 +181,36 @@ func TestChecks_ConstraintDiagnostics(t *testing.T) {
 	}
 }
 
+// TestChecks_VectorDimensionBoundariesAreAccepted pins the accepting side of
+// both caps. Rejecting cases alone leave the comparisons unpinned: turning '<'
+// into '<=' and '>' into '>=' keeps every rejecting case green while the same
+// schema becomes valid under one parser and invalid under the other.
+func TestChecks_VectorDimensionBoundariesAreAccepted(t *testing.T) {
+	tests := []struct {
+		dims string
+		want int
+	}{
+		{"1", minVectorDimensions},
+		{"65536", maxVectorDimensions},
+	}
+	for _, tc := range tests {
+		t.Run(tc.dims, func(t *testing.T) {
+			src := checkSource("v Vector[" + tc.dims + "]")
+			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			if len(issues) != 0 {
+				t.Fatalf("Vector[%s] reported %v, want nothing", tc.dims, issues)
+			}
+			got := file.Types[0].Properties[1].Constraint.VectorDims
+			if got == nil {
+				t.Fatalf("Vector[%s] recorded no dimensions", tc.dims)
+			}
+			if *got != tc.want {
+				t.Errorf("Vector[%s] recorded %d dimensions, want %d", tc.dims, *got, tc.want)
+			}
+		})
+	}
+}
+
 // TestChecks_UnquoteFailuresAreSyntaxErrors pins the three unquote sites that
 // report a syntax error rather than a constraint error: the value is not a
 // string the lexer's rules can resolve, so the fault is in the text.

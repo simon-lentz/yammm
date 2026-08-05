@@ -1,11 +1,15 @@
 package parse
 
 import (
+	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -219,9 +223,16 @@ func TestParse_DiagnosticsNameNoGrammarTypes(t *testing.T) {
 		"schema \"s\"\ntype T {\n\ts String[-1, 2]\n}\n",
 		"schema \"s\"\ntype T {\n\t--> rel 123\n}\n",
 		"schema \"s\"\nimport \"a.yammm\" as one\n",
+		"schema \"s\"\ntype T {\n\tn Integer[99999999999999999999, 5]\n}\n",
+		"schema \"s\"\ntype T {\n\tf Float[1e999, 2]\n}\n",
+		"schema \"s\"\ntype T {\n\ts String[99999999999999999999, 2]\n}\n",
+		"schema \"s\"\ntype T {\n\tv Vector(99999999999999999999)\n}\n",
 	}
-	names := grammarTypeNames()
-	if len(names) == 0 {
+	banned := map[string]string{}
+	for _, name := range grammarTypeNames() {
+		banned[strings.ToLower(name)] = name
+	}
+	if len(banned) == 0 {
 		t.Fatal("no grammar type names found — the extractor is broken, not the parser")
 	}
 	for _, src := range sources {
@@ -230,9 +241,8 @@ func TestParse_DiagnosticsNameNoGrammarTypes(t *testing.T) {
 			t.Errorf("%q reported nothing, so it guards nothing", src)
 		}
 		for _, iss := range issues {
-			msg := strings.ToLower(iss.Message())
-			for _, name := range names {
-				if strings.Contains(msg, strings.ToLower(name)) {
+			for _, word := range identifierWords(iss.Message()) {
+				if name, ok := banned[word]; ok {
 					t.Errorf("%q: diagnostic names the Go type %s: %s", src, name, iss.Message())
 				}
 			}
@@ -240,8 +250,141 @@ func TestParse_DiagnosticsNameNoGrammarTypes(t *testing.T) {
 	}
 }
 
-// grammarTypeNames returns every node struct reachable from the parser roots.
-// participle title-cases them in its EBNF, so callers compare case-insensitively.
+// TestParse_PositionsMatchTheSourceRegistry pins this package's line rule to
+// internal/source, which is where every other yammm position comes from and
+// what lsputil.SpanToLSPRange ultimately reports. The participle lexer breaks
+// lines on "\n" alone, so without normalisation a bare "\r" puts every span on
+// line 1 and an editor underlines the wrong line.
+func TestParse_PositionsMatchTheSourceRegistry(t *testing.T) {
+	sources := []struct{ name, src string }{
+		{"LF", "schema \"s\"\ntype T {\n\tid String primary\n}\n"},
+		{"CRLF", "schema \"s\"\r\ntype T {\r\n\tid String primary\r\n}\r\n"},
+		{"bare CR", "schema \"s\"\rtype T {\r\tid String primary\r}\r"},
+		{"mixed", "schema \"s\"\r\ntype T {\r\tid String primary\n}\r\n"},
+		{"multi-byte runes", "schema \"s\"\ntype T {\n\tid Enum[\"café\", \"thé\"] primary\n}\n"},
+	}
+	for _, tc := range sources {
+		t.Run(tc.name, func(t *testing.T) {
+			id := location.NewSourceID("s.yammm")
+			reg := source.NewRegistry()
+			if err := reg.Register(id, []byte(tc.src)); err != nil {
+				t.Fatal(err)
+			}
+			file, issues := Parse([]byte(tc.src), id)
+			if len(issues) != 0 {
+				t.Fatalf("unexpected issues: %v", issues)
+			}
+
+			prop := file.Types[0].Properties[0]
+			spans := []struct {
+				what string
+				span location.Span
+			}{
+				{"schema name", file.NameSpan},
+				{"type name", file.Types[0].NameSpan},
+				{"property name", prop.NameSpan},
+				{"property extent end", prop.Span},
+			}
+			// Enum literals put a multi-byte rune before a later span on the
+			// same line, which is what makes the column math rune-counted.
+			for i, lit := range prop.Constraint.EnumLits {
+				spans = append(spans, struct {
+					what string
+					span location.Span
+				}{fmt.Sprintf("enum literal %d", i), lit.Span})
+			}
+			for _, s := range spans {
+				want := reg.PositionAt(id, s.span.Start.Byte)
+				if got := s.span.Start; got.Line != want.Line || got.Column != want.Column {
+					t.Errorf("%s at byte %d: parse says %d:%d, the registry says %d:%d",
+						s.what, s.span.Start.Byte, got.Line, got.Column, want.Line, want.Column)
+				}
+			}
+		})
+	}
+}
+
+// TestParse_ElidedTokensNeverReachTheGrammar covers the live elide path. The
+// PeekingLexer Parse builds is where participle reads its elide set, so a kind
+// missing from it arrives at the grammar and is rejected as an unexpected
+// token — and nothing else in this package parses a line comment.
+func TestParse_ElidedTokensNeverReachTheGrammar(t *testing.T) {
+	src := "// leading\nschema \"s\"\n// between\ntype T {\n\tid String primary // trailing\n}\n"
+
+	file, issues := Parse([]byte(src), location.SourceID{})
+
+	if len(issues) != 0 {
+		t.Fatalf("a source carrying line comments reported %v", issues)
+	}
+	if len(file.Types) != 1 || len(file.Types[0].Properties) != 1 {
+		t.Errorf("the comments reached the tree: %+v", file.Types)
+	}
+}
+
+// TestParse_SyntaxDiagnosticsPinTheirComposedText pins the text syntaxErr
+// builds and the construct name each of the four recovery sites supplies. The
+// guard above is negative and stays true for text that is empty, constant, or
+// labelled with the wrong construct.
+func TestParse_SyntaxDiagnosticsPinTheirComposedText(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{
+			"schema header",
+			"type A {\n\tid String primary\n}\n",
+			`unexpected token "type" in the schema header`,
+		},
+		{
+			"import declaration",
+			"schema \"s\"\nimport\n",
+			`unexpected token "<EOF>" in an import declaration`,
+		},
+		{
+			"declaration",
+			"schema \"s\"\ntype X = \n",
+			`unexpected token "<EOF>" in a declaration`,
+		},
+		{
+			"type body",
+			"schema \"s\"\ntype T {\n\t(\n}\n",
+			`unexpected token "(" in a type body`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, issues := Parse([]byte(tc.src), location.SourceID{})
+			var got []string
+			for _, iss := range issues {
+				if iss.Message() == tc.want {
+					return
+				}
+				got = append(got, iss.Message())
+			}
+			t.Errorf("no diagnostic reads %q; got %q", tc.want, got)
+		})
+	}
+}
+
+// TestParse_GrammarTypeNamesReachesInterfaces pins that the extractor sees
+// exprCapture. It is the one grammar type participle renders into an
+// expected-set, and a struct-only walk never reaches it.
+func TestParse_GrammarTypeNamesReachesInterfaces(t *testing.T) {
+	if !slices.Contains(grammarTypeNames(), "exprCapture") {
+		t.Error("grammarTypeNames omits exprCapture, so an expected-set naming it would pass")
+	}
+}
+
+// identifierWords splits text into lowercased runs of letters and digits, which
+// is how participle renders a type name inside an expected-set. Matching whole
+// words rather than substrings keeps strC from matching a reported strconv
+// error, which no check diagnostic could otherwise carry.
+func identifierWords(text string) []string {
+	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+// grammarTypeNames returns every node type reachable from the parser roots.
+// Interfaces count: exprCapture is the one grammar type participle renders into
+// an expected-set, through its custom node.
 func grammarTypeNames() []string {
 	seen := map[reflect.Type]bool{}
 	var names []string
@@ -250,12 +393,15 @@ func grammarTypeNames() []string {
 		for rt.Kind() == reflect.Ptr || rt.Kind() == reflect.Slice {
 			rt = rt.Elem()
 		}
-		if rt.Kind() != reflect.Struct || seen[rt] {
+		if seen[rt] {
 			return
 		}
 		seen[rt] = true
-		if strings.HasSuffix(rt.PkgPath(), "/internal/parse") {
+		if rt.Name() != "" && strings.HasSuffix(rt.PkgPath(), "/internal/parse") {
 			names = append(names, rt.Name())
+		}
+		if rt.Kind() != reflect.Struct {
+			return
 		}
 		for f := range rt.Fields() {
 			walk(f.Type)
