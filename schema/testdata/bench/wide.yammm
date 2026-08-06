@@ -1,0 +1,163 @@
+/* A broad schema: inheritance, relations, invariants and annotations
+   together, at the size a real consumer schema reaches. It is the largest
+   file in this directory, so the largest-fixture benchmark selects it. */
+schema "bench_wide"
+
+type Slug = String[1, 64]
+type CountryCode = String[2, 2]
+type Currency = Enum["eur", "gbp", "jpy", "usd"]
+type Fraction = Float[0.0, 1.0]
+
+abstract type Timestamped {
+	created_at Timestamp required @writeOnce
+	updated_at Timestamp
+}
+
+abstract type Identified extends Timestamped {
+	external_id UUID @index
+	slug Slug required @index
+}
+
+type Organisation extends Identified {
+	org_id String primary
+	name String[1, 200] required
+	country CountryCode required @index
+	currency Currency required
+	active Boolean required
+	headcount Integer[0, _]
+	retired_at Timestamp
+
+	--> operates (many) Facility / operated_by (one)
+	--> partners (_:many) Organisation
+
+	@@index(country, currency)
+
+	! "an active organisation has no retirement stamp" active || retired_at != nil
+	! "the name is not blank" name -> Len > 0
+}
+
+type Facility extends Identified {
+	facility_id String primary
+	label String[1, 200] required
+	country CountryCode required
+	capacity Integer[1, 100000] required
+	utilisation Fraction required
+	open Boolean required
+
+	--> serves (many) Route {
+		priority Integer required
+		since Timestamp
+	}
+	*-> zones (many) Zone
+
+	@@index(country, open)
+
+	! "utilisation stays within the unit interval" utilisation >= 0.0 && utilisation <= 1.0
+	! "an open facility has capacity" open == false || capacity > 0
+}
+
+part type Zone {
+	zone_id String primary
+	name String[1, 120] required
+	floor Integer required
+	area Float[0.0, _]
+
+	! "the floor is not below ground level" floor >= 0
+}
+
+type Route extends Timestamped {
+	route_id String primary
+	origin Slug required @index
+	destination Slug required @index
+	distance_km Float[0.0, _] required
+	transit_days Integer[0, 400] required
+	mode Enum["air", "rail", "road", "sea"] required
+	tags List<Slug>
+
+	--> alternate (one) Route
+
+	@@index(origin, destination)
+	@@index(mode, transit_days)
+
+	! "a route does not start where it ends" origin != destination
+	! "distance is positive" distance_km > 0.0
+	! "air routes are quick" mode != "air" || transit_days <= 7
+}
+
+type Shipment extends Identified {
+	shipment_id String primary
+	reference Pattern["^[A-Z]{2}[0-9]{8}$"] required @index
+	status Enum["booked", "collected", "in_transit", "delivered", "cancelled"] required
+	declared_value Float[0.0, _] required
+	currency Currency required
+	weight_kg Float[0.0, 40000.0] required
+	volume_m3 Float[0.0, _]
+	collected_at Timestamp
+	delivered_at Timestamp
+	signature Vector[128] @vector(cosine)
+
+	--> travels (one) Route
+	--> handled_by (one) Organisation
+	*-> parcels (many) Parcel
+
+	@@index(status, collected_at)
+
+	! "a delivered shipment was collected" status != "delivered" || collected_at != nil
+	! "a cancelled shipment was never delivered" status != "cancelled" || delivered_at == nil
+	! "declared value is not negative" declared_value >= 0.0
+	! "weight is positive" weight_kg > 0.0
+}
+
+part type Parcel {
+	parcel_id String primary
+	ordinal Integer[1, _] required
+	weight_kg Float[0.0, 1000.0] required
+	fragile Boolean required
+	barcode Pattern["^[0-9]{12,14}$"] required
+
+	! "a parcel weighs something" weight_kg > 0.0
+}
+
+type Event extends Timestamped {
+	event_id String primary
+	kind Enum["scan", "exception", "handover", "customs"] required
+	recorded_at Timestamp required @index
+	location Slug @index
+	note String[0, 500]
+
+	--> concerns (one) Shipment
+
+	@@index(kind, recorded_at)
+
+	! "an exception carries a note" kind != "exception" || note -> Len > 0
+}
+
+type Tariff extends Timestamped {
+	tariff_id String primary
+	currency Currency required
+	base_rate Float[0.0, _] required
+	per_kg Float[0.0, _] required
+	per_km Float[0.0, _] required
+	minimum Float[0.0, _] required
+	surcharge Fraction required
+	effective_from Date required
+	effective_to Date
+
+	--> applies_to (many) Route
+
+	! "the minimum is not below the base rate" minimum >= 0.0
+	! "the surcharge is a fraction" surcharge >= 0.0 && surcharge <= 1.0
+	! "rates are not negative" per_kg >= 0.0 && per_km >= 0.0
+}
+
+type Contact extends Identified {
+	contact_id String primary
+	full_name String[1, 200] required
+	email Pattern["^[^@]+@[^@]+$"] required @index
+	phone String[0, 40]
+	preferred Boolean required
+
+	--> works_for (one) Organisation
+
+	! "a contact is reachable" email -> Len > 0
+}

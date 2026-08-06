@@ -1,0 +1,45 @@
+// Associations and compositions across every multiplicity spelling, with
+// backrefs and edge properties.
+schema "bench_relations"
+
+type Warehouse {
+	id String primary
+	name String required
+
+	--> supplies (many) Depot / supplied_by (one)
+	*-> bays (many) Bay
+}
+
+type Depot {
+	id String primary
+	name String required
+	region String[2, 2] required
+
+	--> nearest (one) Warehouse
+	--> peers (_:many) Depot
+	--> carries (many) Item {
+		quantity Integer required
+		reserved Integer
+		added_at Timestamp
+	}
+	*-> docks (_) Dock
+}
+
+part type Bay {
+	id String primary
+	position Integer required
+}
+
+part type Dock {
+	id String primary
+	width Float
+}
+
+type Item {
+	sku String primary
+	title String[1, 200] required
+	weight Float[0.0, _]
+
+	--> replaces (one:one) Item
+	--> variants (one:many) Item
+}

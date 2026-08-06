@@ -87,8 +87,6 @@ var (
 	TestCompleteModel                      = completeModel
 	TestDetectCrossSchemaInheritanceCycles = detectCrossSchemaInheritanceCycles
 	TestNewParser                          = newParser
-	TestNewSpanBuilder                     = newSpanBuilder
-	TestMustPositionAt                     = mustPositionAt
 	TestIsValidAlias                       = isValidAlias
 	TestIsReservedKeyword                  = isReservedKeyword
 	TestReservedKeywords                   = reservedKeywords

@@ -2,1125 +2,328 @@ package schema
 
 import (
 	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
-
-	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/internal/grammar"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
-	"github.com/simon-lentz/yammm/schema/internal/exprcomp"
 )
 
-// schemaParser parses YAMMM schema source into an AST model.
+// schemaParser adapts the parser's node tree onto this package's decl model.
+// Spans, constraint values and recovery are settled before a node arrives, so
+// this layer re-parses no spelling; it owns only the loading decisions the
+// parser leaves out, which is alias derivation and the reserved-word refusal.
 type schemaParser struct {
 	sourceID  location.SourceID
 	collector *diag.Collector
-	spans     *spanBuilder
 }
 
 // newParser creates a new schemaParser for the given source.
-func newParser(
-	sourceID location.SourceID,
-	collector *diag.Collector,
-	registry location.PositionRegistry,
-	converter location.RuneOffsetConverter,
-) *schemaParser {
-	return &schemaParser{
-		sourceID:  sourceID,
-		collector: collector,
-		spans:     newSpanBuilder(sourceID, registry, converter),
-	}
+func newParser(sourceID location.SourceID, collector *diag.Collector) *schemaParser {
+	return &schemaParser{sourceID: sourceID, collector: collector}
 }
 
-// Parse parses the source content and returns an AST model.
-// Parse errors are collected in the provided collector.
+// Parse parses the source content and returns an AST model, collecting parse
+// errors in the provided collector. It returns nil when no usable schema name
+// was produced, which stops the loader before completion: a nameless model
+// draws a cascade of diagnostics that all restate the one real defect.
 func (p *schemaParser) Parse(source []byte) *model {
-	input := antlr.NewInputStream(string(source))
-	lexer := grammar.NewYammmGrammarLexer(input)
-	stream := antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel)
-	parser := grammar.NewYammmGrammarParser(stream)
+	file, issues := parse.Parse(source, p.sourceID)
+	p.collector.CollectAll(issues)
 
-	// Remove default error listeners and add our own
-	parser.RemoveErrorListeners()
-	parser.AddErrorListener(&errorListener{
-		collector: p.collector,
-		sourceID:  p.sourceID,
-		spans:     p.spans,
-	})
-
-	// Parse the schema
-	tree := parser.Schema()
-
-	// Build the AST using a listener
-	listener := &astBuilder{
-		parser:    p,
-		sourceID:  p.sourceID,
-		collector: p.collector,
-		spans:     p.spans,
-	}
-	antlr.ParseTreeWalkerDefault.Walk(listener, tree)
-
-	return listener.model
-}
-
-// errorListener converts ANTLR errors to diagnostic issues.
-type errorListener struct {
-	*antlr.DefaultErrorListener
-	collector *diag.Collector
-	sourceID  location.SourceID
-	spans     *spanBuilder
-}
-
-func (e *errorListener) SyntaxError(
-	_ antlr.Recognizer,
-	offendingSymbol any,
-	line, column int,
-	msg string,
-	_ antlr.RecognitionException,
-) {
-	var span location.Span
-
-	// Try to get proper byte offsets from the offending token.
-	// Per, schema parsing is "trusted provenance" — all spans
-	// should have byte offsets for LSP conversion.
-	if token, ok := offendingSymbol.(antlr.Token); ok && token != nil {
-		span = e.spans.FromToken(token)
-		if token.GetTokenType() == grammar.YammmGrammarLexerINVALID_NUMBER {
-			msg = exprcomp.InvalidNumberMessage(token.GetText())
-		}
-	} else {
-		// Fallback: ANTLR provides line/column but no token (rare edge case).
-		// Use Byte=-1 to signal unknown byte offset.
-		pos := location.Position{Line: line, Column: column + 1, Byte: -1}
-		span = location.Span{Source: e.sourceID, Start: pos, End: pos}
-	}
-
-	e.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX, msg).WithSpan(span).Build())
-}
-
-// astBuilder is an ANTLR listener that builds the AST model.
-type astBuilder struct {
-	*grammar.BaseYammmGrammarListener
-	parser    *schemaParser
-	sourceID  location.SourceID
-	collector *diag.Collector
-	spans     *spanBuilder
-
-	// Current parsing state
-	model          *model
-	currentType    *typeDecl
-	currentDT      Constraint
-	currentDTRef   DataTypeRef // Reference to DataType (for alias constraints)
-	currentProps   []*propertyDecl
-	currentImports []*importDecl
-}
-
-// ExitSchema_name is called when exiting the schema_name production.
-func (b *astBuilder) ExitSchema_name(ctx *grammar.Schema_nameContext) { //nolint:revive // ANTLR-generated name
-	nameToken := ctx.GetToken(grammar.YammmGrammarLexerSTRING, 0)
-	if nameToken == nil {
-		b.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_SYNTAX, "missing schema name").Build())
-		return
-	}
-
-	name, err := unquoteString(nameToken.GetText())
-	if err != nil {
-		span := b.spans.FromToken(nameToken.GetSymbol())
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			fmt.Sprintf("invalid schema name: %v", err)).WithSpan(span).Build())
-		return
-	}
-
-	var doc string
-	if ctx.DOC_COMMENT() != nil {
-		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
-	}
-
-	b.model = &model{
-		Name:          name,
-		Span:          b.spans.FromContext(ctx),
-		Documentation: doc,
-	}
-}
-
-// ExitImport_decl is called when exiting the import_decl production.
-func (b *astBuilder) ExitImport_decl(ctx *grammar.Import_declContext) { //nolint:revive // ANTLR-generated name
-	pathToken := ctx.GetPath()
-	if pathToken == nil {
-		return
-	}
-
-	path, err := unquoteString(pathToken.GetText())
-	if err != nil {
-		span := b.spans.FromToken(pathToken)
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			fmt.Sprintf("invalid import path: %v", err)).WithSpan(span).Build())
-		return
-	}
-
-	var importAlias string
-	if aliasCtx := ctx.GetAlias(); aliasCtx != nil {
-		importAlias = aliasCtx.GetText()
-	} else {
-		importAlias = deriveAliasFromPath(path)
-	}
-
-	// Check for reserved keyword alias
-	if isReservedKeyword(importAlias) {
-		span := b.spans.FromContext(ctx)
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
-			fmt.Sprintf("import alias %q is a reserved keyword", importAlias)).WithSpan(span).Build())
-		return
-	}
-
-	imp := &importDecl{
-		Path:  path,
-		Alias: importAlias,
-		Span:  b.spans.FromContext(ctx),
-	}
-	b.currentImports = append(b.currentImports, imp)
-}
-
-// ExitSchema is called when exiting the schema production.
-func (b *astBuilder) ExitSchema(_ *grammar.SchemaContext) {
-	if b.model != nil {
-		b.model.Imports = b.currentImports
-	}
-}
-
-// EnterType is called when entering the type production.
-func (b *astBuilder) EnterType(ctx *grammar.TypeContext) {
-	typeNameCtx := ctx.Type_name()
-	if typeNameCtx == nil {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"type declaration missing name").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-	typeName := typeNameCtx.GetText()
-
-	// Capture precise span of the type name token for accurate go-to-definition
-	nameSpan := b.spans.FromContext(typeNameCtx)
-
-	var doc string
-	if ctx.DOC_COMMENT() != nil {
-		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
-	}
-
-	b.currentType = &typeDecl{
-		Name:          typeName,
-		NameSpan:      nameSpan,
-		IsAbstract:    ctx.GetIs_abstract() != nil,
-		IsPart:        ctx.GetIs_part() != nil,
-		Documentation: doc,
-		Span:          b.spans.FromContext(ctx),
-	}
-	b.currentProps = nil
-}
-
-// ExitType is called when exiting the type production.
-func (b *astBuilder) ExitType(_ *grammar.TypeContext) {
-	if b.model != nil && b.currentType != nil {
-		b.model.Types = append(b.model.Types, b.currentType)
-	}
-	b.currentType = nil
-}
-
-// ExitExtends_types is called when exiting the extends_types production.
-func (b *astBuilder) ExitExtends_types(ctx *grammar.Extends_typesContext) { //nolint:revive // ANTLR-generated name
-	if b.currentType == nil {
-		return
-	}
-	for _, refCtx := range ctx.AllType_ref() {
-		ref := b.buildTypeRef(refCtx)
-		if ref != nil {
-			b.currentType.Inherits = append(b.currentType.Inherits, ref)
-		}
-	}
-}
-
-// ExitProperty is called when exiting the property production.
-func (b *astBuilder) ExitProperty(ctx *grammar.PropertyContext) {
-	if b.currentType == nil {
-		return
-	}
-
-	propNameCtx := ctx.Property_name()
-	if propNameCtx == nil {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"property declaration missing name").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-	propName := propNameCtx.GetText()
-	isPrimary := ctx.GetIs_primary() != nil
-	isRequired := ctx.GetIs_required() != nil || isPrimary
-
-	var doc string
-	if ctx.DOC_COMMENT() != nil {
-		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
-	}
-
-	prop := &propertyDecl{
-		Name:          propName,
-		Constraint:    b.currentDT,
-		DataTypeRef:   b.currentDTRef,
-		Optional:      !isRequired,
-		IsPrimaryKey:  isPrimary,
-		Documentation: doc,
-		Annotations:   b.buildPropertyAnnotations(ctx),
-		Span:          b.spans.FromContext(ctx),
-	}
-	b.currentType.Properties = append(b.currentType.Properties, prop)
-	b.currentDT = nil
-	b.currentDTRef = DataTypeRef{} // Clear for next property
-}
-
-// buildPropertyAnnotations collects the property-trailing @name(args)
-// decorators into their decls. Order is preserved (the deterministic base for
-// AllAnnotations ordering).
-func (b *astBuilder) buildPropertyAnnotations(ctx *grammar.PropertyContext) []*annotationDecl {
-	annCtxs := ctx.AllAnnotation()
-	if len(annCtxs) == 0 {
+	if file.SchemaNameFailed {
 		return nil
 	}
-	// The line the property itself is declared on. `annotation*` is postfix and
-	// whitespace is not significant, so an annotation written on a LATER line
-	// still binds here — to the property ABOVE it, not the one below it that a
-	// reader coming from a prefix-decorator language would expect. Record the
-	// mismatch for completion to report; the parse itself is unambiguous.
-	propLine := 0
-	if nameCtx := ctx.Property_name(); nameCtx != nil {
-		propLine = b.spans.FromContext(nameCtx).Start.Line
-	}
 
-	decls := make([]*annotationDecl, 0, len(annCtxs))
-	for _, ac := range annCtxs {
-		nameCtx := ac.GetName()
-		if nameCtx == nil {
-			continue
+	m := &model{
+		Name:          file.Name,
+		Span:          file.Span,
+		Documentation: file.Doc,
+	}
+	for _, imp := range file.Imports {
+		if decl := p.importDecl(imp); decl != nil {
+			m.Imports = append(m.Imports, decl)
 		}
-		args, malformed := b.buildAnnotationArgs(ac.Annotation_args())
-		span := b.spans.FromContext(ac)
-		detached := 0
-		if propLine > 0 && span.Start.Line > propLine {
-			detached = propLine
-		}
-		decls = append(decls, &annotationDecl{
-			Name:             nameCtx.GetText(),
-			Args:             args,
-			ArgsMalformed:    malformed,
-			Span:             span,
-			DetachedFromLine: detached,
+	}
+	for _, dt := range file.DataTypes {
+		constraint, _ := p.constraint(dt.Constraint)
+		m.DataTypes = append(m.DataTypes, &dataTypeDecl{
+			Name:          dt.Name,
+			Constraint:    constraint,
+			Documentation: dt.Doc,
+			Span:          dt.Span,
 		})
 	}
-	return decls
+	for _, t := range file.Types {
+		m.Types = append(m.Types, p.typeDecl(t))
+	}
+	return m
 }
 
-// buildAnnotationArgs collects an annotation's argument list, recording whether
-// each argument was an identifier or a literal. String literals are unquoted;
-// other literals keep their source text (they exist only to draw a precise
-// "got a literal" diagnostic in completion, since no v1 annotation accepts one).
-//
-// malformed reports that at least one argument context matched no alternative.
-// The grammar requires an argument list to hold at least one argument, so an
-// empty one ("@index()") is a syntax error — but ANTLR's recovery still leaves a
-// context behind. Such a context is dropped rather than carried as a text-less
-// argument, and the flag lets completion skip semantic checks whose input never
-// parsed; a text-less argument otherwise produces diagnostics that contradict
-// the source (a zero-argument call reported as having arguments, a composite
-// blamed for referencing a property named "").
-func (b *astBuilder) buildAnnotationArgs(argsCtx grammar.IAnnotation_argsContext) (args []annotationArgDecl, malformed bool) {
-	if argsCtx == nil {
-		return nil, false
+// importDecl resolves an import's alias and returns nil for a reserved one,
+// dropping the declaration. The parser records only an alias the source wrote,
+// because deriving one from the path is a loading decision; the reserved-word
+// refusal belongs with it for the same reason.
+func (p *schemaParser) importDecl(imp *parse.Import) *importDecl {
+	alias := imp.Alias
+	if !imp.HasAlias {
+		alias = deriveAliasFromPath(imp.Path)
 	}
-	argCtxs := argsCtx.AllAnnotation_arg()
-	args = make([]annotationArgDecl, 0, len(argCtxs))
-	for _, ac := range argCtxs {
-		var (
-			text    string
-			rawText string
-			token   = tokenIdentifier
-		)
-		switch {
-		case ac.Property_name() != nil:
-			text = ac.Property_name().GetText()
-		case ac.UC_WORD() != nil:
-			text = ac.UC_WORD().GetText()
-		case ac.Literal() != nil:
-			raw := ac.Literal().GetText()
-			switch {
-			case len(raw) > 0 && (raw[0] == '"' || raw[0] == '\''):
-				if unquoted, err := unquoteString(raw); err == nil {
-					// tokenString's contract is that its text is the UNQUOTED value,
-					// so only a successful unquote earns the label.
-					token = tokenString
-					text = unquoted
-					rawText = raw
-				} else {
-					// The yammm STRING lexer accepts escapes Go's unquoter rejects
-					// (\u/\x/\0 with no hex digits), so a lexed string can fail here.
-					// Keep the raw source as a bare literal rather than a tokenString
-					// whose text is not actually unquoted: labelling it tokenString
-					// would break identity() (two distinct sources colliding on the
-					// same unquoted-looking bytes) and displayText (re-quoting the
-					// already-quoted raw). As a bare literal the raw IS its spelling.
-					token = tokenLiteral
-					text = raw
-				}
-			default:
-				token = tokenLiteral // bare literal: number, boolean, regex — raw IS the spelling
-				text = raw
-			}
-		default:
-			// No alternative matched: an error-recovery artifact, not an argument.
-			// An empty string literal is NOT this case — it matches Literal().
-			malformed = true
-			continue
-		}
-		args = append(args, annotationArgDecl{
-			Text:  text,
-			Token: token,
-			Span:  b.spans.FromContext(ac),
-			Raw:   rawText,
+	if isReservedKeyword(alias) {
+		p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
+			fmt.Sprintf("import alias %q is a reserved keyword", alias)).
+			WithSpan(imp.Span).Build())
+		return nil
+	}
+	return &importDecl{Path: imp.Path, Alias: alias, Span: imp.Span}
+}
+
+func (p *schemaParser) typeDecl(t *parse.TypeDecl) *typeDecl {
+	out := &typeDecl{
+		Name:          t.Name,
+		NameSpan:      t.NameSpan,
+		IsAbstract:    t.IsAbstract,
+		IsPart:        t.IsPart,
+		Documentation: t.Doc,
+		Span:          t.Span,
+	}
+	for _, ref := range t.Extends {
+		out.Inherits = append(out.Inherits, typeRef(ref))
+	}
+	for _, prop := range t.Properties {
+		out.Properties = append(out.Properties, p.property(prop))
+	}
+	for _, rel := range t.Relations {
+		out.Relations = append(out.Relations, p.relationDecl(rel))
+	}
+	for _, inv := range t.Invariants {
+		// The decl layer calls the invariant's message string its name.
+		out.Invariants = append(out.Invariants, &invariantDecl{
+			Name:          inv.Message,
+			Expr:          inv.Expr,
+			Documentation: inv.Doc,
+			Span:          inv.Span,
 		})
 	}
-	return args, malformed
+	for _, ann := range t.Annotations {
+		out.Annotations = append(out.Annotations, annotationDeclOf(ann))
+	}
+	return out
 }
 
-// ExitDatatype is called when exiting the datatype production.
-func (b *astBuilder) ExitDatatype(ctx *grammar.DatatypeContext) {
-	typeNameCtx := ctx.Type_name()
-	if typeNameCtx == nil {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"datatype declaration missing name").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
+// property maps a type-body property. A primary key is required by definition,
+// which is why Optional reads both modifiers where the edge-property form below
+// reads one.
+func (p *schemaParser) property(prop *parse.Property) *propertyDecl {
+	constraint, ref := p.constraint(prop.Constraint)
+	out := &propertyDecl{
+		Name:          prop.Name,
+		Constraint:    constraint,
+		DataTypeRef:   ref,
+		Optional:      !prop.IsRequired && !prop.IsPrimaryKey,
+		IsPrimaryKey:  prop.IsPrimaryKey,
+		Documentation: prop.Doc,
+		Span:          prop.Span,
 	}
-	typeName := typeNameCtx.GetText() // Preserve declared case
-
-	var doc string
-	if ctx.DOC_COMMENT() != nil {
-		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
+	for _, ann := range prop.Annotations {
+		out.Annotations = append(out.Annotations, annotationDeclOf(ann))
 	}
-
-	dt := &dataTypeDecl{
-		Name:          typeName,
-		Constraint:    b.currentDT,
-		Documentation: doc,
-		Span:          b.spans.FromContext(ctx),
-	}
-
-	if b.model != nil {
-		b.model.DataTypes = append(b.model.DataTypes, dt)
-	}
-	b.currentDT = nil
+	return out
 }
 
-// EnterAssociation is called when entering the association production.
-func (b *astBuilder) EnterAssociation(_ *grammar.AssociationContext) {
-	b.currentProps = nil
-}
-
-// ExitAssociation is called when exiting the association production.
-func (b *astBuilder) ExitAssociation(ctx *grammar.AssociationContext) {
-	if b.currentType == nil {
-		return
-	}
-
-	thisNameCtx := ctx.GetThisName()
-	if thisNameCtx == nil {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"association missing relation name").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-
-	optional, many := handleMultiplicity(ctx.GetThisMp())
-	relName := thisNameCtx.GetText()
-	target := b.buildTypeRef(ctx.GetToType())
-
-	reverseOptional, reverseMany := true, false
-	backref := ""
-	if ctx.GetReverse_name() != nil {
-		backref = ctx.GetReverse_name().GetText()
-		reverseOptional, reverseMany = handleMultiplicity(ctx.GetReverseMp())
-	}
-
-	var doc string
-	if ctx.DOC_COMMENT() != nil {
-		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
-	}
-
-	rel := &relationDecl{
-		Kind:            RelationAssociation,
-		Name:            relName,
-		Target:          target,
-		Optional:        optional,
-		Many:            many,
-		Backref:         backref,
-		ReverseOptional: reverseOptional,
-		ReverseMany:     reverseMany,
-		Properties:      b.currentProps,
-		Documentation:   doc,
-		Span:            b.spans.FromContext(ctx),
-	}
-	b.currentType.Relations = append(b.currentType.Relations, rel)
-	b.currentProps = nil
-}
-
-// EnterComposition is called when entering the composition production.
-func (b *astBuilder) EnterComposition(_ *grammar.CompositionContext) {
-	b.currentProps = nil
-}
-
-// ExitComposition is called when exiting the composition production.
-func (b *astBuilder) ExitComposition(ctx *grammar.CompositionContext) {
-	if b.currentType == nil {
-		return
-	}
-
-	optional, many := handleMultiplicity(ctx.GetThisMp())
-	target := b.buildTypeRef(ctx.GetToType())
-
-	var relName string
-	if ctx.GetThisName() != nil {
-		relName = ctx.GetThisName().GetText()
-	}
-	if relName == "" {
-		// Composition requires a name for edge object encoding.
-		// This should not happen with valid grammar, but we validate defensively.
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"composition must have a name").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-
-	reverseOptional, reverseMany := true, false
-	backref := ""
-	if ctx.GetReverse_name() != nil {
-		backref = ctx.GetReverse_name().GetText()
-		reverseOptional, reverseMany = handleMultiplicity(ctx.GetReverseMp())
-	}
-
-	var doc string
-	if ctx.DOC_COMMENT() != nil {
-		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
-	}
-
-	rel := &relationDecl{
-		Kind:            RelationComposition,
-		Name:            relName,
-		Target:          target,
-		Optional:        optional,
-		Many:            many,
-		Backref:         backref,
-		ReverseOptional: reverseOptional,
-		ReverseMany:     reverseMany,
-		Documentation:   doc,
-		Span:            b.spans.FromContext(ctx),
-	}
-	b.currentType.Relations = append(b.currentType.Relations, rel)
-}
-
-// ExitRel_property is called when exiting the rel_property production.
-func (b *astBuilder) ExitRel_property(ctx *grammar.Rel_propertyContext) { //nolint:revive // ANTLR-generated name
-	propNameCtx := ctx.Property_name()
-	if propNameCtx == nil {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"edge property missing name").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-	propName := propNameCtx.GetText()
-	isRequired := ctx.GetIs_required() != nil
-
-	var doc string
-	if ctx.DOC_COMMENT() != nil {
-		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
-	}
-
-	prop := &propertyDecl{
-		Name:          propName,
-		Constraint:    b.currentDT,
-		DataTypeRef:   b.currentDTRef,
-		Optional:      !isRequired,
-		IsPrimaryKey:  false,
-		Documentation: doc,
-		Span:          b.spans.FromContext(ctx),
-	}
-	b.currentProps = append(b.currentProps, prop)
-	b.currentDT = nil
-	b.currentDTRef = DataTypeRef{} // Clear for next property
-}
-
-// ExitInvariant is called when exiting the invariant production.
-func (b *astBuilder) ExitInvariant(ctx *grammar.InvariantContext) {
-	if b.currentType == nil {
-		return
-	}
-
-	msgToken := ctx.GetMessage()
-	if msgToken == nil {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"invariant missing message string").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-	name, err := unquoteString(msgToken.GetText())
-	if err != nil {
-		span := b.spans.FromToken(msgToken)
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			fmt.Sprintf("invalid invariant message: %v", err)).WithSpan(span).Build())
-		return
-	}
-
-	// Compile the invariant expression
-	var compiledExpr expr.Expression
-	if exprCtx := ctx.Expr(); exprCtx != nil {
-		compiledExpr = exprcomp.Compile(
-			exprCtx,
-			b.collector,
-			b.sourceID,
-			b.spans,
-		)
-	}
-
-	var doc string
-	if ctx.DOC_COMMENT() != nil {
-		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
-	}
-
-	inv := &invariantDecl{
-		Name:          name,
-		Expr:          compiledExpr,
-		Documentation: doc,
-		Span:          b.spans.FromContext(ctx),
-	}
-	b.currentType.Invariants = append(b.currentType.Invariants, inv)
-}
-
-// ExitType_annotation collects a type-level @@name(args) member, with its
-// optional leading doc comment, onto the current type in document order.
-func (b *astBuilder) ExitType_annotation(ctx *grammar.Type_annotationContext) { //nolint:revive // ANTLR-generated name
-	if b.currentType == nil {
-		return
-	}
-	nameCtx := ctx.GetName()
-	if nameCtx == nil {
-		return
-	}
-	var doc string
-	if ctx.DOC_COMMENT() != nil {
-		doc = stripDelimiters(ctx.DOC_COMMENT().GetText())
-	}
-	args, malformed := b.buildAnnotationArgs(ctx.Annotation_args())
-	b.currentType.Annotations = append(b.currentType.Annotations, &annotationDecl{
-		Name:          nameCtx.GetText(),
-		Args:          args,
-		ArgsMalformed: malformed,
-		Documentation: doc,
-		Span:          b.spans.FromContext(ctx),
-	})
-}
-
-// boundSpan returns a span covering a bound value, including the optional
-// leading minus sign. When neg is nil, it falls back to spanning only the
-// value token.
-func (b *astBuilder) boundSpan(neg, value antlr.Token) location.Span {
-	if neg != nil {
-		return b.spans.FromTokens(neg, value)
-	}
-	return b.spans.FromToken(value)
-}
-
-//nolint:revive // min/max shadow builtins but match domain semantics
-func (b *astBuilder) ExitIntegerT(ctx *grammar.IntegerTContext) {
-	var min, max int64
-	hasMin, hasMax := false, false
-	parseErr := false
-
-	if minToken := ctx.GetMin(); minToken != nil && minToken.GetText() != "_" {
-		minText := minToken.GetText()
-		if ctx.GetNegMin() != nil {
-			minText = "-" + minText
-		}
-		v, err := strconv.ParseInt(minText, 10, 64)
-		if err != nil {
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("invalid integer bound: %v", err)).
-				WithSpan(b.boundSpan(ctx.GetNegMin(), minToken)).Build())
-			parseErr = true
-		} else {
-			min, hasMin = v, true
-		}
-	} else if minToken != nil && minToken.GetText() == "_" && ctx.GetNegMin() != nil {
-		b.collector.Collect(diag.NewIssue(diag.Warning, diag.E_INVALID_CONSTRAINT,
-			"minus sign before '_' (unbounded) has no effect").
-			WithSpan(b.spans.FromToken(ctx.GetNegMin())).Build())
-	}
-	if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() != "_" {
-		maxText := maxToken.GetText()
-		if ctx.GetNegMax() != nil {
-			maxText = "-" + maxText
-		}
-		v, err := strconv.ParseInt(maxText, 10, 64)
-		if err != nil {
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("invalid integer bound: %v", err)).
-				WithSpan(b.boundSpan(ctx.GetNegMax(), maxToken)).Build())
-			parseErr = true
-		} else {
-			max, hasMax = v, true
-		}
-	} else if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() == "_" && ctx.GetNegMax() != nil {
-		b.collector.Collect(diag.NewIssue(diag.Warning, diag.E_INVALID_CONSTRAINT,
-			"minus sign before '_' (unbounded) has no effect").
-			WithSpan(b.spans.FromToken(ctx.GetNegMax())).Build())
-	}
-
-	// Validate min <= max when both are present
-	if !parseErr && hasMin && hasMax && min > max {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-			fmt.Sprintf("integer bounds inverted: min %d > max %d", min, max)).
-			WithSpan(b.spans.FromContext(ctx)).Build())
-	}
-
-	switch {
-	case hasMin && hasMax:
-		b.currentDT = IntegerBetween(min, max)
-	case hasMin:
-		b.currentDT = IntegerMin(min)
-	case hasMax:
-		b.currentDT = IntegerMax(max)
-	default:
-		b.currentDT = NewIntegerConstraint()
+// edgeProperty maps a relation's edge property, which carries no annotations
+// and never a primary key — the grammar admits neither in that position.
+func (p *schemaParser) edgeProperty(prop *parse.Property) *propertyDecl {
+	constraint, ref := p.constraint(prop.Constraint)
+	return &propertyDecl{
+		Name:          prop.Name,
+		Constraint:    constraint,
+		DataTypeRef:   ref,
+		Optional:      !prop.IsRequired,
+		Documentation: prop.Doc,
+		Span:          prop.Span,
 	}
 }
 
-//nolint:revive // min/max shadow builtins but match domain semantics
-func (b *astBuilder) ExitFloatT(ctx *grammar.FloatTContext) {
-	var min, max float64
-	hasMin, hasMax := false, false
-	parseErr := false
-
-	if minToken := ctx.GetMin(); minToken != nil && minToken.GetText() != "_" {
-		minText := minToken.GetText()
-		if ctx.GetNegMin() != nil {
-			minText = "-" + minText
-		}
-		v, err := strconv.ParseFloat(minText, 64)
-		if err != nil {
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("invalid float bound: %v", err)).
-				WithSpan(b.boundSpan(ctx.GetNegMin(), minToken)).Build())
-			parseErr = true
-		} else {
-			min, hasMin = v, true
-		}
-	} else if minToken != nil && minToken.GetText() == "_" && ctx.GetNegMin() != nil {
-		b.collector.Collect(diag.NewIssue(diag.Warning, diag.E_INVALID_CONSTRAINT,
-			"minus sign before '_' (unbounded) has no effect").
-			WithSpan(b.spans.FromToken(ctx.GetNegMin())).Build())
+func (p *schemaParser) relationDecl(rel *parse.Relation) *relationDecl {
+	out := &relationDecl{
+		Kind:            relationKind(rel.Kind),
+		Name:            rel.Name,
+		Target:          typeRef(rel.Target),
+		Optional:        rel.Optional,
+		Many:            rel.Many,
+		Backref:         rel.Backref,
+		ReverseOptional: rel.ReverseOptional,
+		ReverseMany:     rel.ReverseMany,
+		Documentation:   rel.Doc,
+		Span:            rel.Span,
 	}
-	if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() != "_" {
-		maxText := maxToken.GetText()
-		if ctx.GetNegMax() != nil {
-			maxText = "-" + maxText
-		}
-		v, err := strconv.ParseFloat(maxText, 64)
-		if err != nil {
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("invalid float bound: %v", err)).
-				WithSpan(b.boundSpan(ctx.GetNegMax(), maxToken)).Build())
-			parseErr = true
-		} else {
-			max, hasMax = v, true
-		}
-	} else if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() == "_" && ctx.GetNegMax() != nil {
-		b.collector.Collect(diag.NewIssue(diag.Warning, diag.E_INVALID_CONSTRAINT,
-			"minus sign before '_' (unbounded) has no effect").
-			WithSpan(b.spans.FromToken(ctx.GetNegMax())).Build())
+	for _, prop := range rel.Properties {
+		out.Properties = append(out.Properties, p.edgeProperty(prop))
 	}
-
-	// Validate min <= max when both are present
-	if !parseErr && hasMin && hasMax && min > max {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-			fmt.Sprintf("float bounds inverted: min %v > max %v", min, max)).
-			WithSpan(b.spans.FromContext(ctx)).Build())
-	}
-
-	switch {
-	case hasMin && hasMax:
-		b.currentDT = FloatBetween(min, max)
-	case hasMin:
-		b.currentDT = FloatMin(min)
-	case hasMax:
-		b.currentDT = FloatMax(max)
-	default:
-		b.currentDT = NewFloatConstraint()
-	}
+	return out
 }
 
-func (b *astBuilder) ExitBoolT(_ *grammar.BoolTContext) {
-	b.currentDT = NewBooleanConstraint()
+func relationKind(k parse.RelationKind) RelationKind {
+	if k == parse.RelationComposition {
+		return RelationComposition
+	}
+	return RelationAssociation
 }
 
-func (b *astBuilder) ExitStringT(ctx *grammar.StringTContext) {
-	var minLen, maxLen int64 = -1, -1
-	parseErr := false
-
-	if minToken := ctx.GetMin(); minToken != nil && minToken.GetText() != "_" {
-		v, err := strconv.ParseInt(minToken.GetText(), 10, 64)
-		switch {
-		case err != nil:
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("invalid string length bound: %v", err)).
-				WithSpan(b.spans.FromToken(minToken)).Build())
-			parseErr = true
-		case v < 0:
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("string minimum length cannot be negative: %d", v)).
-				WithSpan(b.spans.FromToken(minToken)).Build())
-			parseErr = true
-		default:
-			minLen = v
-		}
-	}
-	if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() != "_" {
-		v, err := strconv.ParseInt(maxToken.GetText(), 10, 64)
-		switch {
-		case err != nil:
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("invalid string length bound: %v", err)).
-				WithSpan(b.spans.FromToken(maxToken)).Build())
-			parseErr = true
-		case v < 0:
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("string maximum length cannot be negative: %d", v)).
-				WithSpan(b.spans.FromToken(maxToken)).Build())
-			parseErr = true
-		default:
-			maxLen = v
-		}
-	}
-
-	// Validate min <= max when both are present
-	if !parseErr && minLen >= 0 && maxLen >= 0 && minLen > maxLen {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-			fmt.Sprintf("string length bounds inverted: min %d > max %d", minLen, maxLen)).
-			WithSpan(b.spans.FromContext(ctx)).Build())
-	}
-
-	switch {
-	case minLen >= 0 && maxLen >= 0:
-		b.currentDT = StringLenBetween(minLen, maxLen)
-	case minLen >= 0:
-		b.currentDT = StringMinLen(minLen)
-	case maxLen >= 0:
-		b.currentDT = StringMaxLen(maxLen)
-	default:
-		b.currentDT = NewStringConstraint()
-	}
-}
-
-func (b *astBuilder) ExitEnumT(ctx *grammar.EnumTContext) {
-	var values []string
-	seen := make(map[string]bool)
-	for _, token := range ctx.AllSTRING() {
-		val, err := unquoteString(token.GetText())
-		if err != nil {
-			span := b.spans.FromToken(token.GetSymbol())
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-				fmt.Sprintf("invalid enum value: %v", err)).WithSpan(span).Build())
-			continue
-		}
-		if val == "" {
-			span := b.spans.FromToken(token.GetSymbol())
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				"enum value cannot be empty").WithSpan(span).Build())
-			continue
-		}
-		if seen[val] {
-			span := b.spans.FromToken(token.GetSymbol())
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("duplicate enum value %q", val)).WithSpan(span).Build())
-			continue
-		}
-		seen[val] = true
-		values = append(values, val)
-	}
-	if len(values) < 2 {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-			fmt.Sprintf("enum must have at least two values (got %d)", len(values))).WithSpan(b.spans.FromContext(ctx)).Build())
-	}
-	b.currentDT = NewEnumConstraint(values)
-}
-
-func (b *astBuilder) ExitPatternT(ctx *grammar.PatternTContext) {
-	var patterns []*regexp.Regexp
-	for _, token := range ctx.AllSTRING() {
-		patStr, err := unquoteString(token.GetText())
-		if err != nil {
-			span := b.spans.FromToken(token.GetSymbol())
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-				fmt.Sprintf("invalid pattern: %v", err)).WithSpan(span).Build())
-			continue
-		}
-		re, err := regexp.Compile(patStr)
-		if err != nil {
-			span := b.spans.FromToken(token.GetSymbol())
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("invalid regex pattern %q: %v", patStr, err)).WithSpan(span).Build())
-			continue
-		}
-		patterns = append(patterns, re)
-	}
-	// Emit error if more than 2 patterns provided (max 2 allowed for performance)
-	if len(patterns) > 2 {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-			fmt.Sprintf("pattern constraint exceeds maximum of 2 patterns (got %d)", len(patterns))).
-			WithSpan(b.spans.FromContext(ctx)).Build())
-		patterns = patterns[:2] // Continue with first 2 for error recovery
-	}
-	b.currentDT = NewPatternConstraint(patterns)
-}
-
-func (b *astBuilder) ExitTimestampT(ctx *grammar.TimestampTContext) {
-	if ctx.GetFormat() == nil {
-		b.currentDT = NewTimestampConstraint()
-	} else {
-		format, err := unquoteString(ctx.GetFormat().GetText())
-		if err != nil {
-			span := b.spans.FromToken(ctx.GetFormat())
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-				fmt.Sprintf("invalid timestamp format: %v", err)).WithSpan(span).Build())
-			b.currentDT = NewTimestampConstraint()
-			return
-		}
-		b.currentDT = NewTimestampConstraintFormatted(format)
-	}
-}
-
-func (b *astBuilder) ExitDateT(_ *grammar.DateTContext) {
-	b.currentDT = NewDateConstraint()
-}
-
-func (b *astBuilder) ExitUuidT(_ *grammar.UuidTContext) { //nolint:revive // ANTLR-generated name
-	b.currentDT = NewUUIDConstraint()
-}
-
-const (
-	minVectorDimensions = 1
-	maxVectorDimensions = 65536
-)
-
-func (b *astBuilder) ExitVectorT(ctx *grammar.VectorTContext) {
-	dimToken := ctx.GetDimensions()
-	if dimToken == nil {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"vector type missing dimensions").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-
-	dimText := dimToken.GetText()
-	if dimText == "" {
-		// ANTLR error recovery may produce a token with empty text
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"vector type missing dimensions").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-
-	dim, err := strconv.Atoi(dimText)
-	if err != nil {
-		// Use context span since token may have invalid position from error recovery
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-			fmt.Sprintf("invalid vector dimensions: %v", err)).WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-
-	if dim < minVectorDimensions {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-			fmt.Sprintf("vector dimensions must be at least %d (got %d)", minVectorDimensions, dim)).
-			WithSpan(b.spans.FromToken(dimToken)).Build())
-		return
-	}
-
-	if dim > maxVectorDimensions {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-			fmt.Sprintf("vector dimensions exceed maximum of %d (got %d)", maxVectorDimensions, dim)).
-			WithSpan(b.spans.FromToken(dimToken)).Build())
-		return
-	}
-
-	b.currentDT = NewVectorConstraint(dim)
-}
-
-func (b *astBuilder) ExitListT(ctx *grammar.ListTContext) {
-	// The element type's constraint was built by a nested Exit*T call
-	// and stored in b.currentDT (post-order traversal).
-	elementConstraint := b.currentDT
-
-	if elementConstraint == nil {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"list type missing element type").WithSpan(b.spans.FromContext(ctx)).Build())
-		return
-	}
-
-	var minLen, maxLen int64 = -1, -1
-	parseErr := false
-
-	if minToken := ctx.GetMin(); minToken != nil && minToken.GetText() != "_" {
-		v, err := strconv.ParseInt(minToken.GetText(), 10, 64)
-		switch {
-		case err != nil:
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("invalid list length bound: %v", err)).
-				WithSpan(b.spans.FromToken(minToken)).Build())
-			parseErr = true
-		case v < 0:
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("list minimum length cannot be negative: %d", v)).
-				WithSpan(b.spans.FromToken(minToken)).Build())
-			parseErr = true
-		default:
-			minLen = v
-		}
-	}
-	if maxToken := ctx.GetMax(); maxToken != nil && maxToken.GetText() != "_" {
-		v, err := strconv.ParseInt(maxToken.GetText(), 10, 64)
-		switch {
-		case err != nil:
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("invalid list length bound: %v", err)).
-				WithSpan(b.spans.FromToken(maxToken)).Build())
-			parseErr = true
-		case v < 0:
-			b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-				fmt.Sprintf("list maximum length cannot be negative: %d", v)).
-				WithSpan(b.spans.FromToken(maxToken)).Build())
-			parseErr = true
-		default:
-			maxLen = v
-		}
-	}
-
-	// Validate min <= max when both are present
-	if !parseErr && minLen >= 0 && maxLen >= 0 && minLen > maxLen {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
-			fmt.Sprintf("list length bounds inverted: min %d > max %d", minLen, maxLen)).
-			WithSpan(b.spans.FromContext(ctx)).Build())
-	}
-
-	switch {
-	case minLen >= 0 && maxLen >= 0:
-		b.currentDT = ListLenBetween(elementConstraint, minLen, maxLen)
-	case minLen >= 0:
-		b.currentDT = ListMinLen(elementConstraint, minLen)
-	case maxLen >= 0:
-		b.currentDT = ListMaxLen(elementConstraint, maxLen)
-	default:
-		b.currentDT = NewListConstraint(elementConstraint)
-	}
-}
-
-func (b *astBuilder) ExitQualified_alias(ctx *grammar.Qualified_aliasContext) { //nolint:revive // ANTLR-generated name
-	nameToken := ctx.GetName()
-	if nameToken == nil {
-		// Syntax error recovery - no name token
-		return
-	}
-
-	qualifier := ""
-	if q := ctx.GetQualifier(); q != nil {
-		qualifier = q.GetText()
-	}
-	name := nameToken.GetText() // Preserve declared case (not toLowerFirst)
-
-	var fullName string
-	if qualifier != "" {
-		fullName = qualifier + "." + name
-	} else {
-		fullName = name
-	}
-
-	// AliasConstraint needs to be resolved during completion
-	// For now, store a placeholder with just the name
-	b.currentDT = NewAliasConstraint(fullName, nil)
-
-	// Capture the DataTypeRef with span for LSP navigation
-	b.currentDTRef = NewDataTypeRef(qualifier, name, b.spans.FromContext(ctx))
-}
-
-func (b *astBuilder) buildTypeRef(ctx grammar.IType_refContext) *astTypeRef {
-	if ctx == nil {
+func typeRef(r *parse.TypeRef) *astTypeRef {
+	if r == nil {
 		return nil
 	}
-
-	nameCtx := ctx.GetName()
-	if nameCtx == nil {
-		b.collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
-			"type reference missing type name").WithSpan(b.spans.FromContext(ctx)).Build())
-		return nil
-	}
-
-	qualifier := ""
-	if q := ctx.GetQualifier(); q != nil {
-		qualifier = q.GetText()
-	}
-	name := nameCtx.GetText()
-	return &astTypeRef{
-		Qualifier: qualifier,
-		Name:      name,
-		Span:      b.spans.FromContext(ctx),
-	}
+	return &astTypeRef{Qualifier: r.Qualifier, Name: r.Name, Span: r.Span}
 }
 
-// handleMultiplicity parses the multiplicity context and returns (optional, many).
-// When multiplicity is omitted (ctx == nil), defaults to optional/one (true, false).
-// This matches the grammar where multiplicity is optional for relation declarations.
-func handleMultiplicity(ctx grammar.IMultiplicityContext) (optional, many bool) {
-	if ctx == nil {
-		// Default: optional/one - the relation is not required and has at most one target.
-		return true, false
+func annotationDeclOf(a *parse.Annotation) *annotationDecl {
+	out := &annotationDecl{
+		Name:             a.Name,
+		Documentation:    a.Doc,
+		Span:             a.Span,
+		DetachedFromLine: a.DetachedFromLine,
 	}
-	text := ctx.GetText()
-	switch text {
-	case "(_)", "(_:one)":
-		return true, false
-	case "(one)":
-		return false, false
-	case "(many)", "(_:many)":
-		return true, true
-	case "(one:one)":
-		return false, false
-	case "(one:many)":
-		return false, true
-	default:
-		return true, false
+	if len(a.Args) == 0 {
+		return out
 	}
+	out.Args = make([]annotationArgDecl, 0, len(a.Args))
+	for _, arg := range a.Args {
+		out.Args = append(out.Args, annotationArgDecl{
+			Text:  arg.Text,
+			Token: annotationToken(arg.Kind),
+			Span:  arg.Span,
+			Raw:   arg.Raw,
+		})
+	}
+	return out
 }
 
-// unquoteString removes surrounding quotes from a string literal and processes
-// escape sequences. Handles both single and double quoted strings.
-// Returns the original string unchanged if not properly quoted.
-func unquoteString(s string) (string, error) {
-	if len(s) < 2 {
-		return s, nil
+func annotationToken(k parse.ArgKind) annotationTokenKind {
+	//exhaustive:enforce
+	switch k {
+	case parse.ArgIdentifier:
+		return tokenIdentifier
+	case parse.ArgLiteral:
+		return tokenLiteral
+	case parse.ArgString:
+		return tokenString
 	}
-	// Handle both single and double quoted strings
-	if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-		result, err := strconv.Unquote(`"` + s[1:len(s)-1] + `"`)
-		if err != nil {
-			return "", fmt.Errorf("unquote string: %w", err)
+	return tokenIdentifier // unreachable: ArgKind has exactly the three forms above
+}
+
+// constraint builds the decl layer's constraint from a parsed one, plus the
+// data-type reference an alias carries for go-to-definition. A nil result means
+// an unusable datatype — a rejected Vector dimension, or a List whose element
+// was rejected — and both already carry their own diagnostic.
+func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef) {
+	if c == nil {
+		return nil, DataTypeRef{}
+	}
+	//exhaustive:enforce
+	switch c.Kind {
+	case parse.ConstraintInteger:
+		return integerConstraint(c), DataTypeRef{}
+	case parse.ConstraintFloat:
+		return floatConstraint(c), DataTypeRef{}
+	case parse.ConstraintBoolean:
+		return NewBooleanConstraint(), DataTypeRef{}
+	case parse.ConstraintString:
+		return stringConstraint(c), DataTypeRef{}
+	case parse.ConstraintEnum:
+		return NewEnumConstraint(c.EnumValues()), DataTypeRef{}
+	case parse.ConstraintPattern:
+		return NewPatternConstraint(c.PatternRegexps()), DataTypeRef{}
+	case parse.ConstraintTimestamp:
+		if format, ok := c.Format(); ok {
+			return NewTimestampConstraintFormatted(format), DataTypeRef{}
 		}
-		return result, nil
+		return NewTimestampConstraint(), DataTypeRef{}
+	case parse.ConstraintDate:
+		return NewDateConstraint(), DataTypeRef{}
+	case parse.ConstraintUUID:
+		return NewUUIDConstraint(), DataTypeRef{}
+	case parse.ConstraintVector:
+		if c.VectorDims == nil {
+			return nil, DataTypeRef{}
+		}
+		return NewVectorConstraint(*c.VectorDims), DataTypeRef{}
+	case parse.ConstraintList:
+		return p.listConstraint(c)
+	case parse.ConstraintAlias:
+		return aliasConstraint(c)
 	}
-	return s, nil
+	return nil, DataTypeRef{} // unreachable: ConstraintKind has exactly the twelve forms above
 }
 
-// stripDelimiters removes block comment delimiters (/* */) from documentation
-// comments and trims surrounding whitespace from the inner content.
-func stripDelimiters(s string) string {
-	if len(s) >= 4 && strings.HasPrefix(s, "/*") && strings.HasSuffix(s, "*/") {
-		return strings.TrimSpace(s[2 : len(s)-2])
+// aliasConstraint is the one form yielding two outputs from one node: the
+// constraint resolved during completion, and the reference the LSP navigates
+// from. The span covers the whole reference, qualifier included, so
+// go-to-definition selects what the author wrote.
+func aliasConstraint(c *parse.Constraint) (Constraint, DataTypeRef) {
+	ref := c.Alias
+	if ref == nil {
+		return nil, DataTypeRef{}
 	}
-	return s
+	fullName := ref.Name
+	if ref.Qualifier != "" {
+		fullName = ref.Qualifier + "." + ref.Name
+	}
+	return NewAliasConstraint(fullName, nil), NewDataTypeRef(ref.Qualifier, ref.Name, ref.Span)
+}
+
+func integerConstraint(c *parse.Constraint) Constraint {
+	switch {
+	case c.IntMin != nil && c.IntMax != nil:
+		return IntegerBetween(*c.IntMin, *c.IntMax)
+	case c.IntMin != nil:
+		return IntegerMin(*c.IntMin)
+	case c.IntMax != nil:
+		return IntegerMax(*c.IntMax)
+	}
+	return NewIntegerConstraint()
+}
+
+func floatConstraint(c *parse.Constraint) Constraint {
+	switch {
+	case c.FloatMin != nil && c.FloatMax != nil:
+		return FloatBetween(*c.FloatMin, *c.FloatMax)
+	case c.FloatMin != nil:
+		return FloatMin(*c.FloatMin)
+	case c.FloatMax != nil:
+		return FloatMax(*c.FloatMax)
+	}
+	return NewFloatConstraint()
+}
+
+func stringConstraint(c *parse.Constraint) Constraint {
+	switch {
+	case c.LenMin != nil && c.LenMax != nil:
+		return StringLenBetween(*c.LenMin, *c.LenMax)
+	case c.LenMin != nil:
+		return StringMinLen(*c.LenMin)
+	case c.LenMax != nil:
+		return StringMaxLen(*c.LenMax)
+	}
+	return NewStringConstraint()
+}
+
+// listConstraint returns nil when the element type is unusable, because a list
+// of nothing is not a datatype the layer above can validate against. The
+// element's data-type reference passes through: List<Alias> is a property whose
+// declared type names that alias, and go-to-definition on it must land there.
+func (p *schemaParser) listConstraint(c *parse.Constraint) (Constraint, DataTypeRef) {
+	elem, ref := p.constraint(c.Elem)
+	if elem == nil {
+		return nil, DataTypeRef{}
+	}
+	switch {
+	case c.LenMin != nil && c.LenMax != nil:
+		return ListLenBetween(elem, *c.LenMin, *c.LenMax), ref
+	case c.LenMin != nil:
+		return ListMinLen(elem, *c.LenMin), ref
+	case c.LenMax != nil:
+		return ListMaxLen(elem, *c.LenMax), ref
+	}
+	return NewListConstraint(elem), ref
 }

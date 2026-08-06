@@ -22,17 +22,22 @@ import (
 func Parse(src []byte, sourceID location.SourceID) (*File, []diag.Issue) {
 	ps := mustParsers()
 	text := string(src)
-	toks, err := lexAll(ps, text)
+
+	lx, err := ps.def.LexString("", text)
 	if err != nil {
 		panic("parse: " + err.Error())
 	}
-	plex, err := lexer.Upgrade(&sliceLexer{toks: toks}, ps.elide...)
+	counted := &countingLexer{inner: lx}
+	plex, err := lexer.Upgrade(counted, ps.elide...)
 	if err != nil {
 		panic("parse: " + err.Error())
 	}
 
 	b := &builder{
-		ps: ps, src: text, sourceID: sourceID, toks: toks,
+		ps: ps, src: text, sourceID: sourceID,
+		// Range aliases the PeekingLexer's own storage rather than copying it,
+		// so the look-back slice costs nothing beyond the lex itself.
+		toks:       plex.Range(0, lexer.RawCursor(counted.n)),
 		lineStarts: lineStarts(text), file: &File{},
 	}
 	b.parseFile(plex)
@@ -40,15 +45,33 @@ func Parse(src []byte, sourceID location.SourceID) (*File, []diag.Issue) {
 	return b.file, b.issues
 }
 
-// lexAll drains the lexer into a slice, EOF token included. The builder keeps
-// the slice so it can look back over a failed construct's tokens, which the
-// forward-only PeekingLexer cannot do.
+// countingLexer records how many tokens passed through, which is the only way
+// to name the end of the PeekingLexer's raw token range from outside it.
+type countingLexer struct {
+	inner lexer.Lexer
+	n     int
+}
+
+func (c *countingLexer) Next() (lexer.Token, error) {
+	t, err := c.inner.Next()
+	if err != nil {
+		return t, err //nolint:wrapcheck // the caller panics on any lexer failure
+	}
+	c.n++
+	return t, nil
+}
+
+// bytesPerToken is the measured mean over the repo's fixtures. It sizes the
+// slice below so a whole-file lex does not grow and copy repeatedly.
+const bytesPerToken = 3
+
+// lexAll drains the lexer into a slice, EOF token included.
 func lexAll(ps *parsers, src string) ([]lexer.Token, error) {
 	lx, err := ps.def.LexString("", src)
 	if err != nil {
 		return nil, fmt.Errorf("lex source: %w", err)
 	}
-	var toks []lexer.Token
+	toks := make([]lexer.Token, 0, len(src)/bytesPerToken+8)
 	for {
 		t, err := lx.Next()
 		if err != nil {
@@ -59,21 +82,6 @@ func lexAll(ps *parsers, src string) ([]lexer.Token, error) {
 			return toks, nil
 		}
 	}
-}
-
-// sliceLexer replays an already-lexed token slice.
-type sliceLexer struct {
-	toks []lexer.Token
-	i    int
-}
-
-func (s *sliceLexer) Next() (lexer.Token, error) {
-	if s.i >= len(s.toks) {
-		return lexer.Token{Type: lexer.EOF}, nil
-	}
-	t := s.toks[s.i]
-	s.i++
-	return t, nil
 }
 
 type builder struct {

@@ -22,7 +22,7 @@ func parseSchema(t *testing.T, schemaSource string) (*schema.TestModel, diag.Res
 	require.NoError(t, err)
 
 	collector := diag.NewCollector(0)
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 	return model, collector.Result()
 }

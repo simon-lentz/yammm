@@ -2,6 +2,7 @@ package parse
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"strconv"
 
@@ -461,4 +462,16 @@ var reservedLC = map[string]bool{
 var propertyNameExclusions = map[string]bool{
 	"as": true, "part": true, "in": true,
 	"nil": true, "true": true, "false": true,
+}
+
+// ReservedKeywords returns every spelling the language refuses in a position
+// that admits either case — an import alias, a relation name, a reverse name.
+// It is the union of the lowercase keywords and the built-in datatype names,
+// and it is exported so a caller enforcing its own alias rule can compare
+// against this vocabulary rather than keep a second copy that silently drifts.
+func ReservedKeywords() map[string]bool {
+	out := make(map[string]bool, len(reservedLC)+len(datatypeKeywords))
+	maps.Copy(out, reservedLC)
+	maps.Copy(out, datatypeKeywords)
+	return out
 }

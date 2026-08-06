@@ -1,0 +1,35 @@
+// Every builtin datatype form, with and without bounds, so the loading
+// benchmark exercises each constraint constructor once.
+schema "bench_scalars"
+
+type ShortCode = String[2, 8]
+type Ratio = Float[0.0, 1.0]
+type Grade = Enum["a", "b", "c", "d"]
+
+type Measurement {
+	id String primary
+	label String[1, 120] required
+	note String
+	count Integer required
+	bounded_count Integer[0, 4096]
+	lower_only Integer[10, _]
+	upper_only Integer[_, 99]
+	signed Integer[-100, 100]
+	amount Float
+	bounded_amount Float[-1.5, 1.5]
+	enabled Boolean required
+	ratio Ratio
+	code ShortCode
+	grade Grade
+	tag Pattern["^[a-z][a-z0-9_]*$"]
+	dual Pattern["^a", "z$"]
+	seen_at Timestamp required
+	stamped Timestamp["2006-01-02T15:04:05Z07:00"]
+	on_date Date
+	external UUID
+	embedding Vector[128]
+	keywords List<String>
+	bounded_keywords List<String[1, 32]>[1, 16]
+	scores List<Float>
+	codes List<ShortCode>
+}

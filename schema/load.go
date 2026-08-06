@@ -634,7 +634,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	}
 
 	// Parse the schema
-	parser := newParser(sourceID, l.collector, l.sourceRegistry, l.sourceRegistry)
+	parser := newParser(sourceID, l.collector)
 	m := parser.Parse(content)
 
 	if m == nil {
