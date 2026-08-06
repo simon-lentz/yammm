@@ -251,7 +251,7 @@ type fltC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
 	Kw     bool        `parser:"@'Float'"`
-	Bounds *numBoundsC `parser:"@@?"`
+	Bounds *fltBoundsC `parser:"@@?"`
 }
 
 // numBoundsC is the signed numeric bound pair. Each bound keeps its own extent
@@ -263,7 +263,26 @@ type numBoundsC struct {
 	MaxTok boundTok `parser:"',' @@ ']'"`
 }
 
+// fltBoundsC is Float's bound pair. It exists apart from numBoundsC because the
+// two admit different tokens: an Integer bound is INTEGER or '_', and a Float
+// bound also takes FLOAT. Sharing one token set let Integer[1.5, 3] parse and
+// then fail a constraint check, which moves the diagnostic out of the syntax
+// category callers are told to filter on.
+type fltBoundsC struct {
+	Pos    lexer.Position
+	EndPos lexer.Position
+	MinTok fltBoundTok `parser:"'[' @@"`
+	MaxTok fltBoundTok `parser:"',' @@ ']'"`
+}
+
 type boundTok struct {
+	Pos    lexer.Position
+	EndPos lexer.Position
+	Neg    bool   `parser:"@'-'?"`
+	Text   string `parser:"@('_' | INTEGER)"`
+}
+
+type fltBoundTok struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
 	Neg    bool   `parser:"@'-'?"`
@@ -301,15 +320,21 @@ type lenTok struct {
 type enuC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool     `parser:"@'Enum'"`
-	Values []strTok `parser:"'[' @@ (',' @@)+ ','? ']'"`
+	Kw     bool `parser:"@'Enum'"`
+	// One value parses. The two-value minimum is a constraint check, not a
+	// grammar rule: rejecting the shape here made the promoted check
+	// unreachable by the spelling a user is most likely to write, so they got a
+	// punctuation complaint instead of the rule.
+	Values []strTok `parser:"'[' @@ (',' @@)* ','? ']'"`
 }
 
 type patC struct {
-	Pos      lexer.Position
-	EndPos   lexer.Position
-	Kw       bool     `parser:"@'Pattern'"`
-	Patterns []strTok `parser:"'[' @@ (',' @@)? ']'"`
+	Pos    lexer.Position
+	EndPos lexer.Position
+	Kw     bool `parser:"@'Pattern'"`
+	// Any number of patterns parses; the maximum of two is a constraint check.
+	// See enuC for why the arity does not live in the grammar.
+	Patterns []strTok `parser:"'[' @@ (',' @@)* ','? ']'"`
 }
 
 // strTok is one STRING token with its own extent, so per-value diagnostics

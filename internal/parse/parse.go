@@ -127,7 +127,9 @@ func (b *builder) parseHeader(plex *lexer.PeekingLexer) {
 		// A schema with no name is unusable, so the loader stops before
 		// completion. This failure is fatal where other syntax errors are not.
 		b.file.SchemaNameFailed = true
-		b.failed(plex, err, diag.Fatal, "in the schema header", func() { b.resync(plex, declStart) })
+		b.failed(plex, err, diag.Fatal, "in the schema header", func(past int) {
+			b.resync(plex, past, false, func(t *lexer.Token) bool { return declStart(b.ps.tok, t) })
+		})
 		return
 	}
 	b.file.NameRaw = head.Name.Raw
@@ -151,9 +153,9 @@ func (b *builder) parseImports(plex *lexer.PeekingLexer) {
 		}
 		imp, err := tryParse(b.ps.imp, plex)
 		if err != nil {
-			b.failed(plex, err, diag.Error, "in an import declaration", func() {
-				b.resync(plex, func(t *lexer.Token) bool {
-					return t.Value == "import" || declStart(t)
+			b.failed(plex, err, diag.Error, "in an import declaration", func(past int) {
+				b.resync(plex, past, true, func(t *lexer.Token) bool {
+					return declStart(b.ps.tok, t)
 				})
 			})
 			continue
@@ -196,8 +198,8 @@ func (b *builder) parseDecls(plex *lexer.PeekingLexer) {
 		}
 		head, headErr := tryParse(b.ps.typeHead, plex)
 		if headErr != nil {
-			b.failed(plex, deeperErr(dtErr, headErr), diag.Error, "in a declaration", func() {
-				b.resync(plex, declStart)
+			b.failed(plex, deeperErr(dtErr, headErr), diag.Error, "in a declaration", func(past int) {
+				b.resync(plex, past, true, func(t *lexer.Token) bool { return declStart(b.ps.tok, t) })
 			})
 			continue
 		}
@@ -250,7 +252,7 @@ func (b *builder) parseMembers(plex *lexer.PeekingLexer, nt *TypeDecl) int {
 		}
 		m, err := tryParse(b.ps.member, plex)
 		if err != nil {
-			b.failed(plex, err, diag.Error, "in a type body", func() { b.resyncMember(plex) })
+			b.failed(plex, err, diag.Error, "in a type body", func(past int) { b.resyncMember(plex, past) })
 			continue
 		}
 		b.addMember(nt, m)
@@ -285,7 +287,9 @@ func (b *builder) addAssociation(nt *TypeDecl, a *assocNode) {
 		Span:     b.spanOf(a.Pos, a.EndPos),
 	}
 	rel.Optional, rel.Many = multiplicityOf(a.Mult)
-	b.applyReverse(rel, a.Reverse)
+	if !b.applyReverse(rel, a.Reverse) {
+		return
+	}
 	if a.Body != nil {
 		for i := range a.Body.Props {
 			rel.Properties = append(rel.Properties, b.edgeProp(&a.Body.Props[i]))
@@ -295,36 +299,57 @@ func (b *builder) addAssociation(nt *TypeDecl, a *assocNode) {
 }
 
 func (b *builder) addComposition(nt *TypeDecl, c *compNode) {
-	name := c.Name.value()
-	if name == "" {
-		// A composition's name is what encodes its edge, so an unnamed one has
-		// nothing to record and is dropped rather than half-built.
-		b.report(diag.Error, diag.E_SYNTAX, b.spanOf(c.Pos, c.EndPos), "composition must have a name")
-		return
-	}
 	rel := &Relation{
 		Kind:     RelationComposition,
-		Name:     name,
+		Name:     c.Name.value(),
 		NameSpan: b.spanOf(c.Name.Pos, c.Name.EndPos),
 		Target:   b.typeRef(&c.Target),
 		Doc:      stripDoc(c.Doc),
 		Span:     b.spanOf(c.Pos, c.EndPos),
 	}
 	rel.Optional, rel.Many = multiplicityOf(c.Mult)
-	b.applyReverse(rel, c.Reverse)
+	if !b.applyReverse(rel, c.Reverse) {
+		return
+	}
 	nt.Relations = append(nt.Relations, rel)
 }
 
 // applyReverse fills the backward direction. With no reverse written, the edge
 // is reachable optionally and singly from the far side.
-func (b *builder) applyReverse(rel *Relation, rev *reverseNode) {
+func (b *builder) applyReverse(rel *Relation, rev *reverseNode) bool {
 	if rev == nil {
 		rel.ReverseOptional, rel.ReverseMany = true, false
-		return
+		return true
+	}
+	// A multiplicity is optional, so a nil one usually means none was written.
+	// It also means one was written and rejected, and the two are
+	// indistinguishable from the node alone — the '(' that opens it is left in
+	// the stream. Recording the written-nothing default there would put a
+	// cardinality in the tree that the source contradicts, so the relation is
+	// dropped instead. The leftover text draws its own diagnostic.
+	if rev.Mult == nil && b.startsMultiplicity(rev.EndPos.Offset) {
+		return false
 	}
 	rel.Backref = rev.Name.value()
 	rel.BackrefSpan = b.spanOf(rev.Name.Pos, rev.Name.EndPos)
 	rel.ReverseOptional, rel.ReverseMany = multiplicityOf(rev.Mult)
+	return true
+}
+
+// startsMultiplicity reports whether the first meaningful token at or after
+// offset opens a multiplicity. b.toks is the un-elided stream, so whitespace
+// and line comments are stepped over here.
+func (b *builder) startsMultiplicity(offset int) bool {
+	i, _ := slices.BinarySearchFunc(b.toks, offset, func(t lexer.Token, target int) int {
+		return t.Pos.Offset - target
+	})
+	for ; i < len(b.toks); i++ {
+		if slices.Contains(b.ps.elide, b.toks[i].Type) {
+			continue
+		}
+		return b.toks[i].Type == b.ps.tok.lpar
+	}
+	return false
 }
 
 func (b *builder) edgeProp(p *relPropNode) *Property {
@@ -449,9 +474,14 @@ func (b *builder) addInvariant(nt *TypeDecl, inv *invNode) {
 		Doc:         stripDoc(inv.Doc),
 		Span:        b.spanOf(inv.Pos, inv.EndPos),
 	}
-	if msg, ok := b.unquoteAt(&inv.Msg, "invalid invariant message"); ok {
-		ni.Message = msg
+	msg, ok := b.unquoteAt(&inv.Msg, "invalid invariant message")
+	if !ok {
+		// The message is what an invariant shows when it fails, so one that
+		// will not unquote has nothing to show. Production drops the invariant
+		// here too; keeping it put an empty string in front of the user.
+		return
 	}
+	ni.Message = msg
 	nt.Invariants = append(nt.Invariants, ni)
 }
 
@@ -484,7 +514,12 @@ func tryParse[G any](p *participle.Parser[G], plex *lexer.PeekingLexer) (*G, err
 
 // resync consumes at least one token, then skips forward — stepping over whole
 // brace-delimited bodies — until EOF or a token that starts a new declaration.
-func (b *builder) resync(plex *lexer.PeekingLexer, start func(*lexer.Token) bool) {
+// resync skips forward to the next token start admits, tracking brace depth so
+// whole bodies are stepped over. past is a byte floor: the failed parse reached
+// it, so everything before it belongs to the construct that failed and cannot
+// begin the next one. atLeastOne forces progress; the header path clears it,
+// because there the failing token is itself the declaration to keep.
+func (b *builder) resync(plex *lexer.PeekingLexer, past int, atLeastOne bool, start func(*lexer.Token) bool) {
 	lb, rb := b.ps.tok.lbrace, b.ps.tok.rbrace
 	depth, consumed := 0, 0
 	for {
@@ -492,7 +527,7 @@ func (b *builder) resync(plex *lexer.PeekingLexer, start func(*lexer.Token) bool
 		if t.EOF() {
 			return
 		}
-		if consumed > 0 && depth <= 0 && start(t) {
+		if (consumed > 0 || !atLeastOne) && depth <= 0 && t.Pos.Offset >= past && start(t) {
 			return
 		}
 		plex.Next()
@@ -509,8 +544,21 @@ func (b *builder) resync(plex *lexer.PeekingLexer, start func(*lexer.Token) bool
 // resyncMember re-syncs inside a type body. It stops at the body's closing
 // brace without consuming it, so the member loop is the one that closes the
 // type, or at the next member start.
-func (b *builder) resyncMember(plex *lexer.PeekingLexer) {
+func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int) {
 	lb, rb := b.ps.tok.lbrace, b.ps.tok.rbrace
+	// A member that began with a marker cannot end at a bare name: every name
+	// between the marker and the next member belongs to it — a relation's own
+	// name, its target, its multiplicity words. Stopping at one re-parses the
+	// member's own text and reports the same defect again. A member that began
+	// with a name has no such marker to key on, so there the byte floor past
+	// the failed parse is the only bound available.
+	// Only a member that began with a bare name can end at one. A marker-led
+	// member owns every name up to the next marker, and a member that began
+	// with a token no member can begin with — leftover text from a construct
+	// that already parsed — gives no clue where the next one starts, so both
+	// scan to a marker or the body's brace.
+	first := plex.Peek()
+	markerOnly := marksMember(b.ps.tok, first) || !memberStart(b.ps.tok, first)
 	depth, consumed := 0, 0
 	for {
 		t := plex.Peek()
@@ -520,7 +568,19 @@ func (b *builder) resyncMember(plex *lexer.PeekingLexer) {
 		if depth == 0 && t.Type == rb {
 			return
 		}
-		if consumed > 0 && depth == 0 && b.memberStart(t) {
+		stops := memberStart(b.ps.tok, t)
+		if markerOnly {
+			stops = marksMember(b.ps.tok, t)
+		}
+		// The token the parse failed on belongs to the failed member unless it
+		// is a marker, which can only be the start of the next one. Without
+		// that exception a property's own "primary" modifier reads as the next
+		// property; with it too broadly, a bare "-->" swallows the relation
+		// that follows it.
+		if t.Pos.Offset == past && !marksMember(b.ps.tok, t) {
+			stops = false
+		}
+		if consumed > 0 && depth == 0 && t.Pos.Offset >= past && stops {
 			return
 		}
 		plex.Next()
@@ -534,21 +594,41 @@ func (b *builder) resyncMember(plex *lexer.PeekingLexer) {
 	}
 }
 
-func declStart(t *lexer.Token) bool {
+// declStart reports whether t can begin a declaration. "import" is one: an
+// import that parses must survive a failed header, which is what leaving it out
+// cost. A doc comment is recognised by its token type, because the rule table
+// lets "/*/" lex as REGEXP and a text-prefix test cannot tell the two apart.
+func declStart(tok tokenTypes, t *lexer.Token) bool {
 	switch t.Value {
-	case "type", "abstract", "part":
+	case "type", "abstract", "part", "import":
 		return true
 	}
-	return strings.HasPrefix(t.Value, "/*")
+	return t.Type == tok.docComment
 }
 
-func (b *builder) memberStart(t *lexer.Token) bool {
+// marksMember reports whether t is one of the leading markers that open a
+// member of a kind other than a property. They are the only tokens that can end
+// a marker-led member, because a property name cannot appear between them.
+func marksMember(tok tokenTypes, t *lexer.Token) bool {
 	switch {
-	case strings.HasPrefix(t.Value, "/*"), t.Value == "@@", t.Value == "!",
+	case t.Type == tok.docComment, t.Value == "@@", t.Value == "!",
 		t.Value == "-->", t.Value == "*->":
 		return true
 	}
-	return t.Type == b.ps.tok.lcWord && !reservedLC[t.Value]
+	return false
+}
+
+// memberStart reports whether t can begin a type-body member. The property
+// position excludes only propertyNameExclusions, not all of reservedLC: eleven
+// contextual keywords are legal property names, and testing the wider set made
+// recovery skip them without a word.
+func memberStart(tok tokenTypes, t *lexer.Token) bool {
+	switch {
+	case t.Type == tok.docComment, t.Value == "@@", t.Value == "!",
+		t.Value == "-->", t.Value == "*->":
+		return true
+	}
+	return t.Type == tok.lcWord && !propertyNameExclusions[t.Value]
 }
 
 // deeperErr picks whichever error reached further into the input, which is the
@@ -574,10 +654,22 @@ func deeperErr(a, c error) error {
 // re-syncs first, because the extent recovery skipped is the extent the failed
 // construct covers, and only then does the whole of a malformed construct
 // become visible. what names the construct, for the diagnostic.
-func (b *builder) failed(plex *lexer.PeekingLexer, err error, sev diag.Severity, what string, resync func()) {
+func (b *builder) failed(plex *lexer.PeekingLexer, err error, sev diag.Severity, what string, resync func(past int)) {
 	from := plex.Peek().Pos.Offset
-	resync()
+	resync(resumeFloor(err, from))
 	b.syntaxErr(sev, err, what, from, plex.Peek().Pos.Offset)
+}
+
+// resumeFloor returns the byte the failed parse reached. Recovery that restarts
+// before it re-parses text the failed construct already owns and reports the
+// same defect a second time. A participle error carrying no position falls back
+// to from, which bounds nothing and leaves the old behaviour.
+func resumeFloor(err error, from int) int {
+	var pe participle.Error
+	if errors.As(err, &pe) {
+		return pe.Position().Offset
+	}
+	return from
 }
 
 // syntaxErr turns a participle failure into one diagnostic. A malformed
@@ -599,10 +691,26 @@ func (b *builder) syntaxErr(sev diag.Severity, err error, what string, from, to 
 	var pe participle.Error
 	if errors.As(err, &pe) {
 		at := pe.Position().Offset
-		b.report(sev, diag.E_SYNTAX, b.spanFromOffsets(at, at), pe.Message())
+		b.report(sev, diag.E_SYNTAX, b.tokenSpanAt(at), pe.Message())
 		return
 	}
-	b.report(sev, diag.E_SYNTAX, location.Span{Source: b.sourceID}, err.Error())
+	// An error carrying no position of its own: report it on the construct's
+	// first token, since blaming byte 0 points at an unrelated line.
+	b.report(sev, diag.E_SYNTAX, b.tokenSpanAt(from), err.Error())
+}
+
+// tokenSpanAt returns the extent of the token starting at offset, or a
+// zero-width span there when no token does. Every Pratt-parser failure reaches
+// this: reporting the bare position instead left an editor with nothing to
+// underline, because a zero-width range highlights no character.
+func (b *builder) tokenSpanAt(offset int) location.Span {
+	i, ok := slices.BinarySearchFunc(b.toks, offset, func(t lexer.Token, target int) int {
+		return t.Pos.Offset - target
+	})
+	if ok && i < len(b.toks) {
+		return b.tokenSpan(&b.toks[i])
+	}
+	return b.spanFromOffsets(offset, offset)
 }
 
 // firstInvalidNumber returns the earliest malformed-numeric token starting in

@@ -11,8 +11,8 @@ import (
 // These rows record what ten sites do today, so a replacement is scored against
 // a measured bar rather than a remembered one. They are neither a survey of the
 // grammar nor a statement of the rule that decides which construct survives.
-// Two rows draw a second diagnostic, marked below, and record a defect rather
-// than an intent.
+// Every row draws exactly one diagnostic; the duplicates two of them once
+// recorded went with the recovery predicate's repair.
 var abandonedGroups = []struct {
 	name   string
 	src    string
@@ -45,7 +45,7 @@ var abandonedGroups = []struct {
 		want:   `unexpected token "[" in a type body`,
 		anchor: "[",
 		types:  1,
-		count:  2,
+		count:  1,
 	},
 	{
 		name:   "timestamp format",
@@ -88,14 +88,12 @@ var abandonedGroups = []struct {
 		count:  1,
 	},
 	{
-		// Both diagnostics are byte-identical — same code, span and text — so
-		// a reader sees one error twice. Recorded, not endorsed.
 		name:   "multiplicity",
 		src:    "schema \"s\"\ntype T {\n\t--> r (many:one) B\n}\n",
 		want:   `unexpected token "(" in a type body`,
 		anchor: "(",
 		types:  1,
-		count:  2,
+		count:  1,
 	},
 	{
 		name:   "extends clause",

@@ -103,7 +103,7 @@ func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
 		switch {
 		case t.Type == p.tok.lbrack && precAt >= minPrec:
 			p.next()
-			args, err := p.exprListUntil(p.tok.rbrack)
+			args, err := p.exprListUntil(p.tok.rbrack, false)
 			if err != nil {
 				return nil, err
 			}
@@ -222,7 +222,7 @@ func (p *exprParser) prefix() (expr.Expression, error) {
 		return inner, nil
 	case p.tok.lbrack:
 		p.next()
-		elems, err := p.exprListUntil(p.tok.rbrack)
+		elems, err := p.exprListUntil(p.tok.rbrack, false)
 		if err != nil {
 			return nil, err
 		}
@@ -312,7 +312,7 @@ func (p *exprParser) fcall(lhs expr.Expression, name string) (expr.Expression, e
 	var args, params, body expr.Expression
 	if p.lx.Peek().Type == p.tok.lpar {
 		p.next()
-		list, err := p.exprListUntil(p.tok.rpar)
+		list, err := p.exprListUntil(p.tok.rpar, true)
 		if err != nil {
 			return nil, err
 		}
@@ -378,11 +378,23 @@ func (p *exprParser) lambdaParams() ([]string, error) {
 // tolerant expression list terminated by the named closing token, which it
 // consumes. The empty list is non-nil, because exprcomp builds its own through
 // make and a nil slice compares unequal to that under cmp and DeepEqual.
-func (p *exprParser) exprListUntil(closer lexer.TokenType) ([]expr.Expression, error) {
+func (p *exprParser) exprListUntil(closer lexer.TokenType, bareComma bool) ([]expr.Expression, error) {
 	out := []expr.Expression{}
 	for {
 		t := p.lx.Peek()
 		if t.Type == closer {
+			p.next()
+			return out, nil
+		}
+		// A call's argument list admits one comma with no arguments at all:
+		// the grammar's optional trailing COMMA sits outside its argument
+		// group, so "f(,)" is legal. The list and index forms put the same
+		// COMMA inside their group, so "[,]" is not, and they pass false.
+		if bareComma && len(out) == 0 && t.Type == p.tok.comma {
+			p.next()
+			if p.lx.Peek().Type != closer {
+				return nil, p.errf(p.lx.Peek(), "expected a closing delimiter after ','")
+			}
 			p.next()
 			return out, nil
 		}

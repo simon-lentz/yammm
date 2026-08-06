@@ -182,9 +182,11 @@ func TestRender_Discriminates(t *testing.T) {
 			"schema \"a\"\ntype A {\n\tt List<String> primary\n\t! \"m\" t -> Contains(\"y\")\n}\n",
 		},
 		{
+			// Identical bodies: the parameter list is the only difference, so
+			// the pair cannot pass on a body difference instead.
 			"lambda parameters",
-			"schema \"a\"\ntype A {\n\tt List<Integer> primary\n\t! \"m\" t -> Count |$x| { $x > 0 }\n}\n",
-			"schema \"a\"\ntype A {\n\tt List<Integer> primary\n\t! \"m\" t -> Count |$y| { $y > 0 }\n}\n",
+			"schema \"a\"\ntype A {\n\tt List<Integer> primary\n\t! \"m\" t -> Count |$x| { 1 > 0 }\n}\n",
+			"schema \"a\"\ntype A {\n\tt List<Integer> primary\n\t! \"m\" t -> Count |$y| { 1 > 0 }\n}\n",
 		},
 	}
 	for _, tc := range tests {

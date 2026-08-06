@@ -97,7 +97,7 @@ func (b *builder) intConstraint(c *intC, span location.Span) *Constraint {
 // suppress the inverted-bounds check while an unbounded one must not.
 func (b *builder) intBound(t *boundTok) (*int64, bool) {
 	if t.Text == unbounded {
-		b.warnPointlessMinus(t)
+		b.warnPointlessMinus(t.Neg, t.Pos.Offset)
 		return nil, false
 	}
 	text := t.Text
@@ -120,7 +120,7 @@ func (b *builder) floatConstraint(c *fltC, span location.Span) *Constraint {
 		return out
 	}
 	whole := b.spanOf(c.Pos, c.EndPos)
-	out.Bounds = b.boundsOf(bounds)
+	out.Bounds = b.fltBoundsOf(bounds)
 	minV, badMin := b.floatBound(&bounds.MinTok)
 	maxV, badMax := b.floatBound(&bounds.MaxTok)
 	out.FloatMin, out.FloatMax = minV, maxV
@@ -131,9 +131,9 @@ func (b *builder) floatConstraint(c *fltC, span location.Span) *Constraint {
 	return out
 }
 
-func (b *builder) floatBound(t *boundTok) (*float64, bool) {
+func (b *builder) floatBound(t *fltBoundTok) (*float64, bool) {
 	if t.Text == unbounded {
-		b.warnPointlessMinus(t)
+		b.warnPointlessMinus(t.Neg, t.Pos.Offset)
 		return nil, false
 	}
 	text := t.Text
@@ -150,12 +150,14 @@ func (b *builder) floatBound(t *boundTok) (*float64, bool) {
 }
 
 // warnPointlessMinus reports a minus sign written before the unbounded marker,
-// anchored on the sign alone since that is the character to delete.
-func (b *builder) warnPointlessMinus(t *boundTok) {
-	if !t.Neg {
+// anchored on the sign alone since that is the character to delete. It takes
+// the sign and its position rather than a bound node, because Integer and Float
+// bounds are different types.
+func (b *builder) warnPointlessMinus(neg bool, at int) {
+	if !neg {
 		return
 	}
-	span := b.spanFromOffsets(t.Pos.Offset, t.Pos.Offset+1)
+	span := b.spanFromOffsets(at, at+1)
 	b.report(diag.Warning, diag.E_INVALID_CONSTRAINT, span,
 		"minus sign before '_' (unbounded) has no effect")
 }
@@ -252,8 +254,19 @@ func (b *builder) enumConstraint(c *enuC, span location.Span) *Constraint {
 	return out
 }
 
+// maxPatterns is the largest pattern list a Pattern constraint accepts. The
+// grammar admits any number so this check can report the rule; a list past the
+// cap is reported and truncated, so nothing downstream compiles a pattern the
+// constraint does not carry.
+const maxPatterns = 2
+
 func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
 	out := &Constraint{Kind: ConstraintPattern, Span: span}
+	if len(c.Patterns) > maxPatterns {
+		b.reportf(diag.E_INVALID_CONSTRAINT, span,
+			"pattern constraint exceeds maximum of %d patterns (got %d)", maxPatterns, len(c.Patterns))
+		c.Patterns = c.Patterns[:maxPatterns]
+	}
 	for i := range c.Patterns {
 		p := &c.Patterns[i]
 		lit := Literal{Raw: p.Raw, Span: b.spanOf(p.Pos, p.EndPos)}
@@ -318,6 +331,16 @@ func (b *builder) vectorConstraint(c *vecC, span location.Span) *Constraint {
 }
 
 // ---- written-argument capture ----
+
+// fltBoundsOf mirrors boundsOf for Float's own bound pair, which carries a
+// different token type because the two admit different spellings.
+func (b *builder) fltBoundsOf(bd *fltBoundsC) *Bounds {
+	return &Bounds{
+		Min:  Bound{Text: bd.MinTok.Text, Neg: bd.MinTok.Neg, Span: b.spanOf(bd.MinTok.Pos, bd.MinTok.EndPos)},
+		Max:  Bound{Text: bd.MaxTok.Text, Neg: bd.MaxTok.Neg, Span: b.spanOf(bd.MaxTok.Pos, bd.MaxTok.EndPos)},
+		Span: b.spanOf(bd.Pos, bd.EndPos),
+	}
+}
 
 func (b *builder) boundsOf(bd *numBoundsC) *Bounds {
 	return &Bounds{

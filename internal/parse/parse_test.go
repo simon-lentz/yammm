@@ -164,6 +164,30 @@ func assertVehicle(t *testing.T, ty *TypeDecl) {
 	}
 }
 
+// TestParse_AnnotationArgumentsKeepBothIdentifierSpellings covers the two
+// identifier branches of arg. ArgIdentifier is the zero Kind, so a branch that
+// stops recording its text yields an argument that still reads as an
+// identifier and carries "" — which only the text assertion catches.
+func TestParse_AnnotationArgumentsKeepBothIdentifierSpellings(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary @audit(Owner, owner)\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %v", issues)
+	}
+	args := file.Types[0].Properties[0].Annotations[0].Args
+	if len(args) != 2 {
+		t.Fatalf("got %d arguments, want 2", len(args))
+	}
+	for i, want := range []string{"Owner", "owner"} {
+		if args[i].Kind != ArgIdentifier || args[i].Text != want {
+			t.Errorf("arg %d = %+v, want identifier %q", i, args[i], want)
+		}
+		if got := src[args[i].Span.Start.Byte:args[i].Span.End.Byte]; got != want {
+			t.Errorf("arg %d span covers %q, want %q", i, got, want)
+		}
+	}
+}
+
 func TestParse_SpansAreByteExact(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n}\n"
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
@@ -226,8 +250,8 @@ func TestParse_DiagnosticsNameNoGrammarTypes(t *testing.T) {
 		"schema \"s\"\nimport \"a.yammm\" as one\n",
 		"schema \"s\"\ntype T {\n\tn Integer[99999999999999999999, 5]\n}\n",
 		// The Pratt parser's failures are the only ones that reach syntaxErr's
-		// participle.Error and fallback branches, which pass a message through
-		// untouched — the one channel by which a Go type name can leak.
+		// participle.Error branch, which passes a message through untouched —
+		// the one channel by which a Go type name can leak.
 		"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" +\n}\n",
 		"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id ->\n}\n",
 		"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" 1 +* 2\n}\n",
@@ -685,5 +709,114 @@ func TestParse_ReportsEveryDocumentedCode(t *testing.T) {
 	if got := diag.E_INVALID_INVARIANT.Category(); got != diag.CategorySchema {
 		t.Errorf("E_INVALID_INVARIANT category = %v, want %v — the doc's warning "+
 			"about the CategorySyntax filter no longer holds", got, diag.CategorySchema)
+	}
+}
+
+// TestParse_CallArgumentsAcceptOneBareComma pins the shape the grammar's
+// arguments production admits and the list and index forms do not: its optional
+// trailing COMMA sits outside the argument group, so "f(,)" is a legal empty
+// argument list. Rejecting it stopped a schema that loads today from loading.
+func TestParse_CallArgumentsAcceptOneBareComma(t *testing.T) {
+	body := func(e string) string {
+		return "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + e + "\n}\n"
+	}
+	t.Run("accepted in a call", func(t *testing.T) {
+		_, issues := Parse([]byte(body("id -> f(,)")), location.NewSourceID("s.yammm"))
+		if len(issues) != 0 {
+			t.Errorf("f(,) drew %v, want none", issues)
+		}
+	})
+	for _, tc := range []struct{ name, expr, want string }{
+		// The message is pinned because the expression parser's own rejection
+		// anchors inside the call, where the member loop's fallback anchors on
+		// the closing paren a token later.
+		{"two commas in a call", "id -> f(,,)", "expected a closing delimiter after ','"},
+		{"a bare comma in a list literal", "[,] != nil", ""},
+		{"a bare comma in an index", "id[,] != nil", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, issues := Parse([]byte(body(tc.expr)), location.NewSourceID("s.yammm"))
+			if len(issues) != 1 {
+				t.Fatalf("%s drew %d diagnostics, want 1: %v", tc.expr, len(issues), issues)
+			}
+			if tc.want != "" && issues[0].Message() != tc.want {
+				t.Errorf("message = %q, want %q", issues[0].Message(), tc.want)
+			}
+		})
+	}
+}
+
+// TestParse_IntegerBoundsRejectAFloat pins the split between the two numeric
+// bound sets. An Integer bound is INTEGER or '_'; a Float bound also takes
+// FLOAT. Sharing one set let Integer[1.5, 3] parse and then fail a constraint
+// check, which moves the diagnostic out of diag.CategorySyntax — the category
+// the package doc tells callers to filter on.
+func TestParse_IntegerBoundsRejectAFloat(t *testing.T) {
+	prop := func(p string) string {
+		return "schema \"s\"\ntype T {\n\tid String primary\n\t" + p + "\n}\n"
+	}
+	t.Run("Integer rejects a float bound as syntax", func(t *testing.T) {
+		_, issues := Parse([]byte(prop("n Integer[1.5, 3]")), location.NewSourceID("s.yammm"))
+		if len(issues) != 1 {
+			t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
+		}
+		if issues[0].Code() != diag.E_SYNTAX {
+			t.Errorf("code = %s, want E_SYNTAX — a constraint code leaves the syntax category",
+				issues[0].Code())
+		}
+	})
+	for _, tc := range []struct{ name, prop string }{
+		{"Float takes a float bound", "n Float[1.5, 3.5]"},
+		{"Float takes an integer bound", "n Float[1, 3]"},
+		{"Integer takes an integer bound", "n Integer[1, 3]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, issues := Parse([]byte(prop(tc.prop)), location.NewSourceID("s.yammm"))
+			if len(issues) != 0 {
+				t.Errorf("%s drew %v, want none", tc.prop, issues)
+			}
+		})
+	}
+}
+
+// TestParse_InvariantWithAnUnquotableMessageIsNotKept pins that an invariant
+// whose message will not unquote is dropped rather than recorded with an empty
+// one. The message is what the invariant shows when it fails, so keeping it put
+// blank text in front of the user; production drops it here too.
+func TestParse_InvariantWithAnUnquotableMessageIsNotKept(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\\x\" id != nil\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 1 {
+		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
+	}
+	if len(file.Types) != 1 {
+		t.Fatalf("got %d types, want 1", len(file.Types))
+	}
+	if got := len(file.Types[0].Invariants); got != 0 {
+		t.Errorf("recorded %d invariants, want 0 — one was kept with no message", got)
+	}
+}
+
+// TestParse_ExpressionFailuresCarryAnExtent pins that a Pratt-parser failure
+// underlines the token it stopped on. Every such failure reaches syntaxErr's
+// participle.Error branch, which reported the bare position — a zero-width
+// range highlights no character, so an editor showed nothing at all.
+func TestParse_ExpressionFailuresCarryAnExtent(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"a binary operator with no right operand", "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id >\n}\n"},
+		{"an unclosed group", "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" ((id\n}\n"},
+		{"a datatype declaration with no constraint", "schema \"s\"\ntype A = \n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			if len(issues) == 0 {
+				t.Fatal("no diagnostic")
+			}
+			sp := issues[0].Span()
+			if sp.End.Byte <= sp.Start.Byte && sp.Start.Byte < len(tc.src) {
+				t.Errorf("span [%d,%d) is zero-width inside the source — nothing is underlined",
+					sp.Start.Byte, sp.End.Byte)
+			}
+		})
 	}
 }

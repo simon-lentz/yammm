@@ -143,15 +143,17 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 	// The composition arm of multiplicityOf has no other reader. (one) is the
 	// spelling to assert: (many) is (true, true), which a hardcoded pair also
 	// satisfies, so it cannot tell a real read of c.Mult from a constant.
-	one, issues := Parse([]byte(relSource("*-> PARTS (one) Wheel / owner")), location.NewSourceID("s.yammm"))
+	// An asymmetric spelling, so swapping the two fields is detectable: every
+	// symmetric pair survives a swap, and (many) is one.
+	asym, issues := Parse([]byte(relSource("*-> PARTS (one:many) Wheel / owner")), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
-	if len(one.Types) == 0 || len(one.Types[0].Relations) != 1 {
-		t.Fatalf("got %d types, want one carrying one relation", len(one.Types))
+	if len(asym.Types) == 0 || len(asym.Types[0].Relations) != 1 {
+		t.Fatalf("got %d types, want one carrying one relation", len(asym.Types))
 	}
-	if got := one.Types[0].Relations[0]; got.Optional || got.Many {
-		t.Errorf("(one) → optional=%v many=%v, want both false", got.Optional, got.Many)
+	if got := asym.Types[0].Relations[0]; got.Optional || !got.Many {
+		t.Errorf("(one:many) → optional=%v many=%v, want false true", got.Optional, got.Many)
 	}
 	if !rels[0].Optional || !rels[0].Many {
 		t.Errorf("(many) → optional=%v many=%v, want both true", rels[0].Optional, rels[0].Many)
@@ -309,5 +311,40 @@ func TestRelation_SpansCoverTheWholeDeclaration(t *testing.T) {
 	}
 	if got := src[rel.BackrefSpan.Start.Byte:rel.BackrefSpan.End.Byte]; got != "car" {
 		t.Errorf("backref span covers %q, want car", got)
+	}
+}
+
+// TestRelation_RejectedReverseMultiplicityRecordsNoRelation pins that a reverse
+// multiplicity the grammar refuses does not become the written-nothing default.
+// An optional group is nil both when nothing was written and when what was
+// written was rejected, and defaulting there put a cardinality in the tree that
+// the source contradicts.
+func TestRelation_RejectedReverseMultiplicityRecordsNoRelation(t *testing.T) {
+	for _, tc := range []struct {
+		name, member string
+		wantRels     int
+	}{
+		{"association, rejected", "--> r Wheel /back (many:one)", 0},
+		{"composition, rejected", "*-> c Wheel /back (many:one)", 0},
+		{"association, valid", "--> r Wheel /back (one:many)", 1},
+		{"association, none written", "--> r Wheel /back", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, _ := Parse([]byte(relSource(tc.member)), location.NewSourceID("s.yammm"))
+			if len(file.Types) == 0 {
+				t.Fatal("no type recorded")
+			}
+			if got := len(file.Types[0].Relations); got != tc.wantRels {
+				t.Fatalf("relations = %d, want %d", got, tc.wantRels)
+			}
+			if tc.wantRels == 0 {
+				return
+			}
+			rel := file.Types[0].Relations[0]
+			if tc.name == "association, valid" && (rel.ReverseOptional || !rel.ReverseMany) {
+				t.Errorf("(one:many) → reverse optional=%v many=%v, want false true",
+					rel.ReverseOptional, rel.ReverseMany)
+			}
+		})
 	}
 }

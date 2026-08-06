@@ -122,6 +122,7 @@ type tokenTypes struct {
 	uscore, variable                lexer.TokenType
 	str, integer, float, regexp     lexer.TokenType
 	ucWord, lcWord, invalidNumber   lexer.TokenType
+	docComment                      lexer.TokenType
 }
 
 // resolveTokens reports every name the rule table does not define, rather than
@@ -149,6 +150,7 @@ func resolveTokens(syms map[string]lexer.TokenType) (tokenTypes, error) {
 	t.float, t.regexp = get("FLOAT"), get("REGEXP")
 	t.ucWord, t.lcWord = get("UC_WORD"), get("LC_WORD")
 	t.invalidNumber = get("INVALID_NUMBER")
+	t.docComment = get("DOC_COMMENT")
 	if len(missing) > 0 {
 		return t, fmt.Errorf("lexer rule table is missing %s", strings.Join(missing, ", "))
 	}

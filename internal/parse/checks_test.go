@@ -378,3 +378,43 @@ func assertIssues(t *testing.T, src string, base int, got []diag.Issue, want []w
 		}
 	}
 }
+
+// TestChecks_ArityRulesAreChecksNotGrammar pins that the two arity rules report
+// the rule rather than a punctuation complaint. The grammar admits the shape so
+// the promoted check is reachable by the spelling a user actually writes;
+// rejecting it in the grammar left only "unexpected token".
+func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
+	for _, tc := range []struct{ name, prop, want string }{
+		{"one enum value", "e Enum[\"a\"]", "enum must have at least two values (got 1)"},
+		{"three patterns", "p Pattern[\"a\", \"b\", \"c\"]", "pattern constraint exceeds maximum of 2 patterns (got 3)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + tc.prop + "\n}\n"
+			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			if len(issues) != 1 {
+				t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
+			}
+			if issues[0].Code() != diag.E_INVALID_CONSTRAINT || issues[0].Message() != tc.want {
+				t.Errorf("got %s %q, want E_INVALID_CONSTRAINT %q",
+					issues[0].Code(), issues[0].Message(), tc.want)
+			}
+		})
+	}
+}
+
+// TestChecks_PatternListIsTruncatedAtTheCap pins that a rejected pattern list
+// does not reach the constraint. The grammar now admits any number, so without
+// the truncation a caller compiling PatternRegexps would enforce patterns the
+// constraint reported as too many.
+func TestChecks_PatternListIsTruncatedAtTheCap(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\tp Pattern[\"a\", \"b\", \"c\", \"d\"]\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 1 {
+		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
+	}
+	c := file.Types[0].Properties[1].Constraint
+	if got := len(c.PatternRegexps()); got != maxPatterns {
+		t.Errorf("PatternRegexps() = %d, want %d — the list past the cap must not reach the constraint",
+			got, maxPatterns)
+	}
+}

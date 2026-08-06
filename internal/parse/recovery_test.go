@@ -1,8 +1,11 @@
 package parse
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/alecthomas/participle/v2/lexer"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
@@ -162,6 +165,49 @@ func TestRecovery_SpanOfClampsAnInvertedPair(t *testing.T) {
 	}
 }
 
+// TestRecovery_ErrorWithoutAPositionIsStillReported covers syntaxErr's last
+// branch, which no source reaches: every failure the parsers raise implements
+// participle.Error. Deleting the branch would drop the diagnostic for a foreign
+// error while recovery still skipped the construct, which is silent acceptance.
+func TestRecovery_ErrorWithoutAPositionIsStillReported(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n}\n"
+	from := strings.Index(src, "id")
+	b := &builder{
+		ps:         mustParsers(),
+		src:        src,
+		sourceID:   location.NewSourceID("s.yammm"),
+		lineStarts: lineStarts(src),
+		toks:       lexTokens(t, src),
+	}
+
+	b.syntaxErr(diag.Error, errors.New("lexer stopped: bad rune"), "in a type body", from, len(src))
+
+	if len(b.issues) != 1 {
+		t.Fatalf("got %d issues, want 1", len(b.issues))
+	}
+	got := b.issues[0]
+	if got.Code() != diag.E_SYNTAX || got.Severity() != diag.Error {
+		t.Errorf("got %s/%v, want E_SYNTAX/error", got.Code(), got.Severity())
+	}
+	if got.Message() != "lexer stopped: bad rune" {
+		t.Errorf("message = %q, want the error's own text", got.Message())
+	}
+	if covered := src[got.Span().Start.Byte:got.Span().End.Byte]; covered != "id" {
+		t.Errorf("span covers %q, want the construct's first token %q", covered, "id")
+	}
+}
+
+// lexTokens returns the un-elided token slice Parse builds, so a test can drive
+// a builder method that reads it.
+func lexTokens(t *testing.T, src string) []lexer.Token {
+	t.Helper()
+	toks, err := lexAll(mustParsers(), src)
+	if err != nil {
+		t.Fatalf("lex: %v", err)
+	}
+	return toks
+}
+
 // TestRecovery_PositionAtClampsAnOutOfRangeOffset covers the guard that keeps
 // positionAt from slicing past the source. Every offset-derived span funnels
 // through it, so an unclamped one indexes b.src out of range and panics out of
@@ -207,8 +253,8 @@ func TestRecovery_UnclosedBodyReportsAtEOF(t *testing.T) {
 func TestRecovery_LookaheadIsNotWiderThanTwo(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary @a(x,\n}\n"
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-	if len(issues) != 3 {
-		t.Errorf("got %d diagnostics, want 3 — the lookahead window widened", len(issues))
+	if len(issues) != 1 {
+		t.Errorf("got %d diagnostics, want 1 — the lookahead window widened", len(issues))
 	}
 	if len(file.Types) != 1 {
 		t.Fatalf("got %d types, want 1", len(file.Types))
@@ -270,12 +316,11 @@ func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 		// The property survives carrying a bare @a the source never wrote.
 		{
 			name: "annotation arguments", member: "id String primary @a(x",
-			wantProps: 1, wantIssues: 2, wantAnchor: "(", wantBareAnn: "a",
+			wantProps: 1, wantIssues: 1, wantAnchor: "(", wantBareAnn: "a",
 		},
-		// Both diagnostics are byte-identical to each other: one defect, twice.
 		{
 			name: "multiplicity", member: "--> wheels (many Wheel",
-			wantIssues: 2, wantAnchor: "(",
+			wantIssues: 1, wantAnchor: "(",
 		},
 	}
 	for _, tc := range tests {
@@ -450,5 +495,121 @@ func assertNodeSpansWithinSource(t *testing.T, src string, f *File) {
 		for _, ann := range ty.Annotations {
 			checkAnnotation("type annotation", ann)
 		}
+	}
+}
+
+// TestRecovery_ContextualKeywordPropertiesSurvive pins that recovery does not
+// delete a property whose name is one of the eleven contextual keywords. The
+// member-start predicate has to test the six spellings that are never names,
+// not the seventeen the language reserves somewhere.
+func TestRecovery_ContextualKeywordPropertiesSurvive(t *testing.T) {
+	for _, name := range []string{"type", "schema", "import", "extends", "primary", "required", "one", "many", "abstract", "datatype", "includes"} {
+		t.Run(name, func(t *testing.T) {
+			src := "schema \"s\"\ntype T {\n\tid String primary\n\tbroken @\n\t" + name + " String\n}\n"
+			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			if len(issues) != 1 {
+				t.Fatalf("got %d diagnostics, want 1: %v", len(issues), issues)
+			}
+			if len(file.Types) != 1 {
+				t.Fatalf("got %d types, want 1", len(file.Types))
+			}
+			props := file.Types[0].Properties
+			if len(props) != 2 || props[1].Name != name {
+				var got []string
+				for _, p := range props {
+					got = append(got, p.Name)
+				}
+				t.Errorf("properties = %v, want [id %s] — recovery deleted a legal member", got, name)
+			}
+		})
+	}
+}
+
+// TestRecovery_OneDefectDrawsOneDiagnostic pins that recovery does not restart
+// inside the member it just left. Each source holds one defect; a restart in
+// the middle of the failed member reports it again at a second position.
+func TestRecovery_OneDefectDrawsOneDiagnostic(t *testing.T) {
+	for _, tc := range []struct{ name, member string }{
+		{"relation with junk after its name", "--> rel 123"},
+		{"relation with a malformed multiplicity", "--> r (many:one) B"},
+		{"relation with an unterminated multiplicity", "--> wheels (many Wheel"},
+		{"a regex-shaped token where a datatype belongs", "x /*/"},
+		{"a property with no datatype, before more members", "id primary\n\tref String"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + tc.member + "\n}\n"
+			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			if len(issues) != 1 {
+				t.Errorf("got %d diagnostics, want 1 — recovery restarted inside the failed member: %v",
+					len(issues), issues)
+			}
+		})
+	}
+}
+
+// TestRecovery_RegexIsNotADocComment pins that recovery classifies a doc
+// comment by token type. The rule table lets "/*/" lex as REGEXP, so a
+// text-prefix test halts recovery on a regex literal and re-parses at a token
+// no production can match, costing the member that follows it.
+func TestRecovery_RegexIsNotADocComment(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\tx @\n\t/*/ y String\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 1 {
+		t.Fatalf("got %d diagnostics, want 1: %v", len(issues), issues)
+	}
+	if len(file.Types) != 1 {
+		t.Fatalf("got %d types, want 1", len(file.Types))
+	}
+	var names []string
+	for _, p := range file.Types[0].Properties {
+		names = append(names, p.Name)
+	}
+	if len(names) != 2 || names[1] != "y" {
+		t.Errorf("properties = %v, want [id y] — the member after the regex was lost", names)
+	}
+}
+
+// TestRecovery_HeaderFailureKeepsTheDeclarationItStopsOn pins that a failed
+// schema header costs the header alone. The failing token is itself the start
+// of the next declaration, so a resync that must consume one token eats it.
+func TestRecovery_HeaderFailureKeepsTheDeclarationItStopsOn(t *testing.T) {
+	t.Run("abstract survives", func(t *testing.T) {
+		file, _ := Parse([]byte("abstract type A {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
+		if len(file.Types) != 1 {
+			t.Fatalf("got %d types, want 1", len(file.Types))
+		}
+		if !file.Types[0].IsAbstract {
+			t.Error("the type lost its abstract modifier to recovery")
+		}
+	})
+	t.Run("a lone type survives", func(t *testing.T) {
+		file, _ := Parse([]byte("type A {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
+		if len(file.Types) != 1 || len(file.Types[0].Properties) != 1 {
+			t.Errorf("types = %d, want one carrying its property", len(file.Types))
+		}
+	})
+	t.Run("an import survives", func(t *testing.T) {
+		file, _ := Parse([]byte("import \"a.yammm\" as al\ntype A {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
+		if len(file.Imports) != 1 || len(file.Types) != 1 {
+			t.Errorf("imports = %d types = %d, want 1 and 1", len(file.Imports), len(file.Types))
+		}
+	})
+}
+
+// TestRecovery_MalformedNumberDoesNotSwallowAnEarlierDefect pins the window the
+// malformed-numeric override searches. Measured after recovery, it covered
+// everything recovery skipped, so a literal in a later declaration replaced the
+// real diagnostic and the file reported one error about the wrong thing.
+func TestRecovery_MalformedNumberDoesNotSwallowAnEarlierDefect(t *testing.T) {
+	src := "type A {\n\ty Integer[0x10, 5]\n}\n"
+	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 2 {
+		t.Fatalf("got %d diagnostics, want 2 — the header failure and the literal: %v", len(issues), issues)
+	}
+	if issues[0].Severity() != diag.Fatal || !strings.Contains(issues[0].Message(), "schema header") {
+		t.Errorf("first diagnostic = %v %q, want the fatal header failure", issues[0].Severity(), issues[0].Message())
+	}
+	if !strings.Contains(issues[1].Message(), "0x10") {
+		t.Errorf("second diagnostic = %q, want the malformed literal", issues[1].Message())
 	}
 }
