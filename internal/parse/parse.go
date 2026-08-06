@@ -127,9 +127,14 @@ func (b *builder) parseHeader(plex *lexer.PeekingLexer) {
 		// A schema with no name is unusable, so the loader stops before
 		// completion. This failure is fatal where other syntax errors are not.
 		b.file.SchemaNameFailed = true
-		b.failed(plex, err, diag.Fatal, "in the schema header", func(past int) {
-			b.resync(plex, past, false, func(t *lexer.Token) bool { return declStart(b.ps.tok, t) })
-		})
+		// Reported before re-syncing, and bounded at the failure rather than at
+		// where recovery stopped: the header's recovery runs to the first
+		// declaration, so everything it skips belongs to other constructs and a
+		// malformed literal in any of them would take over this diagnostic.
+		from := plex.Peek().Pos.Offset
+		past := resumeFloor(err, from)
+		b.syntaxErr(diag.Fatal, err, "in the schema header", from, past)
+		b.resync(plex, past, false, func(t *lexer.Token) bool { return declStart(b.ps.tok, t) })
 		return
 	}
 	b.file.NameRaw = head.Name.Raw
@@ -287,9 +292,7 @@ func (b *builder) addAssociation(nt *TypeDecl, a *assocNode) {
 		Span:     b.spanOf(a.Pos, a.EndPos),
 	}
 	rel.Optional, rel.Many = multiplicityOf(a.Mult)
-	if !b.applyReverse(rel, a.Reverse) {
-		return
-	}
+	b.applyReverse(rel, a.Reverse)
 	if a.Body != nil {
 		for i := range a.Body.Props {
 			rel.Properties = append(rel.Properties, b.edgeProp(&a.Body.Props[i]))
@@ -308,48 +311,22 @@ func (b *builder) addComposition(nt *TypeDecl, c *compNode) {
 		Span:     b.spanOf(c.Pos, c.EndPos),
 	}
 	rel.Optional, rel.Many = multiplicityOf(c.Mult)
-	if !b.applyReverse(rel, c.Reverse) {
-		return
-	}
+	b.applyReverse(rel, c.Reverse)
 	nt.Relations = append(nt.Relations, rel)
 }
 
 // applyReverse fills the backward direction. With no reverse written, the edge
-// is reachable optionally and singly from the far side.
-func (b *builder) applyReverse(rel *Relation, rev *reverseNode) bool {
+// is reachable optionally and singly from the far side; a written multiplicity
+// the grammar refused takes that same default, and the syntax diagnostic on the
+// leftover text is what tells the author it was refused.
+func (b *builder) applyReverse(rel *Relation, rev *reverseNode) {
 	if rev == nil {
 		rel.ReverseOptional, rel.ReverseMany = true, false
-		return true
-	}
-	// A multiplicity is optional, so a nil one usually means none was written.
-	// It also means one was written and rejected, and the two are
-	// indistinguishable from the node alone — the '(' that opens it is left in
-	// the stream. Recording the written-nothing default there would put a
-	// cardinality in the tree that the source contradicts, so the relation is
-	// dropped instead. The leftover text draws its own diagnostic.
-	if rev.Mult == nil && b.startsMultiplicity(rev.EndPos.Offset) {
-		return false
+		return
 	}
 	rel.Backref = rev.Name.value()
 	rel.BackrefSpan = b.spanOf(rev.Name.Pos, rev.Name.EndPos)
 	rel.ReverseOptional, rel.ReverseMany = multiplicityOf(rev.Mult)
-	return true
-}
-
-// startsMultiplicity reports whether the first meaningful token at or after
-// offset opens a multiplicity. b.toks is the un-elided stream, so whitespace
-// and line comments are stepped over here.
-func (b *builder) startsMultiplicity(offset int) bool {
-	i, _ := slices.BinarySearchFunc(b.toks, offset, func(t lexer.Token, target int) int {
-		return t.Pos.Offset - target
-	})
-	for ; i < len(b.toks); i++ {
-		if slices.Contains(b.ps.elide, b.toks[i].Type) {
-			continue
-		}
-		return b.toks[i].Type == b.ps.tok.lpar
-	}
-	return false
 }
 
 func (b *builder) edgeProp(p *relPropNode) *Property {
@@ -463,6 +440,14 @@ func (b *builder) addInvariant(nt *TypeDecl, inv *invNode) {
 		b.report(diag.Error, diag.E_SYNTAX, b.pointAt(inv.Pos), "invariant missing expression")
 		return
 	}
+	// The message decides whether this invariant is kept at all, so it is
+	// resolved before the expression's own literal diagnostics are reported:
+	// an invariant being discarded must not ask the author to fix a literal
+	// inside it, which is a diagnostic the generated parser never reaches.
+	msg, ok := b.unquoteAt(&inv.Msg, "invalid invariant message")
+	if !ok {
+		return
+	}
 	for _, d := range res.Diags {
 		b.report(diag.Error, diag.E_INVALID_INVARIANT, b.spanFromOffsets(d.Start, d.End), d.Msg)
 	}
@@ -473,13 +458,6 @@ func (b *builder) addInvariant(nt *TypeDecl, inv *invNode) {
 		ExprSpan:    b.spanFromOffsets(res.Start, res.End),
 		Doc:         stripDoc(inv.Doc),
 		Span:        b.spanOf(inv.Pos, inv.EndPos),
-	}
-	msg, ok := b.unquoteAt(&inv.Msg, "invalid invariant message")
-	if !ok {
-		// The message is what an invariant shows when it fails, so one that
-		// will not unquote has nothing to show. Production drops the invariant
-		// here too; keeping it put an empty string in front of the user.
-		return
 	}
 	ni.Message = msg
 	nt.Invariants = append(nt.Invariants, ni)
@@ -541,24 +519,12 @@ func (b *builder) resync(plex *lexer.PeekingLexer, past int, atLeastOne bool, st
 	}
 }
 
-// resyncMember re-syncs inside a type body. It stops at the body's closing
-// brace without consuming it, so the member loop is the one that closes the
-// type, or at the next member start.
+// resyncMember re-syncs inside a type body, stopping at the closing brace
+// without consuming it or at the next member start. A member start is believed
+// only at a marker or at a line's first token, because every name a failed
+// member owns sits mid-line behind the token that failed.
 func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int) {
 	lb, rb := b.ps.tok.lbrace, b.ps.tok.rbrace
-	// A member that began with a marker cannot end at a bare name: every name
-	// between the marker and the next member belongs to it — a relation's own
-	// name, its target, its multiplicity words. Stopping at one re-parses the
-	// member's own text and reports the same defect again. A member that began
-	// with a name has no such marker to key on, so there the byte floor past
-	// the failed parse is the only bound available.
-	// Only a member that began with a bare name can end at one. A marker-led
-	// member owns every name up to the next marker, and a member that began
-	// with a token no member can begin with — leftover text from a construct
-	// that already parsed — gives no clue where the next one starts, so both
-	// scan to a marker or the body's brace.
-	first := plex.Peek()
-	markerOnly := marksMember(b.ps.tok, first) || !memberStart(b.ps.tok, first)
 	depth, consumed := 0, 0
 	for {
 		t := plex.Peek()
@@ -568,18 +534,8 @@ func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int) {
 		if depth == 0 && t.Type == rb {
 			return
 		}
-		stops := memberStart(b.ps.tok, t)
-		if markerOnly {
-			stops = marksMember(b.ps.tok, t)
-		}
-		// The token the parse failed on belongs to the failed member unless it
-		// is a marker, which can only be the start of the next one. Without
-		// that exception a property's own "primary" modifier reads as the next
-		// property; with it too broadly, a bare "-->" swallows the relation
-		// that follows it.
-		if t.Pos.Offset == past && !marksMember(b.ps.tok, t) {
-			stops = false
-		}
+		stops := memberStart(b.ps.tok, t) &&
+			(marksMember(b.ps.tok, t) || b.startsLine(t.Pos.Offset))
 		if consumed > 0 && depth == 0 && t.Pos.Offset >= past && stops {
 			return
 		}
@@ -592,6 +548,20 @@ func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int) {
 			depth--
 		}
 	}
+}
+
+// startsLine reports whether only whitespace precedes offset on its own line.
+// Recovery uses it to tell a member the author began from a name inside the one
+// that just failed.
+func (b *builder) startsLine(offset int) bool {
+	if offset <= 0 || offset > len(b.src) {
+		return true
+	}
+	line, atStart := slices.BinarySearch(b.lineStarts, offset)
+	if !atStart {
+		line--
+	}
+	return strings.TrimSpace(b.src[b.lineStarts[line]:offset]) == ""
 }
 
 // declStart reports whether t can begin a declaration. "import" is one: an
@@ -623,12 +593,8 @@ func marksMember(tok tokenTypes, t *lexer.Token) bool {
 // contextual keywords are legal property names, and testing the wider set made
 // recovery skip them without a word.
 func memberStart(tok tokenTypes, t *lexer.Token) bool {
-	switch {
-	case t.Type == tok.docComment, t.Value == "@@", t.Value == "!",
-		t.Value == "-->", t.Value == "*->":
-		return true
-	}
-	return t.Type == tok.lcWord && !propertyNameExclusions[t.Value]
+	return marksMember(tok, t) ||
+		(t.Type == tok.lcWord && !propertyNameExclusions[t.Value])
 }
 
 // deeperErr picks whichever error reached further into the input, which is the

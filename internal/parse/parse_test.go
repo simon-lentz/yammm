@@ -188,6 +188,65 @@ func TestParse_AnnotationArgumentsKeepBothIdentifierSpellings(t *testing.T) {
 	}
 }
 
+// TestParse_DiscardedInvariantReportsOnlyItsMessage pins the order the two
+// checks run in. An invariant whose message will not unquote is dropped, so
+// reporting its expression's literal errors first asks the author to fix a
+// construct that is being thrown away — a diagnostic the oracle never emits.
+func TestParse_DiscardedInvariantReportsOnlyItsMessage(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\\x\" id == 99999999999999999999999999\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 1 {
+		t.Fatalf("got %d diagnostics, want 1: %v", len(issues), issues)
+	}
+	if !strings.Contains(issues[0].Message(), "invalid invariant message") {
+		t.Errorf("diagnostic = %q, want the message failure", issues[0].Message())
+	}
+	if got := len(file.Types[0].Invariants); got != 0 {
+		t.Errorf("kept %d invariants, want 0", got)
+	}
+}
+
+// TestParse_CallArgumentsMatchTheGrammarsCommaRule pins both directions of the
+// argument-list relaxation. The generated grammar admits one trailing comma
+// anywhere in the list, so f(x,) is legal and f(x,,) is not; every row here was
+// measured against schema.LoadString.
+func TestParse_CallArgumentsMatchTheGrammarsCommaRule(t *testing.T) {
+	for _, tc := range []struct {
+		call   string
+		reject bool
+	}{
+		{`f(x,,)`, true},
+		{`f(,,)`, true},
+		{`f(x,)`, false},
+		{`f(,)`, false},
+		{`f()`, false},
+	} {
+		src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id -> " + tc.call + "\n}\n"
+		_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		if got := len(issues) > 0; got != tc.reject {
+			t.Errorf("%s: rejected=%v, want %v (%v)", tc.call, got, tc.reject, issues)
+		}
+	}
+}
+
+// TestParse_BareCommaCallHasNonNilArguments covers the third spelling that
+// reaches an empty argument list. exprcomp builds its own through make, and a
+// nil slice compares unequal to that, so the differential fails on the call.
+func TestParse_BareCommaCallHasNonNilArguments(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id -> lower(,)\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 0 {
+		t.Fatalf("got %v, want a clean parse", issues)
+	}
+	lists := argsLiterals(file.Types[0].Invariants[0].Expr)
+	if len(lists) != 1 {
+		t.Fatalf("found %d argument lists, want 1", len(lists))
+	}
+	if lists[0] == nil {
+		t.Error("the bare-comma call carries a nil argument slice, want an empty one")
+	}
+}
+
 func TestParse_SpansAreByteExact(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n}\n"
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
@@ -805,7 +864,7 @@ func TestParse_ExpressionFailuresCarryAnExtent(t *testing.T) {
 	for _, tc := range []struct{ name, src string }{
 		{"a binary operator with no right operand", "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id >\n}\n"},
 		{"an unclosed group", "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" ((id\n}\n"},
-		{"a datatype declaration with no constraint", "schema \"s\"\ntype A = \n"},
+		{"a datatype declaration whose constraint is junk", "schema \"s\"\ntype A = ?\ntype B {\n\tid String primary\n}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
@@ -813,7 +872,11 @@ func TestParse_ExpressionFailuresCarryAnExtent(t *testing.T) {
 				t.Fatal("no diagnostic")
 			}
 			sp := issues[0].Span()
-			if sp.End.Byte <= sp.Start.Byte && sp.Start.Byte < len(tc.src) {
+			if sp.Start.Byte >= len(tc.src) {
+				t.Fatalf("span starts at %d, past the end of a %d-byte source — the row asserts nothing",
+					sp.Start.Byte, len(tc.src))
+			}
+			if sp.End.Byte <= sp.Start.Byte {
 				t.Errorf("span [%d,%d) is zero-width inside the source — nothing is underlined",
 					sp.Start.Byte, sp.End.Byte)
 			}

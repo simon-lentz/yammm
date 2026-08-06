@@ -314,36 +314,39 @@ func TestRelation_SpansCoverTheWholeDeclaration(t *testing.T) {
 	}
 }
 
-// TestRelation_RejectedReverseMultiplicityRecordsNoRelation pins that a reverse
-// multiplicity the grammar refuses does not become the written-nothing default.
-// An optional group is nil both when nothing was written and when what was
-// written was rejected, and defaulting there put a cardinality in the tree that
-// the source contradicts.
-func TestRelation_RejectedReverseMultiplicityRecordsNoRelation(t *testing.T) {
+// TestRelation_ReverseMultiplicityIsRecordedAsWritten pins every reverse shape,
+// including the one a refused multiplicity produces. Dropping the relation there
+// was tried and withdrawn: it took the relation's own semantic checks with it,
+// and the syntax diagnostic on the leftover text already says it was refused.
+func TestRelation_ReverseMultiplicityIsRecordedAsWritten(t *testing.T) {
 	for _, tc := range []struct {
 		name, member string
-		wantRels     int
+		wantOptional bool
+		wantMany     bool
+		wantBackref  string
 	}{
-		{"association, rejected", "--> r Wheel /back (many:one)", 0},
-		{"composition, rejected", "*-> c Wheel /back (many:one)", 0},
-		{"association, valid", "--> r Wheel /back (one:many)", 1},
-		{"association, none written", "--> r Wheel /back", 1},
+		{"none written defaults to optional single", "--> r Wheel /back", true, false, "back"},
+		{"one:many is recorded as written", "--> r Wheel /back (one:many)", false, true, "back"},
+		{"one:one is recorded as written", "--> r Wheel /back (one:one)", false, false, "back"},
+		{"a refused multiplicity keeps the relation", "--> r Wheel /back (many:one)", true, false, "back"},
+		{"a refused multiplicity keeps a composition", "*-> c Wheel /back (many:one)", true, false, "back"},
+		{"no reverse at all", "--> r Wheel", true, false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file, _ := Parse([]byte(relSource(tc.member)), location.NewSourceID("s.yammm"))
 			if len(file.Types) == 0 {
 				t.Fatal("no type recorded")
 			}
-			if got := len(file.Types[0].Relations); got != tc.wantRels {
-				t.Fatalf("relations = %d, want %d", got, tc.wantRels)
-			}
-			if tc.wantRels == 0 {
-				return
+			if got := len(file.Types[0].Relations); got != 1 {
+				t.Fatalf("relations = %d, want 1 — the relation must survive its own bad reverse", got)
 			}
 			rel := file.Types[0].Relations[0]
-			if tc.name == "association, valid" && (rel.ReverseOptional || !rel.ReverseMany) {
-				t.Errorf("(one:many) → reverse optional=%v many=%v, want false true",
-					rel.ReverseOptional, rel.ReverseMany)
+			if rel.ReverseOptional != tc.wantOptional || rel.ReverseMany != tc.wantMany {
+				t.Errorf("reverse optional=%v many=%v, want %v %v",
+					rel.ReverseOptional, rel.ReverseMany, tc.wantOptional, tc.wantMany)
+			}
+			if rel.Backref != tc.wantBackref {
+				t.Errorf("backref = %q, want %q", rel.Backref, tc.wantBackref)
 			}
 		})
 	}

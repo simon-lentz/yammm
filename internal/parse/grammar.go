@@ -321,11 +321,11 @@ type enuC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
 	Kw     bool `parser:"@'Enum'"`
-	// One value parses. The two-value minimum is a constraint check, not a
-	// grammar rule: rejecting the shape here made the promoted check
-	// unreachable by the spelling a user is most likely to write, so they got a
-	// punctuation complaint instead of the rule.
-	Values []strTok `parser:"'[' @@ (',' @@)* ','? ']'"`
+	// An empty list parses too. The two-value minimum is a constraint check,
+	// not a grammar rule: rejecting the shape here made the promoted check
+	// unreachable by the spellings a user is most likely to write, so they got
+	// a punctuation complaint instead of the rule.
+	Values []strTok `parser:"'[' (@@ (',' @@)*)? ','? ']'"`
 }
 
 type patC struct {
@@ -333,8 +333,10 @@ type patC struct {
 	EndPos lexer.Position
 	Kw     bool `parser:"@'Pattern'"`
 	// Any number of patterns parses; the maximum of two is a constraint check.
-	// See enuC for why the arity does not live in the grammar.
-	Patterns []strTok `parser:"'[' @@ (',' @@)* ','? ']'"`
+	// See enuC for why the arity does not live in the grammar. No trailing
+	// comma: patternT has none, and admitting one accepts source the generated
+	// parser rejects.
+	Patterns []strTok `parser:"'[' @@ (',' @@)* ']'"`
 }
 
 // strTok is one STRING token with its own extent, so per-value diagnostics

@@ -255,18 +255,14 @@ func (b *builder) enumConstraint(c *enuC, span location.Span) *Constraint {
 }
 
 // maxPatterns is the largest pattern list a Pattern constraint accepts. The
-// grammar admits any number so this check can report the rule; a list past the
-// cap is reported and truncated, so nothing downstream compiles a pattern the
-// constraint does not carry.
+// count is of patterns that compile, which is what the generated parser counts;
+// every written literal stays in PatternLits, and only the first maxPatterns
+// survivors carry a Regex, so nothing downstream enforces a pattern past the cap.
 const maxPatterns = 2
 
 func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
 	out := &Constraint{Kind: ConstraintPattern, Span: span}
-	if len(c.Patterns) > maxPatterns {
-		b.reportf(diag.E_INVALID_CONSTRAINT, span,
-			"pattern constraint exceeds maximum of %d patterns (got %d)", maxPatterns, len(c.Patterns))
-		c.Patterns = c.Patterns[:maxPatterns]
-	}
+	kept := 0
 	for i := range c.Patterns {
 		p := &c.Patterns[i]
 		lit := Literal{Raw: p.Raw, Span: b.spanOf(p.Pos, p.EndPos)}
@@ -278,13 +274,21 @@ func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
 		}
 		lit.Text = text
 		re, err := regexp.Compile(text)
-		if err != nil {
+		switch {
+		case err != nil:
 			b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span,
 				"invalid regex pattern %q: %v", text, err)
-		} else {
+		case kept < maxPatterns:
 			lit.Regex, lit.Kept = re, true
+			kept++
+		default:
+			kept++
 		}
 		out.PatternLits = append(out.PatternLits, lit)
+	}
+	if kept > maxPatterns {
+		b.reportf(diag.E_INVALID_CONSTRAINT, span,
+			"pattern constraint exceeds maximum of %d patterns (got %d)", maxPatterns, kept)
 	}
 	return out
 }

@@ -2,6 +2,7 @@ package parse
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -141,6 +142,205 @@ func TestRecovery_SpansAreNeverInverted(t *testing.T) {
 			assertSpansWithinSource(t, src, issues)
 			assertNodeSpansWithinSource(t, src, file)
 		})
+	}
+}
+
+// TestRecovery_MembersAfterAFailedOneSurvive pins the property the whole
+// resync rule exists for: a member the author wrote reaches the tree unless it
+// is the one that failed. Every row here lost at least one member to an earlier
+// rule that keyed on token kind rather than on where the line begins.
+func TestRecovery_MembersAfterAFailedOneSurvive(t *testing.T) {
+	tests := []struct {
+		what  string
+		src   string
+		props []string
+		rels  []string
+		anns  int
+		invs  int
+	}{
+		{
+			"a failed relation keeps every property after it",
+			"schema \"s\"\ntype T {\n\tid String primary\n\t--> owner (bogus) Person\n\tname String\n\tage Integer\n}\n",
+			[]string{"id", "name", "age"},
+			nil, 0, 0,
+		},
+		{
+			"a bare name keeps the properties after it",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\tcolor String\n\tsize Integer\n}\n",
+			[]string{"id", "color", "size"},
+			nil, 0, 0,
+		},
+		{
+			"a doc comment on the failed member costs no extra member",
+			"schema \"s\"\ntype T {\n\tid String primary\n\t/* doc */ bad\n\tcolor String\n\tsize Integer\n}\n",
+			[]string{"id", "color", "size"},
+			nil, 0, 0,
+		},
+		{
+			"an unterminated type argument keeps the next property",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tx List<String\n\tcolor String\n}\n",
+			[]string{"id", "color"},
+			nil, 0, 0,
+		},
+		{
+			"a rejected bound keeps the properties after it",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tn Integer[1.5, 3]\n\tzz String\n\tww Integer\n}\n",
+			[]string{"id", "n", "zz", "ww"},
+			nil, 0, 0,
+		},
+		{
+			"a failed member keeps an association after it",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\t--> owner Person\n\tname String\n}\n",
+			[]string{"id", "name"},
+			[]string{"owner"},
+			0, 0,
+		},
+		{
+			"a failed member keeps a composition after it",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\t*-> parts Part\n\tname String\n}\n",
+			[]string{"id", "name"},
+			[]string{"parts"},
+			0, 0,
+		},
+		{
+			"a failed member keeps a doc-commented member after it",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\t/* d */ color String\n\tname String\n}\n",
+			[]string{"id", "color", "name"},
+			nil, 0, 0,
+		},
+		{
+			"a failed member keeps a type annotation after it",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\t@@audit\n\tname String\n}\n",
+			[]string{"id", "name"},
+			nil, 1, 0,
+		},
+		{
+			"a failed member keeps an invariant after it",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\t! \"m\" id != \"\"\n\tname String\n}\n",
+			[]string{"id", "name"},
+			nil, 0, 1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.what, func(t *testing.T) {
+			file, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			if len(issues) != 1 {
+				t.Errorf("got %d diagnostics, want 1: %v", len(issues), issues)
+			}
+			if len(file.Types) != 1 {
+				t.Fatalf("got %d types, want 1", len(file.Types))
+			}
+			var got []string
+			for _, p := range file.Types[0].Properties {
+				got = append(got, p.Name)
+			}
+			if !slices.Equal(got, tc.props) {
+				t.Errorf("properties = %v, want %v", got, tc.props)
+			}
+			var gotRels []string
+			for _, r := range file.Types[0].Relations {
+				gotRels = append(gotRels, r.Name)
+			}
+			if !slices.Equal(gotRels, tc.rels) {
+				t.Errorf("relations = %v, want %v", gotRels, tc.rels)
+			}
+			if got := len(file.Types[0].Annotations); got != tc.anns {
+				t.Errorf("type annotations = %d, want %d", got, tc.anns)
+			}
+			if got := len(file.Types[0].Invariants); got != tc.invs {
+				t.Errorf("invariants = %d, want %d", got, tc.invs)
+			}
+		})
+	}
+}
+
+// TestRecovery_AModifierDoesNotRestartRecovery pins the other direction: a
+// modifier inside the failed member is not a member start, so one defect still
+// draws one diagnostic.
+func TestRecovery_AModifierDoesNotRestartRecovery(t *testing.T) {
+	for _, src := range []string{
+		"schema \"s\"\ntype T {\n\tid String primary\n\tx 123 primary\n}\n",
+		"schema \"s\"\ntype T {\n\tid String primary\n\tx 123 required\n}\n",
+	} {
+		_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		if len(issues) != 1 {
+			t.Errorf("%q: got %d diagnostics, want 1: %v", src, len(issues), issues)
+		}
+	}
+}
+
+// TestRecovery_HeaderFailureOwnsItsOwnDiagnostic pins that the header's
+// malformed-numeric window ends at the failure. Its recovery runs to the first
+// declaration, so a literal in any construct it skips must not take over the
+// diagnostic — nor stamp the header's Fatal severity on an unrelated token.
+func TestRecovery_HeaderFailureOwnsItsOwnDiagnostic(t *testing.T) {
+	src := "schema\n\ty Integer[0x10, 5]\n"
+	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) == 0 {
+		t.Fatal("no diagnostic")
+	}
+	if got := issues[0].Message(); !strings.Contains(got, "schema header") {
+		t.Errorf("first diagnostic = %q, want the header failure", got)
+	}
+	if got := issues[0].Span().Start.Byte; got != strings.Index(src, "y") {
+		t.Errorf("anchored at %d, want the failing token at %d", got, strings.Index(src, "y"))
+	}
+}
+
+// TestRecovery_DeclarationResyncHasAByteFloor covers the floor on the
+// declaration-level resync, the twin of the one inside a type body. Without it
+// recovery restarts before the failed construct and reports it twice.
+func TestRecovery_DeclarationResyncHasAByteFloor(t *testing.T) {
+	src := "/* d */ @\nA "
+	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 1 {
+		t.Errorf("got %d diagnostics, want 1: %v", len(issues), issues)
+	}
+}
+
+// TestRecovery_DeclarationLevelRegexIsNotADocComment is the declaration-level
+// twin of the member-level rule: "/*/" lexes as REGEXP, and a text-prefix test
+// halts declaration resync on it and re-reports the same construct.
+func TestRecovery_DeclarationLevelRegexIsNotADocComment(t *testing.T) {
+	src := "schema \"s\"\ntype A = \n/*/ \ntype B {\n\tid String primary\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 1 {
+		t.Errorf("got %d diagnostics, want 1: %v", len(issues), issues)
+	}
+	if len(file.Types) != 1 || file.Types[0].Name != "B" {
+		t.Errorf("types = %v, want B alone", file.Types)
+	}
+}
+
+// TestRecovery_ResumeFloorFallsBackToTheConstructStart covers the branch an
+// error carrying no position takes. Returning 0 there collapses the floor and
+// lets recovery restart before the construct that failed.
+func TestRecovery_ResumeFloorFallsBackToTheConstructStart(t *testing.T) {
+	const from = 42
+	if got := resumeFloor(errors.New("no position"), from); got != from {
+		t.Errorf("resumeFloor(plain error, %d) = %d, want %d", from, got, from)
+	}
+}
+
+// TestRecovery_TokenSpanAtCollapsesInsideAToken covers the fallback for an
+// offset that is not a token start. Underlining the next token instead would
+// highlight a region the diagnostic is not about.
+func TestRecovery_TokenSpanAtCollapsesInsideAToken(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n}\n"
+	b := &builder{
+		ps:         mustParsers(),
+		src:        src,
+		sourceID:   location.NewSourceID("s.yammm"),
+		lineStarts: lineStarts(src),
+		toks:       lexTokens(t, src),
+	}
+	inside := strings.Index(src, "String") + 2
+
+	got := b.tokenSpanAt(inside)
+
+	if got.Start.Byte != inside || got.End.Byte != inside {
+		t.Errorf("tokenSpanAt(%d) = [%d,%d), want it collapsed to a point there",
+			inside, got.Start.Byte, got.End.Byte)
 	}
 }
 
@@ -552,7 +752,7 @@ func TestRecovery_OneDefectDrawsOneDiagnostic(t *testing.T) {
 // text-prefix test halts recovery on a regex literal and re-parses at a token
 // no production can match, costing the member that follows it.
 func TestRecovery_RegexIsNotADocComment(t *testing.T) {
-	src := "schema \"s\"\ntype T {\n\tid String primary\n\tx @\n\t/*/ y String\n}\n"
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\tx @\n\t/*/\n\ty String\n}\n"
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 1 {
 		t.Fatalf("got %d diagnostics, want 1: %v", len(issues), issues)

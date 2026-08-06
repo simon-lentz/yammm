@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -386,6 +387,7 @@ func assertIssues(t *testing.T, src string, base int, got []diag.Issue, want []w
 func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
 	for _, tc := range []struct{ name, prop, want string }{
 		{"one enum value", "e Enum[\"a\"]", "enum must have at least two values (got 1)"},
+		{"no enum values", "e Enum[]", "enum must have at least two values (got 0)"},
 		{"three patterns", "p Pattern[\"a\", \"b\", \"c\"]", "pattern constraint exceeds maximum of 2 patterns (got 3)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -398,7 +400,112 @@ func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
 				t.Errorf("got %s %q, want E_INVALID_CONSTRAINT %q",
 					issues[0].Code(), issues[0].Message(), tc.want)
 			}
+			// The oracle anchors both rules on the whole constraint; an anchor
+			// on one value underlines a region the rule is not about.
+			want := tc.prop[strings.Index(tc.prop, " ")+1:]
+			if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != want {
+				t.Errorf("anchored on %q, want the whole constraint %q", got, want)
+			}
 		})
+	}
+}
+
+// TestChecks_FloatBoundsCarryTheWrittenSpelling covers fltBoundsOf, whose whole
+// output no other test reads. Bounds is the only record of what the author
+// wrote and of the extent the minus sign covers, so a consumer that reads it
+// gets nil — or a swapped pair — with every other assertion green.
+func TestChecks_FloatBoundsCarryTheWrittenSpelling(t *testing.T) {
+	src := checkSource("f Float[-1.5, 2.5]")
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %v", issues)
+	}
+	bounds := file.Types[0].Properties[1].Constraint.Bounds
+	if bounds == nil {
+		t.Fatal("Float constraint carries no written bounds")
+	}
+	if bounds.Min.Text != "1.5" || !bounds.Min.Neg {
+		t.Errorf("min = %+v, want the written 1.5 with its sign", bounds.Min)
+	}
+	if bounds.Max.Text != "2.5" || bounds.Max.Neg {
+		t.Errorf("max = %+v, want the written 2.5 unsigned", bounds.Max)
+	}
+	if got := src[bounds.Min.Span.Start.Byte:bounds.Min.Span.End.Byte]; got != "-1.5" {
+		t.Errorf("min span covers %q, want the sign too", got)
+	}
+}
+
+// TestChecks_PatternListRejectsATrailingComma pins the grammar against the
+// generated one. patternT carries no trailing COMMA, so admitting one accepts
+// source production refuses — a schema that loads here and not there.
+func TestChecks_PatternListRejectsATrailingComma(t *testing.T) {
+	for _, prop := range []string{`p Pattern["a", "b",]`, `p Pattern["a",]`} {
+		src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + prop + "\n}\n"
+		_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX {
+			t.Errorf("%s: got %v, want one E_SYNTAX", prop, issues)
+		}
+	}
+}
+
+// TestChecks_PatternArityCountsWhatCompiles pins the count against the
+// generated parser's, which appends only patterns that unquote and compile. A
+// count of written literals reports an arity error production never raises, and
+// a pattern past the cap keeps its own diagnostic either way.
+func TestChecks_PatternArityCountsWhatCompiles(t *testing.T) {
+	for _, tc := range []struct {
+		name, prop string
+		wantCodes  []diag.Code
+	}{
+		{
+			"an uncompilable third pattern leaves two survivors",
+			`p Pattern["a", "b", "("]`,
+			[]diag.Code{diag.E_INVALID_CONSTRAINT},
+		},
+		{
+			"an unquotable middle pattern leaves two survivors",
+			`p Pattern["a", "\\x", "b"]`,
+			[]diag.Code{diag.E_INVALID_CONSTRAINT},
+		},
+		{
+			"three that compile is three",
+			`p Pattern["a", "b", "c"]`,
+			[]diag.Code{diag.E_INVALID_CONSTRAINT},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + tc.prop + "\n}\n"
+			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			if len(issues) != len(tc.wantCodes) {
+				t.Fatalf("got %d issues, want %d: %v", len(issues), len(tc.wantCodes), issues)
+			}
+			for i, want := range tc.wantCodes {
+				if issues[i].Code() != want {
+					t.Errorf("issue %d = %s, want %s", i, issues[i].Code(), want)
+				}
+			}
+		})
+	}
+}
+
+// TestChecks_EveryWrittenPatternKeepsItsLiteral pins node.go's Kept contract at
+// the cap: a consumer reading PatternLits sees everything the author wrote, and
+// Kept is what says which of them the constraint enforces.
+func TestChecks_EveryWrittenPatternKeepsItsLiteral(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\tp Pattern[\"^a$\", \"^b$\", \".*\"]\n}\n"
+	file, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	c := file.Types[0].Properties[1].Constraint
+	if got := len(c.PatternLits); got != 3 {
+		t.Fatalf("PatternLits = %d, want all 3 written literals", got)
+	}
+	for i, want := range []bool{true, true, false} {
+		if c.PatternLits[i].Kept != want {
+			t.Errorf("literal %d (%s) Kept = %v, want %v", i, c.PatternLits[i].Raw, c.PatternLits[i].Kept, want)
+		}
+	}
+	res := c.PatternRegexps()
+	if len(res) != 2 || res[0].String() != "^a$" || res[1].String() != "^b$" {
+		t.Errorf("enforced patterns = %v, want the first two written", res)
 	}
 }
 
