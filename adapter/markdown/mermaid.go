@@ -94,9 +94,9 @@ func (g *generator) writeEdges(b *strings.Builder, t *schema.Type) {
 	}
 }
 
-// writeRelationEdge writes one labeled relation edge. A target that never
-// resolved (a deferred import on a registry-less Builder schema) is
-// skipped — the type's section still lists the reference textually.
+// writeRelationEdge writes one labeled relation edge. A target absent from
+// the document's type map is skipped — the type's section still lists the
+// reference textually.
 func (g *generator) writeRelationEdge(b *strings.Builder, ownerID string, rel *schema.Relation, arrow string) {
 	target, ok := g.types[rel.TargetID()]
 	if !ok {

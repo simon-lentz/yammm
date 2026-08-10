@@ -179,6 +179,13 @@ digits, or underscores. Violations fail the build with `E_INVALID_NAME`.
 Schema names and invariant names are quoted strings in the DSL and stay
 free-form; import aliases are validated during completion (`E_INVALID_ALIAS`).
 
+A qualified reference (`alias.Type` in `Extends`, a relation or composition
+target, or a qualified datatype constraint) must resolve at build time: the
+alias must name a declared import backed by a registry (`WithRegistry` +
+`AddImport`). A qualified reference naming no resolvable import fails the
+build with `E_UNKNOWN_TYPE`, with or without a registry — no later link step
+exists that could resolve it.
+
 ### TypeBuilder Methods
 
 | Method | Description |
@@ -443,7 +450,7 @@ finRes, err := ba.Finalize(ctx)
 
 New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK`, and `Finalize`'s check covers the union — a required association imported from the seed and still unresolved fails the batch with `E_UNRESOLVED_REQUIRED`. `Count()` reflects only records added through the assembler (seeded instances are not counted), and construction diagnostics are not carried over from the seed (`.ys`-loaded snapshots carry none by design; `Duplicates` and `Unresolved` are the persistent structural records, and both import). The seed snapshot must originate from the same schema — taken from a `Graph` bound to it, or loaded via `snapshot.Load` against it, which verifies structural compatibility. Every other contract — lifecycle, finalize barrier, validator-access modes, `FinalizeResult` — is identical to `NewBatchAssembler`.
 
-**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `instance/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees, provenance-presence-aware, and exact for same-typed numeric properties (only mixed `int64`/`float64` pairs coerce, matching the wire's whole-float narrowing).
+**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `instance/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included), provenance-presence-aware, and exact for every numeric property, dynamic type included: schema-aware float emission keeps `KindFloat` values `float64` across a marshal/load round trip, so an `int64`/`float64` mismatch is a real defect, not a wire artifact.
 
 ### Seeding from a Snapshot
 

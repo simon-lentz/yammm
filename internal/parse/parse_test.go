@@ -805,6 +805,53 @@ func TestParse_CallArgumentsAcceptOneBareComma(t *testing.T) {
 	}
 }
 
+// TestLexAndParse_StreamEqualsLex pins the equivalence the formatter's
+// correctness rides on: the token view LexAndParse returns from its
+// single lex is exactly what Lex returns from its own, over every tracked
+// fixture — valid and malformed alike, since Lex is total.
+func TestLexAndParse_StreamEqualsLex(t *testing.T) {
+	entries := walkCorpus(t)
+	if len(entries) < 100 {
+		t.Fatalf("corpus walk found %d fixtures, floor is 100", len(entries))
+	}
+	for _, e := range entries {
+		_, stream, _ := LexAndParse([]byte(e.Src), location.NewSourceID("s.yammm"))
+		want := Lex(e.Src)
+		if !slices.Equal(stream, want) {
+			t.Errorf("%s: LexAndParse stream diverges from Lex (%d vs %d tokens)",
+				e.Path, len(stream), len(want))
+		}
+	}
+}
+
+// TestParse_ConditionalRequiresElse pins the ternary arity at the grammar: a
+// two-operand conditional can never evaluate, so "cond ? { x }" is a load-time
+// syntax error rather than a guaranteed evaluation error.
+func TestParse_ConditionalRequiresElse(t *testing.T) {
+	body := func(e string) string {
+		return "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + e + "\n}\n"
+	}
+	t.Run("with else accepted", func(t *testing.T) {
+		_, issues := Parse([]byte(body("id != nil ? { true : false }")), location.NewSourceID("s.yammm"))
+		if len(issues) != 0 {
+			t.Errorf("ternary with else drew %v, want none", issues)
+		}
+	})
+	t.Run("without else rejected", func(t *testing.T) {
+		_, issues := Parse([]byte(body("id != nil ? { true }")), location.NewSourceID("s.yammm"))
+		if len(issues) != 1 {
+			t.Fatalf("else-less ternary drew %d diagnostics, want 1: %v", len(issues), issues)
+		}
+		if issues[0].Code() != diag.E_SYNTAX {
+			t.Errorf("code = %v, want %v", issues[0].Code(), diag.E_SYNTAX)
+		}
+		const want = "expected ':' and an else branch in a conditional"
+		if issues[0].Message() != want {
+			t.Errorf("message = %q, want %q", issues[0].Message(), want)
+		}
+	})
+}
+
 // TestParse_IntegerBoundsRejectAFloat pins the split between the two numeric
 // bound sets. An Integer bound is INTEGER or '_'; a Float bound also takes
 // FLOAT. Sharing one set let Integer[1.5, 3] parse and then fail a constraint

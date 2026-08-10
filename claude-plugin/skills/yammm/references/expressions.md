@@ -262,7 +262,7 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `TypeOf` | `val -> TypeOf` | Get runtime type name as string |
+| `TypeOf` | `val -> TypeOf` | DSL type name as string: `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"pattern"` (`"unknown"` for anything else) |
 | `IsNil` | `val -> IsNil` | True if value is nil |
 
 ---

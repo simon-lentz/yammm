@@ -162,7 +162,9 @@ func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
 }
 
 // conditional parses the "{ then : else }" tail of a conditional whose '?' the
-// caller has already consumed. The else branch is optional.
+// caller has already consumed. The else branch is required: a two-operand
+// conditional can never evaluate, so the missing ':' is a syntax error here
+// rather than a guaranteed evaluation error later.
 func (p *exprParser) conditional(cond expr.Expression) (expr.Expression, error) {
 	if err := p.expect(p.tok.lbrace, "'{' after '?'"); err != nil {
 		return nil, err
@@ -171,21 +173,17 @@ func (p *exprParser) conditional(cond expr.Expression) (expr.Expression, error) 
 	if err != nil {
 		return nil, err
 	}
-	var falseBranch expr.Expression
-	if p.lx.Peek().Type == p.tok.colon {
-		p.next()
-		falseBranch, err = p.parse(0)
-		if err != nil {
-			return nil, err
-		}
+	if err := p.expect(p.tok.colon, "':' and an else branch in a conditional"); err != nil {
+		return nil, err
+	}
+	falseBranch, err := p.parse(0)
+	if err != nil {
+		return nil, err
 	}
 	if err := p.expect(p.tok.rbrace, "'}' closing conditional"); err != nil {
 		return nil, err
 	}
-	if falseBranch != nil {
-		return expr.SExpr{expr.Op("?"), cond, trueBranch, falseBranch}, nil
-	}
-	return expr.SExpr{expr.Op("?"), cond, trueBranch}, nil
+	return expr.SExpr{expr.Op("?"), cond, trueBranch, falseBranch}, nil
 }
 
 func (p *exprParser) prefix() (expr.Expression, error) {

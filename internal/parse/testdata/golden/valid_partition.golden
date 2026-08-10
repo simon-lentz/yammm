@@ -125,6 +125,8 @@ format/testdata/qualified_references.yammm
 format/testdata/trailing_comma_in_constraints.yammm
 format/testdata/wrap_and_align_interaction.yammm
 format/testdata/wrap_long_enum.yammm
+instance/testdata/contract/contract_err.yammm
+instance/testdata/contract/contract_pass.yammm
 internal/parse/testdata/corpus/multibyte.yammm
 lsp/editors/vscode/tests/integration/fixtures/workspace/broken.yammm
 lsp/editors/vscode/tests/integration/fixtures/workspace/valid.yammm

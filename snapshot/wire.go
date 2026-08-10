@@ -34,6 +34,11 @@ package snapshot
 //     that insert a fifth top-level key, shift the header-body
 //     transition, or change the inter-key separator pattern silently
 //     break UpdateMetadata even without relaxing the field-order rule.
+//     UpdateMetadata(x) == Marshal(Load(x)) holds for documents the
+//     current Marshal produced; a legacy document carrying int-shaped
+//     floats is the deliberate exception — UpdateMetadata preserves its
+//     body verbatim while a re-marshal heals KindFloat values into
+//     decimal form.
 //
 // Both contracts are tested in snapshot/wire_test.go via:
 //   - TestWireFormat_TopLevelKeyOrder (token-level key-order pin)

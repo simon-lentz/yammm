@@ -1,0 +1,139 @@
+schema "contract_pass"
+
+type T {
+	id String primary
+	absent_list List<Integer>
+	absent_str String
+
+	// --- Collection functions ---
+	! "p_all_empty_true" [] -> All |$x| { $x > 0 }
+	! "p_any_empty_false" !([] -> Any |$x| { $x > 0 })
+	! "p_allornone_empty_true" [] -> AllOrNone |$x| { $x > 0 }
+	! "p_allornone_mixed_false" !([1, -1] -> AllOrNone |$x| { $x > 0 })
+	! "p_nil_input_is_empty_all" absent_list -> All |$x| { $x > 0 }
+	! "p_nil_len_zero" absent_list -> Len == 0
+	! "p_unique" [1, 2, 2, 3] -> Unique -> Len == 3
+	! "p_compact" [1, nil, 2] -> Compact -> Len == 2
+	! "p_sort" ([3, 1, 2] -> Sort) == [1, 2, 3]
+	! "p_reverse" ([1, 2] -> Reverse) == [2, 1]
+	! "p_flatten_one_level" [[1, 2], [3]] -> Flatten -> Len == 3
+	! "p_contains" [1, 2, 3] -> Contains(2)
+	! "p_contains_crosstype_false" !([1, 2, 3] -> Contains("2"))
+	! "p_first_empty_nil" ([] -> First) == nil
+	! "p_last_empty_nil" ([] -> Last) == nil
+	! "p_first" [1, 2, 3] -> First == 1
+	! "p_sum_empty_zero" [] -> Sum == 0
+	! "p_sum_mixed_float" [1, 2.5] -> Sum == 3.5
+	! "p_reduce_init" [1, 2, 3] -> Reduce(0) |$acc, $x| { $acc + $x } == 6
+	! "p_reduce_seed_first" [1, 2, 3] -> Reduce |$acc, $x| { $acc + $x } == 6
+	! "p_map" [1, 2, 3] -> Map |$x| { $x * 2 } -> Sum == 12
+	! "p_filter" [1, 2, 3] -> Filter |$x| { $x > 1 } -> Len == 2
+	! "p_count" [1, 2, 3] -> Count |$x| { $x > 1 } == 2
+
+	// --- Numeric functions ---
+	! "p_abs" (-5) -> Abs == 5
+	! "p_round_bankers_down" 2.5 -> Round == 2
+	! "p_round_bankers_up" 3.5 -> Round == 4
+	! "p_round_int_passthrough" 7 -> Round == 7
+	! "p_floor" 2.7 -> Floor == 2.0
+	! "p_ceil" 2.1 -> Ceil == 3.0
+	! "p_floor_int_passthrough" 3 -> Floor == 3
+	! "p_min_two" 2 -> Min(3) == 2
+	! "p_max_two" 2 -> Max(3) == 3
+	! "p_min_slice" [3, 1, 2] -> Min == 1
+	! "p_max_slice" [3, 1, 2] -> Max == 3
+	! "p_compare_num" 1 -> Compare(2) == -1
+	! "d_compare_strings_works" "a" -> Compare("b") == -1
+
+	// --- String functions ---
+	! "p_upper" "Hello" -> Upper == "HELLO"
+	! "p_lower" "Hello" -> Lower == "hello"
+	! "p_trim" "  x  " -> Trim == "x"
+	! "p_len_runes" "préfix" -> Len == 6
+	! "p_substring_one_arg" "abc" -> Substring(1) == "bc"
+	! "p_substring_two_arg" "abc" -> Substring(0, 2) == "ab"
+	! "d_substring_negative_start" "abc" -> Substring(-2) == "bc"
+	! "d_substring_end_clamped" "abc" -> Substring(1, 99) == "bc"
+	! "p_split" "a,b" -> Split(",") -> Len == 2
+	! "p_join" ["a", "b"] -> Join("-") == "a-b"
+	! "p_startswith" "abc" -> StartsWith("ab")
+	! "p_endswith" "abc" -> EndsWith("bc")
+	! "p_replace_all" "aaa" -> Replace("a", "b") == "bbb"
+	! "p_trimprefix" "abc" -> TrimPrefix("ab") == "c"
+	! "d_trimprefix_absent_noop" "abc" -> TrimPrefix("x") == "abc"
+	! "p_trimsuffix" "abc" -> TrimSuffix("bc") == "a"
+	! "p_match_captures" "abc" -> Match(/b(c)/) -> Len == 2
+	! "p_match_miss_nil" ("abc" -> Match(/z/)) == nil
+
+	// --- Control flow ---
+	! "p_then_nil_shortcircuit" (nil -> Then |$v| { false }) == nil
+	! "p_then_nonnil" 5 -> Then |$v| { $v > 4 }
+	! "p_lest_nil_runs_body" nil -> Lest { true }
+	! "p_lest_nonnil_passthrough" 5 -> Lest { 99 } == 5
+	! "p_with_always_runs" nil -> With |$v| { $v == nil }
+	! "p_default_nil" nil -> Default(7) == 7
+	! "p_default_nonnil" 5 -> Default(7) == 5
+	! "p_coalesce" nil -> Coalesce(nil, 3) == 3
+	! "p_coalesce_all_nil" (nil -> Coalesce(nil, nil)) == nil
+
+	// --- Utility ---
+	! "p_isnil_nil" nil -> IsNil
+	! "p_isnil_zero_false" !(0 -> IsNil)
+	! "p_isnil_emptystr_false" !("" -> IsNil)
+	! "p_isnil_absent_prop" absent_str -> IsNil
+	! "d_typeof_int" 5 -> TypeOf == "integer"
+	! "d_typeof_float" 5.5 -> TypeOf == "float"
+	! "d_typeof_string" "x" -> TypeOf == "string"
+	! "d_typeof_bool" true -> TypeOf == "boolean"
+	! "d_typeof_nil" nil -> TypeOf == "nil"
+	! "d_typeof_list" ([1] -> TypeOf) == "list"
+	! "d_typeof_pattern" (/x/ -> TypeOf) == "pattern"
+
+	// --- Operators: equality and ordering ---
+	! "p_eq_crosstype_false" !(1 == "1")
+	! "p_neq_crosstype_true" 1 != "1"
+	! "d_lt_crosstype_strata_true" 1 < "a"
+	! "d_gt_crosstype_strata" "a" > 1
+	! "d_lt_crosstype_strata_false" !("a" < 1)
+	! "d_nil_lt_number" nil < 0
+	! "d_bool_ordered" false < true
+	! "d_nan_eq_nan" (0.0 * (1.0 / 0.0)) ==
+		(0.0 * (1.0 / 0.0))
+	! "d_nan_unique_collapses" [0.0 * (1.0 / 0.0),
+		0.0 * (1.0 / 0.0)] -> Unique -> Len == 1
+	! "d_float_div_zero_inf" 1.0 / 0.0 > 999999999
+	! "p_string_order" "2030-01-02" > "2030-01-01"
+	! "d_timestamp_order_is_string_order" "2030-01-01T10:00:00+09:00" > "2030-01-01T02:00:00Z"
+
+	// --- Operators: arithmetic ---
+	! "p_int_div_truncates" 7 / 2 == 3
+	! "d_int_div_truncates_toward_zero" (-7) / 2 == -3
+	! "p_mixed_div_float" 7.0 / 2 == 3.5
+	! "p_mod" 7 % 3 == 1
+	! "d_mod_sign_of_dividend" (-7) % 3 == -1
+	! "p_promote_int_float" 1 + 2.5 == 3.5
+	! "p_string_concat" "a" + "b" == "ab"
+	! "d_list_concat" ([1] + [2]) -> Len == 2
+
+	// --- Operators: membership, match, logic ---
+	! "p_in" 2 in [1, 2]
+	! "p_in_crosstype_false" !("2" in [1, 2])
+	! "p_regex_match" "user@host.com" =~ /.+@.+\..+/
+	! "p_typecheck_int" 5 =~ Integer
+	! "p_typecheck_float" 5.5 =~ Float
+	! "d_int_matches_float" 5 =~ Float
+	! "d_wholefloat_matches_integer" 5.0 =~ Integer
+	! "p_typecheck_date" "2030-01-01" =~ Date
+	! "p_typecheck_not_date" "x" !~ Date
+	! "p_typecheck_uuid" "550e8400-e29b-41d4-a716-446655440000" =~ UUID
+	! "p_xor" true ^ false
+	! "p_xor_same_false" !(true ^ true)
+
+	// --- Ternary, indexing, variables ---
+	! "p_ternary_true" (true ? { 1 : 2 }) == 1
+	! "p_ternary_false" (false ? { 1 : 2 }) == 2
+	! "p_index" [10, 20, 30][1] == 20
+	! "p_index_string_rune" "abé"[2] == "é"
+	! "d_index_oob_nil" ([10][5]) == nil
+	! "d_numeric_var_unset_nil" $0 == nil
+}

@@ -4,8 +4,10 @@ package analysis
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -22,6 +24,21 @@ import (
 
 // diagnosticSource is the value used for the Source field in LSP diagnostics.
 const diagnosticSource = "yammm"
+
+// canonicalSourceID mints a SourceID with best-effort symlink resolution so
+// registry keys match the loader's canonical output — a mismatched key makes
+// SpanToLSPRange fall back to rune columns on failed loads. Resolution
+// failures (markdown virtual paths, deleted files) keep the path as given.
+func canonicalSourceID(path string) (location.SourceID, error) {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	id, err := location.SourceIDFromAbsolutePath(path)
+	if err != nil {
+		return location.SourceID{}, fmt.Errorf("mint source ID for %q: %w", path, err)
+	}
+	return id, nil
+}
 
 // Snapshot represents an immutable analysis result for a single entry file.
 // It captures the complete state needed for LSP features: parsed schema,
@@ -219,7 +236,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 
 	// Pre-register overlay content
 	for path, content := range overlays {
-		id, err := location.SourceIDFromAbsolutePath(path)
+		id, err := canonicalSourceID(path)
 		if err != nil {
 			a.logger.Warn(
 				"failed to create source ID",
@@ -287,7 +304,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 		)
 	}
 
-	entrySourceID, idErr := location.SourceIDFromAbsolutePath(entryPath)
+	entrySourceID, idErr := canonicalSourceID(entryPath)
 	if idErr != nil {
 		a.logger.Warn(
 			"failed to create entry source ID",

@@ -1,9 +1,11 @@
 package parse
 
 import (
-	"fmt"
+	"errors"
 	"regexp"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
@@ -375,18 +377,80 @@ func (b *builder) unquoteAt(t *strTok, what string) (string, bool) {
 	return text, true
 }
 
-// unquote strips a literal's surrounding quotes and resolves its escapes.
-// Single and double quotes are both accepted; an unquoted string is returned
-// unchanged.
+// errUnquoteSyntax keeps the exact message the strconv-backed unquoter
+// produced, so consumers matching diagnostic text see no change.
+var errUnquoteSyntax = errors.New("unquote string: invalid syntax")
+
+// unquote strips a literal's surrounding quotes and resolves exactly the
+// lexer's STRING escape vocabulary: \b \t \n \f \r \0 \xHH \uHHHH \" \' \\.
+// The quote character not delimiting the literal appears literally unescaped.
 func unquote(s string) (string, error) {
 	if !isQuoted(s) {
 		return s, nil
 	}
-	out, err := strconv.Unquote(`"` + s[1:len(s)-1] + `"`)
-	if err != nil {
-		return "", fmt.Errorf("unquote string: %w", err)
+	body := s[1 : len(s)-1]
+	var out strings.Builder
+	out.Grow(len(body))
+	for i := 0; i < len(body); {
+		c := body[i]
+		if c != '\\' {
+			out.WriteByte(c)
+			i++
+			continue
+		}
+		if i+1 >= len(body) {
+			return "", errUnquoteSyntax
+		}
+		esc := body[i+1]
+		i += 2
+		switch esc {
+		case 'b':
+			out.WriteByte('\b')
+		case 't':
+			out.WriteByte('\t')
+		case 'n':
+			out.WriteByte('\n')
+		case 'f':
+			out.WriteByte('\f')
+		case 'r':
+			out.WriteByte('\r')
+		case '0':
+			out.WriteByte(0)
+		case '"':
+			out.WriteByte('"')
+		case '\'':
+			out.WriteByte('\'')
+		case '\\':
+			out.WriteByte('\\')
+		case 'x':
+			if i+2 > len(body) {
+				return "", errUnquoteSyntax
+			}
+			v, err := strconv.ParseUint(body[i:i+2], 16, 8)
+			if err != nil {
+				return "", errUnquoteSyntax
+			}
+			out.WriteByte(byte(v))
+			i += 2
+		case 'u':
+			if i+4 > len(body) {
+				return "", errUnquoteSyntax
+			}
+			v, err := strconv.ParseUint(body[i:i+4], 16, 16)
+			if err != nil {
+				return "", errUnquoteSyntax
+			}
+			r := rune(uint16(v))
+			if !utf8.ValidRune(r) {
+				return "", errUnquoteSyntax
+			}
+			out.WriteRune(r)
+			i += 4
+		default:
+			return "", errUnquoteSyntax
+		}
 	}
-	return out, nil
+	return out.String(), nil
 }
 
 func isQuoted(s string) bool {

@@ -63,7 +63,7 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 		instances := snap.InstancesOf(typeName)
 		wires := make([]instWire, 0, len(instances))
 		for _, inst := range instances {
-			w := marshalInstance(inst, snap, schemaSource, typeName)
+			w := marshalInstance(inst, snap, s, schemaSource, typeName)
 			// Collect edges from EdgesFrom for the global edge sort.
 			edges := snap.EdgesFrom(inst)
 			for _, e := range edges {
@@ -82,7 +82,7 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 		dw := dupWire{
 			Type:     d.Instance.TypeName(),
 			Key:      d.Instance.PrimaryKey().Clone(),
-			Instance: marshalDuplicateInstance(d.Instance, schemaSource),
+			Instance: marshalDuplicateInstance(d.Instance, s, schemaSource),
 		}
 		dupWires = append(dupWires, dw)
 	}
@@ -108,7 +108,11 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 			uw.TargetKey = nil
 		default:
 			uw.TargetKey = parseTargetKey(u.TargetKey)
-			uw.Properties = u.Properties().Clone()
+			var rel *schema.Relation
+			if srcType, ok := resolveWireType(s, u.Source.TypeName(), u.Source.TypeID()); ok {
+				rel, _ = srcType.Relation(u.Relation)
+			}
+			uw.Properties = wireEdgeProps(u.Properties(), rel)
 		}
 		unresolvedWires = append(unresolvedWires, uw)
 	}
@@ -409,15 +413,16 @@ func assembleIndented(headerJSON, typesJSON, instancesJSON, diagJSON []byte, ind
 }
 
 // marshalInstance converts a graph.Instance to its wire representation.
-func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, schemaSource, mapKey string) instWire {
+func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schema, schemaSource, mapKey string) instWire {
+	t, _ := resolveWireType(s, mapKey, inst.TypeID())
 	w := instWire{
 		Key:        inst.PrimaryKey().Clone(),
-		Properties: inst.Properties().Clone(),
+		Properties: wireProps(inst.Properties(), t),
 	}
 
 	// type_id: omit when recoverable from context.
 	typeID := inst.TypeID()
-	if typeID.Name() != mapKey || typeID.SchemaPath().String() != schemaSource {
+	if !typeID.IsZero() && (typeID.Name() != mapKey || typeID.SchemaPath().String() != schemaSource) {
 		w.TypeID = &typeIDWire{
 			SchemaPath: typeID.SchemaPath().String(),
 			Name:       typeID.Name(),
@@ -429,10 +434,14 @@ func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, schemaSource, m
 	if len(edges) > 0 {
 		edgeMap := make(map[string][]edgeWire)
 		for _, e := range edges {
+			var rel *schema.Relation
+			if t != nil {
+				rel, _ = t.Relation(e.Relation())
+			}
 			ew := edgeWire{
 				TargetType: e.Target().TypeName(),
 				TargetKey:  e.Target().PrimaryKey().Clone(),
-				Properties: e.Properties().Clone(),
+				Properties: wireEdgeProps(e.Properties(), rel),
 			}
 			if ew.Properties == nil {
 				ew.Properties = map[string]any{}
@@ -447,10 +456,18 @@ func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, schemaSource, m
 	if len(compRels) > 0 {
 		compMap := make(map[string][]instWire, len(compRels))
 		for _, relName := range compRels {
+			// The parent relation's target is the child's exact type, and the
+			// only route for loaded children (relation-name TypeName, zero TypeID).
+			var childType *schema.Type
+			if t != nil {
+				if rel, ok := t.Relation(relName); ok {
+					childType, _ = s.TypeByID(rel.TargetID())
+				}
+			}
 			children := inst.Composed(relName)
 			childWires := make([]instWire, 0, len(children))
 			for _, child := range children {
-				cw := marshalComposedChild(child, schemaSource, child.TypeName())
+				cw := marshalComposedChild(child, s, childType, schemaSource, child.TypeName())
 				childWires = append(childWires, cw)
 			}
 			compMap[relName] = childWires
@@ -474,17 +491,18 @@ func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, schemaSource, m
 	return w
 }
 
-// marshalComposedChild marshals a composed child instance.
+// marshalComposedChild marshals a composed child instance under t, the parent
+// relation's target type (nil when the parent never resolved — passthrough).
 // Composed children never carry edges (omitempty handles this).
-func marshalComposedChild(inst *graph.Instance, schemaSource, mapKey string) instWire {
+func marshalComposedChild(inst *graph.Instance, s *schema.Schema, t *schema.Type, schemaSource, mapKey string) instWire {
 	w := instWire{
 		Key:        inst.PrimaryKey().Clone(),
-		Properties: inst.Properties().Clone(),
+		Properties: wireProps(inst.Properties(), t),
 	}
 
 	// type_id
 	typeID := inst.TypeID()
-	if typeID.Name() != mapKey || typeID.SchemaPath().String() != schemaSource {
+	if !typeID.IsZero() && (typeID.Name() != mapKey || typeID.SchemaPath().String() != schemaSource) {
 		w.TypeID = &typeIDWire{
 			SchemaPath: typeID.SchemaPath().String(),
 			Name:       typeID.Name(),
@@ -496,10 +514,16 @@ func marshalComposedChild(inst *graph.Instance, schemaSource, mapKey string) ins
 	if len(compRels) > 0 {
 		compMap := make(map[string][]instWire, len(compRels))
 		for _, relName := range compRels {
+			var childType *schema.Type
+			if t != nil {
+				if rel, ok := t.Relation(relName); ok {
+					childType, _ = s.TypeByID(rel.TargetID())
+				}
+			}
 			children := inst.Composed(relName)
 			childWires := make([]instWire, 0, len(children))
 			for _, child := range children {
-				cw := marshalComposedChild(child, schemaSource, child.TypeName())
+				cw := marshalComposedChild(child, s, childType, schemaSource, child.TypeName())
 				childWires = append(childWires, cw)
 			}
 			compMap[relName] = childWires
@@ -525,14 +549,15 @@ func marshalComposedChild(inst *graph.Instance, schemaSource, mapKey string) ins
 
 // marshalDuplicateInstance marshals a duplicate record's instance.
 // Duplicate instances have no edges and no composed children.
-func marshalDuplicateInstance(inst *graph.Instance, schemaSource string) instWire {
+func marshalDuplicateInstance(inst *graph.Instance, s *schema.Schema, schemaSource string) instWire {
+	t, _ := resolveWireType(s, inst.TypeName(), inst.TypeID())
 	w := instWire{
 		Key:        inst.PrimaryKey().Clone(),
-		Properties: inst.Properties().Clone(),
+		Properties: wireProps(inst.Properties(), t),
 	}
 
 	typeID := inst.TypeID()
-	if typeID.Name() != inst.TypeName() || typeID.SchemaPath().String() != schemaSource {
+	if !typeID.IsZero() && (typeID.Name() != inst.TypeName() || typeID.SchemaPath().String() != schemaSource) {
 		w.TypeID = &typeIDWire{
 			SchemaPath: typeID.SchemaPath().String(),
 			Name:       typeID.Name(),

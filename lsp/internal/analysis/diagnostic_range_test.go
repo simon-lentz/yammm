@@ -92,6 +92,70 @@ func TestAnalyze_DiagnosticRangesConvertFromParseSpans(t *testing.T) {
 	}
 }
 
+// TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths pins the conversion
+// when the client's path crosses a symlink (macOS /tmp → /private): the
+// analyzer must canonicalise its own registry keys, because on a failed load
+// no back-fill re-keys them and a miss falls back to rune columns — identical
+// under both encodings, which is what the final assertion catches. The
+// workspace path is deliberately NOT pre-resolved; resolving it is what hides
+// the bug.
+func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
+	t.Parallel()
+
+	const src = "schema \"ranges\"\n" +
+		"\n" +
+		"type Doc {\n" +
+		"\tid String primary\n" +
+		"\ttitle Enum[\"🎉日\", \"🎉日\"]\n" +
+		"}\n"
+
+	// Resolve the base so the symlink below is the only indirection in play.
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp base: %v", err)
+	}
+	realDir := filepath.Join(base, "real")
+	if err := os.MkdirAll(realDir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	linkDir := filepath.Join(base, "link")
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	path := filepath.Join(linkDir, "main.yammm")
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	starts := map[lsputil.PositionEncoding][]uint32{}
+	for _, enc := range []lsputil.PositionEncoding{
+		lsputil.PositionEncodingUTF16,
+		lsputil.PositionEncodingUTF8,
+	} {
+		a := NewAnalyzer(slog.New(slog.NewTextHandler(io.Discard, nil)))
+		snap, _ := a.Analyze(t.Context(), path, map[string][]byte{path: []byte(src)}, linkDir, enc)
+		if snap == nil {
+			t.Fatalf("%s: analyze returned no snapshot", enc)
+		}
+		if len(snap.LSPDiagnostics) == 0 {
+			t.Fatalf("%s: the fixture reports no diagnostics, so nothing is converted", enc)
+		}
+		for _, ud := range snap.LSPDiagnostics {
+			starts[enc] = append(starts[enc], ud.Diagnostic.Range.Start.Character)
+		}
+	}
+
+	utf8Cols, utf16Cols := starts[lsputil.PositionEncodingUTF8], starts[lsputil.PositionEncodingUTF16]
+	if len(utf8Cols) != len(utf16Cols) {
+		t.Fatalf("diagnostic counts differ by encoding: %d and %d", len(utf8Cols), len(utf16Cols))
+	}
+	if slices.Equal(utf8Cols, utf16Cols) {
+		t.Errorf("every column is identical under both encodings (%v); the registry "+
+			"missed the symlinked path and fell back to rune columns", utf8Cols)
+	}
+}
+
 // columnUnits returns the length of a line in the units the encoding counts.
 func columnUnits(line string, enc lsputil.PositionEncoding) int {
 	if enc == lsputil.PositionEncodingUTF8 {

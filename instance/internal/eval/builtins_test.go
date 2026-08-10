@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/schema/expr"
 	"github.com/stretchr/testify/assert"
@@ -1157,19 +1158,32 @@ func TestBuiltin_Substring(t *testing.T) {
 }
 
 func TestBuiltin_TypeOf(t *testing.T) {
-	// TypeOf returns reflect.TypeOf().String() for type names
+	// TypeOf reports the DSL type vocabulary, never Go type names; the table
+	// spans the evaluator's whole value domain so nothing falls through to %T.
 	tests := []struct {
 		name     string
 		val      any
 		expected string
 	}{
 		{"string", "hello", "string"},
-		{"int64", int64(42), "int64"},
-		{"float64", 3.14, "float64"},
-		{"bool", true, "bool"},
+		{"int64", int64(42), "integer"},
+		{"int", int(1), "integer"},
+		{"int32", int32(1), "integer"},
+		{"uint8", uint8(1), "integer"},
+		{"float64", 3.14, "float"},
+		{"float32", float32(1.5), "float"},
+		{"bool", true, "boolean"},
 		{"nil", nil, "nil"},
-		{"slice", []any{1, 2, 3}, "[]interface {}"},
-		{"map", map[string]any{"a": 1}, "map[string]interface {}"},
+		{"regexp", regexp.MustCompile("a"), "pattern"},
+		{"slice", []any{1, 2, 3}, "list"},
+		{"typed_slice", []string{"a"}, "list"},
+		{"array", [2]int{1, 2}, "list"},
+		{"immutable_slice", immutable.WrapSlice([]any{int64(1)}), "list"},
+		{"map", map[string]any{"a": 1}, "map"},
+		{"typed_map", map[int]string{}, "map"},
+		{"immutable_map", immutable.WrapMap(map[string]any{}), "map"},
+		{"func", eval.TypeChecker(nil), "unknown"},
+		{"struct", struct{}{}, "unknown"},
 	}
 
 	for _, tt := range tests {

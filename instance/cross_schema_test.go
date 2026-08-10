@@ -3,6 +3,7 @@ package instance_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -379,10 +380,12 @@ part type Item {
 	})
 }
 
-// A registry-less schema.Builder defers a qualified cross-schema relation
-// target, leaving a zero TargetID; validation falls back to syntactic
-// entry-relative resolution and reports the target as not found.
-func TestValidate_DeferredTargetFallback(t *testing.T) {
+// TestValidate_DanglingQualifiedTargetRejectedAtBuild pins that the dangling
+// cross-schema relation target the instance layer once had to handle at
+// validation time is now rejected at schema construction: a registry-less
+// Builder draws E_UNKNOWN_TYPE and nils the schema, so no validator can see a
+// zero-TargetID relation through a public entry point.
+func TestValidate_DanglingQualifiedTargetRejectedAtBuild(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("app").
 		AddType("Node").
@@ -390,36 +393,10 @@ func TestValidate_DeferredTargetFallback(t *testing.T) {
 		WithRelation("LINKED", schema.NewTypeRef("ext", "Thing", location.Span{}), true, false).
 		Done().
 		Build()
-	if result.HasErrors() {
-		t.Fatalf("build: %v", result.Err())
+	if s != nil {
+		t.Fatal("a dangling qualified relation target must nil the schema")
 	}
-
-	node, ok := s.Type("Node")
-	if !ok {
-		t.Fatal("type Node missing")
-	}
-	rel, ok := node.Relation("LINKED")
-	if !ok {
-		t.Fatal("relation LINKED missing")
-	}
-	if !rel.TargetID().IsZero() {
-		t.Fatal("fixture must exercise the deferred (zero-TargetID) path")
-	}
-
-	v := instance.NewValidator(s)
-	valid, vres := v.ValidateOne(t.Context(), "Node", instance.RawInstance{
-		Properties: map[string]any{
-			"id":     "N1",
-			"linked": map[string]any{"_target_id": "T1"},
-		},
-	})
-	if valid != nil {
-		t.Error("deferred-target edge must not produce a valid instance")
-	}
-	if vres.OK() {
-		t.Fatal("deferred-target edge must be rejected")
-	}
-	if !vres.HasCode(instance.ErrTypeNotFound) {
-		t.Errorf("want E_INSTANCE_TYPE_NOT_FOUND, got: %s", vres)
+	if !result.HasCode(diag.E_UNKNOWN_TYPE) {
+		t.Errorf("want E_UNKNOWN_TYPE, got: %s", result)
 	}
 }

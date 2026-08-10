@@ -125,13 +125,13 @@ func TestDiffSnapshots_DetectsDifference(t *testing.T) {
 	}
 }
 
-// TestDiffSnapshots_DetectsBigIntegerCorruption pins exact comparison of
-// same-typed integer properties: two int64 values differing by 1 above 2^53
-// collapse to the same float64, so a float-coercing comparer would miss
-// exactly the corruption class a wire round trip could introduce. Mixed
-// int64/float64 pairs of equal value must still compare equal — the wire
-// narrows whole float64 values to int64 on load.
-func TestDiffSnapshots_DetectsBigIntegerCorruption(t *testing.T) {
+// TestDiffSnapshots_ComparesNumbersExactly pins exact numeric comparison on
+// both axes: two int64 values differing by 1 above 2^53 collapse to the same
+// float64, so a float-coercing comparer would miss that corruption class; and
+// an int64/float64 pair of equal value must FAIL the diff — schema-aware
+// float emission keeps KindFloat values float64 across a round trip, so a
+// dynamic-type mismatch is a real defect, not a wire artifact.
+func TestDiffSnapshots_ComparesNumbersExactly(t *testing.T) {
 	s := testSchema(t)
 	person := func(code any) *graph.Snapshot {
 		return buildSnapshot(t, s, instancetest.VI(
@@ -148,8 +148,11 @@ func TestDiffSnapshots_DetectsBigIntegerCorruption(t *testing.T) {
 		t.Error("DiffSnapshots must detect a ±1 corruption of an int64 property above 2^53")
 	}
 
-	// Tolerated representation change: int64(1) vs float64(1).
-	snapshottest.DiffSnapshots(t, person(int64(1)), person(float64(1)))
+	probe = &testing.T{}
+	snapshottest.DiffSnapshots(probe, person(int64(1)), person(float64(1)))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must reject an int64/float64 dynamic-type mismatch")
+	}
 }
 
 // TestDiffSnapshots_DistinguishesProvenancePresence pins that an instance

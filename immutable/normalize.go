@@ -23,11 +23,12 @@ import (
 //  3. Returns the original json.Number unchanged if both parsers fail
 //     (malformed number string)
 //
-// Type narrowing: JSON has no int/float distinction. float64(1.0) marshals
-// as "1" (no decimal point), which NormalizeNumber converts to int64(1).
-// This is inherent to JSON's lack of int/float distinction.
-// The Value typed accessors (Int(), Float()) handle both representations
-// transparently.
+// Classification is by lexical form alone: a float indicator ('.', 'e', 'E')
+// means float64, an int-shaped literal means int64. Writers that know a value
+// is a float must emit it with an indicator (snapshot.Marshal emits KindFloat
+// values in decimal form); an int-shaped literal under a float-typed field
+// classifies as int64 here, and the Value typed accessors (Int(), Float())
+// handle both representations transparently.
 func NormalizeNumber(n json.Number) any {
 	s := n.String()
 

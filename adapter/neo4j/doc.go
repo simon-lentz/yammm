@@ -63,12 +63,12 @@
 // @@index yields a composite range index (declared property order is
 // significant); a property-level @vector yields an [IndexVector] ANN index
 // whose dimension comes from the property's Vector[N] constraint. Load-time
-// validation guarantees eligibility wherever it can resolve a target's type;
-// where it must defer — a supertype that never resolved, and every qualified
-// reference in a registry-less [schema.NewBuilder] schema — the adapter
-// re-checks, reporting [E_NEO4J_UNKNOWN_PROPERTY] for a property that does not
-// exist and [E_NEO4J_INVALID_INDEX_TARGET] for one whose type cannot carry the
-// index. The adapter does NOT simply trust the sealed model here.
+// validation guarantees eligibility for every schema a public entry point
+// returns — dangling references are rejected at construction — and the adapter
+// still re-checks as defense in depth, reporting [E_NEO4J_UNKNOWN_PROPERTY]
+// for a property that does not exist and [E_NEO4J_INVALID_INDEX_TARGET] for
+// one whose type cannot carry the index, rather than trusting a model that
+// may have been assembled outside those guarantees.
 //
 // Index names are always emitted — {label}_{props}_idx for range,
 // {label}_{prop}_vector_idx for vector — because diff and DROP tooling need

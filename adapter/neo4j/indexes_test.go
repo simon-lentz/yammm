@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -323,14 +324,14 @@ func TestIndexes_FulltextRangeNameCollisionDisambiguated(t *testing.T) {
 	}
 }
 
-// A schema.Builder schema with no registry defers every qualified reference, so
-// a type extending an unresolvable qualified supertype seals cleanly and
-// validateIndexType suppresses E_UNKNOWN_ANNOTATION_TARGET for its @@index
-// arguments — the property might live on the invisible ancestor. The adapter
-// therefore cannot trust the sealed model: emitting DDL for a property that does
-// not exist creates a permanently empty index that DiffIndexes then reports as
-// matched on every subsequent run.
-func TestIndexesStructured_UnknownCompositeProperty_Reported(t *testing.T) {
+// TestIndexesStructured_DanglingSupertypeRejectedAtBuild pins that the state
+// the adapter's emission-time property re-check was written for — a sealed
+// schema whose supertype never resolved, hiding whether an @@index argument
+// names a real property — is rejected at construction: a registry-less Builder
+// draws E_UNKNOWN_TYPE and nils the schema. The re-check in IndexesStructured
+// stays as defense against internal callers, but no public entry point can
+// hand the adapter a model it cannot trust.
+func TestIndexesStructured_DanglingSupertypeRejectedAtBuild(t *testing.T) {
 	t.Parallel()
 	s, res := schema.NewBuilder().
 		WithName("probe").
@@ -340,18 +341,11 @@ func TestIndexesStructured_UnknownCompositeProperty_Reported(t *testing.T) {
 		WithTypeAnnotation("index", "missingProp").
 		Done().
 		Build()
-	if res.HasErrors() {
-		t.Fatalf("precondition: the deferred-supertype path should seal cleanly, got: %v", res)
+	if s != nil {
+		t.Fatal("a dangling qualified supertype must nil the schema")
 	}
-
-	indexes, result := New().IndexesStructured(context.Background(), s)
-	if !result.HasCode(E_NEO4J_UNKNOWN_PROPERTY) {
-		t.Errorf("want E_NEO4J_UNKNOWN_PROPERTY for @@index on an undeclared property, got: %v", result)
-	}
-	for _, idx := range indexes {
-		if slices.Contains(idx.Properties, "missingProp") {
-			t.Errorf("emitted DDL for an undeclared property: %s", idx.Statement)
-		}
+	if !res.HasCode(diag.E_UNKNOWN_TYPE) {
+		t.Errorf("want E_UNKNOWN_TYPE at Build, got: %v", res)
 	}
 }
 
@@ -400,40 +394,11 @@ func TestIndexesStructured_BuilderFulltextRoundTrip(t *testing.T) {
 	}
 }
 
-// The fulltext sibling of the unknown-composite-property case: a registry-less
-// builder schema seals cleanly with @@fulltext naming nothing, and the adapter
-// must refuse to emit DDL for the property that does not exist.
-func TestIndexesStructured_UnknownFulltextProperty_Reported(t *testing.T) {
-	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("probe").
-		AddType("Entity").
-		Extends(schema.NewTypeRef("common", "Base", location.Span{})).
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithTypeAnnotation("fulltext", "missingProp").
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("precondition: the deferred-supertype path should seal cleanly, got: %v", res)
-	}
-
-	indexes, result := New().IndexesStructured(context.Background(), s)
-	if !result.HasCode(E_NEO4J_UNKNOWN_PROPERTY) {
-		t.Errorf("want E_NEO4J_UNKNOWN_PROPERTY for @@fulltext on an undeclared property, got: %v", result)
-	}
-	for _, idx := range indexes {
-		if slices.Contains(idx.Properties, "missingProp") {
-			t.Errorf("emitted DDL for an undeclared property: %s", idx.Statement)
-		}
-	}
-}
-
-// @fulltext on a property whose type never resolved (an unresolved qualified
-// alias in a registry-less builder schema) is the deferred-validation hole the
-// adapter re-check covers: the loader deferred its eligibility check, so
-// trusting the sealed model would emit fulltext DDL over a property the DSL's
-// own rule may forbid.
-func TestIndexesStructured_UnresolvedAliasFulltextTarget_Reported(t *testing.T) {
+// TestIndexesStructured_DanglingAliasTargetRejectedAtBuild pins the sibling
+// state on the datatype path: @fulltext on a property whose type is a dangling
+// qualified alias is rejected at construction rather than sealing into a model
+// whose eligibility the adapter would have to re-derive.
+func TestIndexesStructured_DanglingAliasTargetRejectedAtBuild(t *testing.T) {
 	t.Parallel()
 	s, res := schema.NewBuilder().
 		WithName("probe").
@@ -443,18 +408,11 @@ func TestIndexesStructured_UnresolvedAliasFulltextTarget_Reported(t *testing.T) 
 		WithPropertyAnnotation("blob", "fulltext").
 		Done().
 		Build()
-	if res.HasErrors() {
-		t.Fatalf("precondition: the unresolved-alias path should seal cleanly, got: %v", res)
+	if s != nil {
+		t.Fatal("a dangling qualified property datatype must nil the schema")
 	}
-
-	indexes, result := New().IndexesStructured(context.Background(), s)
-	if !result.HasCode(E_NEO4J_INVALID_INDEX_TARGET) {
-		t.Errorf("want E_NEO4J_INVALID_INDEX_TARGET for @fulltext on an unresolved alias, got: %v", result)
-	}
-	for _, idx := range indexes {
-		if slices.Contains(idx.Properties, "blob") {
-			t.Errorf("emitted DDL for a property whose type never resolved: %s", idx.Statement)
-		}
+	if !res.HasCode(diag.E_UNKNOWN_TYPE) {
+		t.Errorf("want E_UNKNOWN_TYPE at Build, got: %v", res)
 	}
 }
 

@@ -1,0 +1,171 @@
+{
+  "name": "\"contract_err\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 28,
+        "e": 29
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 36,
+              "e": 42
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 33,
+            "e": 50
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"x_reduce_empty_no_init\"",
+          "expr": "(== (Reduce ([]) (args ) (params a x) ($ \"a\")) nil)",
+          "expr_span": {
+            "s": 239,
+            "e": 276
+          },
+          "span": {
+            "s": 212,
+            "e": 276
+          }
+        },
+        {
+          "msg": "\"x_min_empty\"",
+          "expr": "(== (Min ([]) (args ) (params ) nil) nil)",
+          "expr_span": {
+            "s": 294,
+            "e": 312
+          },
+          "span": {
+            "s": 278,
+            "e": 312
+          }
+        },
+        {
+          "msg": "\"x_upper_nonstring\"",
+          "expr": "(== (Upper 5 (args ) (params ) nil) \"5\")",
+          "expr_span": {
+            "s": 336,
+            "e": 353
+          },
+          "span": {
+            "s": 314,
+            "e": 353
+          }
+        },
+        {
+          "msg": "\"x_int_div_zero\"",
+          "expr": "(== (/ 1 0) 0)",
+          "expr_span": {
+            "s": 374,
+            "e": 384
+          },
+          "span": {
+            "s": 355,
+            "e": 384
+          }
+        },
+        {
+          "msg": "\"x_mod_zero\"",
+          "expr": "(== (% 1 0) 0)",
+          "expr_span": {
+            "s": 401,
+            "e": 411
+          },
+          "span": {
+            "s": 386,
+            "e": 411
+          }
+        },
+        {
+          "msg": "\"x_contains_string_receiver\"",
+          "expr": "(Contains \"abc\" (args \"b\") (params ) nil)",
+          "expr_span": {
+            "s": 444,
+            "e": 466
+          },
+          "span": {
+            "s": 413,
+            "e": 466
+          }
+        },
+        {
+          "msg": "\"x_undefined_named_var\"",
+          "expr": "(== ($ \"undef\") nil)",
+          "expr_span": {
+            "s": 494,
+            "e": 507
+          },
+          "span": {
+            "s": 468,
+            "e": 507
+          }
+        },
+        {
+          "msg": "\"x_scalar_not_collection\"",
+          "expr": "(All 1 (args ) (params x) true)",
+          "expr_span": {
+            "s": 537,
+            "e": 559
+          },
+          "span": {
+            "s": 509,
+            "e": 559
+          }
+        },
+        {
+          "msg": "\"x_nonbool_invariant_result\"",
+          "expr": "(+ 5 1)",
+          "expr_span": {
+            "s": 592,
+            "e": 597
+          },
+          "span": {
+            "s": 561,
+            "e": 597
+          }
+        },
+        {
+          "msg": "\"x_index_two_args\"",
+          "expr": "(== (@ ([] 10 20 30) 0 2) 10)",
+          "expr_span": {
+            "s": 620,
+            "e": 644
+          },
+          "span": {
+            "s": 599,
+            "e": 644
+          }
+        },
+        {
+          "msg": "\"f_nil_result_is_falsey\"",
+          "expr": "(Then nil (args ) (params v) true)",
+          "expr_span": {
+            "s": 673,
+            "e": 698
+          },
+          "span": {
+            "s": 646,
+            "e": 698
+          }
+        }
+      ],
+      "span": {
+        "s": 23,
+        "e": 700
+      }
+    }
+  ]
+}

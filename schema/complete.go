@@ -781,8 +781,8 @@ const (
 // and [completer.resolveAliasChain]) layer their own registry policy on top.
 func (c *completer) classifyQualifier(qualifier string) (aliasResolution, location.SourceID) {
 	if c.resolvedImports == nil {
-		// No resolution map: a Builder/bridge with zero imports, reached only
-		// with a registry present, so any qualifier names no import — absent.
+		// No resolution map means zero declared imports (with or without a
+		// registry), so any qualifier names no import — absent.
 		return aliasAbsent, location.SourceID{}
 	}
 	res, declared := c.resolvedImports[qualifier]
@@ -796,25 +796,13 @@ func (c *completer) classifyQualifier(qualifier string) (aliasResolution, locati
 	}
 }
 
-// referenceDeferred reports whether a qualified reference whose target did not
-// resolve should be skipped silently rather than reported as unknown. Two cases
-// defer: no registry is available to resolve cross-schema refs (so the
-// reference is validated at link time), or the qualifier names a declared
-// import whose load failed (whose failure already carries the root-cause
-// diagnostic). An unqualified reference, and a qualifier that names no declared
-// import while a registry IS present (including a nil resolution map — a Builder
-// or bridge with zero imports), is NOT deferred: it is a genuine unknown.
-//
-// This is the single deferral predicate for the resolveTypeRef-based reference
-// sites (extends clauses, relation and composition targets), folding the
-// registry check in so no site re-derives it — and so a future site cannot get
-// the registry/nil-map interaction wrong, as one once did.
+// referenceDeferred reports whether a qualified reference's failure to resolve
+// stays silent: only a declared-but-failed import defers, its root cause being
+// already reported. An undeclared qualifier is unknown regardless of registry
+// presence — no link step ever comes, so deferring would hide a dangling ref.
 func (c *completer) referenceDeferred(qualifier string) bool {
 	if qualifier == "" {
 		return false
-	}
-	if c.registry == nil {
-		return true
 	}
 	state, _ := c.classifyQualifier(qualifier)
 	return state == aliasDeferred
@@ -922,18 +910,8 @@ func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, v
 			return nil, false
 		}
 	} else {
-		// Cross-schema reference. This site needs the full alias state — the
-		// absent/resolved split and the resolved SourceID — so it reads the
-		// tri-state [completer.classifyQualifier] directly rather than the bool
-		// [completer.referenceDeferred] the resolveTypeRef sites use. The two
-		// defer on the same conditions (no registry to resolve against, or a
-		// declared-but-failed import whose failure already carries the root
-		// cause), so datatype references and extends/relation references cannot
-		// diverge on the registry/nil-map interaction the way they once did.
-		if c.registry == nil {
-			// No registry to resolve the cross-schema ref; defer to link time.
-			return NewAliasConstraint(dataTypeName, nil), true
-		}
+		// Cross-schema reference: reads the tri-state directly (it needs the
+		// SourceID) but defers on the same one condition [completer.referenceDeferred] does.
 		state, sourceID := c.classifyQualifier(qualifier)
 		switch state {
 		case aliasDeferred:
@@ -941,9 +919,8 @@ func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, v
 			// already carries the root cause, so defer rather than re-blame.
 			return NewAliasConstraint(dataTypeName, nil), true
 		case aliasAbsent:
-			// The qualifier names no declared import (a nil resolution map — a
-			// Builder schema or bridge with zero imports — classifies absent, and
-			// is reached here only with a registry present): a genuine unknown.
+			// The qualifier names no declared import: a genuine unknown, with
+			// or without a registry — no link step will ever resolve it.
 			c.reportUnknownAlias(suppressUnknown, span,
 				"unknown type %q in datatype reference: no import declared with alias %q",
 				dataTypeName, qualifier)

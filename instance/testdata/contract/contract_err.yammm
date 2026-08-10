@@ -1,0 +1,19 @@
+schema "contract_err"
+
+type T {
+	id String primary
+
+	// Every invariant must draw a diagnostic: x_* an evaluation error with the
+	// exact message the driving test asserts, f_* E_INVARIANT_FAIL (nil is falsey).
+	! "x_reduce_empty_no_init" ([] -> Reduce |$a, $x| { $a }) == nil
+	! "x_min_empty" ([] -> Min) == nil
+	! "x_upper_nonstring" 5 -> Upper == "5"
+	! "x_int_div_zero" 1 / 0 == 0
+	! "x_mod_zero" 1 % 0 == 0
+	! "x_contains_string_receiver" "abc" -> Contains("b")
+	! "x_undefined_named_var" $undef == nil
+	! "x_scalar_not_collection" 1 -> All |$x| { true }
+	! "x_nonbool_invariant_result" 5 + 1
+	! "x_index_two_args" [10, 20, 30][0, 2] == 10
+	! "f_nil_result_is_falsey" nil -> Then |$v| { true }
+}

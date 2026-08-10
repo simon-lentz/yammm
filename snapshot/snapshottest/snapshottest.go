@@ -77,8 +77,16 @@ func AssertDeterministic(tb testing.TB, snap *graph.Snapshot, opts ...snapshot.O
 type snapProjection struct {
 	Types      []string
 	Instances  map[string][]instProjection
-	Duplicates []string
+	Duplicates []dupProjection
 	Unresolved []unresProjection
+}
+
+// dupProjection carries the duplicate's full instance tree, not just its
+// identity — duplicate properties are schema-typed values a round trip must
+// preserve like any live node's.
+type dupProjection struct {
+	Type     string
+	Instance instProjection
 }
 
 type instProjection struct {
@@ -116,32 +124,15 @@ type unresProjection struct {
 }
 
 // DiffSnapshots compares two snapshots structurally with go-cmp and fails
-// the test with a (-want +got) diff on mismatch. Mixed int64/float64
-// property pairs compare by float64 value, tolerating the wire format's
-// whole-float narrowing across a marshal/load boundary; same-typed pairs
-// compare exactly, so integer corruption above 2^53 is not masked by a
-// float64 collapse.
+// the test with a (-want +got) diff on mismatch. Values compare exactly,
+// dynamic type included: schema-aware float emission keeps a KindFloat value
+// float64 across a marshal/load boundary, so an int64/float64 mismatch is a
+// real defect, not a wire artifact to tolerate.
 func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 	tb.Helper()
-	numericCoercion := cmp.FilterValues(func(a, b any) bool {
-		_, aInt := a.(int64)
-		_, aFloat := a.(float64)
-		_, bInt := b.(int64)
-		_, bFloat := b.(float64)
-		return (aInt && bFloat) || (aFloat && bInt)
-	}, cmp.Transformer("toFloat64", func(v any) float64 {
-		switch n := v.(type) {
-		case int64:
-			return float64(n)
-		case float64:
-			return n
-		}
-		panic("unreachable: filter admits only int64/float64")
-	}))
-	// EquateEmpty: a built snapshot carries nil property maps where a
-	// loaded one carries empty maps; the distinction is not part of the
-	// structural contract.
-	if d := cmp.Diff(project(want), project(got), numericCoercion, cmpopts.EquateEmpty()); d != "" {
+	// EquateEmpty: a built snapshot carries nil property maps where a loaded
+	// one carries empty maps; that distinction is outside the contract.
+	if d := cmp.Diff(project(want), project(got), cmpopts.EquateEmpty()); d != "" {
 		tb.Errorf("snapshots differ (-want +got):\n%s", d)
 	}
 }
@@ -166,7 +157,10 @@ func project(s *graph.Snapshot) snapProjection {
 		}
 	}
 	for _, d := range s.Duplicates() {
-		p.Duplicates = append(p.Duplicates, d.Instance.TypeName()+d.Instance.PrimaryKey().String())
+		p.Duplicates = append(p.Duplicates, dupProjection{
+			Type:     d.Instance.TypeName(),
+			Instance: projectInstanceTree(d.Instance),
+		})
 	}
 	for _, u := range s.Unresolved() {
 		p.Unresolved = append(p.Unresolved, unresProjection{

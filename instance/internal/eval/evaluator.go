@@ -419,6 +419,9 @@ func (e *Evaluator) evalSlice(children []expr.Expression, scope Scope) (any, err
 	if len(children) < 2 {
 		return nil, errors.New("slice access requires at least 2 operands")
 	}
+	if len(children) > 2 {
+		return nil, errors.New("slice access accepts exactly one index")
+	}
 
 	// Evaluate the receiver
 	obj, err := e.evaluate(children[0], scope)

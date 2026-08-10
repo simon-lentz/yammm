@@ -1386,10 +1386,10 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		assert.InDelta(t, 1.5e10, props["val"], 1.0)
 	})
 
-	t.Run("float_type_narrowing", func(t *testing.T) {
+	t.Run("whole_float_stays_float", func(t *testing.T) {
 		t.Parallel()
-		// float64(1.0) marshals as JSON "1", normalizes to int64(1) on load.
-		// The typed accessor should still return 1.0 via Float().
+		// KindFloat values emit in decimal form ("1.0"), so the round trip
+		// preserves the dynamic type exactly — no narrowing, no coercion.
 		s, v := fidelitySchema(t, "Float")
 		raw := instance.RawInstance{Properties: map[string]any{"id": "x", "val": float64(1.0)}}
 		valid, result := v.ValidateOne(t.Context(), "Item", raw)
@@ -1401,6 +1401,7 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 
 		data, mr := snapshot.Marshal(t.Context(), snap)
 		require.True(t, mr.OK())
+		require.Contains(t, string(data), `"val":1.0`, "whole float must emit in decimal form")
 		loaded, lr := snapshot.Load(t.Context(), data, s)
 		require.True(t, lr.OK())
 
@@ -1408,9 +1409,8 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		require.Len(t, items, 1)
 		val, ok := items[0].Properties().Get("val")
 		require.True(t, ok)
-		f, fok := val.Float()
-		require.True(t, fok)
-		assert.Equal(t, float64(1.0), f)
+		require.IsType(t, float64(0), val.Unwrap(), "round trip must preserve float64, not narrow to int64")
+		assert.Equal(t, float64(1.0), val.Unwrap())
 	})
 
 	t.Run("boolean_true_false", func(t *testing.T) {

@@ -1,0 +1,1418 @@
+{
+  "name": "\"contract_pass\"",
+  "span": {
+    "s": 0,
+    "e": 22
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 29,
+        "e": 30
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 37,
+              "e": 43
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 34,
+            "e": 51
+          }
+        },
+        {
+          "name": "absent_list",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Integer",
+              "span": {
+                "s": 70,
+                "e": 77
+              }
+            },
+            "span": {
+              "s": 65,
+              "e": 78
+            }
+          },
+          "span": {
+            "s": 53,
+            "e": 78
+          }
+        },
+        {
+          "name": "absent_str",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 91,
+              "e": 97
+            }
+          },
+          "span": {
+            "s": 80,
+            "e": 97
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"p_all_empty_true\"",
+          "expr": "(All ([]) (args ) (params x) (\u003e ($ \"x\") 0))",
+          "expr_span": {
+            "s": 154,
+            "e": 179
+          },
+          "span": {
+            "s": 133,
+            "e": 179
+          }
+        },
+        {
+          "msg": "\"p_any_empty_false\"",
+          "expr": "(! (Any ([]) (args ) (params x) (\u003e ($ \"x\") 0)))",
+          "expr_span": {
+            "s": 203,
+            "e": 231
+          },
+          "span": {
+            "s": 181,
+            "e": 231
+          }
+        },
+        {
+          "msg": "\"p_allornone_empty_true\"",
+          "expr": "(AllOrNone ([]) (args ) (params x) (\u003e ($ \"x\") 0))",
+          "expr_span": {
+            "s": 260,
+            "e": 291
+          },
+          "span": {
+            "s": 233,
+            "e": 291
+          }
+        },
+        {
+          "msg": "\"p_allornone_mixed_false\"",
+          "expr": "(! (AllOrNone ([] 1 (-x 1)) (args ) (params x) (\u003e ($ \"x\") 0)))",
+          "expr_span": {
+            "s": 321,
+            "e": 360
+          },
+          "span": {
+            "s": 293,
+            "e": 360
+          }
+        },
+        {
+          "msg": "\"p_nil_input_is_empty_all\"",
+          "expr": "(All (p \"absent_list\") (args ) (params x) (\u003e ($ \"x\") 0))",
+          "expr_span": {
+            "s": 391,
+            "e": 425
+          },
+          "span": {
+            "s": 362,
+            "e": 425
+          }
+        },
+        {
+          "msg": "\"p_nil_len_zero\"",
+          "expr": "(== (Len (p \"absent_list\") (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 446,
+            "e": 469
+          },
+          "span": {
+            "s": 427,
+            "e": 469
+          }
+        },
+        {
+          "msg": "\"p_unique\"",
+          "expr": "(== (Len (Unique ([] 1 2 2 3) (args ) (params ) nil) (args ) (params ) nil) 3)",
+          "expr_span": {
+            "s": 484,
+            "e": 518
+          },
+          "span": {
+            "s": 471,
+            "e": 518
+          }
+        },
+        {
+          "msg": "\"p_compact\"",
+          "expr": "(== (Len (Compact ([] 1 nil 2) (args ) (params ) nil) (args ) (params ) nil) 2)",
+          "expr_span": {
+            "s": 534,
+            "e": 568
+          },
+          "span": {
+            "s": 520,
+            "e": 568
+          }
+        },
+        {
+          "msg": "\"p_sort\"",
+          "expr": "(== (Sort ([] 3 1 2) (args ) (params ) nil) ([] 1 2 3))",
+          "expr_span": {
+            "s": 581,
+            "e": 613
+          },
+          "span": {
+            "s": 570,
+            "e": 613
+          }
+        },
+        {
+          "msg": "\"p_reverse\"",
+          "expr": "(== (Reverse ([] 1 2) (args ) (params ) nil) ([] 2 1))",
+          "expr_span": {
+            "s": 629,
+            "e": 658
+          },
+          "span": {
+            "s": 615,
+            "e": 658
+          }
+        },
+        {
+          "msg": "\"p_flatten_one_level\"",
+          "expr": "(== (Len (Flatten ([] ([] 1 2) ([] 3)) (args ) (params ) nil) (args ) (params ) nil) 3)",
+          "expr_span": {
+            "s": 684,
+            "e": 720
+          },
+          "span": {
+            "s": 660,
+            "e": 720
+          }
+        },
+        {
+          "msg": "\"p_contains\"",
+          "expr": "(Contains ([] 1 2 3) (args 2) (params ) nil)",
+          "expr_span": {
+            "s": 737,
+            "e": 761
+          },
+          "span": {
+            "s": 722,
+            "e": 761
+          }
+        },
+        {
+          "msg": "\"p_contains_crosstype_false\"",
+          "expr": "(! (Contains ([] 1 2 3) (args \"2\") (params ) nil))",
+          "expr_span": {
+            "s": 794,
+            "e": 823
+          },
+          "span": {
+            "s": 763,
+            "e": 823
+          }
+        },
+        {
+          "msg": "\"p_first_empty_nil\"",
+          "expr": "(== (First ([]) (args ) (params ) nil) nil)",
+          "expr_span": {
+            "s": 847,
+            "e": 867
+          },
+          "span": {
+            "s": 825,
+            "e": 867
+          }
+        },
+        {
+          "msg": "\"p_last_empty_nil\"",
+          "expr": "(== (Last ([]) (args ) (params ) nil) nil)",
+          "expr_span": {
+            "s": 890,
+            "e": 909
+          },
+          "span": {
+            "s": 869,
+            "e": 909
+          }
+        },
+        {
+          "msg": "\"p_first\"",
+          "expr": "(== (First ([] 1 2 3) (args ) (params ) nil) 1)",
+          "expr_span": {
+            "s": 923,
+            "e": 946
+          },
+          "span": {
+            "s": 911,
+            "e": 946
+          }
+        },
+        {
+          "msg": "\"p_sum_empty_zero\"",
+          "expr": "(== (Sum ([]) (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 969,
+            "e": 983
+          },
+          "span": {
+            "s": 948,
+            "e": 983
+          }
+        },
+        {
+          "msg": "\"p_sum_mixed_float\"",
+          "expr": "(== (Sum ([] 1 2.5) (args ) (params ) nil) 3.5)",
+          "expr_span": {
+            "s": 1007,
+            "e": 1029
+          },
+          "span": {
+            "s": 985,
+            "e": 1029
+          }
+        },
+        {
+          "msg": "\"p_reduce_init\"",
+          "expr": "(== (Reduce ([] 1 2 3) (args 0) (params acc x) (+ ($ \"acc\") ($ \"x\"))) 6)",
+          "expr_span": {
+            "s": 1049,
+            "e": 1101
+          },
+          "span": {
+            "s": 1031,
+            "e": 1101
+          }
+        },
+        {
+          "msg": "\"p_reduce_seed_first\"",
+          "expr": "(== (Reduce ([] 1 2 3) (args ) (params acc x) (+ ($ \"acc\") ($ \"x\"))) 6)",
+          "expr_span": {
+            "s": 1127,
+            "e": 1176
+          },
+          "span": {
+            "s": 1103,
+            "e": 1176
+          }
+        },
+        {
+          "msg": "\"p_map\"",
+          "expr": "(== (Sum (Map ([] 1 2 3) (args ) (params x) (* ($ \"x\") 2)) (args ) (params ) nil) 12)",
+          "expr_span": {
+            "s": 1188,
+            "e": 1233
+          },
+          "span": {
+            "s": 1178,
+            "e": 1233
+          }
+        },
+        {
+          "msg": "\"p_filter\"",
+          "expr": "(== (Len (Filter ([] 1 2 3) (args ) (params x) (\u003e ($ \"x\") 1)) (args ) (params ) nil) 2)",
+          "expr_span": {
+            "s": 1248,
+            "e": 1295
+          },
+          "span": {
+            "s": 1235,
+            "e": 1295
+          }
+        },
+        {
+          "msg": "\"p_count\"",
+          "expr": "(== (Count ([] 1 2 3) (args ) (params x) (\u003e ($ \"x\") 1)) 2)",
+          "expr_span": {
+            "s": 1309,
+            "e": 1348
+          },
+          "span": {
+            "s": 1297,
+            "e": 1348
+          }
+        },
+        {
+          "msg": "\"p_abs\"",
+          "expr": "(== (Abs (-x 5) (args ) (params ) nil) 5)",
+          "expr_span": {
+            "s": 1391,
+            "e": 1407
+          },
+          "span": {
+            "s": 1381,
+            "e": 1407
+          }
+        },
+        {
+          "msg": "\"p_round_bankers_down\"",
+          "expr": "(== (Round 2.5 (args ) (params ) nil) 2)",
+          "expr_span": {
+            "s": 1434,
+            "e": 1451
+          },
+          "span": {
+            "s": 1409,
+            "e": 1451
+          }
+        },
+        {
+          "msg": "\"p_round_bankers_up\"",
+          "expr": "(== (Round 3.5 (args ) (params ) nil) 4)",
+          "expr_span": {
+            "s": 1476,
+            "e": 1493
+          },
+          "span": {
+            "s": 1453,
+            "e": 1493
+          }
+        },
+        {
+          "msg": "\"p_round_int_passthrough\"",
+          "expr": "(== (Round 7 (args ) (params ) nil) 7)",
+          "expr_span": {
+            "s": 1523,
+            "e": 1538
+          },
+          "span": {
+            "s": 1495,
+            "e": 1538
+          }
+        },
+        {
+          "msg": "\"p_floor\"",
+          "expr": "(== (Floor 2.7 (args ) (params ) nil) 2)",
+          "expr_span": {
+            "s": 1552,
+            "e": 1571
+          },
+          "span": {
+            "s": 1540,
+            "e": 1571
+          }
+        },
+        {
+          "msg": "\"p_ceil\"",
+          "expr": "(== (Ceil 2.1 (args ) (params ) nil) 3)",
+          "expr_span": {
+            "s": 1584,
+            "e": 1602
+          },
+          "span": {
+            "s": 1573,
+            "e": 1602
+          }
+        },
+        {
+          "msg": "\"p_floor_int_passthrough\"",
+          "expr": "(== (Floor 3 (args ) (params ) nil) 3)",
+          "expr_span": {
+            "s": 1632,
+            "e": 1647
+          },
+          "span": {
+            "s": 1604,
+            "e": 1647
+          }
+        },
+        {
+          "msg": "\"p_min_two\"",
+          "expr": "(== (Min 2 (args 3) (params ) nil) 2)",
+          "expr_span": {
+            "s": 1663,
+            "e": 1679
+          },
+          "span": {
+            "s": 1649,
+            "e": 1679
+          }
+        },
+        {
+          "msg": "\"p_max_two\"",
+          "expr": "(== (Max 2 (args 3) (params ) nil) 3)",
+          "expr_span": {
+            "s": 1695,
+            "e": 1711
+          },
+          "span": {
+            "s": 1681,
+            "e": 1711
+          }
+        },
+        {
+          "msg": "\"p_min_slice\"",
+          "expr": "(== (Min ([] 3 1 2) (args ) (params ) nil) 1)",
+          "expr_span": {
+            "s": 1729,
+            "e": 1750
+          },
+          "span": {
+            "s": 1713,
+            "e": 1750
+          }
+        },
+        {
+          "msg": "\"p_max_slice\"",
+          "expr": "(== (Max ([] 3 1 2) (args ) (params ) nil) 3)",
+          "expr_span": {
+            "s": 1768,
+            "e": 1789
+          },
+          "span": {
+            "s": 1752,
+            "e": 1789
+          }
+        },
+        {
+          "msg": "\"p_compare_num\"",
+          "expr": "(== (Compare 1 (args 2) (params ) nil) (-x 1))",
+          "expr_span": {
+            "s": 1809,
+            "e": 1830
+          },
+          "span": {
+            "s": 1791,
+            "e": 1830
+          }
+        },
+        {
+          "msg": "\"d_compare_strings_works\"",
+          "expr": "(== (Compare \"a\" (args \"b\") (params ) nil) (-x 1))",
+          "expr_span": {
+            "s": 1860,
+            "e": 1885
+          },
+          "span": {
+            "s": 1832,
+            "e": 1885
+          }
+        },
+        {
+          "msg": "\"p_upper\"",
+          "expr": "(== (Upper \"Hello\" (args ) (params ) nil) \"HELLO\")",
+          "expr_span": {
+            "s": 1929,
+            "e": 1956
+          },
+          "span": {
+            "s": 1917,
+            "e": 1956
+          }
+        },
+        {
+          "msg": "\"p_lower\"",
+          "expr": "(== (Lower \"Hello\" (args ) (params ) nil) \"hello\")",
+          "expr_span": {
+            "s": 1970,
+            "e": 1997
+          },
+          "span": {
+            "s": 1958,
+            "e": 1997
+          }
+        },
+        {
+          "msg": "\"p_trim\"",
+          "expr": "(== (Trim \"  x  \" (args ) (params ) nil) \"x\")",
+          "expr_span": {
+            "s": 2010,
+            "e": 2032
+          },
+          "span": {
+            "s": 1999,
+            "e": 2032
+          }
+        },
+        {
+          "msg": "\"p_len_runes\"",
+          "expr": "(== (Len \"préfix\" (args ) (params ) nil) 6)",
+          "expr_span": {
+            "s": 2050,
+            "e": 2071
+          },
+          "span": {
+            "s": 2034,
+            "e": 2071
+          }
+        },
+        {
+          "msg": "\"p_substring_one_arg\"",
+          "expr": "(== (Substring \"abc\" (args 1) (params ) nil) \"bc\")",
+          "expr_span": {
+            "s": 2097,
+            "e": 2126
+          },
+          "span": {
+            "s": 2073,
+            "e": 2126
+          }
+        },
+        {
+          "msg": "\"p_substring_two_arg\"",
+          "expr": "(== (Substring \"abc\" (args 0 2) (params ) nil) \"ab\")",
+          "expr_span": {
+            "s": 2152,
+            "e": 2184
+          },
+          "span": {
+            "s": 2128,
+            "e": 2184
+          }
+        },
+        {
+          "msg": "\"d_substring_negative_start\"",
+          "expr": "(== (Substring \"abc\" (args (-x 2)) (params ) nil) \"bc\")",
+          "expr_span": {
+            "s": 2217,
+            "e": 2247
+          },
+          "span": {
+            "s": 2186,
+            "e": 2247
+          }
+        },
+        {
+          "msg": "\"d_substring_end_clamped\"",
+          "expr": "(== (Substring \"abc\" (args 1 99) (params ) nil) \"bc\")",
+          "expr_span": {
+            "s": 2277,
+            "e": 2310
+          },
+          "span": {
+            "s": 2249,
+            "e": 2310
+          }
+        },
+        {
+          "msg": "\"p_split\"",
+          "expr": "(== (Len (Split \"a,b\" (args \",\") (params ) nil) (args ) (params ) nil) 2)",
+          "expr_span": {
+            "s": 2324,
+            "e": 2355
+          },
+          "span": {
+            "s": 2312,
+            "e": 2355
+          }
+        },
+        {
+          "msg": "\"p_join\"",
+          "expr": "(== (Join ([] \"a\" \"b\") (args \"-\") (params ) nil) \"a-b\")",
+          "expr_span": {
+            "s": 2368,
+            "e": 2400
+          },
+          "span": {
+            "s": 2357,
+            "e": 2400
+          }
+        },
+        {
+          "msg": "\"p_startswith\"",
+          "expr": "(StartsWith \"abc\" (args \"ab\") (params ) nil)",
+          "expr_span": {
+            "s": 2419,
+            "e": 2444
+          },
+          "span": {
+            "s": 2402,
+            "e": 2444
+          }
+        },
+        {
+          "msg": "\"p_endswith\"",
+          "expr": "(EndsWith \"abc\" (args \"bc\") (params ) nil)",
+          "expr_span": {
+            "s": 2461,
+            "e": 2484
+          },
+          "span": {
+            "s": 2446,
+            "e": 2484
+          }
+        },
+        {
+          "msg": "\"p_replace_all\"",
+          "expr": "(== (Replace \"aaa\" (args \"a\" \"b\") (params ) nil) \"bbb\")",
+          "expr_span": {
+            "s": 2504,
+            "e": 2539
+          },
+          "span": {
+            "s": 2486,
+            "e": 2539
+          }
+        },
+        {
+          "msg": "\"p_trimprefix\"",
+          "expr": "(== (TrimPrefix \"abc\" (args \"ab\") (params ) nil) \"c\")",
+          "expr_span": {
+            "s": 2558,
+            "e": 2590
+          },
+          "span": {
+            "s": 2541,
+            "e": 2590
+          }
+        },
+        {
+          "msg": "\"d_trimprefix_absent_noop\"",
+          "expr": "(== (TrimPrefix \"abc\" (args \"x\") (params ) nil) \"abc\")",
+          "expr_span": {
+            "s": 2621,
+            "e": 2654
+          },
+          "span": {
+            "s": 2592,
+            "e": 2654
+          }
+        },
+        {
+          "msg": "\"p_trimsuffix\"",
+          "expr": "(== (TrimSuffix \"abc\" (args \"bc\") (params ) nil) \"a\")",
+          "expr_span": {
+            "s": 2673,
+            "e": 2705
+          },
+          "span": {
+            "s": 2656,
+            "e": 2705
+          }
+        },
+        {
+          "msg": "\"p_match_captures\"",
+          "expr": "(== (Len (Match \"abc\" (args /b(c)/) (params ) nil) (args ) (params ) nil) 2)",
+          "expr_span": {
+            "s": 2728,
+            "e": 2762
+          },
+          "span": {
+            "s": 2707,
+            "e": 2762
+          }
+        },
+        {
+          "msg": "\"p_match_miss_nil\"",
+          "expr": "(== (Match \"abc\" (args /z/) (params ) nil) nil)",
+          "expr_span": {
+            "s": 2785,
+            "e": 2813
+          },
+          "span": {
+            "s": 2764,
+            "e": 2813
+          }
+        },
+        {
+          "msg": "\"p_then_nil_shortcircuit\"",
+          "expr": "(== (Then nil (args ) (params v) false) nil)",
+          "expr_span": {
+            "s": 2869,
+            "e": 2904
+          },
+          "span": {
+            "s": 2841,
+            "e": 2904
+          }
+        },
+        {
+          "msg": "\"p_then_nonnil\"",
+          "expr": "(Then 5 (args ) (params v) (\u003e ($ \"v\") 4))",
+          "expr_span": {
+            "s": 2924,
+            "e": 2949
+          },
+          "span": {
+            "s": 2906,
+            "e": 2949
+          }
+        },
+        {
+          "msg": "\"p_lest_nil_runs_body\"",
+          "expr": "(Lest nil (args ) (params ) true)",
+          "expr_span": {
+            "s": 2976,
+            "e": 2996
+          },
+          "span": {
+            "s": 2951,
+            "e": 2996
+          }
+        },
+        {
+          "msg": "\"p_lest_nonnil_passthrough\"",
+          "expr": "(== (Lest 5 (args ) (params ) 99) 5)",
+          "expr_span": {
+            "s": 3028,
+            "e": 3049
+          },
+          "span": {
+            "s": 2998,
+            "e": 3049
+          }
+        },
+        {
+          "msg": "\"p_with_always_runs\"",
+          "expr": "(With nil (args ) (params v) (== ($ \"v\") nil))",
+          "expr_span": {
+            "s": 3074,
+            "e": 3104
+          },
+          "span": {
+            "s": 3051,
+            "e": 3104
+          }
+        },
+        {
+          "msg": "\"p_default_nil\"",
+          "expr": "(== (Default nil (args 7) (params ) nil) 7)",
+          "expr_span": {
+            "s": 3124,
+            "e": 3146
+          },
+          "span": {
+            "s": 3106,
+            "e": 3146
+          }
+        },
+        {
+          "msg": "\"p_default_nonnil\"",
+          "expr": "(== (Default 5 (args 7) (params ) nil) 5)",
+          "expr_span": {
+            "s": 3169,
+            "e": 3189
+          },
+          "span": {
+            "s": 3148,
+            "e": 3189
+          }
+        },
+        {
+          "msg": "\"p_coalesce\"",
+          "expr": "(== (Coalesce nil (args nil 3) (params ) nil) 3)",
+          "expr_span": {
+            "s": 3206,
+            "e": 3234
+          },
+          "span": {
+            "s": 3191,
+            "e": 3234
+          }
+        },
+        {
+          "msg": "\"p_coalesce_all_nil\"",
+          "expr": "(== (Coalesce nil (args nil nil) (params ) nil) nil)",
+          "expr_span": {
+            "s": 3259,
+            "e": 3293
+          },
+          "span": {
+            "s": 3236,
+            "e": 3293
+          }
+        },
+        {
+          "msg": "\"p_isnil_nil\"",
+          "expr": "(IsNil nil (args ) (params ) nil)",
+          "expr_span": {
+            "s": 3332,
+            "e": 3344
+          },
+          "span": {
+            "s": 3316,
+            "e": 3344
+          }
+        },
+        {
+          "msg": "\"p_isnil_zero_false\"",
+          "expr": "(! (IsNil 0 (args ) (params ) nil))",
+          "expr_span": {
+            "s": 3369,
+            "e": 3382
+          },
+          "span": {
+            "s": 3346,
+            "e": 3382
+          }
+        },
+        {
+          "msg": "\"p_isnil_emptystr_false\"",
+          "expr": "(! (IsNil \"\" (args ) (params ) nil))",
+          "expr_span": {
+            "s": 3411,
+            "e": 3425
+          },
+          "span": {
+            "s": 3384,
+            "e": 3425
+          }
+        },
+        {
+          "msg": "\"p_isnil_absent_prop\"",
+          "expr": "(IsNil (p \"absent_str\") (args ) (params ) nil)",
+          "expr_span": {
+            "s": 3451,
+            "e": 3470
+          },
+          "span": {
+            "s": 3427,
+            "e": 3470
+          }
+        },
+        {
+          "msg": "\"d_typeof_int\"",
+          "expr": "(== (TypeOf 5 (args ) (params ) nil) \"integer\")",
+          "expr_span": {
+            "s": 3489,
+            "e": 3513
+          },
+          "span": {
+            "s": 3472,
+            "e": 3513
+          }
+        },
+        {
+          "msg": "\"d_typeof_float\"",
+          "expr": "(== (TypeOf 5.5 (args ) (params ) nil) \"float\")",
+          "expr_span": {
+            "s": 3534,
+            "e": 3558
+          },
+          "span": {
+            "s": 3515,
+            "e": 3558
+          }
+        },
+        {
+          "msg": "\"d_typeof_string\"",
+          "expr": "(== (TypeOf \"x\" (args ) (params ) nil) \"string\")",
+          "expr_span": {
+            "s": 3580,
+            "e": 3605
+          },
+          "span": {
+            "s": 3560,
+            "e": 3605
+          }
+        },
+        {
+          "msg": "\"d_typeof_bool\"",
+          "expr": "(== (TypeOf true (args ) (params ) nil) \"boolean\")",
+          "expr_span": {
+            "s": 3625,
+            "e": 3652
+          },
+          "span": {
+            "s": 3607,
+            "e": 3652
+          }
+        },
+        {
+          "msg": "\"d_typeof_nil\"",
+          "expr": "(== (TypeOf nil (args ) (params ) nil) \"nil\")",
+          "expr_span": {
+            "s": 3671,
+            "e": 3693
+          },
+          "span": {
+            "s": 3654,
+            "e": 3693
+          }
+        },
+        {
+          "msg": "\"d_typeof_list\"",
+          "expr": "(== (TypeOf ([] 1) (args ) (params ) nil) \"list\")",
+          "expr_span": {
+            "s": 3713,
+            "e": 3738
+          },
+          "span": {
+            "s": 3695,
+            "e": 3738
+          }
+        },
+        {
+          "msg": "\"d_typeof_pattern\"",
+          "expr": "(== (TypeOf /x/ (args ) (params ) nil) \"pattern\")",
+          "expr_span": {
+            "s": 3761,
+            "e": 3789
+          },
+          "span": {
+            "s": 3740,
+            "e": 3789
+          }
+        },
+        {
+          "msg": "\"p_eq_crosstype_false\"",
+          "expr": "(! (== 1 \"1\"))",
+          "expr_span": {
+            "s": 3862,
+            "e": 3873
+          },
+          "span": {
+            "s": 3837,
+            "e": 3873
+          }
+        },
+        {
+          "msg": "\"p_neq_crosstype_true\"",
+          "expr": "(!= 1 \"1\")",
+          "expr_span": {
+            "s": 3900,
+            "e": 3908
+          },
+          "span": {
+            "s": 3875,
+            "e": 3908
+          }
+        },
+        {
+          "msg": "\"d_lt_crosstype_strata_true\"",
+          "expr": "(\u003c 1 \"a\")",
+          "expr_span": {
+            "s": 3941,
+            "e": 3948
+          },
+          "span": {
+            "s": 3910,
+            "e": 3948
+          }
+        },
+        {
+          "msg": "\"d_gt_crosstype_strata\"",
+          "expr": "(\u003e \"a\" 1)",
+          "expr_span": {
+            "s": 3976,
+            "e": 3983
+          },
+          "span": {
+            "s": 3950,
+            "e": 3983
+          }
+        },
+        {
+          "msg": "\"d_lt_crosstype_strata_false\"",
+          "expr": "(! (\u003c \"a\" 1))",
+          "expr_span": {
+            "s": 4017,
+            "e": 4027
+          },
+          "span": {
+            "s": 3985,
+            "e": 4027
+          }
+        },
+        {
+          "msg": "\"d_nil_lt_number\"",
+          "expr": "(\u003c nil 0)",
+          "expr_span": {
+            "s": 4049,
+            "e": 4056
+          },
+          "span": {
+            "s": 4029,
+            "e": 4056
+          }
+        },
+        {
+          "msg": "\"d_bool_ordered\"",
+          "expr": "(\u003c false true)",
+          "expr_span": {
+            "s": 4077,
+            "e": 4089
+          },
+          "span": {
+            "s": 4058,
+            "e": 4089
+          }
+        },
+        {
+          "msg": "\"d_nan_eq_nan\"",
+          "expr": "(== (* 0 (/ 1 0)) (* 0 (/ 1 0)))",
+          "expr_span": {
+            "s": 4108,
+            "e": 4152
+          },
+          "span": {
+            "s": 4091,
+            "e": 4152
+          }
+        },
+        {
+          "msg": "\"d_nan_unique_collapses\"",
+          "expr": "(== (Len (Unique ([] (* 0 (/ 1 0)) (* 0 (/ 1 0))) (args ) (params ) nil) (args ) (params ) nil) 1)",
+          "expr_span": {
+            "s": 4181,
+            "e": 4243
+          },
+          "span": {
+            "s": 4154,
+            "e": 4243
+          }
+        },
+        {
+          "msg": "\"d_float_div_zero_inf\"",
+          "expr": "(\u003e (/ 1 0) 999999999)",
+          "expr_span": {
+            "s": 4270,
+            "e": 4291
+          },
+          "span": {
+            "s": 4245,
+            "e": 4291
+          }
+        },
+        {
+          "msg": "\"p_string_order\"",
+          "expr": "(\u003e \"2030-01-02\" \"2030-01-01\")",
+          "expr_span": {
+            "s": 4312,
+            "e": 4339
+          },
+          "span": {
+            "s": 4293,
+            "e": 4339
+          }
+        },
+        {
+          "msg": "\"d_timestamp_order_is_string_order\"",
+          "expr": "(\u003e \"2030-01-01T10:00:00+09:00\" \"2030-01-01T02:00:00Z\")",
+          "expr_span": {
+            "s": 4379,
+            "e": 4431
+          },
+          "span": {
+            "s": 4341,
+            "e": 4431
+          }
+        },
+        {
+          "msg": "\"p_int_div_truncates\"",
+          "expr": "(== (/ 7 2) 3)",
+          "expr_span": {
+            "s": 4492,
+            "e": 4502
+          },
+          "span": {
+            "s": 4468,
+            "e": 4502
+          }
+        },
+        {
+          "msg": "\"d_int_div_truncates_toward_zero\"",
+          "expr": "(== (/ (-x 7) 2) (-x 3))",
+          "expr_span": {
+            "s": 4540,
+            "e": 4554
+          },
+          "span": {
+            "s": 4504,
+            "e": 4554
+          }
+        },
+        {
+          "msg": "\"p_mixed_div_float\"",
+          "expr": "(== (/ 7 2) 3.5)",
+          "expr_span": {
+            "s": 4578,
+            "e": 4592
+          },
+          "span": {
+            "s": 4556,
+            "e": 4592
+          }
+        },
+        {
+          "msg": "\"p_mod\"",
+          "expr": "(== (% 7 3) 1)",
+          "expr_span": {
+            "s": 4604,
+            "e": 4614
+          },
+          "span": {
+            "s": 4594,
+            "e": 4614
+          }
+        },
+        {
+          "msg": "\"d_mod_sign_of_dividend\"",
+          "expr": "(== (% (-x 7) 3) (-x 1))",
+          "expr_span": {
+            "s": 4643,
+            "e": 4657
+          },
+          "span": {
+            "s": 4616,
+            "e": 4657
+          }
+        },
+        {
+          "msg": "\"p_promote_int_float\"",
+          "expr": "(== (+ 1 2.5) 3.5)",
+          "expr_span": {
+            "s": 4683,
+            "e": 4697
+          },
+          "span": {
+            "s": 4659,
+            "e": 4697
+          }
+        },
+        {
+          "msg": "\"p_string_concat\"",
+          "expr": "(== (+ \"a\" \"b\") \"ab\")",
+          "expr_span": {
+            "s": 4719,
+            "e": 4736
+          },
+          "span": {
+            "s": 4699,
+            "e": 4736
+          }
+        },
+        {
+          "msg": "\"d_list_concat\"",
+          "expr": "(== (Len (+ ([] 1) ([] 2)) (args ) (params ) nil) 2)",
+          "expr_span": {
+            "s": 4756,
+            "e": 4779
+          },
+          "span": {
+            "s": 4738,
+            "e": 4779
+          }
+        },
+        {
+          "msg": "\"p_in\"",
+          "expr": "(in 2 ([] 1 2))",
+          "expr_span": {
+            "s": 4839,
+            "e": 4850
+          },
+          "span": {
+            "s": 4830,
+            "e": 4850
+          }
+        },
+        {
+          "msg": "\"p_in_crosstype_false\"",
+          "expr": "(! (in \"2\" ([] 1 2)))",
+          "expr_span": {
+            "s": 4877,
+            "e": 4893
+          },
+          "span": {
+            "s": 4852,
+            "e": 4893
+          }
+        },
+        {
+          "msg": "\"p_regex_match\"",
+          "expr": "(=~ \"user@host.com\" /.+@.+\\..+/)",
+          "expr_span": {
+            "s": 4913,
+            "e": 4943
+          },
+          "span": {
+            "s": 4895,
+            "e": 4943
+          }
+        },
+        {
+          "msg": "\"p_typecheck_int\"",
+          "expr": "(=~ 5 (dt Integer))",
+          "expr_span": {
+            "s": 4965,
+            "e": 4977
+          },
+          "span": {
+            "s": 4945,
+            "e": 4977
+          }
+        },
+        {
+          "msg": "\"p_typecheck_float\"",
+          "expr": "(=~ 5.5 (dt Float))",
+          "expr_span": {
+            "s": 5001,
+            "e": 5013
+          },
+          "span": {
+            "s": 4979,
+            "e": 5013
+          }
+        },
+        {
+          "msg": "\"d_int_matches_float\"",
+          "expr": "(=~ 5 (dt Float))",
+          "expr_span": {
+            "s": 5039,
+            "e": 5049
+          },
+          "span": {
+            "s": 5015,
+            "e": 5049
+          }
+        },
+        {
+          "msg": "\"d_wholefloat_matches_integer\"",
+          "expr": "(=~ 5 (dt Integer))",
+          "expr_span": {
+            "s": 5084,
+            "e": 5098
+          },
+          "span": {
+            "s": 5051,
+            "e": 5098
+          }
+        },
+        {
+          "msg": "\"p_typecheck_date\"",
+          "expr": "(=~ \"2030-01-01\" (dt Date))",
+          "expr_span": {
+            "s": 5121,
+            "e": 5141
+          },
+          "span": {
+            "s": 5100,
+            "e": 5141
+          }
+        },
+        {
+          "msg": "\"p_typecheck_not_date\"",
+          "expr": "(!~ \"x\" (dt Date))",
+          "expr_span": {
+            "s": 5168,
+            "e": 5179
+          },
+          "span": {
+            "s": 5143,
+            "e": 5179
+          }
+        },
+        {
+          "msg": "\"p_typecheck_uuid\"",
+          "expr": "(=~ \"550e8400-e29b-41d4-a716-446655440000\" (dt UUID))",
+          "expr_span": {
+            "s": 5202,
+            "e": 5248
+          },
+          "span": {
+            "s": 5181,
+            "e": 5248
+          }
+        },
+        {
+          "msg": "\"p_xor\"",
+          "expr": "(^ true false)",
+          "expr_span": {
+            "s": 5260,
+            "e": 5272
+          },
+          "span": {
+            "s": 5250,
+            "e": 5272
+          }
+        },
+        {
+          "msg": "\"p_xor_same_false\"",
+          "expr": "(! (^ true true))",
+          "expr_span": {
+            "s": 5295,
+            "e": 5309
+          },
+          "span": {
+            "s": 5274,
+            "e": 5309
+          }
+        },
+        {
+          "msg": "\"p_ternary_true\"",
+          "expr": "(== (? true 1 2) 1)",
+          "expr_span": {
+            "s": 5372,
+            "e": 5395
+          },
+          "span": {
+            "s": 5353,
+            "e": 5395
+          }
+        },
+        {
+          "msg": "\"p_ternary_false\"",
+          "expr": "(== (? false 1 2) 2)",
+          "expr_span": {
+            "s": 5417,
+            "e": 5441
+          },
+          "span": {
+            "s": 5397,
+            "e": 5441
+          }
+        },
+        {
+          "msg": "\"p_index\"",
+          "expr": "(== (@ ([] 10 20 30) 1) 20)",
+          "expr_span": {
+            "s": 5455,
+            "e": 5476
+          },
+          "span": {
+            "s": 5443,
+            "e": 5476
+          }
+        },
+        {
+          "msg": "\"p_index_string_rune\"",
+          "expr": "(== (@ \"abé\" 2) \"é\")",
+          "expr_span": {
+            "s": 5502,
+            "e": 5519
+          },
+          "span": {
+            "s": 5478,
+            "e": 5519
+          }
+        },
+        {
+          "msg": "\"d_index_oob_nil\"",
+          "expr": "(== (@ ([] 10) 5) nil)",
+          "expr_span": {
+            "s": 5541,
+            "e": 5557
+          },
+          "span": {
+            "s": 5521,
+            "e": 5557
+          }
+        },
+        {
+          "msg": "\"d_numeric_var_unset_nil\"",
+          "expr": "(== ($ \"0\") nil)",
+          "expr_span": {
+            "s": 5587,
+            "e": 5596
+          },
+          "span": {
+            "s": 5559,
+            "e": 5596
+          }
+        }
+      ],
+      "span": {
+        "s": 24,
+        "e": 5598
+      }
+    }
+  ]
+}

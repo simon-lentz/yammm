@@ -62,16 +62,16 @@ var lineEndingReplacer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 // TokenStream applies parse-tree-assisted token-stream formatting.
 // Returns an error if lexing/parsing fails so callers can fall back.
 //
-// It reads the source twice on purpose. The un-elided token stream carries the
+// It needs two views of one source: the un-elided token stream carries the
 // whitespace and comments a formatter must preserve but no expression extents;
 // the node tree carries the extents and the syntax verdict but elides the
-// whitespace. Neither alone is enough for phase 1.
+// whitespace. LexAndParse returns both from a single lex.
 func TokenStream(text string) (string, error) {
 	normalized := lineEndingReplacer.Replace(text)
 
 	// Fail on syntax alone: a source that is semantically invalid but parses,
 	// such as inverted bounds, still formats.
-	file, issues := parse.Parse([]byte(normalized), location.SourceID{})
+	file, allTokens, issues := parse.LexAndParse([]byte(normalized), location.SourceID{})
 	for _, iss := range issues {
 		if iss.Code().Category() == diag.CategorySyntax {
 			return "", fmt.Errorf("parse failed: %s", iss.Message())
@@ -79,7 +79,6 @@ func TokenStream(text string) (string, error) {
 	}
 
 	ranges := invariantExpressionRanges(file)
-	allTokens := parse.Lex(normalized)
 
 	var out strings.Builder
 	var pendingWS strings.Builder

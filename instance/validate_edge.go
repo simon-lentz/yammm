@@ -213,8 +213,8 @@ func (v *Validator) validateEdgeTarget(
 	// types or inherited cross-schema resolve against the true target.
 	targetType, found := resolveRelationTarget(v.schema, rel)
 	if !found {
-		// Reachable only for a deferred (registry-less Builder) cross-schema
-		// reference whose target the entry schema cannot resolve.
+		// Unreachable through public construction (every entry point rejects
+		// a dangling target); kept as defense for models built outside them.
 		issue := diag.NewIssue(
 			diag.Error,
 			ErrTypeNotFound,

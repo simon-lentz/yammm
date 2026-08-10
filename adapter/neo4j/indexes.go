@@ -93,12 +93,11 @@ func (k IndexKind) String() string {
 // the property's Vector[N] constraint; property-level @fulltext and type-level
 // @@fulltext yield fulltext indexes over text properties. Load-time validation
 // guarantees target
-// eligibility wherever it can resolve the type's full member set; where it must
-// defer — a supertype that never resolved, and every qualified reference in a
-// registry-less [schema.NewBuilder] schema — the adapter re-checks that each
-// named property exists and that its type can carry the index it was annotated
-// with, rather than emitting DDL for a property that does not exist or cannot
-// be indexed.
+// eligibility for every schema a public entry point returns; the adapter
+// re-checks anyway — that each named property exists and that its type can
+// carry the index it was annotated with — as defense against a model
+// assembled outside those guarantees, rather than emitting DDL for a property
+// that does not exist or cannot be indexed.
 //
 // Abstract types are skipped (they have no Neo4j label). Part types are NOT
 // skipped: they receive a label and constraints today, so they receive index
@@ -442,12 +441,11 @@ func validIndexName(t *schema.Type, prop *schema.Property, ann *schema.Annotatio
 // validScalarTarget reports whether a property named by @index or @@index can be
 // emitted: a usable Neo4j identifier, and a type the loader's own rule accepts.
 //
-// The type check is not redundant with load-time validation. The loader defers
-// its eligibility check whenever the target's type cannot be resolved — a type
-// whose supertype never resolved, and every qualified reference in a
-// registry-less [schema.NewBuilder] schema — so a schema can seal cleanly with
-// @index on a List or on an unresolved alias. Trusting the sealed model there
-// would emit a range index over a property the DSL's own rule forbids.
+// The type check is defense in depth. Every public entry point rejects the
+// dangling references that once sealed cleanly, but a model assembled outside
+// those guarantees could still carry @index on a List or on an unresolved
+// alias — trusting it would emit a range index over a property the DSL's own
+// rule forbids.
 func validScalarTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
 	collector *diag.Collector, reported reportedTargets,
 ) bool {

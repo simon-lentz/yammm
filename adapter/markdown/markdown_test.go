@@ -110,15 +110,18 @@ func TestMarshal_ClassDiagramOption(t *testing.T) {
 }
 
 // TestMarshal_NonSourceBacked pins that Marshal accepts a Builder-built
-// schema with no source content: invariants degrade to message-only and an
-// unresolved relation target renders unlinked, with no error.
+// schema with no source content: invariants degrade to message-only and no
+// source fence is emitted.
 func TestMarshal_NonSourceBacked(t *testing.T) {
 	t.Parallel()
 
 	s, res := schema.NewBuilder().WithName("built").
+		AddType("Other").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
 		AddType("Thing").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("POINTS_AT", schema.NewTypeRef("ext", "Other", location.Span{}), true, false).
+		WithRelation("POINTS_AT", schema.NewTypeRef("", "Other", location.Span{}), true, false).
 		WithInvariant("always true", expr.NewLiteral(true), "").
 		Done().
 		Build()
@@ -140,8 +143,8 @@ func TestMarshal_NonSourceBacked(t *testing.T) {
 	if strings.Contains(doc, "```yammm") {
 		t.Errorf("source fence emitted for a non-source-backed schema:\n%s", doc)
 	}
-	if !strings.Contains(doc, "- `--> POINTS_AT (_)` ext.Other") {
-		t.Errorf("unresolved relation target not rendered unlinked:\n%s", doc)
+	if !strings.Contains(doc, "- `--> POINTS_AT (_)` [Other](#") {
+		t.Errorf("relation target not rendered as a link:\n%s", doc)
 	}
 }
 

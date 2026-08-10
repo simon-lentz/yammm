@@ -990,10 +990,43 @@ func builtinMatch(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Ex
 // --- Utility Builtin implementations ---
 
 func builtinTypeOf(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if lhs == nil {
-		return "nil", nil
+	return dslTypeName(lhs), nil
+}
+
+// dslTypeName maps an evaluator value onto the DSL type vocabulary that TypeOf
+// reports: "nil", "boolean", "integer", "float", "string", "list", "map",
+// "pattern", or "unknown" for any shape outside it. The scalar type lists
+// mirror [value.TypeStrata] so classification and comparison agree.
+func dslTypeName(v any) string {
+	if v == nil {
+		return "nil"
 	}
-	return fmt.Sprintf("%T", lhs), nil
+	switch v.(type) {
+	case bool:
+		return "boolean"
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, uintptr:
+		return "integer"
+	case float32, float64:
+		return "float"
+	case string:
+		return "string"
+	case *regexp.Regexp:
+		return "pattern"
+	case immutable.Slice:
+		return "list"
+	case immutable.Map[string]:
+		return "map"
+	}
+	if t := reflect.TypeOf(v); t != nil {
+		switch t.Kind() {
+		case reflect.Slice, reflect.Array:
+			return "list"
+		case reflect.Map:
+			return "map"
+		}
+	}
+	return "unknown"
 }
 
 func builtinIsNil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
