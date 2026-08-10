@@ -1,6 +1,9 @@
 package format
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // lineClass classifies a source line for blank-line collapsing.
 type lineClass int
@@ -116,11 +119,11 @@ func resultEndsWithBlank(classes []lineClass) bool {
 // prevNonBlankEndsWithBrace returns true if the previous non-blank result line
 // ends with '{'.
 func prevNonBlankEndsWithBrace(result []string, classes []lineClass) bool {
-	for i := len(result) - 1; i >= 0; i-- {
+	for i, line := range slices.Backward(result) {
 		if classes[i] == lineBlank {
 			continue
 		}
-		trimmed := strings.TrimSpace(result[i])
+		trimmed := strings.TrimSpace(line)
 		return strings.HasSuffix(trimmed, "{")
 	}
 	return false

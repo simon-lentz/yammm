@@ -89,12 +89,12 @@ func (h *RecordHandler) WithGroup(name string) slog.Handler {
 
 // qualify nests attrs inside the open groups, innermost group last.
 func qualify(groups []string, attrs []slog.Attr) []slog.Attr {
-	for i := len(groups) - 1; i >= 0; i-- {
+	for _, group := range slices.Backward(groups) {
 		args := make([]any, len(attrs))
 		for j, a := range attrs {
 			args[j] = a
 		}
-		attrs = []slog.Attr{slog.Group(groups[i], args...)}
+		attrs = []slog.Attr{slog.Group(group, args...)}
 	}
 	return attrs
 }

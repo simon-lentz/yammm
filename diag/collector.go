@@ -236,8 +236,8 @@ func (c *Collector) evictionSlotLocked(sev Severity) (int, bool) {
 	if !ok || !sev.IsMoreSevereThan(victim) {
 		return 0, false
 	}
-	for i := len(c.issues) - 1; i >= 0; i-- {
-		if c.issues[i].Severity() == victim {
+	for i, iss := range slices.Backward(c.issues) {
+		if iss.Severity() == victim {
 			return i, true
 		}
 	}

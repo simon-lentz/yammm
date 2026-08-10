@@ -639,8 +639,7 @@ func (b *builder) failed(plex *lexer.PeekingLexer, err error, sev diag.Severity,
 // same defect a second time. A participle error carrying no position falls back
 // to from, which bounds nothing and leaves the old behaviour.
 func resumeFloor(err error, from int) int {
-	var pe participle.Error
-	if errors.As(err, &pe) {
+	if pe, ok := errors.AsType[participle.Error](err); ok {
 		return pe.Position().Offset
 	}
 	return from
@@ -655,15 +654,13 @@ func (b *builder) syntaxErr(sev diag.Severity, err error, what string, from, to 
 		b.report(sev, diag.E_SYNTAX, b.tokenSpan(bad), InvalidNumberMessage(bad.Value))
 		return
 	}
-	var ut *participle.UnexpectedTokenError
-	if errors.As(err, &ut) {
+	if ut, ok := errors.AsType[*participle.UnexpectedTokenError](err); ok {
 		start := ut.Unexpected.Pos.Offset
 		span := b.spanFromOffsets(start, start+len(ut.Unexpected.Value))
 		b.report(sev, diag.E_SYNTAX, span, fmt.Sprintf("unexpected token %q %s", ut.Unexpected, what))
 		return
 	}
-	var pe participle.Error
-	if errors.As(err, &pe) {
+	if pe, ok := errors.AsType[participle.Error](err); ok {
 		at := pe.Position().Offset
 		b.report(sev, diag.E_SYNTAX, b.tokenSpanAt(at), pe.Message())
 		return
