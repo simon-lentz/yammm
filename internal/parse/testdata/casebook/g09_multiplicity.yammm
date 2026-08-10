@@ -1,0 +1,10 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	--> r (many:one) Beta
+}
+
+type Beta {
+	id String primary
+}

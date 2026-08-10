@@ -1,0 +1,148 @@
+{
+  "name": "\"annotations_snapshot\"",
+  "span": {
+    "s": 83,
+    "e": 112
+  },
+  "types": [
+    {
+      "name": "Document",
+      "name_span": {
+        "s": 119,
+        "e": 127
+      },
+      "props": [
+        {
+          "name": "content_hash",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 144,
+              "e": 150
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 131,
+            "e": 163
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 178,
+              "e": 184
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 190,
+                "e": 196
+              }
+            }
+          ],
+          "span": {
+            "s": 165,
+            "e": 196
+          }
+        },
+        {
+          "name": "embedding",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "768"
+            ],
+            "span": {
+              "s": 211,
+              "e": 222
+            }
+          },
+          "anns": [
+            {
+              "name": "vector",
+              "args": [
+                {
+                  "kind": "ident",
+                  "text": "cosine",
+                  "span": {
+                    "s": 231,
+                    "e": 237
+                  }
+                }
+              ],
+              "has_parens": true,
+              "span": {
+                "s": 223,
+                "e": 238
+              }
+            }
+          ],
+          "span": {
+            "s": 198,
+            "e": 238
+          }
+        },
+        {
+          "name": "first_seen",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 253,
+              "e": 262
+            }
+          },
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 265,
+                "e": 275
+              }
+            }
+          ],
+          "span": {
+            "s": 240,
+            "e": 275
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "state",
+              "span": {
+                "s": 286,
+                "e": 291
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "content_hash",
+              "span": {
+                "s": 293,
+                "e": 305
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 278,
+            "e": 306
+          }
+        }
+      ],
+      "span": {
+        "s": 114,
+        "e": 308
+      }
+    }
+  ]
+}

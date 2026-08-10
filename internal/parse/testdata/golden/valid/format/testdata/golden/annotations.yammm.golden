@@ -1,0 +1,221 @@
+{
+  "name": "\"annotations\"",
+  "span": {
+    "s": 0,
+    "e": 20
+  },
+  "types": [
+    {
+      "name": "Document",
+      "name_span": {
+        "s": 27,
+        "e": 35
+      },
+      "props": [
+        {
+          "name": "content_hash",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 54,
+              "e": 60
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 38,
+            "e": 68
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 75,
+              "e": 81
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 82,
+                "e": 88
+              }
+            }
+          ],
+          "span": {
+            "s": 69,
+            "e": 88
+          }
+        },
+        {
+          "name": "title",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 95,
+              "e": 101
+            }
+          },
+          "anns": [
+            {
+              "name": "fulltext",
+              "span": {
+                "s": 104,
+                "e": 113
+              }
+            }
+          ],
+          "span": {
+            "s": 89,
+            "e": 113
+          }
+        },
+        {
+          "name": "published_on",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 129,
+              "e": 133
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 134,
+                "e": 140
+              }
+            }
+          ],
+          "span": {
+            "s": 114,
+            "e": 140
+          }
+        },
+        {
+          "name": "embedding",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "768"
+            ],
+            "span": {
+              "s": 151,
+              "e": 162
+            }
+          },
+          "anns": [
+            {
+              "name": "vector",
+              "args": [
+                {
+                  "kind": "ident",
+                  "text": "cosine",
+                  "span": {
+                    "s": 173,
+                    "e": 179
+                  }
+                }
+              ],
+              "has_parens": true,
+              "span": {
+                "s": 165,
+                "e": 180
+              }
+            }
+          ],
+          "span": {
+            "s": 141,
+            "e": 180
+          }
+        },
+        {
+          "name": "first_seen",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 192,
+              "e": 201
+            }
+          },
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 202,
+                "e": 212
+              }
+            }
+          ],
+          "span": {
+            "s": 181,
+            "e": 212
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "state",
+              "span": {
+                "s": 245,
+                "e": 250
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "published_on",
+              "span": {
+                "s": 252,
+                "e": 264
+              }
+            }
+          ],
+          "has_parens": true,
+          "doc": "composite lookup",
+          "span": {
+            "s": 214,
+            "e": 265
+          }
+        },
+        {
+          "name": "fulltext",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "title",
+              "span": {
+                "s": 278,
+                "e": 283
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "state",
+              "span": {
+                "s": 284,
+                "e": 289
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 266,
+            "e": 291
+          }
+        }
+      ],
+      "span": {
+        "s": 22,
+        "e": 293
+      }
+    }
+  ]
+}

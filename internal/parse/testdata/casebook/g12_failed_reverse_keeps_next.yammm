@@ -1,0 +1,15 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	--> r Beta /
+	--> q Gamma
+}
+
+type Beta {
+	id String primary
+}
+
+type Gamma {
+	id String primary
+}

@@ -1,0 +1,1429 @@
+{
+ "cases": [
+  {
+   "file": "a01_annotation_empty_args.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "@index() empty argument list"
+    }
+   ]
+  },
+  {
+   "file": "a02_bare_at_body_start.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      6
+     ],
+     "note": "bare @name as first type-body member"
+    }
+   ]
+  },
+  {
+   "file": "a03_modifier_after_annotation.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "modifier after annotation; SPEC documents anchor drifting to closing brace"
+    }
+   ],
+   "oracle_only": [
+    {
+     "decl": "Alpha.primary",
+     "why": "ANTLR recovery names a property after the trailing modifier; the author wrote no such property"
+    }
+   ]
+  },
+  {
+   "file": "a04_invalid_number_bounds.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "note": "INVALID_NUMBER 0x10 in constraint bounds; message must name the literal"
+    }
+   ]
+  },
+  {
+   "file": "a05_invalid_number_expr.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      6,
+      6
+     ],
+     "anchor": [
+      6,
+      7
+     ],
+     "note": "INVALID_NUMBER 42abc in invariant expression"
+    }
+   ]
+  },
+  {
+   "file": "a06_unterminated_string.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "unterminated string in Enum; lexes via ANY_OTHER totality"
+    }
+   ]
+  },
+  {
+   "file": "a07_stray_char.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      7
+     ],
+     "note": "stray ';' (ANY_OTHER token) in type body"
+    }
+   ]
+  },
+  {
+   "file": "a08_missing_schema_name.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      1,
+      1
+     ],
+     "anchor": [
+      1,
+      3
+     ],
+     "allow_spanless": true,
+     "note": "schema keyword without name; secondary spanless Fatal expected"
+    }
+   ]
+  },
+  {
+   "file": "a09_lowercase_type_name.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      3,
+      3
+     ],
+     "anchor": [
+      3,
+      5
+     ],
+     "note": "lowercase type name (type_name requires UC_WORD)"
+    }
+   ]
+  },
+  {
+   "file": "a10_property_missing_type.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "note": "property missing datatype (id primary)"
+    }
+   ]
+  },
+  {
+   "file": "a11_unclosed_body_eof.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "allow_spanless": true,
+     "note": "type body unclosed at EOF"
+    }
+   ]
+  },
+  {
+   "file": "a12_inverted_bounds.yammm",
+   "category": "A",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_INVALID_CONSTRAINT",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "inverted Integer bounds; builder-level check during parse"
+    }
+   ]
+  },
+  {
+   "file": "b01_two_defects_adjacent_types.yammm",
+   "category": "B",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "note": "missing datatype in Alpha"
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      9,
+      9
+     ],
+     "anchor": [
+      9,
+      10
+     ],
+     "note": "@index() empty args in Beta"
+    }
+   ]
+  },
+  {
+   "file": "b02_two_defects_far_apart.yammm",
+   "category": "B",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "note": "modifier after annotation in Alpha"
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      17,
+      17
+     ],
+     "anchor": [
+      17,
+      18
+     ],
+     "note": "INVALID_NUMBER 0x7 in Omega bounds; two clean types between"
+    }
+   ],
+   "oracle_only": [
+    {
+     "decl": "Alpha.primary",
+     "why": "ANTLR recovery names a property after the trailing modifier"
+    }
+   ]
+  },
+  {
+   "file": "b03_three_defects.yammm",
+   "category": "B",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "note": "missing datatype in Alpha"
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      9,
+      9
+     ],
+     "anchor": [
+      9,
+      10
+     ],
+     "note": "@@index() empty args in Beta"
+    },
+    {
+     "id": "d3",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      14,
+      14
+     ],
+     "anchor": [
+      14,
+      15
+     ],
+     "note": "modifier after annotation in Gamma"
+    }
+   ],
+   "oracle_only": [
+    {
+     "decl": "Gamma.required",
+     "why": "ANTLR recovery names a property after the trailing modifier"
+    }
+   ],
+   "allowed_noise": [
+    {
+     "code": "E_INVALID_ANNOTATION",
+     "why": "@@index() survives as a bare annotation and reaches its arity check"
+    }
+   ]
+  },
+  {
+   "file": "b04_two_defects_one_body.yammm",
+   "category": "B",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "note": "missing datatype, first member"
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      6,
+      6
+     ],
+     "anchor": [
+      6,
+      7
+     ],
+     "note": "@index() empty args, same body two members later"
+    }
+   ]
+  },
+  {
+   "file": "b05_defects_first_and_last.yammm",
+   "category": "B",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "note": "INVALID_NUMBER 0xA in first type"
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      12,
+      12
+     ],
+     "anchor": [
+      12,
+      13
+     ],
+     "note": "modifier after annotation in last type"
+    }
+   ],
+   "oracle_only": [
+    {
+     "decl": "Gamma.primary",
+     "why": "ANTLR recovery names a property after the trailing modifier"
+    }
+   ]
+  },
+  {
+   "file": "c01_semantic_above_unknown_datatype.yammm",
+   "category": "C",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "semantic",
+     "expect_code": "E_UNKNOWN_TYPE",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "placement": "above",
+     "note": "unknown datatype Widget, before the syntax defect"
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      10,
+      10
+     ],
+     "anchor": [
+      10,
+      11
+     ],
+     "note": "@index() empty args in later type"
+    }
+   ]
+  },
+  {
+   "file": "c02_semantic_above_missing_pk.yammm",
+   "category": "C",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "semantic",
+     "expect_code": "E_NO_PRIMARY_KEY",
+     "lines": [
+      3,
+      5
+     ],
+     "anchor": [
+      3,
+      5
+     ],
+     "placement": "above",
+     "note": "type Alpha lacks a primary key, before the syntax defect"
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      9,
+      9
+     ],
+     "anchor": [
+      9,
+      10
+     ],
+     "note": "INVALID_NUMBER 0x5 in later type"
+    }
+   ]
+  },
+  {
+   "file": "d01_semantic_below_unknown_datatype.yammm",
+   "category": "D",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "note": "missing datatype in Alpha"
+    },
+    {
+     "id": "d2",
+     "kind": "semantic",
+     "expect_code": "E_UNKNOWN_TYPE",
+     "lines": [
+      9,
+      9
+     ],
+     "anchor": [
+      9,
+      9
+     ],
+     "placement": "below",
+     "note": "unknown datatype Widget, after the syntax defect"
+    }
+   ]
+  },
+  {
+   "file": "d02_semantic_below_missing_pk.yammm",
+   "category": "D",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "@index() empty args in Alpha"
+    },
+    {
+     "id": "d2",
+     "kind": "semantic",
+     "expect_code": "E_NO_PRIMARY_KEY",
+     "lines": [
+      8,
+      10
+     ],
+     "anchor": [
+      8,
+      10
+     ],
+     "placement": "below",
+     "note": "type Beta lacks a primary key, after the syntax defect"
+    }
+   ]
+  },
+  {
+   "file": "d03_semantic_below_same_type.yammm",
+   "category": "D",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      5
+     ],
+     "note": "missing datatype, first member"
+    },
+    {
+     "id": "d2",
+     "kind": "semantic",
+     "expect_code": "E_UNKNOWN_TYPE",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "placement": "below",
+     "note": "unknown datatype on the next member of the same body"
+    }
+   ]
+  },
+  {
+   "file": "e01_stray_rbrace_midbody.yammm",
+   "category": "E",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      7
+     ],
+     "anchor": [
+      5,
+      8
+     ],
+     "note": "premature close + orphan members; cascade probe \u2014 Beta must survive"
+    }
+   ]
+  },
+  {
+   "file": "e02_junk_between_members.yammm",
+   "category": "E",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      7
+     ],
+     "note": "junk token run (QMARK x3, INVALID_NUMBER, DOLLAR x2) inside body"
+    }
+   ]
+  },
+  {
+   "file": "e03_mangled_expr.yammm",
+   "category": "E",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      6,
+      6
+     ],
+     "anchor": [
+      6,
+      7
+     ],
+     "note": "mangled invariant expression ((count + ) *"
+    }
+   ]
+  },
+  {
+   "file": "f01_arrow_typo.yammm",
+   "category": "F",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "arrow typo: -> where a member start needs --> or *->"
+    }
+   ]
+  },
+  {
+   "file": "f02_malformed_multiplicity.yammm",
+   "category": "F",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "multiplicity spelling (two); the grammar admits only one, many, _"
+    },
+    {
+     "id": "d2",
+     "kind": "semantic",
+     "expect_code": "E_UNKNOWN_TYPE",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "tree hole from the same edit: recovery leaves the association target empty, so completion reports type \"\" referenced in association \"owner\" \u2014 ORACLE ONLY: the oracle's recovery leaves the target empty and completion reports type \"\"; the shipped parser drops the member instead",
+     "oracle_only": true
+    }
+   ]
+  },
+  {
+   "file": "f03_missing_relation_name.yammm",
+   "category": "F",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "association with no name; any_name admits UC_WORD or LC_WORD only"
+    }
+   ]
+  },
+  {
+   "file": "f04_edge_property_primary.yammm",
+   "category": "F",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      6,
+      6
+     ],
+     "anchor": [
+      6,
+      7
+     ],
+     "note": "primary on an edge property; rel_property admits required only, so primary binds as a second property name and the body's closing brace lands where a datatype is expected"
+    }
+   ]
+  },
+  {
+   "file": "f05_composition_missing_target.yammm",
+   "category": "F",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "semantic",
+     "expect_code": "E_UNKNOWN_TYPE",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "tree hole: Beta binds as the composition name, leaving the target empty, so completion reports type \"\" referenced in composition \"Beta\" \u2014 ORACLE ONLY: same tree hole: the oracle binds Beta as the composition name and reports type \"\"",
+     "oracle_only": true
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "composition with no target type"
+    }
+   ],
+   "oracle_only": [
+    {
+     "decl": "Alpha --> Beta",
+     "why": "ANTLR builds a composition whose target is the empty string; the name is the target the author wrote"
+    }
+   ]
+  },
+  {
+   "file": "g01_length_bounds_string.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "length bounds on String: the '-' is not admitted by the unsigned bound production"
+    }
+   ]
+  },
+  {
+   "file": "g02_length_bounds_list.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "length bounds on List: same bound production, reached through the element form"
+    }
+   ]
+  },
+  {
+   "file": "g03_numeric_bounds.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "numeric bounds: a non-numeric minimum, which the signed bound production rejects"
+    }
+   ]
+  },
+  {
+   "file": "g04_timestamp_format.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      6
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "timestamp format: the format literal's closing bracket is missing \u2014 anchor spans the construct: it opens on the first line and is only detectable by the last, so either is a correct place to report it"
+    }
+   ]
+  },
+  {
+   "file": "g05_import_alias_reserved.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "semantic",
+     "expect_code": "E_INVALID_ALIAS",
+     "lines": [
+      2,
+      2
+     ],
+     "anchor": [
+      2,
+      2
+     ],
+     "note": "import alias is a reserved lowercase spelling; the check fires at parse and at completion \u2014 ORACLE ONLY: the alias group is abandoned, so the import arrives with no written alias and the token-anchored E_SYNTAX is the survivor",
+     "oracle_only": true
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      2,
+      2
+     ],
+     "anchor": [
+      2,
+      2
+     ],
+     "note": "same edit, reported by a later phase"
+    }
+   ],
+   "allowed_noise": [
+    {
+     "code": "E_IMPORT_NOT_ALLOWED",
+     "why": "the import survives the refused alias and meets the loader's categorical rejection"
+    }
+   ]
+  },
+  {
+   "file": "g06_reverse_clause.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      6
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "reverse clause with no name after the '/' \u2014 anchor spans the construct: it opens on the first line and is only detectable by the last, so either is a correct place to report it"
+    }
+   ]
+  },
+  {
+   "file": "g07_relation_body.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      6
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "relation body whose edge property is named with a reserved spelling"
+    }
+   ]
+  },
+  {
+   "file": "g08_annotation_args.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "semantic",
+     "expect_code": "E_UNKNOWN_ANNOTATION",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      4
+     ],
+     "note": "annotation argument list holding a token no argument production admits"
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      4
+     ],
+     "note": "same edit, reported by a later phase"
+    }
+   ]
+  },
+  {
+   "file": "g09_multiplicity.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "semantic",
+     "expect_code": "E_UNKNOWN_TYPE",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "multiplicity spelling (many:one), which the grammar does not admit \u2014 ORACLE ONLY: the oracle's recovery leaves the target empty and reports type \"\"",
+     "oracle_only": true
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "same edit, reported by a later phase"
+    }
+   ]
+  },
+  {
+   "file": "g10_extends_empty.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "semantic",
+     "expect_code": "E_NO_PRIMARY_KEY",
+     "lines": [
+      3,
+      5
+     ],
+     "anchor": [
+      3,
+      5
+     ],
+     "note": "extends clause with no type reference before the body \u2014 ORACLE ONLY: the whole declaration is dropped, collapsing the oracle's cascade to one anchored E_SYNTAX",
+     "oracle_only": true
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      3,
+      5
+     ],
+     "anchor": [
+      3,
+      5
+     ],
+     "note": "same edit, reported by a later phase"
+    }
+   ]
+  },
+  {
+   "file": "g11_unterminated_bounds_keeps_types.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      4,
+      4
+     ],
+     "anchor": [
+      4,
+      4
+     ],
+     "note": "unterminated bound list in a datatype declaration, with two type declarations after it"
+    }
+   ],
+   "oracle_only": [
+    {
+     "decl": "datatype Code",
+     "why": "cluster A's committed regime: an unterminated bound list takes its declaration down. Won't-fix in this migration (D-30)"
+    }
+   ]
+  },
+  {
+   "file": "g12_failed_reverse_keeps_next.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      6
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "failed reverse clause followed by a second, well-formed association \u2014 anchor spans the construct: it opens on the first line and is only detectable by the last, so either is a correct place to report it"
+    }
+   ]
+  },
+  {
+   "file": "g13_aliasless_import_keeps_type.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "semantic",
+     "expect_code": "E_IMPORT_NOT_ALLOWED",
+     "lines": [
+      2,
+      4
+     ],
+     "anchor": [
+      2,
+      4
+     ],
+     "note": "import ending at 'as' with no alias, followed by a type declaration"
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      2,
+      4
+     ],
+     "anchor": [
+      2,
+      4
+     ],
+     "note": "same edit, reported by a later phase \u2014 anchor spans the construct: it opens on the first line and is only detectable by the last, so either is a correct place to report it"
+    }
+   ]
+  },
+  {
+   "file": "g14_unterminated_multiplicity.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "multiplicity with no closing paren"
+    }
+   ]
+  },
+  {
+   "file": "g15_extends_nonref.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      3,
+      3
+     ],
+     "anchor": [
+      3,
+      3
+     ],
+     "note": "extends clause naming a literal instead of a type"
+    }
+   ]
+  },
+  {
+   "file": "g16_invariant_malformed_number_compound.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_INVALID_INVARIANT",
+     "lines": [
+      6,
+      6
+     ],
+     "anchor": [
+      6,
+      6
+     ],
+     "note": "malformed numeric literal inside an invariant expression, after a well-formed comparison \u2014 ORACLE ONLY: one diagnostic per defect: the malformed literal is reported once, by d2",
+     "oracle_only": true
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      6,
+      6
+     ],
+     "anchor": [
+      6,
+      6
+     ],
+     "note": "same edit, reported by a later phase"
+    }
+   ]
+  },
+  {
+   "file": "g17_import_alias_datatype.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "semantic",
+     "expect_code": "E_INVALID_ALIAS",
+     "lines": [
+      2,
+      2
+     ],
+     "anchor": [
+      2,
+      2
+     ],
+     "note": "import alias is a datatype name \u2014 ORACLE ONLY: same as g05: the alias group is abandoned",
+     "oracle_only": true
+    },
+    {
+     "id": "d2",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      2,
+      2
+     ],
+     "anchor": [
+      2,
+      2
+     ],
+     "note": "same edit, reported by a later phase"
+    }
+   ],
+   "allowed_noise": [
+    {
+     "code": "E_IMPORT_NOT_ALLOWED",
+     "why": "same as g05"
+    }
+   ]
+  },
+  {
+   "file": "g18_keyword_named_property_after_defect.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      6
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "a defect followed by a property named with a contextual keyword, which recovery must not skip"
+    },
+    {
+     "id": "d2",
+     "kind": "semantic",
+     "expect_code": "E_UNKNOWN_ANNOTATION",
+     "lines": [
+      5,
+      6
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "same edit, reported by a later phase \u2014 ORACLE ONLY: one diagnostic per defect: the same edit is reported once, by d1",
+     "oracle_only": true
+    }
+   ]
+  },
+  {
+   "file": "g19_members_after_failed_relation.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "a malformed multiplicity; every property after it must survive"
+    },
+    {
+     "id": "d2",
+     "kind": "semantic",
+     "expect_code": "E_UNKNOWN_TYPE",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "placement": "below",
+     "note": "the oracle's recovery leaves the association target empty and completion reports type \"\" \u2014 the tree-hole family, not a planted defect \u2014 ORACLE ONLY: the oracle's tree hole; the manifest note already calls it not a planted defect",
+     "oracle_only": true
+    }
+   ]
+  },
+  {
+   "file": "g20_members_after_bare_name.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      6
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "a bare name with no type; the properties after it must survive"
+    }
+   ]
+  },
+  {
+   "file": "g21_members_after_unterminated_argument.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      6
+     ],
+     "anchor": [
+      5,
+      6
+     ],
+     "note": "an unterminated type argument; the property after it must survive"
+    }
+   ],
+   "oracle_only": [
+    {
+     "decl": "Alpha.x",
+     "why": "ANTLR inserts the missing '>' and builds the property; parse refuses the member that failed, and its diagnostic anchors on the token the parse stopped at, one line further on"
+    }
+   ]
+  },
+  {
+   "file": "g22_members_after_rejected_bound.yammm",
+   "category": "G",
+   "defects": [
+    {
+     "id": "d1",
+     "kind": "syntax",
+     "expect_code": "E_SYNTAX",
+     "lines": [
+      5,
+      5
+     ],
+     "anchor": [
+      5,
+      5
+     ],
+     "note": "a float where an integer bound is required; the properties after it must survive"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "imports": [
+    {
+      "path": "\"./path\"",
+      "alias": "alias",
+      "span": {
+        "s": 15,
+        "e": 45
+      }
+    },
+    {
+      "path": "\"./other\"",
+      "alias": "other",
+      "span": {
+        "s": 46,
+        "e": 69
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 76,
+        "e": 77
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 86,
+              "e": 92
+            }
+          },
+          "span": {
+            "s": 81,
+            "e": 92
+          }
+        }
+      ],
+      "span": {
+        "s": 71,
+        "e": 94
+      }
+    }
+  ]
+}

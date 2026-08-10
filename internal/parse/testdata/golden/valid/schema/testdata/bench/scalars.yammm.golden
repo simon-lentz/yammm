@@ -1,0 +1,520 @@
+{
+  "name": "\"bench_scalars\"",
+  "span": {
+    "s": 129,
+    "e": 151
+  },
+  "datatypes": [
+    {
+      "name": "ShortCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "2",
+          "8"
+        ],
+        "span": {
+          "s": 170,
+          "e": 182
+        }
+      },
+      "span": {
+        "s": 153,
+        "e": 182
+      }
+    },
+    {
+      "name": "Ratio",
+      "constraint": {
+        "kind": "Float",
+        "args": [
+          "0.0",
+          "1.0"
+        ],
+        "span": {
+          "s": 196,
+          "e": 211
+        }
+      },
+      "span": {
+        "s": 183,
+        "e": 211
+      }
+    },
+    {
+      "name": "Grade",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"a\"",
+          "\"b\"",
+          "\"c\"",
+          "\"d\""
+        ],
+        "span": {
+          "s": 225,
+          "e": 249
+        }
+      },
+      "span": {
+        "s": 212,
+        "e": 249
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Measurement",
+      "name_span": {
+        "s": 256,
+        "e": 267
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 274,
+              "e": 280
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 271,
+            "e": 288
+          }
+        },
+        {
+          "name": "label",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "120"
+            ],
+            "span": {
+              "s": 296,
+              "e": 310
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 290,
+            "e": 319
+          }
+        },
+        {
+          "name": "note",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 326,
+              "e": 332
+            }
+          },
+          "span": {
+            "s": 321,
+            "e": 332
+          }
+        },
+        {
+          "name": "count",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 340,
+              "e": 347
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 334,
+            "e": 356
+          }
+        },
+        {
+          "name": "bounded_count",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "4096"
+            ],
+            "span": {
+              "s": 372,
+              "e": 388
+            }
+          },
+          "span": {
+            "s": 358,
+            "e": 388
+          }
+        },
+        {
+          "name": "lower_only",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "10",
+              "_"
+            ],
+            "span": {
+              "s": 401,
+              "e": 415
+            }
+          },
+          "span": {
+            "s": 390,
+            "e": 415
+          }
+        },
+        {
+          "name": "upper_only",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "_",
+              "99"
+            ],
+            "span": {
+              "s": 428,
+              "e": 442
+            }
+          },
+          "span": {
+            "s": 417,
+            "e": 442
+          }
+        },
+        {
+          "name": "signed",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "-100",
+              "100"
+            ],
+            "span": {
+              "s": 451,
+              "e": 469
+            }
+          },
+          "span": {
+            "s": 444,
+            "e": 469
+          }
+        },
+        {
+          "name": "amount",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 478,
+              "e": 483
+            }
+          },
+          "span": {
+            "s": 471,
+            "e": 483
+          }
+        },
+        {
+          "name": "bounded_amount",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "-1.5",
+              "1.5"
+            ],
+            "span": {
+              "s": 500,
+              "e": 516
+            }
+          },
+          "span": {
+            "s": 485,
+            "e": 516
+          }
+        },
+        {
+          "name": "enabled",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 526,
+              "e": 533
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 518,
+            "e": 542
+          }
+        },
+        {
+          "name": "ratio",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Ratio"
+            ],
+            "span": {
+              "s": 550,
+              "e": 555
+            }
+          },
+          "span": {
+            "s": 544,
+            "e": 555
+          }
+        },
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "ShortCode"
+            ],
+            "span": {
+              "s": 562,
+              "e": 571
+            }
+          },
+          "span": {
+            "s": 557,
+            "e": 571
+          }
+        },
+        {
+          "name": "grade",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Grade"
+            ],
+            "span": {
+              "s": 579,
+              "e": 584
+            }
+          },
+          "span": {
+            "s": 573,
+            "e": 584
+          }
+        },
+        {
+          "name": "tag",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^[a-z][a-z0-9_]*$\""
+            ],
+            "span": {
+              "s": 590,
+              "e": 618
+            }
+          },
+          "span": {
+            "s": 586,
+            "e": 618
+          }
+        },
+        {
+          "name": "dual",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^a\"",
+              "\"z$\""
+            ],
+            "span": {
+              "s": 625,
+              "e": 644
+            }
+          },
+          "span": {
+            "s": 620,
+            "e": 644
+          }
+        },
+        {
+          "name": "seen_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 654,
+              "e": 663
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 646,
+            "e": 672
+          }
+        },
+        {
+          "name": "stamped",
+          "constraint": {
+            "kind": "Timestamp",
+            "args": [
+              "\"2006-01-02T15:04:05Z07:00\""
+            ],
+            "span": {
+              "s": 682,
+              "e": 720
+            }
+          },
+          "span": {
+            "s": 674,
+            "e": 720
+          }
+        },
+        {
+          "name": "on_date",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 730,
+              "e": 734
+            }
+          },
+          "span": {
+            "s": 722,
+            "e": 734
+          }
+        },
+        {
+          "name": "external",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 745,
+              "e": 749
+            }
+          },
+          "span": {
+            "s": 736,
+            "e": 749
+          }
+        },
+        {
+          "name": "embedding",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "128"
+            ],
+            "span": {
+              "s": 761,
+              "e": 772
+            }
+          },
+          "span": {
+            "s": 751,
+            "e": 772
+          }
+        },
+        {
+          "name": "keywords",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 788,
+                "e": 794
+              }
+            },
+            "span": {
+              "s": 783,
+              "e": 795
+            }
+          },
+          "span": {
+            "s": 774,
+            "e": 795
+          }
+        },
+        {
+          "name": "bounded_keywords",
+          "constraint": {
+            "kind": "List",
+            "args": [
+              "1",
+              "16"
+            ],
+            "elem": {
+              "kind": "String",
+              "args": [
+                "1",
+                "32"
+              ],
+              "span": {
+                "s": 819,
+                "e": 832
+              }
+            },
+            "span": {
+              "s": 814,
+              "e": 840
+            }
+          },
+          "span": {
+            "s": 797,
+            "e": 840
+          }
+        },
+        {
+          "name": "scores",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Float",
+              "span": {
+                "s": 854,
+                "e": 859
+              }
+            },
+            "span": {
+              "s": 849,
+              "e": 860
+            }
+          },
+          "span": {
+            "s": 842,
+            "e": 860
+          }
+        },
+        {
+          "name": "codes",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Alias",
+              "args": [
+                "ShortCode"
+              ],
+              "span": {
+                "s": 873,
+                "e": 882
+              }
+            },
+            "span": {
+              "s": 868,
+              "e": 883
+            }
+          },
+          "span": {
+            "s": 862,
+            "e": 883
+          }
+        }
+      ],
+      "span": {
+        "s": 251,
+        "e": 885
+      }
+    }
+  ]
+}

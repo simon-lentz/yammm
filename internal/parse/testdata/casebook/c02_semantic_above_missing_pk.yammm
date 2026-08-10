@@ -1,0 +1,10 @@
+schema "seeded"
+
+type Alpha {
+	name String
+}
+
+type Beta {
+	id String primary
+	count Integer[_, 0x5]
+}

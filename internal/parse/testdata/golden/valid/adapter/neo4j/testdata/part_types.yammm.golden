@@ -1,0 +1,135 @@
+{
+  "name": "\"part_test\"",
+  "span": {
+    "s": 0,
+    "e": 18
+  },
+  "types": [
+    {
+      "name": "LineItem",
+      "name_span": {
+        "s": 30,
+        "e": 38
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "line_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 57,
+              "e": 63
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 45,
+            "e": 71
+          }
+        },
+        {
+          "name": "description",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 88,
+              "e": 94
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 76,
+            "e": 103
+          }
+        },
+        {
+          "name": "quantity",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 120,
+              "e": 127
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 108,
+            "e": 136
+          }
+        }
+      ],
+      "span": {
+        "s": 20,
+        "e": 138
+      }
+    },
+    {
+      "name": "Order",
+      "name_span": {
+        "s": 145,
+        "e": 150
+      },
+      "props": [
+        {
+          "name": "order_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 166,
+              "e": 172
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 157,
+            "e": 180
+          }
+        },
+        {
+          "name": "customer",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 194,
+              "e": 200
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 185,
+            "e": 209
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "ITEMS",
+          "name_span": {
+            "s": 218,
+            "e": 223
+          },
+          "target": {
+            "name": "LineItem",
+            "span": {
+              "s": 233,
+              "e": 241
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 214,
+            "e": 241
+          }
+        }
+      ],
+      "span": {
+        "s": 140,
+        "e": 243
+      }
+    }
+  ]
+}

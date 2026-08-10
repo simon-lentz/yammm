@@ -1,0 +1,98 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "imports": [
+    {
+      "path": "\"collision_common.yammm\"",
+      "alias": "common",
+      "span": {
+        "s": 14,
+        "e": 55
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 62,
+        "e": 68
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 75,
+              "e": 81
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 72,
+            "e": 89
+          }
+        }
+      ],
+      "span": {
+        "s": 57,
+        "e": 91
+      }
+    },
+    {
+      "name": "County",
+      "name_span": {
+        "s": 98,
+        "e": 104
+      },
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 113,
+              "e": 119
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 108,
+            "e": 127
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_REGION",
+          "name_span": {
+            "s": 133,
+            "e": 142
+          },
+          "target": {
+            "qualifier": "common",
+            "name": "Region",
+            "span": {
+              "s": 149,
+              "e": 162
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 129,
+            "e": 162
+          }
+        }
+      ],
+      "span": {
+        "s": 93,
+        "e": 164
+      }
+    }
+  ]
+}

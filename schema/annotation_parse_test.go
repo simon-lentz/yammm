@@ -93,21 +93,24 @@ type Document {
 	}
 }
 
-// ANTLR's error recovery leaves an argument context with no matched alternative
-// when an argument list is empty (`@index()`, itself a syntax error). Carrying
-// that as an argument used to drive a contradictory semantic diagnostic on top
-// of the syntax error: a zero-argument call told it has arguments, or a
-// composite blamed for referencing an empty-named property. The syntax error
-// owns the diagnosis; no annotation diagnostic may pile on.
-func TestAnnotation_Parse_EmptyArgListNoSemanticCascade(t *testing.T) {
+// An empty argument list ("@index()") is a syntax error, and the annotation
+// survives it as a bare "@name": the parenthesised group does not parse, so it
+// is left out and the stray "(" is what fails. The annotation therefore reaches
+// its arity check like any other zero-argument one.
+//
+// Only the arity check may fire. A target check must not, because the argument
+// list it would read was never written.
+func TestAnnotation_Parse_EmptyArgList(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		body string
+		name      string
+		body      string
+		wantArity int
 	}{
-		{"index", "\tx String @index()"},
-		{"vector", "\te Vector[8] @vector()"},
-		{"compositeIndex", "\tx String\n\t@@index()"},
+		// @index legitimately takes no arguments, so nothing else is owed.
+		{name: "index", body: "\tx String @index()", wantArity: 0},
+		{name: "vector", body: "\te Vector[8] @vector()", wantArity: 1},
+		{name: "compositeIndex", body: "\tx String\n\t@@index()", wantArity: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -117,13 +120,15 @@ func TestAnnotation_Parse_EmptyArgListNoSemanticCascade(t *testing.T) {
 				t.Fatalf("precondition: an empty argument list is a syntax error, got: %v", res)
 			}
 			counts := codeCounts(res)
+			if n := counts[diag.E_INVALID_ANNOTATION]; n != tt.wantArity {
+				t.Errorf("E_INVALID_ANNOTATION count: got %d, want %d: %v", n, tt.wantArity, res)
+			}
 			for _, code := range []diag.Code{
-				diag.E_INVALID_ANNOTATION,
 				diag.E_INVALID_ANNOTATION_TARGET,
 				diag.E_UNKNOWN_ANNOTATION_TARGET,
 			} {
 				if n := counts[code]; n != 0 {
-					t.Errorf("a malformed argument list must not cascade into %d %s: %v", n, code, res)
+					t.Errorf("an unwritten argument list must not cascade into %d %s: %v", n, code, res)
 				}
 			}
 		})

@@ -1,0 +1,8 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	n Integer[1.5, 3]
+	zz String
+	ww Integer
+}

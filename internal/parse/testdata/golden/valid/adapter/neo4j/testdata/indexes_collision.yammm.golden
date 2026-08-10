@@ -1,0 +1,147 @@
+{
+  "name": "\"collision_test\"",
+  "span": {
+    "s": 0,
+    "e": 23
+  },
+  "types": [
+    {
+      "name": "Item",
+      "name_span": {
+        "s": 30,
+        "e": 34
+      },
+      "props": [
+        {
+          "name": "item_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 49,
+              "e": 55
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 41,
+            "e": 63
+          }
+        },
+        {
+          "name": "a",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 76,
+              "e": 82
+            }
+          },
+          "span": {
+            "s": 68,
+            "e": 82
+          }
+        },
+        {
+          "name": "b_c",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 95,
+              "e": 101
+            }
+          },
+          "span": {
+            "s": 87,
+            "e": 101
+          }
+        },
+        {
+          "name": "a_b",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 114,
+              "e": 120
+            }
+          },
+          "span": {
+            "s": 106,
+            "e": 120
+          }
+        },
+        {
+          "name": "c",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 133,
+              "e": 139
+            }
+          },
+          "span": {
+            "s": 125,
+            "e": 139
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "a",
+              "span": {
+                "s": 153,
+                "e": 154
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "b_c",
+              "span": {
+                "s": 156,
+                "e": 159
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 145,
+            "e": 160
+          }
+        },
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "a_b",
+              "span": {
+                "s": 173,
+                "e": 176
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "c",
+              "span": {
+                "s": 178,
+                "e": 179
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 165,
+            "e": 180
+          }
+        }
+      ],
+      "span": {
+        "s": 25,
+        "e": 182
+      }
+    }
+  ]
+}

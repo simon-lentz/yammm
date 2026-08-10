@@ -1,0 +1,83 @@
+{
+  "name": "\"col\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "Item",
+      "name_span": {
+        "s": 19,
+        "e": 23
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 44,
+              "e": 50
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 30,
+            "e": 58
+          }
+        },
+        {
+          "name": "body",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 77,
+              "e": 83
+            }
+          },
+          "anns": [
+            {
+              "name": "fulltext",
+              "span": {
+                "s": 84,
+                "e": 93
+              }
+            }
+          ],
+          "span": {
+            "s": 63,
+            "e": 93
+          }
+        },
+        {
+          "name": "body_fulltext",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 112,
+              "e": 118
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 119,
+                "e": 125
+              }
+            }
+          ],
+          "span": {
+            "s": 98,
+            "e": 125
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 127
+      }
+    }
+  ]
+}

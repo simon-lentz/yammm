@@ -1,0 +1,6 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	status Enum["A", "B]
+}

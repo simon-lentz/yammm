@@ -1,0 +1,134 @@
+{
+  "name": "\"edge_mixed_test\"",
+  "span": {
+    "s": 0,
+    "e": 24
+  },
+  "types": [
+    {
+      "name": "Company",
+      "name_span": {
+        "s": 31,
+        "e": 38
+      },
+      "props": [
+        {
+          "name": "company_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 56,
+              "e": 62
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 45,
+            "e": 70
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 80,
+              "e": 86
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 75,
+            "e": 95
+          }
+        }
+      ],
+      "span": {
+        "s": 26,
+        "e": 97
+      }
+    },
+    {
+      "name": "Employee",
+      "name_span": {
+        "s": 104,
+        "e": 112
+      },
+      "props": [
+        {
+          "name": "employee_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 131,
+              "e": 137
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 119,
+            "e": 145
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 155,
+              "e": 161
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 150,
+            "e": 170
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "WORKS_AT",
+          "name_span": {
+            "s": 179,
+            "e": 187
+          },
+          "target": {
+            "name": "Company",
+            "span": {
+              "s": 196,
+              "e": 203
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "note",
+              "constraint": {
+                "kind": "String",
+                "span": {
+                  "s": 219,
+                  "e": 225
+                }
+              },
+              "span": {
+                "s": 214,
+                "e": 225
+              }
+            }
+          ],
+          "span": {
+            "s": 175,
+            "e": 231
+          }
+        }
+      ],
+      "span": {
+        "s": 99,
+        "e": 233
+      }
+    }
+  ]
+}

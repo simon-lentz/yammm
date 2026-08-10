@@ -113,10 +113,8 @@ type invariantDecl struct {
 type annotationDecl struct {
 	Name string
 	Args []annotationArgDecl
-	// ArgsMalformed reports that the argument list failed to parse, so Args is
-	// not a faithful record of what the source wrote. Semantic checks over the
-	// argument list are skipped for such an annotation — the syntax error owns
-	// the diagnosis.
+	// ArgsMalformed reported that the argument list failed to parse. Nothing
+	// sets it: an annotation whose arguments fail now draws its own diagnostic.
 	ArgsMalformed bool
 	Documentation string
 	Span          location.Span

@@ -1,0 +1,99 @@
+{
+  "name": "\"top\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "imports": [
+    {
+      "path": "\"diamond_left.yammm\"",
+      "alias": "left",
+      "span": {
+        "s": 14,
+        "e": 49
+      }
+    },
+    {
+      "path": "\"diamond_right.yammm\"",
+      "alias": "right",
+      "span": {
+        "s": 50,
+        "e": 87
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Top",
+      "name_span": {
+        "s": 94,
+        "e": 97
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 104,
+              "e": 110
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 101,
+            "e": 118
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "TO_LEFT",
+          "name_span": {
+            "s": 124,
+            "e": 131
+          },
+          "target": {
+            "qualifier": "left",
+            "name": "Left",
+            "span": {
+              "s": 138,
+              "e": 147
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 120,
+            "e": 147
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "TO_RIGHT",
+          "name_span": {
+            "s": 153,
+            "e": 161
+          },
+          "target": {
+            "qualifier": "right",
+            "name": "Right",
+            "span": {
+              "s": 168,
+              "e": 179
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 149,
+            "e": 179
+          }
+        }
+      ],
+      "span": {
+        "s": 89,
+        "e": 181
+      }
+    }
+  ]
+}

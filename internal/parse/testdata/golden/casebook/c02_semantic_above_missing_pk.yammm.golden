@@ -1,0 +1,77 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 36,
+              "e": 42
+            }
+          },
+          "span": {
+            "s": 31,
+            "e": 42
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 44
+      }
+    },
+    {
+      "name": "Beta",
+      "name_span": {
+        "s": 51,
+        "e": 55
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 62,
+              "e": 68
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 59,
+            "e": 76
+          }
+        }
+      ],
+      "span": {
+        "s": 46,
+        "e": 101
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "malformed numeric literal \"0x5\": numeric literals are decimal (hexadecimal and suffixed forms are not supported)",
+      "span": {
+        "s": 95,
+        "e": 98
+      },
+      "line": 9,
+      "end_line": 9
+    }
+  ]
+}

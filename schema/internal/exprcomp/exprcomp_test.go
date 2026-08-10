@@ -3,7 +3,6 @@ package exprcomp_test
 import (
 	"testing"
 
-	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -12,11 +11,6 @@ import (
 	"github.com/simon-lentz/yammm/schema/expr"
 	"github.com/simon-lentz/yammm/schema/internal/exprcomp"
 )
-
-// noopSpans is a minimal SpanFromContext for tests that don't need real spans.
-type noopSpans struct{}
-
-func (noopSpans) FromContext(antlr.ParserRuleContext) location.Span { return location.Span{} }
 
 // TestCompileString_Ops drives every operator and expression form through
 // one table: each source compiles without diagnostics and roots at the
@@ -165,21 +159,6 @@ func TestCompileString_DatatypeLiteral(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestCompile_NilContext(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://test.yammm")
-	collector := diag.NewCollector(0)
-
-	result := exprcomp.Compile(nil, collector, sourceID, nil)
-	assert.Nil(t, result)
-}
-
-func TestVisitor_HasErrors(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://test.yammm")
-
-	visitor := exprcomp.NewVisitor(nil, sourceID, noopSpans{})
-	assert.False(t, visitor.HasErrors())
-}
-
 func TestBuiltinRegistry_Names_Sorted(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://sorted.yammm")
 	collector := diag.NewCollector(0)
@@ -216,25 +195,10 @@ func TestCompileString_FunctionCall_NilNormalization(t *testing.T) {
 
 // TestVisitor_NilTree verifies that Visit handles nil input gracefully.
 // This is related to visitor.go error handling paths.
-func TestVisitor_NilTree(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://nil-tree.yammm")
-	collector := diag.NewCollector(0)
-
-	visitor := exprcomp.NewVisitor(collector, sourceID, noopSpans{})
-	result := visitor.Visit(nil)
-	assert.Nil(t, result)
-	assert.False(t, visitor.HasErrors(), "nil tree should not trigger error")
-}
-
-// TestVisitor_ErrorHandling_InvalidExpression verifies error collection for invalid expressions.
-// Note: The DatatypeKeywordContext error path (visitor.go:86-88) is defensive code that
-// is difficult to trigger through normal parsing. The grammar wraps datatype keywords
-// in DatatypeNameContext, not DatatypeKeywordContext. This test covers the general
-// error handling pattern for expressions that fail validation.
-//
-// Note: Unknown function names no longer produce errors at compile time - validation
-// is deferred to the eval layer. This test only covers syntax errors like invalid regexp.
-func TestVisitor_ErrorHandling_InvalidExpression(t *testing.T) {
+// Unknown function names do not produce errors here; name validation is
+// deferred to the eval layer. Only malformed literals — an invalid regexp
+// among them — are reported at compile time.
+func TestCompileString_ErrorHandling_InvalidExpression(t *testing.T) {
 	tests := []struct {
 		name   string
 		expr   string

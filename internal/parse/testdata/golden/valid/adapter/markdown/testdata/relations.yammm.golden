@@ -1,0 +1,198 @@
+{
+  "name": "\"Fleet\"",
+  "span": {
+    "s": 0,
+    "e": 14
+  },
+  "types": [
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 21,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 34,
+              "e": 38
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 31,
+            "e": 46
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "100"
+            ],
+            "span": {
+              "s": 53,
+              "e": 68
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 48,
+            "e": 77
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "150"
+            ],
+            "span": {
+              "s": 83,
+              "e": 99
+            }
+          },
+          "span": {
+            "s": 79,
+            "e": 99
+          }
+        }
+      ],
+      "span": {
+        "s": 16,
+        "e": 101
+      }
+    },
+    {
+      "name": "Car",
+      "name_span": {
+        "s": 108,
+        "e": 111
+      },
+      "props": [
+        {
+          "name": "vin",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 119,
+              "e": 125
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 115,
+            "e": 133
+          }
+        },
+        {
+          "name": "color",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"red\"",
+              "\"green\""
+            ],
+            "span": {
+              "s": 141,
+              "e": 162
+            }
+          },
+          "span": {
+            "s": 135,
+            "e": 162
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "OWNER",
+          "name_span": {
+            "s": 169,
+            "e": 174
+          },
+          "target": {
+            "name": "Person",
+            "span": {
+              "s": 181,
+              "e": 187
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 165,
+            "e": 187
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "WHEELS",
+          "name_span": {
+            "s": 193,
+            "e": 199
+          },
+          "target": {
+            "name": "Wheel",
+            "span": {
+              "s": 211,
+              "e": 216
+            }
+          },
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 189,
+            "e": 216
+          }
+        }
+      ],
+      "span": {
+        "s": 103,
+        "e": 218
+      }
+    },
+    {
+      "name": "Wheel",
+      "name_span": {
+        "s": 230,
+        "e": 235
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "position",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"FL\"",
+              "\"FR\"",
+              "\"RL\"",
+              "\"RR\""
+            ],
+            "span": {
+              "s": 248,
+              "e": 277
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 239,
+            "e": 286
+          }
+        }
+      ],
+      "span": {
+        "s": 220,
+        "e": 288
+      }
+    }
+  ]
+}

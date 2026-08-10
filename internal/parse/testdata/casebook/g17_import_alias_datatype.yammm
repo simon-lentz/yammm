@@ -1,0 +1,6 @@
+schema "seeded"
+import "a.yammm" as String
+
+type Alpha {
+	id String primary
+}

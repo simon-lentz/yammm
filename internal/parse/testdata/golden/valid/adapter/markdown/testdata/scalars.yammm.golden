@@ -1,0 +1,214 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "County",
+      "name_span": {
+        "s": 19,
+        "e": 25
+      },
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "5",
+              "5"
+            ],
+            "span": {
+              "s": 34,
+              "e": 47
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 29,
+            "e": 55
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "_"
+            ],
+            "span": {
+              "s": 62,
+              "e": 75
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 57,
+            "e": 84
+          }
+        },
+        {
+          "name": "population",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "_"
+            ],
+            "span": {
+              "s": 97,
+              "e": 111
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 86,
+            "e": 120
+          }
+        },
+        {
+          "name": "density",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "100000.0"
+            ],
+            "span": {
+              "s": 130,
+              "e": 151
+            }
+          },
+          "span": {
+            "s": 122,
+            "e": 151
+          }
+        },
+        {
+          "name": "rank",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "_",
+              "99"
+            ],
+            "span": {
+              "s": 158,
+              "e": 173
+            }
+          },
+          "span": {
+            "s": 153,
+            "e": 173
+          }
+        },
+        {
+          "name": "active",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 182,
+              "e": 189
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 175,
+            "e": 198
+          }
+        },
+        {
+          "name": "founded",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 208,
+              "e": 212
+            }
+          },
+          "span": {
+            "s": 200,
+            "e": 212
+          }
+        },
+        {
+          "name": "updated_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 225,
+              "e": 234
+            }
+          },
+          "span": {
+            "s": 214,
+            "e": 234
+          }
+        },
+        {
+          "name": "guid",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 241,
+              "e": 245
+            }
+          },
+          "span": {
+            "s": 236,
+            "e": 245
+          }
+        },
+        {
+          "name": "embedding",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "3"
+            ],
+            "span": {
+              "s": 257,
+              "e": 267
+            }
+          },
+          "span": {
+            "s": 247,
+            "e": 267
+          }
+        },
+        {
+          "name": "tags",
+          "constraint": {
+            "kind": "List",
+            "args": [
+              "1",
+              "5"
+            ],
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 280,
+                "e": 286
+              }
+            },
+            "span": {
+              "s": 274,
+              "e": 294
+            }
+          },
+          "span": {
+            "s": 269,
+            "e": 294
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 296
+      }
+    }
+  ]
+}

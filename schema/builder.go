@@ -789,13 +789,9 @@ func (t *TypeBuilder) WithTypeDocumentation(doc string) *TypeBuilder {
 // fails validation. The e parameter is the compiled expression to evaluate.
 // The doc parameter is optional documentation for the invariant.
 //
-// Expressions can be constructed programmatically using the expr package:
+// Expressions are constructed with the expr package. Compiling one from source
+// text is internal to schema loading and is not reachable from here:
 //
-//	// Using CompileString (for testing):
-//	collector := diag.NewCollector(10)
-//	ageExpr := expr.CompileString("age > 0", collector, sourceID)
-//
-//	// Or construct directly:
 //	ageExpr := expr.SExpr{expr.Op(">"), expr.SExpr{expr.Op("$"), expr.NewLiteral("age")}, expr.NewLiteral(int64(0))}
 func (t *TypeBuilder) WithInvariant(name string, e expr.Expression, doc string) *TypeBuilder {
 	t.state.invariants = append(t.state.invariants, &invariantDecl{

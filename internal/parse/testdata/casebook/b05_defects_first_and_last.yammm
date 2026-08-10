@@ -1,0 +1,13 @@
+schema "seeded"
+
+type Alpha {
+	id String[0xA, 20] primary
+}
+
+type Beta {
+	id String primary
+}
+
+type Gamma {
+	note String primary @index primary
+}

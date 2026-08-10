@@ -1,0 +1,7 @@
+schema "seeded"
+
+type Alpha {
+	id primary
+	ref Widget
+	name String
+}

@@ -1,0 +1,82 @@
+{
+  "name": "\"fleet\"",
+  "span": {
+    "s": 0,
+    "e": 14
+  },
+  "types": [
+    {
+      "name": "Car",
+      "name_span": {
+        "s": 21,
+        "e": 24
+      },
+      "props": [
+        {
+          "name": "vin",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 32,
+              "e": 38
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 28,
+            "e": 46
+          }
+        },
+        {
+          "name": "color",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"red\"",
+              "\"green\"",
+              "\"blue\""
+            ],
+            "span": {
+              "s": 54,
+              "e": 83
+            }
+          },
+          "span": {
+            "s": 48,
+            "e": 83
+          }
+        },
+        {
+          "name": "sizes",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Enum",
+              "args": [
+                "\"s\"",
+                "\"m\"",
+                "\"l\""
+              ],
+              "span": {
+                "s": 97,
+                "e": 117
+              }
+            },
+            "span": {
+              "s": 91,
+              "e": 118
+            }
+          },
+          "span": {
+            "s": 85,
+            "e": 118
+          }
+        }
+      ],
+      "span": {
+        "s": 16,
+        "e": 120
+      }
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	age Integer[10, 1]
+}

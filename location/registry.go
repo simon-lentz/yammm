@@ -35,21 +35,3 @@ type PositionRegistry interface {
 	//   - Byte: The input byteOffset (echoed back for convenience)
 	PositionAt(source SourceID, byteOffset int) Position
 }
-
-// RuneOffsetConverter provides rune-to-byte offset conversion.
-//
-// ANTLR positions are rune-based (character indices), but the schema layer
-// uses byte offsets for consistency with Go strings and UTF-8 handling.
-// This interface enables the conversion between these coordinate systems.
-//
-// The primary implementation is source.Registry.
-type RuneOffsetConverter interface {
-	// RuneToByteOffset converts a rune offset to a byte offset for the given source.
-	//
-	// Returns (byteOffset, true) on success.
-	// Returns (0, false) if:
-	//   - The source is not registered
-	//   - The rune offset is out of range
-	//   - The rune offset is negative
-	RuneToByteOffset(source SourceID, runeOffset int) (byteOffset int, ok bool)
-}

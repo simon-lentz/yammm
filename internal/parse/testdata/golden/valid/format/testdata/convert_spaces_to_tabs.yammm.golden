@@ -1,0 +1,51 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 20,
+        "e": 26
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 38,
+              "e": 44
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 33,
+            "e": 53
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 62,
+              "e": 69
+            }
+          },
+          "span": {
+            "s": 58,
+            "e": 69
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 71
+      }
+    }
+  ]
+}

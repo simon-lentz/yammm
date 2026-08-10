@@ -1,0 +1,150 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 34,
+              "e": 40
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 31,
+            "e": 48
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "r",
+          "name_span": {
+            "s": 54,
+            "e": 55
+          },
+          "target": {
+            "name": "Beta",
+            "span": {
+              "s": 56,
+              "e": 60
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 50,
+            "e": 60
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "q",
+          "name_span": {
+            "s": 68,
+            "e": 69
+          },
+          "target": {
+            "name": "Gamma",
+            "span": {
+              "s": 70,
+              "e": 75
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 64,
+            "e": 75
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 77
+      }
+    },
+    {
+      "name": "Beta",
+      "name_span": {
+        "s": 84,
+        "e": 88
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 95,
+              "e": 101
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 92,
+            "e": 109
+          }
+        }
+      ],
+      "span": {
+        "s": 79,
+        "e": 111
+      }
+    },
+    {
+      "name": "Gamma",
+      "name_span": {
+        "s": 118,
+        "e": 123
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 130,
+              "e": 136
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 127,
+            "e": 144
+          }
+        }
+      ],
+      "span": {
+        "s": 113,
+        "e": 146
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"/\" in a type body",
+      "span": {
+        "s": 61,
+        "e": 62
+      },
+      "line": 5,
+      "end_line": 5
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+// Invariant expressions across the operator set, so the benchmark pays the
+// expression-compilation cost rather than measuring declarations alone.
+schema "bench_invariants"
+
+type Order {
+	order_id String primary
+	status Enum["draft", "placed", "shipped", "closed"] required
+	subtotal Float[0.0, _] required
+	discount Float[0.0, _] required
+	total Float[0.0, _] required
+	quantity Integer[1, _] required
+	reference String
+	placed_at Timestamp
+	closed_at Timestamp
+
+	! "total is subtotal less discount" total == subtotal - discount
+	! "discount never exceeds subtotal" discount <= subtotal
+	! "quantity is positive" quantity > 0
+	! "reference is set once placed" status == "draft" || reference != nil
+	! "reference is not blank" reference -> Len > 0
+	! "closed orders were placed" status != "closed" || placed_at != nil
+	! "reference looks like a code" reference =~ /^[A-Z]{3}-[0-9]+$/
+	! "reference is not a draft marker" reference !~ /^DRAFT/
+	! "shipped or closed carries a stamp" (status != "shipped" && status != "closed") || placed_at != nil
+	! "totals stay in range" total >= 0.0 && total <= 1000000.0
+	! "status is known" status == "draft" || status == "placed" || status == "shipped" || status == "closed"
+	! "subtotal is not negative" subtotal >= 0.0
+}
+
+type Basket {
+	basket_id String primary
+	lines List<String> required
+	owner String required
+
+	! "a basket holds something" lines -> Len > 0
+	! "owner is named" owner -> Len >= 3
+}

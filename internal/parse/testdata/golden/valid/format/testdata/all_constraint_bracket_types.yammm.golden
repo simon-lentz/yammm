@@ -1,0 +1,171 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 20,
+        "e": 21
+      },
+      "props": [
+        {
+          "name": "a",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "255"
+            ],
+            "span": {
+              "s": 27,
+              "e": 42
+            }
+          },
+          "span": {
+            "s": 25,
+            "e": 42
+          }
+        },
+        {
+          "name": "b",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "_"
+            ],
+            "span": {
+              "s": 46,
+              "e": 60
+            }
+          },
+          "span": {
+            "s": 44,
+            "e": 60
+          }
+        },
+        {
+          "name": "c",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "100.0"
+            ],
+            "span": {
+              "s": 64,
+              "e": 82
+            }
+          },
+          "span": {
+            "s": 62,
+            "e": 82
+          }
+        },
+        {
+          "name": "d",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"x\"",
+              "\"y\"",
+              "\"z\""
+            ],
+            "span": {
+              "s": 86,
+              "e": 106
+            }
+          },
+          "span": {
+            "s": 84,
+            "e": 106
+          }
+        },
+        {
+          "name": "e",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^[a-z]+$\""
+            ],
+            "span": {
+              "s": 110,
+              "e": 130
+            }
+          },
+          "span": {
+            "s": 108,
+            "e": 130
+          }
+        },
+        {
+          "name": "f",
+          "constraint": {
+            "kind": "Timestamp",
+            "args": [
+              "\"2006-01-02\""
+            ],
+            "span": {
+              "s": 134,
+              "e": 158
+            }
+          },
+          "span": {
+            "s": 132,
+            "e": 158
+          }
+        },
+        {
+          "name": "g",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "128"
+            ],
+            "span": {
+              "s": 162,
+              "e": 174
+            }
+          },
+          "span": {
+            "s": 160,
+            "e": 174
+          }
+        },
+        {
+          "name": "h",
+          "constraint": {
+            "kind": "List",
+            "args": [
+              "1",
+              "5"
+            ],
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 184,
+                "e": 190
+              }
+            },
+            "span": {
+              "s": 178,
+              "e": 198
+            }
+          },
+          "span": {
+            "s": 176,
+            "e": 198
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 200
+      }
+    }
+  ]
+}

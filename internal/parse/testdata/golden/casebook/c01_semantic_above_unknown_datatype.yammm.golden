@@ -1,0 +1,118 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 34,
+              "e": 40
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 31,
+            "e": 48
+          }
+        },
+        {
+          "name": "ref",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Widget"
+            ],
+            "span": {
+              "s": 54,
+              "e": 60
+            }
+          },
+          "span": {
+            "s": 50,
+            "e": 60
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 62
+      }
+    },
+    {
+      "name": "Beta",
+      "name_span": {
+        "s": 69,
+        "e": 73
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 80,
+              "e": 86
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 77,
+            "e": 94
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 102,
+              "e": 108
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 109,
+                "e": 115
+              }
+            }
+          ],
+          "span": {
+            "s": 96,
+            "e": 115
+          }
+        }
+      ],
+      "span": {
+        "s": 64,
+        "e": 119
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"(\" in a type body",
+      "span": {
+        "s": 115,
+        "e": 116
+      },
+      "line": 10,
+      "end_line": 10
+    }
+  ]
+}

@@ -13,7 +13,7 @@ YAMMM is designed for structured data modeling with a focus on:
 
 YAMMM's design draws inspiration from [CUE](https://cuelang.org/)'s constraint-based approach to data validation, adapted for a nominal type system with explicit relationships. Where CUE uses structural typing and lattice-based unification, YAMMM uses named types with inheritance and constraint narrowing.
 
-The grammar is compact and regular, allowing for easy analysis by automatic tools. We use [ANTLR](https://en.wikipedia.org/wiki/ANTLR) to generate lexers and parsers from [`YammmGrammar.g4`](../internal/grammar/YammmGrammar.g4).
+The grammar is compact and regular, which keeps it easy to analyze with automatic tools. The [Grammar Summary](#grammar-summary) at the end of this document is the normative statement of the syntax. The reference implementation parses it in two parts: the declaration grammar comes from annotated Go types, and expressions are parsed by a hand-written Pratt parser.
 
 ## Notation
 
@@ -192,7 +192,7 @@ schema    type    datatype    required    primary    extends
 includes    abstract    one    many    import
 ```
 
-The keywords `as`, `part`, and `in` cannot be used as property names because they would create parsing ambiguity in import declarations (`as`), type modifiers (`part`), and membership expressions (`in`) respectively.
+Six spellings cannot be used as property names. The keywords `as`, `part`, and `in` would create parsing ambiguity in import declarations (`as`), type modifiers (`part`), and membership expressions (`in`) respectively. The literals `true`, `false`, and `nil` are also barred: the lexer reads them as literal values, not as identifiers, so the declaration is a syntax error. All six are rejected where the property is declared, not where it is used.
 
 ### Operators and Punctuation
 
@@ -938,7 +938,7 @@ Associations represent references between independent entities:
 
 ```text
 Association = [ DOC_COMMENT ] "-->" Name [ Multiplicity ] TypeRef
-              [ "/" ReverseName [ Multiplicity ] ]
+              [ "/" Name [ Multiplicity ] ]
               [ "{" { RelProperty } "}" ] .
 Name        = UC_WORD | LC_WORD .
 ```
@@ -968,7 +968,7 @@ Compositions represent ownership where child entities are embedded within their 
 
 ```text
 Composition = [ DOC_COMMENT ] "*->" Name [ Multiplicity ] TypeRef
-              [ "/" ReverseName [ Multiplicity ] ] .
+              [ "/" Name [ Multiplicity ] ] .
 ```
 
 The target must be a concrete `part` type (not abstract).
@@ -1110,7 +1110,7 @@ The single/double sigil split is required, not stylistic. Because whitespace —
 
 **Placement on the line.** A property-level annotation must be written on the same line as the property it annotates. Because whitespace is not significant, an annotation on a line of its own still binds to the property **above** it — never the one below — so writing it prefix-style, as decorators are written in Python, TypeScript, or Java, would silently mark the wrong property and emit the wrong store DDL. That shape is rejected with `E_INVALID_ANNOTATION` naming the property it would have attached to. A property may carry several annotations, all on its own line (`first_seen Timestamp @writeOnce @index`); a marker meant for the type as a whole is written `@@name` on its own line.
 
-**Ordering.** A property-level annotation must follow the datatype and any modifier: `state String @index` is valid, but `state String @index primary` is a syntax error — the modifier must precede the annotation. Recovery is not targeted. Because `primary` is also a legal property name, the parser reads the trailing modifier as the *next* property's name and then fails looking for that property's datatype, so the reported `E_SYNTAX` lists the datatype keywords it expected and is anchored at whatever comes next — typically the type body's closing brace, a line below the mistake.
+**Ordering.** A property-level annotation must follow the datatype and any modifier: `state String @index` is valid, but `state String @index primary` is a syntax error — the modifier must precede the annotation. Recovery does not target the misplaced modifier, because `primary` is also a legal property name and the parser cannot tell the two readings apart. The reported `E_SYNTAX` is anchored at the first token that cannot continue the type body — often its closing brace, a line below the mistake. The property itself is still recorded, so the rest of the type is checked normally.
 
 **Arguments** are positional. When parentheses are present they must hold at least one argument — `@index()` is a syntax error; a no-argument annotation is written without parentheses (`@index`). A trailing comma is allowed.
 
@@ -1180,7 +1180,7 @@ Invariants are constraints attached to types that are evaluated during instance 
 ### Invariant Declaration
 
 ```text
-Invariant = "!" message=STRING constraint=Expr .
+Invariant = [ DOC_COMMENT ] "!" message=STRING constraint=Expr .
 ```
 
 The message is displayed when the invariant evaluates to false:
@@ -1361,6 +1361,8 @@ Works on:
 - Arrays and slices
 
 Invalid indices or ranges return evaluation errors with start/end/len details.
+
+Only these two forms have a defined meaning. The bracket grammar is more permissive than the language: it also accepts an empty list, three or more arguments, and a trailing comma (`expr[]`, `expr[a, b, c,]`). These parse without a diagnostic and are not valid YAMMM — do not write them.
 
 ### Property Access
 
@@ -1689,6 +1691,11 @@ The hash format is `sha256:<hex>`. A structural hash version (currently `1`) is 
 
 ## Grammar Summary
 
+This section is the normative statement of YAMMM's syntax, and it is
+maintained by hand. Keep it in step with the parser whenever the grammar
+changes: nothing checks it automatically, and no second grammar exists to
+check it against.
+
 ```text
 Schema     = SchemaName { ImportDecl } { TypeDecl | DataTypeDecl } EOF .
 SchemaName = [ DOC_COMMENT ] "schema" STRING .
@@ -1721,7 +1728,8 @@ Composition = [ DOC_COMMENT ] "*->" Name [ Multiplicity ] TypeRef
 Name       = UC_WORD | LC_WORD .
 Multiplicity = "(" MultiplicitySpec ")" .
 
-Invariant  = "!" STRING Expr .
+Invariant  = [ DOC_COMMENT ] "!" STRING Expr .
+RelProperty = [ DOC_COMMENT ] PropertyName DataTypeRef [ "required" ] .
 
 BuiltIn    = "Integer" [ "[" IntBound "," IntBound "]" ]
            | "Float" [ "[" FloatBound "," FloatBound "]" ]

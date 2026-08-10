@@ -1,0 +1,19 @@
+// Syntactically clean, semantically invalid: every defect below is a constraint
+// the schema layer rejects, not a shape the grammar refuses.
+schema "semantically_invalid"
+
+type Reading {
+	id String primary
+	// inverted numeric bounds
+	age Integer[10, 1]
+	// inverted length bounds
+	label String[80, 4]
+	// inverted list length bounds
+	tags List<String>[9, 2]
+	// an enum with one usable value
+	state Enum["only", "only"]
+	// a vector dimension past the cap
+	embedding Vector[70000]
+
+	! "age is sane" age>0
+}

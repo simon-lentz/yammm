@@ -1,0 +1,10 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	--> r Beta { nil String }
+}
+
+type Beta {
+	id String primary
+}

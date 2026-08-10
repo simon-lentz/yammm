@@ -1,0 +1,70 @@
+{
+  "name": "\"left\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "imports": [
+    {
+      "path": "\"diamond_base.yammm\"",
+      "alias": "base",
+      "span": {
+        "s": 15,
+        "e": 50
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Left",
+      "name_span": {
+        "s": 57,
+        "e": 61
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 68,
+              "e": 74
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 65,
+            "e": 82
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "TO_SHARED",
+          "name_span": {
+            "s": 88,
+            "e": 97
+          },
+          "target": {
+            "qualifier": "base",
+            "name": "Shared",
+            "span": {
+              "s": 104,
+              "e": 115
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 84,
+            "e": 115
+          }
+        }
+      ],
+      "span": {
+        "s": 52,
+        "e": 117
+      }
+    }
+  ]
+}

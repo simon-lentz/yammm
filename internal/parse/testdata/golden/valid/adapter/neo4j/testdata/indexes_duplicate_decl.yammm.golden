@@ -1,0 +1,105 @@
+{
+  "name": "\"dup_decl_test\"",
+  "span": {
+    "s": 0,
+    "e": 22
+  },
+  "types": [
+    {
+      "name": "Publisher",
+      "name_span": {
+        "s": 29,
+        "e": 38
+      },
+      "props": [
+        {
+          "name": "pid",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 50,
+              "e": 56
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 45,
+            "e": 64
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 74,
+              "e": 80
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 81,
+                "e": 87
+              }
+            },
+            {
+              "name": "fulltext",
+              "span": {
+                "s": 88,
+                "e": 97
+              }
+            }
+          ],
+          "span": {
+            "s": 69,
+            "e": 97
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "name",
+              "span": {
+                "s": 111,
+                "e": 115
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 103,
+            "e": 116
+          }
+        },
+        {
+          "name": "fulltext",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "name",
+              "span": {
+                "s": 132,
+                "e": 136
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 121,
+            "e": 137
+          }
+        }
+      ],
+      "span": {
+        "s": 24,
+        "e": 139
+      }
+    }
+  ]
+}

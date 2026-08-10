@@ -1,0 +1,60 @@
+{
+  "name": "\"badident_test\"",
+  "span": {
+    "s": 0,
+    "e": 22
+  },
+  "types": [
+    {
+      "name": "Thing",
+      "name_span": {
+        "s": 29,
+        "e": 34
+      },
+      "props": [
+        {
+          "name": "thing_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 50,
+              "e": 56
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 41,
+            "e": 64
+          }
+        },
+        {
+          "name": "match",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 78,
+              "e": 84
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 85,
+                "e": 91
+              }
+            }
+          ],
+          "span": {
+            "s": 69,
+            "e": 91
+          }
+        }
+      ],
+      "span": {
+        "s": 24,
+        "e": 93
+      }
+    }
+  ]
+}

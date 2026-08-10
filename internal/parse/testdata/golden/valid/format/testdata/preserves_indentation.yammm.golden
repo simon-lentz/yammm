@@ -1,0 +1,72 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 20,
+        "e": 26
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 35,
+              "e": 41
+            }
+          },
+          "span": {
+            "s": 30,
+            "e": 41
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 47,
+              "e": 54
+            }
+          },
+          "span": {
+            "s": 43,
+            "e": 54
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "EMPLOYER",
+          "name_span": {
+            "s": 60,
+            "e": 68
+          },
+          "target": {
+            "name": "Company",
+            "span": {
+              "s": 75,
+              "e": 82
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 56,
+            "e": 82
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 84
+      }
+    }
+  ]
+}

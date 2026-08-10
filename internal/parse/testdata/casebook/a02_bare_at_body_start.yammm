@@ -1,0 +1,6 @@
+schema "seeded"
+
+type Alpha {
+	@index
+	id String primary
+}

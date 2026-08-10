@@ -1,0 +1,118 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "datatypes": [
+    {
+      "name": "Email",
+      "constraint": {
+        "kind": "Pattern",
+        "args": [
+          "\"^.+@.+$\""
+        ],
+        "span": {
+          "s": 171,
+          "e": 189
+        }
+      },
+      "span": {
+        "s": 160,
+        "e": 189
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Address",
+      "name_span": {
+        "s": 22,
+        "e": 29
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 40,
+              "e": 46
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 35,
+            "e": 56
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "_"
+            ],
+            "span": {
+              "s": 65,
+              "e": 82
+            }
+          },
+          "span": {
+            "s": 61,
+            "e": 82
+          }
+        },
+        {
+          "name": "score",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "-90.0",
+              "90.0"
+            ],
+            "span": {
+              "s": 93,
+              "e": 112
+            }
+          },
+          "span": {
+            "s": 87,
+            "e": 112
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "REL",
+          "name_span": {
+            "s": 122,
+            "e": 125
+          },
+          "target": {
+            "name": "Target",
+            "span": {
+              "s": 134,
+              "e": 140
+            }
+          },
+          "backref": "owned_by",
+          "backref_span": {
+            "s": 143,
+            "e": 151
+          },
+          "span": {
+            "s": 117,
+            "e": 156
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 158
+      }
+    }
+  ]
+}

@@ -22,7 +22,7 @@ func parseSchema(t *testing.T, schemaSource string) (*schema.TestModel, diag.Res
 	require.NoError(t, err)
 
 	collector := diag.NewCollector(0)
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 	return model, collector.Result()
 }
@@ -3382,7 +3382,7 @@ type Source {
 func TestParse_VectorDimensionNonNumeric(t *testing.T) {
 	t.Parallel()
 
-	// Test vector with non-numeric dimension (ANTLR error recovery)
+	// Test vector with non-numeric dimension, which recovery must survive.
 	source := `schema "test"
 type Embedding {
 	id UUID primary

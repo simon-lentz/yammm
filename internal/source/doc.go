@@ -11,7 +11,7 @@
 //
 //   - Store raw source bytes keyed by [location.SourceID]
 //   - Precompute line-start byte offsets for efficient position lookup
-//   - Precompute rune-to-byte offset tables for ANTLR token conversion
+//   - Precompute rune offset tables, which give every position its rune column
 //   - Convert byte offset to [location.Position] (PositionAt)
 //   - Provide raw bytes to consumers as a [diag.SourceProvider]
 //   - Enforce uniqueness of source identity keys

@@ -19,7 +19,7 @@ type sourceEntry struct {
 	// len(lineOffsets) is the total number of lines.
 	lineOffsets []int
 	// runeOffsets[i] is the byte offset of the i-th rune.
-	// Used for O(1) rune-to-byte conversion (ANTLR token positions).
+	// Backs the rune column in every Position.
 	runeOffsets []int
 }
 
@@ -184,43 +184,6 @@ func (r *Registry) LineStartByte(source location.SourceID, line int) (int, bool)
 	}
 
 	return entry.lineOffsets[line-1], true
-}
-
-// RuneToByteOffset converts a rune index (0-based) to a byte offset.
-//
-// This method enables O(1) conversion from ANTLR token positions (which are
-// rune-based) to byte offsets needed for [location.Position].
-//
-// Returns (0, false) if:
-//   - The source is not registered
-//   - The rune index is negative
-//   - The rune index exceeds the number of runes in the source
-//
-// runeIndex == len(runeOffsets) returns (len(content), true) for EOF.
-func (r *Registry) RuneToByteOffset(source location.SourceID, runeIndex int) (int, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	entry, ok := r.entries[source]
-	if !ok {
-		return 0, false
-	}
-
-	// Validate rune index range
-	if runeIndex < 0 {
-		return 0, false
-	}
-
-	// EOF position: runeIndex == number of runes
-	if runeIndex == len(entry.runeOffsets) {
-		return len(entry.content), true
-	}
-
-	if runeIndex > len(entry.runeOffsets) {
-		return 0, false
-	}
-
-	return entry.runeOffsets[runeIndex], true
 }
 
 // Keys returns all registered source identifiers in sorted order.

@@ -1,0 +1,12 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	--> owner Beta {
+		since Timestamp primary
+	}
+}
+
+type Beta {
+	id String primary
+}

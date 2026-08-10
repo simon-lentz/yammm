@@ -1,0 +1,49 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 34,
+              "e": 40
+            }
+          },
+          "span": {
+            "s": 31,
+            "e": 40
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 60
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "malformed numeric literal \"0x10\": numeric literals are decimal (hexadecimal and suffixed forms are not supported)",
+      "span": {
+        "s": 41,
+        "e": 45
+      },
+      "line": 4,
+      "end_line": 4
+    }
+  ]
+}

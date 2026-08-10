@@ -1,0 +1,118 @@
+{
+  "name": "\"csv_rel_test\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "types": [
+    {
+      "name": "Company",
+      "name_span": {
+        "s": 28,
+        "e": 35
+      },
+      "props": [
+        {
+          "name": "company_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 53,
+              "e": 59
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 42,
+            "e": 67
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 77,
+              "e": 83
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 72,
+            "e": 92
+          }
+        }
+      ],
+      "span": {
+        "s": 23,
+        "e": 94
+      }
+    },
+    {
+      "name": "Employee",
+      "name_span": {
+        "s": 101,
+        "e": 109
+      },
+      "props": [
+        {
+          "name": "employee_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 128,
+              "e": 134
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 116,
+            "e": 142
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 152,
+              "e": 158
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 147,
+            "e": 167
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "WORKS_AT",
+          "name_span": {
+            "s": 176,
+            "e": 184
+          },
+          "target": {
+            "name": "Company",
+            "span": {
+              "s": 193,
+              "e": 200
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 172,
+            "e": 200
+          }
+        }
+      ],
+      "span": {
+        "s": 96,
+        "e": 202
+      }
+    }
+  ]
+}

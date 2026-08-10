@@ -1,0 +1,342 @@
+{
+  "name": "\"expressions\"",
+  "span": {
+    "s": 0,
+    "e": 20
+  },
+  "types": [
+    {
+      "name": "RuleSet",
+      "name_span": {
+        "s": 29,
+        "e": 36
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 47,
+              "e": 53
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 42,
+            "e": 63
+          }
+        },
+        {
+          "name": "name_norm",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 78,
+              "e": 84
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 68,
+            "e": 93
+          }
+        },
+        {
+          "name": "start_date",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 109,
+              "e": 113
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 98,
+            "e": 122
+          }
+        },
+        {
+          "name": "end_date",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 136,
+              "e": 140
+            }
+          },
+          "span": {
+            "s": 127,
+            "e": 140
+          }
+        },
+        {
+          "name": "confidence",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "1.0"
+            ],
+            "span": {
+              "s": 156,
+              "e": 171
+            }
+          },
+          "span": {
+            "s": 145,
+            "e": 171
+          }
+        },
+        {
+          "name": "count",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "1",
+              "_"
+            ],
+            "span": {
+              "s": 182,
+              "e": 194
+            }
+          },
+          "span": {
+            "s": 176,
+            "e": 194
+          }
+        },
+        {
+          "name": "active",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 206,
+              "e": 213
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 199,
+            "e": 222
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "ITEMS",
+          "name_span": {
+            "s": 232,
+            "e": 237
+          },
+          "target": {
+            "name": "LineItem",
+            "span": {
+              "s": 245,
+              "e": 253
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 228,
+            "e": 253
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"name_not_empty\"",
+          "expr": "(!= (p \"name\") \"\")",
+          "expr_span": {
+            "s": 278,
+            "e": 288
+          },
+          "span": {
+            "s": 259,
+            "e": 288
+          }
+        },
+        {
+          "msg": "\"norm_not_empty\"",
+          "expr": "(\u003e (Len (p \"name_norm\") (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 312,
+            "e": 332
+          },
+          "span": {
+            "s": 293,
+            "e": 332
+          }
+        },
+        {
+          "msg": "\"dates_valid\"",
+          "expr": "(|| (== (p \"end_date\") nil) (\u003e (p \"end_date\") (p \"start_date\")))",
+          "expr_span": {
+            "s": 353,
+            "e": 393
+          },
+          "span": {
+            "s": 337,
+            "e": 393
+          }
+        },
+        {
+          "msg": "\"confidence_valid\"",
+          "expr": "(\u0026\u0026 (\u003e= (p \"confidence\") 0) (\u003c= (p \"confidence\") 1))",
+          "expr_span": {
+            "s": 419,
+            "e": 457
+          },
+          "span": {
+            "s": 398,
+            "e": 457
+          }
+        },
+        {
+          "msg": "\"all_positive_qty\"",
+          "expr": "(All (p \"ITEMS\") (args ) (params item) (\u003e (. ($ \"item\") \"quantity\") 0))",
+          "expr_span": {
+            "s": 483,
+            "e": 526
+          },
+          "span": {
+            "s": 462,
+            "e": 526
+          }
+        },
+        {
+          "msg": "\"has_items\"",
+          "expr": "(\u003e (Len (p \"ITEMS\") (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 545,
+            "e": 561
+          },
+          "span": {
+            "s": 531,
+            "e": 561
+          }
+        },
+        {
+          "msg": "\"pipeline_check\"",
+          "expr": "(!= (Trim (Upper (p \"name\") (args ) (params ) nil) (args ) (params ) nil) \"\")",
+          "expr_span": {
+            "s": 585,
+            "e": 612
+          },
+          "span": {
+            "s": 566,
+            "e": 612
+          }
+        },
+        {
+          "msg": "\"replace_check\"",
+          "expr": "(!= (Replace (p \"name\") (args \"old\" \"new\") (params ) nil) \"\")",
+          "expr_span": {
+            "s": 635,
+            "e": 670
+          },
+          "span": {
+            "s": 617,
+            "e": 670
+          }
+        },
+        {
+          "msg": "\"not_disabled\"",
+          "expr": "(|| (! (p \"active\")) (\u003e (p \"confidence\") 0.5))",
+          "expr_span": {
+            "s": 692,
+            "e": 719
+          },
+          "span": {
+            "s": 675,
+            "e": 719
+          }
+        },
+        {
+          "msg": "\"grouping\"",
+          "expr": "(\u0026\u0026 (\u003e (p \"count\") 0) (\u003c (p \"confidence\") 1))",
+          "expr_span": {
+            "s": 737,
+            "e": 770
+          },
+          "span": {
+            "s": 724,
+            "e": 770
+          }
+        },
+        {
+          "msg": "\"ternary_check\"",
+          "expr": "(\u003e (? (p \"active\") (p \"confidence\") 0) 0)",
+          "expr_span": {
+            "s": 793,
+            "e": 828
+          },
+          "span": {
+            "s": 775,
+            "e": 828
+          }
+        }
+      ],
+      "span": {
+        "s": 22,
+        "e": 830
+      }
+    },
+    {
+      "name": "LineItem",
+      "name_span": {
+        "s": 842,
+        "e": 850
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "quantity",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "1",
+              "_"
+            ],
+            "span": {
+              "s": 866,
+              "e": 879
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 857,
+            "e": 888
+          }
+        },
+        {
+          "name": "price",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 899,
+              "e": 912
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 893,
+            "e": 921
+          }
+        }
+      ],
+      "span": {
+        "s": 832,
+        "e": 923
+      }
+    }
+  ]
+}

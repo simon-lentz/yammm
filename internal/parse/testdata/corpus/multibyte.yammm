@@ -1,0 +1,11 @@
+schema "多字节"
+
+/* Dokumentation für Prüfung — höchst wichtig */
+type Pruefstueck {
+	id String primary
+	/* étiquette dernière */
+	label Enum["été", "hiver", "🌊 sæson"]
+	note String required @writeOnce
+	@@index(label, note)
+	! "libellé non vide" label != "x" && note =~ /^é.+$/
+}

@@ -1,0 +1,51 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 22,
+        "e": 28
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 39,
+              "e": 45
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 34,
+            "e": 55
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"must_be_enabled\"",
+          "expr": "(\u0026\u0026 (! (p \"disabled\")) (p \"active\"))",
+          "expr_span": {
+            "s": 80,
+            "e": 99
+          },
+          "span": {
+            "s": 60,
+            "e": 99
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 101
+      }
+    }
+  ]
+}

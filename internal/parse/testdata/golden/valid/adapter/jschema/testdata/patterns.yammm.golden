@@ -1,0 +1,73 @@
+{
+  "name": "\"contacts\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "types": [
+    {
+      "name": "Contact",
+      "name_span": {
+        "s": 24,
+        "e": 31
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 38,
+              "e": 44
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 35,
+            "e": 52
+          }
+        },
+        {
+          "name": "email",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}$\""
+            ],
+            "span": {
+              "s": 60,
+              "e": 121
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 54,
+            "e": 130
+          }
+        },
+        {
+          "name": "phone",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^\\\\d{3}-\\\\d{3}-\\\\d{4}$\"",
+              "\"^[0-9-]{12}$\""
+            ],
+            "span": {
+              "s": 138,
+              "e": 188
+            }
+          },
+          "span": {
+            "s": 132,
+            "e": 188
+          }
+        }
+      ],
+      "span": {
+        "s": 19,
+        "e": 190
+      }
+    }
+  ]
+}

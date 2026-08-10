@@ -1,0 +1,65 @@
+{
+  "name": "\"混合Content\"",
+  "span": {
+    "s": 0,
+    "e": 22
+  },
+  "types": [
+    {
+      "name": "MixedType",
+      "name_span": {
+        "s": 60,
+        "e": 69
+      },
+      "props": [
+        {
+          "name": "ascii",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 79,
+              "e": 85
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 73,
+            "e": 94
+          }
+        },
+        {
+          "name": "jpField",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 133,
+              "e": 140
+            }
+          },
+          "span": {
+            "s": 125,
+            "e": 140
+          }
+        },
+        {
+          "name": "emojiField",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 172,
+              "e": 177
+            }
+          },
+          "span": {
+            "s": 161,
+            "e": 177
+          }
+        }
+      ],
+      "span": {
+        "s": 55,
+        "e": 179
+      }
+    }
+  ]
+}

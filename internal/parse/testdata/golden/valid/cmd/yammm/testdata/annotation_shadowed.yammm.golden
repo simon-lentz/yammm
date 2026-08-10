@@ -1,0 +1,97 @@
+{
+  "name": "\"shadowed\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "types": [
+    {
+      "name": "Base",
+      "name_span": {
+        "s": 33,
+        "e": 37
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 55,
+              "e": 61
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 44,
+            "e": 72
+          }
+        },
+        {
+          "name": "first_seen",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 88,
+              "e": 97
+            }
+          },
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 98,
+                "e": 108
+              }
+            }
+          ],
+          "span": {
+            "s": 77,
+            "e": 108
+          }
+        }
+      ],
+      "span": {
+        "s": 19,
+        "e": 110
+      }
+    },
+    {
+      "name": "Doc",
+      "name_span": {
+        "s": 117,
+        "e": 120
+      },
+      "extends": [
+        {
+          "name": "Base",
+          "span": {
+            "s": 129,
+            "e": 133
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "first_seen",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 151,
+              "e": 160
+            }
+          },
+          "span": {
+            "s": 140,
+            "e": 160
+          }
+        }
+      ],
+      "span": {
+        "s": 112,
+        "e": 162
+      }
+    }
+  ]
+}

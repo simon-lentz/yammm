@@ -1,0 +1,292 @@
+{
+  "name": "\"snapshot_test\"",
+  "span": {
+    "s": 91,
+    "e": 113
+  },
+  "imports": [
+    {
+      "path": "\"./sibling\"",
+      "alias": "sib",
+      "span": {
+        "s": 115,
+        "e": 140
+      }
+    }
+  ],
+  "datatypes": [
+    {
+      "name": "Email",
+      "constraint": {
+        "kind": "Pattern",
+        "args": [
+          "\"^[a-z]+@[a-z]+\\\\.[a-z]{2,}$\""
+        ],
+        "span": {
+          "s": 171,
+          "e": 209
+        }
+      },
+      "span": {
+        "s": 158,
+        "e": 209
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Auditable",
+      "name_span": {
+        "s": 225,
+        "e": 234
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 249,
+              "e": 258
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 238,
+            "e": 267
+          }
+        }
+      ],
+      "span": {
+        "s": 211,
+        "e": 269
+      }
+    },
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 276,
+        "e": 282
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 291,
+            "e": 300
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 311,
+              "e": 317
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 304,
+            "e": 325
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "255"
+            ],
+            "span": {
+              "s": 334,
+              "e": 348
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 327,
+            "e": 357
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "150"
+            ],
+            "span": {
+              "s": 366,
+              "e": 381
+            }
+          },
+          "span": {
+            "s": 359,
+            "e": 381
+          }
+        },
+        {
+          "name": "active",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 390,
+              "e": 397
+            }
+          },
+          "span": {
+            "s": 383,
+            "e": 397
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "FRIEND",
+          "name_span": {
+            "s": 404,
+            "e": 410
+          },
+          "target": {
+            "name": "Person",
+            "span": {
+              "s": 420,
+              "e": 426
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 400,
+            "e": 426
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "HAS",
+          "name_span": {
+            "s": 432,
+            "e": 435
+          },
+          "target": {
+            "qualifier": "sib",
+            "name": "Sibling",
+            "span": {
+              "s": 439,
+              "e": 450
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 428,
+            "e": 450
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "KNOWS",
+          "name_span": {
+            "s": 456,
+            "e": 461
+          },
+          "target": {
+            "name": "Person",
+            "span": {
+              "s": 469,
+              "e": 475
+            }
+          },
+          "backref": "KNOWN_BY",
+          "backref_span": {
+            "s": 478,
+            "e": 486
+          },
+          "reverse_optional": true,
+          "reverse_many": true,
+          "span": {
+            "s": 452,
+            "e": 493
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "OWNS",
+          "name_span": {
+            "s": 499,
+            "e": 503
+          },
+          "target": {
+            "name": "Pet",
+            "span": {
+              "s": 513,
+              "e": 516
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 495,
+            "e": 516
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"name_not_empty\"",
+          "expr": "(!= (p \"name\") \"\")",
+          "expr_span": {
+            "s": 538,
+            "e": 548
+          },
+          "span": {
+            "s": 519,
+            "e": 548
+          }
+        }
+      ],
+      "span": {
+        "s": 271,
+        "e": 550
+      }
+    },
+    {
+      "name": "Pet",
+      "name_span": {
+        "s": 562,
+        "e": 565
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 574,
+              "e": 580
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 569,
+            "e": 589
+          }
+        }
+      ],
+      "span": {
+        "s": 552,
+        "e": 591
+      }
+    }
+  ]
+}

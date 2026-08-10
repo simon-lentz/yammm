@@ -1,0 +1,57 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "imports": [
+    {
+      "path": "\"inherit_common.yammm\"",
+      "alias": "common",
+      "span": {
+        "s": 14,
+        "e": 53
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "City",
+      "name_span": {
+        "s": 60,
+        "e": 64
+      },
+      "extends": [
+        {
+          "qualifier": "common",
+          "name": "Located",
+          "span": {
+            "s": 73,
+            "e": 87
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 96,
+              "e": 102
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 91,
+            "e": 110
+          }
+        }
+      ],
+      "span": {
+        "s": 55,
+        "e": 112
+      }
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+{
+  "name": "\"alias_test\"",
+  "span": {
+    "s": 0,
+    "e": 19
+  },
+  "datatypes": [
+    {
+      "name": "Email",
+      "constraint": {
+        "kind": "Pattern",
+        "args": [
+          "\"^.+@.+$\""
+        ],
+        "span": {
+          "s": 34,
+          "e": 52
+        }
+      },
+      "span": {
+        "s": 21,
+        "e": 52
+      }
+    },
+    {
+      "name": "Money",
+      "constraint": {
+        "kind": "Float",
+        "args": [
+          "0.0",
+          "_"
+        ],
+        "span": {
+          "s": 66,
+          "e": 79
+        }
+      },
+      "span": {
+        "s": 53,
+        "e": 79
+      }
+    },
+    {
+      "name": "ShortCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "2",
+          "10"
+        ],
+        "span": {
+          "s": 97,
+          "e": 110
+        }
+      },
+      "span": {
+        "s": 80,
+        "e": 110
+      }
+    },
+    {
+      "name": "Priority",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"low\"",
+          "\"medium\"",
+          "\"high\""
+        ],
+        "span": {
+          "s": 127,
+          "e": 156
+        }
+      },
+      "span": {
+        "s": 111,
+        "e": 156
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Product",
+      "name_span": {
+        "s": 163,
+        "e": 170
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 186,
+              "e": 190
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 177,
+            "e": 198
+          }
+        },
+        {
+          "name": "email",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Email"
+            ],
+            "span": {
+              "s": 212,
+              "e": 217
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 203,
+            "e": 226
+          }
+        },
+        {
+          "name": "price",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Money"
+            ],
+            "span": {
+              "s": 240,
+              "e": 245
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 231,
+            "e": 254
+          }
+        },
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "ShortCode"
+            ],
+            "span": {
+              "s": 268,
+              "e": 277
+            }
+          },
+          "span": {
+            "s": 259,
+            "e": 277
+          }
+        },
+        {
+          "name": "priority",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Priority"
+            ],
+            "span": {
+              "s": 291,
+              "e": 299
+            }
+          },
+          "span": {
+            "s": 282,
+            "e": 299
+          }
+        }
+      ],
+      "span": {
+        "s": 158,
+        "e": 301
+      }
+    }
+  ]
+}

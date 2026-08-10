@@ -34,6 +34,17 @@ func FuzzLoadString(f *testing.F) {
 		"schema \"test\"\ntype Trade {\n\tid String primary\n\tx String @index()\n}",
 		"schema \"test\"\ntype Trade {\n\tid String primary\n\t@@index(ghost)\n}",
 		"schema \"test\"\ntype Trade {\n\tid String primary\n\tx String @index @index\n}",
+
+		// Differential-fuzz finds from the parser spike: an alias target that
+		// names its own type, and a modifier ambiguous with the next property.
+		`schema""type A=A`,
+		"schema \"0000\"  type A000000{ a00 A00000 primary A} ",
+
+		// A pipeline arrow at end of input, all three spellings: the released
+		// loader dereferenced nil here, and nothing else in the tree pins it.
+		"type A{!00->",
+		"type A{!0->",
+		`schema "s" type A { ! "m" x->`,
 	}
 	for _, s := range seeds {
 		f.Add(s)

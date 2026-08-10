@@ -1,0 +1,82 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "RuleSet",
+      "name_span": {
+        "s": 22,
+        "e": 29
+      },
+      "invariants": [
+        {
+          "msg": "\"all_positive\"",
+          "expr": "(All (p \"ITEMS\") (args ) (params item) (\u003e (. ($ \"item\") \"qty\") 0))",
+          "expr_span": {
+            "s": 52,
+            "e": 90
+          },
+          "span": {
+            "s": 35,
+            "e": 90
+          }
+        },
+        {
+          "msg": "\"adult_status\"",
+          "expr": "(== (? (\u003e= (p \"age\") 18) \"adult\" \"minor\") (p \"category\"))",
+          "expr_span": {
+            "s": 112,
+            "e": 157
+          },
+          "span": {
+            "s": 95,
+            "e": 157
+          }
+        },
+        {
+          "msg": "\"must_be_enabled\"",
+          "expr": "(\u0026\u0026 (! (p \"disabled\")) (p \"active\"))",
+          "expr_span": {
+            "s": 182,
+            "e": 201
+          },
+          "span": {
+            "s": 162,
+            "e": 201
+          }
+        },
+        {
+          "msg": "\"grouping\"",
+          "expr": "(\u0026\u0026 (\u003e (p \"a\") 0) (\u003c (p \"b\") 100))",
+          "expr_span": {
+            "s": 219,
+            "e": 239
+          },
+          "span": {
+            "s": 206,
+            "e": 239
+          }
+        },
+        {
+          "msg": "\"replace\"",
+          "expr": "(Replace (p \"items\") (args \"old\" \"new\") (params ) nil)",
+          "expr_span": {
+            "s": 256,
+            "e": 286
+          },
+          "span": {
+            "s": 244,
+            "e": 286
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 288
+      }
+    }
+  ]
+}

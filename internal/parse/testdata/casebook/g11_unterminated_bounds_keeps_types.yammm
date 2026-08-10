@@ -1,0 +1,9 @@
+schema "seeded"
+
+type Code = String [5, 5
+type Alpha {
+	id String primary
+}
+type Beta {
+	id String primary
+}

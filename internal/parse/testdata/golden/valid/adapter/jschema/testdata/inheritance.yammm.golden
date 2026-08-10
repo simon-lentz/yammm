@@ -1,0 +1,176 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 19,
+        "e": 25
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 32,
+              "e": 38
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 29,
+            "e": 46
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 48
+      }
+    },
+    {
+      "name": "GeoEntity",
+      "name_span": {
+        "s": 64,
+        "e": 73
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 80,
+              "e": 84
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 77,
+            "e": 92
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 99,
+              "e": 105
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 94,
+            "e": 114
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_REGION",
+          "name_span": {
+            "s": 120,
+            "e": 129
+          },
+          "target": {
+            "name": "Region",
+            "span": {
+              "s": 136,
+              "e": 142
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 116,
+            "e": 142
+          }
+        }
+      ],
+      "span": {
+        "s": 50,
+        "e": 144
+      }
+    },
+    {
+      "name": "County",
+      "name_span": {
+        "s": 151,
+        "e": 157
+      },
+      "extends": [
+        {
+          "name": "GeoEntity",
+          "span": {
+            "s": 166,
+            "e": 175
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 184,
+              "e": 190
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 179,
+            "e": 199
+          }
+        }
+      ],
+      "span": {
+        "s": 146,
+        "e": 201
+      }
+    },
+    {
+      "name": "City",
+      "name_span": {
+        "s": 208,
+        "e": 212
+      },
+      "extends": [
+        {
+          "name": "GeoEntity",
+          "span": {
+            "s": 221,
+            "e": 230
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "population",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 245,
+              "e": 252
+            }
+          },
+          "span": {
+            "s": 234,
+            "e": 252
+          }
+        }
+      ],
+      "span": {
+        "s": 203,
+        "e": 254
+      }
+    }
+  ]
+}

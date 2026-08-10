@@ -1,0 +1,112 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "County",
+      "name_span": {
+        "s": 53,
+        "e": 59
+      },
+      "doc": "County is a US county node.",
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 68,
+              "e": 74
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 63,
+            "e": 82
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 89,
+              "e": 95
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 84,
+            "e": 104
+          }
+        },
+        {
+          "name": "population",
+          "doc": "population is the resident count at the last census.",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 177,
+              "e": 184
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 106,
+            "e": 193
+          }
+        },
+        {
+          "name": "area_sq_km",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 206,
+              "e": 211
+            }
+          },
+          "span": {
+            "s": 195,
+            "e": 211
+          }
+        },
+        {
+          "name": "founded",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 221,
+              "e": 225
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 213,
+            "e": 234
+          }
+        },
+        {
+          "name": "updated_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 247,
+              "e": 256
+            }
+          },
+          "span": {
+            "s": 236,
+            "e": 256
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 258
+      }
+    }
+  ]
+}

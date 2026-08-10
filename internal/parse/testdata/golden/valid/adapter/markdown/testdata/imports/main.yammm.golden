@@ -1,0 +1,70 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "imports": [
+    {
+      "path": "\"common.yammm\"",
+      "alias": "common",
+      "span": {
+        "s": 14,
+        "e": 45
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "County",
+      "name_span": {
+        "s": 52,
+        "e": 58
+      },
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 67,
+              "e": 73
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 62,
+            "e": 81
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_REGION",
+          "name_span": {
+            "s": 87,
+            "e": 96
+          },
+          "target": {
+            "qualifier": "common",
+            "name": "Region",
+            "span": {
+              "s": 103,
+              "e": 116
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 83,
+            "e": 116
+          }
+        }
+      ],
+      "span": {
+        "s": 47,
+        "e": 118
+      }
+    }
+  ]
+}

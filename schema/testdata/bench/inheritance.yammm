@@ -1,0 +1,49 @@
+/* Abstract bases, a diamond, and a part type, so the benchmark pays the
+   linearization cost a real schema pays. */
+schema "bench_inheritance"
+
+abstract type Tracked {
+	created_at Timestamp required
+	updated_at Timestamp
+}
+
+abstract type Named {
+	name String[1, 160] required
+	name_norm String required
+}
+
+abstract type Auditable extends Tracked, Named {
+	revision Integer required
+	author String
+}
+
+type Document extends Auditable {
+	doc_id String primary
+	body String
+	published Boolean required
+}
+
+type Article extends Document {
+	headline String required
+	word_count Integer[0, _]
+}
+
+type Review extends Auditable {
+	review_id String primary
+	rating Integer[1, 5] required
+	verdict Enum["accept", "revise", "reject"] required
+
+	--> covers (one) Article
+}
+
+part type Footnote {
+	id String primary
+	text String required
+}
+
+type Chapter extends Tracked {
+	chapter_id String primary
+	ordinal Integer required
+
+	*-> footnotes (many) Footnote
+}

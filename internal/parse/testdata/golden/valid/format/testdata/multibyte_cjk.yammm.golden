@@ -1,0 +1,51 @@
+{
+  "name": "\"日本語テスト\"",
+  "span": {
+    "s": 0,
+    "e": 27
+  },
+  "types": [
+    {
+      "name": "User",
+      "name_span": {
+        "s": 34,
+        "e": 38
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 47,
+              "e": 53
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 42,
+            "e": 62
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 101,
+              "e": 108
+            }
+          },
+          "span": {
+            "s": 97,
+            "e": 108
+          }
+        }
+      ],
+      "span": {
+        "s": 29,
+        "e": 110
+      }
+    }
+  ]
+}

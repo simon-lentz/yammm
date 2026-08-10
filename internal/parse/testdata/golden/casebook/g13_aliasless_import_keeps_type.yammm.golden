@@ -1,0 +1,59 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "imports": [
+    {
+      "path": "\"a.yammm\"",
+      "span": {
+        "s": 16,
+        "e": 32
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 42,
+        "e": 47
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 54,
+              "e": 60
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 51,
+            "e": 68
+          }
+        }
+      ],
+      "span": {
+        "s": 37,
+        "e": 70
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"as\" in a declaration",
+      "span": {
+        "s": 33,
+        "e": 35
+      },
+      "line": 2,
+      "end_line": 2
+    }
+  ]
+}

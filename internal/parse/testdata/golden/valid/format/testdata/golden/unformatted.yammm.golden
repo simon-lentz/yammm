@@ -1,0 +1,234 @@
+{
+  "name": "\"formatting\"",
+  "span": {
+    "s": 181,
+    "e": 200
+  },
+  "imports": [
+    {
+      "path": "\"./other\"",
+      "alias": "other",
+      "span": {
+        "s": 203,
+        "e": 228
+      }
+    }
+  ],
+  "datatypes": [
+    {
+      "name": "RegionCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "2",
+          "2"
+        ],
+        "span": {
+          "s": 249,
+          "e": 261
+        }
+      },
+      "span": {
+        "s": 231,
+        "e": 261
+      }
+    },
+    {
+      "name": "DistrictCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "3",
+          "3"
+        ],
+        "span": {
+          "s": 282,
+          "e": 293
+        }
+      },
+      "span": {
+        "s": 262,
+        "e": 293
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 300,
+        "e": 306
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 320,
+              "e": 326
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 315,
+            "e": 336
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 345,
+              "e": 352
+            }
+          },
+          "span": {
+            "s": 341,
+            "e": 352
+          }
+        },
+        {
+          "name": "bio",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 363,
+              "e": 369
+            }
+          },
+          "span": {
+            "s": 359,
+            "e": 369
+          }
+        }
+      ],
+      "span": {
+        "s": 295,
+        "e": 391
+      }
+    },
+    {
+      "name": "Address",
+      "name_span": {
+        "s": 401,
+        "e": 408
+      },
+      "props": [
+        {
+          "name": "street",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 421,
+              "e": 427
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 414,
+            "e": 437
+          }
+        },
+        {
+          "name": "city",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 468,
+              "e": 474
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 461,
+            "e": 483
+          }
+        },
+        {
+          "name": "zip",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 493,
+              "e": 499
+            }
+          },
+          "span": {
+            "s": 489,
+            "e": 499
+          }
+        },
+        {
+          "name": "region_code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "RegionCode"
+            ],
+            "span": {
+              "s": 516,
+              "e": 526
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 504,
+            "e": 535
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_REGION",
+          "name_span": {
+            "s": 544,
+            "e": 553
+          },
+          "target": {
+            "qualifier": "other",
+            "name": "Region",
+            "span": {
+              "s": 560,
+              "e": 572
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 540,
+            "e": 572
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "NEAR_DISTRICT",
+          "name_span": {
+            "s": 581,
+            "e": 594
+          },
+          "target": {
+            "qualifier": "other",
+            "name": "District",
+            "span": {
+              "s": 604,
+              "e": 618
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 577,
+            "e": 618
+          }
+        }
+      ],
+      "span": {
+        "s": 394,
+        "e": 630
+      }
+    }
+  ]
+}

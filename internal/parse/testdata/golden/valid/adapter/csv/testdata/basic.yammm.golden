@@ -1,0 +1,143 @@
+{
+  "name": "\"csv_test\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "types": [
+    {
+      "name": "Entity",
+      "name_span": {
+        "s": 24,
+        "e": 30
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 40,
+              "e": 46
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 37,
+            "e": 54
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 64,
+              "e": 70
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 59,
+            "e": 79
+          }
+        },
+        {
+          "name": "count",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 90,
+              "e": 97
+            }
+          },
+          "span": {
+            "s": 84,
+            "e": 97
+          }
+        },
+        {
+          "name": "score",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 108,
+              "e": 113
+            }
+          },
+          "span": {
+            "s": 102,
+            "e": 113
+          }
+        },
+        {
+          "name": "active",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 125,
+              "e": 132
+            }
+          },
+          "span": {
+            "s": 118,
+            "e": 132
+          }
+        },
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 148,
+              "e": 152
+            }
+          },
+          "span": {
+            "s": 137,
+            "e": 152
+          }
+        },
+        {
+          "name": "updated_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 168,
+              "e": 177
+            }
+          },
+          "span": {
+            "s": 157,
+            "e": 177
+          }
+        },
+        {
+          "name": "tags",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 192,
+                "e": 198
+              }
+            },
+            "span": {
+              "s": 187,
+              "e": 199
+            }
+          },
+          "span": {
+            "s": 182,
+            "e": 199
+          }
+        }
+      ],
+      "span": {
+        "s": 19,
+        "e": 201
+      }
+    }
+  ]
+}

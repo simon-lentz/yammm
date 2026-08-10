@@ -1,0 +1,26 @@
+// Property-level and type-level annotations, so the benchmark pays the
+// annotation validation and inheritance cost.
+schema "bench_annotations"
+
+type Record {
+	record_id String primary
+	state String @index
+	region String[2, 2] @index
+	created_at Timestamp @writeOnce
+	source_id String @writeOnce
+	embedding Vector[256] @vector(cosine)
+	summary String
+
+	/* the state-and-region lookup index */
+	@@index(state, region)
+	@@index(region, created_at)
+}
+
+type Snapshot {
+	snapshot_id String primary
+	taken_at Timestamp @writeOnce @index
+	digest String @index
+	vector Vector[64] @vector(euclidean)
+
+	@@index(digest, taken_at)
+}

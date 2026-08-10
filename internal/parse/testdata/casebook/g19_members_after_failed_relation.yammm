@@ -1,0 +1,12 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	--> owner (bogus) Beta
+	name String
+	age Integer
+}
+
+type Beta {
+	id String primary
+}

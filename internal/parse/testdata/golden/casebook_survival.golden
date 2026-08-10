@@ -1,0 +1,586 @@
+# Golden set 2 — casebook defect reporting and declaration survival
+# 'matched' means a diagnostic of the expected code overlaps the planted
+# anchor lines. 'oracle_only' entries are deliberate differences from the
+# retired reference parser, kept with the reason each was accepted.
+
+## a01_annotation_empty_args.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.state
+  type Alpha
+
+## a02_bare_at_body_start.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  type Alpha
+
+## a03_modifier_after_annotation.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.state
+  type Alpha
+oracle_only (the reference parser built these; this one deliberately does not):
+  Alpha.primary — ANTLR recovery names a property after the trailing modifier; the author wrote no such property
+
+## a04_invalid_number_bounds.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  type Alpha
+
+## a05_invalid_number_expr.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.count
+  Alpha.id
+  type Alpha
+
+## a06_unterminated_string.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  type Alpha
+
+## a07_stray_char.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.name
+  type Alpha
+
+## a08_missing_schema_name.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  type Alpha
+
+## a09_lowercase_type_name.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+
+## a10_property_missing_type.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  type Alpha
+
+## a11_unclosed_body_eof.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  type Alpha
+
+## a12_inverted_bounds.yammm [A]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_INVALID_CONSTRAINT         matched
+decls:
+  Alpha.age
+  Alpha.id
+  type Alpha
+
+## b01_two_defects_adjacent_types.yammm [B]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Beta.id
+  Beta.state
+  type Alpha
+  type Beta
+
+## b02_two_defects_far_apart.yammm [B]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.name
+  Clean1.id
+  Clean2.id
+  Clean2.note
+  type Alpha
+  type Clean1
+  type Clean2
+  type Omega
+oracle_only (the reference parser built these; this one deliberately does not):
+  Alpha.primary — ANTLR recovery names a property after the trailing modifier
+
+## b03_three_defects.yammm [B]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   syntax   E_SYNTAX                     matched
+  d3   syntax   E_SYNTAX                     matched
+decls:
+  Beta.id
+  Gamma.id
+  Gamma.state
+  type Alpha
+  type Beta
+  type Gamma
+oracle_only (the reference parser built these; this one deliberately does not):
+  Gamma.required — ANTLR recovery names a property after the trailing modifier
+allowed_noise: E_INVALID_ANNOTATION — @@index() survives as a bare annotation and reaches its arity check
+
+## b04_two_defects_one_body.yammm [B]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.name
+  Alpha.state
+  type Alpha
+
+## b05_defects_first_and_last.yammm [B]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Beta.id
+  Gamma.note
+  type Alpha
+  type Beta
+  type Gamma
+oracle_only (the reference parser built these; this one deliberately does not):
+  Gamma.primary — ANTLR recovery names a property after the trailing modifier
+
+## c01_semantic_above_unknown_datatype.yammm [C]
+first-hit: d2
+noise: 0
+defects:
+  d1   semantic E_UNKNOWN_TYPE               unmatched
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.ref
+  Beta.id
+  Beta.state
+  type Alpha
+  type Beta
+
+## c02_semantic_above_missing_pk.yammm [C]
+first-hit: d2
+noise: 0
+defects:
+  d1   semantic E_NO_PRIMARY_KEY             unmatched
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.name
+  Beta.id
+  type Alpha
+  type Beta
+
+## d01_semantic_below_unknown_datatype.yammm [D]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   semantic E_UNKNOWN_TYPE               unmatched
+decls:
+  Beta.id
+  Beta.ref
+  type Alpha
+  type Beta
+
+## d02_semantic_below_missing_pk.yammm [D]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   semantic E_NO_PRIMARY_KEY             unmatched
+decls:
+  Alpha.id
+  Alpha.state
+  Beta.name
+  type Alpha
+  type Beta
+
+## d03_semantic_below_same_type.yammm [D]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   semantic E_UNKNOWN_TYPE               unmatched
+decls:
+  Alpha.name
+  Alpha.ref
+  type Alpha
+
+## e01_stray_rbrace_midbody.yammm [E]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## e02_junk_between_members.yammm [E]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.name
+  type Alpha
+
+## e03_mangled_expr.yammm [E]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.count
+  Alpha.id
+  type Alpha
+
+## f01_arrow_typo.yammm [F]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## f02_malformed_multiplicity.yammm [F]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   semantic E_UNKNOWN_TYPE               unmatched (oracle-only: must stay unmatched)
+decls:
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## f03_missing_relation_name.yammm [F]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## f04_edge_property_primary.yammm [F]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## f05_composition_missing_target.yammm [F]
+first-hit: d2
+noise: 0
+defects:
+  d1   semantic E_UNKNOWN_TYPE               unmatched (oracle-only: must stay unmatched)
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+oracle_only (the reference parser built these; this one deliberately does not):
+  Alpha --> Beta — ANTLR builds a composition whose target is the empty string; the name is the target the author wrote
+
+## g01_length_bounds_string.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.s
+  type Alpha
+
+## g02_length_bounds_list.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.l
+  type Alpha
+
+## g03_numeric_bounds.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.n
+  type Alpha
+
+## g04_timestamp_format.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.t
+  type Alpha
+
+## g05_import_alias_reserved.yammm [G]
+first-hit: d2
+noise: 0
+defects:
+  d1   semantic E_INVALID_ALIAS              unmatched (oracle-only: must stay unmatched)
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  type Alpha
+allowed_noise: E_IMPORT_NOT_ALLOWED — the import survives the refused alias and meets the loader's categorical rejection
+
+## g06_reverse_clause.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha --> r
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## g07_relation_body.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha --> r
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## g08_annotation_args.yammm [G]
+first-hit: d2
+noise: 0
+defects:
+  d1   semantic E_UNKNOWN_ANNOTATION         unmatched
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  type Alpha
+
+## g09_multiplicity.yammm [G]
+first-hit: d2
+noise: 0
+defects:
+  d1   semantic E_UNKNOWN_TYPE               unmatched (oracle-only: must stay unmatched)
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## g10_extends_empty.yammm [G]
+first-hit: d2
+noise: 0
+defects:
+  d1   semantic E_NO_PRIMARY_KEY             unmatched (oracle-only: must stay unmatched)
+  d2   syntax   E_SYNTAX                     matched
+decls:
+
+## g11_unterminated_bounds_keeps_types.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+oracle_only (the reference parser built these; this one deliberately does not):
+  datatype Code — cluster A's committed regime: an unterminated bound list takes its declaration down. Won't-fix in this migration (D-30)
+
+## g12_failed_reverse_keeps_next.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha --> q
+  Alpha --> r
+  Alpha.id
+  Beta.id
+  Gamma.id
+  type Alpha
+  type Beta
+  type Gamma
+
+## g13_aliasless_import_keeps_type.yammm [G]
+first-hit: d2
+noise: 0
+defects:
+  d1   semantic E_IMPORT_NOT_ALLOWED         unmatched
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  type Alpha
+
+## g14_unterminated_multiplicity.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## g15_extends_nonref.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+
+## g16_invariant_malformed_number_compound.yammm [G]
+first-hit: d2
+noise: 0
+defects:
+  d1   syntax   E_INVALID_INVARIANT          unmatched (oracle-only: must stay unmatched)
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.n
+  type Alpha
+
+## g17_import_alias_datatype.yammm [G]
+first-hit: d2
+noise: 0
+defects:
+  d1   semantic E_INVALID_ALIAS              unmatched (oracle-only: must stay unmatched)
+  d2   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  type Alpha
+allowed_noise: E_IMPORT_NOT_ALLOWED — same as g05
+
+## g18_keyword_named_property_after_defect.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   semantic E_UNKNOWN_ANNOTATION         unmatched (oracle-only: must stay unmatched)
+decls:
+  Alpha.id
+  Alpha.type
+  type Alpha
+
+## g19_members_after_failed_relation.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+  d2   semantic E_UNKNOWN_TYPE               unmatched (oracle-only: must stay unmatched)
+decls:
+  Alpha.age
+  Alpha.id
+  Alpha.name
+  Beta.id
+  type Alpha
+  type Beta
+
+## g20_members_after_bare_name.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.color
+  Alpha.id
+  Alpha.size
+  type Alpha
+
+## g21_members_after_unterminated_argument.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.color
+  Alpha.id
+  type Alpha
+oracle_only (the reference parser built these; this one deliberately does not):
+  Alpha.x — ANTLR inserts the missing '>' and builds the property; parse refuses the member that failed, and its diagnostic anchors on the token the parse stopped at, one line further on
+
+## g22_members_after_rejected_bound.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha.id
+  Alpha.n
+  Alpha.ww
+  Alpha.zz
+  type Alpha

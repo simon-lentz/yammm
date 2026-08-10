@@ -1,0 +1,70 @@
+{
+  "name": "\"registry\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "imports": [
+    {
+      "path": "\"lib/dep\"",
+      "alias": "dep",
+      "span": {
+        "s": 19,
+        "e": 42
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Contract",
+      "name_span": {
+        "s": 49,
+        "e": 57
+      },
+      "props": [
+        {
+          "name": "contract_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 73,
+              "e": 79
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 61,
+            "e": 87
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "SUPPLIED_BY",
+          "name_span": {
+            "s": 93,
+            "e": 104
+          },
+          "target": {
+            "qualifier": "dep",
+            "name": "Vendor",
+            "span": {
+              "s": 111,
+              "e": 121
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 89,
+            "e": 121
+          }
+        }
+      ],
+      "span": {
+        "s": 44,
+        "e": 123
+      }
+    }
+  ]
+}

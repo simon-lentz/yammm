@@ -1,0 +1,143 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "span": {
+        "s": 17,
+        "e": 43
+      }
+    },
+    {
+      "name": "Beta",
+      "name_span": {
+        "s": 50,
+        "e": 54
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 61,
+              "e": 67
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 58,
+            "e": 75
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "span": {
+            "s": 77,
+            "e": 84
+          }
+        }
+      ],
+      "span": {
+        "s": 45,
+        "e": 88
+      }
+    },
+    {
+      "name": "Gamma",
+      "name_span": {
+        "s": 95,
+        "e": 100
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 107,
+              "e": 113
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 104,
+            "e": 121
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 129,
+              "e": 135
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 136,
+                "e": 142
+              }
+            }
+          ],
+          "span": {
+            "s": 123,
+            "e": 142
+          }
+        }
+      ],
+      "span": {
+        "s": 90,
+        "e": 153
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"primary\" in a type body",
+      "span": {
+        "s": 34,
+        "e": 41
+      },
+      "line": 4,
+      "end_line": 4
+    },
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"(\" in a type body",
+      "span": {
+        "s": 84,
+        "e": 85
+      },
+      "line": 9,
+      "end_line": 9
+    },
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"}\" in a type body",
+      "span": {
+        "s": 152,
+        "e": 153
+      },
+      "line": 15,
+      "end_line": 15
+    }
+  ]
+}

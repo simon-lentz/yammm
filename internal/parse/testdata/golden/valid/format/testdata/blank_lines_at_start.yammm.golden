@@ -1,0 +1,36 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 2,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 22,
+        "e": 28
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 37,
+              "e": 43
+            }
+          },
+          "span": {
+            "s": 32,
+            "e": 43
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 45
+      }
+    }
+  ]
+}

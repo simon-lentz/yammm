@@ -32,7 +32,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -62,7 +62,7 @@ type Pet extends Animal {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -91,7 +91,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -124,7 +124,7 @@ type Car {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -159,7 +159,7 @@ abstract type Entity {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -190,7 +190,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -229,7 +229,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -261,7 +261,7 @@ type Car {
 	sourceID := registerSource(t, reg, schemaSource, "car.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -293,7 +293,7 @@ import "parts.yammm"
 	sourceID := registerSource(t, reg, schemaSource, "main.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -307,21 +307,52 @@ import "parts.yammm"
 	assert.True(t, result.OK(), "expected no errors, got: %v", result)
 }
 
+// A reserved alias is refused where it can be seen: the derivation. A written
+// one never reaches this check — the alias position refuses reserved spellings
+// outright, so the import arrives with no alias and the leftover text draws the
+// syntax error instead.
 func TestParser_ReservedKeywordAlias(t *testing.T) {
-	schemaSource := `schema "test"
+	tests := []struct {
+		name      string
+		source    string
+		wantCode  diag.Code
+		wantAlias string
+	}{
+		{
+			name:     "derived from the path",
+			source:   "schema \"test\"\n\nimport \"type.yammm\"\n",
+			wantCode: diag.E_INVALID_ALIAS,
+		},
+		{
+			name:      "written out",
+			source:    "schema \"test\"\n\nimport \"foo.yammm\" as type\n",
+			wantCode:  diag.E_SYNTAX,
+			wantAlias: "foo",
+		},
+	}
 
-import "foo.yammm" as type
-`
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := source.NewRegistry()
+			sourceID := registerSource(t, reg, tt.source, "test.yammm")
+			collector := diag.NewCollector(0)
 
-	reg := source.NewRegistry()
-	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
-	collector := diag.NewCollector(0)
+			parser := schema.TestNewParser(sourceID, collector)
+			model := parser.Parse([]byte(tt.source))
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
-	_ = parser.Parse([]byte(schemaSource))
+			result := collector.Result()
+			assert.False(t, result.OK(), "expected an error")
+			assert.True(t, result.HasCode(tt.wantCode), "want %s, got: %v", tt.wantCode, result)
 
-	result := collector.Result()
-	assert.False(t, result.OK(), "expected error for reserved keyword alias")
+			require.NotNil(t, model)
+			if tt.wantAlias == "" {
+				assert.Empty(t, model.Imports, "a refused alias drops its import")
+				return
+			}
+			require.Len(t, model.Imports, 1)
+			assert.Equal(t, tt.wantAlias, model.Imports[0].Alias)
+		})
+	}
 }
 
 func TestParser_Invariant(t *testing.T) {
@@ -336,7 +367,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -365,7 +396,7 @@ type Order {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	model := parser.Parse([]byte(schemaSource))
 
 	require.NotNil(t, model)
@@ -391,7 +422,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	_ = parser.Parse([]byte(schemaSource))
 
 	result := collector.Result()
@@ -411,7 +442,7 @@ type Person {
 	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
 	collector := diag.NewCollector(0)
 
-	parser := schema.TestNewParser(sourceID, collector, reg, reg)
+	parser := schema.TestNewParser(sourceID, collector)
 	_ = parser.Parse([]byte(schemaSource))
 
 	result := collector.Result()
@@ -464,49 +495,4 @@ func TestTypeRef_String(t *testing.T) {
 			assert.Equal(t, tt.qualified, tt.ref.IsQualified())
 		})
 	}
-}
-
-func TestSpanBuilder_FromToken(t *testing.T) {
-	// Simple ASCII source
-	schemaSource := "schema \"test\""
-
-	reg := source.NewRegistry()
-	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
-
-	builder := schema.TestNewSpanBuilder(sourceID, reg, reg)
-
-	// FromToken with nil returns zero span
-	span := builder.FromToken(nil)
-	assert.True(t, span.IsZero())
-}
-
-func TestSpanBuilder_FromContext(t *testing.T) {
-	reg := source.NewRegistry()
-	sourceID := registerSource(t, reg, "test", "test.yammm")
-
-	builder := schema.TestNewSpanBuilder(sourceID, reg, reg)
-
-	// FromContext with nil returns zero span
-	span := builder.FromContext(nil)
-	assert.True(t, span.IsZero())
-}
-
-func TestMustPositionAt_Exported(t *testing.T) {
-	schemaSource := "test"
-
-	reg := source.NewRegistry()
-	sourceID := registerSource(t, reg, schemaSource, "test.yammm")
-
-	pos := schema.TestMustPositionAt(reg, sourceID, 0)
-	assert.Equal(t, 1, pos.Line)
-	assert.Equal(t, 1, pos.Column)
-}
-
-func TestMustPositionAt_PanicOnUnknownSource(t *testing.T) {
-	reg := source.NewRegistry()
-	unknownID := location.NewSourceID("unknown.yammm")
-
-	assert.Panics(t, func() {
-		schema.TestMustPositionAt(reg, unknownID, 0)
-	})
 }

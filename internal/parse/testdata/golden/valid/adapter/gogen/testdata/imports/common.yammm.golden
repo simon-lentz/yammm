@@ -1,0 +1,75 @@
+{
+  "name": "\"common\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "datatypes": [
+    {
+      "name": "RegionCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "5",
+          "5"
+        ],
+        "span": {
+          "s": 35,
+          "e": 48
+        }
+      },
+      "span": {
+        "s": 17,
+        "e": 48
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 55,
+        "e": 61
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "RegionCode"
+            ],
+            "span": {
+              "s": 70,
+              "e": 80
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 65,
+            "e": 88
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 95,
+              "e": 101
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 90,
+            "e": 110
+          }
+        }
+      ],
+      "span": {
+        "s": 50,
+        "e": 112
+      }
+    }
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "datatypes": [
+    {
+      "name": "FipsCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "5",
+          "5"
+        ],
+        "span": {
+          "s": 30,
+          "e": 43
+        }
+      },
+      "span": {
+        "s": 14,
+        "e": 43
+      }
+    },
+    {
+      "name": "Tier",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"gold\"",
+          "\"silver\""
+        ],
+        "span": {
+          "s": 56,
+          "e": 79
+        }
+      },
+      "span": {
+        "s": 44,
+        "e": 79
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "County",
+      "name_span": {
+        "s": 86,
+        "e": 92
+      },
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "FipsCode"
+            ],
+            "span": {
+              "s": 101,
+              "e": 109
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 96,
+            "e": 117
+          }
+        },
+        {
+          "name": "tier",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Tier"
+            ],
+            "span": {
+              "s": 124,
+              "e": 128
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 119,
+            "e": 137
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"active\"",
+              "\"merged\"",
+              "\"dissolved\""
+            ],
+            "span": {
+              "s": 146,
+              "e": 184
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 139,
+            "e": 193
+          }
+        },
+        {
+          "name": "codes",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Alias",
+              "args": [
+                "FipsCode"
+              ],
+              "span": {
+                "s": 207,
+                "e": 215
+              }
+            },
+            "span": {
+              "s": 201,
+              "e": 216
+            }
+          },
+          "span": {
+            "s": 195,
+            "e": 216
+          }
+        }
+      ],
+      "span": {
+        "s": 81,
+        "e": 218
+      }
+    }
+  ]
+}

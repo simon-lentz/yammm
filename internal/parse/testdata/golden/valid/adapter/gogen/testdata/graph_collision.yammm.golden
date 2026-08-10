@@ -1,0 +1,65 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "ABCDef",
+      "name_span": {
+        "s": 19,
+        "e": 25
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 32,
+              "e": 38
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 29,
+            "e": 46
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 48
+      }
+    },
+    {
+      "name": "AbcDef",
+      "name_span": {
+        "s": 55,
+        "e": 61
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 68,
+              "e": 74
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 65,
+            "e": 82
+          }
+        }
+      ],
+      "span": {
+        "s": 50,
+        "e": 84
+      }
+    }
+  ]
+}

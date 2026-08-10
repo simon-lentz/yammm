@@ -1,0 +1,72 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "imports": [
+    {
+      "path": "\"./other\"",
+      "alias": "other",
+      "span": {
+        "s": 15,
+        "e": 40
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 47,
+        "e": 48
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "other.CustomType"
+            ],
+            "span": {
+              "s": 87,
+              "e": 105
+            }
+          },
+          "span": {
+            "s": 82,
+            "e": 105
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "REL",
+          "name_span": {
+            "s": 56,
+            "e": 59
+          },
+          "target": {
+            "qualifier": "other",
+            "name": "Target",
+            "span": {
+              "s": 66,
+              "e": 80
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 52,
+            "e": 80
+          }
+        }
+      ],
+      "span": {
+        "s": 42,
+        "e": 107
+      }
+    }
+  ]
+}

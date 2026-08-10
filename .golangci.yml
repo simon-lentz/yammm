@@ -105,16 +105,16 @@ linters:
         linters:
           - revive
       # Package names matching domain concepts (not stdlib collisions).
+      - path: "^internal/parse/.*"
+        text: "avoid package names that conflict"
+        linters:
+          - revive
       - path: "adapter/json/.*"
         text: "avoid package names that conflict"
         linters:
           - revive
       - path: "adapter/csv/.*"
         text: "avoid package names that conflict"
-        linters:
-          - revive
-      # ANTLR-generated method names use underscores (ExitSchema_name, etc.).
-      - path: "schema/internal/parse/.*"
         linters:
           - revive
       # Package names matching domain concepts (not stdlib collisions).

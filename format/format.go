@@ -6,30 +6,46 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/antlr4-go/antlr/v4"
-
-	"github.com/simon-lentz/yammm/internal/grammar"
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
+	"github.com/simon-lentz/yammm/location"
 )
 
+// tokenRange is a half-open byte range of the source.
 type tokenRange struct {
 	start int
 	end   int
 }
 
-type parseErrorListener struct {
-	*antlr.DefaultErrorListener
-	errs []string
-}
-
-func (l *parseErrorListener) SyntaxError(
-	_ antlr.Recognizer,
-	_ any,
-	line, column int,
-	msg string,
-	_ antlr.RecognitionException,
-) {
-	l.errs = append(l.errs, fmt.Sprintf("%d:%d %s", line, column, msg))
-}
+// The token kinds the pair rules below name. They are the rule names the
+// parser's lexer table spells, matched by value because that table is
+// keywordless — a keyword arrives as an ordinary word and is told apart by its
+// text, exactly as isKeywordWithRequiredSpaceAfter does.
+const (
+	kindWS          = "WS"
+	kindSLComment   = "SL_COMMENT"
+	kindDocComment  = "DOC_COMMENT"
+	kindSTRING      = "STRING"
+	kindLBRACE      = "LBRACE"
+	kindRBRACE      = "RBRACE"
+	kindLBRACK      = "LBRACK"
+	kindRBRACK      = "RBRACK"
+	kindLPAR        = "LPAR"
+	kindRPAR        = "RPAR"
+	kindAT          = "AT"
+	kindATAT        = "ATAT"
+	kindASSOC       = "ASSOC"
+	kindCOMP        = "COMP"
+	kindEXCLAMATION = "EXCLAMATION"
+	kindSLASH       = "SLASH"
+	kindEQUALS      = "EQUALS"
+	kindPERIOD      = "PERIOD"
+	kindCOMMA       = "COMMA"
+	kindMINUS       = "MINUS"
+	kindCOLON       = "COLON"
+	kindLT          = "LT"
+	kindGT          = "GT"
+)
 
 type spacingAction int
 
@@ -45,34 +61,31 @@ var lineEndingReplacer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
 // TokenStream applies parse-tree-assisted token-stream formatting.
 // Returns an error if lexing/parsing fails so callers can fall back.
+//
+// It reads the source twice on purpose. The un-elided token stream carries the
+// whitespace and comments a formatter must preserve but no expression extents;
+// the node tree carries the extents and the syntax verdict but elides the
+// whitespace. Neither alone is enough for phase 1.
 func TokenStream(text string) (string, error) {
 	normalized := lineEndingReplacer.Replace(text)
 
-	input := antlr.NewInputStream(normalized)
-	lexer := grammar.NewYammmGrammarLexer(input)
-	parseErrs := &parseErrorListener{DefaultErrorListener: &antlr.DefaultErrorListener{}}
-	lexer.RemoveErrorListeners()
-	lexer.AddErrorListener(parseErrs)
-
-	stream := antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel)
-	parser := grammar.NewYammmGrammarParser(stream)
-	parser.RemoveErrorListeners()
-	parser.AddErrorListener(parseErrs)
-
-	tree := parser.Schema()
-	if len(parseErrs.errs) > 0 {
-		return "", fmt.Errorf("parse failed: %s", parseErrs.errs[0])
+	// Fail on syntax alone: a source that is semantically invalid but parses,
+	// such as inverted bounds, still formats.
+	file, issues := parse.Parse([]byte(normalized), location.SourceID{})
+	for _, iss := range issues {
+		if iss.Code().Category() == diag.CategorySyntax {
+			return "", fmt.Errorf("parse failed: %s", iss.Message())
+		}
 	}
 
-	ranges := collectInvariantExpressionRanges(tree)
-	stream.Fill()
-	allTokens := stream.GetAllTokens()
+	ranges := invariantExpressionRanges(file)
+	allTokens := parse.Lex(normalized)
 
 	var out strings.Builder
 	var pendingWS strings.Builder
 	lineStart := true
 	indentLevel := 0
-	var prev antlr.Token
+	var prev *parse.Token
 	prevInExpr := false
 	// Annotation-head tracking. prevAtSigil marks that the previous non-hidden
 	// token was @ / @@ (so the current token is the annotation name), and
@@ -81,24 +94,19 @@ func TokenStream(text string) (string, error) {
 	prevAtSigil := false
 	prevAnnotationName := false
 
-	for _, tok := range allTokens {
-		if tok.GetTokenType() == antlr.TokenEOF {
-			continue
-		}
+	for i := range allTokens {
+		tok := &allTokens[i]
+		inExpr := offsetInRanges(tok.Start, ranges)
 
-		idx := tok.GetTokenIndex()
-		inExpr := tokenInRanges(idx, ranges)
-		tt := tok.GetTokenType()
-
-		if tt == grammar.YammmGrammarLexerWS {
+		if tok.Kind == kindWS {
 			if inExpr {
 				if pendingWS.Len() > 0 {
 					writeExprWhitespace(&out, pendingWS.String(), &lineStart)
 					pendingWS.Reset()
 				}
-				writeExprWhitespace(&out, tok.GetText(), &lineStart)
+				writeExprWhitespace(&out, tok.Value, &lineStart)
 			} else {
-				pendingWS.WriteString(tok.GetText())
+				pendingWS.WriteString(tok.Value)
 			}
 			continue
 		}
@@ -139,23 +147,23 @@ func TokenStream(text string) (string, error) {
 		// space the (name, LPAR) default would otherwise emit. Decided here from
 		// loop state because that same pair is a relation multiplicity elsewhere,
 		// which must keep its space.
-		if prevAnnotationName && tt == grammar.YammmGrammarLexerLPAR {
+		if prevAnnotationName && tok.Kind == kindLPAR {
 			sep = ""
 		}
 		pendingWS.Reset()
 		writeText(&out, sep, &lineStart)
 		writeTokenText(&out, tok, &lineStart)
 
-		if tt == grammar.YammmGrammarLexerLBRACE {
+		if tok.Kind == kindLBRACE {
 			indentLevel++
-		} else if tt == grammar.YammmGrammarLexerRBRACE && indentLevel > 0 {
+		} else if tok.Kind == kindRBRACE && indentLevel > 0 {
 			indentLevel--
 		}
 
 		// The non-hidden token immediately after @ / @@ is always the annotation
 		// name (grammar), so prevAtSigil alone identifies it.
 		prevAnnotationName = prevAtSigil
-		prevAtSigil = tt == grammar.YammmGrammarLexerAT || tt == grammar.YammmGrammarLexerATAT
+		prevAtSigil = tok.Kind == kindAT || tok.Kind == kindATAT
 		prev = tok
 		prevInExpr = false
 	}
@@ -167,50 +175,35 @@ func TokenStream(text string) (string, error) {
 	return finalizeFormattedText(AlignColumns(WrapLongLines(collapseBlankLines(out.String())))), nil
 }
 
-type invariantRangeCollector struct {
-	*grammar.BaseYammmGrammarListener
-	ranges []tokenRange
-}
-
-func (c *invariantRangeCollector) ExitInvariant(ctx *grammar.InvariantContext) {
-	if ctx == nil || ctx.GetConstraint() == nil {
-		return
+// invariantExpressionRanges returns the byte extent of every invariant
+// expression, sorted and merged. Inside one, the author's own spacing is kept
+// and the declaration pair rules do not apply.
+func invariantExpressionRanges(file *parse.File) []tokenRange {
+	var ranges []tokenRange
+	for _, t := range file.Types {
+		for _, inv := range t.Invariants {
+			span := inv.ExprSpan
+			if span.End.Byte <= span.Start.Byte {
+				continue
+			}
+			ranges = append(ranges, tokenRange{start: span.Start.Byte, end: span.End.Byte})
+		}
 	}
-
-	startTok := ctx.GetConstraint().GetStart()
-	endTok := ctx.GetConstraint().GetStop()
-	if startTok == nil || endTok == nil {
-		return
-	}
-
-	start := startTok.GetTokenIndex()
-	end := endTok.GetTokenIndex()
-	if start < 0 || end < start {
-		return
-	}
-	c.ranges = append(c.ranges, tokenRange{start: start, end: end})
-}
-
-func collectInvariantExpressionRanges(tree antlr.ParseTree) []tokenRange {
-	collector := &invariantRangeCollector{
-		BaseYammmGrammarListener: &grammar.BaseYammmGrammarListener{},
-	}
-	antlr.ParseTreeWalkerDefault.Walk(collector, tree)
-	if len(collector.ranges) == 0 {
+	if len(ranges) == 0 {
 		return nil
 	}
 
-	slices.SortFunc(collector.ranges, func(a, b tokenRange) int {
+	slices.SortFunc(ranges, func(a, b tokenRange) int {
 		return cmp.Or(
 			cmp.Compare(a.start, b.start),
 			cmp.Compare(a.end, b.end),
 		)
 	})
 
-	merged := make([]tokenRange, 0, len(collector.ranges))
-	current := collector.ranges[0]
-	for _, r := range collector.ranges[1:] {
-		if r.start <= current.end+1 {
+	merged := make([]tokenRange, 0, len(ranges))
+	current := ranges[0]
+	for _, r := range ranges[1:] {
+		if r.start <= current.end {
 			if r.end > current.end {
 				current.end = r.end
 			}
@@ -219,34 +212,35 @@ func collectInvariantExpressionRanges(tree antlr.ParseTree) []tokenRange {
 		merged = append(merged, current)
 		current = r
 	}
-	merged = append(merged, current)
-	return merged
+	return append(merged, current)
 }
 
-func tokenInRanges(idx int, ranges []tokenRange) bool {
-	if idx < 0 || len(ranges) == 0 {
+// offsetInRanges reports whether a byte offset falls inside a merged range. The
+// ranges are half-open, which is what makes the end offset the first byte after
+// the expression rather than its last.
+func offsetInRanges(off int, ranges []tokenRange) bool {
+	if off < 0 || len(ranges) == 0 {
 		return false
 	}
-	// Find the first range whose end >= idx
-	i, _ := slices.BinarySearchFunc(ranges, idx, func(r tokenRange, target int) int {
-		return cmp.Compare(r.end, target)
+	i, _ := slices.BinarySearchFunc(ranges, off, func(r tokenRange, target int) int {
+		return cmp.Compare(r.end-1, target)
 	})
 	if i >= len(ranges) {
 		return false
 	}
-	return ranges[i].start <= idx
+	return ranges[i].start <= off
 }
 
 func declarationSeparator(
-	prev antlr.Token,
-	curr antlr.Token,
+	prev *parse.Token,
+	curr *parse.Token,
 	pendingWS string,
 	indentLevel int,
 	currInExpr bool,
 ) string {
 	newlineCount := strings.Count(pendingWS, "\n")
 	currIndent := indentLevel
-	if !currInExpr && curr.GetTokenType() == grammar.YammmGrammarLexerRBRACE && currIndent > 0 {
+	if !currInExpr && curr.Kind == kindRBRACE && currIndent > 0 {
 		currIndent--
 	}
 
@@ -257,7 +251,7 @@ func declarationSeparator(
 		return ""
 	}
 
-	if isCommentToken(curr.GetTokenType()) {
+	if isCommentToken(curr.Kind) {
 		if newlineCount > 0 {
 			return newlineSeparator(newlineCount, currIndent)
 		}
@@ -277,29 +271,29 @@ func declarationSeparator(
 	return " "
 }
 
-func declarationSpacingAction(prev antlr.Token, curr antlr.Token) spacingAction {
+func declarationSpacingAction(prev *parse.Token, curr *parse.Token) spacingAction {
 	if prev == nil {
 		return spacingNone
 	}
 
-	prevType := prev.GetTokenType()
-	currType := curr.GetTokenType()
+	prevType := prev.Kind
+	currType := curr.Kind
 
-	if currType == grammar.YammmGrammarLexerRBRACE {
+	if currType == kindRBRACE {
 		return spacingNewline
 	}
-	if prevType == grammar.YammmGrammarLexerLBRACE {
+	if prevType == kindLBRACE {
 		return spacingNewline
 	}
-	if prevType == grammar.YammmGrammarLexerRBRACE {
+	if prevType == kindRBRACE {
 		return spacingNewline
 	}
-	if prevType == grammar.YammmGrammarLexerDOC_COMMENT {
+	if prevType == kindDocComment {
 		return spacingNewline
 	}
 
 	// Closing delimiters win over broad left-side rules.
-	if currType == grammar.YammmGrammarLexerRBRACK || currType == grammar.YammmGrammarLexerRPAR {
+	if currType == kindRBRACK || currType == kindRPAR {
 		return spacingNone
 	}
 
@@ -307,68 +301,68 @@ func declarationSpacingAction(prev antlr.Token, curr antlr.Token) spacingAction 
 	// always follows it. The name-to-"(" spacing is decided in TokenStream from
 	// loop state, not here, because that pair is shared with a relation
 	// multiplicity (`worksAt (one)`), which must keep its space.
-	if prevType == grammar.YammmGrammarLexerAT || prevType == grammar.YammmGrammarLexerATAT {
+	if prevType == kindAT || prevType == kindATAT {
 		return spacingNone
 	}
 
 	// Specific pair rules.
-	if prevType == grammar.YammmGrammarLexerEXCLAMATION && currType == grammar.YammmGrammarLexerSTRING {
+	if prevType == kindEXCLAMATION && currType == kindSTRING {
 		return spacingSpace
 	}
-	if prevType == grammar.YammmGrammarLexerASSOC || prevType == grammar.YammmGrammarLexerCOMP {
+	if prevType == kindASSOC || prevType == kindCOMP {
 		return spacingSpace
 	}
-	if currType == grammar.YammmGrammarLexerLBRACE {
+	if currType == kindLBRACE {
 		return spacingSpace
 	}
-	if prevType == grammar.YammmGrammarLexerSLASH || currType == grammar.YammmGrammarLexerSLASH {
+	if prevType == kindSLASH || currType == kindSLASH {
 		return spacingSpace
 	}
-	if prevType == grammar.YammmGrammarLexerEQUALS || currType == grammar.YammmGrammarLexerEQUALS {
+	if prevType == kindEQUALS || currType == kindEQUALS {
 		return spacingSpace
 	}
-	if prevType == grammar.YammmGrammarLexerPERIOD || currType == grammar.YammmGrammarLexerPERIOD {
+	if prevType == kindPERIOD || currType == kindPERIOD {
 		return spacingNone
 	}
-	if prevType == grammar.YammmGrammarLexerCOMMA {
+	if prevType == kindCOMMA {
 		return spacingSpace
 	}
-	if currType == grammar.YammmGrammarLexerCOMMA {
+	if currType == kindCOMMA {
 		return spacingNone
 	}
-	if prevType == grammar.YammmGrammarLexerMINUS {
+	if prevType == kindMINUS {
 		return spacingNone
 	}
-	if prevType == grammar.YammmGrammarLexerLPAR || currType == grammar.YammmGrammarLexerRPAR {
+	if prevType == kindLPAR || currType == kindRPAR {
 		return spacingNone
 	}
-	if prevType == grammar.YammmGrammarLexerCOLON || currType == grammar.YammmGrammarLexerCOLON {
+	if prevType == kindCOLON || currType == kindCOLON {
 		return spacingNone
 	}
-	if prevType == grammar.YammmGrammarLexerLBRACK {
+	if prevType == kindLBRACK {
 		return spacingNone
 	}
-	if currType == grammar.YammmGrammarLexerLBRACK && isConstraintBracketLeft(prev.GetText()) {
+	if currType == kindLBRACK && isConstraintBracketLeft(prev.Value) {
 		return spacingNone
 	}
 	// List type angle brackets: collapse spacing around < and > only in
 	// type contexts (e.g. List<String>), not in expression comparisons.
-	if currType == grammar.YammmGrammarLexerLT && isListAngleBracketLeft(prev.GetText()) {
+	if currType == kindLT && isListAngleBracketLeft(prev.Value) {
 		return spacingNone
 	}
-	if prevType == grammar.YammmGrammarLexerLT {
+	if prevType == kindLT {
 		return spacingNone
 	}
-	if currType == grammar.YammmGrammarLexerGT {
+	if currType == kindGT {
 		return spacingNone
 	}
-	if prevType == grammar.YammmGrammarLexerGT {
-		if currType == grammar.YammmGrammarLexerLBRACK {
+	if prevType == kindGT {
+		if currType == kindLBRACK {
 			return spacingNone
 		}
 		return spacingSpace
 	}
-	if isKeywordWithRequiredSpaceAfter(prev.GetText()) {
+	if isKeywordWithRequiredSpaceAfter(prev.Value) {
 		return spacingSpace
 	}
 
@@ -399,8 +393,8 @@ func isListAngleBracketLeft(text string) bool {
 	return text == "List"
 }
 
-func isCommentToken(tokenType int) bool {
-	return tokenType == grammar.YammmGrammarLexerSL_COMMENT || tokenType == grammar.YammmGrammarLexerDOC_COMMENT
+func isCommentToken(kind string) bool {
+	return kind == kindSLComment || kind == kindDocComment
 }
 
 func normalizeDocComment(text string) string {
@@ -443,9 +437,9 @@ func writeExprWhitespace(out *strings.Builder, ws string, lineStart *bool) {
 	writeText(out, b.String(), lineStart)
 }
 
-func writeTokenText(out *strings.Builder, tok antlr.Token, lineStart *bool) {
-	text := tok.GetText()
-	if tok.GetTokenType() == grammar.YammmGrammarLexerDOC_COMMENT {
+func writeTokenText(out *strings.Builder, tok *parse.Token, lineStart *bool) {
+	text := tok.Value
+	if tok.Kind == kindDocComment {
 		text = normalizeDocComment(text)
 	}
 	writeText(out, text, lineStart)

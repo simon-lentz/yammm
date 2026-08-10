@@ -1,0 +1,380 @@
+{
+  "name": "\"alignment\"",
+  "span": {
+    "s": 0,
+    "e": 18
+  },
+  "datatypes": [
+    {
+      "name": "RegionCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "2",
+          "2"
+        ],
+        "span": {
+          "s": 38,
+          "e": 50
+        }
+      },
+      "span": {
+        "s": 20,
+        "e": 50
+      }
+    },
+    {
+      "name": "DistrictCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "3",
+          "3"
+        ],
+        "span": {
+          "s": 71,
+          "e": 83
+        }
+      },
+      "span": {
+        "s": 51,
+        "e": 83
+      }
+    },
+    {
+      "name": "RegionID",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "1",
+          "15"
+        ],
+        "span": {
+          "s": 100,
+          "e": 113
+        }
+      },
+      "span": {
+        "s": 84,
+        "e": 113
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 120,
+        "e": 126
+      },
+      "props": [
+        {
+          "name": "region_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 143,
+              "e": 149
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 133,
+            "e": 157
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 167,
+              "e": 173
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 162,
+            "e": 182
+          }
+        },
+        {
+          "name": "region_code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "RegionCode"
+            ],
+            "span": {
+              "s": 199,
+              "e": 209
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 187,
+            "e": 218
+          }
+        },
+        {
+          "name": "land_area",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 246,
+              "e": 251
+            }
+          },
+          "span": {
+            "s": 236,
+            "e": 251
+          }
+        },
+        {
+          "name": "water_area",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 280,
+              "e": 285
+            }
+          },
+          "span": {
+            "s": 269,
+            "e": 285
+          }
+        }
+      ],
+      "span": {
+        "s": 115,
+        "e": 287
+      }
+    },
+    {
+      "name": "District",
+      "name_span": {
+        "s": 294,
+        "e": 302
+      },
+      "props": [
+        {
+          "name": "region_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 319,
+              "e": 325
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 309,
+            "e": 333
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 343,
+              "e": 349
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 338,
+            "e": 358
+          }
+        },
+        {
+          "name": "region_code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "RegionCode"
+            ],
+            "span": {
+              "s": 375,
+              "e": 385
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 363,
+            "e": 394
+          }
+        },
+        {
+          "name": "district_code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "DistrictCode"
+            ],
+            "span": {
+              "s": 413,
+              "e": 425
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 399,
+            "e": 434
+          }
+        },
+        {
+          "name": "grade",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"A\"",
+              "\"B\"",
+              "\"C\"",
+              "\"D\"",
+              "\"E\"",
+              "\"F\""
+            ],
+            "span": {
+              "s": 462,
+              "e": 496
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 456,
+            "e": 505
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_REGION",
+          "name_span": {
+            "s": 515,
+            "e": 524
+          },
+          "target": {
+            "name": "Region",
+            "span": {
+              "s": 531,
+              "e": 537
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 511,
+            "e": 537
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "HAS_SUBDISTRICT",
+          "name_span": {
+            "s": 546,
+            "e": 561
+          },
+          "target": {
+            "name": "Subdistrict",
+            "span": {
+              "s": 569,
+              "e": 580
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 542,
+            "e": 580
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "ADJACENT_TO",
+          "name_span": {
+            "s": 589,
+            "e": 600
+          },
+          "target": {
+            "name": "District",
+            "span": {
+              "s": 610,
+              "e": 618
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 585,
+            "e": 618
+          }
+        }
+      ],
+      "span": {
+        "s": 289,
+        "e": 633
+      }
+    },
+    {
+      "name": "Subdistrict",
+      "name_span": {
+        "s": 645,
+        "e": 656
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "region_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 673,
+              "e": 679
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 663,
+            "e": 687
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 697,
+              "e": 703
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 692,
+            "e": 712
+          }
+        },
+        {
+          "name": "grade",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 723,
+              "e": 729
+            }
+          },
+          "span": {
+            "s": 717,
+            "e": 729
+          }
+        }
+      ],
+      "span": {
+        "s": 635,
+        "e": 731
+      }
+    }
+  ]
+}

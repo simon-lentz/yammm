@@ -1,0 +1,63 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 20,
+        "e": 26
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 35,
+              "e": 41
+            }
+          },
+          "span": {
+            "s": 30,
+            "e": 41
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 43
+      }
+    },
+    {
+      "name": "Company",
+      "name_span": {
+        "s": 85,
+        "e": 92
+      },
+      "props": [
+        {
+          "name": "title",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 102,
+              "e": 108
+            }
+          },
+          "span": {
+            "s": 96,
+            "e": 108
+          }
+        }
+      ],
+      "span": {
+        "s": 80,
+        "e": 110
+      }
+    }
+  ]
+}

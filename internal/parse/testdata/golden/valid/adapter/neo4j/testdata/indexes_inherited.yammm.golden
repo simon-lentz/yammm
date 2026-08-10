@@ -1,0 +1,158 @@
+{
+  "name": "\"inherit_test\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "types": [
+    {
+      "name": "Auditable",
+      "name_span": {
+        "s": 37,
+        "e": 46
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "audited_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 64,
+              "e": 73
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 83,
+                "e": 89
+              }
+            }
+          ],
+          "span": {
+            "s": 53,
+            "e": 89
+          }
+        },
+        {
+          "name": "vec",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "128"
+            ],
+            "span": {
+              "s": 105,
+              "e": 116
+            }
+          },
+          "anns": [
+            {
+              "name": "vector",
+              "args": [
+                {
+                  "kind": "ident",
+                  "text": "cosine",
+                  "span": {
+                    "s": 132,
+                    "e": 138
+                  }
+                }
+              ],
+              "has_parens": true,
+              "span": {
+                "s": 124,
+                "e": 139
+              }
+            }
+          ],
+          "span": {
+            "s": 94,
+            "e": 139
+          }
+        }
+      ],
+      "span": {
+        "s": 23,
+        "e": 141
+      }
+    },
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 148,
+        "e": 153
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 162,
+            "e": 171
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "alpha_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 187,
+              "e": 193
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 178,
+            "e": 201
+          }
+        }
+      ],
+      "span": {
+        "s": 143,
+        "e": 203
+      }
+    },
+    {
+      "name": "Beta",
+      "name_span": {
+        "s": 210,
+        "e": 214
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 223,
+            "e": 232
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "beta_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 247,
+              "e": 253
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 239,
+            "e": 261
+          }
+        }
+      ],
+      "span": {
+        "s": 205,
+        "e": 263
+      }
+    }
+  ]
+}

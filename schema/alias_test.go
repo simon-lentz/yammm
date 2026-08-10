@@ -4,10 +4,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/simon-lentz/yammm/internal/grammar"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -150,15 +149,15 @@ func TestDeriveAliasFromPath(t *testing.T) {
 	}
 }
 
-// TestGrammarAliasSynchronization is the CRITICAL test that verifies the
-// reserved keyword list matches the generated lexer. This prevents drift between
-// the grammar and the alias validation logic.
+// TestGrammarAliasSynchronization verifies that this package's reserved-keyword
+// list matches the parser's own vocabulary, so an alias the loader accepts can
+// never be a spelling the grammar refuses to lex as a qualifier.
 //
-// It extracts keywords from the generated lexer's LiteralNames, which is
-// automatically kept in sync with the grammar file during code generation.
-// This approach is filesystem-independent and more robust than parsing .g4 files.
+// The comparison is against [parse.ReservedKeywords], which the parser composes
+// from the maps its own positions test against. Both lists are hand-written, in
+// different packages, and only this test couples them.
 func TestGrammarAliasSynchronization(t *testing.T) {
-	grammarKeywords := extractKeywordsFromLexer()
+	grammarKeywords := parse.ReservedKeywords()
 	codeKeywords := schema.TestReservedKeywords()
 
 	// Convert to sorted slices for comparison
@@ -185,10 +184,10 @@ func TestGrammarAliasSynchronization(t *testing.T) {
 
 	// Report discrepancies
 	if len(missingInCode) > 0 {
-		t.Errorf("Keywords in grammar but MISSING from alias.reservedKeywords: %v", missingInCode)
+		t.Errorf("Keywords in the parser but MISSING from alias.reservedKeywords: %v", missingInCode)
 	}
 	if len(missingInGrammar) > 0 {
-		t.Errorf("Keywords in alias.reservedKeywords but MISSING from grammar: %v", missingInGrammar)
+		t.Errorf("Keywords in alias.reservedKeywords but MISSING from the parser: %v", missingInGrammar)
 	}
 
 	// Log summary for debugging
@@ -198,76 +197,6 @@ func TestGrammarAliasSynchronization(t *testing.T) {
 	// Verify exact match
 	assert.ElementsMatch(t, grammarList, codeList,
 		"Reserved keywords must exactly match grammar keywords")
-}
-
-// extractKeywordsFromLexer extracts all keyword literals from the generated
-// ANTLR lexer. Keywords are identified by being quoted string literals in
-// the LiteralNames array (format: 'keyword').
-//
-// This includes:
-// - DSL keywords (schema, import, type, extends, etc.)
-// - Datatype keywords (Integer, Float, Boolean, etc.)
-// - Boolean literals (true, false) - added explicitly since BOOLEAN is a rule, not a literal
-func extractKeywordsFromLexer() map[string]bool {
-	keywords := make(map[string]bool)
-
-	// Create a lexer to access its LiteralNames
-	// We use an empty input stream since we only need the static metadata
-	lexer := grammar.NewYammmGrammarLexer(antlr.NewInputStream(""))
-
-	// Extract keyword literals from LiteralNames
-	// Keywords are quoted strings like 'schema', 'type', 'Integer', etc.
-	for _, lit := range lexer.LiteralNames {
-		// Skip empty entries and non-quoted strings
-		if len(lit) < 3 || lit[0] != '\'' || lit[len(lit)-1] != '\'' {
-			continue
-		}
-
-		// Extract the keyword (strip quotes)
-		kw := lit[1 : len(lit)-1]
-
-		// Only include identifier-like keywords (letters, digits, underscores)
-		// Skip operators and punctuation
-		if isIdentifierKeyword(kw) {
-			keywords[kw] = true
-		}
-	}
-
-	// The BOOLEAN lexer rule matches 'true' | 'false' but these literals
-	// aren't in LiteralNames because they're part of a pattern rule.
-	// We check if BOOLEAN is a symbolic name and add the literals explicitly.
-	if slices.Contains(lexer.SymbolicNames, "BOOLEAN") {
-		keywords["true"] = true
-		keywords["false"] = true
-	}
-
-	return keywords
-}
-
-// isIdentifierKeyword returns true if the string looks like an identifier
-// (starts with letter, contains only letters/digits/underscores).
-func isIdentifierKeyword(s string) bool {
-	if len(s) == 0 {
-		return false
-	}
-
-	// Must start with a letter
-	first := s[0]
-	isLetter := (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')
-	if !isLetter {
-		return false
-	}
-
-	// Rest must be alphanumeric or underscore
-	for i := 1; i < len(s); i++ {
-		c := s[i]
-		isAlphaNumUnderscore := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
-		if !isAlphaNumUnderscore {
-			return false
-		}
-	}
-
-	return true
 }
 
 func mapToSortedSlice(m map[string]bool) []string {

@@ -1,22 +1,3 @@
-# --- Grammar Generation ---
-
-JAVA          ?= java
-ANTLR_VERSION ?= 4.13.1
-ANTLR_JAR      = antlr-$(ANTLR_VERSION)-complete.jar
-ANTLR_URL      = https://www.antlr.org/download/antlr-$(ANTLR_VERSION)-complete.jar
-GRAMMAR_DIR    = internal/grammar
-GRAMMAR_FILE   = YammmGrammar.g4
-
-.PHONY: generate-grammars
-generate-grammars: $(ANTLR_JAR)
-	cd $(GRAMMAR_DIR) && $(JAVA) -jar $(abspath $(ANTLR_JAR)) -Dlanguage=Go -visitor -listener \
-		-package grammar \
-		-o . \
-		$(GRAMMAR_FILE)
-
-$(ANTLR_JAR):
-	curl -sSL -o $@ $(ANTLR_URL)
-
 # --- Lint & Test ---
 
 .PHONY: lint lint-fix

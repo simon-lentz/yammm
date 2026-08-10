@@ -63,8 +63,8 @@ func personSchema(t *testing.T) *schema.Schema {
 // required edge properties and another that declares one optional edge
 // property. The DSL path is required because the programmatic schema.Builder
 // does not expose edge-property declaration at the TypeBuilder level.
-// Optional edge properties omit the 'required' keyword (YammmGrammar.g4:33
-// makes 'required' optional on rel_property productions).
+// Optional edge properties omit the 'required' keyword, which the SPEC's
+// RelProperty production makes optional.
 func edgePropsSchema(t *testing.T) *schema.Schema {
 	t.Helper()
 	const src = `schema "edgepropstest"

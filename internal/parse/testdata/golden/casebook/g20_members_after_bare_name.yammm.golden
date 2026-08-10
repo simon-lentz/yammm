@@ -1,0 +1,78 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 34,
+              "e": 40
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 31,
+            "e": 48
+          }
+        },
+        {
+          "name": "color",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 61,
+              "e": 67
+            }
+          },
+          "span": {
+            "s": 55,
+            "e": 67
+          }
+        },
+        {
+          "name": "size",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 74,
+              "e": 81
+            }
+          },
+          "span": {
+            "s": 69,
+            "e": 81
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 83
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"color\" in a type body",
+      "span": {
+        "s": 55,
+        "e": 60
+      },
+      "line": 6,
+      "end_line": 6
+    }
+  ]
+}

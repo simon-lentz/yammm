@@ -683,7 +683,7 @@ type T extends MS1, MP1, MP2, MS2 { id String primary }`,
 		},
 		{
 			// The conflicting side accretes only members that chain with EVERY
-			// recorded member: String-required and String[9,] each chain with
+			// recorded member: String-required and String[9,_] each chain with
 			// the plain String but not with each other, so they are two
 			// clashes. Matching against a stored representative alone
 			// collapses them into one.
@@ -691,7 +691,7 @@ type T extends MS1, MP1, MP2, MS2 { id String primary }`,
 			schema: `abstract type A { x Integer }
 abstract type B { x String }
 abstract type C { x String required }
-abstract type D { x String[9,] }
+abstract type D { x String[9,_] }
 type T extends A, B, C, D { id String primary }`,
 			want: 2,
 		},

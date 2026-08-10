@@ -1,0 +1,37 @@
+{
+  "name": "\"tiny\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Item",
+      "name_span": {
+        "s": 20,
+        "e": 24
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 31,
+              "e": 37
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 28,
+            "e": 45
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 47
+      }
+    }
+  ]
+}

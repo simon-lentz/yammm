@@ -1,10 +1,14 @@
 // Package format provides canonical formatting for .yammm schema files.
 //
 // The formatter applies parse-tree-assisted token-stream formatting: it lexes
-// and parses the input using the ANTLR grammar, then rewrites the token stream
-// with canonical spacing, indentation, column alignment, and line wrapping.
-// The output is deterministic and idempotent (formatting an already-formatted
-// file produces the same output).
+// and parses the input, then rewrites the token stream with canonical spacing,
+// indentation, column alignment, and line wrapping. The output is deterministic
+// and idempotent (formatting an already-formatted file produces the same
+// output).
+//
+// It reads the source twice, because neither view alone carries what phase 1
+// needs: the token stream holds the whitespace and comments to preserve, and
+// the node tree holds the invariant expression extents and the syntax verdict.
 //
 // # Entry Point
 //
@@ -48,16 +52,16 @@
 //
 // # Additional Functions
 //
-// The individual pipeline phases are also exported for use by the LSP and
-// other consumers:
+// The individual pipeline phases are exported, and none of them has a consumer
+// outside this package today:
 //
 //   - [WrapLongLines]: wrap lines exceeding [LineWidthThreshold]
 //   - [AlignColumns]: align property types and modifiers within type blocks
 //   - [NormalizeIndentation]: convert spaces to tabs
 //   - [DisplayWidth]: compute visual width of a line (tab-aware)
 //
-// The formatter is used by the LSP server for textDocument/formatting and by
-// the CLI for the "yammm fmt" command.
+// [TokenStream] is what the LSP server calls for textDocument/formatting, and
+// what the CLI calls for the "yammm fmt" command.
 //
 // # Thread Safety
 //
@@ -65,5 +69,5 @@
 //
 // # Dependencies
 //
-//	format  ──imports──▶  (stdlib + internal/grammar)
+//	format  ──imports──▶  (stdlib + diag + location + internal/parse)
 package format

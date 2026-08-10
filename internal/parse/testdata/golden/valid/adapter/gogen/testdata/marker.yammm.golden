@@ -1,0 +1,37 @@
+{
+  "name": "\"marker\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Marker",
+      "name_span": {
+        "s": 22,
+        "e": 28
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 35,
+              "e": 39
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 32,
+            "e": 47
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 49
+      }
+    }
+  ]
+}
