@@ -1,0 +1,52 @@
+{
+  "name": "\"auth\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Session",
+      "name_span": {
+        "s": 20,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 34,
+              "e": 38
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 31,
+            "e": 46
+          }
+        },
+        {
+          "name": "jwt_token",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 58,
+              "e": 64
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 48,
+            "e": 73
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 75
+      }
+    }
+  ]
+}

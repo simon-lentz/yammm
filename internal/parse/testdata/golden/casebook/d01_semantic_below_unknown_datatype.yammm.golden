@@ -1,0 +1,78 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "span": {
+        "s": 17,
+        "e": 43
+      }
+    },
+    {
+      "name": "Beta",
+      "name_span": {
+        "s": 50,
+        "e": 54
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 61,
+              "e": 67
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 58,
+            "e": 75
+          }
+        },
+        {
+          "name": "ref",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Widget"
+            ],
+            "span": {
+              "s": 81,
+              "e": 87
+            }
+          },
+          "span": {
+            "s": 77,
+            "e": 87
+          }
+        }
+      ],
+      "span": {
+        "s": 45,
+        "e": 89
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"primary\" in a type body",
+      "span": {
+        "s": 34,
+        "e": 41
+      },
+      "line": 4,
+      "end_line": 4
+    }
+  ]
+}

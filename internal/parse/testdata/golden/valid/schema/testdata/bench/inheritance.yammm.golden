@@ -1,0 +1,499 @@
+{
+  "name": "\"bench_inheritance\"",
+  "doc": "Abstract bases, a diamond, and a part type, so the benchmark pays the\n   linearization cost a real schema pays.",
+  "span": {
+    "s": 0,
+    "e": 144
+  },
+  "types": [
+    {
+      "name": "Tracked",
+      "name_span": {
+        "s": 160,
+        "e": 167
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 182,
+              "e": 191
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 171,
+            "e": 200
+          }
+        },
+        {
+          "name": "updated_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 213,
+              "e": 222
+            }
+          },
+          "span": {
+            "s": 202,
+            "e": 222
+          }
+        }
+      ],
+      "span": {
+        "s": 146,
+        "e": 224
+      }
+    },
+    {
+      "name": "Named",
+      "name_span": {
+        "s": 240,
+        "e": 245
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "160"
+            ],
+            "span": {
+              "s": 254,
+              "e": 268
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 249,
+            "e": 277
+          }
+        },
+        {
+          "name": "name_norm",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 289,
+              "e": 295
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 279,
+            "e": 304
+          }
+        }
+      ],
+      "span": {
+        "s": 226,
+        "e": 306
+      }
+    },
+    {
+      "name": "Auditable",
+      "name_span": {
+        "s": 322,
+        "e": 331
+      },
+      "abstract": true,
+      "extends": [
+        {
+          "name": "Tracked",
+          "span": {
+            "s": 340,
+            "e": 347
+          }
+        },
+        {
+          "name": "Named",
+          "span": {
+            "s": 349,
+            "e": 354
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "revision",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 367,
+              "e": 374
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 358,
+            "e": 383
+          }
+        },
+        {
+          "name": "author",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 392,
+              "e": 398
+            }
+          },
+          "span": {
+            "s": 385,
+            "e": 398
+          }
+        }
+      ],
+      "span": {
+        "s": 308,
+        "e": 400
+      }
+    },
+    {
+      "name": "Document",
+      "name_span": {
+        "s": 407,
+        "e": 415
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 424,
+            "e": 433
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "doc_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 444,
+              "e": 450
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 437,
+            "e": 458
+          }
+        },
+        {
+          "name": "body",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 465,
+              "e": 471
+            }
+          },
+          "span": {
+            "s": 460,
+            "e": 471
+          }
+        },
+        {
+          "name": "published",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 483,
+              "e": 490
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 473,
+            "e": 499
+          }
+        }
+      ],
+      "span": {
+        "s": 402,
+        "e": 501
+      }
+    },
+    {
+      "name": "Article",
+      "name_span": {
+        "s": 508,
+        "e": 515
+      },
+      "extends": [
+        {
+          "name": "Document",
+          "span": {
+            "s": 524,
+            "e": 532
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "headline",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 545,
+              "e": 551
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 536,
+            "e": 560
+          }
+        },
+        {
+          "name": "word_count",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "_"
+            ],
+            "span": {
+              "s": 573,
+              "e": 586
+            }
+          },
+          "span": {
+            "s": 562,
+            "e": 586
+          }
+        }
+      ],
+      "span": {
+        "s": 503,
+        "e": 588
+      }
+    },
+    {
+      "name": "Review",
+      "name_span": {
+        "s": 595,
+        "e": 601
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 610,
+            "e": 619
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "review_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 633,
+              "e": 639
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 623,
+            "e": 647
+          }
+        },
+        {
+          "name": "rating",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "1",
+              "5"
+            ],
+            "span": {
+              "s": 656,
+              "e": 669
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 649,
+            "e": 678
+          }
+        },
+        {
+          "name": "verdict",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"accept\"",
+              "\"revise\"",
+              "\"reject\""
+            ],
+            "span": {
+              "s": 688,
+              "e": 722
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 680,
+            "e": 731
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "covers",
+          "name_span": {
+            "s": 738,
+            "e": 744
+          },
+          "target": {
+            "name": "Article",
+            "span": {
+              "s": 751,
+              "e": 758
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 734,
+            "e": 758
+          }
+        }
+      ],
+      "span": {
+        "s": 590,
+        "e": 760
+      }
+    },
+    {
+      "name": "Footnote",
+      "name_span": {
+        "s": 772,
+        "e": 780
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 787,
+              "e": 793
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 784,
+            "e": 801
+          }
+        },
+        {
+          "name": "text",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 808,
+              "e": 814
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 803,
+            "e": 823
+          }
+        }
+      ],
+      "span": {
+        "s": 762,
+        "e": 825
+      }
+    },
+    {
+      "name": "Chapter",
+      "name_span": {
+        "s": 832,
+        "e": 839
+      },
+      "extends": [
+        {
+          "name": "Tracked",
+          "span": {
+            "s": 848,
+            "e": 855
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "chapter_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 870,
+              "e": 876
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 859,
+            "e": 884
+          }
+        },
+        {
+          "name": "ordinal",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 894,
+              "e": 901
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 886,
+            "e": 910
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "footnotes",
+          "name_span": {
+            "s": 917,
+            "e": 926
+          },
+          "target": {
+            "name": "Footnote",
+            "span": {
+              "s": 934,
+              "e": 942
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 913,
+            "e": 942
+          }
+        }
+      ],
+      "span": {
+        "s": 827,
+        "e": 944
+      }
+    }
+  ]
+}

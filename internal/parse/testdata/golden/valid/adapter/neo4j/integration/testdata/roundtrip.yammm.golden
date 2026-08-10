@@ -1,0 +1,546 @@
+{
+  "name": "\"rt\"",
+  "span": {
+    "s": 0,
+    "e": 11
+  },
+  "types": [
+    {
+      "name": "Tracked",
+      "name_span": {
+        "s": 27,
+        "e": 34
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "first_seen",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 52,
+              "e": 61
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 71,
+                "e": 81
+              }
+            }
+          ],
+          "span": {
+            "s": 41,
+            "e": 81
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "first_seen",
+              "span": {
+                "s": 95,
+                "e": 105
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 87,
+            "e": 106
+          }
+        }
+      ],
+      "span": {
+        "s": 13,
+        "e": 108
+      }
+    },
+    {
+      "name": "Document",
+      "name_span": {
+        "s": 115,
+        "e": 123
+      },
+      "extends": [
+        {
+          "name": "Tracked",
+          "span": {
+            "s": 132,
+            "e": 139
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "doc_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 159,
+              "e": 165
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 146,
+            "e": 176
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 194,
+              "e": 200
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 204,
+                "e": 210
+              }
+            }
+          ],
+          "span": {
+            "s": 181,
+            "e": 210
+          }
+        },
+        {
+          "name": "published_on",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 228,
+              "e": 232
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 238,
+                "e": 244
+              }
+            }
+          ],
+          "span": {
+            "s": 215,
+            "e": 244
+          }
+        },
+        {
+          "name": "embedding",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "4"
+            ],
+            "span": {
+              "s": 262,
+              "e": 271
+            }
+          },
+          "anns": [
+            {
+              "name": "vector",
+              "args": [
+                {
+                  "kind": "ident",
+                  "text": "cosine",
+                  "span": {
+                    "s": 280,
+                    "e": 286
+                  }
+                }
+              ],
+              "has_parens": true,
+              "span": {
+                "s": 272,
+                "e": 287
+              }
+            }
+          ],
+          "span": {
+            "s": 249,
+            "e": 287
+          }
+        },
+        {
+          "name": "title",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 305,
+              "e": 311
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "fulltext",
+              "span": {
+                "s": 324,
+                "e": 333
+              }
+            }
+          ],
+          "span": {
+            "s": 292,
+            "e": 333
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "state",
+              "span": {
+                "s": 347,
+                "e": 352
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "published_on",
+              "span": {
+                "s": 354,
+                "e": 366
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 339,
+            "e": 367
+          }
+        },
+        {
+          "name": "fulltext",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "title",
+              "span": {
+                "s": 383,
+                "e": 388
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "state",
+              "span": {
+                "s": 390,
+                "e": 395
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 372,
+            "e": 396
+          }
+        }
+      ],
+      "span": {
+        "s": 110,
+        "e": 398
+      }
+    },
+    {
+      "name": "Note",
+      "name_span": {
+        "s": 405,
+        "e": 409
+      },
+      "extends": [
+        {
+          "name": "Tracked",
+          "span": {
+            "s": 418,
+            "e": 425
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "note_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 440,
+              "e": 446
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 432,
+            "e": 454
+          }
+        },
+        {
+          "name": "body",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 467,
+              "e": 473
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 474,
+                "e": 480
+              }
+            }
+          ],
+          "span": {
+            "s": 459,
+            "e": 480
+          }
+        }
+      ],
+      "span": {
+        "s": 400,
+        "e": 482
+      }
+    },
+    {
+      "name": "Typed",
+      "name_span": {
+        "s": 1108,
+        "e": 1113
+      },
+      "doc": "Carries one property per Neo4j type expression the adapter can emit that\n   Document and Note do not already cover, so every expression is applied to a\n   real server and read back. A TYPE constraint is compared against the\n   server's propertyType by exact string, and the two only agree because the\n   adapter spells them the way Neo4j does — a claim that is worth checking\n   against a server rather than against the mapping that makes it.\n\n   Deliberately not extending Tracked: it stays out of the inheritance and\n   annotation round-trips so those keep asserting over the shapes they were\n   written for.",
+      "props": [
+        {
+          "name": "typed_id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 1130,
+              "e": 1134
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 1120,
+            "e": 1145
+          }
+        },
+        {
+          "name": "t_integer",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 1160,
+              "e": 1167
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1150,
+            "e": 1176
+          }
+        },
+        {
+          "name": "t_float",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 1191,
+              "e": 1196
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1181,
+            "e": 1207
+          }
+        },
+        {
+          "name": "t_boolean",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 1222,
+              "e": 1229
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1212,
+            "e": 1238
+          }
+        },
+        {
+          "name": "t_enum",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"draft\"",
+              "\"final\""
+            ],
+            "span": {
+              "s": 1253,
+              "e": 1275
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1243,
+            "e": 1284
+          }
+        },
+        {
+          "name": "t_pattern",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^[a-z]+$\""
+            ],
+            "span": {
+              "s": 1299,
+              "e": 1318
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1289,
+            "e": 1330
+          }
+        },
+        {
+          "name": "tl_string",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 1354,
+                "e": 1360
+              }
+            },
+            "span": {
+              "s": 1349,
+              "e": 1361
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1336,
+            "e": 1373
+          }
+        },
+        {
+          "name": "tl_integer",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Integer",
+              "span": {
+                "s": 1396,
+                "e": 1403
+              }
+            },
+            "span": {
+              "s": 1391,
+              "e": 1404
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1378,
+            "e": 1415
+          }
+        },
+        {
+          "name": "tl_boolean",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Boolean",
+              "span": {
+                "s": 1438,
+                "e": 1445
+              }
+            },
+            "span": {
+              "s": 1433,
+              "e": 1446
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1420,
+            "e": 1457
+          }
+        },
+        {
+          "name": "tl_date",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Date",
+              "span": {
+                "s": 1480,
+                "e": 1484
+              }
+            },
+            "span": {
+              "s": 1475,
+              "e": 1485
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1462,
+            "e": 1499
+          }
+        },
+        {
+          "name": "tl_timestamp",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Timestamp",
+              "span": {
+                "s": 1522,
+                "e": 1531
+              }
+            },
+            "span": {
+              "s": 1517,
+              "e": 1532
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1504,
+            "e": 1541
+          }
+        }
+      ],
+      "span": {
+        "s": 484,
+        "e": 1543
+      }
+    }
+  ]
+}

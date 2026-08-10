@@ -1,0 +1,10 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	*-> Beta
+}
+
+part type Beta {
+	id String primary
+}

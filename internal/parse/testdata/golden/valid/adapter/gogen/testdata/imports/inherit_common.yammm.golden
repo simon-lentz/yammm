@@ -1,0 +1,114 @@
+{
+  "name": "\"common\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "datatypes": [
+    {
+      "name": "RegionCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "5",
+          "5"
+        ],
+        "span": {
+          "s": 35,
+          "e": 48
+        }
+      },
+      "span": {
+        "s": 17,
+        "e": 48
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Marker",
+      "name_span": {
+        "s": 60,
+        "e": 66
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 73,
+              "e": 77
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 70,
+            "e": 85
+          }
+        }
+      ],
+      "span": {
+        "s": 50,
+        "e": 87
+      }
+    },
+    {
+      "name": "Located",
+      "name_span": {
+        "s": 103,
+        "e": 110
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "region",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "RegionCode"
+            ],
+            "span": {
+              "s": 121,
+              "e": 131
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 114,
+            "e": 140
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "HAS_MARKER",
+          "name_span": {
+            "s": 146,
+            "e": 156
+          },
+          "target": {
+            "name": "Marker",
+            "span": {
+              "s": 164,
+              "e": 170
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 142,
+            "e": 170
+          }
+        }
+      ],
+      "span": {
+        "s": 89,
+        "e": 172
+      }
+    }
+  ]
+}

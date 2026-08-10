@@ -1,0 +1,11 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	ref Widget
+}
+
+type Beta {
+	id String primary
+	state String @index()
+}

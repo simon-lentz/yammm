@@ -1,0 +1,50 @@
+{
+  "name": "",
+  "span": {
+    "s": 0,
+    "e": 0
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 13,
+        "e": 18
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 25,
+              "e": 31
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 22,
+            "e": 39
+          }
+        }
+      ],
+      "span": {
+        "s": 8,
+        "e": 41
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "fatal",
+      "msg": "unexpected token \"type\" in the schema header",
+      "span": {
+        "s": 8,
+        "e": 12
+      },
+      "line": 3,
+      "end_line": 3
+    }
+  ]
+}

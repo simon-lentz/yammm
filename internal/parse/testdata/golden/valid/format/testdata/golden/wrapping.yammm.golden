@@ -1,0 +1,289 @@
+{
+  "name": "\"wrapping\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "datatypes": [
+    {
+      "name": "ShortEnum",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"A\"",
+          "\"B\"",
+          "\"C\""
+        ],
+        "span": {
+          "s": 36,
+          "e": 55
+        }
+      },
+      "span": {
+        "s": 19,
+        "e": 55
+      }
+    },
+    {
+      "name": "LongEnum",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"active\"",
+          "\"inactive\"",
+          "\"pending\"",
+          "\"suspended\"",
+          "\"terminated\"",
+          "\"archived\"",
+          "\"deleted\"",
+          "\"expired\"",
+          "\"revoked\""
+        ],
+        "span": {
+          "s": 72,
+          "e": 181
+        }
+      },
+      "span": {
+        "s": 56,
+        "e": 181
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Record",
+      "name_span": {
+        "s": 188,
+        "e": 194
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 204,
+              "e": 210
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 201,
+            "e": 218
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "ShortEnum"
+            ],
+            "span": {
+              "s": 230,
+              "e": 239
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 223,
+            "e": 248
+          }
+        },
+        {
+          "name": "long_status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"active\"",
+              "\"inactive\"",
+              "\"pending_review\"",
+              "\"suspended_temporarily\"",
+              "\"terminated_permanently\"",
+              "\"archived_readonly\"",
+              "\"deleted_soft\""
+            ],
+            "span": {
+              "s": 265,
+              "e": 397
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 253,
+            "e": 406
+          }
+        },
+        {
+          "name": "short_status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"A\"",
+              "\"B\"",
+              "\"C\""
+            ],
+            "span": {
+              "s": 424,
+              "e": 443
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 411,
+            "e": 452
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"id_valid\"",
+          "expr": "(!= (p \"id\") \"\")",
+          "expr_span": {
+            "s": 471,
+            "e": 479
+          },
+          "span": {
+            "s": 458,
+            "e": 479
+          }
+        },
+        {
+          "msg": "\"status_check\"",
+          "expr": "(|| (== (p \"status\") \"active\") (== (p \"status\") \"inactive\"))",
+          "expr_span": {
+            "s": 501,
+            "e": 543
+          },
+          "span": {
+            "s": 484,
+            "e": 543
+          }
+        },
+        {
+          "msg": "\"geoid_valid\"",
+          "expr": "(|| (|| (\u0026\u0026 (== (p \"geo_type\") \"state\") (!= (p \"geoid\") \"\")) (\u0026\u0026 (== (p \"geo_type\") \"county\") (!= (p \"geoid\") \"\"))) (\u0026\u0026 (== (p \"geo_type\") \"place\") (!= (p \"geoid\") \"\")))",
+          "expr_span": {
+            "s": 564,
+            "e": 681
+          },
+          "span": {
+            "s": 548,
+            "e": 681
+          }
+        },
+        {
+          "msg": "\"complex_check\"",
+          "expr": "(|| (|| (\u0026\u0026 (== (p \"status\") \"active\") (\u003e (p \"confidence\") 0.5)) (\u0026\u0026 (== (p \"status\") \"pending\") (\u003e (p \"confidence\") 0.3))) (== (p \"status\") \"override\"))",
+          "expr_span": {
+            "s": 704,
+            "e": 813
+          },
+          "span": {
+            "s": 686,
+            "e": 813
+          }
+        }
+      ],
+      "span": {
+        "s": 183,
+        "e": 815
+      }
+    },
+    {
+      "name": "VeryLongBaseTypeName",
+      "name_span": {
+        "s": 831,
+        "e": 851
+      },
+      "abstract": true,
+      "extends": [
+        {
+          "name": "LongParentNameOne",
+          "span": {
+            "s": 860,
+            "e": 877
+          }
+        },
+        {
+          "name": "LongParentNameTwo",
+          "span": {
+            "s": 879,
+            "e": 896
+          }
+        },
+        {
+          "name": "AnotherVeryLongParentTypeName",
+          "span": {
+            "s": 898,
+            "e": 927
+          }
+        },
+        {
+          "name": "YetAnotherParentType",
+          "span": {
+            "s": 929,
+            "e": 949
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "base_field",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 967,
+              "e": 973
+            }
+          },
+          "span": {
+            "s": 956,
+            "e": 973
+          }
+        }
+      ],
+      "span": {
+        "s": 817,
+        "e": 975
+      }
+    },
+    {
+      "name": "ShortExtends",
+      "name_span": {
+        "s": 982,
+        "e": 994
+      },
+      "extends": [
+        {
+          "name": "BaseType",
+          "span": {
+            "s": 1003,
+            "e": 1011
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "value",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1024,
+              "e": 1030
+            }
+          },
+          "span": {
+            "s": 1018,
+            "e": 1030
+          }
+        }
+      ],
+      "span": {
+        "s": 977,
+        "e": 1032
+      }
+    }
+  ]
+}

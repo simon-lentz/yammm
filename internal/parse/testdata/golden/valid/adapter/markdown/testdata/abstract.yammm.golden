@@ -1,0 +1,112 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "Entity",
+      "name_span": {
+        "s": 28,
+        "e": 34
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 41,
+              "e": 45
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 38,
+            "e": 53
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 55
+      }
+    },
+    {
+      "name": "Named",
+      "name_span": {
+        "s": 71,
+        "e": 76
+      },
+      "abstract": true,
+      "extends": [
+        {
+          "name": "Entity",
+          "span": {
+            "s": 85,
+            "e": 91
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 100,
+              "e": 106
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 95,
+            "e": 115
+          }
+        }
+      ],
+      "span": {
+        "s": 57,
+        "e": 117
+      }
+    },
+    {
+      "name": "Landmark",
+      "name_span": {
+        "s": 124,
+        "e": 132
+      },
+      "extends": [
+        {
+          "name": "Named",
+          "span": {
+            "s": 141,
+            "e": 146
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 155,
+              "e": 161
+            }
+          },
+          "span": {
+            "s": 150,
+            "e": 161
+          }
+        }
+      ],
+      "span": {
+        "s": 119,
+        "e": 163
+      }
+    }
+  ]
+}

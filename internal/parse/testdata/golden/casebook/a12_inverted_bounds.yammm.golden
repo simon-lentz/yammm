@@ -1,0 +1,68 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 34,
+              "e": 40
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 31,
+            "e": 48
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "10",
+              "1"
+            ],
+            "span": {
+              "s": 54,
+              "e": 68
+            }
+          },
+          "span": {
+            "s": 50,
+            "e": 68
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 70
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_INVALID_CONSTRAINT",
+      "severity": "error",
+      "msg": "integer bounds inverted: min 10 \u003e max 1",
+      "span": {
+        "s": 54,
+        "e": 68
+      },
+      "line": 5,
+      "end_line": 5
+    }
+  ]
+}

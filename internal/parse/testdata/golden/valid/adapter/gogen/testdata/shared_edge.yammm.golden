@@ -1,0 +1,137 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "User",
+      "name_span": {
+        "s": 19,
+        "e": 23
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 30,
+              "e": 34
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 27,
+            "e": 42
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 44
+      }
+    },
+    {
+      "name": "Post",
+      "name_span": {
+        "s": 51,
+        "e": 55
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 62,
+              "e": 66
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 59,
+            "e": 74
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "CREATED_BY",
+          "name_span": {
+            "s": 80,
+            "e": 90
+          },
+          "target": {
+            "name": "User",
+            "span": {
+              "s": 97,
+              "e": 101
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 76,
+            "e": 101
+          }
+        }
+      ],
+      "span": {
+        "s": 46,
+        "e": 103
+      }
+    },
+    {
+      "name": "Comment",
+      "name_span": {
+        "s": 110,
+        "e": 117
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 124,
+              "e": 128
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 121,
+            "e": 136
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "CREATED_BY",
+          "name_span": {
+            "s": 142,
+            "e": 152
+          },
+          "target": {
+            "name": "User",
+            "span": {
+              "s": 159,
+              "e": 163
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 138,
+            "e": 163
+          }
+        }
+      ],
+      "span": {
+        "s": 105,
+        "e": 165
+      }
+    }
+  ]
+}

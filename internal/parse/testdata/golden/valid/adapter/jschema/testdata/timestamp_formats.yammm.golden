@@ -1,0 +1,69 @@
+{
+  "name": "\"fleet\"",
+  "span": {
+    "s": 0,
+    "e": 14
+  },
+  "types": [
+    {
+      "name": "Reading",
+      "name_span": {
+        "s": 21,
+        "e": 28
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 35,
+              "e": 41
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 32,
+            "e": 49
+          }
+        },
+        {
+          "name": "taken_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 60,
+              "e": 69
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 51,
+            "e": 78
+          }
+        },
+        {
+          "name": "logged_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "args": [
+              "\"2006-01-02 15:04:05\""
+            ],
+            "span": {
+              "s": 90,
+              "e": 123
+            }
+          },
+          "span": {
+            "s": 80,
+            "e": 123
+          }
+        }
+      ],
+      "span": {
+        "s": 16,
+        "e": 125
+      }
+    }
+  ]
+}

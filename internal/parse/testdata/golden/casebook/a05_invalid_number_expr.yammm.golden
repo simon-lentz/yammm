@@ -1,0 +1,64 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 34,
+              "e": 40
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 31,
+            "e": 48
+          }
+        },
+        {
+          "name": "count",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 56,
+              "e": 63
+            }
+          },
+          "span": {
+            "s": 50,
+            "e": 63
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 90
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "malformed numeric literal \"42abc\": numeric literals are decimal (hexadecimal and suffixed forms are not supported)",
+      "span": {
+        "s": 83,
+        "e": 88
+      },
+      "line": 6,
+      "end_line": 6
+    }
+  ]
+}

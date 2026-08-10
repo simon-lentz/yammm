@@ -1,0 +1,352 @@
+{
+  "name": "\"edge_cases\"",
+  "span": {
+    "s": 0,
+    "e": 19
+  },
+  "imports": [
+    {
+      "path": "\"./other\"",
+      "alias": "other",
+      "span": {
+        "s": 21,
+        "e": 46
+      }
+    },
+    {
+      "path": "\"./more\"",
+      "alias": "more",
+      "span": {
+        "s": 47,
+        "e": 70
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Auditable",
+      "name_span": {
+        "s": 167,
+        "e": 176
+      },
+      "abstract": true,
+      "doc": "* DOC_COMMENT block:\n * This schema tests edge cases for the formatter.",
+      "props": [
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 194,
+              "e": 203
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 183,
+            "e": 212
+          }
+        },
+        {
+          "name": "updated_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 228,
+              "e": 237
+            }
+          },
+          "span": {
+            "s": 217,
+            "e": 237
+          }
+        },
+        {
+          "name": "created_by",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 253,
+              "e": 259
+            }
+          },
+          "span": {
+            "s": 242,
+            "e": 259
+          }
+        }
+      ],
+      "span": {
+        "s": 72,
+        "e": 261
+      }
+    },
+    {
+      "name": "Detail",
+      "name_span": {
+        "s": 273,
+        "e": 279
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "key",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 290,
+              "e": 296
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 286,
+            "e": 304
+          }
+        },
+        {
+          "name": "value",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 315,
+              "e": 321
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 309,
+            "e": 330
+          }
+        }
+      ],
+      "span": {
+        "s": 263,
+        "e": 332
+      }
+    },
+    {
+      "name": "Document",
+      "name_span": {
+        "s": 339,
+        "e": 347
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 356,
+            "e": 365
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "title",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 378,
+              "e": 384
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 372,
+            "e": 392
+          }
+        },
+        {
+          "name": "content",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 405,
+              "e": 411
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 397,
+            "e": 420
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"draft\"",
+              "\"published\"",
+              "\"archived\""
+            ],
+            "span": {
+              "s": 432,
+              "e": 470
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 425,
+            "e": 479
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "AUTHORED_BY",
+          "name_span": {
+            "s": 489,
+            "e": 500
+          },
+          "target": {
+            "qualifier": "other",
+            "name": "Person",
+            "span": {
+              "s": 507,
+              "e": 519
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 485,
+            "e": 519
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "HAS_DETAIL",
+          "name_span": {
+            "s": 528,
+            "e": 538
+          },
+          "target": {
+            "name": "Detail",
+            "span": {
+              "s": 546,
+              "e": 552
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 524,
+            "e": 552
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "REFERENCES",
+          "name_span": {
+            "s": 561,
+            "e": 571
+          },
+          "target": {
+            "qualifier": "more",
+            "name": "Resource",
+            "span": {
+              "s": 581,
+              "e": 594
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "weight",
+              "constraint": {
+                "kind": "Float",
+                "span": {
+                  "s": 612,
+                  "e": 617
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 605,
+                "e": 626
+              }
+            },
+            {
+              "name": "created_at",
+              "constraint": {
+                "kind": "Timestamp",
+                "span": {
+                  "s": 646,
+                  "e": 655
+                }
+              },
+              "span": {
+                "s": 635,
+                "e": 655
+              }
+            }
+          ],
+          "span": {
+            "s": 557,
+            "e": 661
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "LINKS",
+          "name_span": {
+            "s": 670,
+            "e": 675
+          },
+          "target": {
+            "name": "Document",
+            "span": {
+              "s": 683,
+              "e": 691
+            }
+          },
+          "optional": true,
+          "many": true,
+          "backref": "linked_by",
+          "backref_span": {
+            "s": 694,
+            "e": 703
+          },
+          "span": {
+            "s": 666,
+            "e": 709
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"title_not_empty\"",
+          "expr": "(!= (p \"title\") \"\")",
+          "expr_span": {
+            "s": 735,
+            "e": 746
+          },
+          "span": {
+            "s": 715,
+            "e": 746
+          }
+        },
+        {
+          "msg": "\"valid_status\"",
+          "expr": "(|| (!= (p \"status\") \"archived\") (!= (p \"content\") \"\"))",
+          "expr_span": {
+            "s": 768,
+            "e": 805
+          },
+          "span": {
+            "s": 751,
+            "e": 805
+          }
+        }
+      ],
+      "span": {
+        "s": 334,
+        "e": 807
+      }
+    }
+  ]
+}

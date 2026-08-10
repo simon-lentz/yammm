@@ -1,0 +1,52 @@
+{
+  "name": "\"integration_valid\"",
+  "span": {
+    "s": 0,
+    "e": 26
+  },
+  "types": [
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 33,
+        "e": 39
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 48,
+              "e": 54
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 43,
+            "e": 62
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 69,
+              "e": 75
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 64,
+            "e": 84
+          }
+        }
+      ],
+      "span": {
+        "s": 28,
+        "e": 86
+      }
+    }
+  ]
+}

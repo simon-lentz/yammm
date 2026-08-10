@@ -1,0 +1,52 @@
+{
+  "name": "\"deplib\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Vendor",
+      "name_span": {
+        "s": 22,
+        "e": 28
+      },
+      "props": [
+        {
+          "name": "vendor_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 42,
+              "e": 48
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 32,
+            "e": 56
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 63,
+              "e": 69
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 58,
+            "e": 78
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 80
+      }
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+{
+  "name": "\"多字节\"",
+  "span": {
+    "s": 0,
+    "e": 18
+  },
+  "types": [
+    {
+      "name": "Pruefstueck",
+      "name_span": {
+        "s": 79,
+        "e": 90
+      },
+      "doc": "Dokumentation für Prüfung — höchst wichtig",
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 97,
+              "e": 103
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 94,
+            "e": 111
+          }
+        },
+        {
+          "name": "label",
+          "doc": "étiquette dernière",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"été\"",
+              "\"hiver\"",
+              "\"🌊 sæson\""
+            ],
+            "span": {
+              "s": 147,
+              "e": 184
+            }
+          },
+          "span": {
+            "s": 113,
+            "e": 184
+          }
+        },
+        {
+          "name": "note",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 191,
+              "e": 197
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 207,
+                "e": 217
+              }
+            }
+          ],
+          "span": {
+            "s": 186,
+            "e": 217
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "label",
+              "span": {
+                "s": 227,
+                "e": 232
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "note",
+              "span": {
+                "s": 234,
+                "e": 238
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 219,
+            "e": 239
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"libellé non vide\"",
+          "expr": "(\u0026\u0026 (!= (p \"label\") \"x\") (=~ (p \"note\") /^é.+$/))",
+          "expr_span": {
+            "s": 263,
+            "e": 295
+          },
+          "span": {
+            "s": 241,
+            "e": 295
+          }
+        }
+      ],
+      "span": {
+        "s": 20,
+        "e": 297
+      }
+    }
+  ]
+}

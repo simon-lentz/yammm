@@ -1,0 +1,111 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Base",
+      "name_span": {
+        "s": 29,
+        "e": 33
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 40,
+              "e": 46
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 37,
+            "e": 54
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 56
+      }
+    },
+    {
+      "name": "Auditable",
+      "name_span": {
+        "s": 72,
+        "e": 81
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "ts",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 88,
+              "e": 97
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 85,
+            "e": 106
+          }
+        }
+      ],
+      "span": {
+        "s": 58,
+        "e": 108
+      }
+    },
+    {
+      "name": "Concrete",
+      "name_span": {
+        "s": 115,
+        "e": 123
+      },
+      "extends": [
+        {
+          "name": "Base",
+          "span": {
+            "s": 133,
+            "e": 137
+          }
+        },
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 139,
+            "e": 148
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 157,
+              "e": 163
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 152,
+            "e": 172
+          }
+        }
+      ],
+      "span": {
+        "s": 110,
+        "e": 174
+      }
+    }
+  ]
+}

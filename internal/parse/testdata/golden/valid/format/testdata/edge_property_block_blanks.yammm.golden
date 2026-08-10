@@ -1,0 +1,73 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 20,
+        "e": 21
+      },
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "REL",
+          "name_span": {
+            "s": 29,
+            "e": 32
+          },
+          "target": {
+            "name": "Target",
+            "span": {
+              "s": 39,
+              "e": 45
+            }
+          },
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "weight",
+              "constraint": {
+                "kind": "Float",
+                "span": {
+                  "s": 58,
+                  "e": 63
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 51,
+                "e": 72
+              }
+            },
+            {
+              "name": "score",
+              "constraint": {
+                "kind": "Integer",
+                "span": {
+                  "s": 81,
+                  "e": 88
+                }
+              },
+              "span": {
+                "s": 75,
+                "e": 88
+              }
+            }
+          ],
+          "span": {
+            "s": 25,
+            "e": 92
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 94
+      }
+    }
+  ]
+}

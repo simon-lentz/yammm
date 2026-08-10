@@ -1,0 +1,37 @@
+{
+  "name": "\"sibling\"",
+  "span": {
+    "s": 0,
+    "e": 16
+  },
+  "types": [
+    {
+      "name": "Sibling",
+      "name_span": {
+        "s": 23,
+        "e": 30
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 39,
+              "e": 45
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 34,
+            "e": 54
+          }
+        }
+      ],
+      "span": {
+        "s": 18,
+        "e": 56
+      }
+    }
+  ]
+}

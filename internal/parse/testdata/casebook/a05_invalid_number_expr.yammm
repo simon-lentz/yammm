@@ -1,0 +1,7 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	count Integer
+	! "bound" count < 42abc
+}

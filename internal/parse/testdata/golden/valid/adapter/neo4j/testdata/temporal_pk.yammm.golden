@@ -1,0 +1,161 @@
+{
+  "name": "\"tpk_test\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "types": [
+    {
+      "name": "Doc",
+      "name_span": {
+        "s": 187,
+        "e": 190
+      },
+      "props": [
+        {
+          "name": "created_on",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 208,
+              "e": 212
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 197,
+            "e": 220
+          }
+        },
+        {
+          "name": "updated_on",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 236,
+              "e": 240
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 225,
+            "e": 249
+          }
+        },
+        {
+          "name": "title",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 265,
+              "e": 271
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 254,
+            "e": 280
+          }
+        }
+      ],
+      "span": {
+        "s": 182,
+        "e": 282
+      }
+    },
+    {
+      "name": "Order",
+      "name_span": {
+        "s": 528,
+        "e": 533
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 547,
+              "e": 551
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 540,
+            "e": 561
+          }
+        },
+        {
+          "name": "key_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 573,
+              "e": 579
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 566,
+            "e": 588
+          }
+        }
+      ],
+      "span": {
+        "s": 523,
+        "e": 590
+      }
+    },
+    {
+      "name": "Citation",
+      "name_span": {
+        "s": 721,
+        "e": 729
+      },
+      "props": [
+        {
+          "name": "citation_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 748,
+              "e": 754
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 736,
+            "e": 762
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "CITES",
+          "name_span": {
+            "s": 771,
+            "e": 776
+          },
+          "target": {
+            "name": "Doc",
+            "span": {
+              "s": 785,
+              "e": 788
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 767,
+            "e": 788
+          }
+        }
+      ],
+      "span": {
+        "s": 716,
+        "e": 790
+      }
+    }
+  ]
+}

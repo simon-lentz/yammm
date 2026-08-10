@@ -1,0 +1,7 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	broken @
+	type String
+}

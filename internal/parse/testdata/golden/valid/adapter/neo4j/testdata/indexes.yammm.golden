@@ -1,0 +1,400 @@
+{
+  "name": "\"index_test\"",
+  "span": {
+    "s": 0,
+    "e": 19
+  },
+  "types": [
+    {
+      "name": "Tracked",
+      "name_span": {
+        "s": 35,
+        "e": 42
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "first_seen",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 60,
+              "e": 69
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 79,
+                "e": 89
+              }
+            }
+          ],
+          "span": {
+            "s": 49,
+            "e": 89
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "first_seen",
+              "span": {
+                "s": 103,
+                "e": 113
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 95,
+            "e": 114
+          }
+        }
+      ],
+      "span": {
+        "s": 21,
+        "e": 116
+      }
+    },
+    {
+      "name": "Document",
+      "name_span": {
+        "s": 123,
+        "e": 131
+      },
+      "extends": [
+        {
+          "name": "Tracked",
+          "span": {
+            "s": 140,
+            "e": 147
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "content_hash",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 167,
+              "e": 173
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 154,
+            "e": 186
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 204,
+              "e": 210
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 216,
+                "e": 222
+              }
+            }
+          ],
+          "span": {
+            "s": 191,
+            "e": 222
+          }
+        },
+        {
+          "name": "title",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 240,
+              "e": 246
+            }
+          },
+          "anns": [
+            {
+              "name": "fulltext",
+              "span": {
+                "s": 252,
+                "e": 261
+              }
+            }
+          ],
+          "span": {
+            "s": 227,
+            "e": 261
+          }
+        },
+        {
+          "name": "published_on",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 279,
+              "e": 283
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 291,
+                "e": 297
+              }
+            }
+          ],
+          "span": {
+            "s": 266,
+            "e": 297
+          }
+        },
+        {
+          "name": "embedding",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "768"
+            ],
+            "span": {
+              "s": 315,
+              "e": 326
+            }
+          },
+          "anns": [
+            {
+              "name": "vector",
+              "args": [
+                {
+                  "kind": "ident",
+                  "text": "cosine",
+                  "span": {
+                    "s": 335,
+                    "e": 341
+                  }
+                }
+              ],
+              "has_parens": true,
+              "span": {
+                "s": 327,
+                "e": 342
+              }
+            }
+          ],
+          "span": {
+            "s": 302,
+            "e": 342
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "SECTIONS",
+          "name_span": {
+            "s": 415,
+            "e": 423
+          },
+          "target": {
+            "name": "Section",
+            "span": {
+              "s": 433,
+              "e": 440
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 411,
+            "e": 440
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "state",
+              "span": {
+                "s": 356,
+                "e": 361
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "published_on",
+              "span": {
+                "s": 363,
+                "e": 375
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 348,
+            "e": 376
+          }
+        },
+        {
+          "name": "fulltext",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "title",
+              "span": {
+                "s": 392,
+                "e": 397
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "state",
+              "span": {
+                "s": 399,
+                "e": 404
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 381,
+            "e": 405
+          }
+        }
+      ],
+      "span": {
+        "s": 118,
+        "e": 442
+      }
+    },
+    {
+      "name": "Note",
+      "name_span": {
+        "s": 449,
+        "e": 453
+      },
+      "extends": [
+        {
+          "name": "Tracked",
+          "span": {
+            "s": 462,
+            "e": 469
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "note_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 484,
+              "e": 490
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 476,
+            "e": 498
+          }
+        },
+        {
+          "name": "body",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 511,
+              "e": 517
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 518,
+                "e": 524
+              }
+            }
+          ],
+          "span": {
+            "s": 503,
+            "e": 524
+          }
+        }
+      ],
+      "span": {
+        "s": 444,
+        "e": 526
+      }
+    },
+    {
+      "name": "Section",
+      "name_span": {
+        "s": 538,
+        "e": 545
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "section_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 563,
+              "e": 569
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 552,
+            "e": 577
+          }
+        },
+        {
+          "name": "heading",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 593,
+              "e": 599
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 600,
+                "e": 606
+              }
+            }
+          ],
+          "span": {
+            "s": 582,
+            "e": 606
+          }
+        }
+      ],
+      "span": {
+        "s": 528,
+        "e": 608
+      }
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "name": "\"composite\"",
+  "span": {
+    "s": 0,
+    "e": 18
+  },
+  "types": [
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 25,
+        "e": 31
+      },
+      "props": [
+        {
+          "name": "country",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 43,
+              "e": 49
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 35,
+            "e": 57
+          }
+        },
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 64,
+              "e": 70
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 59,
+            "e": 78
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 85,
+              "e": 91
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 80,
+            "e": 100
+          }
+        }
+      ],
+      "span": {
+        "s": 20,
+        "e": 102
+      }
+    },
+    {
+      "name": "Sensor",
+      "name_span": {
+        "s": 109,
+        "e": 115
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 122,
+              "e": 128
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 119,
+            "e": 136
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "LOCATED_IN",
+          "name_span": {
+            "s": 142,
+            "e": 152
+          },
+          "target": {
+            "name": "Region",
+            "span": {
+              "s": 159,
+              "e": 165
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 138,
+            "e": 165
+          }
+        }
+      ],
+      "span": {
+        "s": 104,
+        "e": 167
+      }
+    }
+  ]
+}

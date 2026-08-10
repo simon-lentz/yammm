@@ -1,0 +1,86 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 20,
+        "e": 21
+      },
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "REL",
+          "name_span": {
+            "s": 29,
+            "e": 32
+          },
+          "target": {
+            "name": "Target",
+            "span": {
+              "s": 44,
+              "e": 50
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 25,
+            "e": 50
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "REL2",
+          "name_span": {
+            "s": 56,
+            "e": 60
+          },
+          "target": {
+            "name": "Target",
+            "span": {
+              "s": 71,
+              "e": 77
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 52,
+            "e": 77
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "REL3",
+          "name_span": {
+            "s": 83,
+            "e": 87
+          },
+          "target": {
+            "name": "Target",
+            "span": {
+              "s": 103,
+              "e": 109
+            }
+          },
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 79,
+            "e": 109
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 111
+      }
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "County",
+      "name_span": {
+        "s": 19,
+        "e": 25
+      },
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 34,
+              "e": 40
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 29,
+            "e": 48
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 55,
+              "e": 61
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 50,
+            "e": 70
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 72
+      }
+    }
+  ]
+}

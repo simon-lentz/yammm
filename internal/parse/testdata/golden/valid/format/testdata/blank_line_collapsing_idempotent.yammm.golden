@@ -1,0 +1,129 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 3,
+    "e": 16
+  },
+  "imports": [
+    {
+      "path": "\"./a\"",
+      "alias": "a",
+      "span": {
+        "s": 20,
+        "e": 37
+      }
+    },
+    {
+      "path": "\"./b\"",
+      "alias": "b",
+      "span": {
+        "s": 38,
+        "e": 55
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Base",
+      "name_span": {
+        "s": 84,
+        "e": 88
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 98,
+              "e": 104
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 95,
+            "e": 112
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 122,
+              "e": 128
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 117,
+            "e": 137
+          }
+        }
+      ],
+      "span": {
+        "s": 70,
+        "e": 142
+      }
+    },
+    {
+      "name": "Concrete",
+      "name_span": {
+        "s": 151,
+        "e": 159
+      },
+      "extends": [
+        {
+          "name": "Base",
+          "span": {
+            "s": 168,
+            "e": 172
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "REL",
+          "name_span": {
+            "s": 180,
+            "e": 183
+          },
+          "target": {
+            "name": "Target",
+            "span": {
+              "s": 190,
+              "e": 196
+            }
+          },
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "weight",
+              "constraint": {
+                "kind": "Float",
+                "span": {
+                  "s": 210,
+                  "e": 215
+                }
+              },
+              "span": {
+                "s": 203,
+                "e": 215
+              }
+            }
+          ],
+          "span": {
+            "s": 176,
+            "e": 220
+          }
+        }
+      ],
+      "span": {
+        "s": 146,
+        "e": 222
+      }
+    }
+  ]
+}

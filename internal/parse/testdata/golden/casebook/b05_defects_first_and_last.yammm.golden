@@ -1,0 +1,125 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 34,
+              "e": 40
+            }
+          },
+          "span": {
+            "s": 31,
+            "e": 40
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 59
+      }
+    },
+    {
+      "name": "Beta",
+      "name_span": {
+        "s": 66,
+        "e": 70
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 77,
+              "e": 83
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 74,
+            "e": 91
+          }
+        }
+      ],
+      "span": {
+        "s": 61,
+        "e": 93
+      }
+    },
+    {
+      "name": "Gamma",
+      "name_span": {
+        "s": 100,
+        "e": 105
+      },
+      "props": [
+        {
+          "name": "note",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 114,
+              "e": 120
+            }
+          },
+          "primary": true,
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 129,
+                "e": 135
+              }
+            }
+          ],
+          "span": {
+            "s": 109,
+            "e": 135
+          }
+        }
+      ],
+      "span": {
+        "s": 95,
+        "e": 145
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "malformed numeric literal \"0xA\": numeric literals are decimal (hexadecimal and suffixed forms are not supported)",
+      "span": {
+        "s": 41,
+        "e": 44
+      },
+      "line": 4,
+      "end_line": 4
+    },
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"}\" in a type body",
+      "span": {
+        "s": 144,
+        "e": 145
+      },
+      "line": 13,
+      "end_line": 13
+    }
+  ]
+}

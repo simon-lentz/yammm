@@ -1,0 +1,78 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 34,
+              "e": 40
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 31,
+            "e": 48
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 65
+      }
+    },
+    {
+      "name": "Beta",
+      "name_span": {
+        "s": 72,
+        "e": 76
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 83,
+              "e": 89
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 80,
+            "e": 97
+          }
+        }
+      ],
+      "span": {
+        "s": 67,
+        "e": 99
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"-\u003e\" in a type body",
+      "span": {
+        "s": 50,
+        "e": 52
+      },
+      "line": 5,
+      "end_line": 5
+    }
+  ]
+}

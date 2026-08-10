@@ -1,0 +1,38 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 37,
+        "e": 38
+      },
+      "doc": "Entity doc",
+      "props": [
+        {
+          "name": "name",
+          "doc": "Field doc",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 64,
+              "e": 70
+            }
+          },
+          "span": {
+            "s": 42,
+            "e": 70
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 72
+      }
+    }
+  ]
+}

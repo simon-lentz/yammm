@@ -1,0 +1,183 @@
+{
+  "name": "\"geo\"",
+  "doc": "Geo reference vocabulary for county-level records.",
+  "span": {
+    "s": 0,
+    "e": 69
+  },
+  "datatypes": [
+    {
+      "name": "FipsCode",
+      "doc": "FipsCode is a five-character FIPS identifier.",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "5",
+          "5"
+        ],
+        "span": {
+          "s": 139,
+          "e": 152
+        }
+      },
+      "span": {
+        "s": 71,
+        "e": 152
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "State",
+      "name_span": {
+        "s": 186,
+        "e": 191
+      },
+      "doc": "State is a US state.",
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 200,
+              "e": 206
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 195,
+            "e": 214
+          }
+        }
+      ],
+      "span": {
+        "s": 154,
+        "e": 216
+      }
+    },
+    {
+      "name": "District",
+      "name_span": {
+        "s": 228,
+        "e": 236
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 243,
+              "e": 247
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 240,
+            "e": 255
+          }
+        }
+      ],
+      "span": {
+        "s": 218,
+        "e": 257
+      }
+    },
+    {
+      "name": "County",
+      "name_span": {
+        "s": 298,
+        "e": 304
+      },
+      "doc": "County is a US county node.",
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "FipsCode"
+            ],
+            "span": {
+              "s": 313,
+              "e": 321
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 308,
+            "e": 329
+          }
+        },
+        {
+          "name": "population",
+          "doc": "population is the resident count at the last census.",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 402,
+              "e": 409
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 331,
+            "e": 418
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_STATE",
+          "name_span": {
+            "s": 468,
+            "e": 476
+          },
+          "doc": "IN_STATE records the county's state.",
+          "target": {
+            "name": "State",
+            "span": {
+              "s": 483,
+              "e": 488
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 420,
+            "e": 488
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "HAS_DISTRICT",
+          "name_span": {
+            "s": 541,
+            "e": 553
+          },
+          "doc": "HAS_DISTRICT holds electoral districts.",
+          "target": {
+            "name": "District",
+            "span": {
+              "s": 561,
+              "e": 569
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 490,
+            "e": 569
+          }
+        }
+      ],
+      "span": {
+        "s": 259,
+        "e": 571
+      }
+    }
+  ]
+}

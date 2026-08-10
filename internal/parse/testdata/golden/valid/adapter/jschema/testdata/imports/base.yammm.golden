@@ -1,0 +1,37 @@
+{
+  "name": "\"base\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Basin",
+      "name_span": {
+        "s": 20,
+        "e": 25
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 32,
+              "e": 38
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 29,
+            "e": 46
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 48
+      }
+    }
+  ]
+}

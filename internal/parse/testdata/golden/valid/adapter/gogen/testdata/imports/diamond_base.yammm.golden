@@ -1,0 +1,37 @@
+{
+  "name": "\"base\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Shared",
+      "name_span": {
+        "s": 20,
+        "e": 26
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 33,
+              "e": 39
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 30,
+            "e": 47
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 49
+      }
+    }
+  ]
+}

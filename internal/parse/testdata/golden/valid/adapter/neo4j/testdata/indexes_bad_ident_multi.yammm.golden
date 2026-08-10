@@ -1,0 +1,102 @@
+{
+  "name": "\"badident_multi_test\"",
+  "span": {
+    "s": 0,
+    "e": 28
+  },
+  "types": [
+    {
+      "name": "Thing",
+      "name_span": {
+        "s": 35,
+        "e": 40
+      },
+      "props": [
+        {
+          "name": "thing_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 56,
+              "e": 62
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 47,
+            "e": 70
+          }
+        },
+        {
+          "name": "match",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 84,
+              "e": 90
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 91,
+                "e": 97
+              }
+            }
+          ],
+          "span": {
+            "s": 75,
+            "e": 97
+          }
+        },
+        {
+          "name": "other",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 111,
+              "e": 117
+            }
+          },
+          "span": {
+            "s": 102,
+            "e": 117
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "match",
+              "span": {
+                "s": 130,
+                "e": 135
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "other",
+              "span": {
+                "s": 137,
+                "e": 142
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 122,
+            "e": 143
+          }
+        }
+      ],
+      "span": {
+        "s": 30,
+        "e": 145
+      }
+    }
+  ]
+}

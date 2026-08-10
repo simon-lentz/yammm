@@ -1,0 +1,97 @@
+{
+  "name": "\"people\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Person",
+      "name_span": {
+        "s": 63,
+        "e": 69
+      },
+      "doc": "Person is a registered individual.",
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 76,
+              "e": 80
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 73,
+            "e": 88
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "150"
+            ],
+            "span": {
+              "s": 94,
+              "e": 110
+            }
+          },
+          "span": {
+            "s": 90,
+            "e": 110
+          }
+        },
+        {
+          "name": "email",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 118,
+              "e": 124
+            }
+          },
+          "span": {
+            "s": 112,
+            "e": 124
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"adults only\"",
+          "expr": "(\u003e= (p \"age\") 18)",
+          "expr_span": {
+            "s": 143,
+            "e": 152
+          },
+          "span": {
+            "s": 127,
+            "e": 152
+          }
+        },
+        {
+          "msg": "\"age within bounds\"",
+          "doc": "Snapshot bound, revisit at next census.",
+          "expr": "(\u0026\u0026 (\u003e= (p \"age\") 0) (\u003c= (p \"age\") 150))",
+          "expr_span": {
+            "s": 223,
+            "e": 247
+          },
+          "span": {
+            "s": 154,
+            "e": 247
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 249
+      }
+    }
+  ]
+}

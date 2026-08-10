@@ -1,0 +1,52 @@
+{
+  "name": "\"common\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 22,
+        "e": 28
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 37,
+              "e": 43
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 32,
+            "e": 51
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 58,
+              "e": 64
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 53,
+            "e": 73
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 75
+      }
+    }
+  ]
+}

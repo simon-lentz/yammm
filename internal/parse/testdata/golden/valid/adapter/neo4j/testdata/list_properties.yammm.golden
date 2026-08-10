@@ -1,0 +1,193 @@
+{
+  "name": "\"list_test\"",
+  "span": {
+    "s": 0,
+    "e": 18
+  },
+  "types": [
+    {
+      "name": "Entity",
+      "name_span": {
+        "s": 25,
+        "e": 31
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 45,
+              "e": 51
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 38,
+            "e": 59
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 71,
+              "e": 77
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 64,
+            "e": 86
+          }
+        },
+        {
+          "name": "tags",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 103,
+                "e": 109
+              }
+            },
+            "span": {
+              "s": 98,
+              "e": 110
+            }
+          },
+          "span": {
+            "s": 91,
+            "e": 110
+          }
+        },
+        {
+          "name": "scores",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Integer",
+              "span": {
+                "s": 127,
+                "e": 134
+              }
+            },
+            "span": {
+              "s": 122,
+              "e": 135
+            }
+          },
+          "span": {
+            "s": 115,
+            "e": 135
+          }
+        },
+        {
+          "name": "active",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 147,
+              "e": 154
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 140,
+            "e": 163
+          }
+        },
+        {
+          "name": "ratios",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Float",
+              "span": {
+                "s": 180,
+                "e": 185
+              }
+            },
+            "span": {
+              "s": 175,
+              "e": 186
+            }
+          },
+          "span": {
+            "s": 168,
+            "e": 186
+          }
+        },
+        {
+          "name": "flags",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Boolean",
+              "span": {
+                "s": 203,
+                "e": 210
+              }
+            },
+            "span": {
+              "s": 198,
+              "e": 211
+            }
+          },
+          "span": {
+            "s": 191,
+            "e": 211
+          }
+        },
+        {
+          "name": "times",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Timestamp",
+              "span": {
+                "s": 228,
+                "e": 237
+              }
+            },
+            "span": {
+              "s": 223,
+              "e": 238
+            }
+          },
+          "span": {
+            "s": 216,
+            "e": 238
+          }
+        },
+        {
+          "name": "dates",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Date",
+              "span": {
+                "s": 255,
+                "e": 259
+              }
+            },
+            "span": {
+              "s": 250,
+              "e": 260
+            }
+          },
+          "span": {
+            "s": 243,
+            "e": 260
+          }
+        }
+      ],
+      "span": {
+        "s": 20,
+        "e": 262
+      }
+    }
+  ]
+}

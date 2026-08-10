@@ -1,0 +1,18 @@
+schema "seeded"
+
+type Alpha {
+	name String @writeOnce primary
+}
+
+type Clean1 {
+	id String primary
+}
+
+type Clean2 {
+	id String primary
+	note String
+}
+
+type Omega {
+	id String[5, 0x7] primary
+}

@@ -1,0 +1,116 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "GeoEntity",
+      "name_span": {
+        "s": 28,
+        "e": 37
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 44,
+              "e": 48
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 41,
+            "e": 56
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 58
+      }
+    },
+    {
+      "name": "State",
+      "name_span": {
+        "s": 65,
+        "e": 70
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 79,
+              "e": 85
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 74,
+            "e": 93
+          }
+        }
+      ],
+      "span": {
+        "s": 60,
+        "e": 95
+      }
+    },
+    {
+      "name": "County",
+      "name_span": {
+        "s": 102,
+        "e": 108
+      },
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 117,
+              "e": 123
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 112,
+            "e": 131
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_STATE",
+          "name_span": {
+            "s": 137,
+            "e": 145
+          },
+          "target": {
+            "name": "State",
+            "span": {
+              "s": 152,
+              "e": 157
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 133,
+            "e": 157
+          }
+        }
+      ],
+      "span": {
+        "s": 97,
+        "e": 159
+      }
+    }
+  ]
+}

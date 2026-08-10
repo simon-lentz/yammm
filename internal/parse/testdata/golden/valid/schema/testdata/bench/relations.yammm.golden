@@ -1,0 +1,491 @@
+{
+  "name": "\"bench_relations\"",
+  "span": {
+    "s": 107,
+    "e": 131
+  },
+  "types": [
+    {
+      "name": "Warehouse",
+      "name_span": {
+        "s": 138,
+        "e": 147
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 154,
+              "e": 160
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 151,
+            "e": 168
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 175,
+              "e": 181
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 170,
+            "e": 190
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "supplies",
+          "name_span": {
+            "s": 197,
+            "e": 205
+          },
+          "target": {
+            "name": "Depot",
+            "span": {
+              "s": 213,
+              "e": 218
+            }
+          },
+          "optional": true,
+          "many": true,
+          "backref": "supplied_by",
+          "backref_span": {
+            "s": 221,
+            "e": 232
+          },
+          "span": {
+            "s": 193,
+            "e": 238
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "bays",
+          "name_span": {
+            "s": 244,
+            "e": 248
+          },
+          "target": {
+            "name": "Bay",
+            "span": {
+              "s": 256,
+              "e": 259
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 240,
+            "e": 259
+          }
+        }
+      ],
+      "span": {
+        "s": 133,
+        "e": 261
+      }
+    },
+    {
+      "name": "Depot",
+      "name_span": {
+        "s": 268,
+        "e": 273
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 280,
+              "e": 286
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 277,
+            "e": 294
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 301,
+              "e": 307
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 296,
+            "e": 316
+          }
+        },
+        {
+          "name": "region",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "2",
+              "2"
+            ],
+            "span": {
+              "s": 325,
+              "e": 337
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 318,
+            "e": 346
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "nearest",
+          "name_span": {
+            "s": 353,
+            "e": 360
+          },
+          "target": {
+            "name": "Warehouse",
+            "span": {
+              "s": 367,
+              "e": 376
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 349,
+            "e": 376
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "peers",
+          "name_span": {
+            "s": 382,
+            "e": 387
+          },
+          "target": {
+            "name": "Depot",
+            "span": {
+              "s": 397,
+              "e": 402
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 378,
+            "e": 402
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "carries",
+          "name_span": {
+            "s": 408,
+            "e": 415
+          },
+          "target": {
+            "name": "Item",
+            "span": {
+              "s": 423,
+              "e": 427
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "quantity",
+              "constraint": {
+                "kind": "Integer",
+                "span": {
+                  "s": 441,
+                  "e": 448
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 432,
+                "e": 457
+              }
+            },
+            {
+              "name": "reserved",
+              "constraint": {
+                "kind": "Integer",
+                "span": {
+                  "s": 469,
+                  "e": 476
+                }
+              },
+              "span": {
+                "s": 460,
+                "e": 476
+              }
+            },
+            {
+              "name": "added_at",
+              "constraint": {
+                "kind": "Timestamp",
+                "span": {
+                  "s": 488,
+                  "e": 497
+                }
+              },
+              "span": {
+                "s": 479,
+                "e": 497
+              }
+            }
+          ],
+          "span": {
+            "s": 404,
+            "e": 500
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "docks",
+          "name_span": {
+            "s": 506,
+            "e": 511
+          },
+          "target": {
+            "name": "Dock",
+            "span": {
+              "s": 516,
+              "e": 520
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 502,
+            "e": 520
+          }
+        }
+      ],
+      "span": {
+        "s": 263,
+        "e": 522
+      }
+    },
+    {
+      "name": "Bay",
+      "name_span": {
+        "s": 534,
+        "e": 537
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 544,
+              "e": 550
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 541,
+            "e": 558
+          }
+        },
+        {
+          "name": "position",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 569,
+              "e": 576
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 560,
+            "e": 585
+          }
+        }
+      ],
+      "span": {
+        "s": 524,
+        "e": 587
+      }
+    },
+    {
+      "name": "Dock",
+      "name_span": {
+        "s": 599,
+        "e": 603
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 610,
+              "e": 616
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 607,
+            "e": 624
+          }
+        },
+        {
+          "name": "width",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 632,
+              "e": 637
+            }
+          },
+          "span": {
+            "s": 626,
+            "e": 637
+          }
+        }
+      ],
+      "span": {
+        "s": 589,
+        "e": 639
+      }
+    },
+    {
+      "name": "Item",
+      "name_span": {
+        "s": 646,
+        "e": 650
+      },
+      "props": [
+        {
+          "name": "sku",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 658,
+              "e": 664
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 654,
+            "e": 672
+          }
+        },
+        {
+          "name": "title",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "200"
+            ],
+            "span": {
+              "s": 680,
+              "e": 694
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 674,
+            "e": 703
+          }
+        },
+        {
+          "name": "weight",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 712,
+              "e": 725
+            }
+          },
+          "span": {
+            "s": 705,
+            "e": 725
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "replaces",
+          "name_span": {
+            "s": 732,
+            "e": 740
+          },
+          "target": {
+            "name": "Item",
+            "span": {
+              "s": 751,
+              "e": 755
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 728,
+            "e": 755
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "variants",
+          "name_span": {
+            "s": 761,
+            "e": 769
+          },
+          "target": {
+            "name": "Item",
+            "span": {
+              "s": 781,
+              "e": 785
+            }
+          },
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 757,
+            "e": 785
+          }
+        }
+      ],
+      "span": {
+        "s": 641,
+        "e": 787
+      }
+    }
+  ]
+}

@@ -1,0 +1,413 @@
+{
+  "name": "\"bench_invariants\"",
+  "span": {
+    "s": 149,
+    "e": 174
+  },
+  "types": [
+    {
+      "name": "Order",
+      "name_span": {
+        "s": 181,
+        "e": 186
+      },
+      "props": [
+        {
+          "name": "order_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 199,
+              "e": 205
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 190,
+            "e": 213
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"draft\"",
+              "\"placed\"",
+              "\"shipped\"",
+              "\"closed\""
+            ],
+            "span": {
+              "s": 222,
+              "e": 266
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 215,
+            "e": 275
+          }
+        },
+        {
+          "name": "subtotal",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 286,
+              "e": 299
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 277,
+            "e": 308
+          }
+        },
+        {
+          "name": "discount",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 319,
+              "e": 332
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 310,
+            "e": 341
+          }
+        },
+        {
+          "name": "total",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 349,
+              "e": 362
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 343,
+            "e": 371
+          }
+        },
+        {
+          "name": "quantity",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "1",
+              "_"
+            ],
+            "span": {
+              "s": 382,
+              "e": 395
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 373,
+            "e": 404
+          }
+        },
+        {
+          "name": "reference",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 416,
+              "e": 422
+            }
+          },
+          "span": {
+            "s": 406,
+            "e": 422
+          }
+        },
+        {
+          "name": "placed_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 434,
+              "e": 443
+            }
+          },
+          "span": {
+            "s": 424,
+            "e": 443
+          }
+        },
+        {
+          "name": "closed_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 455,
+              "e": 464
+            }
+          },
+          "span": {
+            "s": 445,
+            "e": 464
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"total is subtotal less discount\"",
+          "expr": "(== (p \"total\") (- (p \"subtotal\") (p \"discount\")))",
+          "expr_span": {
+            "s": 503,
+            "e": 531
+          },
+          "span": {
+            "s": 467,
+            "e": 531
+          }
+        },
+        {
+          "msg": "\"discount never exceeds subtotal\"",
+          "expr": "(\u003c= (p \"discount\") (p \"subtotal\"))",
+          "expr_span": {
+            "s": 569,
+            "e": 589
+          },
+          "span": {
+            "s": 533,
+            "e": 589
+          }
+        },
+        {
+          "msg": "\"quantity is positive\"",
+          "expr": "(\u003e (p \"quantity\") 0)",
+          "expr_span": {
+            "s": 616,
+            "e": 628
+          },
+          "span": {
+            "s": 591,
+            "e": 628
+          }
+        },
+        {
+          "msg": "\"reference is set once placed\"",
+          "expr": "(|| (== (p \"status\") \"draft\") (!= (p \"reference\") nil))",
+          "expr_span": {
+            "s": 663,
+            "e": 700
+          },
+          "span": {
+            "s": 630,
+            "e": 700
+          }
+        },
+        {
+          "msg": "\"reference is not blank\"",
+          "expr": "(\u003e (Len (p \"reference\") (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 729,
+            "e": 749
+          },
+          "span": {
+            "s": 702,
+            "e": 749
+          }
+        },
+        {
+          "msg": "\"closed orders were placed\"",
+          "expr": "(|| (!= (p \"status\") \"closed\") (!= (p \"placed_at\") nil))",
+          "expr_span": {
+            "s": 781,
+            "e": 819
+          },
+          "span": {
+            "s": 751,
+            "e": 819
+          }
+        },
+        {
+          "msg": "\"reference looks like a code\"",
+          "expr": "(=~ (p \"reference\") /^[A-Z]{3}-[0-9]+$/)",
+          "expr_span": {
+            "s": 853,
+            "e": 885
+          },
+          "span": {
+            "s": 821,
+            "e": 885
+          }
+        },
+        {
+          "msg": "\"reference is not a draft marker\"",
+          "expr": "(!~ (p \"reference\") /^DRAFT/)",
+          "expr_span": {
+            "s": 923,
+            "e": 944
+          },
+          "span": {
+            "s": 887,
+            "e": 944
+          }
+        },
+        {
+          "msg": "\"shipped or closed carries a stamp\"",
+          "expr": "(|| (\u0026\u0026 (!= (p \"status\") \"shipped\") (!= (p \"status\") \"closed\")) (!= (p \"placed_at\") nil))",
+          "expr_span": {
+            "s": 984,
+            "e": 1047
+          },
+          "span": {
+            "s": 946,
+            "e": 1047
+          }
+        },
+        {
+          "msg": "\"totals stay in range\"",
+          "expr": "(\u0026\u0026 (\u003e= (p \"total\") 0) (\u003c= (p \"total\") 1e+06))",
+          "expr_span": {
+            "s": 1074,
+            "e": 1108
+          },
+          "span": {
+            "s": 1049,
+            "e": 1108
+          }
+        },
+        {
+          "msg": "\"status is known\"",
+          "expr": "(|| (|| (|| (== (p \"status\") \"draft\") (== (p \"status\") \"placed\")) (== (p \"status\") \"shipped\")) (== (p \"status\") \"closed\"))",
+          "expr_span": {
+            "s": 1130,
+            "e": 1214
+          },
+          "span": {
+            "s": 1110,
+            "e": 1214
+          }
+        },
+        {
+          "msg": "\"subtotal is not negative\"",
+          "expr": "(\u003e= (p \"subtotal\") 0)",
+          "expr_span": {
+            "s": 1245,
+            "e": 1260
+          },
+          "span": {
+            "s": 1216,
+            "e": 1260
+          }
+        }
+      ],
+      "span": {
+        "s": 176,
+        "e": 1262
+      }
+    },
+    {
+      "name": "Basket",
+      "name_span": {
+        "s": 1269,
+        "e": 1275
+      },
+      "props": [
+        {
+          "name": "basket_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1289,
+              "e": 1295
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 1279,
+            "e": 1303
+          }
+        },
+        {
+          "name": "lines",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 1316,
+                "e": 1322
+              }
+            },
+            "span": {
+              "s": 1311,
+              "e": 1323
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1305,
+            "e": 1332
+          }
+        },
+        {
+          "name": "owner",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1340,
+              "e": 1346
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1334,
+            "e": 1355
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"a basket holds something\"",
+          "expr": "(\u003e (Len (p \"lines\") (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 1387,
+            "e": 1403
+          },
+          "span": {
+            "s": 1358,
+            "e": 1403
+          }
+        },
+        {
+          "msg": "\"owner is named\"",
+          "expr": "(\u003e= (Len (p \"owner\") (args ) (params ) nil) 3)",
+          "expr_span": {
+            "s": 1424,
+            "e": 1441
+          },
+          "span": {
+            "s": 1405,
+            "e": 1441
+          }
+        }
+      ],
+      "span": {
+        "s": 1264,
+        "e": 1443
+      }
+    }
+  ]
+}

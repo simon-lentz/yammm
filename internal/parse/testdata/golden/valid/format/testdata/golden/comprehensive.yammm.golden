@@ -1,0 +1,869 @@
+{
+  "name": "\"comprehensive\"",
+  "span": {
+    "s": 94,
+    "e": 116
+  },
+  "imports": [
+    {
+      "path": "\"./geo\"",
+      "alias": "geo",
+      "span": {
+        "s": 119,
+        "e": 140
+      }
+    },
+    {
+      "path": "\"./catalog\"",
+      "alias": "catalog",
+      "span": {
+        "s": 141,
+        "e": 170
+      }
+    }
+  ],
+  "datatypes": [
+    {
+      "name": "RegionCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "2",
+          "2"
+        ],
+        "span": {
+          "s": 191,
+          "e": 203
+        }
+      },
+      "span": {
+        "s": 173,
+        "e": 203
+      }
+    },
+    {
+      "name": "DistrictCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "3",
+          "3"
+        ],
+        "span": {
+          "s": 224,
+          "e": 235
+        }
+      },
+      "span": {
+        "s": 204,
+        "e": 235
+      }
+    },
+    {
+      "name": "RegionID",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "1",
+          "15"
+        ],
+        "span": {
+          "s": 252,
+          "e": 265
+        }
+      },
+      "span": {
+        "s": 236,
+        "e": 265
+      }
+    },
+    {
+      "name": "LongStatus",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"active\"",
+          "\"inactive\"",
+          "\"pending\"",
+          "\"suspended\"",
+          "\"terminated\"",
+          "\"archived\"",
+          "\"deleted\"",
+          "\"expired\"",
+          "\"revoked\""
+        ],
+        "span": {
+          "s": 284,
+          "e": 393
+        }
+      },
+      "span": {
+        "s": 266,
+        "e": 393
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Auditable",
+      "name_span": {
+        "s": 464,
+        "e": 473
+      },
+      "abstract": true,
+      "doc": "* Abstract base type for auditable entities.",
+      "props": [
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 490,
+              "e": 499
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 479,
+            "e": 509
+          }
+        },
+        {
+          "name": "updated_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 525,
+              "e": 534
+            }
+          },
+          "span": {
+            "s": 514,
+            "e": 534
+          }
+        },
+        {
+          "name": "created_by",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 550,
+              "e": 556
+            }
+          },
+          "span": {
+            "s": 539,
+            "e": 556
+          }
+        },
+        {
+          "name": "run_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 568,
+              "e": 574
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 561,
+            "e": 583
+          }
+        }
+      ],
+      "span": {
+        "s": 395,
+        "e": 585
+      }
+    },
+    {
+      "name": "LineItem",
+      "name_span": {
+        "s": 599,
+        "e": 607
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "quantity",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "1",
+              "_"
+            ],
+            "span": {
+              "s": 622,
+              "e": 635
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 613,
+            "e": 644
+          }
+        },
+        {
+          "name": "price",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 655,
+              "e": 667
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 649,
+            "e": 676
+          }
+        },
+        {
+          "name": "note",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 686,
+              "e": 692
+            }
+          },
+          "span": {
+            "s": 681,
+            "e": 692
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"positive_qty\"",
+          "expr": "(\u003e (p \"quantity\") 0)",
+          "expr_span": {
+            "s": 732,
+            "e": 744
+          },
+          "span": {
+            "s": 715,
+            "e": 744
+          }
+        },
+        {
+          "msg": "\"positive_price\"",
+          "expr": "(\u003e= (p \"price\") 0)",
+          "expr_span": {
+            "s": 768,
+            "e": 780
+          },
+          "span": {
+            "s": 749,
+            "e": 780
+          }
+        }
+      ],
+      "span": {
+        "s": 587,
+        "e": 782
+      }
+    },
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 790,
+        "e": 796
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 807,
+            "e": 816
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "region_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 833,
+              "e": 839
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 823,
+            "e": 847
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 857,
+              "e": 863
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 852,
+            "e": 873
+          }
+        },
+        {
+          "name": "name_norm",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 888,
+              "e": 894
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 878,
+            "e": 903
+          }
+        },
+        {
+          "name": "region_code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "RegionCode"
+            ],
+            "span": {
+              "s": 920,
+              "e": 930
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 908,
+            "e": 939
+          }
+        },
+        {
+          "name": "land_area",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 967,
+              "e": 972
+            }
+          },
+          "span": {
+            "s": 957,
+            "e": 972
+          }
+        },
+        {
+          "name": "water_area",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 1001,
+              "e": 1006
+            }
+          },
+          "span": {
+            "s": 990,
+            "e": 1006
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"name_norm_not_empty\"",
+          "expr": "(!= (p \"name_norm\") \"\")",
+          "expr_span": {
+            "s": 1036,
+            "e": 1051
+          },
+          "span": {
+            "s": 1012,
+            "e": 1051
+          }
+        },
+        {
+          "msg": "\"name_not_blank\"",
+          "expr": "(\u003e (Len (p \"name\") (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 1075,
+            "e": 1090
+          },
+          "span": {
+            "s": 1056,
+            "e": 1090
+          }
+        }
+      ],
+      "span": {
+        "s": 785,
+        "e": 1092
+      }
+    },
+    {
+      "name": "District",
+      "name_span": {
+        "s": 1102,
+        "e": 1110
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 1119,
+            "e": 1128
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "region_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1144,
+              "e": 1150
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 1134,
+            "e": 1158
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1168,
+              "e": 1174
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1163,
+            "e": 1183
+          }
+        },
+        {
+          "name": "name_norm",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1198,
+              "e": 1204
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1188,
+            "e": 1213
+          }
+        },
+        {
+          "name": "region_code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "RegionCode"
+            ],
+            "span": {
+              "s": 1230,
+              "e": 1240
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1218,
+            "e": 1249
+          }
+        },
+        {
+          "name": "district_code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "DistrictCode"
+            ],
+            "span": {
+              "s": 1268,
+              "e": 1280
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1254,
+            "e": 1289
+          }
+        },
+        {
+          "name": "grade",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"A\"",
+              "\"B\"",
+              "\"C\"",
+              "\"D\"",
+              "\"E\"",
+              "\"F\""
+            ],
+            "span": {
+              "s": 1317,
+              "e": 1351
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1311,
+            "e": 1360
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_REGION",
+          "name_span": {
+            "s": 1370,
+            "e": 1379
+          },
+          "target": {
+            "name": "Region",
+            "span": {
+              "s": 1386,
+              "e": 1392
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 1366,
+            "e": 1392
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "ADJACENT_TO",
+          "name_span": {
+            "s": 1401,
+            "e": 1412
+          },
+          "target": {
+            "name": "District",
+            "span": {
+              "s": 1422,
+              "e": 1430
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 1397,
+            "e": 1430
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "HAS_DETAIL",
+          "name_span": {
+            "s": 1452,
+            "e": 1462
+          },
+          "target": {
+            "name": "LineItem",
+            "span": {
+              "s": 1470,
+              "e": 1478
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 1448,
+            "e": 1478
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"name_norm_not_empty\"",
+          "expr": "(!= (p \"name_norm\") \"\")",
+          "expr_span": {
+            "s": 1508,
+            "e": 1523
+          },
+          "span": {
+            "s": 1484,
+            "e": 1523
+          }
+        },
+        {
+          "msg": "\"has_region\"",
+          "expr": "(!= (p \"region_code\") \"\")",
+          "expr_span": {
+            "s": 1543,
+            "e": 1560
+          },
+          "span": {
+            "s": 1528,
+            "e": 1560
+          }
+        },
+        {
+          "msg": "\"valid_grade\"",
+          "expr": "(|| (== (p \"grade\") \"A\") (== (p \"grade\") \"F\"))",
+          "expr_span": {
+            "s": 1581,
+            "e": 1609
+          },
+          "span": {
+            "s": 1565,
+            "e": 1609
+          }
+        }
+      ],
+      "span": {
+        "s": 1095,
+        "e": 1611
+      }
+    },
+    {
+      "name": "Publisher",
+      "name_span": {
+        "s": 1619,
+        "e": 1628
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 1637,
+            "e": 1646
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "publisher_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1666,
+              "e": 1672
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 1653,
+            "e": 1680
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1690,
+              "e": 1696
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1685,
+            "e": 1705
+          }
+        },
+        {
+          "name": "name_norm",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1720,
+              "e": 1726
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1710,
+            "e": 1735
+          }
+        },
+        {
+          "name": "region_code",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "2",
+              "2"
+            ],
+            "span": {
+              "s": 1752,
+              "e": 1764
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1740,
+            "e": 1773
+          }
+        },
+        {
+          "name": "is_active",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 1788,
+              "e": 1795
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1778,
+            "e": 1804
+          }
+        },
+        {
+          "name": "deactivated_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 1824,
+              "e": 1833
+            }
+          },
+          "span": {
+            "s": 1809,
+            "e": 1833
+          }
+        },
+        {
+          "name": "deactivated_reason",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"removed\"",
+              "\"replaced\"",
+              "\"merged\"",
+              "\"manual\""
+            ],
+            "span": {
+              "s": 1857,
+              "e": 1904
+            }
+          },
+          "span": {
+            "s": 1838,
+            "e": 1904
+          }
+        },
+        {
+          "name": "source_fetched_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 1927,
+              "e": 1936
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1909,
+            "e": 1946
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "LOCATED_IN",
+          "name_span": {
+            "s": 1956,
+            "e": 1966
+          },
+          "target": {
+            "qualifier": "geo",
+            "name": "Region",
+            "span": {
+              "s": 1975,
+              "e": 1985
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 1952,
+            "e": 1985
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "PUBLISHES",
+          "name_span": {
+            "s": 1994,
+            "e": 2003
+          },
+          "target": {
+            "qualifier": "catalog",
+            "name": "Book",
+            "span": {
+              "s": 2011,
+              "e": 2023
+            }
+          },
+          "optional": true,
+          "many": true,
+          "backref": "published_by",
+          "backref_span": {
+            "s": 2026,
+            "e": 2038
+          },
+          "span": {
+            "s": 1990,
+            "e": 2044
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"name_not_empty\"",
+          "expr": "(!= (p \"name_norm\") \"\")",
+          "expr_span": {
+            "s": 2069,
+            "e": 2084
+          },
+          "span": {
+            "s": 2050,
+            "e": 2084
+          }
+        },
+        {
+          "msg": "\"active_or_reason\"",
+          "expr": "(|| (p \"is_active\") (!= (p \"deactivated_reason\") nil))",
+          "expr_span": {
+            "s": 2110,
+            "e": 2148
+          },
+          "span": {
+            "s": 2089,
+            "e": 2148
+          }
+        }
+      ],
+      "span": {
+        "s": 1614,
+        "e": 2150
+      }
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 20,
+        "e": 21
+      },
+      "props": [
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"pending_review\"",
+              "\"approved\"",
+              "\"rejected\"",
+              "\"needs_revision\"",
+              "\"escalated\"",
+              "\"archived\"",
+              "\"deleted\""
+            ],
+            "span": {
+              "s": 32,
+              "e": 132
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 25,
+            "e": 141
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 143
+      }
+    }
+  ]
+}

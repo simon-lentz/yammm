@@ -1,0 +1,170 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "State",
+      "name_span": {
+        "s": 19,
+        "e": 24
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 33,
+              "e": 39
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 28,
+            "e": 47
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 54,
+              "e": 60
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 49,
+            "e": 69
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 71
+      }
+    },
+    {
+      "name": "District",
+      "name_span": {
+        "s": 83,
+        "e": 91
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 98,
+              "e": 102
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 95,
+            "e": 110
+          }
+        }
+      ],
+      "span": {
+        "s": 73,
+        "e": 112
+      }
+    },
+    {
+      "name": "County",
+      "name_span": {
+        "s": 119,
+        "e": 125
+      },
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 134,
+              "e": 140
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 129,
+            "e": 148
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_STATE",
+          "name_span": {
+            "s": 154,
+            "e": 162
+          },
+          "target": {
+            "name": "State",
+            "span": {
+              "s": 169,
+              "e": 174
+            }
+          },
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "since",
+              "constraint": {
+                "kind": "Integer",
+                "span": {
+                  "s": 185,
+                  "e": 192
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 179,
+                "e": 201
+              }
+            }
+          ],
+          "span": {
+            "s": 150,
+            "e": 204
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "HAS_DISTRICT",
+          "name_span": {
+            "s": 210,
+            "e": 222
+          },
+          "target": {
+            "name": "District",
+            "span": {
+              "s": 230,
+              "e": 238
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 206,
+            "e": 238
+          }
+        }
+      ],
+      "span": {
+        "s": 114,
+        "e": 240
+      }
+    }
+  ]
+}

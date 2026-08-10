@@ -1,0 +1,104 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "Place",
+      "name_span": {
+        "s": 19,
+        "e": 24
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 31,
+              "e": 37
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 28,
+            "e": 45
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 47
+      }
+    },
+    {
+      "name": "Event",
+      "name_span": {
+        "s": 54,
+        "e": 59
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 66,
+              "e": 72
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 63,
+            "e": 80
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "HELD_AT",
+          "name_span": {
+            "s": 86,
+            "e": 93
+          },
+          "target": {
+            "name": "Place",
+            "span": {
+              "s": 100,
+              "e": 105
+            }
+          },
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "where",
+              "constraint": {
+                "kind": "String",
+                "span": {
+                  "s": 116,
+                  "e": 122
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 110,
+                "e": 131
+              }
+            }
+          ],
+          "span": {
+            "s": 82,
+            "e": 134
+          }
+        }
+      ],
+      "span": {
+        "s": 49,
+        "e": 136
+      }
+    }
+  ]
+}

@@ -1,0 +1,277 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 19,
+        "e": 25
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 32,
+              "e": 38
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 29,
+            "e": 46
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 48
+      }
+    },
+    {
+      "name": "Landmark",
+      "name_span": {
+        "s": 60,
+        "e": 68
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "label",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 78,
+              "e": 84
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 72,
+            "e": 93
+          }
+        }
+      ],
+      "span": {
+        "s": 50,
+        "e": 95
+      }
+    },
+    {
+      "name": "GeoEntity",
+      "name_span": {
+        "s": 111,
+        "e": 120
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 127,
+              "e": 131
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 124,
+            "e": 139
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 146,
+              "e": 152
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 141,
+            "e": 161
+          }
+        },
+        {
+          "name": "rank",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 168,
+              "e": 175
+            }
+          },
+          "span": {
+            "s": 163,
+            "e": 175
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_REGION",
+          "name_span": {
+            "s": 181,
+            "e": 190
+          },
+          "target": {
+            "name": "Region",
+            "span": {
+              "s": 197,
+              "e": 203
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 177,
+            "e": 203
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "LANDMARKS",
+          "name_span": {
+            "s": 209,
+            "e": 218
+          },
+          "target": {
+            "name": "Landmark",
+            "span": {
+              "s": 226,
+              "e": 234
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 205,
+            "e": 234
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"ranked\"",
+          "expr": "(\u003e= (p \"rank\") 0)",
+          "expr_span": {
+            "s": 247,
+            "e": 256
+          },
+          "span": {
+            "s": 236,
+            "e": 256
+          }
+        }
+      ],
+      "span": {
+        "s": 97,
+        "e": 258
+      }
+    },
+    {
+      "name": "County",
+      "name_span": {
+        "s": 265,
+        "e": 271
+      },
+      "extends": [
+        {
+          "name": "GeoEntity",
+          "span": {
+            "s": 280,
+            "e": 289
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 298,
+              "e": 304
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 293,
+            "e": 313
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "SEAT",
+          "name_span": {
+            "s": 319,
+            "e": 323
+          },
+          "target": {
+            "name": "City",
+            "span": {
+              "s": 330,
+              "e": 334
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 315,
+            "e": 334
+          }
+        }
+      ],
+      "span": {
+        "s": 260,
+        "e": 336
+      }
+    },
+    {
+      "name": "City",
+      "name_span": {
+        "s": 343,
+        "e": 347
+      },
+      "extends": [
+        {
+          "name": "GeoEntity",
+          "span": {
+            "s": 356,
+            "e": 365
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "population",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 380,
+              "e": 387
+            }
+          },
+          "span": {
+            "s": 369,
+            "e": 387
+          }
+        }
+      ],
+      "span": {
+        "s": 338,
+        "e": 389
+      }
+    }
+  ]
+}

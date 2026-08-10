@@ -1,0 +1,40 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Broken",
+      "name_span": {
+        "s": 20,
+        "e": 26
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "UnknownType"
+            ],
+            "span": {
+              "s": 33,
+              "e": 44
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 30,
+            "e": 52
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 54
+      }
+    }
+  ]
+}

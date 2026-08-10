@@ -1,0 +1,2166 @@
+{
+  "name": "\"bench_wide\"",
+  "doc": "A broad schema: inheritance, relations, invariants and annotations\n   together, at the size a real consumer schema reaches. It is the largest\n   file in this directory, so the largest-fixture benchmark selects it.",
+  "span": {
+    "s": 0,
+    "e": 239
+  },
+  "datatypes": [
+    {
+      "name": "Slug",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "1",
+          "64"
+        ],
+        "span": {
+          "s": 253,
+          "e": 266
+        }
+      },
+      "span": {
+        "s": 241,
+        "e": 266
+      }
+    },
+    {
+      "name": "CountryCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "2",
+          "2"
+        ],
+        "span": {
+          "s": 286,
+          "e": 298
+        }
+      },
+      "span": {
+        "s": 267,
+        "e": 298
+      }
+    },
+    {
+      "name": "Currency",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"eur\"",
+          "\"gbp\"",
+          "\"jpy\"",
+          "\"usd\""
+        ],
+        "span": {
+          "s": 315,
+          "e": 347
+        }
+      },
+      "span": {
+        "s": 299,
+        "e": 347
+      }
+    },
+    {
+      "name": "Fraction",
+      "constraint": {
+        "kind": "Float",
+        "args": [
+          "0.0",
+          "1.0"
+        ],
+        "span": {
+          "s": 364,
+          "e": 379
+        }
+      },
+      "span": {
+        "s": 348,
+        "e": 379
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Timestamped",
+      "name_span": {
+        "s": 395,
+        "e": 406
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 421,
+              "e": 430
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 440,
+                "e": 450
+              }
+            }
+          ],
+          "span": {
+            "s": 410,
+            "e": 450
+          }
+        },
+        {
+          "name": "updated_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 463,
+              "e": 472
+            }
+          },
+          "span": {
+            "s": 452,
+            "e": 472
+          }
+        }
+      ],
+      "span": {
+        "s": 381,
+        "e": 474
+      }
+    },
+    {
+      "name": "Identified",
+      "name_span": {
+        "s": 490,
+        "e": 500
+      },
+      "abstract": true,
+      "extends": [
+        {
+          "name": "Timestamped",
+          "span": {
+            "s": 509,
+            "e": 520
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "external_id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 536,
+              "e": 540
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 541,
+                "e": 547
+              }
+            }
+          ],
+          "span": {
+            "s": 524,
+            "e": 547
+          }
+        },
+        {
+          "name": "slug",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Slug"
+            ],
+            "span": {
+              "s": 554,
+              "e": 558
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 568,
+                "e": 574
+              }
+            }
+          ],
+          "span": {
+            "s": 549,
+            "e": 574
+          }
+        }
+      ],
+      "span": {
+        "s": 476,
+        "e": 576
+      }
+    },
+    {
+      "name": "Organisation",
+      "name_span": {
+        "s": 583,
+        "e": 595
+      },
+      "extends": [
+        {
+          "name": "Identified",
+          "span": {
+            "s": 604,
+            "e": 614
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "org_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 625,
+              "e": 631
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 618,
+            "e": 639
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "200"
+            ],
+            "span": {
+              "s": 646,
+              "e": 660
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 641,
+            "e": 669
+          }
+        },
+        {
+          "name": "country",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "CountryCode"
+            ],
+            "span": {
+              "s": 679,
+              "e": 690
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 700,
+                "e": 706
+              }
+            }
+          ],
+          "span": {
+            "s": 671,
+            "e": 706
+          }
+        },
+        {
+          "name": "currency",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Currency"
+            ],
+            "span": {
+              "s": 717,
+              "e": 725
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 708,
+            "e": 734
+          }
+        },
+        {
+          "name": "active",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 743,
+              "e": 750
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 736,
+            "e": 759
+          }
+        },
+        {
+          "name": "headcount",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "_"
+            ],
+            "span": {
+              "s": 771,
+              "e": 784
+            }
+          },
+          "span": {
+            "s": 761,
+            "e": 784
+          }
+        },
+        {
+          "name": "retired_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 797,
+              "e": 806
+            }
+          },
+          "span": {
+            "s": 786,
+            "e": 806
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "operates",
+          "name_span": {
+            "s": 813,
+            "e": 821
+          },
+          "target": {
+            "name": "Facility",
+            "span": {
+              "s": 829,
+              "e": 837
+            }
+          },
+          "optional": true,
+          "many": true,
+          "backref": "operated_by",
+          "backref_span": {
+            "s": 840,
+            "e": 851
+          },
+          "span": {
+            "s": 809,
+            "e": 857
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "partners",
+          "name_span": {
+            "s": 863,
+            "e": 871
+          },
+          "target": {
+            "name": "Organisation",
+            "span": {
+              "s": 881,
+              "e": 893
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 859,
+            "e": 893
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "country",
+              "span": {
+                "s": 904,
+                "e": 911
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "currency",
+              "span": {
+                "s": 913,
+                "e": 921
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 896,
+            "e": 922
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"an active organisation has no retirement stamp\"",
+          "expr": "(|| (p \"active\") (!= (p \"retired_at\") nil))",
+          "expr_span": {
+            "s": 976,
+            "e": 1003
+          },
+          "span": {
+            "s": 925,
+            "e": 1003
+          }
+        },
+        {
+          "msg": "\"the name is not blank\"",
+          "expr": "(\u003e (Len (p \"name\") (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 1031,
+            "e": 1046
+          },
+          "span": {
+            "s": 1005,
+            "e": 1046
+          }
+        }
+      ],
+      "span": {
+        "s": 578,
+        "e": 1048
+      }
+    },
+    {
+      "name": "Facility",
+      "name_span": {
+        "s": 1055,
+        "e": 1063
+      },
+      "extends": [
+        {
+          "name": "Identified",
+          "span": {
+            "s": 1072,
+            "e": 1082
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "facility_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1098,
+              "e": 1104
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 1086,
+            "e": 1112
+          }
+        },
+        {
+          "name": "label",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "200"
+            ],
+            "span": {
+              "s": 1120,
+              "e": 1134
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1114,
+            "e": 1143
+          }
+        },
+        {
+          "name": "country",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "CountryCode"
+            ],
+            "span": {
+              "s": 1153,
+              "e": 1164
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1145,
+            "e": 1173
+          }
+        },
+        {
+          "name": "capacity",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "1",
+              "100000"
+            ],
+            "span": {
+              "s": 1184,
+              "e": 1202
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1175,
+            "e": 1211
+          }
+        },
+        {
+          "name": "utilisation",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Fraction"
+            ],
+            "span": {
+              "s": 1225,
+              "e": 1233
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1213,
+            "e": 1242
+          }
+        },
+        {
+          "name": "open",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 1249,
+              "e": 1256
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1244,
+            "e": 1265
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "serves",
+          "name_span": {
+            "s": 1272,
+            "e": 1278
+          },
+          "target": {
+            "name": "Route",
+            "span": {
+              "s": 1286,
+              "e": 1291
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "priority",
+              "constraint": {
+                "kind": "Integer",
+                "span": {
+                  "s": 1305,
+                  "e": 1312
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 1296,
+                "e": 1321
+              }
+            },
+            {
+              "name": "since",
+              "constraint": {
+                "kind": "Timestamp",
+                "span": {
+                  "s": 1330,
+                  "e": 1339
+                }
+              },
+              "span": {
+                "s": 1324,
+                "e": 1339
+              }
+            }
+          ],
+          "span": {
+            "s": 1268,
+            "e": 1342
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "zones",
+          "name_span": {
+            "s": 1348,
+            "e": 1353
+          },
+          "target": {
+            "name": "Zone",
+            "span": {
+              "s": 1361,
+              "e": 1365
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 1344,
+            "e": 1365
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "country",
+              "span": {
+                "s": 1376,
+                "e": 1383
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "open",
+              "span": {
+                "s": 1385,
+                "e": 1389
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 1368,
+            "e": 1390
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"utilisation stays within the unit interval\"",
+          "expr": "(\u0026\u0026 (\u003e= (p \"utilisation\") 0) (\u003c= (p \"utilisation\") 1))",
+          "expr_span": {
+            "s": 1440,
+            "e": 1480
+          },
+          "span": {
+            "s": 1393,
+            "e": 1480
+          }
+        },
+        {
+          "msg": "\"an open facility has capacity\"",
+          "expr": "(|| (== (p \"open\") false) (\u003e (p \"capacity\") 0))",
+          "expr_span": {
+            "s": 1516,
+            "e": 1545
+          },
+          "span": {
+            "s": 1482,
+            "e": 1545
+          }
+        }
+      ],
+      "span": {
+        "s": 1050,
+        "e": 1547
+      }
+    },
+    {
+      "name": "Zone",
+      "name_span": {
+        "s": 1559,
+        "e": 1563
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "zone_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1575,
+              "e": 1581
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 1567,
+            "e": 1589
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "120"
+            ],
+            "span": {
+              "s": 1596,
+              "e": 1610
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1591,
+            "e": 1619
+          }
+        },
+        {
+          "name": "floor",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 1627,
+              "e": 1634
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1621,
+            "e": 1643
+          }
+        },
+        {
+          "name": "area",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 1650,
+              "e": 1663
+            }
+          },
+          "span": {
+            "s": 1645,
+            "e": 1663
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"the floor is not below ground level\"",
+          "expr": "(\u003e= (p \"floor\") 0)",
+          "expr_span": {
+            "s": 1706,
+            "e": 1716
+          },
+          "span": {
+            "s": 1666,
+            "e": 1716
+          }
+        }
+      ],
+      "span": {
+        "s": 1549,
+        "e": 1718
+      }
+    },
+    {
+      "name": "Route",
+      "name_span": {
+        "s": 1725,
+        "e": 1730
+      },
+      "extends": [
+        {
+          "name": "Timestamped",
+          "span": {
+            "s": 1739,
+            "e": 1750
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "route_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 1763,
+              "e": 1769
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 1754,
+            "e": 1777
+          }
+        },
+        {
+          "name": "origin",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Slug"
+            ],
+            "span": {
+              "s": 1786,
+              "e": 1790
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 1800,
+                "e": 1806
+              }
+            }
+          ],
+          "span": {
+            "s": 1779,
+            "e": 1806
+          }
+        },
+        {
+          "name": "destination",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Slug"
+            ],
+            "span": {
+              "s": 1820,
+              "e": 1824
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 1834,
+                "e": 1840
+              }
+            }
+          ],
+          "span": {
+            "s": 1808,
+            "e": 1840
+          }
+        },
+        {
+          "name": "distance_km",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 1854,
+              "e": 1867
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1842,
+            "e": 1876
+          }
+        },
+        {
+          "name": "transit_days",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "0",
+              "400"
+            ],
+            "span": {
+              "s": 1891,
+              "e": 1906
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1878,
+            "e": 1915
+          }
+        },
+        {
+          "name": "mode",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"air\"",
+              "\"rail\"",
+              "\"road\"",
+              "\"sea\""
+            ],
+            "span": {
+              "s": 1922,
+              "e": 1956
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 1917,
+            "e": 1965
+          }
+        },
+        {
+          "name": "tags",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Alias",
+              "args": [
+                "Slug"
+              ],
+              "span": {
+                "s": 1977,
+                "e": 1981
+              }
+            },
+            "span": {
+              "s": 1972,
+              "e": 1982
+            }
+          },
+          "span": {
+            "s": 1967,
+            "e": 1982
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "alternate",
+          "name_span": {
+            "s": 1989,
+            "e": 1998
+          },
+          "target": {
+            "name": "Route",
+            "span": {
+              "s": 2005,
+              "e": 2010
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 1985,
+            "e": 2010
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "origin",
+              "span": {
+                "s": 2021,
+                "e": 2027
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "destination",
+              "span": {
+                "s": 2029,
+                "e": 2040
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 2013,
+            "e": 2041
+          }
+        },
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "mode",
+              "span": {
+                "s": 2051,
+                "e": 2055
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "transit_days",
+              "span": {
+                "s": 2057,
+                "e": 2069
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 2043,
+            "e": 2070
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"a route does not start where it ends\"",
+          "expr": "(!= (p \"origin\") (p \"destination\"))",
+          "expr_span": {
+            "s": 2114,
+            "e": 2135
+          },
+          "span": {
+            "s": 2073,
+            "e": 2135
+          }
+        },
+        {
+          "msg": "\"distance is positive\"",
+          "expr": "(\u003e (p \"distance_km\") 0)",
+          "expr_span": {
+            "s": 2162,
+            "e": 2179
+          },
+          "span": {
+            "s": 2137,
+            "e": 2179
+          }
+        },
+        {
+          "msg": "\"air routes are quick\"",
+          "expr": "(|| (!= (p \"mode\") \"air\") (\u003c= (p \"transit_days\") 7))",
+          "expr_span": {
+            "s": 2206,
+            "e": 2240
+          },
+          "span": {
+            "s": 2181,
+            "e": 2240
+          }
+        }
+      ],
+      "span": {
+        "s": 1720,
+        "e": 2242
+      }
+    },
+    {
+      "name": "Shipment",
+      "name_span": {
+        "s": 2249,
+        "e": 2257
+      },
+      "extends": [
+        {
+          "name": "Identified",
+          "span": {
+            "s": 2266,
+            "e": 2276
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "shipment_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 2292,
+              "e": 2298
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 2280,
+            "e": 2306
+          }
+        },
+        {
+          "name": "reference",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^[A-Z]{2}[0-9]{8}$\""
+            ],
+            "span": {
+              "s": 2318,
+              "e": 2347
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 2357,
+                "e": 2363
+              }
+            }
+          ],
+          "span": {
+            "s": 2308,
+            "e": 2363
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"booked\"",
+              "\"collected\"",
+              "\"in_transit\"",
+              "\"delivered\"",
+              "\"cancelled\""
+            ],
+            "span": {
+              "s": 2372,
+              "e": 2439
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 2365,
+            "e": 2448
+          }
+        },
+        {
+          "name": "declared_value",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 2465,
+              "e": 2478
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 2450,
+            "e": 2487
+          }
+        },
+        {
+          "name": "currency",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Currency"
+            ],
+            "span": {
+              "s": 2498,
+              "e": 2506
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 2489,
+            "e": 2515
+          }
+        },
+        {
+          "name": "weight_kg",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "40000.0"
+            ],
+            "span": {
+              "s": 2527,
+              "e": 2546
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 2517,
+            "e": 2555
+          }
+        },
+        {
+          "name": "volume_m3",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 2567,
+              "e": 2580
+            }
+          },
+          "span": {
+            "s": 2557,
+            "e": 2580
+          }
+        },
+        {
+          "name": "collected_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 2595,
+              "e": 2604
+            }
+          },
+          "span": {
+            "s": 2582,
+            "e": 2604
+          }
+        },
+        {
+          "name": "delivered_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 2619,
+              "e": 2628
+            }
+          },
+          "span": {
+            "s": 2606,
+            "e": 2628
+          }
+        },
+        {
+          "name": "signature",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "128"
+            ],
+            "span": {
+              "s": 2640,
+              "e": 2651
+            }
+          },
+          "anns": [
+            {
+              "name": "vector",
+              "args": [
+                {
+                  "kind": "ident",
+                  "text": "cosine",
+                  "span": {
+                    "s": 2660,
+                    "e": 2666
+                  }
+                }
+              ],
+              "has_parens": true,
+              "span": {
+                "s": 2652,
+                "e": 2667
+              }
+            }
+          ],
+          "span": {
+            "s": 2630,
+            "e": 2667
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "travels",
+          "name_span": {
+            "s": 2674,
+            "e": 2681
+          },
+          "target": {
+            "name": "Route",
+            "span": {
+              "s": 2688,
+              "e": 2693
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 2670,
+            "e": 2693
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "handled_by",
+          "name_span": {
+            "s": 2699,
+            "e": 2709
+          },
+          "target": {
+            "name": "Organisation",
+            "span": {
+              "s": 2716,
+              "e": 2728
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 2695,
+            "e": 2728
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "parcels",
+          "name_span": {
+            "s": 2734,
+            "e": 2741
+          },
+          "target": {
+            "name": "Parcel",
+            "span": {
+              "s": 2749,
+              "e": 2755
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 2730,
+            "e": 2755
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "status",
+              "span": {
+                "s": 2766,
+                "e": 2772
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "collected_at",
+              "span": {
+                "s": 2774,
+                "e": 2786
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 2758,
+            "e": 2787
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"a delivered shipment was collected\"",
+          "expr": "(|| (!= (p \"status\") \"delivered\") (!= (p \"collected_at\") nil))",
+          "expr_span": {
+            "s": 2829,
+            "e": 2873
+          },
+          "span": {
+            "s": 2790,
+            "e": 2873
+          }
+        },
+        {
+          "msg": "\"a cancelled shipment was never delivered\"",
+          "expr": "(|| (!= (p \"status\") \"cancelled\") (== (p \"delivered_at\") nil))",
+          "expr_span": {
+            "s": 2920,
+            "e": 2964
+          },
+          "span": {
+            "s": 2875,
+            "e": 2964
+          }
+        },
+        {
+          "msg": "\"declared value is not negative\"",
+          "expr": "(\u003e= (p \"declared_value\") 0)",
+          "expr_span": {
+            "s": 3001,
+            "e": 3022
+          },
+          "span": {
+            "s": 2966,
+            "e": 3022
+          }
+        },
+        {
+          "msg": "\"weight is positive\"",
+          "expr": "(\u003e (p \"weight_kg\") 0)",
+          "expr_span": {
+            "s": 3047,
+            "e": 3062
+          },
+          "span": {
+            "s": 3024,
+            "e": 3062
+          }
+        }
+      ],
+      "span": {
+        "s": 2244,
+        "e": 3064
+      }
+    },
+    {
+      "name": "Parcel",
+      "name_span": {
+        "s": 3076,
+        "e": 3082
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "parcel_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 3096,
+              "e": 3102
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 3086,
+            "e": 3110
+          }
+        },
+        {
+          "name": "ordinal",
+          "constraint": {
+            "kind": "Integer",
+            "args": [
+              "1",
+              "_"
+            ],
+            "span": {
+              "s": 3120,
+              "e": 3133
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3112,
+            "e": 3142
+          }
+        },
+        {
+          "name": "weight_kg",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "1000.0"
+            ],
+            "span": {
+              "s": 3154,
+              "e": 3172
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3144,
+            "e": 3181
+          }
+        },
+        {
+          "name": "fragile",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 3191,
+              "e": 3198
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3183,
+            "e": 3207
+          }
+        },
+        {
+          "name": "barcode",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^[0-9]{12,14}$\""
+            ],
+            "span": {
+              "s": 3217,
+              "e": 3242
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3209,
+            "e": 3251
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"a parcel weighs something\"",
+          "expr": "(\u003e (p \"weight_kg\") 0)",
+          "expr_span": {
+            "s": 3284,
+            "e": 3299
+          },
+          "span": {
+            "s": 3254,
+            "e": 3299
+          }
+        }
+      ],
+      "span": {
+        "s": 3066,
+        "e": 3301
+      }
+    },
+    {
+      "name": "Event",
+      "name_span": {
+        "s": 3308,
+        "e": 3313
+      },
+      "extends": [
+        {
+          "name": "Timestamped",
+          "span": {
+            "s": 3322,
+            "e": 3333
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "event_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 3346,
+              "e": 3352
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 3337,
+            "e": 3360
+          }
+        },
+        {
+          "name": "kind",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"scan\"",
+              "\"exception\"",
+              "\"handover\"",
+              "\"customs\""
+            ],
+            "span": {
+              "s": 3367,
+              "e": 3415
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3362,
+            "e": 3424
+          }
+        },
+        {
+          "name": "recorded_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 3438,
+              "e": 3447
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 3457,
+                "e": 3463
+              }
+            }
+          ],
+          "span": {
+            "s": 3426,
+            "e": 3463
+          }
+        },
+        {
+          "name": "location",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Slug"
+            ],
+            "span": {
+              "s": 3474,
+              "e": 3478
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 3479,
+                "e": 3485
+              }
+            }
+          ],
+          "span": {
+            "s": 3465,
+            "e": 3485
+          }
+        },
+        {
+          "name": "note",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "0",
+              "500"
+            ],
+            "span": {
+              "s": 3492,
+              "e": 3506
+            }
+          },
+          "span": {
+            "s": 3487,
+            "e": 3506
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "concerns",
+          "name_span": {
+            "s": 3513,
+            "e": 3521
+          },
+          "target": {
+            "name": "Shipment",
+            "span": {
+              "s": 3528,
+              "e": 3536
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 3509,
+            "e": 3536
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "kind",
+              "span": {
+                "s": 3547,
+                "e": 3551
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "recorded_at",
+              "span": {
+                "s": 3553,
+                "e": 3564
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 3539,
+            "e": 3565
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"an exception carries a note\"",
+          "expr": "(|| (!= (p \"kind\") \"exception\") (\u003e (Len (p \"note\") (args ) (params ) nil) 0))",
+          "expr_span": {
+            "s": 3600,
+            "e": 3638
+          },
+          "span": {
+            "s": 3568,
+            "e": 3638
+          }
+        }
+      ],
+      "span": {
+        "s": 3303,
+        "e": 3640
+      }
+    },
+    {
+      "name": "Tariff",
+      "name_span": {
+        "s": 3647,
+        "e": 3653
+      },
+      "extends": [
+        {
+          "name": "Timestamped",
+          "span": {
+            "s": 3662,
+            "e": 3673
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "tariff_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 3687,
+              "e": 3693
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 3677,
+            "e": 3701
+          }
+        },
+        {
+          "name": "currency",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Currency"
+            ],
+            "span": {
+              "s": 3712,
+              "e": 3720
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3703,
+            "e": 3729
+          }
+        },
+        {
+          "name": "base_rate",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 3741,
+              "e": 3754
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3731,
+            "e": 3763
+          }
+        },
+        {
+          "name": "per_kg",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 3772,
+              "e": 3785
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3765,
+            "e": 3794
+          }
+        },
+        {
+          "name": "per_km",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 3803,
+              "e": 3816
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3796,
+            "e": 3825
+          }
+        },
+        {
+          "name": "minimum",
+          "constraint": {
+            "kind": "Float",
+            "args": [
+              "0.0",
+              "_"
+            ],
+            "span": {
+              "s": 3835,
+              "e": 3848
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3827,
+            "e": 3857
+          }
+        },
+        {
+          "name": "surcharge",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Fraction"
+            ],
+            "span": {
+              "s": 3869,
+              "e": 3877
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3859,
+            "e": 3886
+          }
+        },
+        {
+          "name": "effective_from",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 3903,
+              "e": 3907
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 3888,
+            "e": 3916
+          }
+        },
+        {
+          "name": "effective_to",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 3931,
+              "e": 3935
+            }
+          },
+          "span": {
+            "s": 3918,
+            "e": 3935
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "applies_to",
+          "name_span": {
+            "s": 3942,
+            "e": 3952
+          },
+          "target": {
+            "name": "Route",
+            "span": {
+              "s": 3960,
+              "e": 3965
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 3938,
+            "e": 3965
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"the minimum is not below the base rate\"",
+          "expr": "(\u003e= (p \"minimum\") 0)",
+          "expr_span": {
+            "s": 4011,
+            "e": 4025
+          },
+          "span": {
+            "s": 3968,
+            "e": 4025
+          }
+        },
+        {
+          "msg": "\"the surcharge is a fraction\"",
+          "expr": "(\u0026\u0026 (\u003e= (p \"surcharge\") 0) (\u003c= (p \"surcharge\") 1))",
+          "expr_span": {
+            "s": 4059,
+            "e": 4095
+          },
+          "span": {
+            "s": 4027,
+            "e": 4095
+          }
+        },
+        {
+          "msg": "\"rates are not negative\"",
+          "expr": "(\u0026\u0026 (\u003e= (p \"per_kg\") 0) (\u003e= (p \"per_km\") 0))",
+          "expr_span": {
+            "s": 4124,
+            "e": 4154
+          },
+          "span": {
+            "s": 4097,
+            "e": 4154
+          }
+        }
+      ],
+      "span": {
+        "s": 3642,
+        "e": 4156
+      }
+    },
+    {
+      "name": "Contact",
+      "name_span": {
+        "s": 4163,
+        "e": 4170
+      },
+      "extends": [
+        {
+          "name": "Identified",
+          "span": {
+            "s": 4179,
+            "e": 4189
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "contact_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 4204,
+              "e": 4210
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 4193,
+            "e": 4218
+          }
+        },
+        {
+          "name": "full_name",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "1",
+              "200"
+            ],
+            "span": {
+              "s": 4230,
+              "e": 4244
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 4220,
+            "e": 4253
+          }
+        },
+        {
+          "name": "email",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^[^@]+@[^@]+$\""
+            ],
+            "span": {
+              "s": 4261,
+              "e": 4285
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 4295,
+                "e": 4301
+              }
+            }
+          ],
+          "span": {
+            "s": 4255,
+            "e": 4301
+          }
+        },
+        {
+          "name": "phone",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "0",
+              "40"
+            ],
+            "span": {
+              "s": 4309,
+              "e": 4322
+            }
+          },
+          "span": {
+            "s": 4303,
+            "e": 4322
+          }
+        },
+        {
+          "name": "preferred",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 4334,
+              "e": 4341
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 4324,
+            "e": 4350
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "works_for",
+          "name_span": {
+            "s": 4357,
+            "e": 4366
+          },
+          "target": {
+            "name": "Organisation",
+            "span": {
+              "s": 4373,
+              "e": 4385
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 4353,
+            "e": 4385
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"a contact is reachable\"",
+          "expr": "(\u003e (Len (p \"email\") (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 4415,
+            "e": 4431
+          },
+          "span": {
+            "s": 4388,
+            "e": 4431
+          }
+        }
+      ],
+      "span": {
+        "s": 4158,
+        "e": 4433
+      }
+    }
+  ]
+}

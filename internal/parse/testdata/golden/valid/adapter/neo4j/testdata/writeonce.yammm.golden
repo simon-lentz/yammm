@@ -1,0 +1,257 @@
+{
+  "name": "\"wo_test\"",
+  "span": {
+    "s": 0,
+    "e": 16
+  },
+  "types": [
+    {
+      "name": "Tracked",
+      "name_span": {
+        "s": 32,
+        "e": 39
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "first_seen",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 57,
+              "e": 66
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 76,
+                "e": 86
+              }
+            }
+          ],
+          "span": {
+            "s": 46,
+            "e": 86
+          }
+        }
+      ],
+      "span": {
+        "s": 18,
+        "e": 88
+      }
+    },
+    {
+      "name": "Entity",
+      "name_span": {
+        "s": 95,
+        "e": 101
+      },
+      "extends": [
+        {
+          "name": "Tracked",
+          "span": {
+            "s": 110,
+            "e": 117
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 131,
+              "e": 137
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 124,
+            "e": 145
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 157,
+              "e": 163
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 150,
+            "e": 172
+          }
+        },
+        {
+          "name": "origin",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 184,
+              "e": 190
+            }
+          },
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 191,
+                "e": 201
+              }
+            }
+          ],
+          "span": {
+            "s": 177,
+            "e": 201
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "NOTES",
+          "name_span": {
+            "s": 211,
+            "e": 216
+          },
+          "target": {
+            "name": "Note",
+            "span": {
+              "s": 226,
+              "e": 230
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 207,
+            "e": 230
+          }
+        }
+      ],
+      "span": {
+        "s": 90,
+        "e": 232
+      }
+    },
+    {
+      "name": "Plain",
+      "name_span": {
+        "s": 239,
+        "e": 244
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 256,
+              "e": 262
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 251,
+            "e": 270
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 280,
+              "e": 286
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 275,
+            "e": 295
+          }
+        }
+      ],
+      "span": {
+        "s": 234,
+        "e": 297
+      }
+    },
+    {
+      "name": "Note",
+      "name_span": {
+        "s": 309,
+        "e": 313
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "note_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 328,
+              "e": 334
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 320,
+            "e": 345
+          }
+        },
+        {
+          "name": "body",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 358,
+              "e": 364
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 350,
+            "e": 376
+          }
+        },
+        {
+          "name": "added",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 389,
+              "e": 398
+            }
+          },
+          "required": true,
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 408,
+                "e": 418
+              }
+            }
+          ],
+          "span": {
+            "s": 381,
+            "e": 418
+          }
+        }
+      ],
+      "span": {
+        "s": 299,
+        "e": 420
+      }
+    }
+  ]
+}

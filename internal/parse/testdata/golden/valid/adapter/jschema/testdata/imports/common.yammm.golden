@@ -1,0 +1,109 @@
+{
+  "name": "\"common\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "imports": [
+    {
+      "path": "\"base.yammm\"",
+      "alias": "base",
+      "span": {
+        "s": 17,
+        "e": 44
+      }
+    }
+  ],
+  "datatypes": [
+    {
+      "name": "RegionCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "5",
+          "5"
+        ],
+        "span": {
+          "s": 64,
+          "e": 77
+        }
+      },
+      "span": {
+        "s": 46,
+        "e": 77
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 84,
+        "e": 90
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "RegionCode"
+            ],
+            "span": {
+              "s": 99,
+              "e": 109
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 94,
+            "e": 117
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 124,
+              "e": 130
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 119,
+            "e": 139
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_BASIN",
+          "name_span": {
+            "s": 145,
+            "e": 153
+          },
+          "target": {
+            "qualifier": "base",
+            "name": "Basin",
+            "span": {
+              "s": 158,
+              "e": 168
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 141,
+            "e": 168
+          }
+        }
+      ],
+      "span": {
+        "s": 79,
+        "e": 170
+      }
+    }
+  ]
+}

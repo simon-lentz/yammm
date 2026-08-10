@@ -1,0 +1,75 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 20,
+        "e": 21
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 30,
+              "e": 36
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 25,
+            "e": 45
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"pending_review\"",
+              "\"approved\"",
+              "\"rejected\"",
+              "\"needs_revision\"",
+              "\"escalated\"",
+              "\"archived\"",
+              "\"deleted\""
+            ],
+            "span": {
+              "s": 54,
+              "e": 154
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 47,
+            "e": 163
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 169,
+              "e": 176
+            }
+          },
+          "span": {
+            "s": 165,
+            "e": 176
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 178
+      }
+    }
+  ]
+}

@@ -1,0 +1,355 @@
+{
+  "name": "\"full\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "datatypes": [
+    {
+      "name": "FipsCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "5",
+          "5"
+        ],
+        "span": {
+          "s": 31,
+          "e": 44
+        }
+      },
+      "span": {
+        "s": 15,
+        "e": 44
+      }
+    },
+    {
+      "name": "Tier",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"gold\"",
+          "\"silver\""
+        ],
+        "span": {
+          "s": 57,
+          "e": 80
+        }
+      },
+      "span": {
+        "s": 45,
+        "e": 80
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Auditable",
+      "name_span": {
+        "s": 96,
+        "e": 105
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 120,
+              "e": 129
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 109,
+            "e": 138
+          }
+        },
+        {
+          "name": "updated_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 151,
+              "e": 160
+            }
+          },
+          "span": {
+            "s": 140,
+            "e": 160
+          }
+        }
+      ],
+      "span": {
+        "s": 82,
+        "e": 162
+      }
+    },
+    {
+      "name": "Detail",
+      "name_span": {
+        "s": 174,
+        "e": 180
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "note",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 189,
+              "e": 195
+            }
+          },
+          "span": {
+            "s": 184,
+            "e": 195
+          }
+        }
+      ],
+      "span": {
+        "s": 164,
+        "e": 197
+      }
+    },
+    {
+      "name": "State",
+      "name_span": {
+        "s": 204,
+        "e": 209
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 218,
+              "e": 224
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 213,
+            "e": 232
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 239,
+              "e": 245
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 234,
+            "e": 254
+          }
+        }
+      ],
+      "span": {
+        "s": 199,
+        "e": 256
+      }
+    },
+    {
+      "name": "County",
+      "name_span": {
+        "s": 263,
+        "e": 269
+      },
+      "extends": [
+        {
+          "name": "Auditable",
+          "span": {
+            "s": 278,
+            "e": 287
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "FipsCode"
+            ],
+            "span": {
+              "s": 296,
+              "e": 304
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 291,
+            "e": 312
+          }
+        },
+        {
+          "name": "tier",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Tier"
+            ],
+            "span": {
+              "s": 319,
+              "e": 323
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 314,
+            "e": 332
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"active\"",
+              "\"merged\""
+            ],
+            "span": {
+              "s": 341,
+              "e": 366
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 334,
+            "e": 375
+          }
+        },
+        {
+          "name": "population",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 388,
+              "e": 395
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 377,
+            "e": 404
+          }
+        },
+        {
+          "name": "centroid",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "2"
+            ],
+            "span": {
+              "s": 415,
+              "e": 425
+            }
+          },
+          "span": {
+            "s": 406,
+            "e": 425
+          }
+        },
+        {
+          "name": "aliases",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Alias",
+              "args": [
+                "FipsCode"
+              ],
+              "span": {
+                "s": 441,
+                "e": 449
+              }
+            },
+            "span": {
+              "s": 435,
+              "e": 450
+            }
+          },
+          "span": {
+            "s": 427,
+            "e": 450
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_STATE",
+          "name_span": {
+            "s": 456,
+            "e": 464
+          },
+          "target": {
+            "name": "State",
+            "span": {
+              "s": 471,
+              "e": 476
+            }
+          },
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "since",
+              "constraint": {
+                "kind": "Integer",
+                "span": {
+                  "s": 487,
+                  "e": 494
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 481,
+                "e": 503
+              }
+            }
+          ],
+          "span": {
+            "s": 452,
+            "e": 506
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "HAS_DETAIL",
+          "name_span": {
+            "s": 512,
+            "e": 522
+          },
+          "target": {
+            "name": "Detail",
+            "span": {
+              "s": 530,
+              "e": 536
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 508,
+            "e": 536
+          }
+        }
+      ],
+      "span": {
+        "s": 258,
+        "e": 538
+      }
+    }
+  ]
+}

@@ -1,0 +1,183 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "datatypes": [
+    {
+      "name": "StateCode",
+      "constraint": {
+        "kind": "String",
+        "args": [
+          "2",
+          "2"
+        ],
+        "span": {
+          "s": 31,
+          "e": 44
+        }
+      },
+      "span": {
+        "s": 14,
+        "e": 44
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "State",
+      "name_span": {
+        "s": 51,
+        "e": 56
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "StateCode"
+            ],
+            "span": {
+              "s": 65,
+              "e": 74
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 60,
+            "e": 82
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 89,
+              "e": 95
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 84,
+            "e": 104
+          }
+        }
+      ],
+      "span": {
+        "s": 46,
+        "e": 106
+      }
+    },
+    {
+      "name": "County",
+      "name_span": {
+        "s": 113,
+        "e": 119
+      },
+      "props": [
+        {
+          "name": "fips",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 128,
+              "e": 134
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 123,
+            "e": 142
+          }
+        },
+        {
+          "name": "zips",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Alias",
+              "args": [
+                "StateCode"
+              ],
+              "span": {
+                "s": 155,
+                "e": 164
+              }
+            },
+            "span": {
+              "s": 149,
+              "e": 165
+            }
+          },
+          "span": {
+            "s": 144,
+            "e": 165
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_STATE",
+          "name_span": {
+            "s": 171,
+            "e": 179
+          },
+          "target": {
+            "name": "State",
+            "span": {
+              "s": 186,
+              "e": 191
+            }
+          },
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "since",
+              "constraint": {
+                "kind": "Integer",
+                "span": {
+                  "s": 202,
+                  "e": 209
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 196,
+                "e": 218
+              }
+            },
+            {
+              "name": "code_tag",
+              "constraint": {
+                "kind": "Alias",
+                "args": [
+                  "StateCode"
+                ],
+                "span": {
+                  "s": 230,
+                  "e": 239
+                }
+              },
+              "span": {
+                "s": 221,
+                "e": 239
+              }
+            }
+          ],
+          "span": {
+            "s": 167,
+            "e": 242
+          }
+        }
+      ],
+      "span": {
+        "s": 108,
+        "e": 244
+      }
+    }
+  ]
+}

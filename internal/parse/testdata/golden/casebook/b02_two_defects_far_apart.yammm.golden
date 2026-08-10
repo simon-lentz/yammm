@@ -1,0 +1,150 @@
+{
+  "name": "\"seeded\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Alpha",
+      "name_span": {
+        "s": 22,
+        "e": 27
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 36,
+              "e": 42
+            }
+          },
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 43,
+                "e": 53
+              }
+            }
+          ],
+          "span": {
+            "s": 31,
+            "e": 53
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 63
+      }
+    },
+    {
+      "name": "Clean1",
+      "name_span": {
+        "s": 70,
+        "e": 76
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 83,
+              "e": 89
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 80,
+            "e": 97
+          }
+        }
+      ],
+      "span": {
+        "s": 65,
+        "e": 99
+      }
+    },
+    {
+      "name": "Clean2",
+      "name_span": {
+        "s": 106,
+        "e": 112
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 119,
+              "e": 125
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 116,
+            "e": 133
+          }
+        },
+        {
+          "name": "note",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 140,
+              "e": 146
+            }
+          },
+          "span": {
+            "s": 135,
+            "e": 146
+          }
+        }
+      ],
+      "span": {
+        "s": 101,
+        "e": 148
+      }
+    },
+    {
+      "name": "Omega",
+      "name_span": {
+        "s": 155,
+        "e": 160
+      },
+      "span": {
+        "s": 150,
+        "e": 191
+      }
+    }
+  ],
+  "diags": [
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "unexpected token \"}\" in a type body",
+      "span": {
+        "s": 62,
+        "e": 63
+      },
+      "line": 5,
+      "end_line": 5
+    },
+    {
+      "code": "E_SYNTAX",
+      "severity": "error",
+      "msg": "malformed numeric literal \"0x7\": numeric literals are decimal (hexadecimal and suffixed forms are not supported)",
+      "span": {
+        "s": 177,
+        "e": 180
+      },
+      "line": 17,
+      "end_line": 17
+    }
+  ]
+}

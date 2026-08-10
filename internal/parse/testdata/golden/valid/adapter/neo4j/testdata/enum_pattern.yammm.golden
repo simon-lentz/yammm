@@ -1,0 +1,74 @@
+{
+  "name": "\"enum_pattern_test\"",
+  "span": {
+    "s": 0,
+    "e": 26
+  },
+  "types": [
+    {
+      "name": "Record",
+      "name_span": {
+        "s": 33,
+        "e": 39
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 53,
+              "e": 59
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 46,
+            "e": 67
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"pending\"",
+              "\"approved\"",
+              "\"rejected\""
+            ],
+            "span": {
+              "s": 79,
+              "e": 118
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 72,
+            "e": 127
+          }
+        },
+        {
+          "name": "email",
+          "constraint": {
+            "kind": "Pattern",
+            "args": [
+              "\"^.+@.+$\""
+            ],
+            "span": {
+              "s": 139,
+              "e": 157
+            }
+          },
+          "span": {
+            "s": 132,
+            "e": 157
+          }
+        }
+      ],
+      "span": {
+        "s": 28,
+        "e": 159
+      }
+    }
+  ]
+}

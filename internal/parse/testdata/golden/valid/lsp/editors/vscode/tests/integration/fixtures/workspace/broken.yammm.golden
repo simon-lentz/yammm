@@ -1,0 +1,37 @@
+{
+  "name": "\"integration_broken\"",
+  "span": {
+    "s": 0,
+    "e": 27
+  },
+  "types": [
+    {
+      "name": "MissingKey",
+      "name_span": {
+        "s": 34,
+        "e": 44
+      },
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 53,
+              "e": 59
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 48,
+            "e": 68
+          }
+        }
+      ],
+      "span": {
+        "s": 29,
+        "e": 70
+      }
+    }
+  ]
+}

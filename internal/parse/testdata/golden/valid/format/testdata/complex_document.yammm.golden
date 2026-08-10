@@ -1,0 +1,136 @@
+{
+  "name": "\"vehicles\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "imports": [
+    {
+      "path": "\"./parts\"",
+      "alias": "parts",
+      "span": {
+        "s": 20,
+        "e": 45
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Vehicle",
+      "name_span": {
+        "s": 87,
+        "e": 94
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "vin",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "17",
+              "17"
+            ],
+            "span": {
+              "s": 102,
+              "e": 116
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 98,
+            "e": 124
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "MANUFACTURER",
+          "name_span": {
+            "s": 132,
+            "e": 144
+          },
+          "target": {
+            "name": "Manufacturer",
+            "span": {
+              "s": 151,
+              "e": 163
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 128,
+            "e": 163
+          }
+        }
+      ],
+      "span": {
+        "s": 73,
+        "e": 165
+      }
+    },
+    {
+      "name": "Car",
+      "name_span": {
+        "s": 194,
+        "e": 197
+      },
+      "extends": [
+        {
+          "name": "Vehicle",
+          "span": {
+            "s": 206,
+            "e": 213
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "model",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 223,
+              "e": 229
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 217,
+            "e": 238
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "WHEELS",
+          "name_span": {
+            "s": 244,
+            "e": 250
+          },
+          "target": {
+            "qualifier": "parts",
+            "name": "Wheel",
+            "span": {
+              "s": 258,
+              "e": 269
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 240,
+            "e": 269
+          }
+        }
+      ],
+      "span": {
+        "s": 189,
+        "e": 271
+      }
+    }
+  ]
+}

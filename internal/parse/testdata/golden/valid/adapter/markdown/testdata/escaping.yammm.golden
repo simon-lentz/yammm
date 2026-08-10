@@ -1,0 +1,109 @@
+{
+  "name": "\"notes\"",
+  "span": {
+    "s": 0,
+    "e": 14
+  },
+  "datatypes": [
+    {
+      "name": "Grade",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"A|B\"",
+          "\"C`D\""
+        ],
+        "span": {
+          "s": 29,
+          "e": 48
+        }
+      },
+      "span": {
+        "s": 16,
+        "e": 48
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Note",
+      "name_span": {
+        "s": 55,
+        "e": 59
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 66,
+              "e": 72
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 63,
+            "e": 80
+          }
+        },
+        {
+          "name": "grade",
+          "doc": "Multi-line doc:\n\tline two with a | pipe.",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Grade"
+            ],
+            "span": {
+              "s": 136,
+              "e": 141
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 82,
+            "e": 150
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"on|off\"",
+              "\"idle\""
+            ],
+            "span": {
+              "s": 159,
+              "e": 182
+            }
+          },
+          "span": {
+            "s": 152,
+            "e": 182
+          }
+        },
+        {
+          "name": "code",
+          "doc": "Alt spelling uses a\\|b.",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 220,
+              "e": 226
+            }
+          },
+          "span": {
+            "s": 184,
+            "e": 226
+          }
+        }
+      ],
+      "span": {
+        "s": 50,
+        "e": 228
+      }
+    }
+  ]
+}

@@ -1,0 +1,385 @@
+{
+  "name": "\"bench_annotations\"",
+  "span": {
+    "s": 119,
+    "e": 145
+  },
+  "types": [
+    {
+      "name": "Record",
+      "name_span": {
+        "s": 152,
+        "e": 158
+      },
+      "props": [
+        {
+          "name": "record_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 172,
+              "e": 178
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 162,
+            "e": 186
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 194,
+              "e": 200
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 201,
+                "e": 207
+              }
+            }
+          ],
+          "span": {
+            "s": 188,
+            "e": 207
+          }
+        },
+        {
+          "name": "region",
+          "constraint": {
+            "kind": "String",
+            "args": [
+              "2",
+              "2"
+            ],
+            "span": {
+              "s": 216,
+              "e": 228
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 229,
+                "e": 235
+              }
+            }
+          ],
+          "span": {
+            "s": 209,
+            "e": 235
+          }
+        },
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 248,
+              "e": 257
+            }
+          },
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 258,
+                "e": 268
+              }
+            }
+          ],
+          "span": {
+            "s": 237,
+            "e": 268
+          }
+        },
+        {
+          "name": "source_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 280,
+              "e": 286
+            }
+          },
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 287,
+                "e": 297
+              }
+            }
+          ],
+          "span": {
+            "s": 270,
+            "e": 297
+          }
+        },
+        {
+          "name": "embedding",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "256"
+            ],
+            "span": {
+              "s": 309,
+              "e": 320
+            }
+          },
+          "anns": [
+            {
+              "name": "vector",
+              "args": [
+                {
+                  "kind": "ident",
+                  "text": "cosine",
+                  "span": {
+                    "s": 329,
+                    "e": 335
+                  }
+                }
+              ],
+              "has_parens": true,
+              "span": {
+                "s": 321,
+                "e": 336
+              }
+            }
+          ],
+          "span": {
+            "s": 299,
+            "e": 336
+          }
+        },
+        {
+          "name": "summary",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 346,
+              "e": 352
+            }
+          },
+          "span": {
+            "s": 338,
+            "e": 352
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "state",
+              "span": {
+                "s": 404,
+                "e": 409
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "region",
+              "span": {
+                "s": 411,
+                "e": 417
+              }
+            }
+          ],
+          "has_parens": true,
+          "doc": "the state-and-region lookup index",
+          "span": {
+            "s": 355,
+            "e": 418
+          }
+        },
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "region",
+              "span": {
+                "s": 428,
+                "e": 434
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "created_at",
+              "span": {
+                "s": 436,
+                "e": 446
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 420,
+            "e": 447
+          }
+        }
+      ],
+      "span": {
+        "s": 147,
+        "e": 449
+      }
+    },
+    {
+      "name": "Snapshot",
+      "name_span": {
+        "s": 456,
+        "e": 464
+      },
+      "props": [
+        {
+          "name": "snapshot_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 480,
+              "e": 486
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 468,
+            "e": 494
+          }
+        },
+        {
+          "name": "taken_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 505,
+              "e": 514
+            }
+          },
+          "anns": [
+            {
+              "name": "writeOnce",
+              "span": {
+                "s": 515,
+                "e": 525
+              }
+            },
+            {
+              "name": "index",
+              "span": {
+                "s": 526,
+                "e": 532
+              }
+            }
+          ],
+          "span": {
+            "s": 496,
+            "e": 532
+          }
+        },
+        {
+          "name": "digest",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 541,
+              "e": 547
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 548,
+                "e": 554
+              }
+            }
+          ],
+          "span": {
+            "s": 534,
+            "e": 554
+          }
+        },
+        {
+          "name": "vector",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "64"
+            ],
+            "span": {
+              "s": 563,
+              "e": 573
+            }
+          },
+          "anns": [
+            {
+              "name": "vector",
+              "args": [
+                {
+                  "kind": "ident",
+                  "text": "euclidean",
+                  "span": {
+                    "s": 582,
+                    "e": 591
+                  }
+                }
+              ],
+              "has_parens": true,
+              "span": {
+                "s": 574,
+                "e": 592
+              }
+            }
+          ],
+          "span": {
+            "s": 556,
+            "e": 592
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "digest",
+              "span": {
+                "s": 603,
+                "e": 609
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "taken_at",
+              "span": {
+                "s": 611,
+                "e": 619
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 595,
+            "e": 620
+          }
+        }
+      ],
+      "span": {
+        "s": 451,
+        "e": 622
+      }
+    }
+  ]
+}

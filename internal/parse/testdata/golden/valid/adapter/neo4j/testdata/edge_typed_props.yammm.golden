@@ -1,0 +1,118 @@
+{
+  "name": "\"edge_typed_props_test\"",
+  "span": {
+    "s": 0,
+    "e": 30
+  },
+  "types": [
+    {
+      "name": "Target",
+      "name_span": {
+        "s": 37,
+        "e": 43
+      },
+      "props": [
+        {
+          "name": "target_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 60,
+              "e": 66
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 50,
+            "e": 74
+          }
+        }
+      ],
+      "span": {
+        "s": 32,
+        "e": 76
+      }
+    },
+    {
+      "name": "Source",
+      "name_span": {
+        "s": 83,
+        "e": 89
+      },
+      "props": [
+        {
+          "name": "source_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 106,
+              "e": 112
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 96,
+            "e": 120
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "LINKED_AT",
+          "name_span": {
+            "s": 129,
+            "e": 138
+          },
+          "target": {
+            "name": "Target",
+            "span": {
+              "s": 147,
+              "e": 153
+            }
+          },
+          "optional": true,
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "observed_at",
+              "constraint": {
+                "kind": "Timestamp",
+                "span": {
+                  "s": 176,
+                  "e": 185
+                }
+              },
+              "span": {
+                "s": 164,
+                "e": 185
+              }
+            },
+            {
+              "name": "weight",
+              "constraint": {
+                "kind": "Float",
+                "span": {
+                  "s": 201,
+                  "e": 206
+                }
+              },
+              "span": {
+                "s": 194,
+                "e": 206
+              }
+            }
+          ],
+          "span": {
+            "s": 125,
+            "e": 212
+          }
+        }
+      ],
+      "span": {
+        "s": 78,
+        "e": 214
+      }
+    }
+  ]
+}

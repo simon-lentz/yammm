@@ -1,0 +1,6 @@
+schema "seeded"
+
+type Alpha {
+	id String primary
+	s String[-1, 2]
+}
