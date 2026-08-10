@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
@@ -33,8 +34,7 @@ func (c *NotificationCollector) DiagnosticsFor(uri string) []protocol.Diagnostic
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for i := len(c.entries) - 1; i >= 0; i-- {
-		e := c.entries[i]
+	for _, e := range slices.Backward(c.entries) {
 		if e.Method != protocol.ServerTextDocumentPublishDiagnostics {
 			continue
 		}

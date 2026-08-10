@@ -1,5 +1,7 @@
 package protocol
 
+import "slices"
+
 // TextDocumentSyncKind defines how the host (editor) should sync document changes.
 type TextDocumentSyncKind = Integer
 
@@ -45,10 +47,9 @@ type DidChangeTextDocumentParams struct {
 // ExtractFullSyncText returns the text of the last full-document replacement
 // in a content changes slice. Returns ("", false) if no full-sync change exists.
 func ExtractFullSyncText(changes []ContentChange) (string, bool) {
-	// Walk backward to find the last full-sync entry directly.
-	for i := len(changes) - 1; i >= 0; i-- {
-		if changes[i].IsFullSync() {
-			return changes[i].Text, true
+	for _, change := range slices.Backward(changes) {
+		if change.IsFullSync() {
+			return change.Text, true
 		}
 	}
 	return "", false
