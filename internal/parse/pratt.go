@@ -245,7 +245,7 @@ func (p *exprParser) prefix() (expr.Expression, error) {
 	case p.tok.lcWord:
 		return p.lcWord(t)
 	}
-	return nil, p.errf(t, "unexpected token %q in expression", t.Value)
+	return nil, p.errf(t, "unexpected token %q in an expression", t.Value)
 }
 
 // literal converts a literal token, reporting a diagnostic and substituting
@@ -298,9 +298,9 @@ func (p *exprParser) lcWord(t *lexer.Token) (expr.Expression, error) {
 		p.next()
 		return expr.NewLiteral(t.Value == "true"), nil
 	case "as", "part":
-		return nil, p.errf(t, "unexpected keyword %q in expression", t.Value)
+		return nil, p.errf(t, "unexpected keyword %q in an expression", t.Value)
 	case "in":
-		return nil, p.errf(t, "unexpected 'in' in expression")
+		return nil, p.errf(t, "unexpected 'in' in an expression")
 	}
 	p.next()
 	return expr.SExpr{expr.Op("p"), expr.NewLiteral(t.Value)}, nil
@@ -412,7 +412,7 @@ func (p *exprParser) exprListUntil(closer lexer.TokenType, bareComma bool) ([]ex
 			p.next()
 			return out, nil
 		}
-		return nil, p.errf(p.lx.Peek(), "expected ',' or closing delimiter in expression list")
+		return nil, p.errf(p.lx.Peek(), "expected ',' or closing delimiter in an expression list")
 	}
 }
 

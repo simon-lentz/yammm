@@ -19,7 +19,7 @@ type sourceEntry struct {
 	// len(lineOffsets) is the total number of lines.
 	lineOffsets []int
 	// runeOffsets[i] is the byte offset of the i-th rune.
-	// Used for O(1) rune-to-byte conversion (ANTLR token positions).
+	// Backs the rune column in every Position, and RuneToByteOffset.
 	runeOffsets []int
 }
 
@@ -188,8 +188,8 @@ func (r *Registry) LineStartByte(source location.SourceID, line int) (int, bool)
 
 // RuneToByteOffset converts a rune index (0-based) to a byte offset.
 //
-// This method enables O(1) conversion from ANTLR token positions (which are
-// rune-based) to byte offsets needed for [location.Position].
+// Nothing in this module calls it: the parser reads bytes, so spans are
+// byte-native. It serves callers holding rune-indexed positions from elsewhere.
 //
 // Returns (0, false) if:
 //   - The source is not registered

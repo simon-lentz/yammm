@@ -3382,7 +3382,7 @@ type Source {
 func TestParse_VectorDimensionNonNumeric(t *testing.T) {
 	t.Parallel()
 
-	// Test vector with non-numeric dimension (ANTLR error recovery)
+	// Test vector with non-numeric dimension, which recovery must survive.
 	source := `schema "test"
 type Embedding {
 	id UUID primary

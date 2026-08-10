@@ -2,9 +2,8 @@
 //
 // These tests state yammm's own rules — offsets are bytes, columns are runes,
 // ends are exclusive, and the lexical stream elides nothing — rather than any
-// property of the parser generator underneath. The file they replaced pinned
-// ANTLR's rune-based indexing and the conversion that bridged it to byte
-// offsets; there is no conversion now, because the parser reads bytes.
+// property of the parser underneath. Spans need no coordinate conversion,
+// because the parser reads bytes.
 //
 // A failure here means a span no longer slices back to the text it names, which
 // is the invariant the LSP's position conversion and every diagnostic renderer

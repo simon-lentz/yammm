@@ -15,9 +15,9 @@
 //
 // # Compilation vs Evaluation
 //
-// Compilation (transforming ANTLR parse trees into Expression trees) is handled
-// by the internal exprcomp package. Evaluation is handled separately by the
-// instance layer, which provides the runtime context (property values,
+// Compilation (turning parsed expression syntax into Expression trees) is
+// handled by the internal exprcomp package. Evaluation is handled separately by
+// the instance layer, which provides the runtime context (property values,
 // variables, etc.) needed to execute expressions.
 //
 // # Helper Functions

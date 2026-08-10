@@ -256,7 +256,7 @@ func (b *builder) parseMembers(plex *lexer.PeekingLexer, nt *TypeDecl) int {
 	for {
 		t := plex.Peek()
 		if t.EOF() {
-			b.report(diag.Error, diag.E_SYNTAX, b.pointAt(t.Pos), "unexpected end of input in type body")
+			b.report(diag.Error, diag.E_SYNTAX, b.pointAt(t.Pos), "unexpected end of input in a type body")
 			return len(b.src)
 		}
 		if t.Type == b.ps.tok.rbrace {

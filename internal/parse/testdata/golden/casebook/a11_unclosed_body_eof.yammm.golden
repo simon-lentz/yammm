@@ -38,7 +38,7 @@
     {
       "code": "E_SYNTAX",
       "severity": "error",
-      "msg": "unexpected end of input in type body",
+      "msg": "unexpected end of input in a type body",
       "span": {
         "s": 49,
         "e": 49

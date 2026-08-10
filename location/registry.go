@@ -38,9 +38,9 @@ type PositionRegistry interface {
 
 // RuneOffsetConverter provides rune-to-byte offset conversion.
 //
-// ANTLR positions are rune-based (character indices), but the schema layer
-// uses byte offsets for consistency with Go strings and UTF-8 handling.
-// This interface enables the conversion between these coordinate systems.
+// Nothing in this module converts: the parser reads bytes, so spans are
+// byte-native end to end. The interface remains for callers holding
+// rune-indexed positions from elsewhere.
 //
 // The primary implementation is source.Registry.
 type RuneOffsetConverter interface {

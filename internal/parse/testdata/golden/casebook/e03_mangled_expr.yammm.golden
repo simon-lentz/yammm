@@ -52,7 +52,7 @@
     {
       "code": "E_SYNTAX",
       "severity": "error",
-      "msg": "unexpected token \")\" in expression",
+      "msg": "unexpected token \")\" in an expression",
       "span": {
         "s": 85,
         "e": 86

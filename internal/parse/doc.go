@@ -81,8 +81,9 @@
 // row reports E_SYNTAX at diag.Error, so no malformed source loads through the
 // sites they cover.
 //
-// Naming the recovery region rather than the construct that failed is a known
-// divergence from the ANTLR parser, which names the construct.
+// Naming the recovery region rather than the construct that failed is
+// deliberate: three mechanisms that named the construct were built and all
+// three were withdrawn.
 //
 // # Spans
 //

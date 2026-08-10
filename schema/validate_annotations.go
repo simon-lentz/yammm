@@ -189,12 +189,7 @@ func (c *completer) validatePropertyAnnotations(t *Type, prop *Property) {
 		spec, known := annotationRegistry[annotationKey{PlacementProperty, a.name}]
 
 		if a.argsMalformed {
-			// The syntax error owns the ARGUMENT diagnosis (see
-			// Annotation.argsMalformed), so the duplicate probe and spec.validate
-			// — both of which read the arguments — are skipped. But the NAME
-			// parsed fine, and an unknown or misplaced annotation is an
-			// independent problem the malformed arguments do not explain, so it is
-			// still reported.
+			// Unreachable: nothing sets argsMalformed. Kept until the field goes.
 			if !known {
 				c.reportUnknownOrMisplaced(a, PlacementProperty)
 			}
@@ -223,10 +218,7 @@ func (c *completer) validateTypeAnnotations(t *Type) {
 		spec, known := annotationRegistry[annotationKey{PlacementType, a.name}]
 
 		if a.argsMalformed {
-			// The identity dedup key is built from the arguments, which never
-			// parsed, so the duplicate probe is skipped — as is spec.validate.
-			// The name still resolves, so an unknown or misplaced annotation is
-			// reported independently (see validatePropertyAnnotations).
+			// Unreachable: nothing sets argsMalformed. Kept until the field goes.
 			if !known {
 				c.reportUnknownOrMisplaced(a, PlacementType)
 			}

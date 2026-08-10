@@ -8,7 +8,7 @@ import "strings"
 const probeKey = "probe_id UUID primary"
 
 // WrapForParsing wraps the block's content in the minimal schema context the
-// ANTLR parser needs, whose root rule is `schema`.
+// parser needs, whose root production is the schema header.
 //
 // Content that already declares a schema is returned untouched. Content that
 // starts with a top-level keyword gets a schema declaration. Everything else —
