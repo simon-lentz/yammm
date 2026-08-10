@@ -35,21 +35,3 @@ type PositionRegistry interface {
 	//   - Byte: The input byteOffset (echoed back for convenience)
 	PositionAt(source SourceID, byteOffset int) Position
 }
-
-// RuneOffsetConverter provides rune-to-byte offset conversion.
-//
-// Nothing in this module converts: the parser reads bytes, so spans are
-// byte-native end to end. The interface remains for callers holding
-// rune-indexed positions from elsewhere.
-//
-// The primary implementation is source.Registry.
-type RuneOffsetConverter interface {
-	// RuneToByteOffset converts a rune offset to a byte offset for the given source.
-	//
-	// Returns (byteOffset, true) on success.
-	// Returns (0, false) if:
-	//   - The source is not registered
-	//   - The rune offset is out of range
-	//   - The rune offset is negative
-	RuneToByteOffset(source SourceID, runeOffset int) (byteOffset int, ok bool)
-}

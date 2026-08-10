@@ -30,9 +30,6 @@
 # Go workspace sum (generated)
 go.work.sum
 
-# antlr4 dep
-*.jar
-
 # VS Code extension build artifacts
 lsp/editors/vscode/out/
 lsp/editors/vscode/out-test/

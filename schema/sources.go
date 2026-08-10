@@ -21,9 +21,6 @@ type SourceRegistry interface {
 	// LineStartByte returns the byte offset of the start of a line.
 	LineStartByte(id location.SourceID, line int) (int, bool)
 
-	// RuneToByteOffset converts a rune index to a byte offset.
-	RuneToByteOffset(id location.SourceID, runeIndex int) (int, bool)
-
 	// Keys returns all registered source IDs in sorted order.
 	// The returned slice must be sorted by SourceID.String() and must be
 	// a defensive copy (callers may modify it freely).
@@ -86,15 +83,6 @@ func (s *Sources) LineStartByte(id location.SourceID, line int) (int, bool) {
 		return 0, false
 	}
 	return s.registry.LineStartByte(id, line)
-}
-
-// RuneToByteOffset converts a rune index to a byte offset.
-// Returns 0, false if the source is not found or rune index is invalid.
-func (s *Sources) RuneToByteOffset(id location.SourceID, runeIndex int) (int, bool) {
-	if s == nil || s.registry == nil {
-		return 0, false
-	}
-	return s.registry.RuneToByteOffset(id, runeIndex)
 }
 
 // SourceIDs returns all registered source IDs in sorted order.

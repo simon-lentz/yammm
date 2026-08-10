@@ -406,63 +406,6 @@ func TestRegistry_LineStartByte_UnknownSource(t *testing.T) {
 	}
 }
 
-func TestRegistry_RuneToByteOffset(t *testing.T) {
-	t.Parallel()
-
-	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://rune.yammm")
-	// "日本語abc" = 12 bytes (3+3+3+1+1+1)
-	// Rune indices (0-based): 日=0, 本=1, 語=2, a=3, b=4, c=5
-	// Byte offsets:           0,    3,    6,   9,   10,  11
-	content := []byte("日本語abc")
-
-	if err := reg.Register(sourceID, content); err != nil {
-		t.Fatalf("Register() error: %v", err)
-	}
-
-	tests := []struct {
-		runeIndex int
-		wantByte  int
-		wantOK    bool
-	}{
-		{0, 0, true},   // 日
-		{1, 3, true},   // 本
-		{2, 6, true},   // 語
-		{3, 9, true},   // a
-		{4, 10, true},  // b
-		{5, 11, true},  // c
-		{6, 12, true},  // EOF
-		{7, 0, false},  // beyond
-		{-1, 0, false}, // negative
-	}
-
-	for _, tt := range tests {
-		byteOff, ok := reg.RuneToByteOffset(sourceID, tt.runeIndex)
-		if ok != tt.wantOK {
-			t.Errorf("RuneToByteOffset(%d) ok = %v; want %v", tt.runeIndex, ok, tt.wantOK)
-			continue
-		}
-		if !ok {
-			continue
-		}
-		if byteOff != tt.wantByte {
-			t.Errorf("RuneToByteOffset(%d) = %d; want %d", tt.runeIndex, byteOff, tt.wantByte)
-		}
-	}
-}
-
-func TestRegistry_RuneToByteOffset_UnknownSource(t *testing.T) {
-	t.Parallel()
-
-	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://unknown.yammm")
-
-	_, ok := reg.RuneToByteOffset(sourceID, 0)
-	if ok {
-		t.Error("RuneToByteOffset() returned ok=true for unknown source")
-	}
-}
-
 func TestRegistry_EmptyContent(t *testing.T) {
 	t.Parallel()
 
@@ -490,15 +433,6 @@ func TestRegistry_EmptyContent(t *testing.T) {
 	}
 	if pos.Line != 1 || pos.Column != 1 {
 		t.Errorf("PositionAt(0) = (line=%d, col=%d); want (1, 1)", pos.Line, pos.Column)
-	}
-
-	// RuneToByteOffset for empty content (EOF only)
-	byteOff, ok := reg.RuneToByteOffset(sourceID, 0)
-	if !ok {
-		t.Fatal("RuneToByteOffset(0) returned false for empty content")
-	}
-	if byteOff != 0 {
-		t.Errorf("RuneToByteOffset(0) = %d; want 0", byteOff)
 	}
 }
 
@@ -800,50 +734,6 @@ func TestProvenanceUTF8ByteOffsets(t *testing.T) {
 	}
 }
 
-func TestProvenanceUTF8RuneToByteOffset(t *testing.T) {
-	t.Parallel()
-
-	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://utf8_col_test.yammm")
-
-	// "日本語abc" = 12 bytes (3+3+3+1+1+1)
-	// Rune positions (0-based): 日=0, 本=1, 語=2, a=3, b=4, c=5, \n=6
-	content := []byte("日本語abc\n")
-
-	if err := reg.Register(sourceID, content); err != nil {
-		t.Fatalf("Register() error: %v", err)
-	}
-
-	tests := []struct {
-		name      string
-		runeIndex int
-		wantByte  int
-	}{
-		{"first CJK", 0, 0},
-		{"second CJK", 1, 3},
-		{"third CJK", 2, 6},
-		{"first ASCII after CJK", 3, 9},
-		{"second ASCII", 4, 10},
-		{"third ASCII", 5, 11},
-		{"at newline", 6, 12},
-		{"EOF", 7, 13},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			gotByte, ok := reg.RuneToByteOffset(sourceID, tt.runeIndex)
-			if !ok {
-				t.Fatalf("RuneToByteOffset(%d) returned false", tt.runeIndex)
-			}
-			if gotByte != tt.wantByte {
-				t.Errorf("RuneToByteOffset(%d) = %d; want %d",
-					tt.runeIndex, gotByte, tt.wantByte)
-			}
-		})
-	}
-}
-
 func TestProvenanceUTF8Roundtrip(t *testing.T) {
 	t.Parallel()
 
@@ -976,7 +866,6 @@ func TestRegistry_ConcurrentRead(t *testing.T) {
 		_, _ = reg.ContentBySource(sourceID)
 		_ = reg.PositionAt(sourceID, 5)
 		_, _ = reg.LineStartByte(sourceID, 2)
-		_, _ = reg.RuneToByteOffset(sourceID, 3)
 		_ = reg.Has(sourceID)
 		_ = reg.Len()
 		_ = reg.Keys()
@@ -1344,18 +1233,6 @@ func BenchmarkRegistry_PositionAt(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		_ = reg.PositionAt(sourceID, 25)
-	}
-}
-
-func BenchmarkRegistry_RuneToByteOffset(b *testing.B) {
-	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://bench.yammm")
-	content := []byte("type Person {\n  name: string\n  age: int\n}\n")
-	_ = reg.Register(sourceID, content)
-
-	b.ResetTimer()
-	for b.Loop() {
-		_, _ = reg.RuneToByteOffset(sourceID, 25)
 	}
 }
 

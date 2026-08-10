@@ -2,10 +2,9 @@ package parse
 
 import "testing"
 
-// invalidNumberWording is the malformed-numeric text this package emits. It is
-// the canonical copy: schema/internal/exprcomp delegates here rather than
-// keeping its own, and pins the same literal so a wording edit fails on both
-// sides rather than silently re-pointing one of them.
+// invalidNumberWording is the malformed-numeric text this package emits, and
+// this package is its only source. A wording edit must change the literal here
+// too, which is what makes the edit deliberate.
 const invalidNumberWording = `malformed numeric literal "0x10": numeric literals are decimal ` +
 	`(hexadecimal and suffixed forms are not supported)`
 

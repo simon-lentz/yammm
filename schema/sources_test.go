@@ -68,15 +68,6 @@ func TestSources_LineStartByte_NilReceiver(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestSources_RuneToByteOffset_NilReceiver(t *testing.T) {
-	var s *schema.Sources
-
-	offset, ok := s.RuneToByteOffset(location.SourceID{}, 0)
-
-	assert.Equal(t, 0, offset)
-	assert.False(t, ok)
-}
-
 func TestSources_SourceIDs_NilReceiver(t *testing.T) {
 	var s *schema.Sources
 
@@ -158,19 +149,6 @@ func TestSources_LineStartByte_Valid(t *testing.T) {
 
 	assert.True(t, ok)
 	assert.Equal(t, 6, offset)
-}
-
-func TestSources_RuneToByteOffset_Valid(t *testing.T) {
-	reg := source.NewRegistry()
-	// "café" = c(1) + a(1) + f(1) + é(2) = 5 bytes, 4 runes
-	sourceID := registerTestSource(t, reg, "café", "rune")
-	s := schema.NewSources(reg)
-
-	// Rune 3 (é) starts at byte 3
-	offset, ok := s.RuneToByteOffset(sourceID, 3)
-
-	assert.True(t, ok)
-	assert.Equal(t, 3, offset)
 }
 
 func TestSources_SourceIDs_Valid(t *testing.T) {
