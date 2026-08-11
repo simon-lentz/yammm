@@ -34,15 +34,21 @@ package snapshot
 //     that insert a fifth top-level key, shift the header-body
 //     transition, or change the inter-key separator pattern silently
 //     break UpdateMetadata even without relaxing the field-order rule.
-//     UpdateMetadata(x) == Marshal(Load(x)) holds for documents the
-//     current Marshal produced; a legacy document carrying int-shaped
-//     floats is the deliberate exception — UpdateMetadata preserves its
-//     body verbatim while a re-marshal heals KindFloat values into
-//     decimal form.
+//     UpdateMetadata(x) == Marshal(Load(x)) for a document the current
+//     Marshal produced that carries neither created_at nor metadata.
+//     Both are header fields Load does not return, so a re-marshal
+//     cannot reproduce them while UpdateMetadata keeps the header
+//     verbatim. A legacy document carrying int-shaped floats diverges
+//     for a second reason: UpdateMetadata preserves its body while a
+//     re-marshal heals KindFloat values into decimal form.
 //
-// Both contracts are tested in snapshot/wire_test.go via:
+// These contracts are tested in snapshot/wire_test.go via:
 //   - TestWireFormat_TopLevelKeyOrder (token-level key-order pin)
 //   - TestWireFormat_BodySuffixContract (bodyOffset-capture + shape pin)
+//
+// and the equivalence above in snapshot/wire_equivalence_test.go via
+// TestWireContract_UpdateMetadataMatchesReMarshal, which pins the
+// equality and the created_at divergence in the same test.
 //
 // These tests run across a representative corpus of Marshal outputs
 // under every supported Option combination, so a future Marshal-side

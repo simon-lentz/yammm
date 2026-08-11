@@ -262,7 +262,7 @@ Several escape sequences allow arbitrary values to be encoded as ASCII text:
 \0           U+0000 null character
 ```
 
-This is the complete escape vocabulary \u2014 a backslash before any other character does not lex. `\0` always means U+0000 and is not an octal prefix: `'\012'` is the null character followed by the two characters `12`. The quote character not delimiting the literal may appear unescaped: `'say "hi"'` and `"don't"` are both valid, so single-quoted literals can carry double quotes directly and vice versa.
+This is the complete escape vocabulary — a backslash before any other character does not lex. `\0` always means U+0000 and is not an octal prefix: `'\012'` is the null character followed by the two characters `12`. The quote character not delimiting the literal may appear unescaped: `'say "hi"'` and `"don't"` are both valid, so single-quoted literals can carry double quotes directly and vice versa.
 
 Examples:
 
@@ -293,7 +293,7 @@ Examples:
 /\d{3}-\d{4}/        // phone number pattern
 ```
 
-> **Two `/` on one source line lex as a regex literal.** The lexer cannot distinguish a second division from a pattern, so `(0.0 / 0.0) == (0.0 / 0.0)` fails to parse — the span between the first and second `/` becomes a regex literal. This is reachable from ordinary arithmetic; the workaround is one division per line.
+> **Two `/` on one source line lex as a regex literal.** The lexer cannot distinguish a second division from a pattern, so `(0.0 / 0.0) == (0.0 / 0.0)` fails to parse — the span between the first and second `/` becomes a regex literal. This is reachable from ordinary arithmetic. The workaround is one `/` per source line — counting the `//` of a line comment, which is itself two: `(x / 2.0) > 0.0 // halve it` fails to parse for the same reason. Put the comment on its own line.
 
 ### Boolean Literals
 

@@ -999,8 +999,10 @@ func builtinTypeOf(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expr
 
 // dslTypeName maps an evaluator value onto the DSL type vocabulary that TypeOf
 // reports: "nil", "boolean", "integer", "float", "string", "list", "map",
-// "pattern", or "unknown" for any shape outside it. The scalar type lists
-// mirror [value.TypeStrata] so classification and comparison agree.
+// "pattern", "timestamp", or "unknown" for any shape outside it. It recognises
+// the Go scalar types [value.TypeStrata] does but reports them at finer grain —
+// strata group every numeric together and patterns with strings, where the DSL
+// vocabulary separates both.
 func dslTypeName(v any) string {
 	if v == nil {
 		return "nil"

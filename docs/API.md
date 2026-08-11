@@ -182,9 +182,11 @@ free-form; import aliases are validated during completion (`E_INVALID_ALIAS`).
 A qualified reference (`alias.Type` in `Extends`, a relation or composition
 target, or a qualified datatype constraint) must resolve at build time: the
 alias must name a declared import backed by a registry (`WithRegistry` +
-`AddImport`). A qualified reference naming no resolvable import fails the
-build with `E_UNKNOWN_TYPE`, with or without a registry — no later link step
-exists that could resolve it.
+`AddImport`). No later link step exists that could resolve one, so the build
+fails either way — but with different codes. An alias no `AddImport` declares
+fails with `E_UNKNOWN_TYPE`, with or without a registry. An alias that *is*
+declared but whose path resolves to nothing in the registry fails earlier, at
+import resolution, with `E_IMPORT_RESOLVE`.
 
 ### TypeBuilder Methods
 

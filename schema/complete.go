@@ -58,9 +58,9 @@ type resolvedImportMap map[string]importResolution
 // completed *Schema, or nil if this completion contributed any Fatal or Error
 // issue — a per-completion error gate, so when the collector is shared across a
 // multi-schema load each schema is judged by its own error delta. The registry
-// is optional; when nil, cross-schema references are deferred to link time. The
-// resolvedImports map carries each import alias's resolution (or deferral) from
-// the loader.
+// is optional, but a qualified reference resolves or is reported either way —
+// only a declared-but-failed import defers. The resolvedImports map carries
+// each import alias's resolution (or deferral) from the loader.
 func completeModel(
 	m *model,
 	sourceID location.SourceID,
@@ -817,16 +817,13 @@ func (c *completer) referenceDeferred(qualifier string) bool {
 //
 //   - reported — an undeclared local name, or a qualifier naming no declared
 //     import, draws E_UNKNOWN_TYPE; a cyclic chain draws the cycle diagnostic;
-//   - silently deferred to link time — a cross-schema reference with no registry
-//     to resolve it, or a declared-but-failed import whose failure is the root
-//     cause.
+//   - silently deferred — a declared-but-failed import, whose failure is the
+//     root cause and already carries its own diagnostic.
 //
 // Either way the root cause is owned elsewhere, so the type check defers rather
 // than stacking a (usually misleading) E_INVALID_PRIMARY_KEY_TYPE on top of a
-// reported error, or rejecting a reference that every sibling site — extends,
-// relation and composition targets, and non-primary property datatypes — defers
-// to link time. A resolved terminal (a builtin, or an alias resolved to one) is
-// checked normally.
+// reported error. A resolved terminal (a builtin, or an alias resolved to one)
+// is checked normally.
 //
 // Keying off the terminal's resolved state alone — not a re-derived
 // qualifier/registry prediction — is what keeps this in step with
@@ -834,8 +831,7 @@ func (c *completer) referenceDeferred(qualifier string) bool {
 // reported or deferred there, and a resolved one is the only shape this checks.
 //
 // This couples to [completer.resolveAliasConstraints] leaving a deferred
-// terminal as an unresolved AliasConstraint — the invariant pinned by
-// [TestBuild_NoRegistryQualifiedPrimaryKey_TerminalStaysUnresolved]. A change
+// terminal as an unresolved AliasConstraint. A change
 // that instead resolved such terminals to a placeholder would silently flip this
 // predicate to false and resurface a mis-attributed E_INVALID_PRIMARY_KEY_TYPE,
 // so the two must move together.
@@ -867,9 +863,8 @@ func (c *completer) reportUnknownAlias(suppress bool, span location.Span, format
 // A name that cannot name a datatype is an error (E_UNKNOWN_TYPE): an
 // undeclared local name, a qualifier that names no declared import, or a
 // resolved import that lacks the datatype. The reference is left unresolved
-// silently only when resolution is genuinely deferred — no registry to resolve
-// a cross-schema ref, a declared-but-failed import whose failure was already
-// reported, or an import whose schema is absent from the registry.
+// silently only for a declared-but-failed import, whose failure was already
+// reported.
 //
 // suppressUnknown gates the E_UNKNOWN_TYPE reports (not the cycle report): the
 // self-recursion that resolves a found datatype's own unresolved underlying

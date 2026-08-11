@@ -21,18 +21,18 @@ var (
 	E_NEO4J_UNSUPPORTED_TYPE = diag.NewCode("E_NEO4J_UNSUPPORTED_TYPE", diag.CategoryAdapter)
 
 	// E_NEO4J_UNKNOWN_PROPERTY indicates an index annotation names a property
-	// the type does not have. Load-time validation catches this wherever it can
-	// resolve the type's full member set; where it must defer — a type whose
-	// supertype never resolved — the adapter catches it rather than emitting DDL
-	// for a property that will never exist.
+	// the type does not have. Load-time validation catches this on every model
+	// a public entry point produces; the adapter re-checks so a model assembled
+	// outside them cannot emit DDL for a property that will never exist.
 	E_NEO4J_UNKNOWN_PROPERTY = diag.NewCode("E_NEO4J_UNKNOWN_PROPERTY", diag.CategoryAdapter)
 
 	// E_NEO4J_INVALID_INDEX_TARGET indicates an index annotation names a
 	// property whose type cannot carry that index: @index or @@index on a
 	// non-scalar, @vector on a property that is not a Vector, or @vector on a
 	// Vector whose dimension is not positive. Like [E_NEO4J_UNKNOWN_PROPERTY],
-	// this is the adapter re-checking what load-time validation had to defer
-	// because the target's type never resolved.
+	// this is the adapter re-checking what load-time validation already
+	// enforces, so a model assembled outside the public entry points cannot
+	// emit an index the DSL's own rule forbids.
 	E_NEO4J_INVALID_INDEX_TARGET = diag.NewCode("E_NEO4J_INVALID_INDEX_TARGET", diag.CategoryAdapter)
 )
 

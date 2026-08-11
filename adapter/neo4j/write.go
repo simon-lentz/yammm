@@ -629,8 +629,8 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // homogeneous Go slice Neo4j requires ([]string, []float64, []dbtype.Date, ...).
 // A Vector is float-valued by definition (matching the eval package's checkVector
 // / coerceVector), so it coerces elementwise exactly as a List<Float> would; this
-// is what repairs a snapshot-loaded vector, which arrives as []any with whole
-// numbers narrowed to int64 by NormalizeValue. Per-element conversion delegates
+// is what repairs a vector loaded from a pre-v0.12 snapshot, whose whole floats
+// were written int-shaped and arrive narrowed to int64. Per-element conversion delegates
 // to [Coerce] (the Float width-repair and Date/Timestamp parse rules) or, for
 // Integer elements, to [repairInt64] (every Go int/uint width -> int64, mirroring
 // Coerce's Float repair), so the repair rules live in one place; coerceSlice owns

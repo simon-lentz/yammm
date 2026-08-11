@@ -299,7 +299,7 @@ func newGenerator(s *schema.Schema) (*generator, error) {
 
 // resolveSuper finds the closure entry for a declared extends reference by
 // matching it against the type's resolved supertype linearization. Returns
-// false when the reference never resolved (a deferred import).
+// false when the reference names no type in this document's type map.
 func (g *generator) resolveSuper(t *schema.Type, ref schema.TypeRef) (*typeEntry, bool) {
 	for _, super := range t.SuperTypesSlice() {
 		if super.Ref().String() != ref.String() {
