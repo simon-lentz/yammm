@@ -146,13 +146,24 @@ func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 		}
 	}
 
-	utf8Cols, utf16Cols := starts[lsputil.PositionEncodingUTF8], starts[lsputil.PositionEncodingUTF16]
-	if len(utf8Cols) != len(utf16Cols) {
-		t.Fatalf("diagnostic counts differ by encoding: %d and %d", len(utf8Cols), len(utf16Cols))
+	// Exact columns, not merely a pair that differs. The duplicate-enum
+	// diagnostics start at the Enum construct and at the second value; on
+	// this line the three unit systems disagree there, so a wrong answer
+	// cannot hide behind a right one.
+	//
+	//	title Enum["🎉日", "🎉日"]
+	//	       ^7                    both encodings
+	//	                   ^19       UTF-16 units
+	//	                   ^23       UTF-8 bytes
+	//	                   ^18       runes — the fallback this pins against
+	wantUTF16 := []uint32{7, 19}
+	wantUTF8 := []uint32{7, 23}
+
+	if got := starts[lsputil.PositionEncodingUTF16]; !slices.Equal(got, wantUTF16) {
+		t.Errorf("UTF-16 starts = %v, want %v — rune columns would be [7 18]", got, wantUTF16)
 	}
-	if slices.Equal(utf8Cols, utf16Cols) {
-		t.Errorf("every column is identical under both encodings (%v); the registry "+
-			"missed the symlinked path and fell back to rune columns", utf8Cols)
+	if got := starts[lsputil.PositionEncodingUTF8]; !slices.Equal(got, wantUTF8) {
+		t.Errorf("UTF-8 starts = %v, want %v — rune columns would be [7 18]", got, wantUTF8)
 	}
 }
 

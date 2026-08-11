@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"path/filepath"
 	"slices"
 	"time"
 
@@ -25,17 +24,15 @@ import (
 // diagnosticSource is the value used for the Source field in LSP diagnostics.
 const diagnosticSource = "yammm"
 
-// canonicalSourceID mints a SourceID with best-effort symlink resolution so
-// registry keys match the loader's canonical output — a mismatched key makes
-// SpanToLSPRange fall back to rune columns on failed loads. Resolution
-// failures (markdown virtual paths, deleted files) keep the path as given.
+// canonicalSourceID mints a SourceID whose key matches the loader's, so
+// SpanToLSPRange finds the content instead of falling back to rune columns.
+// The server already hands Analyze canonical paths; this holds the property
+// for a caller that does not.
 func canonicalSourceID(path string) (location.SourceID, error) {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
-	}
-	id, err := location.SourceIDFromAbsolutePath(path)
+	canonical := lsputil.CanonicalPath(path)
+	id, err := location.SourceIDFromAbsolutePath(canonical)
 	if err != nil {
-		return location.SourceID{}, fmt.Errorf("mint source ID for %q: %w", path, err)
+		return location.SourceID{}, fmt.Errorf("mint source ID for %q: %w", canonical, err)
 	}
 	return id, nil
 }
