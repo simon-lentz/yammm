@@ -45,11 +45,27 @@ func (f wireFloat) MarshalJSON() ([]byte, error) {
 	return b, nil
 }
 
+// wireTagForm renders a TypeID in tag form — the bare name for a locally
+// declared type, alias-qualified for an imported one. It inverts
+// [resolveWireType] and matches the TypeName a graph instance carries.
+func wireTagForm(s *schema.Schema, id schema.TypeID) string {
+	if s == nil || id.IsZero() || id.SchemaPath() == s.SourceID() {
+		return id.Name()
+	}
+	if alias := s.FindImportAlias(id.SchemaPath()); alias != "" {
+		return alias + "." + id.Name()
+	}
+	return id.Name()
+}
+
 // resolveWireType resolves a snapshot tag-form type name (alias-qualified for
 // imported types) against the schema, falling back to the TypeID for names
 // the tag form cannot resolve. A miss returns (nil, false) and callers pass
 // values through unwrapped — Marshal never rejects a snapshot Load accepts.
 func resolveWireType(s *schema.Schema, tagName string, id schema.TypeID) (*schema.Type, bool) {
+	if s == nil {
+		return nil, false
+	}
 	if alias, name, qualified := strings.Cut(tagName, "."); qualified {
 		if imp, ok := s.ImportByAlias(alias); ok {
 			if imported := imp.Schema(); imported != nil {

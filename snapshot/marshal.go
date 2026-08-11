@@ -467,7 +467,7 @@ func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schem
 			children := inst.Composed(relName)
 			childWires := make([]instWire, 0, len(children))
 			for _, child := range children {
-				cw := marshalComposedChild(child, s, childType, schemaSource, child.TypeName())
+				cw := marshalComposedChild(child, s, childType)
 				childWires = append(childWires, cw)
 			}
 			compMap[relName] = childWires
@@ -494,15 +494,16 @@ func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schem
 // marshalComposedChild marshals a composed child instance under t, the parent
 // relation's target type (nil when the parent never resolved — passthrough).
 // Composed children never carry edges (omitempty handles this).
-func marshalComposedChild(inst *graph.Instance, s *schema.Schema, t *schema.Type, schemaSource, mapKey string) instWire {
+func marshalComposedChild(inst *graph.Instance, s *schema.Schema, t *schema.Type) instWire {
 	w := instWire{
 		Key:        inst.PrimaryKey().Clone(),
 		Properties: wireProps(inst.Properties(), t),
 	}
 
-	// type_id
+	// type_id rides only when the decoder's recovery — the parent relation's
+	// target — would land on a different type.
 	typeID := inst.TypeID()
-	if !typeID.IsZero() && (typeID.Name() != mapKey || typeID.SchemaPath().String() != schemaSource) {
+	if !typeID.IsZero() && (t == nil || t.ID() != typeID) {
 		w.TypeID = &typeIDWire{
 			SchemaPath: typeID.SchemaPath().String(),
 			Name:       typeID.Name(),
@@ -523,7 +524,7 @@ func marshalComposedChild(inst *graph.Instance, s *schema.Schema, t *schema.Type
 			children := inst.Composed(relName)
 			childWires := make([]instWire, 0, len(children))
 			for _, child := range children {
-				cw := marshalComposedChild(child, s, childType, schemaSource, child.TypeName())
+				cw := marshalComposedChild(child, s, childType)
 				childWires = append(childWires, cw)
 			}
 			compMap[relName] = childWires

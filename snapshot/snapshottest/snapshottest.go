@@ -33,6 +33,12 @@ func BuildSnapshot(tb testing.TB, s *schema.Schema, instances ...*instance.Valid
 // AssertRoundTrip marshals a snapshot, loads it back, and verifies
 // structural equivalence via [DiffSnapshots]. Fails the test with a
 // (-want +got) diff on mismatch.
+//
+// Not valid for a snapshot loaded from a pre-v0.12 document: a whole float
+// narrowed to int64 by an older writer heals to float64 on the next Marshal,
+// so the first round trip changes the value's dynamic type by design and
+// [DiffSnapshots] compares dynamic types exactly. Round-trip such a snapshot
+// once first; healing is idempotent, so every later round trip holds.
 func AssertRoundTrip(tb testing.TB, snap *graph.Snapshot, s *schema.Schema, opts ...snapshot.Option) {
 	tb.Helper()
 	ctx := context.Background()
@@ -77,19 +83,13 @@ func AssertDeterministic(tb testing.TB, snap *graph.Snapshot, opts ...snapshot.O
 type snapProjection struct {
 	Types      []string
 	Instances  map[string][]instProjection
-	Duplicates []dupProjection
+	Duplicates []instProjection
 	Unresolved []unresProjection
 }
 
-// dupProjection carries the duplicate's full instance tree, not just its
-// identity — duplicate properties are schema-typed values a round trip must
-// preserve like any live node's.
-type dupProjection struct {
-	Type     string
-	Instance instProjection
-}
-
 type instProjection struct {
+	TypeName   string
+	TypeID     string
 	PK         string
 	Properties map[string]any
 	Edges      []edgeProjection
@@ -157,10 +157,7 @@ func project(s *graph.Snapshot) snapProjection {
 		}
 	}
 	for _, d := range s.Duplicates() {
-		p.Duplicates = append(p.Duplicates, dupProjection{
-			Type:     d.Instance.TypeName(),
-			Instance: projectInstanceTree(d.Instance),
-		})
+		p.Duplicates = append(p.Duplicates, projectInstanceTree(d.Instance))
 	}
 	for _, u := range s.Unresolved() {
 		p.Unresolved = append(p.Unresolved, unresProjection{
@@ -183,6 +180,8 @@ func project(s *graph.Snapshot) snapProjection {
 // carry edges.
 func projectInstanceTree(inst *graph.Instance) instProjection {
 	ip := instProjection{
+		TypeName:   inst.TypeName(),
+		TypeID:     inst.TypeID().String(),
 		PK:         inst.PrimaryKey().String(),
 		Properties: inst.Properties().Clone(),
 	}

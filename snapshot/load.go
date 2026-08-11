@@ -94,7 +94,7 @@ func Load(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption
 	dupParts := make([]graph.DuplicateParts, 0, len(diags.Duplicates))
 	for _, dw := range diags.Duplicates {
 		var dupTypeID schema.TypeID
-		if st, ok := s.Type(dw.Type); ok {
+		if st, ok := resolveWireType(s, dw.Type, schema.TypeID{}); ok {
 			dupTypeID = st.ID()
 		}
 		dp := graph.DuplicateParts{

@@ -216,6 +216,40 @@ func TestMarshal_HealsNarrowedFloats(t *testing.T) {
 	}
 }
 
+// Healing changes a value's dynamic type on the first pass, so a legacy
+// snapshot is not its own round-trip fixpoint — but healing is idempotent, so
+// the loaded document is. This is the exception [snapshottest.AssertRoundTrip]
+// documents, pinned rather than left to prose.
+func TestRoundTrip_LegacyNarrowedFloatStabilisesAfterOnePass(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadWireTestSchema(t)
+	legacy := buildWireTestSnapshot(t, s, int64(1860000), []any{int64(3)})
+
+	data, result := snapshot.Marshal(ctx, legacy)
+	if err := result.Err(); err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	healed, result := snapshot.Load(ctx, data, s)
+	if err := result.Err(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	sensor, ok := healed.InstanceByKey("Sensor", graph.FormatKey("s1"))
+	if !ok {
+		t.Fatal("sensor s1 missing after the healing pass")
+	}
+	reading, ok := sensor.Property("reading")
+	if !ok {
+		t.Fatal("reading property missing")
+	}
+	if _, isFloat := reading.Unwrap().(float64); !isFloat {
+		t.Fatalf("reading = %T, want float64 — the narrowed whole float did not heal", reading.Unwrap())
+	}
+
+	snapshottest.AssertRoundTrip(t, healed, s)
+}
+
 func wrapKey(parts ...any) immutable.Key { return immutable.WrapKey(parts) }
 
 func wrapProps(m map[string]any) immutable.Properties { return immutable.WrapProperties(m) }

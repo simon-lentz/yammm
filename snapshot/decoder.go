@@ -198,7 +198,7 @@ func (sd *streamDecoder) decodeHeader() error {
 			// Validate types against schema.
 			if sd.schema != nil {
 				for _, typeName := range sd.types {
-					if _, ok := sd.schema.Type(typeName); !ok {
+					if _, ok := resolveWireType(sd.schema, typeName, schema.TypeID{}); !ok {
 						sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
 							fmt.Sprintf("type %q not found in schema", typeName)).
 							WithDetail(diag.DetailKeyTypeName, typeName).
@@ -408,10 +408,12 @@ func (sd *streamDecoder) processInstance(
 
 	// Resolve TypeID from schema.
 	var typeID schema.TypeID
+	var declType *schema.Type
 	if sd.schema != nil {
-		schemaType, ok := sd.schema.Type(typeName)
+		schemaType, ok := resolveWireType(sd.schema, typeName, schema.TypeID{})
 		if ok {
 			typeID = schemaType.ID()
+			declType = schemaType
 		}
 
 		// Cross-validate type_id when present.
@@ -448,12 +450,7 @@ func (sd *streamDecoder) processInstance(
 	// Process composed children recursively.
 	for relName, children := range inst.Composed {
 		for _, child := range children {
-			childTypeName := relName
-			if child.TypeID != nil {
-				childTypeName = child.TypeID.Name
-			}
-			// For composed children, use the child's type name from the composed map context.
-			// The child itself determines its type from the composed relation target.
+			childTypeName, _ := sd.composedChildType(declType, relName, child)
 			sd.processInstance(childTypeName, child, depth+1, nil)
 		}
 	}
@@ -461,6 +458,42 @@ func (sd *streamDecoder) processInstance(
 	if emit != nil {
 		emit(typeName, inst, typeID)
 	}
+}
+
+// composedChildType recovers a composed child's type in tag form. The parent
+// relation's target is the primary source, because the wire omits type_id
+// exactly when that target identifies the child; falling back to the relation
+// name loses the child's identity whenever the two differ.
+func (sd *streamDecoder) composedChildType(
+	parent *schema.Type,
+	relName string,
+	child instWire,
+) (string, schema.TypeID) {
+	var target *schema.Type
+	if sd.schema != nil && parent != nil {
+		if rel, ok := parent.Relation(relName); ok {
+			target, _ = sd.schema.TypeByID(rel.TargetID())
+		}
+	}
+
+	if child.TypeID != nil {
+		// The target wins on agreement: it carries the full identity that the
+		// wire's unqualified name cannot.
+		if target != nil && target.ID().Name() == child.TypeID.Name {
+			return wireTagForm(sd.schema, target.ID()), target.ID()
+		}
+		if sd.schema != nil {
+			if t, ok := sd.schema.Type(child.TypeID.Name); ok {
+				return child.TypeID.Name, t.ID()
+			}
+		}
+		return child.TypeID.Name, schema.TypeID{}
+	}
+
+	if target != nil {
+		return wireTagForm(sd.schema, target.ID()), target.ID()
+	}
+	return relName, schema.TypeID{}
 }
 
 // wireToInstanceParts converts a wire instance to InstanceParts.
@@ -478,21 +511,12 @@ func (sd *streamDecoder) wireToInstanceParts(
 
 	// Composed children.
 	if len(inst.Composed) > 0 {
+		declType, _ := resolveWireType(sd.schema, typeName, typeID)
 		ip.Composed = make(map[string][]graph.InstanceParts, len(inst.Composed))
 		for relName, children := range inst.Composed {
 			childParts := make([]graph.InstanceParts, 0, len(children))
 			for _, child := range children {
-				childTypeName := relName
-				if child.TypeID != nil {
-					childTypeName = child.TypeID.Name
-				}
-				// Resolve child TypeID from schema.
-				var childTypeID schema.TypeID
-				if sd.schema != nil {
-					if ct, ok := sd.schema.Type(childTypeName); ok {
-						childTypeID = ct.ID()
-					}
-				}
+				childTypeName, childTypeID := sd.composedChildType(declType, relName, child)
 				cp := sd.wireToInstanceParts(childTypeName, child, childTypeID)
 				childParts = append(childParts, cp)
 			}
