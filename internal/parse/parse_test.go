@@ -751,8 +751,10 @@ func TestParse_ReportsEveryDocumentedCode(t *testing.T) {
 			diag.E_INVALID_CONSTRAINT,
 		},
 		{
+			// A hex escape short of its two digits: the lexer's STRING class
+			// admits it, the unquoter rejects it.
 			"E_INVALID_INVARIANT",
-			"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id != 'ab'\n}\n",
+			"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id != \"\\x4\"\n}\n",
 			diag.E_INVALID_INVARIANT,
 		},
 	}

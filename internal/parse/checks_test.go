@@ -275,9 +275,6 @@ func TestChecks_UnquoteFailuresAreSyntaxErrors(t *testing.T) {
 	}
 }
 
-// TestChecks_SchemaNameUnquoteFailureMarksTheFileFailed pins the shape a later
-// phase depends on: a header that parses but whose literal will not unquote
-// leaves no usable schema name, exactly as a header that did not parse at all.
 // TestChecks_UnquoteResolvesLexerEscapeVocabulary pins unquote to exactly the
 // lexer's STRING escape set. The lexer admits every spelling below, so each
 // must resolve — the strconv-backed predecessor rejected an unescaped '"' in
@@ -297,6 +294,9 @@ func TestChecks_UnquoteResolvesLexerEscapeVocabulary(t *testing.T) {
 		{"literal double quote in single quotes", `'a"b'`, `a"b`},
 		{"literal single quote in double quotes", `"a'b"`, `a'b`},
 		{"zero escape is not octal", `'\012'`, "\x0012"},
+		{"valid multi-byte rune", "\"café\"", "café"},
+		{"invalid utf-8 byte", "\"a\xffb\"", "a�b"},
+		{"truncated utf-8 sequence", "\"a\xe2\x82b\"", "a��b"},
 	}
 	for _, tc := range accepted {
 		t.Run(tc.name, func(t *testing.T) {
@@ -347,6 +347,9 @@ func TestChecks_SingleQuotedLiteralsLoadAtEveryUnquoteSite(t *testing.T) {
 	}
 }
 
+// TestChecks_SchemaNameUnquoteFailureMarksTheFileFailed pins the shape a later
+// phase depends on: a header that parses but whose literal will not unquote
+// leaves no usable schema name, exactly as a header that did not parse at all.
 func TestChecks_SchemaNameUnquoteFailureMarksTheFileFailed(t *testing.T) {
 	file, _ := Parse([]byte("schema \"\\x\"\ntype T {\n\tid String primary\n}\n"), location.SourceID{})
 	if !file.SchemaNameFailed {

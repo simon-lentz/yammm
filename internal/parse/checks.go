@@ -383,7 +383,8 @@ var errUnquoteSyntax = errors.New("unquote string: invalid syntax")
 
 // unquote strips a literal's surrounding quotes and resolves exactly the
 // lexer's STRING escape vocabulary: \b \t \n \f \r \0 \xHH \uHHHH \" \' \\.
-// The quote character not delimiting the literal appears literally unescaped.
+// The quote character not delimiting the literal appears literally unescaped,
+// and an invalid UTF-8 byte becomes U+FFFD, as strconv.Unquote resolved it.
 func unquote(s string) (string, error) {
 	if !isQuoted(s) {
 		return s, nil
@@ -394,8 +395,16 @@ func unquote(s string) (string, error) {
 	for i := 0; i < len(body); {
 		c := body[i]
 		if c != '\\' {
-			out.WriteByte(c)
-			i++
+			if c < utf8.RuneSelf {
+				out.WriteByte(c)
+				i++
+				continue
+			}
+			// DecodeRuneInString yields (RuneError, 1) on an invalid byte, so
+			// WriteRune substitutes U+FFFD one byte at a time.
+			r, size := utf8.DecodeRuneInString(body[i:])
+			out.WriteRune(r)
+			i += size
 			continue
 		}
 		if i+1 >= len(body) {

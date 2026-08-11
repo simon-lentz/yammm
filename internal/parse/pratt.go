@@ -254,7 +254,7 @@ func (p *exprParser) literal(t *lexer.Token) expr.Expression {
 	start, end := t.Pos.Offset, t.Pos.Offset+len(t.Value)
 	switch t.Type {
 	case p.tok.str:
-		s, err := strconv.Unquote(t.Value)
+		s, err := unquote(t.Value)
 		if err != nil {
 			p.diagf(start, end, "invalid string literal: %v", err)
 			return expr.NewLiteral(nil)
