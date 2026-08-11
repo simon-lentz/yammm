@@ -459,7 +459,7 @@ func validScalarTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 		indexTargetRef{ann: ann, name: prop.Name(), code: E_NEO4J_INVALID_INDEX_TARGET},
 		ann, E_NEO4J_INVALID_INDEX_TARGET, targetScope(t, prop),
 		fmt.Sprintf("index annotation names property %q, which is not an indexable scalar", prop.Name()),
-		"a range index requires a scalar property; the loader could not check this target because its type never resolved")
+		"a range index requires a scalar property")
 	return false
 }
 
@@ -467,13 +467,13 @@ func validScalarTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 // The caller has already resolved the constraint and passes the result, so the
 // assertion happens once and drives both the check and the emission.
 //
-// Deferred load-time validation is the same hole validScalarTarget covers, with
-// a sharper consequence: skipping a @vector whose target never resolved would
-// drop the declared ANN index entirely — no DDL and no diagnostic, so every
-// vector query falls back to a brute-force scan and the diff reports no problem
-// because the index is missing from the desired set too. A non-positive
-// dimension is rejected here for a related reason: Neo4j refuses the statement
-// at execution, aborting a DDL apply midway through.
+// The type check is defense in depth on the same terms as [validScalarTarget],
+// with a sharper consequence: emitting nothing for a @vector whose target is
+// not a Vector drops the declared ANN index entirely — no DDL and no
+// diagnostic, so every vector query falls back to a brute-force scan and the
+// diff reports no problem because the index is missing from the desired set
+// too. A non-positive dimension is rejected for a related reason: Neo4j
+// refuses the statement at execution, aborting a DDL apply midway through.
 func validVectorTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
 	vc schema.VectorConstraint, isVector bool,
 	collector *diag.Collector, reported reportedTargets,
@@ -490,7 +490,7 @@ func validVectorTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 	if !isVector {
 		return report(
 			fmt.Sprintf("@vector names property %q, which is not a Vector", prop.Name()),
-			"a vector index requires a Vector property; the loader could not check this target because its type never resolved",
+			"a vector index requires a Vector property",
 		)
 	}
 	if vc.Dimension() <= 0 {
@@ -506,11 +506,11 @@ func validVectorTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 // @@fulltext can be emitted: a usable Neo4j identifier, and a text type the
 // loader's own rule accepts.
 //
-// The type check is not redundant with load-time validation for the same
-// reason [validScalarTarget]'s is not: the loader defers its eligibility check
-// whenever the target's type cannot be resolved, so a schema can seal cleanly
-// with @fulltext on an unresolved alias. Trusting the sealed model there would
-// emit a fulltext index over a property the DSL's own rule forbids.
+// The type check is defense in depth on the same terms as [validScalarTarget]:
+// every public entry point rejects the references that once sealed cleanly, but
+// a model assembled outside those guarantees could still carry @fulltext on a
+// non-text property, and trusting it would emit a fulltext index over a
+// property the DSL's own rule forbids.
 func validFulltextTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
 	collector *diag.Collector, reported reportedTargets,
 ) bool {
@@ -524,7 +524,7 @@ func validFulltextTarget(t *schema.Type, prop *schema.Property, ann *schema.Anno
 		indexTargetRef{ann: ann, name: prop.Name(), code: E_NEO4J_INVALID_INDEX_TARGET},
 		ann, E_NEO4J_INVALID_INDEX_TARGET, targetScope(t, prop),
 		fmt.Sprintf("fulltext annotation names property %q, which is not a text property", prop.Name()),
-		"a fulltext index requires a String, Pattern, or Enum property; the loader could not check this target because its type never resolved")
+		"a fulltext index requires a String, Pattern, or Enum property")
 	return false
 }
 
