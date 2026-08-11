@@ -4,6 +4,7 @@ type T {
 	id String primary
 	absent_list List<Integer>
 	absent_str String
+	tags List<String>
 
 	// --- Collection functions ---
 	! "p_all_empty_true" [] -> All |$x| { $x > 0 }
@@ -135,5 +136,11 @@ type T {
 	! "p_index" [10, 20, 30][1] == 20
 	! "p_index_string_rune" "abé"[2] == "é"
 	! "d_index_oob_nil" ([10][5]) == nil
+	! "p_index_list_property" tags[0] == "alpha"
+	! "p_index_list_property_last" tags[2] == "gamma"
+	! "d_index_list_property_oob_nil" tags[9] == nil
+	! "d_index_list_property_negative_nil" tags[-1] == nil
+	! "d_self_is_map" ($self -> TypeOf) == "map"
+	! "d_self_len_counts_properties" ($self -> Len) > 0
 	! "d_numeric_var_unset_nil" $0 == nil
 }

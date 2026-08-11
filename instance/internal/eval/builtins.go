@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/immutable"
@@ -405,6 +406,9 @@ func builtinLen(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 	case []any:
 		return int64(len(v)), nil
 	case immutable.Slice:
+		return int64(v.Len()), nil
+	case immutable.Map[string]:
+		// A Map is a struct, so the reflect.Map arm below never sees it.
 		return int64(v.Len()), nil
 	}
 
@@ -1013,6 +1017,8 @@ func dslTypeName(v any) string {
 		return "string"
 	case *regexp.Regexp:
 		return "pattern"
+	case time.Time:
+		return "timestamp"
 	case immutable.Slice:
 		return "list"
 	case immutable.Map[string]:

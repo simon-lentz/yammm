@@ -54,6 +54,7 @@ func TestContract_PassCorpus(t *testing.T) {
 	}
 
 	v := instance.NewValidator(s)
+	validated := 0
 	for typeName, instances := range data {
 		for _, props := range instances {
 			valid, result := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
@@ -63,6 +64,18 @@ func TestContract_PassCorpus(t *testing.T) {
 			if valid == nil {
 				t.Error("pass corpus returned nil instance")
 			}
+			validated++
+		}
+	}
+
+	// The floor above guards the schema fixture; this guards the data one,
+	// whose emptying would leave every assertion above unreached.
+	if validated == 0 {
+		t.Fatal("data_pass.json drove no instance — every assertion above was skipped")
+	}
+	for typeName := range s.Types() {
+		if len(data[typeName]) == 0 {
+			t.Errorf("type %q is declared in the corpus but has no instance in data_pass.json", typeName)
 		}
 	}
 }
@@ -85,6 +98,7 @@ func TestContract_ErrCorpus(t *testing.T) {
 		"E_EVAL_ERROR: invariant evaluation error: modulo by zero",
 		"E_EVAL_ERROR: invariant evaluation error: reduce of empty sequence with no initial value",
 		"E_EVAL_ERROR: invariant evaluation error: slice access accepts exactly one index",
+		"E_EVAL_ERROR: invariant evaluation error: slice access requires an index",
 		"E_EVAL_ERROR: invariant evaluation error: undefined variable: $undef",
 		"E_INVARIANT_FAIL: f_nil_result_is_falsey",
 	}

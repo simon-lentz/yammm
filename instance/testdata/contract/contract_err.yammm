@@ -15,5 +15,6 @@ type T {
 	! "x_scalar_not_collection" 1 -> All |$x| { true }
 	! "x_nonbool_invariant_result" 5 + 1
 	! "x_index_two_args" [10, 20, 30][0, 2] == 10
+	! "x_index_empty" [10, 20, 30][] == 10
 	! "f_nil_result_is_falsey" nil -> Then |$v| { true }
 }

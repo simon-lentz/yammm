@@ -150,21 +150,33 @@
           }
         },
         {
-          "msg": "\"f_nil_result_is_falsey\"",
-          "expr": "(Then nil (args ) (params v) true)",
+          "msg": "\"x_index_empty\"",
+          "expr": "(== (@ ([] 10 20 30)) 10)",
           "expr_span": {
-            "s": 673,
-            "e": 698
+            "s": 664,
+            "e": 684
           },
           "span": {
             "s": 646,
-            "e": 698
+            "e": 684
+          }
+        },
+        {
+          "msg": "\"f_nil_result_is_falsey\"",
+          "expr": "(Then nil (args ) (params v) true)",
+          "expr_span": {
+            "s": 713,
+            "e": 738
+          },
+          "span": {
+            "s": 686,
+            "e": 738
           }
         }
       ],
       "span": {
         "s": 23,
-        "e": 700
+        "e": 740
       }
     }
   ]
