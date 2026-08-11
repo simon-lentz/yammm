@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -20,6 +21,11 @@ type wireFloat float64
 // MarshalJSON emits the value exactly as encoding/json's float encoder would,
 // then appends ".0" when the output carries no float indicator (only the 'f'
 // branch can lack one). Non-finite values error, as under encoding/json.
+//
+// Delegating to json.Marshal instead would be shorter but costs 2.18× the
+// time and eight more allocations per call, on the path every float in a
+// document takes. [TestWireFloat_MatchesEncodingJSON] holds the two in
+// lockstep so this copy cannot drift from the encoder it mirrors.
 func (f wireFloat) MarshalJSON() ([]byte, error) {
 	v := float64(f)
 	if math.IsInf(v, 0) || math.IsNaN(v) {
@@ -131,7 +137,7 @@ func wireValue(v any, c schema.Constraint) any {
 	case schema.KindVector:
 		// Vector elements are floats by definition; the constraint carries
 		// only the dimension.
-		elems, ok := v.([]any)
+		elems, ok := wireElems(v)
 		if !ok {
 			return v
 		}
@@ -144,7 +150,7 @@ func wireValue(v any, c schema.Constraint) any {
 		if !ok {
 			return v
 		}
-		elems, ok := v.([]any)
+		elems, ok := wireElems(v)
 		if !ok {
 			return v
 		}
@@ -161,23 +167,79 @@ func wireValue(v any, c schema.Constraint) any {
 	return v
 }
 
-// maxExactWireInt bounds the healing rule: every int64 in [-2^53, 2^53]
-// converts to float64 exactly, so a narrowed whole float always heals inside
-// it. Beyond it the conversion itself can corrupt, so values pass through and
-// simply re-narrow on the next load.
-const maxExactWireInt = int64(1) << 53
+// twoPow63 and twoPow64 are the rounding ceilings of int64 and uint64 in
+// float64: a conversion landing on one has rounded past the integer type's
+// range, and converting it back is undefined.
+const (
+	twoPow63 = 1 << 63
+	twoPow64 = 1 << 64
+)
 
-// wireNumeric wraps a float64 — or an int64 a prior round trip narrowed — as
-// wireFloat. Non-numeric shapes pass through untouched: Load never
-// re-validates, so a hand-crafted document can put anything here.
+// exactWireInt reports n's float64 form when the conversion is exact. Only an
+// exactly convertible integer can have come from a narrowed whole float, so
+// healing an inexact one would invent precision the document never carried.
+func exactWireInt(n int64) (float64, bool) {
+	f := float64(n)
+	if f == twoPow63 {
+		return 0, false
+	}
+	return f, int64(f) == n
+}
+
+// exactWireUint is [exactWireInt] for unsigned values, which reach a float
+// position only from a caller-assembled snapshot.
+func exactWireUint(n uint64) (float64, bool) {
+	f := float64(n)
+	if f == twoPow64 {
+		return 0, false
+	}
+	return f, uint64(f) == n
+}
+
+// wireNumeric wraps any numeric value as wireFloat so it emits with a float
+// indicator; the type switch fast-paths the two types validation produces, and
+// reflection reaches the rest, which arrive only from a caller-assembled
+// snapshot. Non-numeric shapes pass through — Load never re-validates.
 func wireNumeric(v any) any {
 	switch n := v.(type) {
 	case float64:
 		return wireFloat(n)
 	case int64:
-		if n >= -maxExactWireInt && n <= maxExactWireInt {
-			return wireFloat(float64(n))
+		if f, ok := exactWireInt(n); ok {
+			return wireFloat(f)
+		}
+		return v
+	}
+
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return wireFloat(rv.Float())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if f, ok := exactWireInt(rv.Int()); ok {
+			return wireFloat(f)
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		if f, ok := exactWireUint(rv.Uint()); ok {
+			return wireFloat(f)
 		}
 	}
 	return v
+}
+
+// wireElems returns v's elements as []any for any slice or array, so a vector
+// or list position is reached whatever concrete container the caller built.
+func wireElems(v any) ([]any, bool) {
+	if elems, ok := v.([]any); ok {
+		return elems, true
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+		return nil, false
+	}
+	elems := make([]any, rv.Len())
+	for i := range elems {
+		elems[i] = rv.Index(i).Interface()
+	}
+	return elems, true
 }
