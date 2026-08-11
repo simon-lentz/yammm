@@ -307,7 +307,9 @@ func TestSources_FailedLoadKeepsOverlays(t *testing.T) {
 	// The registry keys overlays canonically (symlinks resolved), matching
 	// the loader's identity, so the expected ID is minted the same way.
 	mainCanonical, err := filepath.EvalSymlinks(mainPath)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", mainPath, err)
+	}
 	mainSourceID, err := location.SourceIDFromAbsolutePath(mainCanonical)
 	require.NoError(t, err)
 	assert.True(t, snapshot.Sources.Has(mainSourceID), "overlay content stays available")

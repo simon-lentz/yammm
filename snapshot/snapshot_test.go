@@ -1401,7 +1401,9 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 
 		data, mr := snapshot.Marshal(t.Context(), snap)
 		require.True(t, mr.OK())
-		require.Contains(t, string(data), `"val":1.0`, "whole float must emit in decimal form")
+		if !strings.Contains(string(data), `"val":1.0`) {
+			t.Fatalf("marshal output lacks %q, so the whole float did not emit in decimal form", `"val":1.0`)
+		}
 		loaded, lr := snapshot.Load(t.Context(), data, s)
 		require.True(t, lr.OK())
 
@@ -1409,8 +1411,13 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		require.Len(t, items, 1)
 		val, ok := items[0].Properties().Get("val")
 		require.True(t, ok)
-		require.IsType(t, float64(0), val.Unwrap(), "round trip must preserve float64, not narrow to int64")
-		assert.Equal(t, float64(1.0), val.Unwrap())
+		got, isFloat := val.Unwrap().(float64)
+		if !isFloat {
+			t.Fatalf("round trip produced %T, want float64 — the whole float narrowed", val.Unwrap())
+		}
+		if got != 1.0 {
+			t.Errorf("round trip produced %v, want 1.0", got)
+		}
 	})
 
 	t.Run("boolean_true_false", func(t *testing.T) {
