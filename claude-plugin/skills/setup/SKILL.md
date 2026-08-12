@@ -95,7 +95,7 @@ yammm-lsp --version
 Required for the automatic schema validation hook (PostToolUse). Without it, the hook silently skips validation.
 
 | Platform | Command |
-|----------|---------|
+| -------- | ------- |
 | macOS | `brew install jq` |
 | Debian/Ubuntu | `sudo apt-get install jq` |
 | Windows | `winget install jqlang.jq` |
@@ -105,7 +105,7 @@ Required for the automatic schema validation hook (PostToolUse). Without it, the
 ## What Each Tool Enables
 
 | Tool | Plugin features unlocked |
-|------|--------------------------|
+| ---- | ------------------------ |
 | `yammm` | Schema compilation, formatting, export, PostToolUse auto-validation, `Bash(yammm *)` in skills |
 | `yammm-lsp` | Editor diagnostics, completions, hover, go-to-definition |
 | `jq` | PostToolUse auto-validation hook (parses stdin JSON to extract file paths) |

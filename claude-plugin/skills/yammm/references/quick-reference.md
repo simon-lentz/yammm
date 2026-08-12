@@ -42,7 +42,7 @@ Using `primary required` together is a parse error -- `primary` already implies 
 ## Built-in Constraint Types
 
 | Type | Syntax | Notes |
-|------|--------|-------|
+| ---- | ------ | ----- |
 | `String` | `String[min, max]` | Length in runes; `_` = unbounded |
 | `Integer` | `Integer[min, max]` | Signed; negative bounds allowed |
 | `Float` | `Float[min, max]` | Inclusive bounds |
@@ -69,7 +69,7 @@ Primary key types: `String`, `UUID`, `Date`, `Timestamp` only. Aliases that reso
 ```
 
 | Multiplicity | Required | Cardinality |
-|-------------|----------|-------------|
+| ----------- | -------- | ----------- |
 | (omitted) / `(_)` / `(_:one)` | No | One |
 | `(one)` / `(one:one)` | Yes | One |
 | `(_:many)` / `(many)` | No | Many (0+) |

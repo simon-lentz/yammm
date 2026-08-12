@@ -21,7 +21,7 @@ if result.HasErrors() {
 Key `diag.Result` methods:
 
 | Method | Returns |
-|--------|---------|
+| ------ | ------- |
 | `OK()` | `true` if no Fatal or Error issues |
 | `HasFatal()` | `true` if any Fatal issue |
 | `HasErrors()` | `true` if any Fatal or Error issue |

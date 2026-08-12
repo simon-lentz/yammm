@@ -30,7 +30,7 @@ result.TruncationNote() // dropped-issues one-liner when the limit was hit
 Each issue contains:
 
 | Field | Description |
-|-------|-------------|
+| ----- | ----------- |
 | `Code()` | Stable identifier (e.g., `E_CONSTRAINT_FAIL`) |
 | `Severity()` | Fatal, Error, Warning, Info, or Hint |
 | `Message()` | Human-readable description |
@@ -41,7 +41,7 @@ Each issue contains:
 ### Severity Levels
 
 | Level | Meaning | Stops pipeline? |
-|-------|---------|-----------------|
+| ----- | ------- | --------------- |
 | Fatal | Unrecoverable failure | Yes |
 | Error | Invalid input or state | Yes (via `HasErrors()`) |
 | Warning | Likely problem, not blocking | No |
@@ -82,7 +82,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Sentinel
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_LIMIT_REACHED` | Issue collection limit reached; remaining issues dropped |
 | `E_INTERNAL` | Unexpected internal failure (likely a bug) |
 | `E_CONTEXT_CANCELLED` | Operation cancelled via context |
@@ -90,13 +90,13 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Syntax
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_SYNTAX` | Syntax error in `.yammm` source |
 
 ### Import
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_IMPORT_RESOLVE` | Import path could not be resolved |
 | `E_IMPORT_CYCLE` | Circular import dependency |
 | `E_INVALID_ALIAS` | Import alias is not a valid identifier |
@@ -108,7 +108,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Schema Compilation
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_TYPE_COLLISION` | Type name already defined |
 | `E_INHERIT_CYCLE` | Inheritance chain contains a cycle |
 | `E_SCHEMA_TYPE_NOT_FOUND` | Referenced type not found during compilation |
@@ -145,7 +145,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Instance Validation
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_INSTANCE_TYPE_NOT_FOUND` | Type referenced in instance data not found |
 | `E_ABSTRACT_TYPE` | Attempt to instantiate an abstract type |
 | `E_PART_TYPE_DIRECT` | Attempt to directly instantiate a part type |
@@ -170,7 +170,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Graph
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_DUPLICATE_PK` | Duplicate primary key in graph |
 | `E_DUPLICATE_COMPOSED_PK` | Duplicate composed child primary key |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
@@ -182,7 +182,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Snapshot
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON or wrong structure |
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
@@ -205,7 +205,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Adapter
 
 | Code | Adapter | Meaning |
-|------|---------|---------|
+| ---- | ------- | ------- |
 | `E_ADAPTER_PARSE` | All | Format-specific parsing error |
 | `E_CSV_COERCE` | CSV | Cell value could not be coerced to expected type |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |

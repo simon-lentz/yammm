@@ -412,7 +412,7 @@ type Recipe {
 
 ### Many-to-Many via Junction Type
 
-```yammm
+```yammm-snippet
 type Enrollment {
     id UUID primary
     enrolled_at Timestamp required

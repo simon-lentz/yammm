@@ -161,7 +161,7 @@ embeddings List<Vector[768]>[_, 10]
 ## Primary Key Types
 
 | Allowed | Types |
-|---------|-------|
+| ------- | ----- |
 | Yes | `String`, `UUID`, `Date`, `Timestamp` |
 | No | `Integer`, `Float`, `Boolean`, `Enum`, `Pattern`, `Vector`, `List` |
 
@@ -250,7 +250,7 @@ part type Address {
 ## Type Modifiers Summary
 
 | Modifier | Keyword | Instantiable | Association Target | Composition Target |
-|----------|---------|--------------|-------------------|-------------------|
+| -------- | ------- | ------------ | ----------------- | ----------------- |
 | Concrete | `type` | Yes | Yes | No |
 | Abstract | `abstract type` | No | No | No |
 | Part | `part type` | No (standalone) | No | Yes |
@@ -296,7 +296,7 @@ type Restricted extends Base {
 ```
 
 | Change | Direction | Allowed |
-|--------|-----------|---------|
+| ------ | --------- | ------- |
 | Raise minimum bound | Narrowing | Yes |
 | Lower maximum bound | Narrowing | Yes |
 | Lower minimum bound | Widening | No |

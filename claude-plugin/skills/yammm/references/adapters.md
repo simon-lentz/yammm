@@ -139,6 +139,7 @@ adapter := neo4jAdapter.New(
 ```
 
 **Edition differences:**
+
 - `Enterprise`: Supports UNIQUE, NOT NULL, property type, and NODE KEY constraints
 - `Community`: UNIQUE constraints only
 
@@ -308,7 +309,7 @@ Full API semantics: the JSON Schema Generation section of `docs/API.md`. CLI for
 import "github.com/simon-lentz/yammm/adapter/markdown"
 ```
 
-Schema-in, bytes-out: `markdown.Marshal` maps a loaded, resolved schema to one self-contained Markdown reference document covering the whole import closure — a Mermaid class diagram (each type's own members as `name KindLabel` pairs, `<<Abstract>>`/`<<Part>>` stereotypes, DSL-labeled relation edges, `Parent <|-- Child` inheritance edges), per-type sections in declaration order (flattened property tables with `from <Owner>` inherited-row markers, DSL-form constraint rendering like `String[1, 100]`, relation bullets with linked targets and edge-property sub-tables, invariant source fences extracted from the schema source), and Name | Definition | Description data-type tables. Imported schemas get their own `## Schema <Name> (imported as <alias>)` sections with collision-proof `schemaName.TypeName` headings. Output is deterministic and structurally self-checked (fence balance, link→anchor resolution, table column counts) before return. Option: `WithClassDiagram(false)` omits the diagram. Plain `error`, no instance-data path, no source-backing requirement (on Builder-built schemas invariants degrade to message-only).
+Schema-in, bytes-out: `markdown.Marshal` maps a loaded, resolved schema to one self-contained Markdown reference document covering the whole import closure — a Mermaid class diagram (each type's own members as `name KindLabel` pairs, `<<Abstract>>`/`<<Part>>` stereotypes, DSL-labeled relation edges, `Parent <| - Child` inheritance edges), per-type sections in declaration order (flattened property tables with `from <Owner>` inherited-row markers, DSL-form constraint rendering like `String[1, 100]`, relation bullets with linked targets and edge-property sub-tables, invariant source fences extracted from the schema source), and Name | Definition | Description data-type tables. Imported schemas get their own `## Schema <Name> (imported as <alias>)` sections with collision-proof `schemaName.TypeName` headings. Output is deterministic and structurally self-checked (fence balance, link→anchor resolution, table column counts) before return. Option: `WithClassDiagram(false)` omits the diagram. Plain `error`, no instance-data path, no source-backing requirement (on Builder-built schemas invariants degrade to message-only).
 
 Full API semantics: the Markdown Documentation Generation section of `docs/API.md`. CLI form: `yammm gen --to md` (see `cli.md`).
 
@@ -317,7 +318,7 @@ Full API semantics: the Markdown Documentation Generation section of `docs/API.m
 ## Adapter Error Codes
 
 | Code | Adapter | Meaning |
-|------|---------|---------|
+| ---- | ------- | ------- |
 | `E_ADAPTER_PARSE` | All | Format-specific parsing error |
 | `E_CSV_COERCE` | CSV | Cell value could not be coerced to expected type |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
