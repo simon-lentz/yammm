@@ -20,20 +20,21 @@ import (
 // sourceID names the source that spans belong to, and the zero SourceID is
 // supported for callers with no file behind the text.
 func Parse(src []byte, sourceID location.SourceID) (*File, []diag.Issue) {
-	file, _, issues := parseSource(src, sourceID, false)
+	file, _, issues := parseSource(string(src), sourceID, false)
 	return file, issues
 }
 
 // LexAndParse is Parse plus the un-elided token stream — identical to
 // what [Lex] returns — from the same single lex. A caller needing both views
 // (the formatter) reads them here instead of lexing the source twice.
-func LexAndParse(src []byte, sourceID location.SourceID) (*File, []Token, []diag.Issue) {
+// It takes a string because its one caller holds one: the formatter would
+// otherwise pay a full-source copy in, and parseSource a second one back.
+func LexAndParse(src string, sourceID location.SourceID) (*File, []Token, []diag.Issue) {
 	return parseSource(src, sourceID, true)
 }
 
-func parseSource(src []byte, sourceID location.SourceID, withTokens bool) (*File, []Token, []diag.Issue) {
+func parseSource(text string, sourceID location.SourceID, withTokens bool) (*File, []Token, []diag.Issue) {
 	ps := mustParsers()
-	text := string(src)
 
 	lx, err := ps.def.LexString("", text)
 	if err != nil {

@@ -921,7 +921,10 @@ func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, v
 				dataTypeName, qualifier)
 			return nil, false
 		}
-		// aliasResolved: the import resolved to sourceID.
+		// aliasResolved: the import resolved to sourceID. The registry is
+		// non-nil here by construction — [Builder.resolveImports] returns a nil
+		// resolution map whenever it is absent, and a nil map classifies every
+		// qualifier absent, so this branch is unreachable without one.
 		importedSchema, ok := c.registry.LookupBySourceID(sourceID)
 		if !ok {
 			// The import resolved to a SourceID but its schema is absent from the

@@ -71,7 +71,7 @@ func TokenStream(text string) (string, error) {
 
 	// Fail on syntax alone: a source that is semantically invalid but parses,
 	// such as inverted bounds, still formats.
-	file, allTokens, issues := parse.LexAndParse([]byte(normalized), location.SourceID{})
+	file, allTokens, issues := parse.LexAndParse(normalized, location.SourceID{})
 	for _, iss := range issues {
 		if iss.Code().Category() == diag.CategorySyntax {
 			return "", fmt.Errorf("parse failed: %s", iss.Message())

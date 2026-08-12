@@ -16,9 +16,18 @@ import (
 // than this many means the walk is broken, not the workload small.
 const minBenchCorpus = 20
 
+// benchFixture is one corpus entry. A slice, not a map: Go randomises map
+// iteration order, and the corpus benchmark walks the corpus inside its
+// measured region, so a map would put that randomisation in the measurement.
+type benchFixture struct {
+	name string
+	src  string
+}
+
 // benchCorpus loads every top-level testdata fixture, failing loudly on a
-// fixture the formatter itself would reject.
-func benchCorpus(b *testing.B) map[string]string {
+// fixture the formatter itself would reject. Paths come back sorted from
+// Glob, so the walk order is stable across runs.
+func benchCorpus(b *testing.B) []benchFixture {
 	b.Helper()
 	paths, err := filepath.Glob(filepath.Join("testdata", "*.yammm"))
 	if err != nil {
@@ -27,7 +36,7 @@ func benchCorpus(b *testing.B) map[string]string {
 	if len(paths) < minBenchCorpus {
 		b.Fatalf("bench corpus holds %d fixtures, floor is %d", len(paths), minBenchCorpus)
 	}
-	corpus := make(map[string]string, len(paths))
+	corpus := make([]benchFixture, 0, len(paths))
 	for _, p := range paths {
 		src, err := os.ReadFile(p)
 		if err != nil {
@@ -36,7 +45,7 @@ func benchCorpus(b *testing.B) map[string]string {
 		if _, err := TokenStream(string(src)); err != nil {
 			b.Fatalf("fixture %s does not format: %v", p, err)
 		}
-		corpus[filepath.Base(p)] = string(src)
+		corpus = append(corpus, benchFixture{name: filepath.Base(p), src: string(src)})
 	}
 	return corpus
 }
@@ -63,9 +72,9 @@ func BenchmarkTokenStreamCorpus(b *testing.B) {
 	corpus := benchCorpus(b)
 	b.ReportAllocs()
 	for b.Loop() {
-		for name, src := range corpus {
-			if _, err := TokenStream(src); err != nil {
-				b.Fatalf("%s: %v", name, err)
+		for _, f := range corpus {
+			if _, err := TokenStream(f.src); err != nil {
+				b.Fatalf("%s: %v", f.name, err)
 			}
 		}
 	}
@@ -77,6 +86,19 @@ func BenchmarkTokenStreamSynthetic(b *testing.B) {
 	for b.Loop() {
 		if _, err := TokenStream(src); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkLexOnlyCorpus is BenchmarkLexOnlySynthetic over the tracked
+// corpus, so the corpus figure in docs/VERSIONING.md is derivable the same
+// way the synthetic one is: the removed work is exactly this benchmark.
+func BenchmarkLexOnlyCorpus(b *testing.B) {
+	corpus := benchCorpus(b)
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, f := range corpus {
+			parse.Lex(f.src)
 		}
 	}
 }
