@@ -89,6 +89,25 @@ func resolveWireType(s *schema.Schema, tagName string, id schema.TypeID) (*schem
 	return nil, false
 }
 
+// typeByWireID resolves a persisted type_id — schema path and name together —
+// against the entry schema's import closure. Matching the path as well as the
+// name is what keeps two same-named types in different schemas apart; a
+// name-only lookup silently rebinds one to the other.
+func typeByWireID(s *schema.Schema, w *typeIDWire) (*schema.Type, bool) {
+	if s == nil || w == nil {
+		return nil, false
+	}
+	for _, cs := range s.Closure() {
+		if cs.SourceID().String() != w.SchemaPath {
+			continue
+		}
+		if t, ok := cs.Type(w.Name); ok {
+			return t, true
+		}
+	}
+	return nil, false
+}
+
 // wireProps clones props and rewrites each value under its schema constraint
 // so float-bearing values emit with a float indicator. A nil clone stays nil
 // (the wire's "properties":null shape); a nil type and undeclared properties

@@ -164,6 +164,24 @@ Works on strings (rune-indexed) and lists. Out-of-bounds indexing returns **nil*
 
 The bracket takes exactly one index. There is no range slice: `expr[a, b]` draws an evaluation error, and so does the empty `expr[]`. The grammar admits both spellings and a trailing comma (`expr[a,]`, evaluated as `expr[a]`) -- do not write any of them.
 
+These spellings are checked against the loader when this document is tested:
+
+```yammm-snippet
+! "first tag is alpha" tags[0] == "alpha"
+! "every instance has properties" $self -> Len > 0
+! "a uuid reports as one" id -> TypeOf == "uuid"
+```
+
+The else-less ternary is rejected at load time, not at evaluation:
+
+```yammm-invalid
+! "no else branch" tags -> Len > 0 ? { true }  // E_SYNTAX
+```
+
+The bracket arity rules and the `TypeOf` vocabulary are evaluation-time
+outcomes, which the fence vocabulary cannot decide; they are pinned by the
+tracked contract corpus at `instance/testdata/contract/`.
+
 ---
 
 ## Variables
@@ -265,7 +283,7 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 
 | Function | Signature | Description |
 | -------- | --------- | ----------- |
-| `TypeOf` | `val -> TypeOf` | DSL type name as string: `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, `"pattern"`, or `"timestamp"` (`"unknown"` for anything else). The name comes from the value, not the declared property type: a `Timestamp`, `Date` or `UUID` holding a string yields `"string"` |
+| `TypeOf` | `val -> TypeOf` | DSL type name as string: `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, `"pattern"`, `"timestamp"`, or `"uuid"` (`"unknown"` for anything else). The name comes from the value, not the declared property type: a `Timestamp`, `Date` or `UUID` holding a string yields `"string"` |
 | `IsNil` | `val -> IsNil` | True if value is nil |
 
 ---

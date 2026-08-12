@@ -597,3 +597,42 @@ func TestChecks_PatternListIsTruncatedAtTheCap(t *testing.T) {
 			got, maxPatterns)
 	}
 }
+
+// The two reporting sites for an unquote failure carry different prefixes and
+// both texts are a consumer contract: the checks sites name what failed and
+// carry the unquoter's own message, while the expression site supplies its own
+// context and must not repeat it.
+func TestChecks_UnquoteFailureTextIsStableAtBothSites(t *testing.T) {
+	t.Parallel()
+
+	_, issues := Parse([]byte("schema \"\\x\"\ntype T {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
+	if !hasMessage(issues, "invalid schema name: unquote string: invalid syntax") {
+		t.Errorf("schema-name site text moved; got %s", messages(issues))
+	}
+
+	src := "schema \"s\"\n\ntype T {\n\tid String primary\n\t! \"m\" id == \"\\x\"\n}\n"
+	_, issues = Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if !hasMessage(issues, "invalid string literal: invalid syntax") {
+		t.Errorf("expression site text moved; got %s", messages(issues))
+	}
+	if hasMessage(issues, "invalid string literal: unquote string: invalid syntax") {
+		t.Errorf("expression site double-prefixed the cause; got %s", messages(issues))
+	}
+}
+
+func hasMessage(issues []diag.Issue, want string) bool {
+	for _, i := range issues {
+		if strings.Contains(i.Message(), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func messages(issues []diag.Issue) string {
+	out := make([]string, 0, len(issues))
+	for _, i := range issues {
+		out = append(out, i.Message())
+	}
+	return strings.Join(out, " | ")
+}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/instancetest"
@@ -62,6 +63,82 @@ func TestMarshal_ZeroTypeIDRootEmitsNoTypeID(t *testing.T) {
 	}
 	if strings.Contains(string(data), `"type_id"`) {
 		t.Errorf("marshal emitted a type_id for an instance that carries none:\n%s", data)
+	}
+}
+
+// The duplicates section carries the same guard as the root path, and nothing
+// reached it either.
+func TestMarshal_ZeroTypeIDDuplicateEmitsNoTypeID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := testSchema(t)
+
+	inst := graph.InstanceParts{
+		TypeName:   "Person",
+		PrimaryKey: immutable.WrapKey([]any{"p1"}),
+		Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
+	}
+	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types:     []string{"Person"},
+		Instances: map[string][]graph.InstanceParts{"Person": {inst}},
+		Duplicates: []graph.DuplicateParts{{
+			Type:     "Person",
+			Key:      immutable.WrapKey([]any{"p1"}),
+			Instance: inst,
+		}},
+	})
+	if result.HasErrors() {
+		t.Fatalf("rebuild: %s", result)
+	}
+
+	data, mres := snapshot.Marshal(ctx, snap)
+	if err := mres.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"schema_path":""`) {
+		t.Errorf("marshal emitted a contentless type_id in the duplicates section:\n%s", data)
+	}
+}
+
+// A persisted type_id naming a resolvable type other than the one the tag form
+// resolves to is a contradiction, and the load reports it rather than silently
+// keeping the tag form's answer.
+func TestLoad_ContradictoryTypeIDIsReported(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+
+	// TypeName says the local Part; TypeID says the imported one of the same
+	// name. Only a caller assembling parts directly can build this.
+	imported := mustTypeIDIn(t, s, "base", "Part")
+	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types: []string{"Part"},
+		Instances: map[string][]graph.InstanceParts{
+			"Part": {{
+				TypeName:   "Part",
+				TypeID:     imported,
+				PrimaryKey: immutable.WrapKey([]any{"p1"}),
+				Properties: immutable.WrapProperties(map[string]any{"name": "p1"}),
+			}},
+		},
+	})
+	if result.HasErrors() {
+		t.Fatalf("rebuild: %s", result)
+	}
+	data, mres := snapshot.Marshal(ctx, snap)
+	if err := mres.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	_, lres := snapshot.Load(ctx, data, s)
+	found := false
+	for issue := range lres.Issues() {
+		if issue.Code() == diag.E_SNAPSHOT_TYPEID_MISMATCH {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("load accepted a document whose type_id contradicts its tag form: %s\n%s", lres, data)
 	}
 }
 

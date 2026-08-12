@@ -456,8 +456,8 @@ func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schem
 	if len(compRels) > 0 {
 		compMap := make(map[string][]instWire, len(compRels))
 		for _, relName := range compRels {
-			// The parent relation's target is the child's exact type, and the
-			// only route for loaded children (relation-name TypeName, zero TypeID).
+			// The relation's target is what the decoder recovers when the wire
+			// omits type_id; the child's own type may differ.
 			var childType *schema.Type
 			if t != nil {
 				if rel, ok := t.Relation(relName); ok {
@@ -491,19 +491,22 @@ func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schem
 	return w
 }
 
-// marshalComposedChild marshals a composed child instance under t, the parent
-// relation's target type (nil when the parent never resolved — passthrough).
-// Composed children never carry edges (omitempty handles this).
-func marshalComposedChild(inst *graph.Instance, s *schema.Schema, t *schema.Type) instWire {
+// marshalComposedChild marshals a composed child under target, the parent
+// relation's declared target type (nil when the parent never resolved).
+// Properties and nested relations resolve against the child's own type, which
+// is not always the target: encoding a child's values under another type's
+// constraints corrupts them. Composed children never carry edges.
+func marshalComposedChild(inst *graph.Instance, s *schema.Schema, target *schema.Type) instWire {
+	own, _ := resolveWireType(s, inst.TypeName(), inst.TypeID())
 	w := instWire{
 		Key:        inst.PrimaryKey().Clone(),
-		Properties: wireProps(inst.Properties(), t),
+		Properties: wireProps(inst.Properties(), own),
 	}
 
 	// type_id rides only when the decoder's recovery — the parent relation's
 	// target — would land on a different type.
 	typeID := inst.TypeID()
-	if !typeID.IsZero() && (t == nil || t.ID() != typeID) {
+	if !typeID.IsZero() && (target == nil || target.ID() != typeID) {
 		w.TypeID = &typeIDWire{
 			SchemaPath: typeID.SchemaPath().String(),
 			Name:       typeID.Name(),
@@ -516,8 +519,8 @@ func marshalComposedChild(inst *graph.Instance, s *schema.Schema, t *schema.Type
 		compMap := make(map[string][]instWire, len(compRels))
 		for _, relName := range compRels {
 			var childType *schema.Type
-			if t != nil {
-				if rel, ok := t.Relation(relName); ok {
+			if own != nil {
+				if rel, ok := own.Relation(relName); ok {
 					childType, _ = s.TypeByID(rel.TargetID())
 				}
 			}

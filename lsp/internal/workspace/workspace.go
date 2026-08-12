@@ -217,10 +217,7 @@ func (w *Workspace) AddRoot(uri string) {
 		return
 	}
 
-	canonicalPath := path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		canonicalPath = filepath.Clean(resolved)
-	}
+	canonicalPath := lsputil.CanonicalPath(path)
 
 	if slices.Contains(w.roots, canonicalPath) {
 		w.logger.Debug("workspace root already exists", slog.String("path", canonicalPath))
@@ -246,10 +243,7 @@ func (w *Workspace) RemoveRoot(uri string) {
 		return
 	}
 
-	canonicalPath := path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		canonicalPath = filepath.Clean(resolved)
-	}
+	canonicalPath := lsputil.CanonicalPath(path)
 
 	lenBefore := len(w.roots)
 	w.roots = slices.DeleteFunc(w.roots, func(root string) bool {

@@ -379,7 +379,11 @@ func (b *builder) unquoteAt(t *strTok, what string) (string, bool) {
 
 // errUnquoteSyntax keeps the exact message the strconv-backed unquoter
 // produced, so consumers matching diagnostic text see no change.
-var errUnquoteSyntax = errors.New("unquote string: invalid syntax")
+// unquoteSyntaxCause is the same message without the prefix, for the one
+// reporting site that supplies its own.
+const unquoteSyntaxCause = "invalid syntax"
+
+var errUnquoteSyntax = errors.New("unquote string: " + unquoteSyntaxCause)
 
 // unquote strips a literal's surrounding quotes and resolves exactly the
 // lexer's STRING escape vocabulary: \b \t \n \f \r \0 \xHH \uHHHH \" \' \\.

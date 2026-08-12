@@ -416,12 +416,21 @@ func (sd *streamDecoder) processInstance(
 			declType = schemaType
 		}
 
-		// Cross-validate type_id when present.
+		// An unresolvable persisted path means the schema moved since the
+		// write, which is no defect; a resolvable one naming another type is.
 		if inst.TypeID != nil && ok {
-			if inst.TypeID.Name != typeID.Name() {
+			persisted, resolved := typeByWireID(sd.schema, inst.TypeID)
+			switch {
+			case inst.TypeID.Name != typeID.Name():
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPEID_MISMATCH,
 					fmt.Sprintf("persisted type_id name %q does not match schema type %q",
 						inst.TypeID.Name, typeID.Name())).
+					WithDetail(diag.DetailKeyTypeName, typeName).
+					Build())
+			case resolved && persisted.ID() != typeID:
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPEID_MISMATCH,
+					fmt.Sprintf("persisted type_id names %q in schema %q, but %q resolves to the type declared in %q",
+						inst.TypeID.Name, inst.TypeID.SchemaPath, typeName, typeID.SchemaPath().String())).
 					WithDetail(diag.DetailKeyTypeName, typeName).
 					Build())
 			}
@@ -460,38 +469,28 @@ func (sd *streamDecoder) processInstance(
 	}
 }
 
-// composedChildType recovers a composed child's type in tag form. The parent
-// relation's target is the primary source, because the wire omits type_id
-// exactly when that target identifies the child; falling back to the relation
-// name loses the child's identity whenever the two differ.
+// composedChildType recovers a composed child's type in tag form, inverting
+// the writer's omission rule: type_id is absent exactly when the parent
+// relation's target identifies the child, so an explicit one means the target
+// is the wrong answer and must never override it.
 func (sd *streamDecoder) composedChildType(
 	parent *schema.Type,
 	relName string,
 	child instWire,
 ) (string, schema.TypeID) {
-	var target *schema.Type
-	if sd.schema != nil && parent != nil {
-		if rel, ok := parent.Relation(relName); ok {
-			target, _ = sd.schema.TypeByID(rel.TargetID())
-		}
-	}
-
 	if child.TypeID != nil {
-		// The target wins on agreement: it carries the full identity that the
-		// wire's unqualified name cannot.
-		if target != nil && target.ID().Name() == child.TypeID.Name {
-			return wireTagForm(sd.schema, target.ID()), target.ID()
-		}
-		if sd.schema != nil {
-			if t, ok := sd.schema.Type(child.TypeID.Name); ok {
-				return child.TypeID.Name, t.ID()
-			}
+		if t, ok := typeByWireID(sd.schema, child.TypeID); ok {
+			return wireTagForm(sd.schema, t.ID()), t.ID()
 		}
 		return child.TypeID.Name, schema.TypeID{}
 	}
 
-	if target != nil {
-		return wireTagForm(sd.schema, target.ID()), target.ID()
+	if sd.schema != nil && parent != nil {
+		if rel, ok := parent.Relation(relName); ok {
+			if target, ok := sd.schema.TypeByID(rel.TargetID()); ok {
+				return wireTagForm(sd.schema, target.ID()), target.ID()
+			}
+		}
 	}
 	return relName, schema.TypeID{}
 }

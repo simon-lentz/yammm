@@ -256,7 +256,9 @@ func (p *exprParser) literal(t *lexer.Token) expr.Expression {
 	case p.tok.str:
 		s, err := unquote(t.Value)
 		if err != nil {
-			p.diagf(start, end, "invalid string literal: %v", err)
+			// This site supplies its own context, so it reports the cause
+			// alone rather than double-prefixing a text consumers match.
+			p.diagf(start, end, "invalid string literal: %s", unquoteSyntaxCause)
 			return expr.NewLiteral(nil)
 		}
 		return expr.NewLiteral(s)

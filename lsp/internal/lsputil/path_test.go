@@ -66,3 +66,23 @@ func TestCanonicalPath_KeepsUnresolvablePaths(t *testing.T) {
 		t.Errorf("CanonicalPath(%q) = %q, want %q", deleted, got, want)
 	}
 }
+
+// A relative path is made absolute before anything else. Without that step the
+// key depends on the process working directory, so the same file registers
+// under two identities depending on how it was named.
+func TestCanonicalPath_MakesRelativePathsAbsolute(t *testing.T) {
+	t.Parallel()
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	// Names no existing file, so resolution fails and the cleaned absolute
+	// form is what comes back — the step under test, with nothing after it.
+	rel := filepath.Join("does-not-exist", "schema.yammm")
+	want := filepath.Join(cwd, rel)
+
+	if got := lsputil.CanonicalPath(rel); got != want {
+		t.Errorf("CanonicalPath(%q) = %q, want %q — a relative path kept its relative form", rel, got, want)
+	}
+}

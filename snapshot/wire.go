@@ -126,8 +126,11 @@ type instWire struct {
 	Provenance *provenanceWire       `json:"provenance"`
 }
 
-// typeIDWire is the optional cross-validation type identity.
-// Omitted when recoverable from context (single-schema case).
+// typeIDWire is the persisted type identity, omitted at each position where
+// that position's own recovery already lands on it: the instances-map key for
+// a root instance and for a duplicate, the parent relation's target for a
+// composed child. Present, it is authoritative for a composed child and a
+// cross-check for the other two.
 type typeIDWire struct {
 	SchemaPath string `json:"schema_path"`
 	Name       string `json:"name"`

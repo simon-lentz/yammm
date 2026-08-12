@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -97,13 +98,18 @@ func TestIndexTargetDefense_RejectsTargetsTheLoaderWouldHaveRejected(t *testing.
 	t.Run("vector target rejects a non-Vector property", func(t *testing.T) {
 		t.Parallel()
 		collector := diag.NewCollector(0)
+		// A valid dimension, so only the not-a-Vector guard can fire: a zero
+		// one is caught by the guard after it and the branch stays unpinned.
 		ok := validVectorTarget(typ, propertyOn(t, typ, "title"), vectorAnn,
-			schema.VectorConstraint{}, false, collector, reportedTargets{})
+			schema.NewVectorConstraint(3), false, collector, reportedTargets{})
 		if ok {
 			t.Error("validVectorTarget accepted a String — the declared ANN index would be dropped silently")
 		}
 		if !collector.Result().HasCode(E_NEO4J_INVALID_INDEX_TARGET) {
 			t.Errorf("want %s, got: %v", E_NEO4J_INVALID_INDEX_TARGET, collector.Result())
+		}
+		if !strings.Contains(collector.Result().String(), "not a Vector") {
+			t.Errorf("the diagnostic does not name the reason: %v", collector.Result())
 		}
 	})
 

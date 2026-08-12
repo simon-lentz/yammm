@@ -73,7 +73,12 @@ func TestContract_PassCorpus(t *testing.T) {
 	if validated == 0 {
 		t.Fatal("data_pass.json drove no instance — every assertion above was skipped")
 	}
-	for typeName := range s.Types() {
+	for typeName, typ := range s.Types() {
+		// Abstract and part types have no ValidateOne entry point, so requiring
+		// an instance for them would fail on a fixture that is entirely correct.
+		if typ.IsAbstract() || typ.IsPart() {
+			continue
+		}
 		if len(data[typeName]) == 0 {
 			t.Errorf("type %q is declared in the corpus but has no instance in data_pass.json", typeName)
 		}

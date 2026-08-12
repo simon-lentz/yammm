@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema/expr"
@@ -1021,6 +1022,10 @@ func dslTypeName(v any) string {
 		return "pattern"
 	case time.Time:
 		return "timestamp"
+	case uuid.UUID:
+		// A UUID is [16]byte, so without this case it reaches the array arm
+		// below and reports as a list.
+		return "uuid"
 	case immutable.Slice:
 		return "list"
 	case immutable.Map[string]:

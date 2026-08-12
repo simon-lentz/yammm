@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -122,5 +123,49 @@ func TestTypeOf_NamesATimestamp(t *testing.T) {
 		map[string]any{"ts": "2020-01-02T03:04:05Z"})
 	if !ok {
 		t.Errorf("TypeOf on a string-valued Timestamp: %s", detail)
+	}
+}
+
+// TypeOf names a UUID rather than reporting it as a list. uuid.UUID is
+// [16]byte, so the array arm of the classifier claimed it until this case
+// preceded it.
+func TestTypeOf_NamesAUUID(t *testing.T) {
+	ok, detail := invariantHolds(t, "\tu UUID\n", `u -> TypeOf == "uuid"`,
+		map[string]any{"u": uuid.MustParse("0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b")})
+	if !ok {
+		t.Errorf("TypeOf on a uuid.UUID-valued UUID property: %s", detail)
+	}
+
+	// The D-8 limit: the name comes from the value, so a string-valued UUID
+	// property is indistinguishable from a String.
+	ok, detail = invariantHolds(t, "\tu UUID\n", `u -> TypeOf == "string"`,
+		map[string]any{"u": "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"})
+	if !ok {
+		t.Errorf("TypeOf on a string-valued UUID property: %s", detail)
+	}
+}
+
+// A list index beyond int32 range yields nil. On a 64-bit build this holds
+// with or without the arm's int64 bounds check, so it states the contract
+// rather than pinning the check; the check exists for a consumer building
+// 32-bit, where narrowing first wraps a large index into range.
+func TestIndexing_LargeIndexDoesNotWrap(t *testing.T) {
+	const decls = "\ttags List<String>\n"
+	props := map[string]any{"tags": []any{"alpha", "beta", "gamma"}}
+
+	for _, inv := range []string{
+		`tags[4294967296] -> IsNil`,
+		`tags[4294967297] -> IsNil`,
+		`tags[-4294967295] -> IsNil`,
+	} {
+		if ok, detail := invariantHolds(t, decls, inv, props); !ok {
+			t.Errorf("%s: %s", inv, detail)
+		}
+	}
+
+	// The control: an in-range index still resolves, so the assertions above
+	// cannot pass by making every index nil.
+	if ok, detail := invariantHolds(t, decls, `tags[1] == "beta"`, props); !ok {
+		t.Errorf("in-range index stopped resolving: %s", detail)
 	}
 }

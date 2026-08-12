@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // wireFloat.MarshalJSON is a copy of encoding/json's float encoder, kept for
@@ -192,5 +194,76 @@ func TestExactWireUint_TurnsOnConvertibility(t *testing.T) {
 	}
 	if _, ok := exactWireUint(math.MaxUint64); ok {
 		t.Error("exactWireUint(MaxUint64) = exact, want inexact — float64 rounds it up to 2^64")
+	}
+}
+
+// wireElems reaches a vector or list position whatever container the caller
+// built. []byte is the case worth pinning: encoding/json renders it as a
+// base64 string, which is the wrong shape for a declared list, so the widened
+// arm changes the wire for a caller-assembled snapshot.
+func TestWireElems_ReachesEveryContainer(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   any
+	}{
+		{"byte slice", []byte{1, 2, 3}},
+		{"float32 slice", []float32{1, 2, 3}},
+		{"int slice", []int{1, 2, 3}},
+		{"array", [3]float64{1, 2, 3}},
+		{"any slice", []any{float64(1), float64(2), float64(3)}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := wireValue(tc.in, schema.VectorConstraint{})
+			elems, ok := got.([]any)
+			if !ok {
+				t.Fatalf("wireValue over %T returned %T, want []any — the container never reached the vector arm", tc.in, got)
+			}
+			if len(elems) != 3 {
+				t.Fatalf("got %d elements, want 3", len(elems))
+			}
+			for i, e := range elems {
+				if _, ok := e.(wireFloat); !ok {
+					t.Errorf("element %d is %T, want wireFloat — it would emit int-shaped", i, e)
+				}
+			}
+		})
+	}
+
+	// A non-container under the same constraint passes through untouched, or
+	// the assertions above would hold for anything.
+	if got := wireValue("not a vector", schema.VectorConstraint{}); got != "not a vector" {
+		t.Errorf("wireValue over a string returned %#v, want it untouched", got)
+	}
+}
+
+// The exactness guard turns on convertibility, so a value it cannot represent
+// passes through. Driving every kind at 2 alone never reaches that arm.
+func TestWireNumeric_InexactValuesPassThrough(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		in      any
+		wrapped bool
+	}{
+		{"int64 exactly convertible beyond 2^53", int64(1) << 62, true},
+		{"int64 not exactly convertible", int64(1)<<62 + 1, false},
+		{"MaxInt64", int64(math.MaxInt64), false},
+		{"uint64 not exactly convertible", uint64(1)<<63 + 1, false},
+		{"negative exactly convertible", int64(math.MinInt64), true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := wireNumeric(tc.in)
+			_, wrapped := got.(wireFloat)
+			if wrapped != tc.wrapped {
+				t.Errorf("wireNumeric(%v) wrapped = %v, want %v", tc.in, wrapped, tc.wrapped)
+			}
+		})
 	}
 }

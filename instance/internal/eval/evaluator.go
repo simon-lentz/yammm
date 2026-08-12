@@ -460,6 +460,11 @@ func (e *Evaluator) accessIndex(obj, idx any) (any, error) {
 	// A List-typed property arrives as immutable.Slice, not []any — that is
 	// what Value.Unwrap returns for a collection.
 	if slice, ok := obj.(immutable.Slice); ok {
+		// Bounds-check in int64 like the arms above: narrowing first would
+		// wrap a large index into range on a 32-bit build.
+		if i < 0 || i >= int64(slice.Len()) {
+			return nil, nil //nolint:nilnil // out of bounds returns nil
+		}
 		v, ok := slice.GetOK(int(i))
 		if !ok {
 			return nil, nil //nolint:nilnil // out of bounds returns nil

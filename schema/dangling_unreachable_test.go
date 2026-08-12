@@ -124,6 +124,19 @@ func TestDanglingQualifiedReference_UnreachableThroughBuilder(t *testing.T) {
 		assertRejected(t, s, result)
 	})
 
+	t.Run("composition target", func(t *testing.T) {
+		t.Parallel()
+		s, result := schema.NewBuilder().
+			WithName("d").
+			WithSourceID(location.MustNewSourceID("test://d.yammm")).
+			AddType("Base").
+			WithPrimaryKey("id", schema.NewStringConstraint()).
+			WithComposition("PARTS", schema.NewTypeRef("nope", "Missing", location.Span{}), false, true).
+			Done().
+			Build()
+		assertRejected(t, s, result)
+	})
+
 	t.Run("qualified datatype", func(t *testing.T) {
 		t.Parallel()
 		s, result := schema.NewBuilder().
@@ -136,6 +149,28 @@ func TestDanglingQualifiedReference_UnreachableThroughBuilder(t *testing.T) {
 			Build()
 		assertRejected(t, s, result)
 	})
+}
+
+// The two halves must cover the same positions, or the proof is by exhaustion
+// over one path and by sampling over the other.
+func TestDanglingQualifiedReference_BothHalvesCoverEveryPosition(t *testing.T) {
+	t.Parallel()
+	builderPositions := map[string]bool{
+		"relation target":    true,
+		"extends":            true,
+		"composition target": true,
+		"qualified datatype": true,
+	}
+	for position := range danglingSources {
+		if !builderPositions[position] {
+			t.Errorf("position %q is proved through the loader but not through Builder.Build", position)
+		}
+	}
+	for position := range builderPositions {
+		if _, ok := danglingSources[position]; !ok {
+			t.Errorf("position %q is proved through Builder.Build but has no loader source", position)
+		}
+	}
 }
 
 // A schema that fails to seal is never registered, so a Registry cannot hand
