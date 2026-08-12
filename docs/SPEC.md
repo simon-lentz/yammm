@@ -1505,7 +1505,7 @@ Results on an empty collection are a mixed family:
 
 | Function | Description |
 | -------- | ----------- |
-| `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, `"pattern"`, or `"timestamp"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type: a `Timestamp`, `Date` or `UUID` property holding a string yields `"string"`, and only a `Timestamp` holding a Go `time.Time` yields `"timestamp"` |
+| `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, `"pattern"`, `"timestamp"`, or `"uuid"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type: a `Timestamp`, `Date` or `UUID` property holding a string yields `"string"`. Only a Go-native value yields the last two — a `time.Time` yields `"timestamp"` and a `uuid.UUID` yields `"uuid"` — so data arriving as JSON never produces either |
 | `IsNil` | Check if nil: `value -> IsNil` |
 | `Default` | Return default if nil: `value -> Default(fallback)` |
 | `Coalesce` | Return first non-nil: `a -> Coalesce(b, c)` |
