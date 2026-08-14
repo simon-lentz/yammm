@@ -55,22 +55,28 @@ type EdgeParts struct {
 
 // DuplicateParts holds the data for a single duplicate record.
 //
-// Type and Key identify the primary key that was duplicated. These fields
-// serve double duty: they describe the rejected instance's identity AND
-// provide the lookup key for the Conflict instance in the instance index.
+// Type and Key identify the type identity and primary key that was duplicated,
+// and double as the lookup key for the Conflict instance in the instance index.
+//
+// ParentType, ParentKey and Relation are the composing parent's coordinates,
+// set only for a composed-child duplicate. A composed child is absent from the
+// instance index, so a non-empty Relation directs the lookup through the
+// parent's composed children instead.
 type DuplicateParts struct {
-	Type     schema.TypeID
-	Key      immutable.Key
-	Instance InstanceParts
+	Type       schema.TypeID
+	Key        immutable.Key
+	Instance   InstanceParts
+	ParentType schema.TypeID
+	ParentKey  immutable.Key
+	Relation   string
 }
 
 // UnresolvedParts holds the data for a single unresolved edge record.
 //
 // Properties carries the edge property values declared on the forward
 // reference. Populated only when Reason is "target_missing"; empty
-// otherwise. Loaded from the .ys wire-format v2 "properties" field on
-// unresolved-edge entries; for v1 documents this is always empty
-// (v1 never carried the field).
+// otherwise. Loaded from the "properties" field on unresolved-edge
+// entries, which every readable wire format carries.
 //
 // TargetType is an identity even though no instance of it is present — it is
 // what a later [Graph.Add] resolves an arriving target against, so a name
@@ -162,17 +168,22 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 			continue
 		}
 
-		// Resolve the conflict pointer via the index.
-		conflict := lookupInstance(instanceIndex, dp.Type, dp.Key.String())
+		// Resolve the conflict pointer.
+		conflict := resolveDuplicateConflict(instanceIndex, dp)
 		if conflict == nil {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: duplicate conflict %s[%s] not found in instance index",
-					dp.Type, dp.Key.String())).Build())
+				fmt.Sprintf("RebuildSnapshot: duplicate conflict %s not found",
+					describeDuplicateConflict(dp))).Build())
 			continue
 		}
 
+		var parent *Instance
+		if dp.Relation != "" {
+			parent = lookupInstance(instanceIndex, dp.ParentType, dp.ParentKey.String())
+		}
+
 		dupInst := rebuildInstance(dp.Instance)
-		duplicates = append(duplicates, newDuplicate(dupInst, conflict, diag.Issue{}))
+		duplicates = append(duplicates, newDuplicate(dupInst, conflict, parent, dp.Relation, diag.Issue{}))
 	}
 
 	// Step 4: Create UnresolvedEdge records.
@@ -220,6 +231,36 @@ func rebuildInstance(ip InstanceParts) *Instance {
 	}
 
 	return inst
+}
+
+// resolveDuplicateConflict finds the instance a duplicate collided with.
+// Composed children never enter the instance index, so a composed-child
+// duplicate resolves by walking parent → relation → matching child instead.
+func resolveDuplicateConflict(index map[schema.TypeID]map[string]*Instance, dp DuplicateParts) *Instance {
+	if dp.Relation == "" {
+		return lookupInstance(index, dp.Type, dp.Key.String())
+	}
+	parent := lookupInstance(index, dp.ParentType, dp.ParentKey.String())
+	if parent == nil {
+		return nil
+	}
+	keyStr := dp.Key.String()
+	for _, child := range parent.Composed(dp.Relation) {
+		if child.TypeID() == dp.Type && child.PrimaryKey().String() == keyStr {
+			return child
+		}
+	}
+	return nil
+}
+
+// describeDuplicateConflict renders a duplicate's conflict coordinates for a
+// diagnostic message.
+func describeDuplicateConflict(dp DuplicateParts) string {
+	if dp.Relation == "" {
+		return fmt.Sprintf("%s[%s] in the instance index", dp.Type, dp.Key.String())
+	}
+	return fmt.Sprintf("%s[%s] under %s[%s].%s",
+		dp.Type, dp.Key.String(), dp.ParentType, dp.ParentKey.String(), dp.Relation)
 }
 
 // lookupInstance finds an instance in the index by type identity and key string.

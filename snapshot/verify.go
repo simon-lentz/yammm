@@ -39,6 +39,22 @@ func Verify(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOpti
 		return sd.collector.Result()
 	}
 
+	if sd.isV3() {
+		sections, diags, err := sd.decodeSectionsV3()
+		if err != nil {
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+			return sd.collector.Result()
+		}
+		exists, composed, refs, err := sd.validateInstancesV3(ctx, sections)
+		if err != nil {
+			return sd.collector.Result()
+		}
+		sd.validateDiagnosticsV3(diags, exists, composed)
+		sd.verifyIntegrity()
+		sd.validateEdgeRefsV3(refs, exists)
+		return sd.collector.Result()
+	}
+
 	// Decode remaining sections (instances + diagnostics).
 	instances, diags, err := sd.decodeSections()
 	if err != nil {

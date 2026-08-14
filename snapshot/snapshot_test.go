@@ -460,8 +460,8 @@ func TestInfo_Basic(t *testing.T) {
 		t.Fatal("Info returned nil")
 	}
 
-	if info.Version != 2 {
-		t.Errorf("Version: got %d, want 2", info.Version)
+	if info.Version != 3 {
+		t.Errorf("Version: got %d, want 3", info.Version)
 	}
 	if info.SchemaName != "test" {
 		t.Errorf("SchemaName: got %q, want %q", info.SchemaName, "test")
@@ -512,7 +512,7 @@ func TestHeaderOnly_Basic(t *testing.T) {
 	require.NoError(t, result.Err(), "HeaderOnly should succeed")
 	require.NotNil(t, header, "HeaderOnly should return a non-nil HeaderInfo")
 
-	assert.Equal(t, 2, header.Version, "Version")
+	assert.Equal(t, 3, header.Version, "Version")
 	assert.Equal(t, "test", header.SchemaName, "SchemaName")
 	assert.NotEmpty(t, header.SchemaHash, "SchemaHash should be populated")
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash should be populated (value, not verified)")
@@ -687,7 +687,7 @@ func TestHeaderOnlyRead_HappyPath(t *testing.T) {
 	require.NoError(t, result.Err(), "HeaderOnlyRead should succeed on well-formed input")
 	require.NotNil(t, header, "HeaderOnlyRead should return a non-nil HeaderInfo")
 
-	assert.Equal(t, 2, header.Version)
+	assert.Equal(t, 3, header.Version)
 	assert.Equal(t, "test", header.SchemaName)
 	assert.NotEmpty(t, header.SchemaHash)
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash is the stored value, not a verification result")
@@ -1262,16 +1262,15 @@ func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 		"unresolved edge properties must survive round-trip and match the resolved shape")
 }
 
-// TestLoad_V1Compatibility pins the "v2 reader accepts v1 files losslessly"
-// half of the asymmetric-bump contract. A hand-crafted v1 document (no
-// "properties" field on unresolvedWire entries) loads cleanly through the
-// v0.3.0 decoder; the resulting UnresolvedEdge has empty Properties —
-// equivalent to the v1 in-memory semantics.
+// TestLoad_V1Rejected pins the retirement of wire v1. A v1 document loaded
+// cleanly through every reader up to v0.11.0; from v0.12.0 MinReadableVersion
+// is 2 and the same document is refused with the range named, rather than
+// being read under v2 rules it was never written to.
 //
 // Integrity is not the point of this test (we are constructing a v1 doc by
 // hand rather than recomputing its SHA-256), so WithSkipIntegrityCheck
 // keeps the test focused on version-acceptance semantics.
-func TestLoad_V1Compatibility(t *testing.T) {
+func TestLoad_V1Rejected(t *testing.T) {
 	s := testSchema(t)
 	// Minimal v1-style document. The unresolved-edge entry has NO
 	// "properties" field (the v1 shape). The schema_hash matches
@@ -1284,22 +1283,20 @@ func TestLoad_V1Compatibility(t *testing.T) {
 
 	ctx := context.Background()
 	loaded, result := snapshot.Load(ctx, []byte(doc), s, snapshot.WithSkipIntegrityCheck())
-	require.NoError(t, result.Err(), "v2 reader must accept v1 documents cleanly: %v", result)
-
-	require.Len(t, loaded.Unresolved(), 1)
-	u := loaded.Unresolved()[0]
-	require.Equal(t, 0, u.Properties().Len(),
-		"v1 document has no properties field on unresolved wire; v2 reader loads as empty Properties")
+	require.Nil(t, loaded, "a refused document yields no snapshot")
+	require.True(t, hasCode(result, diag.E_SNAPSHOT_UNSUPPORTED_VERSION),
+		"v1 must be refused with the supported range named: %v", result)
+	require.Contains(t, result.Err().Error(), "[2, 3]")
 }
 
 // TestLoad_UnsupportedVersion pins the rejection path for versions outside
-// the accept range on either side (v0, v3, v99). Each surfaces the
+// the accept range on either side (v0, v1, v99). Each surfaces the
 // E_SNAPSHOT_UNSUPPORTED_VERSION code with the observed version and the
 // supported range named in the message.
 func TestLoad_UnsupportedVersion(t *testing.T) {
 	s := testSchema(t)
 	schemaHash := schema.StructuralHash(s)
-	for _, v := range []int{0, 3, 99} {
+	for _, v := range []int{0, 1, 99} {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			doc := fmt.Sprintf(`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":[],"instances":{},"diagnostics":{"duplicates":[],"unresolved":[]}}`, v, schemaHash)
 
@@ -1311,7 +1308,7 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 			for issue := range result.Errors() {
 				if issue.Code() == diag.E_SNAPSHOT_UNSUPPORTED_VERSION {
 					found = true
-					require.Contains(t, issue.Message(), "[1, 2]",
+					require.Contains(t, issue.Message(), "[2, 3]",
 						"reject message names the accept range")
 				}
 			}

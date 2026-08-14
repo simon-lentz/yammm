@@ -1,143 +1,159 @@
 {
 	"yammm_snapshot": {
-		"version": 2,
+		"version": 3,
 		"schema_name": "wiretest",
 		"schema_source": "string://wiretest.yammm",
 		"schema_hash": "sha256:38660474f3c3ee8d878a24c3033153024156fb9254e71964a6ce7691f14a9810",
 		"schema_hash_algorithm": 1,
-		"integrity_hash": "sha256:06963c3ffa24d5385bf4843b6fcc8aacc66df59c40e140b38226602fcbd0c6a1",
+		"integrity_hash": "sha256:ee06e430d2b8c00482cd03f0293408c19fbd63227b691d047b92811b1d0e89e5",
 		"features": []
 	},
 	"types": [
-  	"Sensor",
-  	"Station"
-  ],
-	"instances": {
-  	"Sensor": [
-  		{
-  			"key": [
-  				"s1"
-  			],
-  			"properties": {
-  				"embedding": [
-  					0.25,
-  					1.0,
-  					2.0
-  				],
-  				"id": "s1",
-  				"reading": 1860000.0,
-  				"samples": [
-  					1.0,
-  					2.5
-  				],
-  				"scale": 5.0
-  			},
-  			"edges": {
-  				"FEED": [
-  					{
-  						"target_type": "Station",
-  						"target_key": [
-  							"st1"
-  						],
-  						"properties": {
-  							"gain": 2.0
-  						}
-  					}
-  				]
-  			},
-  			"composed": {
-  				"PARTS": [
-  					{
-  						"key": [
-  							"p1"
-  						],
-  						"properties": {
-  							"name": "p1",
-  							"weight": 3.0
-  						},
-  						"provenance": null
-  					}
-  				]
-  			},
-  			"provenance": null
-  		},
-  		{
-  			"key": [
-  				"s2"
-  			],
-  			"properties": {
-  				"embedding": [
-  					0.25,
-  					1.0,
-  					2.0
-  				],
-  				"id": "s2",
-  				"reading": 6.0,
-  				"samples": [
-  					8.0
-  				],
-  				"scale": 5.0
-  			},
-  			"provenance": null
-  		}
-  	],
-  	"Station": [
-  		{
-  			"key": [
-  				"st1"
-  			],
-  			"properties": {
-  				"id": "st1"
-  			},
-  			"provenance": null
-  		}
-  	]
-  },
+		{
+			"schema_path": "string://wiretest.yammm",
+			"name": "Part",
+			"tag": "Part"
+		},
+		{
+			"schema_path": "string://wiretest.yammm",
+			"name": "Sensor",
+			"tag": "Sensor"
+		},
+		{
+			"schema_path": "string://wiretest.yammm",
+			"name": "Station",
+			"tag": "Station"
+		}
+	],
+	"instances": [
+		[],
+		[
+			{
+				"key": [
+					"s1"
+				],
+				"properties": {
+					"embedding": [
+						0.25,
+						1.0,
+						2.0
+					],
+					"id": "s1",
+					"reading": 1860000.0,
+					"samples": [
+						1.0,
+						2.5
+					],
+					"scale": 5.0
+				},
+				"edges": {
+					"FEED": [
+						{
+							"target_type": 2,
+							"target_key": [
+								"st1"
+							],
+							"properties": {
+								"gain": 2.0
+							}
+						}
+					]
+				},
+				"composed": {
+					"PARTS": [
+						{
+							"key": [
+								"p1"
+							],
+							"type": 0,
+							"properties": {
+								"name": "p1",
+								"weight": 3.0
+							},
+							"provenance": null
+						}
+					]
+				},
+				"provenance": null
+			},
+			{
+				"key": [
+					"s2"
+				],
+				"properties": {
+					"embedding": [
+						0.25,
+						1.0,
+						2.0
+					],
+					"id": "s2",
+					"reading": 6.0,
+					"samples": [
+						8.0
+					],
+					"scale": 5.0
+				},
+				"provenance": null
+			}
+		],
+		[
+			{
+				"key": [
+					"st1"
+				],
+				"properties": {
+					"id": "st1"
+				},
+				"provenance": null
+			}
+		]
+	],
 	"diagnostics": {
-  	"duplicates": [
-  		{
-  			"type": "Sensor",
-  			"key": [
-  				"s1"
-  			],
-  			"instance": {
-  				"key": [
-  					"s1"
-  				],
-  				"properties": {
-  					"embedding": [
-  						0.25,
-  						1.0,
-  						2.0
-  					],
-  					"id": "s1",
-  					"reading": 7.0,
-  					"samples": [
-  						4.0
-  					],
-  					"scale": 5.0
-  				},
-  				"provenance": null
-  			}
-  		}
-  	],
-  	"unresolved": [
-  		{
-  			"source_type": "Sensor",
-  			"source_key": [
-  				"s2"
-  			],
-  			"relation": "FEED",
-  			"target_type": "Station",
-  			"target_key": [
-  				"ghost"
-  			],
-  			"required": false,
-  			"reason": "target_missing",
-  			"properties": {
-  				"gain": 2.0
-  			}
-  		}
-  	]
-  }
+		"duplicates": [
+			{
+				"type": 1,
+				"key": [
+					"s1"
+				],
+				"instance": {
+					"key": [
+						"s1"
+					],
+					"type": 1,
+					"properties": {
+						"embedding": [
+							0.25,
+							1.0,
+							2.0
+						],
+						"id": "s1",
+						"reading": 7.0,
+						"samples": [
+							4.0
+						],
+						"scale": 5.0
+					},
+					"provenance": null
+				}
+			}
+		],
+		"unresolved": [
+			{
+				"source_type": 1,
+				"source_key": [
+					"s2"
+				],
+				"relation": "FEED",
+				"target_type": 2,
+				"target_key": [
+					"ghost"
+				],
+				"required": false,
+				"reason": "target_missing",
+				"properties": {
+					"gain": 2.0
+				}
+			}
+		]
+	}
 }

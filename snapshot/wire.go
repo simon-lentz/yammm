@@ -61,25 +61,23 @@ package snapshot
 // accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead).
 //
 // The accept range is the closed interval [MinReadableVersion, currentVersion].
-// Documents whose version field falls outside the range are rejected with a
-// Fatal [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] issue. The exported constant
-// lets consumers inspect the accept range without depending on the
+// Documents whose version field falls outside the range are rejected with an
+// Error-severity [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] issue. The exported
+// constant lets consumers inspect the accept range without depending on the
 // unexported currentVersion.
 //
-// Asymmetric-reader semantics. yammm v0.3.0 bumped the wire format from
-// v1 to v2 alongside the addition of edge-property persistence on
-// unresolved edges (see [graph.UnresolvedEdge.Properties]). v2 readers
-// (yammm v0.3.0+) accept v1 documents losslessly — a v1 document simply
-// has no properties field on unresolved-edge wires, and the load path
-// populates the in-memory Properties as empty. v1 readers (yammm v0.2.x
-// and earlier) reject v2 documents cleanly via the existing
-// unknown-version rejection path rather than silently dropping edge
-// properties on cross-batch unresolved edges. See docs/VERSIONING.md
-// for the full pre-1.0 / post-1.0 wire-format policy.
-const MinReadableVersion = 1
+// Asymmetric-reader semantics. yammm v0.12.0 bumped the wire format from
+// v2 to v3, replacing the types array of names with a table of full type
+// identities that every other position references by row. v3 readers accept
+// v2 documents and resolve their identity on the way in; v2 readers (yammm
+// v0.11.0 and earlier) reject v3 documents cleanly via the unknown-version
+// path rather than misreading the new sections. The same release retired v1,
+// which yammm v0.2.x produced and no consumer document carries.
+// See docs/VERSIONING.md for the full pre-1.0 / post-1.0 wire-format policy.
+const MinReadableVersion = 2
 
 const (
-	currentVersion         = 2
+	currentVersion         = 3
 	currentHashAlgoVersion = 1
 )
 
@@ -164,13 +162,69 @@ type dupWire struct {
 	Instance instWire `json:"instance"`
 }
 
+// typeTableEntry is one row of the v3 types table, where schema_path + name is
+// the lossless identity. Tag is carried rather than recomputed, because the
+// rule that renders it cannot express a transitively imported type.
+type typeTableEntry struct {
+	SchemaPath string `json:"schema_path"`
+	Name       string `json:"name"`
+	Tag        string `json:"tag"`
+}
+
+// instWireV3 is the v3 wire representation of a single instance. Type indexes
+// the types table; it is omitted for a root instance, whose position in the
+// instances array denotes its type, and present at every other position.
+type instWireV3 struct {
+	Key        []any                   `json:"key"`
+	Type       *int                    `json:"type,omitempty"`
+	Properties map[string]any          `json:"properties"`
+	Edges      map[string][]edgeWireV3 `json:"edges,omitempty"`
+	Composed   map[string][]instWireV3 `json:"composed,omitempty"`
+	Provenance *provenanceWire         `json:"provenance"`
+}
+
+// edgeWireV3 is the v3 wire representation of an edge target.
+type edgeWireV3 struct {
+	TargetType int            `json:"target_type"`
+	TargetKey  []any          `json:"target_key"`
+	Properties map[string]any `json:"properties"`
+}
+
+// dupWireV3 is the v3 wire representation of a duplicate record. The parent
+// coordinates are present only for a composed-child duplicate, whose conflict
+// resolves by walking parent → relation → child key rather than the instances
+// array, which composed children never appear in.
+type dupWireV3 struct {
+	Type       int        `json:"type"`
+	Key        []any      `json:"key"`
+	Instance   instWireV3 `json:"instance"`
+	ParentType *int       `json:"parent_type,omitempty"`
+	ParentKey  []any      `json:"parent_key,omitempty"`
+	Relation   string     `json:"relation,omitempty"`
+}
+
+// unresolvedWireV3 is the v3 wire representation of an unresolved edge record.
+type unresolvedWireV3 struct {
+	SourceType int            `json:"source_type"`
+	SourceKey  []any          `json:"source_key"`
+	Relation   string         `json:"relation"`
+	TargetType int            `json:"target_type"`
+	TargetKey  []any          `json:"target_key"`
+	Required   bool           `json:"required"`
+	Reason     string         `json:"reason"`
+	Properties map[string]any `json:"properties,omitempty"`
+}
+
+// diagWireV3 is the v3 wire representation of the diagnostics section.
+type diagWireV3 struct {
+	Duplicates []dupWireV3        `json:"duplicates"`
+	Unresolved []unresolvedWireV3 `json:"unresolved"`
+}
+
 // unresolvedWire is the wire representation of an unresolved edge record.
 //
-// Properties is a v2 field (wire-format version 2+, landed in yammm v0.3.0).
-// v1 documents — produced by yammm v0.2.x — have no properties field on
-// unresolved-edge entries; v2 readers parse those documents losslessly,
-// populating the in-memory [graph.UnresolvedEdge] with empty Properties.
-// The `omitempty` tag keeps the field out of the wire for "absent" and
+// Properties landed in yammm v0.3.0 and is carried by every readable wire
+// format. The `omitempty` tag keeps the field out of the wire for "absent" and
 // "empty" unresolved-edge reasons (which never had a target to attach
 // properties to) and for "target_missing" edges whose schema-declared
 // relationship carries no edge properties.

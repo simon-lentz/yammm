@@ -679,7 +679,7 @@ func TestIdentityOracle_ContradictoryNameAndIdentityIsReported(t *testing.T) {
 		t.Fatal("fixture is vacuous: Anchor and Site share an identity")
 	}
 
-	data, result := snapshot.Marshal(ctx, built)
+	data, result := snapshot.MarshalLegacyV2(ctx, built)
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -730,13 +730,13 @@ func TestIdentityOracle_BothPreV012DefectsNeedTwoRoundTrips(t *testing.T) {
 	if result.HasErrors() {
 		t.Fatalf("assembling: %s", result)
 	}
-	base, result := snapshot.Marshal(ctx, built)
+	base, result := snapshot.MarshalLegacyV2(ctx, built)
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	// Marshal cannot write an unresolvable schema path, so the both-defects
-	// document is reached by editing one.
+	// No writer emits an unresolvable schema path, so the both-defects document
+	// is reached by editing a legacy one.
 	const anchor = `{"key":["bp1"],"properties":`
 	const injected = `{"key":["bp1"],"type_id":{"schema_path":"/nonexistent/ghost.yammm","name":"Part"},"properties":`
 	if !bytes.Contains(base, []byte(anchor)) {

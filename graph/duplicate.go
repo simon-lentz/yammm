@@ -30,6 +30,14 @@ type Duplicate struct {
 	// This instance remains in the graph.
 	Conflict *Instance
 
+	// Parent is the composing parent for a composed-child duplicate, and nil
+	// for a root duplicate. With Relation it locates a Conflict no index holds.
+	Parent *Instance
+
+	// Relation is the composing relation name for a composed-child duplicate,
+	// and empty for a root duplicate.
+	Relation string
+
 	// Diagnostic contains the E_DUPLICATE_PK or E_DUPLICATE_COMPOSED_PK issue
 	// with details about the conflict.
 	//
@@ -96,10 +104,8 @@ type UnresolvedEdge struct {
 	// is the zero-value immutable.Properties there.
 	//
 	// Accessed via [UnresolvedEdge.Property] and [UnresolvedEdge.Properties].
-	// Survives Marshal/Load round-trips in .ys wire format v2 and later
-	// (v1 documents produced before v0.3.0 have no properties field;
-	// v2 readers load them as empty Properties, which is lossless —
-	// v1 never carried the data).
+	// Survives Marshal/Load round-trips in every readable .ys wire
+	// format.
 	properties immutable.Properties
 }
 
@@ -128,11 +134,14 @@ func (u *UnresolvedEdge) Properties() immutable.Properties {
 	return u.properties
 }
 
-// newDuplicate creates a Duplicate record.
-func newDuplicate(instance, conflict *Instance, diagnostic diag.Issue) *Duplicate {
+// newDuplicate creates a Duplicate record. parent and relation are the
+// composing coordinates, zero for a root duplicate.
+func newDuplicate(instance, conflict, parent *Instance, relation string, diagnostic diag.Issue) *Duplicate {
 	return &Duplicate{
 		Instance:   instance,
 		Conflict:   conflict,
+		Parent:     parent,
+		Relation:   relation,
 		Diagnostic: diagnostic,
 	}
 }

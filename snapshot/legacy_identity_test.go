@@ -52,14 +52,15 @@ func contradictoryDuplicateDoc(t *testing.T, s *schema.Schema) (schema.TypeID, g
 	}
 }
 
-// marshalDoc assembles parts and marshals them, failing the test on either.
+// marshalDoc assembles parts and writes them as a legacy v2 document, which is
+// the format every test in this file drives the reader with.
 func marshalDoc(t *testing.T, ctx context.Context, s *schema.Schema, parts graph.SnapshotParts) []byte {
 	t.Helper()
 	built, result := graph.RebuildSnapshot(s, parts)
 	if result.HasErrors() {
 		t.Fatalf("assembling: %s", result)
 	}
-	data, result := snapshot.Marshal(ctx, built)
+	data, result := snapshot.MarshalLegacyV2(ctx, built)
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -358,8 +359,8 @@ func TestGraphSnapshot_KeepsBothSidesOfATagCollision(t *testing.T) {
 }
 
 // TestRoundTrip_KeepsBothSidesOfATagCollision is the end-to-end bar: both
-// groups survive Marshal and Load, on a v2 wire whose types array can hold the
-// tag only once.
+// groups survive Marshal and Load, each denoted by its own types-table row
+// rather than by a tag the two share.
 func TestRoundTrip_KeepsBothSidesOfATagCollision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -419,7 +420,7 @@ func unresolvedTargetSnapshot(t *testing.T, s *schema.Schema) *graph.Snapshot {
 func loadWithTargetTag(t *testing.T, s *schema.Schema, tag string) (*graph.Snapshot, diag.Result) {
 	t.Helper()
 	ctx := context.Background()
-	data, result := snapshot.Marshal(ctx, unresolvedTargetSnapshot(t, s))
+	data, result := snapshot.MarshalLegacyV2(ctx, unresolvedTargetSnapshot(t, s))
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

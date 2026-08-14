@@ -78,14 +78,25 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 	}
 
 	// Decode remaining sections.
-	instances, diags, err := sd.decodeSections()
-	if err != nil {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return nil, sd.collector.Result()
+	var counts map[string]int
+	var totalEdges, duplicateCount, unresolvedCount int
+	if sd.isV3() {
+		sections, diags, err := sd.decodeSectionsV3()
+		if err != nil {
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+			return nil, sd.collector.Result()
+		}
+		counts, totalEdges = sd.countInstancesV3(sections)
+		duplicateCount, unresolvedCount = len(diags.Duplicates), len(diags.Unresolved)
+	} else {
+		instances, diags, err := sd.decodeSections()
+		if err != nil {
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+			return nil, sd.collector.Result()
+		}
+		counts, totalEdges = sd.countInstances(instances)
+		duplicateCount, unresolvedCount = len(diags.Duplicates), len(diags.Unresolved)
 	}
-
-	// Count instances and edges.
-	counts, totalEdges := sd.countInstances(instances)
 
 	totalInstances := 0
 	for _, c := range counts {
@@ -105,12 +116,12 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		IntegrityHash:       sd.header.IntegrityHash,
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
-		Types:               sd.types,
+		Types:               sd.typeTags(),
 		InstanceCounts:      counts,
 		TotalInstances:      totalInstances,
 		TotalEdges:          totalEdges,
-		DuplicateCount:      len(diags.Duplicates),
-		UnresolvedCount:     len(diags.Unresolved),
+		DuplicateCount:      duplicateCount,
+		UnresolvedCount:     unresolvedCount,
 		FileSize:            int64(len(data)),
 		IntegrityStatus:     integrityStatus,
 	}
@@ -198,7 +209,7 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 		IntegrityHash:       sd.header.IntegrityHash,
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
-		Types:               sd.types,
+		Types:               sd.typeTags(),
 		FileSize:            int64(len(data)),
 	}
 
@@ -297,7 +308,7 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 		IntegrityHash:       sd.header.IntegrityHash,
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
-		Types:               sd.types,
+		Types:               sd.typeTags(),
 		// FileSize intentionally left 0: not known from an io.Reader.
 	}
 

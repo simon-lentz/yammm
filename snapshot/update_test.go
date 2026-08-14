@@ -329,7 +329,7 @@ func TestUpdateMetadata_BodyOffsetFailure(t *testing.T) {
 	// empty diagnostics section and closing '}'. The decoder should
 	// reject this because 'types' is missing (MALFORMED), or our sanity
 	// check should reject because the byte at bodyOffset is '}' not ','.
-	data := []byte(`{"yammm_snapshot":{"version":1,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":1,"integrity_hash":"","features":[]}}`)
+	data := []byte(`{"yammm_snapshot":{"version":3,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":1,"integrity_hash":"","features":[]}}`)
 	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"k": "v"})
 	require.True(t, res.HasErrors(), "expected error on shape mismatch")
 	gotMalformed := res.HasCode(diag.E_SNAPSHOT_MALFORMED)

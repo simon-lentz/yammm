@@ -1,18 +1,28 @@
 {
   "yammm_snapshot": {
-    "version": 2,
+    "version": 3,
     "schema_name": "test",
     "schema_source": "test://test.yammm",
     "schema_hash": "sha256:d10215e44a4c1b383b89b9f644c79d6e4f1192c46ae1fc52cbbd49ad37c9280e",
     "schema_hash_algorithm": 1,
-    "integrity_hash": "sha256:b4b19ef70839367f2c2da18ce3484e88fc86ff6cedfaa270d2133aae46c8ce9c",
+    "integrity_hash": "sha256:5a0d57a08faf0eb76cd0d3ff2c381e3ab0c56c228f698ba7c7ad9e30bfeab91a",
     "features": []
   },
   "types": [
-    "Person"
+    {
+      "schema_path": "test://test.yammm",
+      "name": "Company",
+      "tag": "Company"
+    },
+    {
+      "schema_path": "test://test.yammm",
+      "name": "Person",
+      "tag": "Person"
+    }
   ],
-  "instances": {
-    "Person": [
+  "instances": [
+    [],
+    [
       {
         "key": [
           "p1"
@@ -23,17 +33,17 @@
         "provenance": null
       }
     ]
-  },
+  ],
   "diagnostics": {
     "duplicates": [],
     "unresolved": [
       {
-        "source_type": "Person",
+        "source_type": 1,
         "source_key": [
           "p1"
         ],
         "relation": "EMPLOYER",
-        "target_type": "Company",
+        "target_type": 0,
         "target_key": null,
         "required": true,
         "reason": "absent"

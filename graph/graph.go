@@ -217,7 +217,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 			if prov := inst.Provenance(); prov != nil {
 				diagBuilder = diagBuilder.WithSpan(prov.Span())
 			}
-			dup := newDuplicate(graphInst, existing, diagBuilder.Build())
+			dup := newDuplicate(graphInst, existing, nil, "", diagBuilder.Build())
 			g.duplicates = append(g.duplicates, dup)
 			opCollector.Collect(dup.Diagnostic)
 			g.collector.Collect(dup.Diagnostic)
@@ -529,7 +529,7 @@ func (g *Graph) AddComposed(
 			issue := builder.Build()
 
 			// Record duplicate
-			dup := newDuplicate(childInst, conflictInst, issue)
+			dup := newDuplicate(childInst, conflictInst, parentInst, relationName, issue)
 			g.duplicates = append(g.duplicates, dup)
 
 			opCollector.Collect(issue)
@@ -563,7 +563,7 @@ func (g *Graph) AddComposed(
 				issue := builder.Build()
 
 				// Record duplicate (existing is the conflict)
-				dup := newDuplicate(childInst, existing, issue)
+				dup := newDuplicate(childInst, existing, parentInst, relationName, issue)
 				g.duplicates = append(g.duplicates, dup)
 
 				opCollector.Collect(issue)
@@ -790,7 +790,14 @@ func (g *Graph) Snapshot() *Snapshot {
 		if clonedConflict == nil {
 			clonedConflict = cloneInstance(d.Conflict, cloneMap)
 		}
-		duplicates[i] = newDuplicate(clonedInstance, clonedConflict, d.Diagnostic)
+		var clonedParent *Instance
+		if d.Parent != nil {
+			clonedParent = cloneMap[d.Parent]
+			if clonedParent == nil {
+				clonedParent = cloneInstance(d.Parent, cloneMap)
+			}
+		}
+		duplicates[i] = newDuplicate(clonedInstance, clonedConflict, clonedParent, d.Relation, d.Diagnostic)
 	}
 	slices.SortFunc(duplicates, func(a, b *Duplicate) int {
 		if c := cmp.Compare(a.Instance.TypeID().String(), b.Instance.TypeID().String()); c != 0 {

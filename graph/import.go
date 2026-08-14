@@ -112,8 +112,16 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 
 		conflictClone := cloneMap[dup.Conflict]
 
+		var parentClone *Instance
+		if dup.Parent != nil {
+			parentClone = cloneMap[dup.Parent]
+			if parentClone == nil {
+				parentClone = cloneInstance(dup.Parent, cloneMap)
+			}
+		}
+
 		// Diagnostic is zero-value for loaded snapshots (HasDiagnostic() == false).
-		g.duplicates = append(g.duplicates, newDuplicate(instClone, conflictClone, dup.Diagnostic))
+		g.duplicates = append(g.duplicates, newDuplicate(instClone, conflictClone, parentClone, dup.Relation, dup.Diagnostic))
 	}
 
 	// Step 5: Diagnostics — no-op.

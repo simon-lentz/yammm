@@ -140,6 +140,11 @@ func UpdateMetadata(
 			fmt.Sprintf("snapshot.UpdateMetadata: header parse failed: %v", err)).Build())
 		return nil, c.Result()
 	}
+	// decodeHeader reports a rejected version or features field on the collector
+	// and returns nil, so the error alone would accept unreadable documents.
+	if sd.collector.HasErrors() {
+		return nil, sd.collector.Result()
+	}
 
 	// Resolve the body offset. decodeHeader captures dec.InputOffset()
 	// immediately after the header object's closing '}'; in Marshal-
@@ -209,7 +214,7 @@ func UpdateMetadata(
 	bodySuffix := data[bodyOffset:]
 
 	// Pass 1: build canonical form with empty integrity hash, compute SHA-256.
-	headerBytes := buildHeaderBytes(hdr, indent)
+	headerBytes := buildHeaderBytes(hdr, indent, sd.header.Version)
 	canon := make([]byte, 0, len(prefix)+len(headerBytes)+len(bodySuffix))
 	canon = append(canon, prefix...)
 	canon = append(canon, headerBytes...)
@@ -219,7 +224,7 @@ func UpdateMetadata(
 	hdr.IntegrityHash = fmt.Sprintf("sha256:%x", h)
 
 	// Pass 2: rebuild header with the computed hash and concatenate.
-	headerBytes = buildHeaderBytes(hdr, indent)
+	headerBytes = buildHeaderBytes(hdr, indent, sd.header.Version)
 	out := make([]byte, 0, len(prefix)+len(headerBytes)+len(bodySuffix))
 	out = append(out, prefix...)
 	out = append(out, headerBytes...)

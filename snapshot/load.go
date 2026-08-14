@@ -57,6 +57,10 @@ func Load(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption
 		return nil, sd.collector.Result()
 	}
 
+	if sd.isV3() {
+		return loadV3(ctx, sd, s)
+	}
+
 	// Decode remaining sections (instances + diagnostics).
 	instances, diags, err := sd.decodeSections()
 	if err != nil {

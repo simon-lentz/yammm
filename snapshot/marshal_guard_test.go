@@ -103,7 +103,8 @@ func TestMarshal_ZeroTypeIDDuplicateEmitsNoTypeID(t *testing.T) {
 
 // A persisted type_id naming a resolvable type other than the one the tag form
 // resolves to is a contradiction, and the load reports it rather than silently
-// keeping the tag form's answer.
+// keeping the tag form's answer. The contradiction is expressible only on the
+// legacy wire, which names types where v3 denotes them.
 func TestLoad_ContradictoryTypeIDIsReported(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -126,7 +127,7 @@ func TestLoad_ContradictoryTypeIDIsReported(t *testing.T) {
 	if result.HasErrors() {
 		t.Fatalf("rebuild: %s", result)
 	}
-	data, mres := snapshot.Marshal(ctx, snap)
+	data, mres := snapshot.MarshalLegacyV2(ctx, snap)
 	if err := mres.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

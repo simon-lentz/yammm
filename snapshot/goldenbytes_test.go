@@ -138,7 +138,7 @@ func normalizeFixtureProps(m map[string]any) map[string]any {
 func extractResolvedEdgeProperties(t *testing.T, data []byte, relation string) []byte {
 	t.Helper()
 	var doc struct {
-		Instances map[string][]struct {
+		Instances [][]struct {
 			Edges map[string][]struct {
 				Properties json.RawMessage `json:"properties"`
 			} `json:"edges"`

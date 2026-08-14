@@ -39,11 +39,13 @@ type edgeRef struct {
 // decoder (HeaderOnlyRead, the sole reader-based caller, only invokes
 // decodeHeader).
 type streamDecoder struct {
-	data      []byte          // raw input bytes; nil for reader-based callers
-	reader    io.Reader       // one-shot reader; non-nil only when data == nil
-	header    headerWire      // decoded header
-	types     []string        // decoded types array
-	collector *diag.Collector // accumulates diagnostics
+	data      []byte           // raw input bytes; nil for reader-based callers
+	reader    io.Reader        // one-shot reader; non-nil only when data == nil
+	header    headerWire       // decoded header
+	types     []string         // decoded types array; legacy documents only
+	typeTable []typeTableEntry // decoded types table; v3 documents only
+	tableIDs  []schema.TypeID  // identity per table row, zero where unresolved
+	collector *diag.Collector  // accumulates diagnostics
 
 	// loadCfg holds deserialization options (e.g., skip integrity check).
 	loadCfg loadConfig
@@ -191,6 +193,13 @@ func (sd *streamDecoder) decodeHeader() error {
 			continue
 		}
 		if key == "types" {
+			if sd.isV3() {
+				if err := dec.Decode(&sd.typeTable); err != nil {
+					return fmt.Errorf("failed to decode types table: %w", err)
+				}
+				sd.resolveTypeTable()
+				return nil
+			}
 			if err := dec.Decode(&sd.types); err != nil {
 				return fmt.Errorf("failed to decode types: %w", err)
 			}
