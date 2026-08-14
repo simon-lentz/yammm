@@ -943,19 +943,7 @@ func (g *Graph) resolveTypeName(typeName string) (schema.TypeID, bool) {
 
 // instanceTagForm computes the canonical instance tag form for a TypeID.
 func (g *Graph) instanceTagForm(id schema.TypeID) string {
-	// Local type: unqualified
-	if id.SchemaPath() == g.schema.SourceID() {
-		return id.Name()
-	}
-
-	// Imported type: alias-qualified
-	alias := g.schema.FindImportAlias(id.SchemaPath())
-	if alias != "" {
-		return alias + "." + id.Name()
-	}
-
-	// Fallback (shouldn't happen for valid schemas)
-	return id.Name()
+	return schema.TagForm(g.schema, id)
 }
 
 // findInstance looks up an instance by TypeID and key.

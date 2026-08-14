@@ -1,12 +1,16 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
@@ -57,6 +61,8 @@ type Site {
 // child encoded under the wrong one loses a float indicator and narrows.
 const identityBaseSource = `schema "base"
 
+import "deep.yammm" as deep
+
 part type Part {
 	name String primary
 	mass Float
@@ -69,6 +75,33 @@ type Basin {
 		strength Float
 	}
 }
+
+// Marker is declared here and in deep, and nowhere in the entry schema. That
+// is the only shape a bare tag can be ambiguous in: a name the entry schema
+// cannot resolve locally and more than one closure schema declares.
+type Marker {
+	id String primary
+}
+`
+
+// identityDeepSource is reachable from the entry schema only through base, so
+// the entry schema holds no alias for it. That is the one input the tag-form
+// rule cannot name, and every case whose origin is "transitive" needs it.
+const identityDeepSource = `schema "deep"
+
+part type Part {
+	name String primary
+	density Float
+}
+
+type Probe {
+	id String primary
+	reading Float
+}
+
+type Marker {
+	id String primary
+}
 `
 
 func loadIdentitySchema(t *testing.T) *schema.Schema {
@@ -76,6 +109,7 @@ func loadIdentitySchema(t *testing.T) *schema.Schema {
 	sources := map[string][]byte{
 		"entry.yammm": []byte(identityEntrySource),
 		"base.yammm":  []byte(identityBaseSource),
+		"deep.yammm":  []byte(identityDeepSource),
 	}
 	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly())
 	if result.HasErrors() {
@@ -123,6 +157,34 @@ func mustTypeIDIn(t *testing.T, s *schema.Schema, alias, name string) schema.Typ
 	return typ.ID()
 }
 
+// mustTransitiveTypeID resolves a type the entry schema reaches only through
+// an intermediate import, which is the position tagForm renders as a bare
+// name because the entry schema holds no alias for it.
+func mustTransitiveTypeID(t *testing.T, s *schema.Schema, viaAlias, thenAlias, name string) schema.TypeID {
+	t.Helper()
+	via, ok := s.ImportByAlias(viaAlias)
+	if !ok {
+		t.Fatalf("import alias %q not found in the entry schema", viaAlias)
+	}
+	mid := via.Schema()
+	if mid == nil {
+		t.Fatalf("import alias %q resolved to no schema", viaAlias)
+	}
+	then, ok := mid.ImportByAlias(thenAlias)
+	if !ok {
+		t.Fatalf("import alias %q not found in the schema imported as %q", thenAlias, viaAlias)
+	}
+	deep := then.Schema()
+	if deep == nil {
+		t.Fatalf("import alias %q resolved to no schema", thenAlias)
+	}
+	typ, ok := deep.Type(name)
+	if !ok {
+		t.Fatalf("type %q not found in the transitively imported schema", name)
+	}
+	return typ.ID()
+}
+
 // identityRecord is one instance's identity at one position, rendered so a
 // whole snapshot's identities compare as sorted text.
 type identityRecord string
@@ -143,9 +205,23 @@ func renderProps(props map[string]any) string {
 	slices.Sort(keys)
 	rendered := make([]string, len(keys))
 	for i, k := range keys {
-		rendered[i] = fmt.Sprintf("%s=%T(%v)", k, props[k], props[k])
+		rendered[i] = k + "=" + renderValue(props[k])
 	}
 	return strings.Join(rendered, ",")
+}
+
+// renderValue descends into containers so an element that changes dynamic type
+// is visible; the container's own %T is identical either way.
+func renderValue(v any) string {
+	rv := reflect.ValueOf(v)
+	if v != nil && rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Interface {
+		parts := make([]string, rv.Len())
+		for i := range parts {
+			parts[i] = renderValue(rv.Index(i).Interface())
+		}
+		return fmt.Sprintf("%T[%s]", v, strings.Join(parts, ","))
+	}
+	return fmt.Sprintf("%T(%v)", v, v)
 }
 
 // collectIdentities walks every position an instance can occupy and returns
@@ -172,8 +248,12 @@ func collectIdentities(snap *graph.Snapshot) []identityRecord {
 		walk("duplicate", d.Instance)
 	}
 	for _, u := range snap.Unresolved() {
-		out = append(out, identityRecord(fmt.Sprintf("unresolved | source=%s | rel=%s | target=%s | props={%s}",
-			u.Source.TypeName(), u.Relation, u.TargetType, renderProps(u.Properties().Clone()))))
+		out = append(out, identityRecord(fmt.Sprintf(
+			"unresolved | source=%s | sourcePk=%s | rel=%s | target=%s | targetKey=%s | required=%t | reason=%s | props={%s}",
+			u.Source.TypeName(), u.Source.PrimaryKey().String(), u.Relation,
+			u.TargetType, u.TargetKey, u.Required, u.Reason,
+			renderProps(u.Properties().Clone()),
+		)))
 	}
 	slices.Sort(out)
 	return out
@@ -339,6 +419,58 @@ func identityCases() []identityCase {
 			},
 		},
 		{
+			// Reachable only through base, so the entry schema holds no alias
+			// and the tag form falls back to the bare name.
+			name:     "root_transitively_imported",
+			origin:   "transitive",
+			position: "root",
+			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+				t.Helper()
+				id := mustTransitiveTypeID(t, s, "base", "deep", "Probe")
+				tag := tagForm(s, id)
+				return graph.SnapshotParts{
+					Types: []string{tag},
+					Instances: map[string][]graph.InstanceParts{
+						tag: {{
+							TypeName:   tag,
+							TypeID:     id,
+							PrimaryKey: immutable.WrapKey([]any{"pr1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "pr1", "reading": float64(2)}),
+						}},
+					},
+				}
+			},
+		},
+		{
+			// A local Part and a transitively imported one render the same bare
+			// tag, so a name-keyed form cannot tell the two groups apart.
+			name:     "root_tag_collision_local_and_transitive",
+			origin:   "transitive",
+			position: "root",
+			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+				t.Helper()
+				localID := mustTypeIDIn(t, s, "", "Part")
+				deepID := mustTransitiveTypeID(t, s, "base", "deep", "Part")
+				return graph.SnapshotParts{
+					Types: []string{tagForm(s, localID), tagForm(s, deepID)},
+					Instances: map[string][]graph.InstanceParts{
+						tagForm(s, localID): {{
+							TypeName:   tagForm(s, localID),
+							TypeID:     localID,
+							PrimaryKey: immutable.WrapKey([]any{"lp1"}),
+							Properties: immutable.WrapProperties(map[string]any{"name": "lp1", "weight": float64(1)}),
+						}},
+						tagForm(s, deepID): {{
+							TypeName:   tagForm(s, deepID),
+							TypeID:     deepID,
+							PrimaryKey: immutable.WrapKey([]any{"dp1"}),
+							Properties: immutable.WrapProperties(map[string]any{"name": "dp1", "density": float64(1)}),
+						}},
+					},
+				}
+			},
+		},
+		{
 			name:     "duplicate_local",
 			origin:   "local",
 			position: "duplicate",
@@ -486,6 +618,130 @@ func TestIdentityOracle_ByteFixpoint(t *testing.T) {
 				t.Errorf("Marshal(Load(Marshal(x))) differs from Marshal(x)\nfirst:\n%s\nsecond:\n%s", first, second)
 			}
 		})
+	}
+}
+
+// TestIdentityOracle_ContradictoryNameAndIdentityIsReported supplies the
+// ingredient assertTagFormConsistent cannot otherwise reach: every case builder
+// sets TypeName from the same tagForm the assertion re-derives, so that
+// assertion cannot fail on a generated document. Built directly, the
+// disagreement must draw the cross-check rather than bind silently.
+func TestIdentityOracle_ContradictoryNameAndIdentityIsReported(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+
+	siteID := mustTypeIDIn(t, s, "", "Site")
+	anchorID := mustTypeIDIn(t, s, "", "Anchor")
+
+	// The name says Anchor; the identity says Site. Nothing else disagrees.
+	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types: []string{"Anchor"},
+		Instances: map[string][]graph.InstanceParts{
+			"Anchor": {{
+				TypeName:   "Anchor",
+				TypeID:     siteID,
+				PrimaryKey: immutable.WrapKey([]any{"x1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "x1"}),
+			}},
+		},
+	})
+	if result.HasErrors() {
+		t.Fatalf("assembling: %s", result)
+	}
+	if anchorID == siteID {
+		t.Fatal("fixture is vacuous: Anchor and Site share an identity")
+	}
+
+	data, result := snapshot.Marshal(ctx, built)
+	if err := result.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	_, result = snapshot.Load(ctx, data, s)
+	var found bool
+	for issue := range result.Errors() {
+		if issue.Code() == diag.E_SNAPSHOT_TYPEID_MISMATCH {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a persisted identity contradicting its own tag form bound silently; want %s\n%s",
+			diag.E_SNAPSHOT_TYPEID_MISMATCH, data)
+	}
+}
+
+// TestIdentityOracle_BothPreV012DefectsNeedTwoRoundTrips falsifies the
+// migration instruction AssertRoundTrip carries. A document holding an
+// int-shaped float AND a composed child whose persisted schema path no longer
+// resolves cannot heal in one pass: the first load loses the child's identity,
+// so its Float constraint is not found and the float stays narrowed.
+func TestIdentityOracle_BothPreV012DefectsNeedTwoRoundTrips(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+
+	siteID := mustTypeIDIn(t, s, "", "Site")
+	basePartID := mustTypeIDIn(t, s, "base", "Part")
+	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types: []string{"Site"},
+		Instances: map[string][]graph.InstanceParts{
+			"Site": {{
+				TypeName:   tagForm(s, siteID),
+				TypeID:     siteID,
+				PrimaryKey: immutable.WrapKey([]any{"s1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "s1"}),
+				Composed: map[string][]graph.InstanceParts{
+					"IMPORTED": {{
+						TypeName:   tagForm(s, basePartID),
+						TypeID:     basePartID,
+						PrimaryKey: immutable.WrapKey([]any{"bp1"}),
+						Properties: immutable.WrapProperties(map[string]any{"name": "bp1", "mass": json.Number("5")}),
+					}},
+				},
+			}},
+		},
+	})
+	if result.HasErrors() {
+		t.Fatalf("assembling: %s", result)
+	}
+	base, result := snapshot.Marshal(ctx, built)
+	if err := result.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// Marshal cannot write an unresolvable schema path, so the both-defects
+	// document is reached by editing one.
+	const anchor = `{"key":["bp1"],"properties":`
+	const injected = `{"key":["bp1"],"type_id":{"schema_path":"/nonexistent/ghost.yammm","name":"Part"},"properties":`
+	if !bytes.Contains(base, []byte(anchor)) {
+		t.Fatalf("fixture shape changed; anchor not found in:\n%s", base)
+	}
+	doc := bytes.Replace(base, []byte(anchor), []byte(injected), 1)
+
+	generations := make([][]byte, 0, 3)
+	prev := doc
+	for range 3 {
+		loaded, res := snapshot.Load(ctx, prev, s, snapshot.WithSkipIntegrityCheck())
+		if err := res.Err(); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		next, res := snapshot.Marshal(ctx, loaded)
+		if err := res.Err(); err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		generations = append(generations, next)
+		prev = next
+	}
+
+	// The instruction AssertRoundTrip carries: one round trip repairs such a
+	// document and every later one holds. Red until the identity repair lands.
+	if !bytes.Equal(generations[0], generations[1]) {
+		t.Errorf("one round trip did not repair the document, so the migration instruction is false:\ngen1:\n%s\ngen2:\n%s",
+			generations[0], generations[1])
+	}
+	if !bytes.Equal(generations[1], generations[2]) {
+		t.Errorf("the document had not stabilised after two round trips:\ngen2:\n%s\ngen3:\n%s",
+			generations[1], generations[2])
 	}
 }
 

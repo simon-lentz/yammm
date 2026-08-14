@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -51,42 +52,37 @@ func (f wireFloat) MarshalJSON() ([]byte, error) {
 	return b, nil
 }
 
-// wireTagForm renders a TypeID in tag form — the bare name for a locally
-// declared type, alias-qualified for an imported one. It inverts
-// [resolveWireType] and matches the TypeName a graph instance carries.
-func wireTagForm(s *schema.Schema, id schema.TypeID) string {
-	if s == nil || id.IsZero() || id.SchemaPath() == s.SourceID() {
-		return id.Name()
-	}
-	if alias := s.FindImportAlias(id.SchemaPath()); alias != "" {
-		return alias + "." + id.Name()
-	}
-	return id.Name()
-}
-
-// resolveWireType resolves a snapshot tag-form type name (alias-qualified for
-// imported types) against the schema, falling back to the TypeID for names
-// the tag form cannot resolve. A miss returns (nil, false) and callers pass
-// values through unwrapped — Marshal never rejects a snapshot Load accepts.
+// resolveWireType resolves a wire type reference, preferring the caller's
+// identity over the tag form because [schema.TagForm] is lossy and an identity
+// is not. The tag is the fallback for positions that persist no identity; a
+// miss returns (nil, false) and callers pass the value through unwrapped.
 func resolveWireType(s *schema.Schema, tagName string, id schema.TypeID) (*schema.Type, bool) {
 	if s == nil {
 		return nil, false
 	}
-	if alias, name, qualified := strings.Cut(tagName, "."); qualified {
-		if imp, ok := s.ImportByAlias(alias); ok {
-			if imported := imp.Schema(); imported != nil {
-				if t, ok := imported.Type(name); ok {
-					return t, true
-				}
-			}
-		}
-	} else if t, ok := s.Type(tagName); ok {
-		return t, true
-	}
 	if !id.IsZero() {
-		return s.TypeByID(id)
+		if t, ok := s.TypeByID(id); ok {
+			return t, true
+		}
 	}
-	return nil, false
+	alias, name, qualified := strings.Cut(tagName, ".")
+	if !qualified {
+		alias, name = "", tagName
+	}
+	return s.ResolveType(schema.NewTypeRef(alias, name, location.Span{}))
+}
+
+// closureTypeNames collects every type name declared anywhere in s's import
+// closure. Callers build it once per document: it is an existence set, never a
+// binding table, because a name declared in two schemas resolves to neither.
+func closureTypeNames(s *schema.Schema) map[string]bool {
+	names := make(map[string]bool)
+	for _, cs := range s.Closure() {
+		for name := range cs.Types() {
+			names[name] = true
+		}
+	}
+	return names
 }
 
 // typeByWireID resolves a persisted type_id — schema path and name together —

@@ -1,8 +1,53 @@
 package graph
 
 import (
+	"fmt"
+
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
+
+// closureTypeIDs indexes every type in s's closure by bare name, in closure
+// order — s first, then each import in declaration order. A name declared more
+// than once maps to every declaration, so a caller can tell the ambiguous case
+// from the unique one instead of silently taking the first.
+func closureTypeIDs(s *schema.Schema) map[string][]schema.TypeID {
+	index := make(map[string][]schema.TypeID)
+	for _, cs := range s.Closure() {
+		for _, t := range cs.TypesSlice() {
+			index[t.Name()] = append(index[t.Name()], t.ID())
+		}
+	}
+	return index
+}
+
+// bindImportedTarget resolves an unresolved edge's target tag that the entry
+// schema cannot name, which is how a v2 document refers to a transitively
+// imported type. The binding is reported whenever the tag is ambiguous, and a
+// tag naming nothing drops the record with a warning rather than in silence.
+func (g *Graph) bindImportedTarget(unres *UnresolvedEdge, closure map[string][]schema.TypeID) (schema.TypeID, bool) {
+	candidates := closure[unres.TargetType]
+	if len(candidates) == 0 {
+		g.collector.Collect(diag.NewIssue(diag.Warning, diag.E_GRAPH_TYPE_NOT_FOUND,
+			fmt.Sprintf("unresolved edge %q from %s references target type %q, which no schema in the import closure declares; the record is dropped",
+				unres.Relation, unres.Source.TypeName(), unres.TargetType)).
+			WithDetail(diag.DetailKeyTypeName, unres.Source.TypeName()).
+			WithDetail(diag.DetailKeyRelationName, unres.Relation).
+			WithDetail(diag.DetailKeyTargetType, unres.TargetType).
+			Build())
+		return schema.TypeID{}, false
+	}
+	if len(candidates) > 1 {
+		g.collector.Collect(diag.NewIssue(diag.Warning, diag.W_GRAPH_AMBIGUOUS_TYPE,
+			fmt.Sprintf("unresolved edge %q from %s names target type %q, which %d schemas in the import closure declare; bound to the one in %q",
+				unres.Relation, unres.Source.TypeName(), unres.TargetType, len(candidates), candidates[0].SchemaPath().String())).
+			WithDetail(diag.DetailKeyTypeName, unres.Source.TypeName()).
+			WithDetail(diag.DetailKeyRelationName, unres.Relation).
+			WithDetail(diag.DetailKeyTargetType, unres.TargetType).
+			Build())
+	}
+	return candidates[0], true
+}
 
 // NewFromSnapshot creates a Graph pre-populated from a Snapshot's contents.
 //
@@ -45,20 +90,22 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	// pointers → graph instance pointers for steps 2-4.
 	cloneMap := make(map[*Instance]*Instance)
 
+	// Filed by carried identity, not by tag: a tag cannot name a transitively
+	// imported type, and one tag group's members need not share a type.
 	for _, typeName := range snap.Types() {
-		typeID, ok := g.resolveTypeName(typeName)
-		if !ok {
-			continue // type not in schema — should not happen after schema hash verification
-		}
-
-		if g.instances[typeID] == nil {
-			g.instances[typeID] = make(map[string]*Instance)
-		}
-
 		for _, inst := range snap.InstancesOf(typeName) {
+			typeID := inst.TypeID()
+			if typeID.IsZero() {
+				var ok bool
+				if typeID, ok = g.resolveTypeName(typeName); !ok {
+					continue
+				}
+			}
+			if g.instances[typeID] == nil {
+				g.instances[typeID] = make(map[string]*Instance)
+			}
 			cloned := cloneInstance(inst, cloneMap)
-			pkString := cloned.PrimaryKey().String()
-			g.instances[typeID][pkString] = cloned
+			g.instances[typeID][cloned.PrimaryKey().String()] = cloned
 		}
 	}
 
@@ -74,12 +121,19 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	// Step 3: Install unresolved edges as pending.
 	// ALL reasons are reinstalled (target_missing, absent, empty) so they
 	// survive the import → add → snapshot cycle without data loss.
+	var closure map[string][]schema.TypeID
 	for _, unres := range snap.Unresolved() {
 		srcClone := cloneMap[unres.Source]
 
 		targetTypeID, ok := g.resolveTypeName(unres.TargetType)
 		if !ok {
-			continue
+			if closure == nil {
+				closure = closureTypeIDs(g.schema)
+			}
+			targetTypeID, ok = g.bindImportedTarget(unres, closure)
+			if !ok {
+				continue
+			}
 		}
 
 		// Reverse the reason mapping from Snapshot(). Graph.Add() stores
@@ -92,11 +146,10 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			reasonDetail = ""
 		}
 
-		// Reconstruct the JSON field name from the schema for diagnostic
-		// fidelity. This is not persisted in the .ys format. Falls back to
-		// empty string for imported types or if the relation is not found.
+		// Not persisted in .ys, so rebuilt here. Resolved by identity, which
+		// reaches the whole closure where the source's tag form does not.
 		jsonField := ""
-		if typ, ok := g.schema.Type(unres.Source.TypeName()); ok {
+		if typ, ok := g.schema.TypeByID(unres.Source.TypeID()); ok {
 			if rel, ok := typ.Relation(unres.Relation); ok {
 				jsonField = rel.FieldName()
 			}

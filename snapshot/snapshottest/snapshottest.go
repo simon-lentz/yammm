@@ -98,12 +98,13 @@ type instProjection struct {
 }
 
 // provProjection distinguishes an instance carrying provenance from one
-// without: a nil pointer means no provenance, a zero-valued one means
-// provenance whose fields are empty — a distinction a round trip must
-// preserve.
+// without: a nil pointer means none, a zero-valued one means empty fields.
+// Both path forms are carried because RawPath is populated only on a parse
+// failure, so it alone leaves a well-formed path empty on both sides.
 type provProjection struct {
 	SourceName string
 	Path       string
+	RawPath    string
 }
 
 type edgeProjection struct {
@@ -113,8 +114,11 @@ type edgeProjection struct {
 	Properties map[string]any
 }
 
+// SourceKey is load-bearing: without it two unresolved records hanging off
+// different source instances of the same type compare equal.
 type unresProjection struct {
 	SourceType string
+	SourceKey  string
 	Relation   string
 	TargetType string
 	TargetKey  string
@@ -162,6 +166,7 @@ func project(s *graph.Snapshot) snapProjection {
 	for _, u := range s.Unresolved() {
 		p.Unresolved = append(p.Unresolved, unresProjection{
 			SourceType: u.Source.TypeName(),
+			SourceKey:  u.Source.PrimaryKey().String(),
 			Relation:   u.Relation,
 			TargetType: u.TargetType,
 			TargetKey:  u.TargetKey,
@@ -196,7 +201,8 @@ func projectInstanceTree(inst *graph.Instance) instProjection {
 	if prov := inst.Provenance(); prov != nil {
 		ip.Provenance = &provProjection{
 			SourceName: prov.SourceName(),
-			Path:       prov.RawPath(),
+			Path:       prov.Path().String(),
+			RawPath:    prov.RawPath(),
 		}
 	}
 	return ip

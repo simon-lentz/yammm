@@ -197,13 +197,21 @@ func (sd *streamDecoder) decodeHeader() error {
 
 			// Validate types against schema.
 			if sd.schema != nil {
+				var closureNames map[string]bool
 				for _, typeName := range sd.types {
-					if _, ok := resolveWireType(sd.schema, typeName, schema.TypeID{}); !ok {
-						sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
-							fmt.Sprintf("type %q not found in schema", typeName)).
-							WithDetail(diag.DetailKeyTypeName, typeName).
-							Build())
+					if _, ok := resolveWireType(sd.schema, typeName, schema.TypeID{}); ok {
+						continue
 					}
+					if closureNames == nil {
+						closureNames = closureTypeNames(sd.schema)
+					}
+					if closureNames[typeName] {
+						continue
+					}
+					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
+						fmt.Sprintf("type %q not found in schema", typeName)).
+						WithDetail(diag.DetailKeyTypeName, typeName).
+						Build())
 				}
 			}
 			return nil // Successfully decoded header + types.
@@ -410,30 +418,12 @@ func (sd *streamDecoder) processInstance(
 	var typeID schema.TypeID
 	var declType *schema.Type
 	if sd.schema != nil {
-		schemaType, ok := resolveWireType(sd.schema, typeName, schema.TypeID{})
-		if ok {
-			typeID = schemaType.ID()
-			declType = schemaType
+		if t, ok := sd.resolveWireIdentity(typeName, inst.TypeID); ok {
+			typeID = t.ID()
+			declType = t
 		}
-
-		// An unresolvable persisted path means the schema moved since the
-		// write, which is no defect; a resolvable one naming another type is.
-		if inst.TypeID != nil && ok {
-			persisted, resolved := typeByWireID(sd.schema, inst.TypeID)
-			switch {
-			case inst.TypeID.Name != typeID.Name():
-				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPEID_MISMATCH,
-					fmt.Sprintf("persisted type_id name %q does not match schema type %q",
-						inst.TypeID.Name, typeID.Name())).
-					WithDetail(diag.DetailKeyTypeName, typeName).
-					Build())
-			case resolved && persisted.ID() != typeID:
-				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPEID_MISMATCH,
-					fmt.Sprintf("persisted type_id names %q in schema %q, but %q resolves to the type declared in %q",
-						inst.TypeID.Name, inst.TypeID.SchemaPath, typeName, typeID.SchemaPath().String())).
-					WithDetail(diag.DetailKeyTypeName, typeName).
-					Build())
-			}
+		if tagType, ok := resolveWireType(sd.schema, typeName, schema.TypeID{}); ok {
+			sd.checkTypeIDAgreement(typeName, inst.TypeID, tagType.ID())
 		}
 	}
 
@@ -469,6 +459,49 @@ func (sd *streamDecoder) processInstance(
 	}
 }
 
+// checkTypeIDAgreement reports a persisted identity that disagrees with what
+// the document's own tag form resolves to. A different name is a contradiction
+// and rejects the document; the same name in another schema is only the tag
+// form being unable to say which, so it warns and the identity decides.
+func (sd *streamDecoder) checkTypeIDAgreement(tagName string, persisted *typeIDWire, tagID schema.TypeID) {
+	if persisted == nil {
+		return
+	}
+	if persisted.Name != tagID.Name() {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPEID_MISMATCH,
+			fmt.Sprintf("persisted type_id name %q does not match schema type %q",
+				persisted.Name, tagID.Name())).
+			WithDetail(diag.DetailKeyTypeName, tagName).
+			Build())
+		return
+	}
+	// An unresolvable path means the schema moved since the write, which the
+	// name fallback already handles; only a resolvable one can disagree.
+	resolved, ok := typeByWireID(sd.schema, persisted)
+	if !ok || resolved.ID() == tagID {
+		return
+	}
+	sd.collector.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_TYPEID_MISMATCH,
+		fmt.Sprintf("persisted type_id names %q in schema %q, but %q resolves to the type declared in %q; the persisted identity is used",
+			persisted.Name, persisted.SchemaPath, tagName, tagID.SchemaPath().String())).
+		WithDetail(diag.DetailKeyTypeName, tagName).
+		Build())
+}
+
+// resolveWireIdentity resolves a persisted identity, falling back to the tag
+// form when the document carries none or when its schema path no longer
+// resolves. A stale path leaves the name good, so binding by name recovers an
+// identity where discarding both returns one that cannot be written back.
+func (sd *streamDecoder) resolveWireIdentity(tagName string, persisted *typeIDWire) (*schema.Type, bool) {
+	if persisted != nil {
+		if t, ok := typeByWireID(sd.schema, persisted); ok {
+			return t, true
+		}
+		return resolveWireType(sd.schema, persisted.Name, schema.TypeID{})
+	}
+	return resolveWireType(sd.schema, tagName, schema.TypeID{})
+}
+
 // composedChildType recovers a composed child's type in tag form, inverting
 // the writer's omission rule: type_id is absent exactly when the parent
 // relation's target identifies the child, so an explicit one means the target
@@ -479,8 +512,8 @@ func (sd *streamDecoder) composedChildType(
 	child instWire,
 ) (string, schema.TypeID) {
 	if child.TypeID != nil {
-		if t, ok := typeByWireID(sd.schema, child.TypeID); ok {
-			return wireTagForm(sd.schema, t.ID()), t.ID()
+		if t, ok := sd.resolveWireIdentity("", child.TypeID); ok {
+			return schema.TagForm(sd.schema, t.ID()), t.ID()
 		}
 		return child.TypeID.Name, schema.TypeID{}
 	}
@@ -488,7 +521,7 @@ func (sd *streamDecoder) composedChildType(
 	if sd.schema != nil && parent != nil {
 		if rel, ok := parent.Relation(relName); ok {
 			if target, ok := sd.schema.TypeByID(rel.TargetID()); ok {
-				return wireTagForm(sd.schema, target.ID()), target.ID()
+				return schema.TagForm(sd.schema, target.ID()), target.ID()
 			}
 		}
 	}
@@ -570,6 +603,12 @@ func (sd *streamDecoder) checkTypesConsistency(instances map[string][]instWire) 
 func (sd *streamDecoder) validateDiagnostics(diags diagWire, exists instanceExistence) {
 	for _, dup := range diags.Duplicates {
 		keyStr := formatWireKey(dup.Key)
+
+		if sd.schema != nil {
+			if tagType, ok := resolveWireType(sd.schema, dup.Type, schema.TypeID{}); ok {
+				sd.checkTypeIDAgreement(dup.Type, dup.Instance.TypeID, tagType.ID())
+			}
+		}
 
 		// Validate duplicate conflict reference.
 		if typeIdx := exists[dup.Type]; typeIdx == nil || !typeIdx[keyStr] {

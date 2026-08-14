@@ -175,6 +175,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_DUPLICATE_COMPOSED_PK` | Duplicate composed child primary key |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
 | `E_GRAPH_TYPE_NOT_FOUND` | Type not found in graph operations |
+| `W_GRAPH_AMBIGUOUS_TYPE` | Persisted type name declared by more than one schema in the closure |
 | `E_GRAPH_PARENT_NOT_FOUND` | Parent node not found for composed child |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
 | `E_GRAPH_MISSING_PK` | Primary key missing in graph operations |

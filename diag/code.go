@@ -366,6 +366,10 @@ var (
 	// E_GRAPH_TYPE_NOT_FOUND indicates a type referenced in graph operations cannot be found.
 	E_GRAPH_TYPE_NOT_FOUND = NewCode("E_GRAPH_TYPE_NOT_FOUND", CategoryGraph)
 
+	// W_GRAPH_AMBIGUOUS_TYPE (Warning) indicates a persisted type name that more
+	// than one schema in the import closure declares; the graph reports its choice.
+	W_GRAPH_AMBIGUOUS_TYPE = NewCode("W_GRAPH_AMBIGUOUS_TYPE", CategoryGraph)
+
 	// E_GRAPH_PARENT_NOT_FOUND indicates a parent node cannot be found.
 	E_GRAPH_PARENT_NOT_FOUND = NewCode("E_GRAPH_PARENT_NOT_FOUND", CategoryGraph)
 

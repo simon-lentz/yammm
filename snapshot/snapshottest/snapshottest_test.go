@@ -180,6 +180,118 @@ func TestDiffSnapshots_DistinguishesProvenancePresence(t *testing.T) {
 	}
 }
 
+// TestDiffSnapshots_SeparatesIdentityFromName pins the two identity fields on
+// instProjection. Two snapshots whose composed child differs only in TypeID —
+// same name, same key, same properties — must not compare equal, because a
+// decoder that rebinds a child to a same-named type in another schema changes
+// nothing else.
+func TestDiffSnapshots_SeparatesIdentityFromName(t *testing.T) {
+	s := compositionSchema(t)
+	// RebuildSnapshot, not BuildSnapshot: Add re-derives a child's TypeName,
+	// so a pair built that way differs in the name and not only the identity.
+	holder := func(cardTypeID schema.TypeID) *graph.Snapshot {
+		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+			Types: []string{"Holder"},
+			Instances: map[string][]graph.InstanceParts{
+				"Holder": {{
+					TypeName:   "Holder",
+					TypeID:     typeID(t, s, "Holder"),
+					PrimaryKey: immutable.WrapKey([]any{"h1"}),
+					Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
+					Composed: map[string][]graph.InstanceParts{
+						"ACCOUNTS": {{
+							TypeName:   "Account",
+							TypeID:     typeID(t, s, "Account"),
+							PrimaryKey: immutable.WrapKey([]any{"a1"}),
+							Properties: immutable.WrapProperties(map[string]any{"number": "a1"}),
+							Composed: map[string][]graph.InstanceParts{
+								"CARDS": {{
+									TypeName:   "Card",
+									TypeID:     cardTypeID,
+									PrimaryKey: immutable.WrapKey([]any{"4242"}),
+									Properties: immutable.WrapProperties(map[string]any{"last4": "4242"}),
+								}},
+							},
+						}},
+					},
+				}},
+			},
+		})
+		if res.HasErrors() {
+			t.Fatalf("rebuild: %s", res)
+		}
+		return built
+	}
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, holder(typeID(t, s, "Card")), holder(typeID(t, s, "Account")))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must detect a composed child that kept its name and changed its TypeID")
+	}
+}
+
+// TestDiffSnapshots_SeparatesUnresolvedBySource pins the source key on an
+// unresolved record. Both snapshots hold the same two instances and one
+// unresolved edge; only the instance the edge hangs off differs.
+func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
+	s := testSchema(t)
+	personParts := func(key string) graph.InstanceParts {
+		return graph.InstanceParts{
+			TypeName:   "Person",
+			TypeID:     typeID(t, s, "Person"),
+			PrimaryKey: immutable.WrapKey([]any{key}),
+			Properties: immutable.WrapProperties(map[string]any{"id": key}),
+		}
+	}
+	withSource := func(sourceKey string) *graph.Snapshot {
+		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+			Types:     []string{"Person"},
+			Instances: map[string][]graph.InstanceParts{"Person": {personParts("p1"), personParts("p2")}},
+			Unresolved: []graph.UnresolvedParts{{
+				SourceType: "Person",
+				SourceKey:  immutable.WrapKey([]any{sourceKey}),
+				Relation:   "EMPLOYER",
+				TargetType: "Company",
+				TargetKey:  immutable.WrapKey([]any{"c99"}),
+				Required:   true,
+				Reason:     "target_missing",
+			}},
+		})
+		if res.HasErrors() {
+			t.Fatalf("rebuild: %s", res)
+		}
+		return built
+	}
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, withSource("p1"), withSource("p2"))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must detect an unresolved edge that moved to a different source instance")
+	}
+}
+
+// TestDiffSnapshots_ComparesProvenancePaths pins the path itself, not only
+// whether provenance is present. RawPath is populated only on a parse failure,
+// so a projection reading it alone reports every well-formed path as empty.
+func TestDiffSnapshots_ComparesProvenancePaths(t *testing.T) {
+	s := testSchema(t)
+	person := func(p path.Builder) *graph.Snapshot {
+		return buildSnapshot(t, s, instancetest.VI(
+			"Person",
+			instancetest.TypeID(typeID(t, s, "Person")),
+			instancetest.PK("p1"),
+			instancetest.Props(map[string]any{"id": "p1"}),
+			instancetest.Provenance(location.NewProvenance("feed", p, location.Span{})),
+		))
+	}
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, person(path.Root().Key("first")), person(path.Root().Key("second")))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots must detect two instances whose provenance paths differ")
+	}
+}
+
 // TestDiffSnapshots_ComparesComposedTreesRecursively pins that composition
 // comparison descends past one level: snapshots differing only in a composed
 // child's own children, or only in a composed child's provenance, must not
