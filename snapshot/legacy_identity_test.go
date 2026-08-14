@@ -42,10 +42,10 @@ func contradictoryDuplicateDoc(t *testing.T, s *schema.Schema) (schema.TypeID, g
 		Properties: immutable.WrapProperties(map[string]any{"name": "p1", "mass": float64(2)}),
 	}
 	return basePart, graph.SnapshotParts{
-		Types:     []string{"Part"},
-		Instances: map[string][]graph.InstanceParts{"Part": {root}},
+		Types:     []schema.TypeID{localPart},
+		Instances: map[schema.TypeID][]graph.InstanceParts{localPart: {root}},
 		Duplicates: []graph.DuplicateParts{{
-			Type:     "Part",
+			Type:     localPart,
 			Key:      immutable.WrapKey([]any{"p1"}),
 			Instance: duplicate,
 		}},
@@ -128,11 +128,12 @@ func TestLoad_AmbiguousRootIdentityLoadsWithWarning(t *testing.T) {
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
 
+	localPart := mustTypeIDIn(t, s, "", "Part")
 	basePart := mustTypeIDIn(t, s, "base", "Part")
 	data := marshalDoc(t, ctx, s, graph.SnapshotParts{
-		Types: []string{"Part"},
-		Instances: map[string][]graph.InstanceParts{
-			"Part": {{
+		Types: []schema.TypeID{localPart},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			localPart: {{
 				TypeName:   "Part",
 				TypeID:     basePart,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
@@ -148,7 +149,7 @@ func TestLoad_AmbiguousRootIdentityLoadsWithWarning(t *testing.T) {
 	if loaded == nil {
 		t.Fatal("load returned no snapshot for a document it accepted")
 	}
-	insts := loaded.InstancesOf("Part")
+	insts := loaded.InstancesOf(basePart)
 	if len(insts) != 1 {
 		t.Fatalf("want 1 Part, got %d", len(insts))
 	}
@@ -204,9 +205,9 @@ func TestLoad_ComposedChildStalePathFallsBackToName(t *testing.T) {
 	// PARTS targets the entry schema's Part, so a base.Part child under it
 	// cannot be recovered from the relation and the wire carries a type_id.
 	data := marshalDoc(t, ctx, s, graph.SnapshotParts{
-		Types: []string{"Site"},
-		Instances: map[string][]graph.InstanceParts{
-			"Site": {{
+		Types: []schema.TypeID{siteID},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			siteID: {{
 				TypeName:   tagForm(s, siteID),
 				TypeID:     siteID,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
@@ -235,7 +236,7 @@ func TestLoad_ComposedChildStalePathFallsBackToName(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatalf("load: %v\n%s", err, stale)
 	}
-	sites := loaded.InstancesOf("Site")
+	sites := loaded.InstancesOf(siteID)
 	if len(sites) != 1 {
 		t.Fatalf("want 1 Site, got %d", len(sites))
 	}
@@ -260,9 +261,9 @@ func TestImportSnapshot_KeepsTransitivelyImportedInstances(t *testing.T) {
 	probeID := mustTransitiveTypeID(t, s, "base", "deep", "Probe")
 	tag := tagForm(s, probeID)
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []string{tag},
-		Instances: map[string][]graph.InstanceParts{
-			tag: {{
+		Types: []schema.TypeID{probeID},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			probeID: {{
 				TypeName:   tag,
 				TypeID:     probeID,
 				PrimaryKey: immutable.WrapKey([]any{"pr1"}),
@@ -284,27 +285,123 @@ func TestImportSnapshot_KeepsTransitivelyImportedInstances(t *testing.T) {
 	}
 }
 
-// unresolvedTargetSnapshot hangs one unresolved edge with the given target tag
-// off a Basin, so the target's binding is the only variable.
-func unresolvedTargetSnapshot(t *testing.T, s *schema.Schema, targetTag string) *graph.Snapshot {
+// The tag collision, one layer above the wire.
+//
+// A local type and a transitively imported one render the same tag. Keying a
+// snapshot by that tag merges them: the second group overwrites the first
+// before anything is marshalled. Graph.Add refuses a transitively imported
+// type outright, so the collision is reachable only through the
+// deserialization path — which is exactly the path a persisted document takes.
+
+// collidingBeacons builds a snapshot holding both Beacons, whose tags collide.
+func collidingBeacons(t *testing.T, s *schema.Schema) (*graph.Snapshot, schema.TypeID, schema.TypeID) {
+	t.Helper()
+	localBeacon := mustTypeIDIn(t, s, "", "Beacon")
+	deepBeacon := mustTransitiveTypeID(t, s, "base", "deep", "Beacon")
+	if tagForm(s, localBeacon) != tagForm(s, deepBeacon) {
+		t.Fatalf("fixture is vacuous: the two Beacons render different tags (%q, %q)",
+			tagForm(s, localBeacon), tagForm(s, deepBeacon))
+	}
+	beacon := func(id schema.TypeID, key string) graph.InstanceParts {
+		return graph.InstanceParts{
+			TypeName:   tagForm(s, id),
+			TypeID:     id,
+			PrimaryKey: immutable.WrapKey([]any{key}),
+			Properties: immutable.WrapProperties(map[string]any{"id": key, "power": float64(1)}),
+		}
+	}
+	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types: []schema.TypeID{localBeacon, deepBeacon},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			localBeacon: {beacon(localBeacon, "local1")},
+			deepBeacon:  {beacon(deepBeacon, "deep1")},
+		},
+	})
+	if result.HasErrors() {
+		t.Fatalf("assembling: %s", result)
+	}
+	return built, localBeacon, deepBeacon
+}
+
+// TestRebuildSnapshot_KeepsBothSidesOfATagCollision pins the assembly path. A
+// name-keyed Instances map cannot even express this input; an identity-keyed
+// one must carry both groups through.
+func TestRebuildSnapshot_KeepsBothSidesOfATagCollision(t *testing.T) {
+	t.Parallel()
+	s := loadIdentitySchema(t)
+
+	built, localBeacon, deepBeacon := collidingBeacons(t, s)
+	if got := len(built.InstancesOf(localBeacon)); got != 1 {
+		t.Errorf("the local Beacon was merged away: want 1 instance, got %d", got)
+	}
+	if got := len(built.InstancesOf(deepBeacon)); got != 1 {
+		t.Errorf("the transitively imported Beacon was merged away: want 1 instance, got %d", got)
+	}
+}
+
+// TestGraphSnapshot_KeepsBothSidesOfATagCollision drives Graph.Snapshot itself,
+// reached through the import path because Add refuses the transitive type.
+func TestGraphSnapshot_KeepsBothSidesOfATagCollision(t *testing.T) {
+	t.Parallel()
+	s := loadIdentitySchema(t)
+
+	built, _, _ := collidingBeacons(t, s)
+	after := graph.NewFromSnapshot(s, built).Snapshot()
+
+	var count int
+	for range after.AllInstances() {
+		count++
+	}
+	if count != 2 {
+		t.Errorf("Graph.Snapshot merged two types rendering one tag: want 2 instances, got %d", count)
+	}
+}
+
+// TestRoundTrip_KeepsBothSidesOfATagCollision is the end-to-end bar: both
+// groups survive Marshal and Load, on a v2 wire whose types array can hold the
+// tag only once.
+func TestRoundTrip_KeepsBothSidesOfATagCollision(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+
+	built, localBeacon, deepBeacon := collidingBeacons(t, s)
+	data, result := snapshot.Marshal(ctx, built)
+	if err := result.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	loaded, result := snapshot.Load(ctx, data, s)
+	if err := result.Err(); err != nil {
+		t.Fatalf("load rejected a document Marshal produced: %v\n%s", err, data)
+	}
+	if got := len(loaded.InstancesOf(localBeacon)); got != 1 {
+		t.Errorf("the local Beacon did not survive the round trip: got %d\n%s", got, data)
+	}
+	if got := len(loaded.InstancesOf(deepBeacon)); got != 1 {
+		t.Errorf("the transitively imported Beacon did not survive the round trip: got %d\n%s", got, data)
+	}
+}
+
+// unresolvedTargetSnapshot hangs one unresolved edge off a Basin, targeting
+// Basin, so a caller can rewrite only the target tag on the wire.
+func unresolvedTargetSnapshot(t *testing.T, s *schema.Schema) *graph.Snapshot {
 	t.Helper()
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
-	tag := tagForm(s, basinID)
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []string{tag},
-		Instances: map[string][]graph.InstanceParts{
-			tag: {{
-				TypeName:   tag,
+		Types: []schema.TypeID{basinID},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			basinID: {{
+				TypeName:   tagForm(s, basinID),
 				TypeID:     basinID,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(7)}),
 			}},
 		},
 		Unresolved: []graph.UnresolvedParts{{
-			SourceType: tag,
+			SourceType: basinID,
 			SourceKey:  immutable.WrapKey([]any{"b1"}),
 			Relation:   "NEAR",
-			TargetType: targetTag,
+			TargetType: basinID,
 			TargetKey:  immutable.WrapKey([]any{"gone"}),
 			Reason:     "target_missing",
 		}},
@@ -313,6 +410,25 @@ func unresolvedTargetSnapshot(t *testing.T, s *schema.Schema, targetTag string) 
 		t.Fatalf("assembling: %s", result)
 	}
 	return built
+}
+
+// loadWithTargetTag rewrites the unresolved record's target tag on the wire and
+// loads the result, which is the only way to reach a tag the writer would never
+// produce — a v2 document written elsewhere, against a schema laid out
+// differently.
+func loadWithTargetTag(t *testing.T, s *schema.Schema, tag string) (*graph.Snapshot, diag.Result) {
+	t.Helper()
+	ctx := context.Background()
+	data, result := snapshot.Marshal(ctx, unresolvedTargetSnapshot(t, s))
+	if err := result.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	const anchor = `"target_type":"base.Basin"`
+	if !bytes.Contains(data, []byte(anchor)) {
+		t.Fatalf("fixture shape changed; %s not found in:\n%s", anchor, data)
+	}
+	edited := bytes.Replace(data, []byte(anchor), []byte(`"target_type":"`+tag+`"`), 1)
+	return snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
 }
 
 // hasCode reports whether the result carries an issue with the given code.
@@ -325,55 +441,67 @@ func hasCode(result diag.Result, code diag.Code) bool {
 	return false
 }
 
-// TestImportSnapshot_BindsUniqueTransitiveTarget drives an unresolved edge
-// whose target tag is a bare name only a transitively imported schema
-// declares. One declaration means no ambiguity, so the record binds and
-// survives rather than being dropped on a lookup the entry schema cannot make.
-func TestImportSnapshot_BindsUniqueTransitiveTarget(t *testing.T) {
+// TestLoad_BindsUniqueTransitiveTarget drives an unresolved record whose target
+// tag is a bare name only a transitively imported schema declares. One
+// declaration means no ambiguity, so it binds and the record survives rather
+// than being dropped on a lookup the entry schema cannot make.
+func TestLoad_BindsUniqueTransitiveTarget(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
-	after := graph.NewFromSnapshot(s, unresolvedTargetSnapshot(t, s, "Probe")).Snapshot()
-	if got := len(after.Unresolved()); got != 1 {
-		t.Errorf("a unique transitively imported target was dropped: want 1 unresolved record, got %d", got)
+	loaded, result := loadWithTargetTag(t, s, "Probe")
+	if err := result.Err(); err != nil {
+		t.Fatalf("load: %v", err)
 	}
-	if hasCode(after.Diagnostics(), diag.W_GRAPH_AMBIGUOUS_TYPE) {
-		t.Errorf("a target declared exactly once was reported ambiguous: %s", after.Diagnostics())
+	if got := len(loaded.Unresolved()); got != 1 {
+		t.Errorf("a unique transitively imported target was dropped: want 1 record, got %d", got)
+	}
+	if hasCode(result, diag.W_SNAPSHOT_AMBIGUOUS_TYPE) {
+		t.Errorf("a target declared exactly once was reported ambiguous: %s", result)
+	}
+	want := mustTransitiveTypeID(t, s, "base", "deep", "Probe")
+	if got := loaded.Unresolved()[0].TargetType; got != want {
+		t.Errorf("bound the wrong target:\nwant %s\ngot  %s", want, got)
 	}
 }
 
-// TestImportSnapshot_ReportsAmbiguousTarget holds the ambiguous half. Marker is
-// declared in two closure schemas and in neither the entry schema nor an alias
-// it can name, so the bare tag cannot say which was meant; the binding is
-// deterministic and the choice is reported rather than assumed.
-func TestImportSnapshot_ReportsAmbiguousTarget(t *testing.T) {
+// TestLoad_ReportsAmbiguousTarget holds the ambiguous half. Marker is declared
+// in two closure schemas and in nothing the entry schema can name, so the bare
+// tag cannot say which was meant; the binding is deterministic and reported.
+func TestLoad_ReportsAmbiguousTarget(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
-	after := graph.NewFromSnapshot(s, unresolvedTargetSnapshot(t, s, "Marker")).Snapshot()
-	if got := len(after.Unresolved()); got != 1 {
-		t.Errorf("an ambiguous target was dropped instead of bound: want 1 unresolved record, got %d", got)
+	loaded, result := loadWithTargetTag(t, s, "Marker")
+	if err := result.Err(); err != nil {
+		t.Fatalf("load: %v", err)
 	}
-	if !hasCode(after.Diagnostics(), diag.W_GRAPH_AMBIGUOUS_TYPE) {
+	if got := len(loaded.Unresolved()); got != 1 {
+		t.Errorf("an ambiguous target was dropped instead of bound: want 1 record, got %d", got)
+	}
+	if !hasCode(result, diag.W_SNAPSHOT_AMBIGUOUS_TYPE) {
 		t.Errorf("a target two closure schemas declare bound silently; want %s\n%s",
-			diag.W_GRAPH_AMBIGUOUS_TYPE, after.Diagnostics())
+			diag.W_SNAPSHOT_AMBIGUOUS_TYPE, result)
 	}
 }
 
-// TestImportSnapshot_ReportsDroppedTarget holds the last shape. A tag naming
-// no type anywhere in the closure cannot be bound, so the record is dropped —
-// but silently dropping an edge is how data loss hides, so it is reported.
-func TestImportSnapshot_ReportsDroppedTarget(t *testing.T) {
+// TestLoad_ReportsDroppedTarget holds the last shape. A tag naming no type
+// anywhere in the closure cannot be bound, so the record is dropped — but a
+// silently dropped edge is how data loss hides, so it is reported.
+func TestLoad_ReportsDroppedTarget(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
-	after := graph.NewFromSnapshot(s, unresolvedTargetSnapshot(t, s, "Nowhere")).Snapshot()
-	if got := len(after.Unresolved()); got != 0 {
-		t.Errorf("a target naming no declared type was bound anyway: got %d unresolved records", got)
+	loaded, result := loadWithTargetTag(t, s, "Nowhere")
+	if err := result.Err(); err != nil {
+		t.Fatalf("load: %v", err)
 	}
-	if !hasCode(after.Diagnostics(), diag.E_GRAPH_TYPE_NOT_FOUND) {
+	if got := len(loaded.Unresolved()); got != 0 {
+		t.Errorf("a target naming no declared type was bound anyway: got %d records", got)
+	}
+	if !hasCode(result, diag.E_SNAPSHOT_UNKNOWN_TYPE) {
 		t.Errorf("an unresolvable target dropped its record silently; want %s\n%s",
-			diag.E_GRAPH_TYPE_NOT_FOUND, after.Diagnostics())
+			diag.E_SNAPSHOT_UNKNOWN_TYPE, result)
 	}
 }
 
@@ -389,9 +517,9 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
 	tag := tagForm(s, basinID)
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []string{tag},
-		Instances: map[string][]graph.InstanceParts{
-			tag: {{
+		Types: []schema.TypeID{basinID},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			basinID: {{
 				TypeName:   tag,
 				TypeID:     basinID,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
@@ -399,10 +527,10 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 			}},
 		},
 		Unresolved: []graph.UnresolvedParts{{
-			SourceType: tag,
+			SourceType: basinID,
 			SourceKey:  immutable.WrapKey([]any{"b1"}),
 			Relation:   "NEAR",
-			TargetType: tag,
+			TargetType: basinID,
 			TargetKey:  immutable.WrapKey([]any{"gone"}),
 			Required:   true,
 			Reason:     "target_missing",

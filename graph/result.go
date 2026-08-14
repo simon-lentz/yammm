@@ -14,13 +14,17 @@ import (
 // and diagnostics. It is safe for concurrent read access from multiple
 // goroutines.
 //
+// Types are identified by [schema.TypeID], never by name; see the package doc
+// for why, and [schema.TagForm] for rendering one as a name.
+//
 // All slice-returning methods produce deterministically sorted output,
-// independent of Add() call order or concurrency:
-//   - [Snapshot.Types]: lexicographic by type name
+// independent of Add() call order or concurrency, and every ordering below
+// compares types by TypeID so two types rendering one name still sort apart:
+//   - [Snapshot.Types]: lexicographic by TypeID (schema path, then name)
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
-//   - [Snapshot.Edges]: lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
-//   - [Snapshot.Duplicates]: lexicographic by (typeName, primaryKey)
-//   - [Snapshot.Unresolved]: lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
+//   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType, targetKey)
+//   - [Snapshot.Duplicates]: (type, primaryKey)
+//   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType, targetKey)
 //
 // The [Snapshot.Instances] map has non-deterministic iteration order per Go semantics.
 // For deterministic iteration, use [Snapshot.AllInstances] (iterator) or
@@ -29,14 +33,14 @@ type Snapshot struct {
 	// schema is the schema used for validation.
 	schema *schema.Schema
 
-	// types contains all type names in sorted order (instance tag form).
-	types []string
+	// types contains every type identity in sorted order.
+	types []schema.TypeID
 
-	// instances maps type name to sorted instances.
-	instances map[string][]*Instance
+	// instances maps type identity to sorted instances.
+	instances map[schema.TypeID][]*Instance
 
 	// instanceIndex provides O(1) lookup by (type, key).
-	instanceIndex map[string]map[string]*Instance
+	instanceIndex map[schema.TypeID]map[string]*Instance
 
 	// edges contains all resolved edges in sorted order.
 	edges []*Edge
@@ -73,19 +77,17 @@ func (r *Snapshot) Schema() *schema.Schema {
 	return r.schema
 }
 
-// Types returns all type names in lexicographic order.
+// Types returns every type identity in the graph, ordered by TypeID: schema
+// path, then name.
 //
-// The returned slice uses instance tag form:
-//   - Local types: unqualified (e.g., "Person")
-//   - Imported types: alias-qualified (e.g., "c.Entity")
-//
-// Use with [Snapshot.InstancesOf] for deterministic iteration.
+// Use with [Snapshot.InstancesOf] for deterministic iteration, and
+// [schema.TagForm] to render an identity as a name.
 // Returns a defensive copy.
-func (r *Snapshot) Types() []string {
+func (r *Snapshot) Types() []schema.TypeID {
 	if r == nil || len(r.types) == 0 {
 		return nil
 	}
-	result := make([]string, len(r.types))
+	result := make([]schema.TypeID, len(r.types))
 	copy(result, r.types)
 	return result
 }
@@ -95,16 +97,12 @@ func (r *Snapshot) Types() []string {
 // Instances are sorted by primary key using [FormatKey] string comparison.
 // Returns nil if the type has no instances in the graph.
 //
-// The typeName must be in instance tag form:
-//   - Local types: unqualified (e.g., "Person")
-//   - Imported types: alias-qualified (e.g., "c.Entity")
-//
 // Returns a defensive copy.
-func (r *Snapshot) InstancesOf(typeName string) []*Instance {
+func (r *Snapshot) InstancesOf(id schema.TypeID) []*Instance {
 	if r == nil || r.instances == nil {
 		return nil
 	}
-	instances := r.instances[typeName]
+	instances := r.instances[id]
 	if len(instances) == 0 {
 		return nil
 	}
@@ -113,20 +111,19 @@ func (r *Snapshot) InstancesOf(typeName string) []*Instance {
 	return result
 }
 
-// Instances returns all validated instances keyed by type name.
+// Instances returns all validated instances keyed by type identity.
 //
 // WARNING: Map iteration order is non-deterministic per Go semantics.
 // For deterministic iteration (CLI output, tests), use [Snapshot.Types]
 // with [Snapshot.InstancesOf] instead.
 //
-// The map keys use instance tag form.
 // Returns a shallow copy of the map; instance slices are shared.
-func (r *Snapshot) Instances() map[string][]*Instance {
+func (r *Snapshot) Instances() map[schema.TypeID][]*Instance {
 	if r == nil || r.instances == nil {
 		return nil
 	}
 	// Shallow copy the map; slices are already sorted snapshots
-	result := make(map[string][]*Instance, len(r.instances))
+	result := make(map[schema.TypeID][]*Instance, len(r.instances))
 	maps.Copy(result, r.instances)
 	return result
 }
@@ -155,17 +152,15 @@ func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
 	}
 }
 
-// InstanceByKey looks up a single instance by type name and primary key.
+// InstanceByKey looks up a single instance by type identity and primary key.
 //
 // The key must be in canonical string form (use [FormatKey] to convert values).
 // Returns (nil, false) if no matching instance exists.
-//
-// The typeName must be in instance tag form.
-func (r *Snapshot) InstanceByKey(typeName, key string) (*Instance, bool) {
+func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool) {
 	if r == nil || r.instanceIndex == nil {
 		return nil, false
 	}
-	typeIndex := r.instanceIndex[typeName]
+	typeIndex := r.instanceIndex[id]
 	if typeIndex == nil {
 		return nil, false
 	}
@@ -296,9 +291,9 @@ func (r *Snapshot) HasErrors() bool {
 // All slices must already be sorted according to the ordering guarantees.
 func newSnapshot(
 	s *schema.Schema,
-	types []string,
-	instances map[string][]*Instance,
-	instanceIndex map[string]map[string]*Instance,
+	types []schema.TypeID,
+	instances map[schema.TypeID][]*Instance,
+	instanceIndex map[schema.TypeID]map[string]*Instance,
 	edges []*Edge,
 	duplicates []*Duplicate,
 	unresolved []*UnresolvedEdge,

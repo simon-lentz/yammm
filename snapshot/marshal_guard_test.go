@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/instancetest"
+	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
@@ -41,9 +42,9 @@ func TestMarshal_ZeroTypeIDRootEmitsNoTypeID(t *testing.T) {
 	// graph.Add panics on a zero TypeID, so the state reaches a snapshot only
 	// through RebuildSnapshot — a caller assembling parts directly.
 	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []string{"Person"},
-		Instances: map[string][]graph.InstanceParts{
-			"Person": {{
+		Types: []schema.TypeID{tidOf(t, s, "Person")},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			tidOf(t, s, "Person"): {{
 				TypeName:   "Person",
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
@@ -79,10 +80,10 @@ func TestMarshal_ZeroTypeIDDuplicateEmitsNoTypeID(t *testing.T) {
 		Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
 	}
 	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []string{"Person"},
-		Instances: map[string][]graph.InstanceParts{"Person": {inst}},
+		Types:     []schema.TypeID{tidOf(t, s, "Person")},
+		Instances: map[schema.TypeID][]graph.InstanceParts{tidOf(t, s, "Person"): {inst}},
 		Duplicates: []graph.DuplicateParts{{
-			Type:     "Person",
+			Type:     tidOf(t, s, "Person"),
 			Key:      immutable.WrapKey([]any{"p1"}),
 			Instance: inst,
 		}},
@@ -112,9 +113,9 @@ func TestLoad_ContradictoryTypeIDIsReported(t *testing.T) {
 	// name. Only a caller assembling parts directly can build this.
 	imported := mustTypeIDIn(t, s, "base", "Part")
 	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []string{"Part"},
-		Instances: map[string][]graph.InstanceParts{
-			"Part": {{
+		Types: []schema.TypeID{tidOf(t, s, "Part")},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			tidOf(t, s, "Part"): {{
 				TypeName:   "Part",
 				TypeID:     imported,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),

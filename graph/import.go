@@ -1,53 +1,8 @@
 package graph
 
 import (
-	"fmt"
-
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
-
-// closureTypeIDs indexes every type in s's closure by bare name, in closure
-// order — s first, then each import in declaration order. A name declared more
-// than once maps to every declaration, so a caller can tell the ambiguous case
-// from the unique one instead of silently taking the first.
-func closureTypeIDs(s *schema.Schema) map[string][]schema.TypeID {
-	index := make(map[string][]schema.TypeID)
-	for _, cs := range s.Closure() {
-		for _, t := range cs.TypesSlice() {
-			index[t.Name()] = append(index[t.Name()], t.ID())
-		}
-	}
-	return index
-}
-
-// bindImportedTarget resolves an unresolved edge's target tag that the entry
-// schema cannot name, which is how a v2 document refers to a transitively
-// imported type. The binding is reported whenever the tag is ambiguous, and a
-// tag naming nothing drops the record with a warning rather than in silence.
-func (g *Graph) bindImportedTarget(unres *UnresolvedEdge, closure map[string][]schema.TypeID) (schema.TypeID, bool) {
-	candidates := closure[unres.TargetType]
-	if len(candidates) == 0 {
-		g.collector.Collect(diag.NewIssue(diag.Warning, diag.E_GRAPH_TYPE_NOT_FOUND,
-			fmt.Sprintf("unresolved edge %q from %s references target type %q, which no schema in the import closure declares; the record is dropped",
-				unres.Relation, unres.Source.TypeName(), unres.TargetType)).
-			WithDetail(diag.DetailKeyTypeName, unres.Source.TypeName()).
-			WithDetail(diag.DetailKeyRelationName, unres.Relation).
-			WithDetail(diag.DetailKeyTargetType, unres.TargetType).
-			Build())
-		return schema.TypeID{}, false
-	}
-	if len(candidates) > 1 {
-		g.collector.Collect(diag.NewIssue(diag.Warning, diag.W_GRAPH_AMBIGUOUS_TYPE,
-			fmt.Sprintf("unresolved edge %q from %s names target type %q, which %d schemas in the import closure declare; bound to the one in %q",
-				unres.Relation, unres.Source.TypeName(), unres.TargetType, len(candidates), candidates[0].SchemaPath().String())).
-			WithDetail(diag.DetailKeyTypeName, unres.Source.TypeName()).
-			WithDetail(diag.DetailKeyRelationName, unres.Relation).
-			WithDetail(diag.DetailKeyTargetType, unres.TargetType).
-			Build())
-	}
-	return candidates[0], true
-}
 
 // NewFromSnapshot creates a Graph pre-populated from a Snapshot's contents.
 //
@@ -90,20 +45,11 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	// pointers → graph instance pointers for steps 2-4.
 	cloneMap := make(map[*Instance]*Instance)
 
-	// Filed by carried identity, not by tag: a tag cannot name a transitively
-	// imported type, and one tag group's members need not share a type.
-	for _, typeName := range snap.Types() {
-		for _, inst := range snap.InstancesOf(typeName) {
-			typeID := inst.TypeID()
-			if typeID.IsZero() {
-				var ok bool
-				if typeID, ok = g.resolveTypeName(typeName); !ok {
-					continue
-				}
-			}
-			if g.instances[typeID] == nil {
-				g.instances[typeID] = make(map[string]*Instance)
-			}
+	for _, typeID := range snap.Types() {
+		if g.instances[typeID] == nil {
+			g.instances[typeID] = make(map[string]*Instance)
+		}
+		for _, inst := range snap.InstancesOf(typeID) {
 			cloned := cloneInstance(inst, cloneMap)
 			g.instances[typeID][cloned.PrimaryKey().String()] = cloned
 		}
@@ -121,26 +67,11 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	// Step 3: Install unresolved edges as pending.
 	// ALL reasons are reinstalled (target_missing, absent, empty) so they
 	// survive the import → add → snapshot cycle without data loss.
-	var closure map[string][]schema.TypeID
 	for _, unres := range snap.Unresolved() {
 		srcClone := cloneMap[unres.Source]
 
-		targetTypeID, ok := g.resolveTypeName(unres.TargetType)
-		if !ok {
-			if closure == nil {
-				closure = closureTypeIDs(g.schema)
-			}
-			targetTypeID, ok = g.bindImportedTarget(unres, closure)
-			if !ok {
-				continue
-			}
-		}
-
-		// Reverse the reason mapping from Snapshot(). Graph.Add() stores
-		// forward references with reasonDetail="" (empty string). Snapshot()
-		// converts "" to "target_missing" at graph.go:821-824. Restoring
-		// the original form ensures pending edge resolution in Add() works
-		// unchanged.
+		// Reverse the reason mapping from [Graph.Snapshot], which converts the
+		// empty reasonDetail [Graph.Add] stores into "target_missing".
 		reasonDetail := unres.Reason
 		if reasonDetail == "target_missing" {
 			reasonDetail = ""
@@ -155,7 +86,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			}
 		}
 
-		pk := pendingKey{targetTypeID: targetTypeID, targetKey: unres.TargetKey}
+		pk := pendingKey{targetTypeID: unres.TargetType, targetKey: unres.TargetKey}
 		g.pending[pk] = append(g.pending[pk], &pendingEdge{
 			source:       srcClone,
 			relation:     unres.Relation,

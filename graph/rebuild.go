@@ -14,9 +14,12 @@ import (
 // without running the graph construction pipeline. All fields use value
 // types; pointer-based cross-references (edge source/target) are resolved
 // internally by [RebuildSnapshot] using the instance index.
+// Every type reference below is a [schema.TypeID]. A name cannot carry a
+// transitively imported type or separate two same-named types, so a
+// name-keyed Instances map merges them before RebuildSnapshot sees them.
 type SnapshotParts struct {
-	Types      []string
-	Instances  map[string][]InstanceParts
+	Types      []schema.TypeID
+	Instances  map[schema.TypeID][]InstanceParts
 	Edges      []EdgeParts
 	Duplicates []DuplicateParts
 	Unresolved []UnresolvedParts
@@ -39,13 +42,13 @@ type InstanceParts struct {
 }
 
 // EdgeParts holds the data for a single resolved edge. Source and target
-// are identified by (type name, primary key) rather than pointer;
+// are identified by (type identity, primary key) rather than pointer;
 // RebuildSnapshot resolves them to *Instance pointers via the instance index.
 type EdgeParts struct {
 	Relation   string
-	SourceType string
+	SourceType schema.TypeID
 	SourceKey  immutable.Key
-	TargetType string
+	TargetType schema.TypeID
 	TargetKey  immutable.Key
 	Properties immutable.Properties
 }
@@ -56,7 +59,7 @@ type EdgeParts struct {
 // serve double duty: they describe the rejected instance's identity AND
 // provide the lookup key for the Conflict instance in the instance index.
 type DuplicateParts struct {
-	Type     string
+	Type     schema.TypeID
 	Key      immutable.Key
 	Instance InstanceParts
 }
@@ -68,11 +71,15 @@ type DuplicateParts struct {
 // otherwise. Loaded from the .ys wire-format v2 "properties" field on
 // unresolved-edge entries; for v1 documents this is always empty
 // (v1 never carried the field).
+//
+// TargetType is an identity even though no instance of it is present — it is
+// what a later [Graph.Add] resolves an arriving target against, so a name
+// there would have to be re-resolved and could bind to the wrong type.
 type UnresolvedParts struct {
-	SourceType string
+	SourceType schema.TypeID
 	SourceKey  immutable.Key
 	Relation   string
-	TargetType string
+	TargetType schema.TypeID
 	TargetKey  immutable.Key
 	Required   bool
 	Reason     string
@@ -102,10 +109,10 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 	collector := diag.NewCollector(0)
 
 	// Step 1: Create Instance objects.
-	instances := make(map[string][]*Instance, len(parts.Instances))
-	instanceIndex := make(map[string]map[string]*Instance, len(parts.Instances))
+	instances := make(map[schema.TypeID][]*Instance, len(parts.Instances))
+	instanceIndex := make(map[schema.TypeID]map[string]*Instance, len(parts.Instances))
 
-	for typeName, instParts := range parts.Instances {
+	for typeID, instParts := range parts.Instances {
 		insts := make([]*Instance, 0, len(instParts))
 		idx := make(map[string]*Instance, len(instParts))
 
@@ -115,8 +122,8 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 			idx[ip.PrimaryKey.String()] = inst
 		}
 
-		instances[typeName] = insts
-		instanceIndex[typeName] = idx
+		instances[typeID] = insts
+		instanceIndex[typeID] = idx
 	}
 
 	// Step 2: Create Edge objects, resolving pointers.
@@ -187,11 +194,15 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		return nil, collector.Result()
 	}
 
-	// Step 5: Assemble the Snapshot.
-	types := parts.Types
+	// Step 5: Assemble the Snapshot. Types is sorted here rather than trusted
+	// from the caller, because [Snapshot.Types] documents the ordering.
+	types := slices.Clone(parts.Types)
 	if types == nil {
-		types = []string{}
+		types = []schema.TypeID{}
 	}
+	slices.SortFunc(types, func(a, b schema.TypeID) int {
+		return cmpString(a.String(), b.String())
+	})
 
 	snap := newSnapshot(s, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK())
 	return snap, diag.OK()
@@ -211,9 +222,9 @@ func rebuildInstance(ip InstanceParts) *Instance {
 	return inst
 }
 
-// lookupInstance finds an instance in the index by type name and key string.
-func lookupInstance(index map[string]map[string]*Instance, typeName, keyStr string) *Instance {
-	typeIdx := index[typeName]
+// lookupInstance finds an instance in the index by type identity and key string.
+func lookupInstance(index map[schema.TypeID]map[string]*Instance, id schema.TypeID, keyStr string) *Instance {
+	typeIdx := index[id]
 	if typeIdx == nil {
 		return nil
 	}
@@ -221,9 +232,10 @@ func lookupInstance(index map[string]map[string]*Instance, typeName, keyStr stri
 }
 
 // compareEdges provides the sorting comparator for edges.
-// Sorts by (sourceType, sourceKey, relation, targetType, targetKey).
+// Sorts by (sourceType, sourceKey, relation, targetType, targetKey), comparing
+// types by identity so two types rendering one name do not interleave.
 func compareEdges(a, b *Edge) int {
-	if c := cmpString(a.source.typeName, b.source.typeName); c != 0 {
+	if c := cmpString(a.source.typeID.String(), b.source.typeID.String()); c != 0 {
 		return c
 	}
 	if c := cmpString(a.source.primaryKey.String(), b.source.primaryKey.String()); c != 0 {
@@ -232,7 +244,7 @@ func compareEdges(a, b *Edge) int {
 	if c := cmpString(a.relation, b.relation); c != 0 {
 		return c
 	}
-	if c := cmpString(a.target.typeName, b.target.typeName); c != 0 {
+	if c := cmpString(a.target.typeID.String(), b.target.typeID.String()); c != 0 {
 		return c
 	}
 	return cmpString(a.target.primaryKey.String(), b.target.primaryKey.String())

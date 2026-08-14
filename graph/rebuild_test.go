@@ -34,8 +34,8 @@ func rebuildTestSchema(t *testing.T) *schema.Schema {
 func TestRebuildSnapshot_EmptyParts(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
-		Types:     []string{},
-		Instances: map[string][]graph.InstanceParts{},
+		Types:     []schema.TypeID{},
+		Instances: map[schema.TypeID][]graph.InstanceParts{},
 	}
 
 	snap, result := graph.RebuildSnapshot(s, parts)
@@ -53,9 +53,9 @@ func TestRebuildSnapshot_EmptyParts(t *testing.T) {
 func TestRebuildSnapshot_WithInstances(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
-		Types: []string{"Company", "Person"},
-		Instances: map[string][]graph.InstanceParts{
-			"Company": {
+		Types: []schema.TypeID{mustTypeID(t, s, "Company"), mustTypeID(t, s, "Person")},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			mustTypeID(t, s, "Company"): {
 				{
 					TypeName:   "Company",
 					TypeID:     mustTypeID(t, s, "Company"),
@@ -63,7 +63,7 @@ func TestRebuildSnapshot_WithInstances(t *testing.T) {
 					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
 				},
 			},
-			"Person": {
+			mustTypeID(t, s, "Person"): {
 				{
 					TypeName:   "Person",
 					TypeID:     mustTypeID(t, s, "Person"),
@@ -82,20 +82,20 @@ func TestRebuildSnapshot_WithInstances(t *testing.T) {
 	if len(snap.Types()) != 2 {
 		t.Errorf("expected 2 types, got %d", len(snap.Types()))
 	}
-	if len(snap.InstancesOf("Company")) != 1 {
-		t.Errorf("expected 1 Company, got %d", len(snap.InstancesOf("Company")))
+	if len(snap.InstancesOf(mustTypeID(t, s, "Company"))) != 1 {
+		t.Errorf("expected 1 Company, got %d", len(snap.InstancesOf(mustTypeID(t, s, "Company"))))
 	}
-	if len(snap.InstancesOf("Person")) != 1 {
-		t.Errorf("expected 1 Person, got %d", len(snap.InstancesOf("Person")))
+	if len(snap.InstancesOf(mustTypeID(t, s, "Person"))) != 1 {
+		t.Errorf("expected 1 Person, got %d", len(snap.InstancesOf(mustTypeID(t, s, "Person"))))
 	}
 }
 
 func TestRebuildSnapshot_WithEdges(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
-		Types: []string{"Company", "Person"},
-		Instances: map[string][]graph.InstanceParts{
-			"Company": {
+		Types: []schema.TypeID{mustTypeID(t, s, "Company"), mustTypeID(t, s, "Person")},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			mustTypeID(t, s, "Company"): {
 				{
 					TypeName:   "Company",
 					TypeID:     mustTypeID(t, s, "Company"),
@@ -103,7 +103,7 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
 				},
 			},
-			"Person": {
+			mustTypeID(t, s, "Person"): {
 				{
 					TypeName:   "Person",
 					TypeID:     mustTypeID(t, s, "Person"),
@@ -115,9 +115,9 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 		Edges: []graph.EdgeParts{
 			{
 				Relation:   "EMPLOYER",
-				SourceType: "Person",
+				SourceType: mustTypeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{"p1"}),
-				TargetType: "Company",
+				TargetType: mustTypeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c1"}),
 				Properties: immutable.Properties{},
 			},
@@ -140,7 +140,7 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 	}
 
 	// EdgesFrom should also work.
-	persons := snap.InstancesOf("Person")
+	persons := snap.InstancesOf(mustTypeID(t, s, "Person"))
 	if len(persons) != 1 {
 		t.Fatalf("expected 1 Person")
 	}
@@ -153,9 +153,9 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
-		Types: []string{"Company"},
-		Instances: map[string][]graph.InstanceParts{
-			"Company": {
+		Types: []schema.TypeID{mustTypeID(t, s, "Company")},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			mustTypeID(t, s, "Company"): {
 				{
 					TypeName:   "Company",
 					TypeID:     mustTypeID(t, s, "Company"),
@@ -167,9 +167,9 @@ func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 		Edges: []graph.EdgeParts{
 			{
 				Relation:   "EMPLOYER",
-				SourceType: "Person",
+				SourceType: mustTypeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{"p1"}),
-				TargetType: "Company",
+				TargetType: mustTypeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c1"}),
 			},
 		},
@@ -197,9 +197,9 @@ func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
-		Types: []string{"Company"},
-		Instances: map[string][]graph.InstanceParts{
-			"Company": {
+		Types: []schema.TypeID{mustTypeID(t, s, "Company")},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			mustTypeID(t, s, "Company"): {
 				{
 					TypeName:   "Company",
 					TypeID:     mustTypeID(t, s, "Company"),
@@ -210,7 +210,7 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 		},
 		Duplicates: []graph.DuplicateParts{
 			{
-				Type: "Company",
+				Type: mustTypeID(t, s, "Company"),
 				Key:  immutable.WrapKey([]any{"c1"}),
 				Instance: graph.InstanceParts{
 					TypeName:   "Company",
@@ -247,11 +247,11 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 func TestRebuildSnapshot_DuplicateConflictMissing(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
-		Types:     []string{"Company"},
-		Instances: map[string][]graph.InstanceParts{"Company": {}},
+		Types:     []schema.TypeID{mustTypeID(t, s, "Company")},
+		Instances: map[schema.TypeID][]graph.InstanceParts{mustTypeID(t, s, "Company"): {}},
 		Duplicates: []graph.DuplicateParts{
 			{
-				Type: "Company",
+				Type: mustTypeID(t, s, "Company"),
 				Key:  immutable.WrapKey([]any{"c_missing"}),
 				Instance: graph.InstanceParts{
 					TypeName:   "Company",
@@ -275,9 +275,9 @@ func TestRebuildSnapshot_DuplicateConflictMissing(t *testing.T) {
 func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
-		Types: []string{"Person"},
-		Instances: map[string][]graph.InstanceParts{
-			"Person": {
+		Types: []schema.TypeID{mustTypeID(t, s, "Person")},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			mustTypeID(t, s, "Person"): {
 				{
 					TypeName:   "Person",
 					TypeID:     mustTypeID(t, s, "Person"),
@@ -288,10 +288,10 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 		},
 		Unresolved: []graph.UnresolvedParts{
 			{
-				SourceType: "Person",
+				SourceType: mustTypeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{"p1"}),
 				Relation:   "EMPLOYER",
-				TargetType: "Company",
+				TargetType: mustTypeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c99"}),
 				Required:   true,
 				Reason:     "target_missing",

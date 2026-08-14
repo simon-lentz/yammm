@@ -10,6 +10,13 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
+// exampleTypeID resolves a local type for the examples, which have no
+// *testing.T to fail on.
+func exampleTypeID(s *schema.Schema, name string) schema.TypeID {
+	t, _ := s.Type(name)
+	return t.ID()
+}
+
 func ExampleGraph_Add() {
 	// Build a schema with a relationship
 	s, _ := schema.NewBuilder().
@@ -58,8 +65,8 @@ func ExampleGraph_Add() {
 
 	// Get snapshot
 	snap := g.Snapshot()
-	fmt.Println("Departments:", len(snap.InstancesOf("Department")))
-	fmt.Println("Employees:", len(snap.InstancesOf("Employee")))
+	fmt.Println("Departments:", len(snap.InstancesOf(exampleTypeID(s, "Department"))))
+	fmt.Println("Employees:", len(snap.InstancesOf(exampleTypeID(s, "Employee"))))
 
 	// Output:
 	// Graph OK: true

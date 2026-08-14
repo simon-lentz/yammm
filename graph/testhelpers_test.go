@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -334,6 +335,26 @@ func testSchemaWithCircularChain(t *testing.T) *schema.Schema {
 // exact-TypeID, so every instance must carry its real schema TypeID.
 
 // mustTypeID resolves a schema type's ID, failing the test if absent.
+// tagID resolves a tag form — bare or alias-qualified — to the identity it
+// renders, so a test written in names reads the same now that Snapshot's
+// accessors take identities.
+func tagID(t *testing.T, s *schema.Schema, tag string) schema.TypeID {
+	t.Helper()
+	alias, name, qualified := strings.Cut(tag, ".")
+	if !qualified {
+		return mustTypeID(t, s, tag)
+	}
+	imp, ok := s.ImportByAlias(alias)
+	if !ok || imp.Schema() == nil {
+		t.Fatalf("import alias %q not found", alias)
+	}
+	typ, ok := imp.Schema().Type(name)
+	if !ok {
+		t.Fatalf("type %q not found in schema imported as %q", name, alias)
+	}
+	return typ.ID()
+}
+
 func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(typeName)
@@ -575,12 +596,12 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 // Assertion Helpers
 
 // assertInstanceCount verifies the number of instances of a type in the result.
-func assertInstanceCount(t *testing.T, result *graph.Snapshot, typeName string, expected int) bool {
+func assertInstanceCount(t *testing.T, result *graph.Snapshot, typeID schema.TypeID, expected int) bool {
 	t.Helper()
 
-	instances := result.InstancesOf(typeName)
+	instances := result.InstancesOf(typeID)
 	if len(instances) != expected {
-		t.Errorf("Expected %d instances of %s, got %d", expected, typeName, len(instances))
+		t.Errorf("Expected %d instances of %s, got %d", expected, typeID, len(instances))
 		return false
 	}
 	return true

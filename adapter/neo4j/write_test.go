@@ -23,6 +23,17 @@ var (
 	_ NodeSource = (*instance.ValidInstance)(nil)
 )
 
+// snapTypeID resolves a local type's identity, which is what Snapshot's
+// accessors take.
+func snapTypeID(t *testing.T, s *schema.Schema, name string) schema.TypeID {
+	t.Helper()
+	typ, ok := s.Type(name)
+	if !ok {
+		t.Fatalf("type %q not found in schema", name)
+	}
+	return typ.ID()
+}
+
 func TestNodeQueryFor_SinglePK(t *testing.T) {
 	t.Parallel()
 	a, s, v, shape := setupWrite(t, "basic.yammm")
@@ -31,7 +42,7 @@ func TestNodeQueryFor_SinglePK(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "count": int64(5), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 	ns := shape.Types["Entity"]
 	st, _ := s.Type("Entity")
 	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
@@ -61,7 +72,7 @@ func TestNodeQueryFor_CompositePK(t *testing.T) {
 		"Record": {{"schema_id": "s1", "record_id": "r1", "name": "test"}},
 	})
 
-	inst := graphResult.InstancesOf("Record")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Record"))[0]
 	ns := shape.Types["Record"]
 	st, _ := s.Type("Record")
 	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
@@ -85,7 +96,7 @@ func TestNodeQueryFor_ImmutableKeys(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 	ns := shape.Types["Entity"]
 	st, _ := s.Type("Entity")
 	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st, WithImmutableKeys("created_at"))
@@ -115,7 +126,7 @@ func TestNodeQueryFor_ImmutableKeyUnknown(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 	ns := shape.Types["Entity"]
 	st, _ := s.Type("Entity")
 
@@ -142,7 +153,7 @@ func TestNodeQueryFor_ImmutableKeyInherited(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "run_id": "r1", "source_fetched_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 	ns := shape.Types["Entity"]
 	st, _ := s.Type("Entity")
 
@@ -168,7 +179,7 @@ func TestNodeQueryFor_ImmutableKeysNilSchemaType(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 	ns := shape.Types["Entity"]
 
 	// With no schema type there is nothing to validate against; the key is
@@ -194,7 +205,7 @@ func TestNodeQueryFor_DerivedImmutableKeys(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 	ns := shape.Types["Entity"]
 	st, _ := s.Type("Entity")
 
@@ -229,7 +240,7 @@ func TestNodeQueryFor_DerivedUnionExplicit(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 	ns := shape.Types["Entity"]
 	st, _ := s.Type("Entity")
 
@@ -257,7 +268,7 @@ func TestNodeQueryFor_UnannotatedTypeUnchanged(t *testing.T) {
 		"Plain": {{"id": "p1", "name": "n"}},
 	})
 
-	inst := graphResult.InstancesOf("Plain")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Plain"))[0]
 	ns := shape.Types["Plain"]
 	st, _ := s.Type("Plain")
 
@@ -290,7 +301,7 @@ func TestNodeQueryFor_NilSchemaTypeStillHonorsWriteOnce(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 	ns := shape.Types["Entity"]
 
 	q, err := a.NodeQueryFor(context.Background(), &ns, inst, nil)
@@ -325,7 +336,7 @@ func TestNodeQueryFor_NilSchemaTypeUnannotatedStaysMutable(t *testing.T) {
 		"Plain": {{"id": "p1", "name": "n"}},
 	})
 
-	inst := graphResult.InstancesOf("Plain")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Plain"))[0]
 	ns := shape.Types["Plain"]
 
 	q, err := a.NodeQueryFor(context.Background(), &ns, inst, nil)
@@ -1092,7 +1103,7 @@ func TestNodeQueryFor_MissingKey(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 
 	// Use a shape with a PK that doesn't exist in the instance.
 	badShape := NodeShape{
@@ -1115,7 +1126,7 @@ func TestNodeQueryFor_EmptyPrimaryKeys(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	inst := graphResult.InstancesOf("Entity")[0]
+	inst := graphResult.InstancesOf(snapTypeID(t, s, "Entity"))[0]
 	emptyPKShape := NodeShape{
 		Label:       "test__Entity",
 		PrimaryKeys: nil,

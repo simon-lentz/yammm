@@ -82,7 +82,7 @@ func TestGraph_ForwardReference_Multiple(t *testing.T) {
 
 	// All 3 should be unresolved
 	snap := g.Snapshot()
-	assertInstanceCount(t, snap, "Person", 3)
+	assertInstanceCount(t, snap, mustTypeID(t, s, "Person"), 3)
 	// All 3 pending edges should be tracked (one per source)
 	if len(snap.Unresolved()) != 3 {
 		t.Errorf("Expected 3 unresolved edges (one per source), got %d", len(snap.Unresolved()))
@@ -182,7 +182,7 @@ func TestGraph_ForwardReference_Snapshot(t *testing.T) {
 	if ur.Relation != "employer" {
 		t.Errorf("Unresolved relation should be employer, got %s", ur.Relation)
 	}
-	if ur.TargetType != "Company" {
+	if ur.TargetType != mustTypeID(t, s, "Company") {
 		t.Errorf("Unresolved target type should be Company, got %s", ur.TargetType)
 	}
 	if ur.TargetKey != `["acme"]` {

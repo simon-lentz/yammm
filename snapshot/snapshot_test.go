@@ -261,7 +261,7 @@ func TestMarshalLoad_EdgeReconstruction(t *testing.T) {
 	}
 
 	// Verify EdgesFrom on loaded snapshot.
-	persons := loaded.InstancesOf("Person")
+	persons := loaded.InstancesOf(tidOf(t, s, "Person"))
 	if len(persons) != 1 {
 		t.Fatalf("expected 1 Person, got %d", len(persons))
 	}
@@ -1082,7 +1082,7 @@ func TestLoad_TypeIDReconstruction(t *testing.T) {
 	data, _ := snapshot.Marshal(ctx, snap)
 	loaded, _ := snapshot.Load(ctx, data, s)
 
-	companies := loaded.InstancesOf("Company")
+	companies := loaded.InstancesOf(tidOf(t, s, "Company"))
 	if len(companies) != 1 {
 		t.Fatalf("expected 1 Company, got %d", len(companies))
 	}
@@ -1107,7 +1107,7 @@ func TestLoad_NullProvenanceRoundTrip(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	companies := loaded.InstancesOf("Company")
+	companies := loaded.InstancesOf(tidOf(t, s, "Company"))
 	if len(companies) != 1 {
 		t.Fatalf("expected 1 Company, got %d", len(companies))
 	}
@@ -1357,7 +1357,7 @@ func fidelityRoundTrip(t *testing.T, s *schema.Schema, v *instance.Validator, va
 	loaded, lr := snapshot.Load(t.Context(), data, s)
 	require.True(t, lr.OK(), "load: %s", lr)
 
-	items := loaded.InstancesOf("Item")
+	items := loaded.InstancesOf(tidOf(t, s, "Item"))
 	require.Len(t, items, 1)
 	return items[0].Properties().Clone()
 }
@@ -1407,7 +1407,7 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		loaded, lr := snapshot.Load(t.Context(), data, s)
 		require.True(t, lr.OK())
 
-		items := loaded.InstancesOf("Item")
+		items := loaded.InstancesOf(tidOf(t, s, "Item"))
 		require.Len(t, items, 1)
 		val, ok := items[0].Properties().Get("val")
 		require.True(t, ok)

@@ -366,10 +366,6 @@ var (
 	// E_GRAPH_TYPE_NOT_FOUND indicates a type referenced in graph operations cannot be found.
 	E_GRAPH_TYPE_NOT_FOUND = NewCode("E_GRAPH_TYPE_NOT_FOUND", CategoryGraph)
 
-	// W_GRAPH_AMBIGUOUS_TYPE (Warning) indicates a persisted type name that more
-	// than one schema in the import closure declares; the graph reports its choice.
-	W_GRAPH_AMBIGUOUS_TYPE = NewCode("W_GRAPH_AMBIGUOUS_TYPE", CategoryGraph)
-
 	// E_GRAPH_PARENT_NOT_FOUND indicates a parent node cannot be found.
 	E_GRAPH_PARENT_NOT_FOUND = NewCode("E_GRAPH_PARENT_NOT_FOUND", CategoryGraph)
 
@@ -400,6 +396,10 @@ var (
 	// E_SNAPSHOT_UNKNOWN_TYPE indicates a type name in the .ys file does not exist
 	// in the provided schema.
 	E_SNAPSHOT_UNKNOWN_TYPE = NewCode("E_SNAPSHOT_UNKNOWN_TYPE", CategorySnapshot)
+
+	// W_SNAPSHOT_AMBIGUOUS_TYPE (Warning) indicates a legacy .ys type name that
+	// two closure schemas declare; the reader binds one and reports the choice.
+	W_SNAPSHOT_AMBIGUOUS_TYPE = NewCode("W_SNAPSHOT_AMBIGUOUS_TYPE", CategorySnapshot)
 
 	// E_SNAPSHOT_TYPE_MISMATCH indicates the types array is inconsistent with the
 	// instances map keys (structural malformation).

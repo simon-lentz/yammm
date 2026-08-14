@@ -33,7 +33,7 @@ func TestEdgesFrom_NoEdges(t *testing.T) {
 	g.Add(context.Background(), person)
 
 	snap := g.Snapshot()
-	instances := snap.InstancesOf("Person")
+	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
 	require.Len(t, instances, 1)
 
 	assert.Nil(t, snap.EdgesFrom(instances[0]))
@@ -50,7 +50,7 @@ func TestEdgesFrom_SingleEdge(t *testing.T) {
 	g.Add(context.Background(), person)
 
 	snap := g.Snapshot()
-	personInst := snap.InstancesOf("Person")[0]
+	personInst := snap.InstancesOf(mustTypeID(t, s, "Person"))[0]
 
 	edges := snap.EdgesFrom(personInst)
 	require.Len(t, edges, 1)
@@ -72,7 +72,7 @@ func TestEdgesFrom_MultipleEdges(t *testing.T) {
 	g.Add(context.Background(), person)
 
 	snap := g.Snapshot()
-	personInst := snap.InstancesOf("Person")[0]
+	personInst := snap.InstancesOf(mustTypeID(t, s, "Person"))[0]
 
 	edges := snap.EdgesFrom(personInst)
 	require.Len(t, edges, 2)
@@ -98,7 +98,7 @@ func TestEdgesFrom_InstanceFromDifferentSnapshot(t *testing.T) {
 	snap2 := g2.Snapshot()
 
 	// Instance from snap1 should not be found in snap2's index (pointer identity)
-	personFromSnap1 := snap1.InstancesOf("Person")[0]
+	personFromSnap1 := snap1.InstancesOf(mustTypeID(t, s, "Person"))[0]
 	assert.Nil(t, snap2.EdgesFrom(personFromSnap1))
 }
 
@@ -113,7 +113,7 @@ func TestEdgesFrom_DefensiveCopy(t *testing.T) {
 	g.Add(context.Background(), person)
 
 	snap := g.Snapshot()
-	personInst := snap.InstancesOf("Person")[0]
+	personInst := snap.InstancesOf(mustTypeID(t, s, "Person"))[0]
 
 	edges1 := snap.EdgesFrom(personInst)
 	edges2 := snap.EdgesFrom(personInst)

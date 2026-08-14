@@ -247,16 +247,17 @@ func (a *Adapter) BatchNodeQueries(
 	}
 	var queries []*BatchNodeQuery
 
-	for _, typeName := range result.Types() {
+	for _, typeID := range result.Types() {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("batch node queries: %w", err)
 		}
+		typeName := schema.TagForm(result.Schema(), typeID)
 		nodeShape, ok := shapes.Types[typeName]
 		if !ok {
 			return nil, fmt.Errorf("no shape for type %q", typeName)
 		}
 
-		schemaType, ok := result.Schema().Type(typeName)
+		schemaType, ok := result.Schema().TypeByID(typeID)
 		if !ok {
 			return nil, fmt.Errorf("type %q not found in schema", typeName)
 		}
@@ -270,7 +271,7 @@ func (a *Adapter) BatchNodeQueries(
 			km = ImmutableKeys
 		}
 
-		instances := result.InstancesOf(typeName)
+		instances := result.InstancesOf(typeID)
 		var rows []map[string]any
 
 		for _, inst := range instances {
@@ -957,13 +958,16 @@ func validateImmutableKeys(keys []string, schemaType *schema.Type) error {
 // stale field name) fails. A snapshot with no types generates no queries and
 // validates vacuously.
 func validateSnapshotImmutableKeys(keys []string, result *graph.Snapshot) error {
-	typeNames := result.Types()
-	if len(typeNames) == 0 {
+	typeIDs := result.Types()
+	if len(typeIDs) == 0 {
 		return nil
 	}
+	typeNames := make([]string, 0, len(typeIDs))
 	matched := make(map[string]bool, len(keys))
-	for _, typeName := range typeNames {
-		schemaType, ok := result.Schema().Type(typeName)
+	for _, typeID := range typeIDs {
+		typeName := schema.TagForm(result.Schema(), typeID)
+		typeNames = append(typeNames, typeName)
+		schemaType, ok := result.Schema().TypeByID(typeID)
 		if !ok {
 			return fmt.Errorf("type %q not found in schema", typeName)
 		}

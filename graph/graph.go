@@ -60,7 +60,7 @@ type pendingEdge struct {
 	source       *Instance
 	relation     string
 	jsonField    string // normalized JSON field name (lower_snake form)
-	targetType   string // instance tag form
+	targetType   schema.TypeID
 	targetKey    string
 	properties   immutable.Properties
 	isRequired   bool
@@ -274,7 +274,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 					source:       graphInst,
 					relation:     relationName,
 					jsonField:    rel.FieldName(),
-					targetType:   targetTypeName,
+					targetType:   targetTypeID,
 					targetKey:    targetKey,
 					properties:   target.Properties(),
 					isRequired:   isRequired,
@@ -298,7 +298,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 				source:       graphInst,
 				relation:     relationName,
 				jsonField:    rel.FieldName(),
-				targetType:   targetTypeName,
+				targetType:   targetTypeID,
 				targetKey:    "",
 				isRequired:   true,
 				reasonDetail: "empty",
@@ -318,13 +318,12 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 		}
 		// Required association field is absent
 		targetTypeID := rel.TargetID()
-		targetTypeName := g.instanceTagForm(targetTypeID)
 		pk := pendingKey{targetTypeID: targetTypeID, targetKey: ""}
 		g.pending[pk] = append(g.pending[pk], &pendingEdge{
 			source:       graphInst,
 			relation:     relationName,
 			jsonField:    rel.FieldName(),
-			targetType:   targetTypeName,
+			targetType:   targetTypeID,
 			targetKey:    "",
 			isRequired:   true,
 			reasonDetail: "absent",
@@ -667,7 +666,7 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 
 			// Add target_type and target_pk only for target_missing case
 			if reasonToken == "target_missing" {
-				builder = builder.WithDetail(diag.DetailKeyTargetType, pend.targetType)
+				builder = builder.WithDetail(diag.DetailKeyTargetType, schema.TagForm(g.schema, pend.targetType))
 				if pend.targetKey != "" {
 					builder = builder.WithDetail(diag.DetailKeyTargetPK, pend.targetKey)
 				}
@@ -686,7 +685,7 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 				slog.String("source_type", pend.source.TypeName()),
 				slog.String("source_pk", pend.source.PrimaryKey().String()),
 				slog.String("relation", pend.relation),
-				slog.String("target_type", pend.targetType),
+				slog.String("target_type", schema.TagForm(g.schema, pend.targetType)),
 				slog.String("reason", reasonToken),
 			)
 		}
@@ -722,20 +721,20 @@ func (g *Graph) Snapshot() *Snapshot {
 	// making the snapshot truly independent of future graph mutations.
 	cloneMap := make(map[*Instance]*Instance)
 
-	// Collect and sort type names
-	types := make([]string, 0, len(g.instances))
+	// Collect and sort type identities
+	types := make([]schema.TypeID, 0, len(g.instances))
 	for typeID := range g.instances {
-		types = append(types, g.instanceTagForm(typeID))
+		types = append(types, typeID)
 	}
-	slices.Sort(types)
+	slices.SortFunc(types, func(a, b schema.TypeID) int {
+		return cmp.Compare(a.String(), b.String())
+	})
 
 	// Build instances map with deep-cloned instances per type
-	instances := make(map[string][]*Instance, len(g.instances))
-	instanceIndex := make(map[string]map[string]*Instance, len(g.instances))
+	instances := make(map[schema.TypeID][]*Instance, len(g.instances))
+	instanceIndex := make(map[schema.TypeID]map[string]*Instance, len(g.instances))
 
 	for typeID, typeInstances := range g.instances {
-		typeName := g.instanceTagForm(typeID)
-
 		// Clone and collect instances
 		insts := make([]*Instance, 0, len(typeInstances))
 		for _, inst := range typeInstances {
@@ -748,14 +747,14 @@ func (g *Graph) Snapshot() *Snapshot {
 			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
 		})
 
-		instances[typeName] = insts
+		instances[typeID] = insts
 
 		// Build index from cloned instances
 		idx := make(map[string]*Instance, len(insts))
 		for _, inst := range insts {
 			idx[inst.PrimaryKey().String()] = inst
 		}
-		instanceIndex[typeName] = idx
+		instanceIndex[typeID] = idx
 	}
 
 	// Rebuild edges with cloned source/target references.
@@ -773,21 +772,7 @@ func (g *Graph) Snapshot() *Snapshot {
 		}
 		edges[i] = newEdge(e.relation, clonedSource, clonedTarget, e.properties)
 	}
-	slices.SortFunc(edges, func(a, b *Edge) int {
-		if c := cmp.Compare(a.Source().TypeName(), b.Source().TypeName()); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(a.Source().PrimaryKey().String(), b.Source().PrimaryKey().String()); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(a.Relation(), b.Relation()); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(a.Target().TypeName(), b.Target().TypeName()); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Target().PrimaryKey().String(), b.Target().PrimaryKey().String())
-	})
+	slices.SortFunc(edges, compareEdges)
 
 	// Rebuild duplicates with cloned instance references.
 	// Defensive: clone on-demand if instances are not already in cloneMap.
@@ -808,7 +793,7 @@ func (g *Graph) Snapshot() *Snapshot {
 		duplicates[i] = newDuplicate(clonedInstance, clonedConflict, d.Diagnostic)
 	}
 	slices.SortFunc(duplicates, func(a, b *Duplicate) int {
-		if c := cmp.Compare(a.Instance.TypeName(), b.Instance.TypeName()); c != 0 {
+		if c := cmp.Compare(a.Instance.TypeID().String(), b.Instance.TypeID().String()); c != 0 {
 			return c
 		}
 		return cmp.Compare(a.Instance.PrimaryKey().String(), b.Instance.PrimaryKey().String())
@@ -839,7 +824,7 @@ func (g *Graph) Snapshot() *Snapshot {
 		}
 	}
 	slices.SortFunc(unresolved, func(a, b *UnresolvedEdge) int {
-		if c := cmp.Compare(a.Source.TypeName(), b.Source.TypeName()); c != 0 {
+		if c := cmp.Compare(a.Source.TypeID().String(), b.Source.TypeID().String()); c != 0 {
 			return c
 		}
 		if c := cmp.Compare(a.Source.PrimaryKey().String(), b.Source.PrimaryKey().String()); c != 0 {
@@ -848,7 +833,7 @@ func (g *Graph) Snapshot() *Snapshot {
 		if c := cmp.Compare(a.Relation, b.Relation); c != 0 {
 			return c
 		}
-		if c := cmp.Compare(a.TargetType, b.TargetType); c != 0 {
+		if c := cmp.Compare(a.TargetType.String(), b.TargetType.String()); c != 0 {
 			return c
 		}
 		return cmp.Compare(a.TargetKey, b.TargetKey)
@@ -899,7 +884,8 @@ func checkSchemaImports(s *schema.Schema, schemaPath location.SourceID, visited 
 	return false
 }
 
-// lookupType looks up a Type by TypeID.
+// lookupType looks up a Type by TypeID. Direct imports only, deliberately:
+// [Graph.Add] documents that contract in its own diagnostic hint.
 func (g *Graph) lookupType(id schema.TypeID) (*schema.Type, bool) {
 	// Check local types
 	if id.SchemaPath() == g.schema.SourceID() {

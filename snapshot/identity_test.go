@@ -61,7 +61,7 @@ func TestRoundTrip_ComposedChildKeepsTypeIdentity(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	sensor, ok := loaded.InstanceByKey("Sensor", graph.FormatKey("s1"))
+	sensor, ok := loaded.InstanceByKey(tidOf(t, s, "Sensor"), graph.FormatKey("s1"))
 	if !ok {
 		t.Fatal("sensor s1 missing after round trip")
 	}
@@ -134,7 +134,7 @@ func TestRoundTrip_CrossSchemaInstance(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatalf("load rejected a document Marshal produced: %v", err)
 	}
-	if _, ok := loaded.InstanceByKey("base.Basin", graph.FormatKey("b1")); !ok {
+	if _, ok := loaded.InstanceByKey(tidOf(t, s, "base.Basin"), graph.FormatKey("b1")); !ok {
 		t.Error("imported-type instance missing after round trip")
 	}
 	snapshottest.AssertRoundTrip(t, snap, s)

@@ -181,7 +181,7 @@ func exportCSV(cmd *cobra.Command, snapshot *graph.Snapshot, _ *schema.Schema, o
 	return &cli.ExitError{Code: cli.ExitUsage}
 }
 
-func exportCSVToDir(cmd *cobra.Command, adapter *csv.Adapter, snapshot *graph.Snapshot, types []string, outputDir string) error {
+func exportCSVToDir(cmd *cobra.Command, adapter *csv.Adapter, snapshot *graph.Snapshot, types []schema.TypeID, outputDir string) error {
 	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		fmt.Fprintf(os.Stderr, "error: create output directory: %v\n", err)
 		return &cli.ExitError{Code: cli.ExitRuntime}

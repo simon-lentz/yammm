@@ -235,7 +235,7 @@ func TestRoundTrip_LegacyNarrowedFloatStabilisesAfterOnePass(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	sensor, ok := healed.InstanceByKey("Sensor", graph.FormatKey("s1"))
+	sensor, ok := healed.InstanceByKey(tidOf(t, s, "Sensor"), graph.FormatKey("s1"))
 	if !ok {
 		t.Fatal("sensor s1 missing after the healing pass")
 	}

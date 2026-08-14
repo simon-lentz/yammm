@@ -239,8 +239,9 @@ func (a *Adapter) buildOutput(result *graph.Snapshot, cfg *writeConfig) map[stri
 	s := result.Schema()
 
 	// Iterate types in sorted order for deterministic output
-	for _, typeName := range result.Types() {
-		instances := result.InstancesOf(typeName)
+	for _, typeID := range result.Types() {
+		typeName := schema.TagForm(s, typeID)
+		instances := result.InstancesOf(typeID)
 		serialized := make([]map[string]any, 0, len(instances))
 
 		for _, inst := range instances {
@@ -416,7 +417,7 @@ func serializeDiagnostics(result *graph.Snapshot, s *schema.Schema) map[string]a
 				"source_type": u.Source.TypeName(),
 				"source_key":  u.Source.PrimaryKey().Clone(),
 				"relation":    fieldName,
-				"target_type": u.TargetType,
+				"target_type": schema.TagForm(result.Schema(), u.TargetType),
 				"target_key":  parseKeyString(u.TargetKey),
 			}
 		}

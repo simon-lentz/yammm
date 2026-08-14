@@ -324,14 +324,17 @@ func (sd *streamDecoder) validateInstances(
 	return exists, refs, nil
 }
 
-// decodeInstances performs full materialization for Load.
+// decodeInstances performs full materialization for Load. Parts are keyed by
+// identity; exists and refs stay keyed by the document's own tag forms,
+// because they validate the wire against itself.
 func (sd *streamDecoder) decodeInstances(
 	ctx context.Context,
 	instances map[string][]instWire,
-) (instanceExistence, map[string][]graph.InstanceParts, []graph.EdgeParts, error) {
+) (instanceExistence, map[schema.TypeID][]graph.InstanceParts, []graph.EdgeParts, []edgeRef, error) {
 	exists := make(instanceExistence)
-	parts := make(map[string][]graph.InstanceParts, len(instances))
+	parts := make(map[schema.TypeID][]graph.InstanceParts, len(instances))
 	var edgeParts []graph.EdgeParts
+	var refs []edgeRef
 
 	// Check types/instances key consistency.
 	sd.checkTypesConsistency(instances)
@@ -339,7 +342,7 @@ func (sd *streamDecoder) decodeInstances(
 	for typeName, insts := range instances {
 		if err := ctx.Err(); err != nil {
 			sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-			return nil, nil, nil, fmt.Errorf("context cancelled: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("context cancelled: %w", err)
 		}
 
 		if exists[typeName] == nil {
@@ -349,7 +352,7 @@ func (sd *streamDecoder) decodeInstances(
 		for _, inst := range insts {
 			sd.processInstance(typeName, inst, 0, func(typeName string, inst instWire, typeID schema.TypeID) {
 				ip := sd.wireToInstanceParts(typeName, inst, typeID)
-				parts[typeName] = append(parts[typeName], ip)
+				parts[typeID] = append(parts[typeID], ip)
 
 				keyStr := ip.PrimaryKey.String()
 				exists[typeName][keyStr] = true
@@ -357,22 +360,31 @@ func (sd *streamDecoder) decodeInstances(
 				// Build EdgeParts from per-instance edges.
 				for relName, targets := range inst.Edges {
 					for _, et := range targets {
-						ep := graph.EdgeParts{
+						refs = append(refs, edgeRef{
+							sourceType: typeName,
+							sourceKey:  keyStr,
+							targetType: et.TargetType,
+							targetKey:  formatWireKey(et.TargetKey),
+						})
+						targetID, ok := sd.bindWireTypeName(et.TargetType, relName)
+						if !ok {
+							continue
+						}
+						edgeParts = append(edgeParts, graph.EdgeParts{
 							Relation:   relName,
-							SourceType: typeName,
+							SourceType: typeID,
 							SourceKey:  ip.PrimaryKey,
-							TargetType: et.TargetType,
+							TargetType: targetID,
 							TargetKey:  immutable.WrapKey(normalizeSlice(et.TargetKey)),
 							Properties: immutable.WrapProperties(normalizeMap(et.Properties)),
-						}
-						edgeParts = append(edgeParts, ep)
+						})
 					}
 				}
 			})
 		}
 	}
 
-	return exists, parts, edgeParts, nil
+	return exists, parts, edgeParts, refs, nil
 }
 
 // countInstances token-scans the instances section for Info.
@@ -486,6 +498,53 @@ func (sd *streamDecoder) checkTypeIDAgreement(tagName string, persisted *typeIDW
 			persisted.Name, persisted.SchemaPath, tagName, tagID.SchemaPath().String())).
 		WithDetail(diag.DetailKeyTypeName, tagName).
 		Build())
+}
+
+// bindWireTypeName binds a legacy tag form to a type identity. A v2 document
+// names a type where it needs to denote one, so a tag the entry schema cannot
+// resolve is matched against the whole closure: unique binds, several binds the
+// first in closure order and reports the choice, none drops the record.
+func (sd *streamDecoder) bindWireTypeName(tagName, relation string) (schema.TypeID, bool) {
+	if t, ok := resolveWireType(sd.schema, tagName, schema.TypeID{}); ok {
+		return t.ID(), true
+	}
+	candidates := sd.closureTypesNamed(tagName)
+	switch len(candidates) {
+	case 0:
+		sd.collector.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_UNKNOWN_TYPE,
+			fmt.Sprintf("unresolved edge %q names type %q, which no schema in the import closure declares; the record is dropped",
+				relation, tagName)).
+			WithDetail(diag.DetailKeyTypeName, tagName).
+			WithDetail(diag.DetailKeyRelationName, relation).
+			Build())
+		return schema.TypeID{}, false
+	case 1:
+		return candidates[0], true
+	default:
+		sd.collector.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_AMBIGUOUS_TYPE,
+			fmt.Sprintf("unresolved edge %q names type %q, which %d schemas in the import closure declare; bound to the one in %q",
+				relation, tagName, len(candidates), candidates[0].SchemaPath().String())).
+			WithDetail(diag.DetailKeyTypeName, tagName).
+			WithDetail(diag.DetailKeyRelationName, relation).
+			Build())
+		return candidates[0], true
+	}
+}
+
+// closureTypesNamed returns every type in the closure declaring the given bare
+// name, in closure order: the entry schema first, then imports in declaration
+// order.
+func (sd *streamDecoder) closureTypesNamed(name string) []schema.TypeID {
+	if sd.schema == nil {
+		return nil
+	}
+	var out []schema.TypeID
+	for _, cs := range sd.schema.Closure() {
+		if t, ok := cs.Type(name); ok {
+			out = append(out, t.ID())
+		}
+	}
+	return out
 }
 
 // resolveWireIdentity resolves a persisted identity, falling back to the tag

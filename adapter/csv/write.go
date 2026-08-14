@@ -97,13 +97,14 @@ func (a *Adapter) MarshalSnapshot(
 
 	output := make(map[string][]byte, len(result.Types()))
 
-	for _, typeName := range result.Types() {
+	for _, typeID := range result.Types() {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("csv marshal snapshot: %w", err)
 		}
 
-		schemaType, _ := result.Schema().Type(typeName)
-		instances := result.InstancesOf(typeName)
+		typeName := schema.TagForm(result.Schema(), typeID)
+		schemaType, _ := result.Schema().TypeByID(typeID)
+		instances := result.InstancesOf(typeID)
 
 		var buf bytes.Buffer
 		if err := a.writeSnapshotTypeTo(ctx, &buf, instances, result, schemaType, opts...); err != nil {
@@ -129,18 +130,19 @@ func (a *Adapter) WriteSnapshot(
 		return ErrNilSnapshot
 	}
 
-	for _, typeName := range result.Types() {
+	for _, typeID := range result.Types() {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("csv write snapshot: %w", err)
 		}
 
+		typeName := schema.TagForm(result.Schema(), typeID)
 		w, err := writerFor(typeName)
 		if err != nil {
 			return fmt.Errorf("writer for type %q: %w", typeName, err)
 		}
 
-		schemaType, _ := result.Schema().Type(typeName)
-		instances := result.InstancesOf(typeName)
+		schemaType, _ := result.Schema().TypeByID(typeID)
+		instances := result.InstancesOf(typeID)
 
 		if err := a.writeSnapshotTypeTo(ctx, w, instances, result, schemaType, opts...); err != nil {
 			return fmt.Errorf("type %q: %w", typeName, err)

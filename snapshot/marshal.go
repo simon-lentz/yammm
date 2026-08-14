@@ -46,21 +46,24 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 
 	// Step 2: Serialize payload sections.
 	// Types array.
-	types := snap.Types()
-	if types == nil {
-		types = []string{}
-	}
+	// Two identities rendering one tag share a v2 array entry; no instance is
+	// lost, because each carries the type_id that distinguishes it.
+	types := []string{}
 
 	// Instances map.
-	instancesMap := make(map[string][]instWire, len(types))
+	instancesMap := make(map[string][]instWire, len(snap.Types()))
 	var allEdgeParts []edgeCollected
-	for _, typeName := range types {
+	for _, typeID := range snap.Types() {
 		if err := ctx.Err(); err != nil {
 			c := diag.NewCollector(0)
 			c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
 			return nil, c.Result()
 		}
-		instances := snap.InstancesOf(typeName)
+		typeName := schema.TagForm(s, typeID)
+		if _, seen := instancesMap[typeName]; !seen {
+			types = append(types, typeName)
+		}
+		instances := snap.InstancesOf(typeID)
 		wires := make([]instWire, 0, len(instances))
 		for _, inst := range instances {
 			w := marshalInstance(inst, snap, s, schemaSource, typeName)
@@ -71,7 +74,7 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 			}
 			wires = append(wires, w)
 		}
-		instancesMap[typeName] = wires
+		instancesMap[typeName] = append(instancesMap[typeName], wires...)
 	}
 	_ = allEdgeParts // edges are serialized per-instance, not globally
 
@@ -94,7 +97,7 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 			SourceType: u.Source.TypeName(),
 			SourceKey:  u.Source.PrimaryKey().Clone(),
 			Relation:   u.Relation,
-			TargetType: u.TargetType,
+			TargetType: schema.TagForm(s, u.TargetType),
 			Required:   u.Required,
 			Reason:     u.Reason,
 		}

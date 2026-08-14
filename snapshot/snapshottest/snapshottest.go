@@ -142,22 +142,25 @@ func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 }
 
 func project(s *graph.Snapshot) snapProjection {
+	ids := s.Types()
 	p := snapProjection{
-		Types:     s.Types(),
-		Instances: make(map[string][]instProjection, len(s.Types())),
+		Types:     make([]string, 0, len(ids)),
+		Instances: make(map[string][]instProjection, len(ids)),
 	}
-	for _, typeName := range s.Types() {
-		for _, inst := range s.InstancesOf(typeName) {
+	for _, typeID := range ids {
+		key := typeID.String()
+		p.Types = append(p.Types, key)
+		for _, inst := range s.InstancesOf(typeID) {
 			ip := projectInstanceTree(inst)
 			for _, e := range s.EdgesFrom(inst) {
 				ip.Edges = append(ip.Edges, edgeProjection{
 					Relation:   e.Relation(),
-					TargetType: e.Target().TypeName(),
+					TargetType: e.Target().TypeID().String(),
 					TargetPK:   e.Target().PrimaryKey().String(),
 					Properties: e.Properties().Clone(),
 				})
 			}
-			p.Instances[typeName] = append(p.Instances[typeName], ip)
+			p.Instances[key] = append(p.Instances[key], ip)
 		}
 	}
 	for _, d := range s.Duplicates() {
@@ -168,7 +171,7 @@ func project(s *graph.Snapshot) snapProjection {
 			SourceType: u.Source.TypeName(),
 			SourceKey:  u.Source.PrimaryKey().String(),
 			Relation:   u.Relation,
-			TargetType: u.TargetType,
+			TargetType: u.TargetType.String(),
 			TargetKey:  u.TargetKey,
 			Required:   u.Required,
 			Reason:     u.Reason,

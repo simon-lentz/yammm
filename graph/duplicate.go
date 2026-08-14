@@ -3,6 +3,7 @@ package graph
 import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // Duplicate records a duplicate primary key detected during graph construction.
@@ -69,9 +70,9 @@ type UnresolvedEdge struct {
 	// Relation is the DSL relation name (e.g., "OWNER").
 	Relation string
 
-	// TargetType is the expected target type name in instance tag form.
-	// This is resolved from the schema's relation definition.
-	TargetType string
+	// TargetType is the expected target type's identity, resolved from the
+	// schema's relation definition.
+	TargetType schema.TypeID
 
 	// TargetKey is the foreign key value in canonical string form.
 	// This is the FormatKey() output of the FK values.
@@ -137,7 +138,7 @@ func newDuplicate(instance, conflict *Instance, diagnostic diag.Issue) *Duplicat
 }
 
 // newUnresolvedEdge creates an UnresolvedEdge record.
-func newUnresolvedEdge(source *Instance, relation, targetType, targetKey string, required bool, reason string, properties immutable.Properties) *UnresolvedEdge {
+func newUnresolvedEdge(source *Instance, relation string, targetType schema.TypeID, targetKey string, required bool, reason string, properties immutable.Properties) *UnresolvedEdge {
 	return &UnresolvedEdge{
 		Source:     source,
 		Relation:   relation,

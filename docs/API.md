@@ -387,8 +387,8 @@ result = g.Check(ctx)
 
 // Get immutable snapshot
 snap := g.Snapshot()
-for _, typeName := range snap.Types() {
-    for _, inst := range snap.InstancesOf(typeName) {
+for _, typeID := range snap.Types() {
+    for _, inst := range snap.InstancesOf(typeID) {
         // Process instances
     }
 }
@@ -494,11 +494,11 @@ The `Snapshot` type provides read-only access to graph state:
 | Method | Description |
 | ------ | ----------- |
 | `Schema()` | The schema used for validation |
-| `Types()` | All type names (sorted) |
-| `InstancesOf(typeName)` | Instances of a type (sorted by primary key) |
-| `Instances()` | Map of type name to instance slices (non-deterministic iteration order) |
+| `Types()` | All type identities (`[]schema.TypeID`, sorted by TypeID) |
+| `InstancesOf(typeID)` | Instances of a type (sorted by primary key) |
+| `Instances()` | Map of type identity to instance slices (non-deterministic iteration order) |
 | `AllInstances()` | Iterator over all instances in deterministic order |
-| `InstanceByKey(typeName, key)` | O(1) lookup by type and primary key |
+| `InstanceByKey(typeID, key)` | O(1) lookup by type identity and primary key |
 | `Edges()` | All resolved edges (sorted) |
 | `EdgesFrom(inst)` | Outgoing edges for a specific instance |
 | `Duplicates()` | Duplicate primary key records (sorted) |
@@ -515,13 +515,15 @@ The `Snapshot` type provides read-only access to graph state:
 
 ### Ordering Guarantees
 
-- `Snapshot.Types()`: Lexicographic by type name
+- `Snapshot.Types()`: Lexicographic by `TypeID` — schema path, then name
 - `Snapshot.InstancesOf()`: Lexicographic by primary key
 - `Snapshot.Edges()`: Lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
 - `Snapshot.Duplicates()`: Lexicographic by (typeName, primaryKey)
 - `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
 
 The `Instances()` map has non-deterministic iteration order per Go semantics. For deterministic iteration, use `AllInstances()` (iterator) or `Types()` + `InstancesOf()` (slice-based).
+
+Types are identified by `schema.TypeID`, never by name. A name is a rendering of an identity — bare for a local type, alias-qualified for a directly imported one — so it cannot name a transitively imported type and cannot separate two same-named types in different schemas. Use `schema.TagForm(snap.Schema(), id)` where a name is wanted for output.
 
 ## Import Closure & Type Lookup
 

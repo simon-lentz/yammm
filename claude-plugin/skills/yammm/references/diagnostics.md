@@ -175,7 +175,6 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_DUPLICATE_COMPOSED_PK` | Duplicate composed child primary key |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
 | `E_GRAPH_TYPE_NOT_FOUND` | Type not found in graph operations |
-| `W_GRAPH_AMBIGUOUS_TYPE` | Persisted type name declared by more than one schema in the closure |
 | `E_GRAPH_PARENT_NOT_FOUND` | Parent node not found for composed child |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
 | `E_GRAPH_MISSING_PK` | Primary key missing in graph operations |
@@ -189,6 +188,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
 | `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema |
+| `W_SNAPSHOT_AMBIGUOUS_TYPE` | Legacy type name declared by more than one schema in the closure |
 | `E_SNAPSHOT_TYPE_MISMATCH` | Types array inconsistent with instances |
 | `E_SNAPSHOT_TYPEID_MISMATCH` | Persisted type_id doesn't match schema |
 | `E_SNAPSHOT_DANGLING_REFERENCE` | Edge target references non-existent instance |

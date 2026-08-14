@@ -191,9 +191,9 @@ func TestDiffSnapshots_SeparatesIdentityFromName(t *testing.T) {
 	// so a pair built that way differs in the name and not only the identity.
 	holder := func(cardTypeID schema.TypeID) *graph.Snapshot {
 		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types: []string{"Holder"},
-			Instances: map[string][]graph.InstanceParts{
-				"Holder": {{
+			Types: []schema.TypeID{typeID(t, s, "Holder")},
+			Instances: map[schema.TypeID][]graph.InstanceParts{
+				typeID(t, s, "Holder"): {{
 					TypeName:   "Holder",
 					TypeID:     typeID(t, s, "Holder"),
 					PrimaryKey: immutable.WrapKey([]any{"h1"}),
@@ -245,13 +245,13 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 	}
 	withSource := func(sourceKey string) *graph.Snapshot {
 		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types:     []string{"Person"},
-			Instances: map[string][]graph.InstanceParts{"Person": {personParts("p1"), personParts("p2")}},
+			Types:     []schema.TypeID{typeID(t, s, "Person")},
+			Instances: map[schema.TypeID][]graph.InstanceParts{typeID(t, s, "Person"): {personParts("p1"), personParts("p2")}},
 			Unresolved: []graph.UnresolvedParts{{
-				SourceType: "Person",
+				SourceType: typeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{sourceKey}),
 				Relation:   "EMPLOYER",
-				TargetType: "Company",
+				TargetType: typeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c99"}),
 				Required:   true,
 				Reason:     "target_missing",

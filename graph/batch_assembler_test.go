@@ -271,7 +271,7 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 		t.Errorf("expected E_UNRESOLVED_REQUIRED in error result; got: %s", ce.Result.String())
 	}
 	// The Person is still inspectable in the partial snapshot.
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != 1 {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != 1 {
 		t.Errorf("expected 1 Person in partial snapshot, got %d", len(persons))
 	}
 }
@@ -373,7 +373,7 @@ func TestBatchAssembler_AddValid_BypassesValidator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != 1 {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != 1 {
 		t.Errorf("expected 1 Person, got %d", len(persons))
 	}
 }
@@ -453,7 +453,7 @@ func TestBatchAssembler_Concurrent_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != expected {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != expected {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
@@ -540,7 +540,7 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 
 			// INV-1: every key that was reported as a successful Add must be
 			// in the final snapshot.
-			persons := finalRes.Snapshot.InstancesOf("Person")
+			persons := finalRes.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))
 			snapKeys := make(map[string]struct{}, len(persons))
 			for _, p := range persons {
 				snapKeys[p.PrimaryKey().String()] = struct{}{}
@@ -602,7 +602,7 @@ func TestBatchAssembler_Concurrent_AddValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != expected {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != expected {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
@@ -642,7 +642,7 @@ func TestBatchAssembler_WithValidatorPool_Correctness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != expected {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != expected {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
@@ -692,7 +692,7 @@ func TestBatchAssembler_WithValidatorPool_BackPressure_N1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != numAdds {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != numAdds {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), numAdds)
 	}
 }
@@ -864,10 +864,10 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if got := len(res.Snapshot.InstancesOf("Person")); got != 2 {
+	if got := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); got != 2 {
 		t.Errorf("Person count: got %d, want 2 (seeded alice + new bob)", got)
 	}
-	if got := len(res.Snapshot.InstancesOf("Company")); got != 1 {
+	if got := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Company"))); got != 1 {
 		t.Errorf("Company count: got %d, want 1", got)
 	}
 	edges := res.Snapshot.Edges()
@@ -882,7 +882,7 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 	}
 
 	// The source snapshot is independent of the resumed batch.
-	if got := len(seed.InstancesOf("Person")); got != 1 {
+	if got := len(seed.InstancesOf(mustTypeID(t, s, "Person"))); got != 1 {
 		t.Errorf("seed Person count mutated: got %d, want 1", got)
 	}
 	if got := len(seed.Edges()); got != 0 {
@@ -1018,7 +1018,7 @@ func TestNewBatchAssemblerFromSnapshot_DuplicateAgainstSeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if got := len(res.Snapshot.InstancesOf("Person")); got != 1 {
+	if got := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); got != 1 {
 		t.Errorf("Person count: got %d, want 1 (seeded alice only)", got)
 	}
 	if got := len(res.Snapshot.Duplicates()); got != 1 {
@@ -1155,10 +1155,10 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 		t.Fatalf("run 2: Finalize: %v", err)
 	}
 
-	if got := len(res2.Snapshot.InstancesOf("Person")); got != 2 {
+	if got := len(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); got != 2 {
 		t.Errorf("Person count: got %d, want 2", got)
 	}
-	if got := len(res2.Snapshot.InstancesOf("Company")); got != 1 {
+	if got := len(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Company"))); got != 1 {
 		t.Errorf("Company count: got %d, want 1", got)
 	}
 	if got := len(res2.Snapshot.Edges()); got != 2 {
