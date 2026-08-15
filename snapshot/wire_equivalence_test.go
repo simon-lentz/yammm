@@ -117,6 +117,34 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 		}
 	})
 
+	// The subtests above marshal with no options, holding the equality for the
+	// compact shape alone; the indent is reused by a separate mechanism.
+	t.Run("holds at every supported indent", func(t *testing.T) {
+		t.Parallel()
+		for _, indent := range []string{"  ", "\t", "    "} {
+			data, result := snapshot.Marshal(ctx, snap, snapshot.WithIndent(indent))
+			if err := result.Err(); err != nil {
+				t.Fatalf("marshal at indent %q: %v", indent, err)
+			}
+			updated, result := snapshot.UpdateMetadata(ctx, data, nil)
+			if err := result.Err(); err != nil {
+				t.Fatalf("UpdateMetadata at indent %q: %v", indent, err)
+			}
+			loaded, result := snapshot.Load(ctx, data, s)
+			if err := result.Err(); err != nil {
+				t.Fatalf("load at indent %q: %v", indent, err)
+			}
+			remarshalled, result := snapshot.Marshal(ctx, loaded, snapshot.WithIndent(indent))
+			if err := result.Err(); err != nil {
+				t.Fatalf("re-marshal at indent %q: %v", indent, err)
+			}
+			if !bytes.Equal(updated, remarshalled) {
+				t.Errorf("indent %q: UpdateMetadata and Marshal(Load(x)) differ:\n update: %s\n re-marshal: %s",
+					indent, updated, remarshalled)
+			}
+		}
+	})
+
 	// The call is the condition: a document carrying no metadata still diverges
 	// once newMeta is non-empty.
 	t.Run("diverges once newMeta is non-empty", func(t *testing.T) {
