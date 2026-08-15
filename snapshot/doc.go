@@ -184,7 +184,11 @@
 // binary against a v0.12.0-written .ys see a structured diagnostic
 // rather than a misread types section. Migrating a v2 document is
 // [Load] followed by [Marshal]; [UpdateMetadata] preserves the input's
-// version and never migrates. See docs/VERSIONING.md for the full
+// version and never migrates, and neither does
+// [UpdateMetadataOrReMarshal] on its fast path, which produces v3 only
+// when it falls back. The migration is one-way: re-marshalling freezes
+// the reader's identity resolution, because v3 carries no tag form to
+// re-resolve from. See docs/VERSIONING.md for the full
 // pre-1.0 / post-1.0 wire-format policy.
 //
 // # Thread Safety

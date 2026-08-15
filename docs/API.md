@@ -822,7 +822,7 @@ The `.ys` wire format uses an integer version field in the header for forward ev
 
 **Asymmetric-reader semantics.** A v3 reader (yammm v0.12.0+) accepts both v2 and v3 documents, resolving a v2 document's type identity on the way in. A v2 reader (yammm v0.11.0 and earlier) rejects v3 documents via the unknown-version path — operators running an older binary against a v0.12.0-written `.ys` see a structured diagnostic rather than a misread types section.
 
-**Migrating a v2 document.** `Load` it and `Marshal` it: the result is v3 carrying the identity the v2 document meant. `UpdateMetadata` does not migrate — it preserves the input's version because it reuses the body verbatim — so `UpdateMetadataOrReMarshal` is the path that produces v3 from v2. Re-marshalling makes the reader's identity resolution permanent, since v3 carries no tag form to re-resolve from.
+**Migrating a v2 document.** `Load` it and `Marshal` it: the result is v3 carrying the identity the v2 document meant. That pair is the migrating path, and the only one. `UpdateMetadata` does not migrate — it rebuilds the header at the version it read, so a v2 document through it is still v2. Neither does `UpdateMetadataOrReMarshal` on its fast path, which returns exactly what `UpdateMetadata` returned; it produces v3 only when `UpdateMetadata` refuses the input and it falls back to `Load` + `Marshal`, which it reports with `W_UPDATE_METADATA_FALLBACK`. Re-marshalling makes the reader's identity resolution permanent, since v3 carries no tag form to re-resolve from.
 
 See [`docs/VERSIONING.md`](VERSIONING.md) for the full pre-1.0 / post-1.0 wire-format policy.
 

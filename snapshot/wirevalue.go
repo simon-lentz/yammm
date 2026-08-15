@@ -145,8 +145,9 @@ func wireProps(props immutable.Properties, t *schema.Type) map[string]any {
 }
 
 // wireEdgeProps is wireProps for edge properties, whose constraints hang off
-// the source type's relation rather than any target type. Resolved and
-// unresolved edges share this one helper so the two paths cannot diverge.
+// the source type's relation rather than any target type. The resolved and
+// unresolved paths agree because both derive rel from the source instance's own
+// identity through [writerTypeID] — the shared input, not the shared body.
 func wireEdgeProps(props immutable.Properties, rel *schema.Relation) map[string]any {
 	m := props.Clone()
 	if len(m) == 0 || rel == nil {

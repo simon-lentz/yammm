@@ -10,7 +10,10 @@ package snapshot
 //   - Do NOT reorder existing fields within a format version.
 //   - New fields may be appended (with omitempty for backward compatibility).
 //   - Removing or reordering fields requires a format version bump.
-//   - The wire struct field ordering test in snapshot_test.go enforces this.
+//   - TestWireStructs_FieldOrder in wire_internal_test.go pins every wire
+//     struct's field order and tags by name, and
+//     TestWireStructs_EveryStructIsPinned fails when a new wire struct is
+//     added without a row there.
 //
 // TOP-LEVEL KEY ORDER AND BODY-SUFFIX STABILITY CONTRACT.
 //
@@ -34,21 +37,40 @@ package snapshot
 //     that insert a fifth top-level key, shift the header-body
 //     transition, or change the inter-key separator pattern silently
 //     break UpdateMetadata even without relaxing the field-order rule.
-//     UpdateMetadata(x) == Marshal(Load(x)) for a document the current
-//     Marshal produced that carries neither created_at nor metadata.
-//     Both are header fields Load does not return, so a re-marshal
-//     cannot reproduce them while UpdateMetadata keeps the header
-//     verbatim. A legacy document carrying int-shaped floats diverges
-//     for a second reason: UpdateMetadata preserves its body while a
-//     re-marshal heals KindFloat values into decimal form.
+//     UpdateMetadata(x, newMeta) == Marshal(Load(x)) for a document the
+//     current Marshal produced that carries no created_at, when newMeta
+//     is empty. The two conditions are not the same kind of condition.
+//     created_at is a condition on the document: UpdateMetadata preserves
+//     it from the input header and Load does not return it, so a
+//     re-marshal cannot reproduce it. Metadata is a condition on the
+//     call: UpdateMetadata writes newMeta and discards whatever the
+//     input carried, so a document holding metadata still matches a
+//     re-marshal when newMeta is empty, and a document holding none
+//     diverges when newMeta is not. A legacy document carrying
+//     int-shaped floats diverges for a third reason: UpdateMetadata
+//     preserves its body while a re-marshal heals KindFloat values into
+//     decimal form.
+//
+//  3. Version preservation (introduced v0.12.0). UpdateMetadata rebuilds
+//     the header at the version it read, so it is a header rewrite and
+//     never a migration: a v2 document through UpdateMetadata is still
+//     v2. UpdateMetadataOrReMarshal preserves the version too on its
+//     fast path, and produces v3 from v2 only when UpdateMetadata
+//     refuses the input and it falls back to Load + Marshal. Load +
+//     Marshal is the migrating path, and re-marshalling freezes the
+//     reader's identity resolution, because v3 carries no tag form to
+//     re-resolve from.
 //
 // These contracts are tested in snapshot/wire_test.go via:
 //   - TestWireFormat_TopLevelKeyOrder (token-level key-order pin)
 //   - TestWireFormat_BodySuffixContract (bodyOffset-capture + shape pin)
 //
-// and the equivalence above in snapshot/wire_equivalence_test.go via
+// the equivalence above in snapshot/wire_equivalence_test.go via
 // TestWireContract_UpdateMetadataMatchesReMarshal, which pins the
-// equality and the created_at divergence in the same test.
+// equality, the created_at divergence and both metadata directions in
+// the same test, and version preservation in
+// snapshot/update_contract_test.go via
+// TestUpdateMetadata_PreservesInputVersion.
 //
 // These tests run across a representative corpus of Marshal outputs
 // under every supported Option combination, so a future Marshal-side
