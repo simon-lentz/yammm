@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -20,24 +21,46 @@ import (
 type wireFloat float64
 
 // MarshalJSON emits the value exactly as encoding/json's float encoder would,
-// then appends ".0" when the output carries no float indicator (only the 'f'
-// branch can lack one). Non-finite values error, as under encoding/json.
+// then appends ".0" when the output carries no float indicator.
 //
 // Delegating to json.Marshal instead would be shorter but costs 2.18× the
 // time and eight more allocations per call, on the path every float in a
 // document takes. [TestWireFloat_MatchesEncodingJSON] holds the two in
 // lockstep so this copy cannot drift from the encoder it mirrors.
 func (f wireFloat) MarshalJSON() ([]byte, error) {
-	v := float64(f)
+	return appendWireFloat(float64(f), 64)
+}
+
+// wireFloat32 is [wireFloat] for a value the caller stored in 32 bits.
+// Emitting it at bitSize 64 spends 17 digits describing 32 bits of value.
+type wireFloat32 float32
+
+// MarshalJSON is [wireFloat.MarshalJSON] at bitSize 32.
+// [TestWireFloat32_MatchesEncodingJSON] holds it in lockstep.
+func (f wireFloat32) MarshalJSON() ([]byte, error) {
+	return appendWireFloat(float64(f), 32)
+}
+
+// appendWireFloat formats v as encoding/json's float encoder would at bitSize,
+// then appends ".0" when the result carries no float indicator. bitSize sets
+// both the shortest-form width and the exponent cutoff, compared in float32
+// for a 32-bit value so the boundary lands where encoding/json's does.
+func appendWireFloat(v float64, bitSize int) ([]byte, error) {
 	if math.IsInf(v, 0) || math.IsNaN(v) {
-		return nil, fmt.Errorf("wire float: unsupported value: %s", strconv.FormatFloat(v, 'g', -1, 64))
+		return nil, fmt.Errorf("wire float: unsupported value: %s", strconv.FormatFloat(v, 'g', -1, bitSize))
 	}
 	abs := math.Abs(v)
 	format := byte('f')
-	if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
-		format = 'e'
+	if abs != 0 {
+		if bitSize == 32 {
+			if a := float32(abs); a < 1e-6 || a >= 1e21 {
+				format = 'e'
+			}
+		} else if abs < 1e-6 || abs >= 1e21 {
+			format = 'e'
+		}
 	}
-	b := strconv.AppendFloat(nil, v, format, -1, 64)
+	b := strconv.AppendFloat(nil, v, format, -1, bitSize)
 	if format == 'e' {
 		// Trim a zero-padded exponent (e-09 → e-9), as encoding/json does.
 		if n := len(b); n >= 4 && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
@@ -211,24 +234,30 @@ func exactWireUint(n uint64) (float64, bool) {
 	return f, uint64(f) == n
 }
 
-// wireNumeric wraps any numeric value as wireFloat so it emits with a float
-// indicator; the type switch fast-paths the two types validation produces, and
-// reflection reaches the rest, which arrive only from a caller-assembled
-// snapshot. Non-numeric shapes pass through — Load never re-validates.
+// wireNumeric wraps any numeric value as a wire float so it emits with a float
+// indicator; the type switch fast-paths what validation and the decoder
+// produce, and reflection reaches the rest. Non-numeric shapes pass through —
+// Load never re-validates.
 func wireNumeric(v any) any {
 	switch n := v.(type) {
 	case float64:
 		return wireFloat(n)
+	case float32:
+		return wireFloat32(n)
 	case int64:
 		if f, ok := exactWireInt(n); ok {
 			return wireFloat(f)
 		}
 		return v
+	case json.Number:
+		return wireJSONNumber(n)
 	}
 
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
-	case reflect.Float32, reflect.Float64:
+	case reflect.Float32:
+		return wireFloat32(float32(rv.Float()))
+	case reflect.Float64:
 		return wireFloat(rv.Float())
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if f, ok := exactWireInt(rv.Int()); ok {
@@ -240,6 +269,21 @@ func wireNumeric(v any) any {
 		}
 	}
 	return v
+}
+
+// wireJSONNumber classifies n with [immutable.NormalizeNumber], the rule the
+// reader applies, so one literal cannot mean a float out and an int back in.
+// A literal neither parser accepts passes through unwrapped.
+func wireJSONNumber(n json.Number) any {
+	switch norm := immutable.NormalizeNumber(n).(type) {
+	case float64:
+		return wireFloat(norm)
+	case int64:
+		if f, ok := exactWireInt(norm); ok {
+			return wireFloat(f)
+		}
+	}
+	return n
 }
 
 // wireElems returns v's elements as []any for any slice or array, so a vector
