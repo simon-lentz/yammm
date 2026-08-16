@@ -43,6 +43,12 @@ import "base.yammm" as base
 part type Part {
 	name String primary
 	weight Float
+	*-> SEGMENTS (many) Segment
+}
+
+part type Segment {
+	id String primary
+	span Float
 }
 
 type Anchor {
@@ -272,11 +278,24 @@ func collectIdentities(snap *graph.Snapshot) []identityRecord {
 	}
 	for _, d := range snap.Duplicates() {
 		walk("duplicate", d.Instance)
+		// A conflict re-resolving to a different instance is a loss the
+		// rejected instance's own record cannot show.
+		conflict, parent := "-", "-"
+		if d.Conflict != nil {
+			conflict = fmt.Sprintf("%s[%s]", d.Conflict.TypeID(), d.Conflict.PrimaryKey())
+		}
+		if d.Parent != nil {
+			parent = fmt.Sprintf("%s[%s]", d.Parent.TypeID(), d.Parent.PrimaryKey())
+		}
+		out = append(out, identityRecord(fmt.Sprintf(
+			"duplicate-coords | id=%s | pk=%s | conflict=%s | parent=%s | rel=%s",
+			d.Instance.TypeID(), d.Instance.PrimaryKey(), conflict, parent, d.Relation,
+		)))
 	}
 	for _, u := range snap.Unresolved() {
 		out = append(out, identityRecord(fmt.Sprintf(
-			"unresolved | source=%s | sourcePk=%s | rel=%s | target=%s | targetKey=%s | required=%t | reason=%s | props={%s}",
-			u.Source.TypeName(), u.Source.PrimaryKey().String(), u.Relation,
+			"unresolved | source=%s | sourceId=%s | sourcePk=%s | rel=%s | target=%s | targetKey=%s | required=%t | reason=%s | props={%s}",
+			u.Source.TypeName(), u.Source.TypeID(), u.Source.PrimaryKey().String(), u.Relation,
 			u.TargetType, u.TargetKey, u.Required, u.Reason,
 			renderProps(u.Properties().Clone()),
 		)))
@@ -411,6 +430,46 @@ func identityCases() []identityCase {
 			origin:   "local",
 			position: "composed",
 			build:    composedCase("GHOST", "", "Part", "p5"),
+		},
+		{
+			// A child of a child: the one position where the parent's own
+			// type reference is itself non-root.
+			name:     "nested_child_depth_two",
+			origin:   "local",
+			position: "nested",
+			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+				t.Helper()
+				siteID := mustTypeIDIn(t, s, "", "Site")
+				partID := mustTypeIDIn(t, s, "", "Part")
+				segmentID := mustTypeIDIn(t, s, "", "Segment")
+				return graph.SnapshotParts{
+					Types: []schema.TypeID{siteID},
+					Instances: map[schema.TypeID][]graph.InstanceParts{
+						siteID: {{
+							TypeName:   tagForm(s, siteID),
+							TypeID:     siteID,
+							PrimaryKey: immutable.WrapKey([]any{"site2"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "site2"}),
+							Composed: map[string][]graph.InstanceParts{
+								"PARTS": {{
+									TypeName:   tagForm(s, partID),
+									TypeID:     partID,
+									PrimaryKey: immutable.WrapKey([]any{"p6"}),
+									Properties: immutable.WrapProperties(map[string]any{"name": "p6", "weight": float64(2)}),
+									Composed: map[string][]graph.InstanceParts{
+										"SEGMENTS": {{
+											TypeName:   tagForm(s, segmentID),
+											TypeID:     segmentID,
+											PrimaryKey: immutable.WrapKey([]any{"sg1"}),
+											Properties: immutable.WrapProperties(map[string]any{"id": "sg1", "span": float64(0.5)}),
+										}},
+									},
+								}},
+							},
+						}},
+					},
+				}
+			},
 		},
 		{
 			// An imported source type: its edge properties resolve only
@@ -574,8 +633,22 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 	s := loadIdentitySchema(t)
 
 	cases := identityCases()
-	if len(cases) < 10 {
-		t.Fatalf("the oracle generated %d documents; it is meant to cover every position", len(cases))
+	covered := make(map[string]bool, len(cases))
+	for _, tc := range cases {
+		covered[tc.position+"/"+tc.origin] = true
+	}
+	// The floor is the ingredient matrix: every pair below must have at
+	// least one generated document, so a deleted case names its hole.
+	for _, want := range []string{
+		"root/local", "root/imported", "root/transitive",
+		"composed/local", "composed/imported", "composed/collided",
+		"nested/local",
+		"duplicate/local", "duplicate/imported",
+		"unresolved/imported",
+	} {
+		if !covered[want] {
+			t.Fatalf("the oracle generates no %s document; the ingredient matrix has a hole", want)
+		}
 	}
 
 	for _, tc := range cases {
