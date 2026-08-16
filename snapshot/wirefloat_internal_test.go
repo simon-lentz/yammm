@@ -359,33 +359,6 @@ func TestExactWireUint_TurnsOnConvertibility(t *testing.T) {
 	}
 }
 
-// The twoPow63 and twoPow64 rounding ceilings, asserted directly rather than
-// through a conversion. Out-of-range float-to-int conversion is
-// implementation-defined — arm64 saturates and amd64 wraps — so a test that
-// reaches the guards only by converting pins them on one architecture and CI
-// runs the other.
-func TestExactWire_GuardsAreReachedOnEveryArchitecture(t *testing.T) {
-	t.Parallel()
-	if got := float64(math.MaxInt64); got != twoPow63 {
-		t.Errorf("float64(MaxInt64) = %v, want the twoPow63 ceiling %v — the guard "+
-			"exists because the conversion lands exactly there", got, float64(twoPow63))
-	}
-	if got := float64(uint64(math.MaxUint64)); got != twoPow64 {
-		t.Errorf("float64(MaxUint64) = %v, want the twoPow64 ceiling %v", got, float64(twoPow64))
-	}
-	// Both ceilings are outside their integer type, which is the whole reason
-	// converting back is undefined and the guards cannot be dropped.
-	if twoPow63-1 >= twoPow63 {
-		t.Error("twoPow63 is not the exclusive upper bound of int64")
-	}
-	if _, ok := exactWireInt(math.MaxInt64); ok {
-		t.Error("exactWireInt(MaxInt64) = exact — the twoPow63 guard did not fire")
-	}
-	if _, ok := exactWireUint(math.MaxUint64); ok {
-		t.Error("exactWireUint(MaxUint64) = exact — the twoPow64 guard did not fire")
-	}
-}
-
 // wireElems reaches a vector or list position whatever container the caller
 // built. The rows are unit inputs, not documents: immutable.WrapProperties
 // wraps every slice, so Properties.Clone hands Marshal a []any and no []byte

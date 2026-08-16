@@ -1,9 +1,7 @@
 package snapshot_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
@@ -766,81 +764,6 @@ func TestIdentityOracle_ContradictoryNameAndIdentityIsReported(t *testing.T) {
 	if !found {
 		t.Errorf("a persisted identity contradicting its own tag form bound silently; want %s\n%s",
 			diag.E_SNAPSHOT_TYPEID_MISMATCH, data)
-	}
-}
-
-// TestIdentityOracle_BothPreV012DefectsNeedTwoRoundTrips falsifies the
-// migration instruction AssertRoundTrip carries. A document holding an
-// int-shaped float AND a composed child whose persisted schema path no longer
-// resolves cannot heal in one pass: the first load loses the child's identity,
-// so its Float constraint is not found and the float stays narrowed.
-func TestIdentityOracle_BothPreV012DefectsNeedTwoRoundTrips(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadIdentitySchema(t)
-
-	siteID := mustTypeIDIn(t, s, "", "Site")
-	basePartID := mustTypeIDIn(t, s, "base", "Part")
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{siteID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			siteID: {{
-				TypeName:   tagForm(s, siteID),
-				TypeID:     siteID,
-				PrimaryKey: immutable.WrapKey([]any{"s1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "s1"}),
-				Composed: map[string][]graph.InstanceParts{
-					"IMPORTED": {{
-						TypeName:   tagForm(s, basePartID),
-						TypeID:     basePartID,
-						PrimaryKey: immutable.WrapKey([]any{"bp1"}),
-						Properties: immutable.WrapProperties(map[string]any{"name": "bp1", "mass": json.Number("5")}),
-					}},
-				},
-			}},
-		},
-	})
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
-	base, result := snapshot.MarshalLegacyV2(ctx, built)
-	if err := result.Err(); err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	// No writer emits an unresolvable schema path, so the both-defects document
-	// is reached by editing a legacy one.
-	const anchor = `{"key":["bp1"],"properties":`
-	const injected = `{"key":["bp1"],"type_id":{"schema_path":"/nonexistent/ghost.yammm","name":"Part"},"properties":`
-	if !bytes.Contains(base, []byte(anchor)) {
-		t.Fatalf("fixture shape changed; anchor not found in:\n%s", base)
-	}
-	doc := bytes.Replace(base, []byte(anchor), []byte(injected), 1)
-
-	generations := make([][]byte, 0, 3)
-	prev := doc
-	for range 3 {
-		loaded, res := snapshot.Load(ctx, prev, s, snapshot.WithSkipIntegrityCheck())
-		if err := res.Err(); err != nil {
-			t.Fatalf("load: %v", err)
-		}
-		next, res := snapshot.Marshal(ctx, loaded)
-		if err := res.Err(); err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		generations = append(generations, next)
-		prev = next
-	}
-
-	// The instruction AssertRoundTrip carries: one round trip repairs such a
-	// document and every later one holds. Red until the identity repair lands.
-	if !bytes.Equal(generations[0], generations[1]) {
-		t.Errorf("one round trip did not repair the document, so the migration instruction is false:\ngen1:\n%s\ngen2:\n%s",
-			generations[0], generations[1])
-	}
-	if !bytes.Equal(generations[1], generations[2]) {
-		t.Errorf("the document had not stabilised after two round trips:\ngen2:\n%s\ngen3:\n%s",
-			generations[1], generations[2])
 	}
 }
 

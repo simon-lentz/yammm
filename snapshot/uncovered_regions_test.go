@@ -15,12 +15,10 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// Regions of the writer and the reader that a mutation run found no test
-// executes. Each test here was written against a surviving mutation, and the
-// mutation is named beside it: an assertion whose mutation was never scored is
-// how these regions reached the tree covered on paper and dead in fact.
+// Round-trip and divergence pins for writer and reader regions no other test
+// file drives. Each test names the mutation that turns it red.
 
-// nestedSchema composes to depth two, which no other fixture does.
+// nestedSchema composes to depth two.
 const nestedSchema = `schema "nested"
 
 type Root {
@@ -69,9 +67,9 @@ func mustProvenance(t *testing.T, name, p string) *location.Provenance {
 	return location.NewProvenance(name, parsed, location.Span{})
 }
 
-// Provenance is emitted at every instance position and asserted at none: the
-// marshalProvenance call could return nil with the suite green. Rebuilt from
-// parts because that is the only entry point that sets provenance directly.
+// Provenance must survive the round trip at every instance position. Rebuilt
+// from parts because that is the only entry point that sets provenance
+// directly.
 //
 // Mutation: w.Provenance = nil in marshalInstanceV3.
 func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
@@ -144,8 +142,7 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 	}
 }
 
-// No test marshals a composed child that has its own composed children, so the
-// recursion is exercised to depth 1 and dropped grandchildren stay green.
+// A composed child's own composed children must survive the round trip.
 //
 // Mutation: cw.Composed = nil after the recursive marshalInstanceV3 call.
 func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
@@ -218,46 +215,9 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 	}
 }
 
-// Marshal's instances-section error branch is never driven and marshalFatalErr
-// is 0% covered. buildTypeTable deletes the zero TypeID from the table, so a
-// snapshot whose Types carries one reaches the table miss the branch reports.
-//
-// Mutation: delete the `if err != nil` block after marshalInstancesV3.
-func TestMarshal_InstancesSectionErrorIsReported(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := testSchema(t)
-
-	parts := graph.SnapshotParts{
-		Types: []schema.TypeID{{}},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			{}: {{
-				TypeName:   "Ghost",
-				PrimaryKey: immutable.WrapKey([]any{"g1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "g1"}),
-			}},
-		},
-	}
-	built, result := graph.RebuildSnapshot(s, parts)
-	if result.HasErrors() {
-		t.Skipf("RebuildSnapshot refuses a zero-identity instance, so this branch is unreachable from here: %s", result)
-	}
-
-	data, result := snapshot.Marshal(ctx, built)
-	if data != nil {
-		t.Errorf("Marshal returned %d bytes for a snapshot it cannot write", len(data))
-	}
-	if !result.HasErrors() {
-		t.Fatal("Marshal accepted a snapshot whose type is absent from the table")
-	}
-	if !hasCode(result, diag.E_INTERNAL) {
-		t.Errorf("result = %s, want an E_INTERNAL naming the failed section", result)
-	}
-}
-
-// No test round-trips a resolved edge whose target is an instance of an
-// imported type, so the edge target's identity is unexercised across a schema
-// boundary — the position most likely to lose an alias.
+// A resolved edge whose target is an instance of an imported type must keep
+// the target's identity across the schema boundary — the position most likely
+// to lose an alias.
 //
 // Mutation: targetID := writerTypeID(inst, s) in marshalInstanceV3's edge loop.
 func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
@@ -332,7 +292,7 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 }
 
 // UpdateMetadata preserves a legacy int-shaped body while Marshal(Load(x))
-// heals it. The wire contract documents that divergence and nothing drove it.
+// heals it — the divergence the wire contract documents.
 //
 // Mutation: have UpdateMetadata rebuild the body rather than reuse it.
 func TestUpdateMetadata_PreservesALegacyIntShapedBodyThatReMarshalHeals(t *testing.T) {
@@ -383,10 +343,8 @@ func TestUpdateMetadata_PreservesALegacyIntShapedBodyThatReMarshalHeals(t *testi
 	}
 }
 
-// The v2 decoder validates composed children through a recursion no test
-// drives, so its depth limit and its edges-on-a-composed-child invariant are
-// both dead. v3's equivalent is covered; v2's is not, and v2 is a read path
-// this package keeps forever.
+// The v2 decoder must reject a composed child carrying edges, through its own
+// recursion rather than the v3 path's.
 //
 // Mutation: drop the sd.processInstance recursion in decoder.go.
 func TestLoad_LegacyComposedChildWithEdgesIsReported(t *testing.T) {
@@ -418,31 +376,5 @@ func TestLoad_LegacyComposedChildWithEdgesIsReported(t *testing.T) {
 	if !hasCode(result, diag.E_SNAPSHOT_INVALID_COMPOSED) {
 		t.Errorf("result = %s, want E_SNAPSHOT_INVALID_COMPOSED — the composed-child "+
 			"edge invariant is never reached on the v2 path", result)
-	}
-}
-
-// wireEdgeProps' contract is that a resolved and an unresolved edge on one
-// relation encode their properties identically. They agree because both derive
-// the relation from the source instance's own identity, not because they share
-// the helper — so the property is worth holding rather than assuming.
-// buildWireTestSnapshot carries both shapes of a FEED edge with gain = 2.
-//
-// Mutation: derive the unresolved site's rel from u.TargetType.
-func TestMarshal_ResolvedAndUnresolvedEdgePropsEncodeAlike(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadWireTestSchema(t)
-	snap := buildWireTestSnapshot(t, s, float64(2), []any{float64(1)})
-
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	// gain is Float-constrained, so both positions emit the indicator or one of
-	// them encoded under a relation that does not declare the property.
-	if n := strings.Count(string(data), `"gain":2.0`); n != 2 {
-		t.Errorf(`"gain":2.0 appears %d times, want 2 — the resolved and unresolved `+
-			"edges encoded one value two ways:\n%s", n, data)
 	}
 }

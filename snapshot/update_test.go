@@ -319,23 +319,29 @@ func TestUpdateMetadata_ConcurrentAccess(t *testing.T) {
 	}
 }
 
+// Each malformed shape pins the exact code its branch draws, so neither
+// branch can go dead behind the other.
 func TestUpdateMetadata_BodyOffsetFailure(t *testing.T) {
-	// An input whose header parses successfully but whose body offset
-	// points at '}' (not ','). Constructed by hand to exercise the
-	// sanity check.
 	ctx := context.Background()
+	const header = `{"yammm_snapshot":{"version":3,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":1,"integrity_hash":"","features":[]}`
 
-	// Valid header object with every required field, followed by an
-	// empty diagnostics section and closing '}'. The decoder should
-	// reject this because 'types' is missing (MALFORMED), or our sanity
-	// check should reject because the byte at bodyOffset is '}' not ','.
-	data := []byte(`{"yammm_snapshot":{"version":3,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":1,"integrity_hash":"","features":[]}}`)
-	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"k": "v"})
-	require.True(t, res.HasErrors(), "expected error on shape mismatch")
-	gotMalformed := res.HasCode(diag.E_SNAPSHOT_MALFORMED)
-	gotBodyOffset := res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET)
-	assert.True(t, gotMalformed || gotBodyOffset,
-		"expected E_SNAPSHOT_MALFORMED or E_UPDATE_METADATA_BODY_OFFSET; got: %v", res)
+	// A document that ends at the header: the decoder rejects it for the
+	// missing types key before the body offset is ever consulted.
+	_, res := snapshot.UpdateMetadata(ctx, []byte(header+`}`), map[string]string{"k": "v"})
+	if !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("a document with no types key drew %v, want %s", res, diag.E_SNAPSHOT_MALFORMED)
+	}
+	if res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET) {
+		t.Errorf("the body-offset guard fired before the decoder rejected the document: %v", res)
+	}
+
+	// A complete document whose byte after the header is not ',': the header
+	// parses clean and the body-offset shape check is the branch that fires.
+	spaced := header + ` ,"types":[],"instances":[],"diagnostics":{"duplicates":[],"unresolved":[]}}`
+	_, res = snapshot.UpdateMetadata(ctx, []byte(spaced), map[string]string{"k": "v"})
+	if !res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET) {
+		t.Errorf("a non-Marshal-shaped body boundary drew %v, want %s", res, diag.E_UPDATE_METADATA_BODY_OFFSET)
+	}
 }
 
 func TestUpdateMetadata_GoldenCorpus(t *testing.T) {

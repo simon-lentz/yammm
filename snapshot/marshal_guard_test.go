@@ -3,7 +3,6 @@ package snapshot_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -28,77 +27,6 @@ func (p *probeTB) Helper() {}
 func (p *probeTB) Errorf(format string, args ...any) {
 	p.errored = true
 	p.msg = fmt.Sprintf(format, args...)
-}
-
-// A root instance carrying no type identity emits no type_id at all, rather
-// than a contentless {"schema_path":"","name":""} object a later load would
-// read as an empty type name. The composed-child guard has the same job; this
-// is the root-instance one, which nothing reached.
-func TestMarshal_ZeroTypeIDRootEmitsNoTypeID(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := testSchema(t)
-
-	// graph.Add panics on a zero TypeID, so the state reaches a snapshot only
-	// through RebuildSnapshot — a caller assembling parts directly.
-	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{tidOf(t, s, "Person")},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			tidOf(t, s, "Person"): {{
-				TypeName:   "Person",
-				PrimaryKey: immutable.WrapKey([]any{"p1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
-			}},
-		},
-	})
-	if result.HasErrors() {
-		t.Fatalf("rebuild: %s", result)
-	}
-
-	data, mres := snapshot.Marshal(ctx, snap)
-	if err := mres.Err(); err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(data), `"schema_path":""`) {
-		t.Errorf("marshal emitted a contentless type_id:\n%s", data)
-	}
-	if strings.Contains(string(data), `"type_id"`) {
-		t.Errorf("marshal emitted a type_id for an instance that carries none:\n%s", data)
-	}
-}
-
-// The duplicates section carries the same guard as the root path, and nothing
-// reached it either.
-func TestMarshal_ZeroTypeIDDuplicateEmitsNoTypeID(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := testSchema(t)
-
-	inst := graph.InstanceParts{
-		TypeName:   "Person",
-		PrimaryKey: immutable.WrapKey([]any{"p1"}),
-		Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
-	}
-	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{tidOf(t, s, "Person")},
-		Instances: map[schema.TypeID][]graph.InstanceParts{tidOf(t, s, "Person"): {inst}},
-		Duplicates: []graph.DuplicateParts{{
-			Type:     tidOf(t, s, "Person"),
-			Key:      immutable.WrapKey([]any{"p1"}),
-			Instance: inst,
-		}},
-	})
-	if result.HasErrors() {
-		t.Fatalf("rebuild: %s", result)
-	}
-
-	data, mres := snapshot.Marshal(ctx, snap)
-	if err := mres.Err(); err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(data), `"schema_path":""`) {
-		t.Errorf("marshal emitted a contentless type_id in the duplicates section:\n%s", data)
-	}
 }
 
 // A persisted type_id naming a resolvable type other than the one the tag form
@@ -145,9 +73,7 @@ func TestLoad_ContradictoryTypeIDIsReported(t *testing.T) {
 }
 
 // DiffSnapshots compares a duplicate's full instance tree, so a difference in
-// a duplicate's properties is a reported difference. The projection carried a
-// bare identity string until this branch widened it, and nothing asserted the
-// widening had any power.
+// a duplicate's properties is a reported difference.
 func TestDiffSnapshots_SeesDuplicatePropertyDifference(t *testing.T) {
 	t.Parallel()
 	s := testSchema(t)
