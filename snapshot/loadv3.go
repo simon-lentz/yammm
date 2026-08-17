@@ -40,10 +40,15 @@ func loadV3(ctx context.Context, sd *streamDecoder, s *schema.Schema) (*graph.Sn
 		if !ok {
 			continue
 		}
+		// Today's wire states one (type, key) pair per duplicate record, and
+		// every state it can express uses that pair as the conflict's address.
+		dupKey := immutable.WrapKey(normalizeSlice(dw.Key))
 		dp := graph.DuplicateParts{
-			Type:     typeID,
-			Key:      immutable.WrapKey(normalizeSlice(dw.Key)),
-			Instance: sd.wireToInstancePartsV3(dw.Type, typeID, dw.Instance),
+			Type:         typeID,
+			Key:          dupKey,
+			Instance:     sd.wireToInstancePartsV3(dw.Type, typeID, dw.Instance),
+			ConflictType: typeID,
+			ConflictKey:  dupKey,
 		}
 		if dw.Relation != "" && dw.ParentType != nil {
 			parentID, ok := sd.typeIDAt(*dw.ParentType, "duplicate parent")

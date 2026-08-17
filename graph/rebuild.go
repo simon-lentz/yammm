@@ -53,22 +53,22 @@ type EdgeParts struct {
 	Properties immutable.Properties
 }
 
-// DuplicateParts holds the data for a single duplicate record.
-//
-// Type and Key identify the type identity and primary key that was duplicated,
-// and double as the lookup key for the Conflict instance in the instance index.
-//
-// ParentType, ParentKey and Relation are the composing parent's coordinates,
-// set only for a composed-child duplicate. A composed child is absent from the
-// instance index, so a non-empty Relation directs the lookup through the
-// parent's composed children instead.
+// DuplicateParts holds the data for a single duplicate record. Type and Key
+// identify the rejected instance; ConflictType and ConflictKey address the
+// instance it collided with. A root conflict resolves through the instance
+// index; a composed conflict resolves through the parent slot named by
+// ParentType, ParentKey and Relation — set only for a composed-child
+// duplicate — where the stated key selects among siblings and an empty key
+// addresses the slot's sole occupant.
 type DuplicateParts struct {
-	Type       schema.TypeID
-	Key        immutable.Key
-	Instance   InstanceParts
-	ParentType schema.TypeID
-	ParentKey  immutable.Key
-	Relation   string
+	Type         schema.TypeID
+	Key          immutable.Key
+	Instance     InstanceParts
+	ConflictType schema.TypeID
+	ConflictKey  immutable.Key
+	ParentType   schema.TypeID
+	ParentKey    immutable.Key
+	Relation     string
 }
 
 // UnresolvedParts holds the data for a single unresolved edge record.
@@ -109,10 +109,16 @@ type UnresolvedParts struct {
 //
 // Returns a diag.Result with Fatal-severity E_INTERNAL diagnostics if
 // internal consistency checks fail (e.g., edge references to missing
-// instances). snapshot.Load validates these invariants before calling
-// RebuildSnapshot; failures here indicate a bug in the caller.
+// instances, or a zero [schema.TypeID] at any parts position — identity is
+// total at this boundary). snapshot.Load validates these invariants before
+// calling RebuildSnapshot; failures here indicate a bug in the caller.
 func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Result) {
 	collector := diag.NewCollector(0)
+
+	validatePartsIdentity(parts, collector)
+	if collector.HasErrors() {
+		return nil, collector.Result()
+	}
 
 	// Step 1: Create Instance objects.
 	instances := make(map[schema.TypeID][]*Instance, len(parts.Instances))
@@ -219,6 +225,76 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 	return snap, diag.OK()
 }
 
+// validatePartsIdentity rejects a zero [schema.TypeID] at every parts
+// position. Zero means unresolved: accepting one would file data under an
+// identity no schema type owns, so nothing downstream re-resolves a name.
+func validatePartsIdentity(parts SnapshotParts, collector *diag.Collector) {
+	zero := func(position, key string) {
+		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+			fmt.Sprintf("RebuildSnapshot: zero type identity at %s position, key %s", position, key)).Build())
+	}
+
+	for i, id := range parts.Types {
+		if id.IsZero() {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+				fmt.Sprintf("RebuildSnapshot: zero type identity at types entry %d", i)).Build())
+		}
+	}
+
+	var checkInstance func(position string, ip InstanceParts)
+	checkInstance = func(position string, ip InstanceParts) {
+		if ip.TypeID.IsZero() {
+			zero(position, ip.PrimaryKey.String())
+		}
+		for _, children := range ip.Composed {
+			for _, child := range children {
+				checkInstance("composed child", child)
+			}
+		}
+	}
+
+	for typeID, instParts := range parts.Instances {
+		if typeID.IsZero() {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+				fmt.Sprintf("RebuildSnapshot: zero type identity keys an instance group of %d instances", len(instParts))).Build())
+		}
+		for _, ip := range instParts {
+			checkInstance("instance", ip)
+		}
+	}
+
+	for _, ep := range parts.Edges {
+		if ep.SourceType.IsZero() {
+			zero("edge source", ep.SourceKey.String())
+		}
+		if ep.TargetType.IsZero() {
+			zero("edge target", ep.TargetKey.String())
+		}
+	}
+
+	for _, dp := range parts.Duplicates {
+		if dp.Type.IsZero() {
+			zero("duplicate", dp.Key.String())
+		}
+		if dp.ConflictType.IsZero() {
+			zero("duplicate conflict", dp.ConflictKey.String())
+		}
+		if dp.Relation != "" && dp.ParentType.IsZero() {
+			zero("duplicate parent", dp.ParentKey.String())
+		}
+		checkInstance("duplicate instance", dp.Instance)
+	}
+
+	for _, up := range parts.Unresolved {
+		if up.SourceType.IsZero() {
+			zero("unresolved source", up.SourceKey.String())
+		}
+		if up.TargetType.IsZero() {
+			zero("unresolved target", up.TargetKey.String())
+		}
+	}
+}
+
 // rebuildInstance creates an Instance from InstanceParts, recursing into composed children.
 func rebuildInstance(ip InstanceParts) *Instance {
 	inst := newInstance(ip.TypeName, ip.TypeID, ip.PrimaryKey, ip.Properties, ip.Provenance)
@@ -233,34 +309,42 @@ func rebuildInstance(ip InstanceParts) *Instance {
 	return inst
 }
 
-// resolveDuplicateConflict finds the instance a duplicate collided with.
-// Composed children never enter the instance index, so a composed-child
-// duplicate resolves by walking parent → relation → matching child instead.
+// resolveDuplicateConflict finds the instance a duplicate collided with, at
+// the stated conflict address. Composed children never enter the instance
+// index, so a composed conflict resolves through the parent's relation slot;
+// slot-alone addressing needs exactly one occupant.
 func resolveDuplicateConflict(index map[schema.TypeID]map[string]*Instance, dp DuplicateParts) *Instance {
 	if dp.Relation == "" {
-		return lookupInstance(index, dp.Type, dp.Key.String())
+		return lookupInstance(index, dp.ConflictType, dp.ConflictKey.String())
 	}
 	parent := lookupInstance(index, dp.ParentType, dp.ParentKey.String())
 	if parent == nil {
 		return nil
 	}
-	keyStr := dp.Key.String()
-	for _, child := range parent.Composed(dp.Relation) {
-		if child.TypeID() == dp.Type && child.PrimaryKey().String() == keyStr {
-			return child
+	occupants := parent.Composed(dp.Relation)
+	if dp.ConflictKey.Len() > 0 {
+		keyStr := dp.ConflictKey.String()
+		for _, child := range occupants {
+			if child.TypeID() == dp.ConflictType && child.PrimaryKey().String() == keyStr {
+				return child
+			}
 		}
+		return nil
+	}
+	if len(occupants) == 1 && occupants[0].TypeID() == dp.ConflictType {
+		return occupants[0]
 	}
 	return nil
 }
 
-// describeDuplicateConflict renders a duplicate's conflict coordinates for a
-// diagnostic message.
+// describeDuplicateConflict renders a duplicate's stated conflict address
+// for a diagnostic message.
 func describeDuplicateConflict(dp DuplicateParts) string {
 	if dp.Relation == "" {
-		return fmt.Sprintf("%s[%s] in the instance index", dp.Type, dp.Key.String())
+		return fmt.Sprintf("%s[%s] in the instance index", dp.ConflictType, dp.ConflictKey.String())
 	}
 	return fmt.Sprintf("%s[%s] under %s[%s].%s",
-		dp.Type, dp.Key.String(), dp.ParentType, dp.ParentKey.String(), dp.Relation)
+		dp.ConflictType, dp.ConflictKey.String(), dp.ParentType, dp.ParentKey.String(), dp.Relation)
 }
 
 // lookupInstance finds an instance in the index by type identity and key string.

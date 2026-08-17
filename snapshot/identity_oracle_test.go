@@ -612,9 +612,11 @@ func duplicateCase(alias, typeName, key string, props map[string]any) func(*test
 			Types:     []schema.TypeID{id},
 			Instances: map[schema.TypeID][]graph.InstanceParts{id: {inst}},
 			Duplicates: []graph.DuplicateParts{{
-				Type:     id,
-				Key:      immutable.WrapKey([]any{key}),
-				Instance: inst,
+				Type:         id,
+				Key:          immutable.WrapKey([]any{key}),
+				Instance:     inst,
+				ConflictType: id,
+				ConflictKey:  immutable.WrapKey([]any{key}),
 			}},
 		}
 	}

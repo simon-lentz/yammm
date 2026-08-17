@@ -48,7 +48,7 @@ var probeOutcomes = map[string]string{
 	"edge_target_row_out_of_range":                 "load[error:E_SNAPSHOT_DANGLING_REFERENCE error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]",
 	"unresolved_source_row_out_of_range":           "load[error:E_SNAPSHOT_MALFORMED]; snapshot=non-nil with 0 unresolved",
 	"composed_child_without_type_diagnostic_count": "load[error:E_SNAPSHOT_MALFORMED x2] verify[error:E_SNAPSHOT_MALFORMED]",
-	"zero_identity_instance_marshal":               "marshal[fatal:E_INTERNAL]; bytes=nil",
+	"zero_identity_instance_marshal":               "rebuild[fatal:E_INTERNAL]",
 	"float32_property_round_trip":                  "went in float32, returned float64",
 	"duplicate_conflict_row_out_of_range":          "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]",
 	"duplicate_with_edges_and_composed":            "load[error:E_SNAPSHOT_COMPOSED_ON_DUPLICATE error:E_SNAPSHOT_EDGES_ON_DUPLICATE] verify[error:E_SNAPSHOT_COMPOSED_ON_DUPLICATE error:E_SNAPSHOT_EDGES_ON_DUPLICATE]",
@@ -531,9 +531,11 @@ func rootDupDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 		Types:     []schema.TypeID{anchorID},
 		Instances: map[schema.TypeID][]graph.InstanceParts{anchorID: {inst}},
 		Duplicates: []graph.DuplicateParts{{
-			Type:     anchorID,
-			Key:      immutable.WrapKey([]any{"a9"}),
-			Instance: inst,
+			Type:         anchorID,
+			Key:          immutable.WrapKey([]any{"a9"}),
+			Instance:     inst,
+			ConflictType: anchorID,
+			ConflictKey:  immutable.WrapKey([]any{"a9"}),
 		}},
 	})
 }

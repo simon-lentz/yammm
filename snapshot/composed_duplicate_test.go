@@ -75,6 +75,57 @@ func TestRoundTrip_ComposedChildDuplicate(t *testing.T) {
 	}
 }
 
+// TestRoundTrip_ComposedChildDuplicateAmongSiblings pins conflict resolution
+// in a slot holding more than one child: the loaded conflict must be the
+// sibling whose key collided, which slot addressing alone cannot select.
+func TestRoundTrip_ComposedChildDuplicateAmongSiblings(t *testing.T) {
+	ctx := context.Background()
+	s := testSchemaWithComposition(t)
+
+	g := graph.New(s)
+	if res := g.Add(ctx, mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Root"})); res.HasErrors() {
+		t.Fatalf("Add parent: %v", res)
+	}
+	for key, value := range map[string]string{"c1": "first", "c2": "second"} {
+		child := mustValidInstance(t, s, "Child", []any{key}, map[string]any{"value": value})
+		if res := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "CHILDREN", child); res.HasErrors() {
+			t.Fatalf("AddComposed %s: %v", key, res)
+		}
+	}
+	colliding := mustValidInstance(t, s, "Child", []any{"c2"}, map[string]any{"value": "third"})
+	if res := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "CHILDREN", colliding); !res.HasErrors() {
+		t.Fatal("AddComposed with a colliding child key must report a duplicate")
+	}
+
+	data, res := snapshot.Marshal(ctx, g.Snapshot())
+	if res.HasErrors() {
+		t.Fatalf("Marshal: %v", res)
+	}
+	loaded, loadRes := snapshot.Load(ctx, data, s)
+	if loadRes.HasErrors() {
+		t.Fatalf("Load rejected a document Marshal produced: %v", loadRes)
+	}
+
+	dups := loaded.Duplicates()
+	if len(dups) != 1 {
+		t.Fatalf("loaded snapshot holds %d duplicates, want 1", len(dups))
+	}
+	conflict := dups[0].Conflict
+	if conflict == nil {
+		t.Fatal("duplicate conflict pointer did not resolve")
+	}
+	if got, want := conflict.PrimaryKey().String(), graph.FormatKey("c2"); got != want {
+		t.Errorf("conflict primary key = %s, want %s", got, want)
+	}
+	v, ok := conflict.Property("value")
+	if !ok {
+		t.Fatal("conflict instance has no value property")
+	}
+	if got, _ := v.String(); got != "second" {
+		t.Errorf("conflict resolved to the wrong sibling: value = %q, want %q", got, "second")
+	}
+}
+
 // TestVerify_ComposedChildDuplicate pins the same document against Verify,
 // which runs the identical existence check on a path that materializes nothing.
 func TestVerify_ComposedChildDuplicate(t *testing.T) {
