@@ -210,8 +210,8 @@ import resolution, with `E_IMPORT_RESOLVE`.
 
 Annotations declared in `.yammm` (or via the Builder methods above) are carried on the loaded schema:
 
-- `Property.Annotations()` / `AnnotationsSlice()` / `Annotation(name) (*Annotation, bool)` — a property's `@name` annotations.
-- `Type.Annotations()` / `AllAnnotations()` (with `*Slice` variants) — a type's `@@` members (own, and own-plus-inherited).
+- `Property.AnnotationsSlice()` / `Annotation(name) (*Annotation, bool)` — a property's `@name` annotations.
+- `Type.AnnotationsSlice()` / `AllAnnotations()` / `AllAnnotationsSlice()` — a type's `@@` members (own, and own-plus-inherited).
 - `Annotation` exposes `Name()`, `Args() []AnnotationArg`, `Documentation()`, `Span()`; `AnnotationArg` exposes `Text()`, `Kind() AnnotationArgKind`, `Span()`.
 - `schema.AnnotationSpecs() []AnnotationSpec` returns the built-in registry for editor tooling — a read-only surface, not a registration API. Each `AnnotationSpec` exposes `Name()`, `Placement() AnnotationPlacement` (`PlacementProperty` or `PlacementType`), `Documentation()`, and `ArgHint()`.
 - `schema.VectorSimilarityFunctions() []string` returns the similarity keywords `@vector` accepts, so tooling cannot suggest one the loader rejects.
@@ -348,7 +348,6 @@ The variadic `Composed(name, children...)` accepts single, multiple-positional, 
 | `EdgeTo(name, targetKey...)` | Add an edge target on an association without edge properties. Variadic key supports composite PKs. |
 | `EdgeToWith(name, targetKey, props)` | Add an edge target on an association with edge properties. `targetKey` is an explicit `[]any` to avoid absorbing `props` into variadic slots. |
 | `Composed(name, children...)` | Add composed children. Variadic supports single, multiple, or slice-unpack shapes. |
-| `WithProvenance(sourceName, pathStr)` | Attach source location metadata. |
 | `Build()` | Produce the `RawInstance`. Returns the first accumulated error (with a "(and N more)" suffix when more exist). |
 | `MustBuild()` | Panic on error. Test-only; production code should use `Build` and propagate. |
 
@@ -399,8 +398,7 @@ for _, typeID := range snap.Types() {
 `graph.BatchAssembler` composes a `Validator` and a `Graph` into a single call surface for the common pipeline pattern: validate → add → check → snapshot. The assembler encodes the ordering invariant (validate before add, check before snapshot) so consumers cannot get the sequence wrong, and is concurrent-safe so multiple goroutines may share one assembler:
 
 ```go
-ba := graph.NewBatchAssembler(ctx, s,
-    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+ba := graph.NewBatchAssembler(ctx, s)
 
 for i, rec := range records {
     if err := ba.Add("TypeName", buildRawInstance(rec)); err != nil {
@@ -442,8 +440,7 @@ Pool mode preserves every external contract (error shapes, Finalize one-shot sem
 snap, res := snapshot.Load(ctx, data, s) // prior batch's .ys
 if res.HasErrors() { /* handle */ }
 
-ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, snap,
-    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)
 for _, rec := range outstanding { // e.g. resume-by-set-difference
     if err := ba.Add("TypeName", rec); err != nil { /* handle */ }
 }

@@ -328,21 +328,9 @@ func (t *Type) AllInvariantsSlice() []*Invariant {
 	return slices.Clone(t.allInvariants)
 }
 
-// Annotations returns an iterator over the type-level annotations declared in
-// this type body (@@name(args) members). Does NOT include inherited
-// annotations; use AllAnnotations for that.
-func (t *Type) Annotations() iter.Seq[*Annotation] {
-	return func(yield func(*Annotation) bool) {
-		for _, a := range t.annotations {
-			if !yield(a) {
-				return
-			}
-		}
-	}
-}
-
 // AnnotationsSlice returns a defensive copy of the type-level annotations
-// declared in this type body.
+// declared in this type body (@@name(args) members). Does NOT include
+// inherited annotations; use [Type.AllAnnotations] for that.
 func (t *Type) AnnotationsSlice() []*Annotation {
 	return slices.Clone(t.annotations)
 }

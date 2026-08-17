@@ -132,8 +132,7 @@ func main() {
 For pipeline workloads, `graph.BatchAssembler` composes the validator and graph into a single concurrent-safe surface that encodes the validate → add → check → snapshot ordering:
 
 ```go
-ba := graph.NewBatchAssembler(ctx, s,
-    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+ba := graph.NewBatchAssembler(ctx, s)
 
 for i, rec := range records { // rec is an instance.RawInstance
     if err := ba.Add("Person", rec); err != nil {

@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -70,7 +68,6 @@ type SchemaBuilder struct {
 	properties   map[string]any
 	edges        map[string]*edgeState
 	compositions map[string]*compositionState
-	provenance   *location.Provenance
 	errors       []*buildError
 
 	// relByFieldName is a lazy-built secondary index that maps FieldName()
@@ -495,19 +492,6 @@ func acceptableChildType(target, child *schema.Type) bool {
 	return target.ID() == child.ID()
 }
 
-// WithProvenance sets source location metadata for diagnostics. The path
-// follows location/path canonical syntax (e.g. "$.Person[0]"); if pathStr
-// fails to parse, it falls back to the root path to match the pre-existing
-// [Builder.WithProvenance] semantics.
-func (b *SchemaBuilder) WithProvenance(sourceName, pathStr string) *SchemaBuilder {
-	p, err := path.Parse(pathStr)
-	if err != nil {
-		p = path.Root()
-	}
-	b.provenance = location.NewProvenance(sourceName, p, location.Span{})
-	return b
-}
-
 // Build produces the RawInstance.
 //
 // If any earlier call on this builder recorded an error, Build returns the
@@ -604,7 +588,7 @@ func (b *SchemaBuilder) Build() (RawInstance, error) {
 	if err := b.firstErrorWithCount(); err != nil {
 		return RawInstance{}, err
 	}
-	return RawInstance{Properties: out, Provenance: b.provenance}, nil
+	return RawInstance{Properties: out}, nil
 }
 
 // checkRequiredEdgeProps verifies that every required edge property on rel

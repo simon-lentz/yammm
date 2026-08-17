@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"iter"
 	"slices"
 
 	"github.com/simon-lentz/yammm/location"
@@ -205,32 +204,12 @@ func (p *Property) DeclaringScope() DeclaringScope {
 	return p.scope
 }
 
-// Annotations returns an iterator over this property's annotations. Duplicate
-// names are rejected during completion, so each name appears at most once.
-//
-// Order depends on which view the property came from. On a DECLARED property
-// (one a type holds in [Type.PropertiesSlice]) it is source order: the
-// @name / @name(args) decorators trailing the declaration, left to right. On a
-// property read from a merged view ([Type.AllProperties]) the annotations may
-// have been gathered from several supertypes, and the order is then the order of
-// the READING type's own `extends` clause — not of any declaring type, which for
-// a property already means the ancestor that declared it. So the same schema
-// property can enumerate its annotations differently on two types that both
-// inherit it. Consumers that care
-// about a specific annotation should look it up by name with
-// [Property.Annotation]; consumers that emit in enumeration order should treat
-// the order as stable-per-load, not as authored order.
-func (p *Property) Annotations() iter.Seq[*Annotation] {
-	return func(yield func(*Annotation) bool) {
-		for _, a := range p.annotations {
-			if !yield(a) {
-				return
-			}
-		}
-	}
-}
-
 // AnnotationsSlice returns a defensive copy of this property's annotations.
+// Duplicate names are rejected during completion, so each name appears at most
+// once. Order depends on the view: source order on a declared property, and
+// the reading type's own `extends`-clause order on a merged view
+// ([Type.AllProperties]) — stable-per-load, not authored order. Consumers that
+// care about a specific annotation should look it up with [Property.Annotation].
 func (p *Property) AnnotationsSlice() []*Annotation {
 	return slices.Clone(p.annotations)
 }

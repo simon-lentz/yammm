@@ -164,15 +164,6 @@ func (r *Registry) LookupType(id TypeID) (*Type, bool) {
 	return t, ok
 }
 
-// LookupSchema returns the schema containing the type with the given TypeID.
-func (r *Registry) LookupSchema(id TypeID) (*Schema, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	s, ok := r.schemas[id.schemaPath]
-	return s, ok
-}
-
 // Contains reports whether a schema with the given source ID is registered.
 func (r *Registry) Contains(id location.SourceID) bool {
 	r.mu.RLock()

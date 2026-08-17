@@ -88,14 +88,6 @@ func (c *Config) Validate(logger *slog.Logger) error {
 // injection in tests, not for configuration (Config handles that).
 type Option func(*Server)
 
-// WithLogger overrides the server's logger. Useful for injecting a test
-// logger that captures records for assertions.
-func WithLogger(logger *slog.Logger) Option {
-	return func(s *Server) {
-		s.logger = logger.With(slog.String("component", "server"))
-	}
-}
-
 // Resolver is consumed by feature handlers (hover, completion, definition, symbols, formatting).
 // It provides read-only access to workspace state for resolving analysis units.
 type Resolver interface {

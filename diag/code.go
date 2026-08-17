@@ -166,9 +166,6 @@ var (
 	// E_RESERVED_PREFIX indicates a name uses a reserved prefix.
 	E_RESERVED_PREFIX = NewCode("E_RESERVED_PREFIX", CategorySchema)
 
-	// E_INVALID_RELATION indicates a relation definition is invalid.
-	E_INVALID_RELATION = NewCode("E_INVALID_RELATION", CategorySchema)
-
 	// E_INVALID_ASSOCIATION_TARGET indicates an association targets an invalid type.
 	E_INVALID_ASSOCIATION_TARGET = NewCode("E_INVALID_ASSOCIATION_TARGET", CategorySchema)
 
@@ -312,9 +309,6 @@ var (
 
 	// E_EVAL_ERROR indicates an error during expression evaluation.
 	E_EVAL_ERROR = NewCode("E_EVAL_ERROR", CategoryInstance)
-
-	// E_UNKNOWN_BUILTIN indicates an unknown builtin function was referenced.
-	E_UNKNOWN_BUILTIN = NewCode("E_UNKNOWN_BUILTIN", CategoryInstance)
 
 	// E_MISSING_FK_TARGET indicates a foreign key target is missing.
 	E_MISSING_FK_TARGET = NewCode("E_MISSING_FK_TARGET", CategoryInstance)

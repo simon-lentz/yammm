@@ -89,10 +89,6 @@ const (
 	// Used for transitive import diagnostics (E_GRAPH_TYPE_NOT_FOUND).
 	DetailKeyTypeSchema = "type_schema"
 
-	// DetailKeyImportedVia is the direct import that provides transitive access.
-	// Used for transitive import diagnostics (E_GRAPH_TYPE_NOT_FOUND).
-	DetailKeyImportedVia = "imported_via"
-
 	// DetailKeyFirstAlias is the first import alias in duplicate detection.
 	DetailKeyFirstAlias = "first_alias"
 

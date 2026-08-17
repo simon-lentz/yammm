@@ -1622,7 +1622,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_CASE_COLLISION` — names differ only by case
 - `E_PROPERTY_RELATION_COLLISION` — property and relation share a name
 - `E_RESERVED_PREFIX` — name uses a reserved prefix
-- `E_INVALID_RELATION`, `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
+- `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
 - `E_INVALID_CONSTRAINT` — constraint definition error
 - `E_INVALID_INVARIANT` — invariant expression error
 - `E_INVALID_NAME` — invalid identifier format
@@ -1662,8 +1662,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UNKNOWN_FIELD` — unexpected field in instance data
 - `E_CONSTRAINT_FAIL` — constraint check failed
 - `E_INVARIANT_FAIL` — invariant check failed
-- `E_EVAL_ERROR` — expression evaluation error
-- `E_UNKNOWN_BUILTIN` — unknown built-in function
+- `E_EVAL_ERROR` — expression evaluation error, including a call to an unknown built-in function
 - `E_MISSING_FK_TARGET` — foreign key target missing
 - `E_PARTIAL_COMPOSITE_FK` — partial composite foreign key
 - `E_UNKNOWN_EDGE_FIELD` — unknown field in edge data

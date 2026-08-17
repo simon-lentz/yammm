@@ -171,24 +171,7 @@ type BatchAssemblerOption func(*batchAssemblerConfig)
 
 // batchAssemblerConfig holds internal configuration for a BatchAssembler.
 type batchAssemblerConfig struct {
-	validatorOpts []instance.Option
-	graphOpts     []Option
-	poolSize      int // 0 == default mutex mode; n>=1 == pool mode
-}
-
-// WithValidatorOptions forwards [instance.Option] values to the underlying
-// Validator. Use [instance.RecommendedOptions] for the standard preset.
-func WithValidatorOptions(opts ...instance.Option) BatchAssemblerOption {
-	return func(c *batchAssemblerConfig) {
-		c.validatorOpts = append(c.validatorOpts, opts...)
-	}
-}
-
-// WithGraphOptions forwards [Option] values to the underlying Graph.
-func WithGraphOptions(opts ...Option) BatchAssemblerOption {
-	return func(c *batchAssemblerConfig) {
-		c.graphOpts = append(c.graphOpts, opts...)
-	}
+	poolSize int // 0 == default mutex mode; n>=1 == pool mode
 }
 
 // WithValidatorPool configures the assembler to use a pool of n
@@ -269,7 +252,7 @@ func NewBatchAssembler(ctx context.Context, s *schema.Schema, opts ...BatchAssem
 	}
 
 	cfg := applyBatchAssemblerOptions(opts)
-	return newBatchAssembler(ctx, s, New(s, cfg.graphOpts...), cfg)
+	return newBatchAssembler(ctx, s, New(s), cfg)
 }
 
 // NewBatchAssemblerFromSnapshot constructs an assembler bound to schema s
@@ -328,7 +311,7 @@ func NewBatchAssemblerFromSnapshot(ctx context.Context, s *schema.Schema, snap *
 	}
 
 	cfg := applyBatchAssemblerOptions(opts)
-	return newBatchAssembler(ctx, s, NewFromSnapshot(s, snap, cfg.graphOpts...), cfg)
+	return newBatchAssembler(ctx, s, NewFromSnapshot(s, snap), cfg)
 }
 
 // newBatchAssembler wires the validator-access mode (single shared
@@ -343,11 +326,11 @@ func newBatchAssembler(ctx context.Context, s *schema.Schema, g *Graph, cfg batc
 	}
 
 	if cfg.poolSize == 0 {
-		ba.validator = instance.NewValidator(s, cfg.validatorOpts...)
+		ba.validator = instance.NewValidator(s)
 	} else {
 		ba.pool = make(chan *instance.Validator, cfg.poolSize)
 		for range cfg.poolSize {
-			ba.pool <- instance.NewValidator(s, cfg.validatorOpts...)
+			ba.pool <- instance.NewValidator(s)
 		}
 	}
 

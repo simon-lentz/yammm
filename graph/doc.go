@@ -52,8 +52,7 @@
 // Check, and is concurrent-safe by default — multiple goroutines may
 // share one assembler:
 //
-//	ba := graph.NewBatchAssembler(ctx, s,
-//	    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+//	ba := graph.NewBatchAssembler(ctx, s)
 //	for i, rec := range records {
 //	    if err := ba.Add("TypeName", buildRawInstance(rec)); err != nil {
 //	        return fmt.Errorf("record %d: %w", i, err)

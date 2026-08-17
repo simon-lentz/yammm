@@ -119,7 +119,6 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_PROPERTY_RELATION_COLLISION` | Property and relation share the same name |
 | `E_RELATION_NORMALIZATION_COLLISION` | Relation names collide after normalization |
 | `E_RESERVED_PREFIX` | Name uses a reserved prefix |
-| `E_INVALID_RELATION` | Relation definition is invalid |
 | `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type |
 | `E_INVALID_COMPOSITION_TARGET` | Composition targets an invalid type |
 | `E_INVALID_CONSTRAINT` | Constraint definition is invalid |
@@ -156,7 +155,6 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_CONSTRAINT_FAIL` | Constraint check failed (bounds, pattern, enum) |
 | `E_INVARIANT_FAIL` | Invariant expression evaluated to false |
 | `E_EVAL_ERROR` | Error during expression evaluation |
-| `E_UNKNOWN_BUILTIN` | Unknown built-in function referenced |
 | `E_MISSING_FK_TARGET` | Foreign key target is missing |
 | `E_PARTIAL_COMPOSITE_FK` | Partial composite foreign key |
 | `E_UNKNOWN_EDGE_FIELD` | Unknown field in edge data |
