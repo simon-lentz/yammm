@@ -188,7 +188,7 @@ func marshalInstances(ctx context.Context, view *writerView, s *schema.Schema, t
 		}
 		items := make([]instWire, 0, len(group.instances))
 		for _, inst := range group.instances {
-			w, err := marshalInstance(inst, view.edges[inst], s, tt, false)
+			w, err := marshalInstance(inst, view.edges[inst], s, tt, false, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -208,7 +208,14 @@ func marshalInstance(
 	s *schema.Schema,
 	tt *typeTable,
 	carryType bool,
+	depth int,
 ) (instWire, error) {
+	// The same bound the reader enforces, so Marshal never writes a document
+	// Load and Verify refuse whole.
+	if depth > maxComposedDepth {
+		return instWire{}, fmt.Errorf("composed nesting depth %d exceeds limit %d at %s[%s]",
+			depth, maxComposedDepth, inst.TypeID(), inst.PrimaryKey())
+	}
 	id := inst.TypeID()
 	t, _ := s.TypeByID(id)
 	w := instWire{
@@ -255,7 +262,7 @@ func marshalInstance(
 			children := inst.Composed(relName)
 			childWires := make([]instWire, 0, len(children))
 			for _, child := range children {
-				cw, err := marshalInstance(child, nil, s, tt, true)
+				cw, err := marshalInstance(child, nil, s, tt, true, depth+1)
 				if err != nil {
 					return instWire{}, err
 				}
@@ -280,7 +287,7 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 		if err != nil {
 			return diagWire{}, err
 		}
-		inst, err := marshalInstance(d.Instance, nil, s, tt, false)
+		inst, err := marshalInstance(d.Instance, nil, s, tt, false, 0)
 		if err != nil {
 			return diagWire{}, err
 		}

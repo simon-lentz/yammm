@@ -1,8 +1,14 @@
 package snapshot
 
 import (
+	"context"
+	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // wireStructCases pins every wire struct's field order and tags —
@@ -117,5 +123,93 @@ func TestWireStructs_EveryStructIsPinned(t *testing.T) {
 		if !seen[name] {
 			t.Errorf("field-order row %s pins a struct no document root reaches — stale row or missing root", name)
 		}
+	}
+}
+
+// deepSchema composes without a natural floor, so a tree can exceed the
+// reader's nesting limit.
+const deepSchema = `schema "deep"
+
+type Trunk {
+	id String primary
+	*-> KIDS (many) Node
+}
+
+part type Node {
+	id String primary
+	*-> KIDS (many) Node
+}
+`
+
+// nestedParts builds a chain of composed Node parts depth levels deep.
+func nestedParts(nodeID schema.TypeID, depth int) []graph.InstanceParts {
+	if depth == 0 {
+		return nil
+	}
+	node := graph.InstanceParts{
+		TypeName:   "Node",
+		TypeID:     nodeID,
+		PrimaryKey: immutable.WrapKey([]any{fmt.Sprintf("n%d", depth)}),
+		Properties: immutable.WrapProperties(map[string]any{"id": fmt.Sprintf("n%d", depth)}),
+	}
+	if kids := nestedParts(nodeID, depth-1); kids != nil {
+		node.Composed = map[string][]graph.InstanceParts{"KIDS": kids}
+	}
+	return []graph.InstanceParts{node}
+}
+
+// TestMarshal_RefusesNestingBeyondTheReadersLimit pins the writer against the
+// reader's bound. The reader refuses composed nesting past maxComposedDepth and
+// nothing upstream bounds it, so an unbounded writer could produce a document
+// Load and Verify reject whole. Marshal refuses to write it instead. In-package
+// because the bound the two sides must share is unexported.
+func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, res := schema.LoadString(t.Context(), deepSchema, "deep.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load deep schema: %s", res)
+	}
+	trunk, ok := s.Type("Trunk")
+	if !ok {
+		t.Fatal("Trunk missing")
+	}
+	node, ok := s.Type("Node")
+	if !ok {
+		t.Fatal("Node missing")
+	}
+
+	build := func(chain int) *graph.Snapshot {
+		t.Helper()
+		root := graph.InstanceParts{
+			TypeName:   "Trunk",
+			TypeID:     trunk.ID(),
+			PrimaryKey: immutable.WrapKey([]any{"t1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "t1"}),
+			Composed:   map[string][]graph.InstanceParts{"KIDS": nestedParts(node.ID(), chain)},
+		}
+		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+			Types:     []schema.TypeID{trunk.ID(), node.ID()},
+			Instances: map[schema.TypeID][]graph.InstanceParts{trunk.ID(): {root}},
+		})
+		if res.HasErrors() {
+			t.Fatalf("assembling a %d-deep chain: %s", chain, res)
+		}
+		return built
+	}
+
+	// The control: the deepest tree the reader accepts must still marshal and
+	// load, or the writer's bound is off by one in the strict direction.
+	data, res := Marshal(ctx, build(maxComposedDepth))
+	if err := res.Err(); err != nil {
+		t.Fatalf("Marshal refused a tree at the reader's limit: %v", err)
+	}
+	if _, loadRes := Load(ctx, data, s); loadRes.HasErrors() {
+		t.Fatalf("Load refused a tree at its own limit: %v", loadRes)
+	}
+
+	// One level deeper is a document no read path accepts.
+	if _, res := Marshal(ctx, build(maxComposedDepth+1)); !res.HasErrors() {
+		t.Error("Marshal wrote a tree nested past the reader's limit")
 	}
 }

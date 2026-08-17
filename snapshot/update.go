@@ -86,15 +86,20 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //	}
 //	out, res := snapshot.UpdateMetadata(ctx, data, newMeta, opts...)
 //
-// UpdateMetadata trusts the caller-provided body bytes verbatim. It does
-// not re-verify the integrity hash of the input. Callers that need to
-// confirm the input is well-formed should pair UpdateMetadata with a
-// prior HeaderOnly call (cheap structural validation) or Verify (full
-// verification) on the same bytes.
+// UpdateMetadata copies the body bytes verbatim and does not validate what
+// they contain: it re-verifies no integrity hash, resolves no schema, and
+// reads no instance. It does read the types table, because that section is
+// decoded with the header, and it refuses a table that states one identity
+// twice — the output carries a freshly computed integrity hash, so accepting
+// a table no read path accepts would hand back a malformed document that
+// passes verification. Callers needing more than that pair UpdateMetadata
+// with a prior [HeaderOnly] call (cheap structural validation) or [Verify]
+// (full verification) on the same bytes.
 //
 // Failure modes and error codes:
 //
-//   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse.
+//   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse, or its
+//     types table states one identity on two rows.
 //   - [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] — the header states a version
 //     no read path accepts. The document is refused rather than
 //     relabelled; UpdateMetadata is a header rewrite, never a migration.

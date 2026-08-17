@@ -602,6 +602,38 @@ func TestWireProbe_DuplicateInstanceUnparseableProvenance(t *testing.T) {
 		"load["+loadSig+"] verify["+verifySig+"]")
 }
 
+// TestWireProbe_DuplicateIdentityRefusedWithoutASchema pins the table check on
+// the schema-less readers. UpdateMetadata recomputes the integrity hash over
+// bytes it copies, so accepting a table no read path accepts would return a
+// malformed document that passes verification.
+func TestWireProbe_DuplicateIdentityRefusedWithoutASchema(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+
+	data := rootDupTwoRowDoc(ctx, t, s)
+	table := wireTypeTable(t, data)
+	first := fmt.Sprintf(`{"schema_path":%q,"name":%q}`, table[0].SchemaPath, table[0].Name)
+	second := fmt.Sprintf(`{"schema_path":%q,"name":%q}`, table[1].SchemaPath, table[1].Name)
+	edited := spliceOnce(t, data, second, first)
+
+	// The schema-full surfaces refuse it, which is what makes silence on the
+	// schema-less ones a defect rather than a policy difference.
+	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]",
+		"load["+loadSig+"] verify["+verifySig+"]")
+
+	if _, res := snapshot.UpdateMetadata(ctx, edited, map[string]string{"k": "v"}); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("UpdateMetadata rewrote a document whose types table repeats an identity: %v", res)
+	}
+	if _, res := snapshot.HeaderOnly(ctx, edited); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("HeaderOnly accepted a types table that repeats an identity: %v", res)
+	}
+	if _, res := snapshot.Info(ctx, edited); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("Info accepted a types table that repeats an identity: %v", res)
+	}
+}
+
 // TestWireProbe_AbsentEdgeTargetType deletes an edge's target row. A
 // missing cross-reference is malformed and never binds to row 0.
 func TestWireProbe_AbsentEdgeTargetType(t *testing.T) {
