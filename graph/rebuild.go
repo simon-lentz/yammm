@@ -203,8 +203,15 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 			continue
 		}
 
+		// Key.String() renders a keyless key as "[]", but UnresolvedEdge.TargetKey
+		// is empty for the "absent" and "empty" reasons, which carry no target.
+		targetKey := ""
+		if up.TargetKey.Len() > 0 {
+			targetKey = up.TargetKey.String()
+		}
+
 		unresolvedEdges = append(unresolvedEdges,
-			newUnresolvedEdge(source, up.Relation, up.TargetType, up.TargetKey.String(), up.Required, up.Reason, up.Properties))
+			newUnresolvedEdge(source, up.Relation, up.TargetType, targetKey, up.Required, up.Reason, up.Properties))
 	}
 
 	if collector.HasErrors() {

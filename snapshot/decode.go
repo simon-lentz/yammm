@@ -487,11 +487,12 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 }
 
 // conflictInSlot reports whether the stated conflict address resolves in the
-// slot. A stated key selects among the occupants; a null key addresses the
-// slot alone, which is well-defined only for a sole occupant.
+// slot: a non-empty key selects among the occupants, an empty one addresses a
+// sole occupant. The arm is chosen by length, not nil-ness, because an empty
+// JSON array decodes non-nil and graph.resolveDuplicateConflict uses Key.Len().
 func (sd *streamDecoder) conflictInSlot(idx *docIndex, slot slotCoord, conflictRow int, rawKey []any, keyStr string) bool {
 	occupants := idx.slots[slot]
-	if rawKey != nil {
+	if len(rawKey) > 0 {
 		for _, occ := range occupants {
 			if occ.row == conflictRow && occ.key == keyStr {
 				return true
