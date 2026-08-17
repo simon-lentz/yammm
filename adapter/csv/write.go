@@ -85,7 +85,9 @@ func (a *Adapter) WriteTyped(
 // per type. CSV is inherently single-type-per-file, so the output is a map
 // from type name to CSV bytes.
 //
-// Returns [ErrNilSnapshot] if result is nil.
+// Returns [ErrNilSnapshot] if result is nil. When two types in the snapshot
+// render the same output name, returns an error naming both identities — a
+// name-keyed map cannot separate them.
 func (a *Adapter) MarshalSnapshot(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -93,6 +95,9 @@ func (a *Adapter) MarshalSnapshot(
 ) (map[string][]byte, error) {
 	if result == nil {
 		return nil, ErrNilSnapshot
+	}
+	if err := renderedNameCollision(result); err != nil {
+		return nil, err
 	}
 
 	output := make(map[string][]byte, len(result.Types()))
@@ -119,7 +124,10 @@ func (a *Adapter) MarshalSnapshot(
 // WriteSnapshot writes a graph snapshot to per-type writers. The writerFor
 // function is called once per type to obtain the destination writer.
 //
-// Returns [ErrNilSnapshot] if result is nil.
+// Returns [ErrNilSnapshot] if result is nil. When two types in the snapshot
+// render the same output name, returns an error naming both identities before
+// any writer is requested — two writers obtained under one name would target
+// one destination.
 func (a *Adapter) WriteSnapshot(
 	ctx context.Context,
 	writerFor func(typeName string) (io.Writer, error),
@@ -128,6 +136,9 @@ func (a *Adapter) WriteSnapshot(
 ) error {
 	if result == nil {
 		return ErrNilSnapshot
+	}
+	if err := renderedNameCollision(result); err != nil {
+		return err
 	}
 
 	for _, typeID := range result.Types() {
@@ -149,6 +160,23 @@ func (a *Adapter) WriteSnapshot(
 		}
 	}
 
+	return nil
+}
+
+// renderedNameCollision reports an error when two type identities in the
+// snapshot render one output name. The rendering is lossy where the snapshot
+// is not, so the writer refuses rather than silently merging the pair.
+func renderedNameCollision(snap *graph.Snapshot) error {
+	s := snap.Schema()
+	seen := make(map[string]schema.TypeID)
+	for _, id := range snap.Types() {
+		name := schema.TagForm(s, id)
+		if first, ok := seen[name]; ok {
+			return fmt.Errorf("csv adapter: type %s and type %s both render output name %q, so per-type CSV output cannot separate them",
+				first, id, name)
+		}
+		seen[name] = id
+	}
 	return nil
 }
 

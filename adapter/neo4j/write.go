@@ -228,7 +228,9 @@ func (a *Adapter) NodeQueryFor(
 // legitimately apply to a subset of a multi-type snapshot).
 //
 // Returns one [BatchNodeQuery] per type per chunk. Types with more instances
-// than the chunk size produce multiple queries.
+// than the chunk size produce multiple queries. When two types in the
+// snapshot render the same type name, returns an error naming both
+// identities — they would share one node shape and one label.
 func (a *Adapter) BatchNodeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -240,6 +242,9 @@ func (a *Adapter) BatchNodeQueries(
 		opt(&cfg)
 	}
 
+	if err := renderedNameCollision(result); err != nil {
+		return nil, err
+	}
 	if len(cfg.immutableKeys) > 0 {
 		if err := validateSnapshotImmutableKeys(cfg.immutableKeys, result); err != nil {
 			return nil, err
@@ -465,7 +470,9 @@ func (a *Adapter) EdgeQueriesFor(
 // BatchEdgeQueries generates UNWIND-batched MERGE queries for edges,
 // grouped by (sourceType, relationType, targetType) signature.
 //
-// Returns one [BatchEdgeQuery] per signature per chunk.
+// Returns one [BatchEdgeQuery] per signature per chunk. When two types in
+// the snapshot render the same type name, returns an error naming both
+// identities — the signature and shape lookups key on that name.
 func (a *Adapter) BatchEdgeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -475,6 +482,10 @@ func (a *Adapter) BatchEdgeQueries(
 	cfg := defaultWriteConfig()
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+
+	if err := renderedNameCollision(result); err != nil {
+		return nil, err
 	}
 
 	edges := result.Edges()
@@ -586,6 +597,23 @@ func (a *Adapter) BatchEdgeQueries(
 	}
 
 	return queries, nil
+}
+
+// renderedNameCollision reports an error when two type identities in the
+// snapshot render one type name. The rendering is lossy where the snapshot
+// is not, so the writer refuses rather than silently merging the pair.
+func renderedNameCollision(snap *graph.Snapshot) error {
+	s := snap.Schema()
+	seen := make(map[string]schema.TypeID)
+	for _, id := range snap.Types() {
+		name := schema.TagForm(s, id)
+		if first, ok := seen[name]; ok {
+			return fmt.Errorf("neo4j adapter: type %s and type %s both render type name %q, so they would share one node shape and label",
+				first, id, name)
+		}
+		seen[name] = id
+	}
+	return nil
 }
 
 // propsToParamMap converts instance properties to a Neo4j-driver-compatible

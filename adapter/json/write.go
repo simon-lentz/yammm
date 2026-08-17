@@ -53,12 +53,17 @@ func WithDiagnostics(include bool) WriteOption {
 // references for resolved associations. Use WithDiagnostics(true) to include
 // unresolved edges and duplicates in a "$diagnostics" section.
 //
-// Returns ErrNilResult if result is nil.
+// Returns ErrNilResult if result is nil. When two types in the snapshot
+// render the same output name, returns an error naming both identities — a
+// name-keyed object cannot separate them.
 //
 //nolint:revive // ctx reserved for future use (cancellation, tracing)
 func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
 	if result == nil {
 		return nil, ErrNilResult
+	}
+	if err := renderedNameCollision(result); err != nil {
+		return nil, err
 	}
 
 	cfg := &writeConfig{}
@@ -231,6 +236,23 @@ func serializeValidInstance(inst *instance.ValidInstance, schemaType *schema.Typ
 	}
 
 	return obj
+}
+
+// renderedNameCollision reports an error when two type identities in the
+// snapshot render one output name. The rendering is lossy where the snapshot
+// is not, so the writer refuses rather than silently merging the pair.
+func renderedNameCollision(snap *graph.Snapshot) error {
+	s := snap.Schema()
+	seen := make(map[string]schema.TypeID)
+	for _, id := range snap.Types() {
+		name := schema.TagForm(s, id)
+		if first, ok := seen[name]; ok {
+			return fmt.Errorf("json adapter: type %s and type %s both render object key %q, so the output object cannot separate them",
+				first, id, name)
+		}
+		seen[name] = id
+	}
+	return nil
 }
 
 // buildOutput constructs the JSON-serializable output map from a graph snapshot.

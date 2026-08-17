@@ -984,6 +984,8 @@ n, err := adapter.WriteObject(ctx, w, snap, writeOpts...)
 data, err := adapter.MarshalInstance(ctx, inst, schemaType, writeOpts...)
 ```
 
+The object output is keyed by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — `MarshalObject` and `WriteObject` return an error naming both identities instead of merging the pair under one key.
+
 ### Write Options
 
 | Option | Description |
@@ -1086,6 +1088,8 @@ Write query generation supports two operational modes:
 
 - **Graph mode:** `BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes
 - **Instance mode:** `NodeQueryFor` accepts any `NodeSource` and `EdgeQueryFor`/`EdgeQueriesFor` generate edge queries from validated instance or edge data
+
+Both graph-mode entry points refuse a snapshot in which two types render the same type name — they would share one node shape and one label — returning an error that names both identities and the rendered name.
 
 `NodeQueryFor` accepts a `NodeSource` interface rather than a concrete type:
 
@@ -1363,6 +1367,8 @@ byType, err := adapter.MarshalSnapshot(ctx, snap, writeOpts...)
 // Stream a snapshot (writerFor provides a writer per type)
 err := adapter.WriteSnapshot(ctx, writerFor, snap, writeOpts...)
 ```
+
+Both snapshot writers key their output by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — they return an error naming both identities instead of merging the pair, and `WriteSnapshot` requests no writer before that check passes.
 
 ### Write Options
 
