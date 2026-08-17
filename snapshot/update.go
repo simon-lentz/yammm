@@ -314,9 +314,8 @@ func UpdateMetadataOrReMarshal(
 	return reMarshaled, c.Result()
 }
 
-// detectIndent sniffs the input's indentation unit using the pinned
-// algorithm from the api_enhancements plan. Matches Marshal's emission
-// shape: assembleCompact writes `{"yammm_snapshot":...` (q == 1);
+// detectIndent sniffs the input's indentation unit. Matches Marshal's
+// emission shape: assembleCompact writes `{"yammm_snapshot":...` (q == 1);
 // assembleIndented writes `{\n<indent>"yammm_snapshot": ...` (data[1]
 // == '\n' and indent == data[2:q]).
 func detectIndent(data []byte) string {

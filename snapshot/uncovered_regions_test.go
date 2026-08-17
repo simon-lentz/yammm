@@ -70,7 +70,7 @@ func mustProvenance(t *testing.T, name, p string) *location.Provenance {
 // from parts because that is the only entry point that sets provenance
 // directly.
 //
-// Mutation: w.Provenance = nil in marshalInstanceV3.
+// Mutation: w.Provenance = nil in marshalInstance.
 func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -143,7 +143,7 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 
 // A composed child's own composed children must survive the round trip.
 //
-// Mutation: cw.Composed = nil after the recursive marshalInstanceV3 call.
+// Mutation: cw.Composed = nil after the recursive marshalInstance call.
 func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

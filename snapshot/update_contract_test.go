@@ -17,7 +17,7 @@ import (
 // the header validation it is written for.
 func headerDoc(s *schema.Schema, version int, featuresJSON string) []byte {
 	return fmt.Appendf(nil,
-		`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":%s},"types":[{"schema_path":"test://test.yammm","name":"Person","tag":"Person"}],"instances":[[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
+		`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":%s},"types":[{"schema_path":"test://test.yammm","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
 		version, schema.StructuralHash(s), featuresJSON)
 }
 

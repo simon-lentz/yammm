@@ -35,11 +35,11 @@ func BuildSnapshot(tb testing.TB, s *schema.Schema, instances ...*instance.Valid
 // structural equivalence via [DiffSnapshots]. Fails the test with a
 // (-want +got) diff on mismatch.
 //
-// Not valid for a snapshot carrying pre-v0.12 shape, because the round trip
-// repairs it while [DiffSnapshots] compares exactly: a whole float narrowed to
-// int64 by an older writer heals to float64, and a composed child that lost its
-// type identity to the older decoder regains it. Round-trip such a snapshot
-// once first; both repairs are idempotent, so every later round trip holds.
+// Not valid for a snapshot whose whole floats are stored as int64, because the
+// round trip heals them to float64 while [DiffSnapshots] compares exactly.
+// Round-trip such a snapshot once first; healing is idempotent, so every later
+// round trip holds. The composed-child identity repair this also warned about
+// is gone with the reader that needed it.
 func AssertRoundTrip(tb testing.TB, snap *graph.Snapshot, s *schema.Schema, opts ...snapshot.Option) {
 	tb.Helper()
 	ctx := context.Background()
