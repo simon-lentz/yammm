@@ -95,6 +95,9 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 // Failure modes and error codes:
 //
 //   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse.
+//   - [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] — the header states a version
+//     no read path accepts. The document is refused rather than
+//     relabelled; UpdateMetadata is a header rewrite, never a migration.
 //   - [diag.E_UPDATE_METADATA_BODY_OFFSET] — the header parsed cleanly
 //     but the body-boundary tracking could not resolve a valid byte
 //     range for the body. This indicates the input does not match the

@@ -452,7 +452,7 @@ finRes, err := ba.Finalize(ctx)
 
 New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK`, and `Finalize`'s check covers the union — a required association imported from the seed and still unresolved fails the batch with `E_UNRESOLVED_REQUIRED`. `Count()` reflects only records added through the assembler (seeded instances are not counted), and construction diagnostics are not carried over from the seed (`.ys`-loaded snapshots carry none by design; `Duplicates` and `Unresolved` are the persistent structural records, and both import). The seed snapshot must originate from the same schema — taken from a `Graph` bound to it, or loaded via `snapshot.Load` against it, which verifies structural compatibility. Every other contract — lifecycle, finalize barrier, validator-access modes, `FinalizeResult` — is identical to `NewBatchAssembler`.
 
-**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `instance/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included), provenance-presence-aware, and exact for every numeric property, dynamic type included: schema-aware float emission keeps `KindFloat` values `float64` across a marshal/load round trip, so an `int64`/`float64` mismatch is a real defect, not a wire artifact.
+**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `instance/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict, parent and relation coordinates), provenance-presence-aware, and exact for every numeric property, dynamic type included: schema-aware float emission keeps `KindFloat` values `float64` across a marshal/load round trip, so an `int64`/`float64` mismatch is a real defect, not a wire artifact. One deliberate exception: a `float32` compares equal to the `float64` its 32-bit shortest wire form parses to, because `Load` materializes dynamic numerics as `int64` and `float64` only and the wire carries value fidelity, not width.
 
 ### Seeding from a Snapshot
 
@@ -483,7 +483,9 @@ snap, result := graph.RebuildSnapshot(schema, parts)
 
 The `SnapshotParts` struct holds fully-resolved instances, edges, duplicates, and unresolved records using value types (`InstanceParts`, `EdgeParts`, `DuplicateParts`, `UnresolvedParts`). Pointer-based cross-references are resolved internally.
 
-`UnresolvedParts.Properties` carries DSL-declared edge property values from the forward reference and is populated only when `Reason` is `"target_missing"` — `"absent"` and `"empty"` describe a missing/empty reference that never had a target. Wire-format v2 and later persist the values through Marshal/Load, symmetric with resolved `Edge.Properties`. See the snapshot package's [Wire Format Versions](#wire-format-versions) subsection for the current accept range.
+`UnresolvedParts.Properties` carries DSL-declared edge property values from the forward reference and is populated only when `Reason` is `"target_missing"` — `"absent"` and `"empty"` describe a missing/empty reference that never had a target. The wire persists the values through Marshal/Load, symmetric with resolved `Edge.Properties`. See the snapshot package's [Wire Format Versions](#wire-format-versions) subsection for the current accept range.
+
+`DuplicateParts` states the conflict's address (`ConflictType`, `ConflictKey`) beside the rejected instance's own identity, plus `ParentType` / `ParentKey` / `Relation` for a composed-child duplicate: a root conflict resolves through the instance index, a composed conflict through the parent's relation slot, and an empty stated key addresses the slot's sole occupant. `RebuildSnapshot` rejects a zero `schema.TypeID` at any parts position with a Fatal `E_INTERNAL` naming the position and key — identity is total at this boundary.
 
 Most users should construct snapshots via `Graph.Add` + `Graph.Snapshot`. `RebuildSnapshot` exists for the `snapshot.Load` deserialization path and testing.
 
@@ -568,11 +570,11 @@ The `snapshot` package serializes and deserializes `graph.Snapshot` values to an
 
 ### File Format
 
-The `.ys` format is JSON-based and preserves full structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip.
+The `.ys` format is JSON-based and preserves structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip. One numeric qualification: the wire carries value fidelity, not width — `Load` materializes dynamic numeric values as `int64` and `float64` only, so a `float32` property returns as the `float64` its 32-bit shortest wire form parses to (converting it back to `float32` returns the original). A caller-assembled snapshot the writer cannot serialize (for example, a zero type identity at any position) returns nil bytes with a Fatal `E_INTERNAL`; snapshots built through `graph.Graph` or `Load` never trigger that path.
 
 The format includes:
 
-- A **version** field for format evolution (current value: `2`, unchanged since yammm v0.3.0; see [Wire Format Versions](#wire-format-versions))
+- A **version** field for format evolution (current value: `3` since yammm v0.12.0, the only readable version; see [Wire Format Versions](#wire-format-versions))
 - A **schema structural hash** for compatibility verification (see [Schema Identity](#schema-identity))
 - An **integrity hash** (SHA-256 over the document body) for corruption detection
 - A **features array** for forward compatibility
@@ -601,7 +603,7 @@ header, result := snapshot.HeaderOnly(ctx, data)
 
 // Streaming sibling: read header metadata from any io.Reader without
 // materializing the full document into memory. Reads at most
-// snapshot.MaxHeaderSize (64 KiB) bytes from the reader.
+// snapshot.MaxHeaderSize (16 MiB) bytes from the reader.
 header, result := snapshot.HeaderOnlyRead(ctx, r)
 
 // Write .ys bytes atomically to disk — tmp+fsync+rename. Consumers
@@ -644,9 +646,10 @@ type SnapshotInfo struct {
     CreatedAt           string            // RFC 3339 or empty
     Metadata            map[string]string // user-provided annotations, nil if absent
 
-    // Content summary.
-    Types           []string
-    InstanceCounts  map[string]int // type name -> count
+    // Content summary. Types is the whole denotation set; InstanceCounts
+    // holds one entry per type the snapshot itself holds.
+    Types           []TypeRef
+    InstanceCounts  map[TypeRef]int
     TotalInstances  int
     TotalEdges      int
     DuplicateCount  int
@@ -657,6 +660,8 @@ type SnapshotInfo struct {
     IntegrityStatus string // "ok", "mismatch", or "skipped"
 }
 ```
+
+`snapshot.TypeRef{SchemaPath, Name string}` is the schema-less display surface: `Info`, `HeaderOnly` and `HeaderOnlyRead` run without an import closure to resolve against, so each type is reported as the identity the document states, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `path#name`. The `#` separator is deliberate beside `schema.TypeID.String()`'s `path:name` form: TypeID's rendering is byte-order-bearing (the wire's types-table sort rides it), so the display form stays visibly distinct rather than moving wire bytes to unify the two.
 
 ### Header-Only Reads
 
@@ -675,8 +680,8 @@ type HeaderInfo struct {
     CreatedAt           string
     Metadata            map[string]string
 
-    // Types array (adjacent to the header; read in the same streaming pass).
-    Types []string
+    // Types table (adjacent to the header; read in the same streaming pass).
+    Types []TypeRef
 
     // File metadata. Populated by HeaderOnly (len(data)); zero value
     // from HeaderOnlyRead (not available from an io.Reader).
@@ -684,7 +689,7 @@ type HeaderInfo struct {
 }
 ```
 
-`HeaderOnlyRead` accepts any `io.Reader` and reads at most `snapshot.MaxHeaderSize = 64 * 1024` bytes. Larger headers are rejected with a Fatal-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. Reader errors (`io.EOF`, `io.ErrUnexpectedEOF`, or arbitrary I/O errors) during the header read surface uniformly as `E_SNAPSHOT_MALFORMED` rather than as a bare error return. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read.
+`HeaderOnlyRead` accepts any `io.Reader` and reads at most `snapshot.MaxHeaderSize = 16 * 1024 * 1024` bytes (16 MiB — headroom for consumers that carry large work-set arrays in header metadata). Larger headers are rejected with an Error-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. Reader errors (`io.EOF`, `io.ErrUnexpectedEOF`, or arbitrary I/O errors) during the header read surface uniformly as `E_SNAPSHOT_MALFORMED` rather than as a bare error return. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read.
 
 #### SchemaHashMatches — dispatch-site cross-check
 
@@ -807,6 +812,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 **Failure modes.** The primitive returns structured diagnostics with stable codes:
 
 - `E_SNAPSHOT_MALFORMED` — the input header does not parse (truncated JSON, missing required fields, wrong first key). Same code `HeaderOnly` / `HeaderOnlyRead` emit for equivalent conditions.
+- `E_SNAPSHOT_UNSUPPORTED_VERSION` — the header states a version no read path accepts (v1 and v2 included; v3 is the only readable version). The document is refused rather than relabelled — `UpdateMetadata` is a header rewrite, never a migration — and `UpdateMetadataOrReMarshal`'s `Load` fallback refuses it the same way.
 - `E_UPDATE_METADATA_BODY_OFFSET` — the header parsed cleanly but the body-boundary tracking resolved to an unexpected byte pattern, indicating the input does not match the shape `Marshal` produces. Byte-identical recovery via the fast path is not possible; `UpdateMetadataOrReMarshal` falls back to `Load + Marshal` automatically.
 - `E_CONTEXT_CANCELLED` — ctx was cancelled at entry. Propagates as cancellation without re-attempting via the slow path.
 
@@ -816,7 +822,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 ### Wire Format Versions
 
-The `.ys` wire format uses an integer version field in the header for forward evolution, and this package reads one version. yammm v0.12.0 introduced v3 — the `types` section is a table of full type identities (`{schema_path, name, tag}`) that every other position references by row index, with `instances` an array parallel to it — and retired every earlier version. v2 named types where it needed to denote them, which no name can do for a transitively imported type or for two same-named types in different schemas.
+The `.ys` wire format uses an integer version field in the header for forward evolution, and this package reads one version. yammm v0.12.0 introduced v3 — the `types` section is a table of `{schema_path, name}` identity rows, `instances` is a list of `{type, items}` groups keyed by table row, and every other type reference is a nullable row index that never defaults — and retired every earlier version. v2 named types where it needed to denote them, which no name can do for a transitively imported type or for two same-named types in different schemas.
 
 `snapshot.MinReadableVersion` (exported constant, value `3` since yammm v0.12.0) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `3`) is the version emitted on every write. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Error-severity `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported version named in the message. **v1 and v2 documents are no longer read** — v3 is the only readable version. An older reader (yammm v0.11.0 and earlier) rejects a v3 document the same way, so an operator running an older binary against a v0.12.0-written `.ys` sees a structured diagnostic rather than a misread types section.
 
