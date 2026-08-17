@@ -615,11 +615,14 @@ func parseTargetKey(keyStr string) []any {
 	if keyStr == "" || keyStr == "[]" {
 		return nil
 	}
+	// UseNumber, so an integer component beyond 2^53 is not rewritten by a
+	// float64 round trip on its way to the wire.
+	dec := json.NewDecoder(strings.NewReader(keyStr))
+	dec.UseNumber()
 	var result []any
-	if err := json.Unmarshal([]byte(keyStr), &result); err != nil {
+	if err := dec.Decode(&result); err != nil {
 		return nil
 	}
-	// Normalize json.Number values.
 	for i, v := range result {
 		result[i] = immutable.NormalizeValue(v)
 	}

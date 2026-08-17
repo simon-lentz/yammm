@@ -136,20 +136,9 @@ func lookupType(s *schema.Schema, id schema.TypeID) (*schema.Type, bool) {
 	if s == nil {
 		return nil, false
 	}
-
-	// Check local types
-	if id.SchemaPath() == s.SourceID() {
-		return s.Type(id.Name())
-	}
-
-	// Check imported schemas
-	for imp := range s.Imports() {
-		if imp.Schema() != nil && imp.Schema().SourceID() == id.SchemaPath() {
-			return imp.Schema().Type(id.Name())
-		}
-	}
-
-	return nil, false
+	// TypeByID indexes the whole import closure. Walking direct imports found
+	// no transitively imported type, which the v3 wire preserves through Load.
+	return s.TypeByID(id)
 }
 
 // serializeInstance converts a graph.Instance to a JSON-serializable map.

@@ -91,3 +91,31 @@ func TestAcceptVersion_RangeMessageFormats(t *testing.T) {
 	require.NotContains(t, iss.Message(), "[2, 2]",
 		"singular-bound message should not use brackets")
 }
+
+// TestDistinctFatalCodes_CollectsBothSeverities pins both loops of the
+// fallback's triggering-code list. The Fatal loop is driven end to end by the
+// body-offset fallback; the Error loop is not, because every Error-severity
+// refusal UpdateMetadata raises is one Load raises too, so the fallback fails
+// and the codes never reach a warning. The branch is exercised here directly
+// rather than left unpinned.
+func TestDistinctFatalCodes_CollectsBothSeverities(t *testing.T) {
+	c := diag.NewCollector(0)
+	c.Collect(diag.NewIssue(diag.Fatal, diag.E_UPDATE_METADATA_BODY_OFFSET, "fatal one").Build())
+	c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "error one").Build())
+	c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "error again").Build())
+	c.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_PATH_FALLBACK, "warning, excluded").Build())
+
+	got := distinctFatalCodes(c.Result())
+	want := []string{
+		diag.E_SNAPSHOT_MALFORMED.String(),
+		diag.E_UPDATE_METADATA_BODY_OFFSET.String(),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("distinctFatalCodes = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("code %d = %q, want %q (sorted, deduplicated, warnings excluded)", i, got[i], want[i])
+		}
+	}
+}

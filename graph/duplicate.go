@@ -42,9 +42,9 @@ type Duplicate struct {
 	// with details about the conflict.
 	//
 	// For snapshots loaded from persisted .ys files, this field is zero-valued
-	// because construction diagnostics are transient and not persisted. Use
-	// [Duplicate.HasDiagnostic] to guard access to this field in code that may
-	// operate on both constructed and loaded snapshots.
+	// because construction diagnostics are transient and not persisted. Code
+	// that runs on both constructed and loaded snapshots guards on
+	// [diag.Issue.IsZero].
 	Diagnostic diag.Issue
 }
 

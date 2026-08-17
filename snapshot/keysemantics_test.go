@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -294,5 +295,70 @@ func TestLoad_StatedConflictKeySelectsAmongSiblings(t *testing.T) {
 	}
 	if got := conflict.PrimaryKey().String(); got != `["c1"]` {
 		t.Errorf("conflict resolved to %s, want [\"c1\"] — the stated key selected the wrong sibling", got)
+	}
+}
+
+// bigKeySchema keys on a String, because no schema may key on an Integer —
+// a numeric key component reaches the writer only through caller-assembled
+// parts.
+const bigKeySchema = `schema "bigkey"
+
+type Ref {
+	id String primary
+	--> POINTS (_) Ref { w Float }
+}
+`
+
+// TestMarshal_KeepsAnIntegerTargetKeyBeyondExactFloat pins the unresolved
+// record's target key against a float64 round trip. The key arrives as its
+// canonical string form and is parsed back for the wire; parsing it without
+// UseNumber rewrote any component past 2^53 to a neighbouring value, silently.
+func TestMarshal_KeepsAnIntegerTargetKeyBeyondExactFloat(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, res := schema.LoadString(t.Context(), bigKeySchema, "bigkey.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load bigkey schema: %s", res)
+	}
+	typ, ok := s.Type("Ref")
+	if !ok {
+		t.Fatal("Ref missing")
+	}
+	id := typ.ID()
+
+	const beyondExact = int64(1)<<53 + 1
+	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types: []schema.TypeID{id},
+		Instances: map[schema.TypeID][]graph.InstanceParts{id: {{
+			TypeName:   "Ref",
+			TypeID:     id,
+			PrimaryKey: immutable.WrapKey([]any{"r1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
+		}}},
+		Unresolved: []graph.UnresolvedParts{{
+			SourceType: id,
+			SourceKey:  immutable.WrapKey([]any{"r1"}),
+			Relation:   "POINTS",
+			TargetType: id,
+			TargetKey:  immutable.WrapKey([]any{beyondExact}),
+			Reason:     "target_missing",
+			Required:   true,
+		}},
+	})
+	if res.HasErrors() {
+		t.Fatalf("assembling: %s", res)
+	}
+	// The fixture is only meaningful while the value is outside float64's
+	// exactly-representable integer range.
+	if int64(float64(beyondExact)) == beyondExact {
+		t.Fatal("fixture is vacuous: the value survives a float64 round trip")
+	}
+
+	data, mres := snapshot.Marshal(ctx, built)
+	if err := mres.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(data, []byte("9007199254740993")) {
+		t.Errorf("the target key did not survive the writer:\n%s", data)
 	}
 }

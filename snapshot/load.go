@@ -24,10 +24,10 @@ import (
 // assumed to contain valid data. However, Load performs structural
 // validation of the .ys format itself.
 //
-// Dynamic numeric values materialize as int64 and float64 only: the wire
-// carries no width, so a float32 stored at write time returns as float64
-// carrying the same value exactly — converting it back to float32 returns
-// the original.
+// Dynamic numeric values materialize as int64 or float64: the wire carries no
+// width, so a float32 stored at write time returns as float64 carrying the
+// same value exactly — converting it back to float32 returns the original. A
+// literal no finite float64 can hold returns as a json.Number, unconverted.
 //
 // The returned Snapshot's Schema() method returns the schema provided to
 // Load, not the schema used at original construction time.

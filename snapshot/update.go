@@ -195,11 +195,9 @@ func UpdateMetadata(
 		createdAt = cfg.createdAt.UTC().Format(time.RFC3339)
 	}
 
-	// Normalize features: Marshal always emits a non-nil array.
+	// Non-nil: decodeHeader reports a nil features field and the gate above
+	// returns on it, so no document reaching here carries one.
 	features := sd.header.Features
-	if features == nil {
-		features = []string{}
-	}
 
 	// Normalize newMeta: empty maps round-trip as omitempty (no key emitted),
 	// matching WithMetadata's shallow-copy-or-nil normalization at
