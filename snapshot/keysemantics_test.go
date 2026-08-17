@@ -177,6 +177,50 @@ func TestLoad_EmptyConflictKeyRefusesUnaddressableSlot(t *testing.T) {
 	})
 }
 
+// TestInfo_ReportsAnUnresolvableInstancesEntry pins that Info reports a short
+// count rather than presenting one as complete. Info resolves no schema, so it
+// cannot run Load's validation — but an instances entry naming no table row is
+// a structural defect Info can see, and skipping it silently produced a clean
+// summary for a document Load and Verify refuse.
+func TestInfo_ReportsAnUnresolvableInstancesEntry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := testSchemaWithComposition(t)
+	data := v3Doc(t)
+
+	rows := len(wireTypeTable(t, data))
+	edited := bytes.Replace(data,
+		[]byte(fmt.Sprintf(`{"type":%d,"items":`, childRow(t, data, "Parent"))),
+		[]byte(fmt.Sprintf(`{"type":%d,"items":`, rows+3)), 1)
+	if bytes.Equal(edited, data) {
+		t.Fatalf("fixture shape changed; no Parent instances entry in:\n%s", data)
+	}
+
+	// The clean document is the control: Info counts it and reports nothing.
+	clean, cleanRes := snapshot.Info(ctx, data)
+	if cleanRes.HasErrors() {
+		t.Fatalf("Info reported the unedited document: %v", cleanRes)
+	}
+	if clean.TotalInstances == 0 {
+		t.Fatal("fixture is vacuous: Info counts no instances in the unedited document")
+	}
+
+	// Load refuses the edited document, which is what makes a clean Info a defect.
+	if _, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck()); !loadRes.HasErrors() {
+		t.Fatal("precondition: Load must refuse an out-of-range instances row")
+	}
+
+	info, infoRes := snapshot.Info(ctx, edited)
+	if !hasCode(infoRes, diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("Info summarized an out-of-range instances row without %s: %v",
+			diag.E_SNAPSHOT_MALFORMED, infoRes)
+	}
+	if info != nil && info.TotalInstances >= clean.TotalInstances {
+		t.Errorf("Info counted %d instances for a document missing a group, want fewer than %d",
+			info.TotalInstances, clean.TotalInstances)
+	}
+}
+
 // TestLoadVerify_EmptyConflictKeyAgreeWithTheGraph pins the reader against
 // graph.resolveDuplicateConflict on the one input where they used to disagree.
 // An empty conflict key addresses the slot alone, which resolves when the slot

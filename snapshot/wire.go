@@ -17,9 +17,9 @@ package snapshot
 //
 // TOP-LEVEL KEY ORDER AND BODY-SUFFIX STABILITY CONTRACT.
 //
-// The .ys wire format commits to two complementary structural contracts
-// beyond the per-struct field order above. Both are load-bearing for
-// UpdateMetadata's byte-surgery primitive; relaxing either silently
+// The .ys wire format commits to three structural contracts beyond the
+// per-struct field order above. All three are load-bearing for
+// UpdateMetadata's byte-surgery primitive; relaxing any one silently
 // breaks every existing and future metadata-rewrite call site.
 //
 //  1. Field-order contract (established pre-v0.3.0). The top-level

@@ -67,8 +67,8 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // Info reads summary metadata and statistics from a .ys file without
 // loading the schema or materializing instance objects.
 //
-// Info uses the shared streamDecoder infrastructure. Memory usage is
-// constant regardless of snapshot size.
+// Info uses the shared streamDecoder infrastructure. It holds the decoded
+// instances section in memory, so peak usage scales with document size.
 //
 // Info verifies the integrity hash and reports the result in IntegrityStatus.
 // Schema hash cannot be verified (no schema available).
@@ -80,7 +80,15 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // instance body, making its cost proportional to the header size rather
 // than the full file.
 //
-// Returns (nil, result) with Error-severity diagnostics for malformed input.
+// Returns (nil, result) when the document cannot be summarized at all: an
+// unreadable header, an unsupported version, or an undecodable section. A
+// document that decodes but fails a check returns a summary beside
+// Error-severity diagnostics — an integrity mismatch reports
+// IntegrityStatus "mismatch", and an instances entry naming no table row is
+// reported and left out of the counts. Read the result before the summary.
+//
+// Info validates no more than it must to count. It resolves no schema, so a
+// document Info summarizes cleanly can still fail [Load] or [Verify].
 //
 // Info follows the library's standard (T, diag.Result) return pattern.
 func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {

@@ -187,5 +187,5 @@
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, schema, instance, diag, location, immutable
+//	snapshot  ──imports──▶  graph, schema, diag, location, location/path, immutable
 package snapshot

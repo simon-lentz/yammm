@@ -661,16 +661,19 @@ func (sd *streamDecoder) instanceParts(row int, inst instWire) graph.InstancePar
 }
 
 // countInstances token-counts the instances section for Info, keyed by each
-// group row's identity so two same-named types never merge.
+// group row's identity so two same-named types never merge. An unresolvable
+// row draws the same diagnostic the pipeline raises for it, so Info reports a
+// short count rather than presenting one as complete.
 func (sd *streamDecoder) countInstances(groups []instanceGroupWire) (map[TypeRef]int, int) {
 	counts := make(map[TypeRef]int, len(groups))
 	totalEdges := 0
 
-	for _, g := range groups {
-		if g.Type == nil || *g.Type < 0 || *g.Type >= len(sd.typeTable) {
+	for gi, g := range groups {
+		row, ok := sd.requireRow(g.Type, fmt.Sprintf("instances entry %d", gi))
+		if !ok {
 			continue
 		}
-		counts[TypeRef(sd.typeTable[*g.Type])] += len(g.Items)
+		counts[TypeRef(sd.typeTable[row])] += len(g.Items)
 		for _, inst := range g.Items {
 			for _, targets := range inst.Edges {
 				totalEdges += len(targets)

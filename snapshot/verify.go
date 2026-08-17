@@ -11,10 +11,10 @@ import (
 // file without materializing a Snapshot. Returns diag.Result with the same
 // diagnostic codes as Load.
 //
-// Verify uses the same validation logic as Load but discards instance data
-// after validation, keeping only an instance existence index and edge
-// references. Memory usage is O(keys + edge references) — typically less
-// than 5% of file size for property-heavy snapshots.
+// Verify runs Load's pipeline and stops before materialization, so it builds
+// no Snapshot and no instance objects. It does decode the instances section
+// first, holding every instance's properties, so peak memory scales with
+// document size rather than with key count.
 //
 // Panics if s is nil (programming error).
 func Verify(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption) diag.Result {
