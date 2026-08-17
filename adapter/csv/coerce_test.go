@@ -40,11 +40,6 @@ func TestCoerceStringValue(t *testing.T) {
 		{name: "timestamp nano", input: "2024-01-01T00:00:00.123456789Z", c: schema.NewTimestampConstraint(), want: "2024-01-01T00:00:00.123456789Z"},
 		{name: "list of strings", input: "a|b|c", c: schema.NewListConstraint(schema.NewStringConstraint()), want: []any{"a", "b", "c"}},
 		{name: "list of integers", input: "1|2|3", c: schema.NewListConstraint(schema.NewIntegerConstraint()), want: []any{int64(1), int64(2), int64(3)}},
-		// Empty string is not the configured null value, so it is an empty list.
-		{
-			name: "empty list", opts: []Option{WithNullValue("NULL")}, input: "",
-			c: schema.NewListConstraint(schema.NewStringConstraint()), want: []any{},
-		},
 	}
 
 	for _, tt := range tests {

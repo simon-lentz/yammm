@@ -158,11 +158,11 @@
 // a link engine) that want the template without the surrounding
 // param-and-chunk plumbing:
 //
-//   - [BuildNodeMergeQuery] / [BuildBatchNodeMergeQuery] — node MERGE
+//   - [buildNodeMergeQuery] / [buildBatchNodeMergeQuery] — node MERGE
 //     templates; the trailing [KeyMutability] parameter ([MutableKeys]
 //     or [ImmutableKeys]) selects between a single `SET` clause and
 //     the `ON CREATE SET` / `ON MATCH SET` split.
-//   - [BuildRelationshipMergeQuery] / [BuildBatchRelationshipMergeQuery]
+//   - [buildRelationshipMergeQuery] / [buildBatchRelationshipMergeQuery]
 //     — relationship MERGE templates. Both variants always end with
 //     `RETURN count(*) AS matched_rows` so consumers implementing
 //     silent-failure detection have a stable column to sum across

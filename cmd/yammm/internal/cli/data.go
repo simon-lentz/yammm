@@ -45,12 +45,7 @@ func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.R
 
 	sourceID := location.NewSourceID("file://" + path)
 
-	adapter, err := adapterjson.New(nil)
-	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("create json adapter: %w", err)
-	}
-
-	parsed, result := adapter.ParseObject(ctx, sourceID, data)
+	parsed, result := adapterjson.New().ParseObject(ctx, sourceID, data)
 	return parsed, result, nil
 }
 
@@ -69,9 +64,9 @@ func LoadAndParseCSV(ctx context.Context, path string, typeName string, typeColu
 	defer f.Close()
 
 	sourceID := location.NewSourceID("file://" + path)
-	adapter := csv.New()
 
 	if typeColumn != "" {
+		adapter := csv.New(csv.WithTypeColumn(typeColumn))
 		parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, f, func(name string) *schema.Type {
 			t, _ := s.Type(name)
 			return t
@@ -80,7 +75,7 @@ func LoadAndParseCSV(ctx context.Context, path string, typeName string, typeColu
 	}
 
 	schemaType, _ := s.Type(typeName)
-	raws, result := adapter.ParseTyped(ctx, sourceID, typeName, f, schemaType)
+	raws, result := csv.New().ParseTyped(ctx, sourceID, typeName, f, schemaType)
 	return map[string][]instance.RawInstance{typeName: raws}, result, nil
 }
 

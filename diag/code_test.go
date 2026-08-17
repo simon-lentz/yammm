@@ -13,9 +13,7 @@ func TestCode_String(t *testing.T) {
 		code Code
 		want string
 	}{
-		{E_LIMIT_REACHED, "E_LIMIT_REACHED"},
 		{E_INTERNAL, "E_INTERNAL"},
-		{E_TYPE_COLLISION, "E_TYPE_COLLISION"},
 		{E_SYNTAX, "E_SYNTAX"},
 		{E_IMPORT_CYCLE, "E_IMPORT_CYCLE"},
 		{E_TYPE_MISMATCH, "E_TYPE_MISMATCH"},
@@ -37,9 +35,7 @@ func TestCode_Category(t *testing.T) {
 		code Code
 		want CodeCategory
 	}{
-		{E_LIMIT_REACHED, CategorySentinel},
 		{E_INTERNAL, CategorySentinel},
-		{E_TYPE_COLLISION, CategorySchema},
 		{E_INHERIT_CYCLE, CategorySchema},
 		{E_SYNTAX, CategorySyntax},
 		{E_IMPORT_RESOLVE, CategoryImport},
@@ -67,8 +63,8 @@ func TestCode_IsZero(t *testing.T) {
 		want bool
 	}{
 		{"zero value", Code{}, true},
-		{"valid code", E_TYPE_COLLISION, false},
-		{"sentinel code", E_LIMIT_REACHED, false},
+		{"valid code", E_DUPLICATE_TYPE, false},
+		{"sentinel code", E_INTERNAL, false},
 	}
 
 	for _, tt := range tests {
@@ -165,12 +161,12 @@ func TestCodesByCategory(t *testing.T) {
 		{
 			cat:         CategorySentinel,
 			minExpected: 2,
-			mustContain: []Code{E_LIMIT_REACHED, E_INTERNAL},
+			mustContain: []Code{E_INTERNAL, E_CONTEXT_CANCELLED},
 		},
 		{
 			cat:         CategorySchema,
 			minExpected: 15,
-			mustContain: []Code{E_TYPE_COLLISION, E_INHERIT_CYCLE, E_INVALID_NAME},
+			mustContain: []Code{E_INHERIT_CYCLE, E_INVALID_NAME},
 		},
 		{
 			cat:         CategorySyntax,
@@ -285,12 +281,9 @@ func TestContractValidationCodesExist(t *testing.T) {
 		category CodeCategory
 	}{
 		// Sentinel
-		{E_LIMIT_REACHED, CategorySentinel},
 		{E_INTERNAL, CategorySentinel},
 		// Schema - core validation
-		{E_TYPE_COLLISION, CategorySchema},
 		{E_INHERIT_CYCLE, CategorySchema},
-		{E_SCHEMA_TYPE_NOT_FOUND, CategorySchema},
 		{E_DUPLICATE_PROPERTY, CategorySchema},
 		{E_DUPLICATE_RELATION, CategorySchema},
 		{E_INVALID_NAME, CategorySchema},

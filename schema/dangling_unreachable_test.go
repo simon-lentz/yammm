@@ -65,13 +65,6 @@ func TestDanglingQualifiedReference_UnreachableThroughEveryEntryPoint(t *testing
 				assertRejected(t, s, result)
 			})
 
-			t.Run("LoadSources", func(t *testing.T) {
-				t.Parallel()
-				s, result := schema.LoadSources(t.Context(),
-					map[string][]byte{"d.yammm": []byte(src)}, ".")
-				assertRejected(t, s, result)
-			})
-
 			t.Run("LoadSourcesWithEntry", func(t *testing.T) {
 				t.Parallel()
 				s, result := schema.LoadSourcesWithEntry(t.Context(),

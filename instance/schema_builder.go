@@ -16,16 +16,15 @@ import (
 // type at construction time and validates property names, relation names, and
 // cardinality invariants as they are added — shifting the failure domain from
 // "at ValidateOne time" to "at Build time." Shape errors (unknown property,
-// unknown relation, cardinality mismatch, EdgeTo-vs-EdgeToWith mismatch,
-// wrong composed type) accumulate on the builder and surface from Build()
+// unknown relation, cardinality mismatch) accumulate on the builder and surface from Build()
 // with a call-site file:line locator captured via runtime.Callers.
 //
 // SchemaBuilder is constructed via [BuilderFor].
 //
 // # Scope of validation
 //
-// Build catches shape errors (schema-structural): property/relation names,
-// cardinality, the EdgeTo-vs-EdgeToWith split, wrong composition child type.
+// Build catches shape errors (schema-structural): property/relation names
+// and cardinality.
 // It does NOT catch value-level errors (wrong type, out-of-range, invalid PK);
 // those remain in [Validator.ValidateOne]'s domain. A SchemaBuilder that
 // returns a clean (RawInstance, nil) from Build is guaranteed to pass the
@@ -48,7 +47,7 @@ import (
 //
 // # Performance
 //
-// Each builder method (Property, EdgeTo, EdgeToWith, Composed) captures the
+// Each builder method (Property, EdgeTo) captures the
 // caller's program counter via runtime.Callers so Build-time shape errors can
 // name the offending call site. Only the stack walk is eager; resolving the PC
 // to file:line happens when an error is rendered, so a successful call
@@ -183,42 +182,14 @@ func (b *SchemaBuilder) Property(name string, value any) *SchemaBuilder {
 //
 // For "many"-cardinality relations, call EdgeTo multiple times — once per
 // target. Cardinality is enforced at Build time: a "one" relation with more
-// than one EdgeTo call surfaces a cardinality error; a "one" relation called
-// via both EdgeTo and EdgeToWith is a shape error.
+// than one EdgeTo call surfaces a cardinality error.
 //
-// If the relation declares edge properties, EdgeTo records a shape error
-// ("relation X declares edge properties; use EdgeToWith") — each edge
-// producer asserts its required shape on first call, regardless of whether
-// the caller also invokes EdgeToWith later.
+// The builder supports property-less association edges only: a relation that
+// declares edge properties, and a composition, each record a shape error —
+// construct such instances from raw data instead.
 func (b *SchemaBuilder) EdgeTo(name string, targetKey ...any) *SchemaBuilder {
 	callerPC := capturePC()
 	b.addEdge(name, targetKey, nil, shapeTo, callerPC)
-	return b
-}
-
-// EdgeToWith adds one edge target plus edge properties to the named
-// association. targetKey is passed as an explicit []any so props is
-// unambiguous at the call site — no accidental absorption of the map into
-// a variadic key slot.
-//
-//	b.EdgeToWith("overlaps_district", []any{districtGEOID}, map[string]any{
-//	    "overlap_pct": 85.3,
-//	})
-//	b.EdgeToWith("part_of_weighted", []any{publisherID, bookID}, map[string]any{
-//	    "weight": 0.5,
-//	})
-//
-// If the relation does NOT declare edge properties, EdgeToWith records a
-// shape error ("relation X has no edge properties; use EdgeTo").
-//
-// Property names are validated against the relation's declared edge
-// properties at Build time; unknown keys surface with their name and the
-// declared set. Missing required edge properties surface at Build time.
-// Passing a nil or empty props map on a relation whose edge properties are
-// all optional succeeds with no edge-property keys in the output target.
-func (b *SchemaBuilder) EdgeToWith(name string, targetKey []any, props map[string]any) *SchemaBuilder {
-	callerPC := capturePC()
-	b.addEdge(name, targetKey, props, shapeToWith, callerPC)
 	return b
 }
 
@@ -241,7 +212,7 @@ func (b *SchemaBuilder) addEdge(name string, targetKey []any, props map[string]a
 			kind:     kindEdgeShape,
 			typ:      b.typeName,
 			target:   rel.Name(),
-			detail:   rel.Name() + " is a composition; use Composed",
+			detail:   rel.Name() + " is a composition; the builder does not support composed children — construct the instance from raw data",
 			callerPC: callerPC,
 		})
 		return
@@ -253,7 +224,7 @@ func (b *SchemaBuilder) addEdge(name string, targetKey []any, props map[string]a
 				kind:     kindEdgeShape,
 				typ:      b.typeName,
 				target:   rel.Name(),
-				detail:   "declares edge properties; use EdgeToWith",
+				detail:   "declares edge properties, which the builder does not support; construct the instance from raw data",
 				callerPC: callerPC,
 			})
 			return
@@ -391,107 +362,6 @@ func (b *SchemaBuilder) edgeStateFor(rel *schema.Relation, shape edgeShape, call
 	return st
 }
 
-// Composed adds one or more composed children to the named composition.
-// Children are *SchemaBuilder values so the parent can enforce target-type
-// matching at Build time against each child's bound type.
-//
-// Variadic shape supports all three call patterns:
-//
-//	b.Composed("addresses", a)              // single child
-//	b.Composed("addresses", a, b, c)        // multiple children
-//	b.Composed("addresses", children...)    // slice unpacking
-//
-// Repeated calls accumulate: two b.Composed("addresses", a).Composed("addresses", b)
-// invocations are equivalent to b.Composed("addresses", a, b). Cardinality
-// is enforced at Build time against the cumulative child count.
-//
-// A call with no children is a no-op — useful when the children list is
-// computed at runtime and legitimately empty (schema-permitting).
-//
-// If the child's bound type does not match the composition's target type
-// (or is not a subtype of an abstract target), Composed records a
-// kindWrongComposedType error with the caller's file:line. Child builders
-// are invoked (via each child's Build) when the parent's Build runs; child
-// errors propagate tagged with the composition relation name.
-func (b *SchemaBuilder) Composed(name string, children ...*SchemaBuilder) *SchemaBuilder {
-	callerPC := capturePC()
-	rel, ok := b.resolveRelation(name)
-	if !ok {
-		b.recordErr(&buildError{
-			kind:     kindUnknownRelation,
-			typ:      b.typeName,
-			target:   name,
-			callerPC: callerPC,
-		})
-		return b
-	}
-	if !rel.IsComposition() {
-		b.recordErr(&buildError{
-			kind:     kindEdgeShape,
-			typ:      b.typeName,
-			target:   rel.Name(),
-			detail:   rel.Name() + " is an association; use EdgeTo or EdgeToWith",
-			callerPC: callerPC,
-		})
-		return b
-	}
-	targetType, found := resolveRelationTarget(b.schema, rel)
-	if !found {
-		b.recordErr(&buildError{
-			kind:     kindWrongComposedType,
-			typ:      b.typeName,
-			target:   rel.Name(),
-			detail:   fmt.Sprintf("target type %q not found", rel.Target().String()),
-			callerPC: callerPC,
-		})
-		return b
-	}
-	st, ok := b.compositions[rel.Name()]
-	if !ok {
-		st = &compositionState{rel: rel}
-		b.compositions[rel.Name()] = st
-	}
-	for _, c := range children {
-		if c == nil {
-			b.recordErr(&buildError{
-				kind:     kindWrongComposedType,
-				typ:      b.typeName,
-				target:   rel.Name(),
-				detail:   "nil child builder",
-				callerPC: callerPC,
-			})
-			continue
-		}
-		if !acceptableChildType(targetType, c.typ) {
-			b.recordErr(&buildError{
-				kind:     kindWrongComposedType,
-				typ:      b.typeName,
-				target:   rel.Name(),
-				detail:   fmt.Sprintf("expected %s, got %s", targetType.Name(), c.typ.Name()),
-				callerPC: callerPC,
-			})
-			continue
-		}
-		st.children = append(st.children, c)
-		st.callerPCs = append(st.callerPCs, callerPC)
-	}
-	return b
-}
-
-// acceptableChildType reports whether a child type can be composed under a
-// declared target type. The schema layer enforces that composition targets
-// are concrete part types (see schema/collision.go:274–287), so the only
-// valid match is an exact ID match: a composition declared against Address
-// accepts Address children and no others. Polymorphic compositions would
-// require the validator to dispatch per-child on runtime type rather than
-// on the declared target, which it does not (validate_composition.go:214
-// re-validates children AS the declared target), so accepting subtypes here
-// would just shift the rejection from Build-time to ValidateOne-time,
-// defeating the primitive's core premise.
-func acceptableChildType(target, child *schema.Type) bool {
-	return target.ID() == child.ID()
-}
-
 // Build produces the RawInstance.
 //
 // If any earlier call on this builder recorded an error, Build returns the
@@ -501,9 +371,9 @@ func acceptableChildType(target, child *schema.Type) bool {
 //
 // On success the returned RawInstance is guaranteed to pass the shape
 // portion of [Validator.ValidateOne]: property names and relation names are
-// schema-valid, cardinality invariants hold, composition children match
-// declared target types. Value-level validation (constraint checks, PK type
-// coercion, reference integrity) still happens at ValidateOne time.
+// schema-valid and cardinality invariants hold. Value-level validation
+// (constraint checks, PK type coercion, reference integrity) still happens
+// at ValidateOne time.
 //
 // Error messages include:
 //   - the offending call's target (property or relation name)
@@ -608,18 +478,6 @@ func (b *SchemaBuilder) checkRequiredEdgeProps(rel *schema.Relation, target map[
 			})
 		}
 	}
-}
-
-// MustBuild is like Build but panics on error. Intended for tests where the
-// inputs are known-good and a failure of the build itself is a programmer
-// error worth surfacing as a panic. Production code should use Build and
-// propagate the returned error.
-func (b *SchemaBuilder) MustBuild() RawInstance {
-	raw, err := b.Build()
-	if err != nil {
-		panic("instance.SchemaBuilder.MustBuild: " + err.Error())
-	}
-	return raw
 }
 
 // recordErr appends one shape-level error to the builder's accumulated list.

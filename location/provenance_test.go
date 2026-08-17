@@ -43,21 +43,3 @@ func TestProvenance_WithRawPath_RoundTrip(t *testing.T) {
 	assert.Equal(t, "$.Item", prov.Path().String())
 	assert.Equal(t, "data.json", prov.SourceName())
 }
-
-func TestProvenance_HasSpan_WithNonZeroSpan(t *testing.T) {
-	source := MustNewSourceID("test://file.json")
-	span := Point(source, 1, 1)
-	prov := NewProvenance("test.json", path.Root(), span)
-
-	assert.True(t, prov.HasSpan())
-}
-
-func TestProvenance_HasSpan_WithZeroSpan(t *testing.T) {
-	prov := NewProvenance("test.json", path.Root(), Span{})
-	assert.False(t, prov.HasSpan())
-}
-
-func TestProvenance_HasSpan_NilReceiver(t *testing.T) {
-	var prov *Provenance
-	assert.False(t, prov.HasSpan())
-}

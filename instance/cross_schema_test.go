@@ -71,7 +71,7 @@ type Basin {
 	if !ok {
 		t.Fatal("IN_BASIN edge missing from validated instance")
 	}
-	if got := edge.TargetCount(); got != 1 {
+	if got := len(edge.Targets()); got != 1 {
 		t.Errorf("target count = %d, want 1", got)
 	}
 }
@@ -180,8 +180,13 @@ part type Piece {
 	if !result.OK() {
 		t.Fatalf("imported-type composition must validate: %s", result)
 	}
-	children, ok := valid.Composed("HAS_PIECE")
-	if !ok || children.IsNil() {
+	foundPiece := false
+	for rel, children := range valid.Compositions() {
+		if rel == "HAS_PIECE" && !children.IsNil() {
+			foundPiece = true
+		}
+	}
+	if !foundPiece {
 		t.Fatal("HAS_PIECE children missing from validated instance")
 	}
 }
@@ -235,11 +240,16 @@ func TestValidate_CrossSchemaInheritedRelations(t *testing.T) {
 	if !ok {
 		t.Fatal("IN_REGION edge missing from validated instance")
 	}
-	if got := edge.TargetCount(); got != 1 {
+	if got := len(edge.Targets()); got != 1 {
 		t.Errorf("target count = %d, want 1", got)
 	}
-	children, ok := valid.Composed("HAS_MARKER")
-	if !ok || children.IsNil() {
+	foundMarker := false
+	for rel, children := range valid.Compositions() {
+		if rel == "HAS_MARKER" && !children.IsNil() {
+			foundMarker = true
+		}
+	}
+	if !foundMarker {
 		t.Fatal("HAS_MARKER children missing from validated instance")
 	}
 }
@@ -321,56 +331,6 @@ func TestSchemaBuilder_CrossSchemaTargets(t *testing.T) {
 
 		v := instance.NewValidator(s)
 		valid, result := v.ValidateOne(t.Context(), "City", raw)
-		if !result.OK() {
-			t.Fatalf("built instance must validate: %s", result)
-		}
-		if valid == nil {
-			t.Fatal("validated instance is nil")
-		}
-	})
-
-	t.Run("Composed on an imported-type composition", func(t *testing.T) {
-		s := loadCrossSchema(t, map[string]string{
-			"entry.yammm": `schema "app"
-
-import "common.yammm" as common
-
-type Anchor {
-	id String primary
-}
-`,
-			"common.yammm": `schema "common"
-
-type Box {
-	id String primary
-	*-> HOLDS (many) Item
-}
-
-part type Item {
-	sku String primary
-}
-`,
-		})
-		child, err := instance.BuilderFor(s, "common.Item")
-		if err != nil {
-			t.Fatalf("BuilderFor(child): %v", err)
-		}
-		child.Property("sku", "S1")
-
-		b, err := instance.BuilderFor(s, "common.Box")
-		if err != nil {
-			t.Fatalf("BuilderFor: %v", err)
-		}
-		raw, err := b.
-			Property("id", "B1").
-			Composed("HOLDS", child).
-			Build()
-		if err != nil {
-			t.Fatalf("Composed must resolve the declaring schema's target: %v", err)
-		}
-
-		v := instance.NewValidator(s)
-		valid, result := v.ValidateOne(t.Context(), "common.Box", raw)
 		if !result.OK() {
 			t.Fatalf("built instance must validate: %s", result)
 		}

@@ -12,7 +12,6 @@ func TestDetailKeyConstants(t *testing.T) {
 		{"DetailKeyGot", DetailKeyGot},
 		{"DetailKeyTypeName", DetailKeyTypeName},
 		{"DetailKeyPropertyName", DetailKeyPropertyName},
-		{"DetailKeyPrefix", DetailKeyPrefix},
 		{"DetailKeyRelationName", DetailKeyRelationName},
 		{"DetailKeyPrimaryKey", DetailKeyPrimaryKey},
 		{"DetailKeyReason", DetailKeyReason},
@@ -24,11 +23,9 @@ func TestDetailKeyConstants(t *testing.T) {
 		{"DetailKeyTargetPK", DetailKeyTargetPK},
 		{"DetailKeyImportPath", DetailKeyImportPath},
 		{"DetailKeyAlias", DetailKeyAlias},
-		{"DetailKeyCycle", DetailKeyCycle},
 		{"DetailKeyName", DetailKeyName},
 		{"DetailKeyContext", DetailKeyContext},
 		{"DetailKeyID", DetailKeyID},
-		{"DetailKeyFunction", DetailKeyFunction},
 	}
 
 	for _, k := range keys {
@@ -53,7 +50,6 @@ func TestDetailKeyConstants_Uniqueness(t *testing.T) {
 		DetailKeyGot,
 		DetailKeyTypeName,
 		DetailKeyPropertyName,
-		DetailKeyPrefix,
 		DetailKeyRelationName,
 		DetailKeyPrimaryKey,
 		DetailKeyReason,
@@ -65,11 +61,9 @@ func TestDetailKeyConstants_Uniqueness(t *testing.T) {
 		DetailKeyTargetPK,
 		DetailKeyImportPath,
 		DetailKeyAlias,
-		DetailKeyCycle,
 		DetailKeyName,
 		DetailKeyContext,
 		DetailKeyID,
-		DetailKeyFunction,
 	}
 
 	seen := make(map[string]bool)
@@ -92,7 +86,6 @@ func TestDetailPairBuilders(t *testing.T) {
 	}{
 		{"ExpectedGot", ExpectedGot("string", "int"), DetailKeyExpected, "string", DetailKeyGot, "int"},
 		{"TypeProp", TypeProp("Person", "name"), DetailKeyTypeName, "Person", DetailKeyPropertyName, "name"},
-		{"TypeRelation", TypeRelation("Person", "friends"), DetailKeyTypeName, "Person", DetailKeyRelationName, "friends"},
 		{"RelationField", RelationField("owns", "unknownField"), DetailKeyRelationName, "owns", DetailKeyField, "unknownField"},
 		{"TypeField", TypeField("Car", "invalidField"), DetailKeyTypeName, "Car", DetailKeyField, "invalidField"},
 		{"PathRelation", PathRelation("OwnedCars", "owned_cars"), DetailKeyRelationName, "OwnedCars", DetailKeyJSONField, "owned_cars"},

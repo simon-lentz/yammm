@@ -117,13 +117,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 }
 
 func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string) error {
-	adapter, err := adapterjson.New(nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: create json adapter: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
-	}
-
-	data, err := adapter.MarshalObject(cmd.Context(), snapshot, adapterjson.WithIndent("\t"))
+	data, err := adapterjson.New().MarshalObject(cmd.Context(), snapshot, adapterjson.WithIndent("\t"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: marshal json: %v\n", err)
 		return &cli.ExitError{Code: cli.ExitRuntime}

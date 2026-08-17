@@ -176,16 +176,6 @@ func (r Result) HasWarnings() bool {
 	return r.counts.Warnings > 0
 }
 
-// HasInfo reports whether any Info issue is present.
-func (r Result) HasInfo() bool {
-	return r.counts.Info > 0
-}
-
-// HasHints reports whether any Hint issue is present.
-func (r Result) HasHints() bool {
-	return r.counts.Hints > 0
-}
-
 // HasCode reports whether any retained issue carries the given code, at any
 // severity. Like [Result.Issues] and [Result.Len], it reflects the issues the
 // result can enumerate: when the issue limit was reached ([Result.LimitReached]),
@@ -276,41 +266,11 @@ func (r Result) Errors() iter.Seq[Issue] {
 	}
 }
 
-// Warnings returns an iterator over Warning issues.
-func (r Result) Warnings() iter.Seq[Issue] {
-	return func(yield func(Issue) bool) {
-		for _, issue := range r.issues {
-			if issue.Severity() == Warning {
-				if !yield(issue) {
-					return
-				}
-			}
-		}
-	}
-}
-
 // BySeverity returns an iterator over issues at exactly the given severity.
 func (r Result) BySeverity(severity Severity) iter.Seq[Issue] {
 	return func(yield func(Issue) bool) {
 		for _, issue := range r.issues {
 			if issue.Severity() == severity {
-				if !yield(issue) {
-					return
-				}
-			}
-		}
-	}
-}
-
-// IssuesAtLeastAsSevereAs returns an iterator over issues at least as severe
-// as the threshold.
-//
-// This uses the same semantics as [Severity.IsAtLeastAsSevereAs].
-// Example: IssuesAtLeastAsSevereAs(Warning) yields Fatal, Error, and Warning issues.
-func (r Result) IssuesAtLeastAsSevereAs(threshold Severity) iter.Seq[Issue] {
-	return func(yield func(Issue) bool) {
-		for _, issue := range r.issues {
-			if issue.Severity().IsAtLeastAsSevereAs(threshold) {
 				if !yield(issue) {
 					return
 				}

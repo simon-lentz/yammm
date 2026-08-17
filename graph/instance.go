@@ -111,11 +111,6 @@ func (i *Instance) Provenance() *location.Provenance {
 	return i.provenance
 }
 
-// HasProvenance reports whether provenance is available for this instance.
-func (i *Instance) HasProvenance() bool {
-	return i != nil && i.provenance != nil
-}
-
 // Composed returns composed children for the given relation name.
 //
 // Returns nil if the relation does not exist or has no children.

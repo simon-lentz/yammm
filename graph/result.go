@@ -2,7 +2,6 @@ package graph
 
 import (
 	"iter"
-	"maps"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
@@ -108,23 +107,6 @@ func (r *Snapshot) InstancesOf(id schema.TypeID) []*Instance {
 	}
 	result := make([]*Instance, len(instances))
 	copy(result, instances)
-	return result
-}
-
-// Instances returns all validated instances keyed by type identity.
-//
-// WARNING: Map iteration order is non-deterministic per Go semantics.
-// For deterministic iteration (CLI output, tests), use [Snapshot.Types]
-// with [Snapshot.InstancesOf] instead.
-//
-// Returns a shallow copy of the map; instance slices are shared.
-func (r *Snapshot) Instances() map[schema.TypeID][]*Instance {
-	if r == nil || r.instances == nil {
-		return nil
-	}
-	// Shallow copy the map; slices are already sorted snapshots
-	result := make(map[schema.TypeID][]*Instance, len(r.instances))
-	maps.Copy(result, r.instances)
 	return result
 }
 
@@ -256,35 +238,6 @@ func (r *Snapshot) Unresolved() []*UnresolvedEdge {
 	result := make([]*UnresolvedEdge, len(r.unresolved))
 	copy(result, r.unresolved)
 	return result
-}
-
-// OK reports whether the graph was constructed without errors.
-//
-// This is a convenience method equivalent to r.Diagnostics().OK().
-// A graph may have warnings and still be OK.
-//
-// For snapshots loaded from persisted .ys files, OK always returns true
-// because construction diagnostics are transient. This reflects
-// construction-time diagnostics only, not structural issues — check
-// [Snapshot.Duplicates] and [Snapshot.Unresolved] separately.
-func (r *Snapshot) OK() bool {
-	if r == nil {
-		return true
-	}
-	return r.diagnostics.OK()
-}
-
-// HasErrors reports whether the graph has any errors.
-//
-// This is a convenience method equivalent to r.Diagnostics().HasErrors().
-//
-// For snapshots loaded from persisted .ys files, HasErrors always returns
-// false because construction diagnostics are transient. See [Snapshot.OK].
-func (r *Snapshot) HasErrors() bool {
-	if r == nil {
-		return false
-	}
-	return r.diagnostics.HasErrors()
 }
 
 // newSnapshot creates a Snapshot from sorted graph data.

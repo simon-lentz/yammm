@@ -107,11 +107,7 @@ func TestMarshalObject_RenderedNameCollisionRefused(t *testing.T) {
 	t.Parallel()
 	snap, localID, deepID := collidingSnapshot(t)
 
-	a, err := New(nil)
-	if err != nil {
-		t.Fatalf("create adapter: %v", err)
-	}
-	_, err = a.MarshalObject(context.Background(), snap)
+	_, err := New().MarshalObject(context.Background(), snap)
 	if err == nil {
 		t.Fatal("collision accepted: want an error naming both identities")
 	}

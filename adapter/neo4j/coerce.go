@@ -307,7 +307,7 @@ func paramKey(prefix, name string) string {
 // MERGE keys are NOT included, because they do not sit where the properties sit
 // and describing both in one map means guessing which of the two a colliding
 // name belongs to: in a flat row `key_id` is a property so named, while in
-// [BuildBatchNodeMergeQuery]'s row shape `key_id` is the merge key for `id` and
+// [buildBatchNodeMergeQuery]'s row shape `key_id` is the merge key for `id` and
 // the properties live nested under row.props. Take them from
 // [ParamTypesForMergeKeys], which describes that shape, and merge the two when
 // the caller's own shape is the one that carries both.
@@ -317,35 +317,6 @@ func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
 	// param map as an own one.
 	for p := range t.AllProperties() {
 		pt[paramKey(prefix, p.Name())] = p.Constraint()
-	}
-	return pt
-}
-
-// ParamTypesForMergeKeys derives a ParamTypes for the MERGE-key parameters the
-// adapter's node builders read — one entry per primary key, own or inherited,
-// under the `key_` namespace ([batchKeyParamPrefix]).
-//
-// One call describes one builder's shape:
-//
-//	ParamTypesForMergeKeys(t, "")      // $key_<pk>, what BuildNodeMergeQuery binds
-//	ParamTypesForMergeKeys(t, "rows")  // row.key_<pk>, what BuildBatchNodeMergeQuery reads
-//
-// The merge key is the one value the MERGE matches on, so leaving it uncoerced
-// is the failure with no error attached: a Date primary key reaching the driver
-// as a string matches no node whose property is a DATE, and every re-ingestion
-// inserts a duplicate. Callers going through [Adapter.NodeQueryFor] or
-// [Adapter.BatchNodeQueries] need none of this — those coerce their own keys
-// from [NodeShape].
-//
-// The relationship builders key on TWO types, so they have no single-type
-// equivalent. Their spellings are $from_key_<pk> / $to_key_<pk>
-// ([BuildRelationshipMergeQuery]) and row.from_<pk> / row.to_<pk>
-// ([BuildBatchRelationshipMergeQuery]); a caller assembling those by hand lists
-// each endpoint type's primary-key constraints under the matching prefix.
-func ParamTypesForMergeKeys(t *schema.Type, prefix string) ParamTypes {
-	pt := make(ParamTypes)
-	for _, pk := range t.PrimaryKeysSlice() {
-		pt[paramKey(prefix, batchKeyParamPrefix+pk.Name())] = pk.Constraint()
 	}
 	return pt
 }

@@ -81,25 +81,10 @@ func (v *ValidInstance) Edge(relationName string) (*ValidEdgeData, bool) {
 	return edge, ok
 }
 
-// Composed returns the validated composed children for a composition relation.
-// Returns (zero, false) if the relation has no composed children.
-func (v *ValidInstance) Composed(relationName string) (immutable.Value, bool) {
-	if v.composed == nil {
-		return immutable.Value{}, false
-	}
-	val, ok := v.composed[relationName]
-	return val, ok
-}
-
 // Provenance returns the source location metadata.
 // Returns nil if no provenance was provided.
 func (v *ValidInstance) Provenance() *location.Provenance {
 	return v.provenance
-}
-
-// HasProvenance reports whether provenance is available.
-func (v *ValidInstance) HasProvenance() bool {
-	return v.provenance != nil
 }
 
 // Edges returns an iterator over all edges.
@@ -167,14 +152,6 @@ func (e *ValidEdgeData) TargetsIter() iter.Seq[ValidEdgeTarget] {
 			}
 		}
 	}
-}
-
-// TargetCount returns the number of edge targets.
-func (e *ValidEdgeData) TargetCount() int {
-	if e == nil {
-		return 0
-	}
-	return len(e.targets)
 }
 
 // IsEmpty returns true if there are no edge targets.

@@ -108,19 +108,6 @@ func ValidateIdentifier(name, context string) error {
 	return nil
 }
 
-// CypherReservedKeywords returns the set of Cypher reserved keywords
-// that are rejected by [ValidateIdentifier]. Keys are uppercase.
-//
-// The returned map is a defensive copy; modifications do not affect
-// subsequent calls.
-func CypherReservedKeywords() map[string]bool {
-	result := make(map[string]bool, len(cypherReservedKeywords))
-	for k := range cypherReservedKeywords {
-		result[k] = true
-	}
-	return result
-}
-
 // Label generates a namespaced Neo4j node label from schema and type names.
 //
 // The label is built as: prefix + sanitize(schemaName) + separator + sanitize(typeName).

@@ -23,7 +23,7 @@ result.TruncationNote() // dropped-issues one-liner when the limit was hit
 
 ### Contextual Wrap (ContextualError)
 
-`result.WithContext(tag)` converts a failed Result into an `error` — a `*diag.ContextualError` carrying the tag plus the full Result — and returns `nil` when the Result is OK, so it slots directly into `return result.WithContext("load users")`. Recover the diagnostics downstream with `errors.As` or `diag.AsContextualError(err, fallbackTag)`. `diag.Collect(issues...)` builds a Result directly from issues. `diag.IsImportDeclarationCode(code)` classifies import-*declaration* codes (the import line itself is wrong) apart from import-*resolution* codes.
+`result.WithContext(tag)` converts a failed Result into an `error` — a `*diag.ContextualError` carrying the tag plus the full Result — and returns `nil` when the Result is OK, so it slots directly into `return result.WithContext("load users")`. Recover the diagnostics downstream with `errors.As` or `diag.AsContextualError(err, fallbackTag)`. `diag.IsImportDeclarationCode(code)` classifies import-*declaration* codes (the import line itself is wrong) apart from import-*resolution* codes.
 
 ### diag.Issue
 
@@ -83,7 +83,6 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_LIMIT_REACHED` | Issue collection limit reached; remaining issues dropped |
 | `E_INTERNAL` | Unexpected internal failure (likely a bug) |
 | `E_CONTEXT_CANCELLED` | Operation cancelled via context |
 
@@ -109,9 +108,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_TYPE_COLLISION` | Type name already defined |
 | `E_INHERIT_CYCLE` | Inheritance chain contains a cycle |
-| `E_SCHEMA_TYPE_NOT_FOUND` | Referenced type not found during compilation |
 | `E_UNKNOWN_PROPERTY` | Referenced property not found on its type |
 | `E_DUPLICATE_PROPERTY` | Property defined more than once on a type |
 | `E_DUPLICATE_RELATION` | Relation defined more than once on a type |
@@ -161,7 +158,6 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_EDGE_SHAPE_MISMATCH` | Edge has wrong shape |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_NOT_FOUND` | Referenced composition not found |
-| `E_MISSING_TYPE_TAG` | `$type` tag is missing |
 | `E_INVALID_TYPE_TAG` | `$type` tag has invalid format |
 | `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
 

@@ -63,21 +63,6 @@ type resultWire struct {
 	DroppedCount int         `json:"droppedCount,omitzero"`
 }
 
-// FormatIssueJSON returns the JSON representation of a single issue.
-//
-// The output format is stable Optional fields with
-// zero values are omitted.
-func (r *Renderer) FormatIssueJSON(issue Issue) json.RawMessage {
-	wire := toIssueWire(issue)
-	//nolint:errchkjson // Wire types are safe; error check is defensive
-	data, err := json.Marshal(wire)
-	if err != nil {
-		// This should never happen with our wire types
-		panic("diag: unexpected JSON marshal error: " + err.Error())
-	}
-	return data
-}
-
 // FormatResultJSON returns the JSON representation of a diagnostic result.
 //
 // The output format is stable The returned JSON contains

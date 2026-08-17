@@ -8,6 +8,14 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
+// formatIssue renders one issue as text — the per-issue shape
+// [Renderer.FormatResult] emits per line.
+func formatIssue(r *Renderer, issue Issue) string {
+	var sb strings.Builder
+	r.formatIssueToBuilder(&sb, issue)
+	return sb.String()
+}
+
 // mockSourceProvider is a test implementation of SourceProvider.
 type mockSourceProvider struct {
 	sources map[location.SourceID][]byte
@@ -33,7 +41,7 @@ func TestNewRenderer_Defaults(t *testing.T) {
 
 	// Test default configuration via output behavior
 	issue := NewIssue(Error, E_SYNTAX, "test error").Build()
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	// Should have basic format without excerpts
 	if !strings.Contains(output, "error") {
@@ -57,7 +65,7 @@ func TestRenderer_WithSourceProvider_Nil(t *testing.T) {
 		Build()
 
 	// Should not panic, just skip excerpts
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 	if output == "" {
 		t.Error("output should not be empty")
 	}
@@ -81,7 +89,7 @@ func TestRenderer_WithExcerpts(t *testing.T) {
 		}).
 		Build()
 
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	// Should contain excerpt
 	if !strings.Contains(output, "line two") {
@@ -106,63 +114,11 @@ func TestRenderer_WithExcerpts_Disabled(t *testing.T) {
 		WithSpan(location.Point(source, 1, 1)).
 		Build()
 
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	// Should NOT contain excerpt
 	if strings.Contains(output, "source content") {
 		t.Error("excerpts should be disabled")
-	}
-}
-
-func TestRenderer_WithMaxLineColumns(t *testing.T) {
-	provider := newMockSourceProvider()
-	source := location.MustNewSourceID("test://file.yammm")
-	longLine := strings.Repeat("x", 200)
-	provider.Add(source, longLine+"\n")
-
-	r := NewRenderer(
-		WithSourceProvider(provider),
-		WithExcerpts(true),
-		WithMaxLineColumns(50),
-	)
-
-	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.Point(source, 1, 1)).
-		Build()
-
-	output := r.FormatIssue(issue)
-
-	// Should be truncated
-	if !strings.Contains(output, "...") {
-		t.Error("long line should be truncated with indicator")
-	}
-	// Should not contain full 200 x's
-	if strings.Contains(output, strings.Repeat("x", 100)) {
-		t.Error("line should be truncated before 100 chars")
-	}
-}
-
-func TestRenderer_WithTruncationIndicator(t *testing.T) {
-	provider := newMockSourceProvider()
-	source := location.MustNewSourceID("test://file.yammm")
-	longLine := strings.Repeat("x", 200)
-	provider.Add(source, longLine+"\n")
-
-	r := NewRenderer(
-		WithSourceProvider(provider),
-		WithExcerpts(true),
-		WithMaxLineColumns(50),
-		WithTruncationIndicator("[...]"),
-	)
-
-	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.Point(source, 1, 1)).
-		Build()
-
-	output := r.FormatIssue(issue)
-
-	if !strings.Contains(output, "[...]") {
-		t.Error("should use custom truncation indicator")
 	}
 }
 
@@ -181,7 +137,7 @@ func TestRenderer_WithModuleRoot(t *testing.T) {
 		WithSpan(location.Point(source, 5, 10)).
 		Build()
 
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	// Should show relative path
 	if strings.Contains(output, "file:///home/user/project/") {
@@ -267,7 +223,7 @@ func TestRenderer_WithModuleRoot_EdgeCases(t *testing.T) {
 				WithSpan(location.Point(source, 1, 1)).
 				Build()
 
-			output := r.FormatIssue(issue)
+			output := formatIssue(r, issue)
 
 			if !strings.Contains(output, tt.wantPath) {
 				t.Errorf("output should contain %q, got: %s", tt.wantPath, output)
@@ -293,7 +249,7 @@ func TestRenderer_WithColors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.severity.String(), func(t *testing.T) {
 			issue := NewIssue(tt.severity, E_SYNTAX, "message").Build()
-			output := r.FormatIssue(issue)
+			output := formatIssue(r, issue)
 
 			if !strings.Contains(output, tt.ansi) {
 				t.Errorf("output should contain ANSI code %q for %s", tt.ansi, tt.severity)
@@ -309,7 +265,7 @@ func TestRenderer_WithColors_Disabled(t *testing.T) {
 	r := NewRenderer(WithColors(false))
 
 	issue := NewIssue(Error, E_SYNTAX, "error").Build()
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	if strings.Contains(output, "\033[") {
 		t.Error("output should not contain ANSI codes when colors disabled")
@@ -317,18 +273,18 @@ func TestRenderer_WithColors_Disabled(t *testing.T) {
 }
 
 func TestRenderer_WithDistinguishFatal(t *testing.T) {
-	issue := NewIssue(Fatal, E_LIMIT_REACHED, "limit").Build()
+	issue := NewIssue(Fatal, E_INTERNAL, "limit").Build()
 
 	// Default: Fatal renders as "error"
 	r1 := NewRenderer()
-	output1 := r1.FormatIssue(issue)
+	output1 := formatIssue(r1, issue)
 	if !strings.Contains(output1, ": error[") {
 		t.Errorf("Fatal should render as 'error' by default, got: %s", output1)
 	}
 
 	// With distinguish: Fatal renders as "fatal"
 	r2 := NewRenderer(WithDistinguishFatal(true))
-	output2 := r2.FormatIssue(issue)
+	output2 := formatIssue(r2, issue)
 	if !strings.Contains(output2, ": fatal[") {
 		t.Errorf("Fatal should render as 'fatal' when distinguished, got: %s", output2)
 	}
@@ -364,7 +320,7 @@ func TestRenderer_FormatIssue_Location(t *testing.T) {
 	r := NewRenderer()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			output := r.FormatIssue(tt.issue)
+			output := formatIssue(r, tt.issue)
 			if !strings.Contains(output, tt.contains) {
 				t.Errorf("output should contain %q, got: %s", tt.contains, output)
 			}
@@ -378,7 +334,7 @@ func TestRenderer_FormatIssue_Hint(t *testing.T) {
 		Build()
 
 	r := NewRenderer()
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	if !strings.Contains(output, "hint: try doing X instead") {
 		t.Errorf("output should contain hint, got: %s", output)
@@ -387,7 +343,7 @@ func TestRenderer_FormatIssue_Hint(t *testing.T) {
 
 func TestRenderer_FormatIssue_Related(t *testing.T) {
 	source := location.MustNewSourceID("test://related.yammm")
-	issue := NewIssue(Error, E_TYPE_COLLISION, "type collision").
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, "type collision").
 		WithRelated(location.RelatedInfo{
 			Message: "first definition here",
 			Span:    location.Point(source, 5, 1),
@@ -395,7 +351,7 @@ func TestRenderer_FormatIssue_Related(t *testing.T) {
 		Build()
 
 	r := NewRenderer()
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	if !strings.Contains(output, "note: first definition here") {
 		t.Errorf("output should contain related note, got: %s", output)
@@ -409,7 +365,7 @@ func TestRenderer_FormatResult(t *testing.T) {
 	c := NewCollector(0)
 	c.Collect(NewIssue(Error, E_SYNTAX, "first error").Build())
 	c.Collect(NewIssue(Warning, E_INVALID_NAME, "warning").Build())
-	c.Collect(NewIssue(Error, E_TYPE_COLLISION, "second error").Build())
+	c.Collect(NewIssue(Error, E_DUPLICATE_TYPE, "second error").Build())
 
 	r := NewRenderer()
 	output := r.FormatResult(c.Result())
@@ -432,34 +388,6 @@ func TestRenderer_FormatResult_Empty(t *testing.T) {
 
 	if output != "" {
 		t.Errorf("FormatResult(OK()) should be empty, got: %q", output)
-	}
-}
-
-func TestRenderer_FormatIssues(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "first").Build(),
-		NewIssue(Error, E_SYNTAX, "second").Build(),
-	}
-
-	r := NewRenderer()
-	output := r.FormatIssues(issues)
-
-	if !strings.Contains(output, "first") || !strings.Contains(output, "second") {
-		t.Errorf("output should contain both issues, got: %s", output)
-	}
-	// Should be separated by newline
-	lines := strings.Split(output, "\n")
-	if len(lines) < 2 {
-		t.Errorf("issues should be on separate lines, got: %s", output)
-	}
-}
-
-func TestRenderer_FormatIssues_Empty(t *testing.T) {
-	r := NewRenderer()
-	output := r.FormatIssues(nil)
-
-	if output != "" {
-		t.Errorf("FormatIssues(nil) should be empty, got: %q", output)
 	}
 }
 
@@ -565,7 +493,7 @@ func TestRenderer_Excerpt_PointSpan(t *testing.T) {
 		WithSpan(location.Point(source, 1, 3)).
 		Build()
 
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	// Should have single caret for point
 	if !strings.Contains(output, "^") {
@@ -592,7 +520,7 @@ func TestRenderer_Excerpt_RangeSpan(t *testing.T) {
 		}).
 		Build()
 
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	// Should have 5 carets (columns 3-7 inclusive)
 	if !strings.Contains(output, "^^^^^") {
@@ -615,7 +543,7 @@ func TestRenderer_Excerpt_UnknownPosition(t *testing.T) {
 		WithSpan(location.Span{Source: source}).
 		Build()
 
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	// Should not contain excerpt (position unknown)
 	if strings.Contains(output, "content") {
@@ -637,7 +565,7 @@ func TestRenderer_Excerpt_SourceNotAvailable(t *testing.T) {
 		WithSpan(location.Point(source, 1, 1)).
 		Build()
 
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	// Should gracefully omit excerpt
 	if output == "" {
@@ -656,7 +584,7 @@ func TestRenderer_CompleteOutput(t *testing.T) {
 		WithModuleRoot("file:///project"),
 	)
 
-	issue := NewIssue(Error, E_TYPE_COLLISION, "type 'User' is already defined").
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, "type 'User' is already defined").
 		WithSpan(location.Span{
 			Source: source,
 			Start:  location.Position{Line: 1, Column: 6},
@@ -672,7 +600,7 @@ func TestRenderer_CompleteOutput(t *testing.T) {
 	// The golden pins the complete rendered form: relativized location,
 	// severity, code, message, hint, related note, source excerpt, and the
 	// underline — including their exact layout and ordering.
-	yammmtest.Golden(t, "renderer_complete_output", []byte(r.FormatIssue(issue)))
+	yammmtest.Golden(t, "renderer_complete_output", []byte(formatIssue(r, issue)))
 }
 
 // TestRenderer_WriteLocation_SourceNameOnly verifies that issues with only
@@ -689,7 +617,7 @@ func TestRenderer_WriteLocation_SourceNameOnly(t *testing.T) {
 		// No span or path
 	}
 
-	output := r.FormatIssue(issue)
+	output := formatIssue(r, issue)
 
 	// Should use sourceName as location, not "<unknown>"
 	if !strings.HasPrefix(output, "data.json:") {
@@ -757,7 +685,7 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			output := r.FormatIssue(tt.issue)
+			output := formatIssue(r, tt.issue)
 			if !strings.HasPrefix(output, tt.expected) {
 				t.Errorf("expected output to start with %q, got:\n%s", tt.expected, output)
 			}

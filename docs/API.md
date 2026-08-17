@@ -26,9 +26,6 @@ s, result := schema.Load(ctx, "path/to/schema.yammm", opts...)
 // Load from string content (sourceCode first, then sourceName)
 s, result := schema.LoadString(ctx, content, "source-name", opts...)
 
-// Load from in-memory sources with import resolution (moduleRoot is required)
-s, result := schema.LoadSources(ctx, sources, moduleRoot, opts...)
-
 // Load from in-memory sources with an explicit entry point
 // Useful in LSP scenarios where multiple documents are open but only one is being analyzed
 s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, opts...)
@@ -246,8 +243,6 @@ validator := instance.NewValidator(schema, opts...)
 | `WithLogger` | Structured logger for debug output |
 | `WithStrictPropertyNames` | Require exact case matching (default: false) |
 | `WithAllowUnknownFields` | Silently ignore unknown fields (default: false) |
-| `WithMaxIssuesPerInstance` | Maximum issues per instance (default: 100) |
-| `WithValueRegistry` | Custom value registry for type classification |
 
 The `RecommendedOptions()` function returns a curated set of defaults (`WithStrictPropertyNames(true)`, `WithAllowUnknownFields(false)`) as a starting point for common use cases.
 
@@ -299,7 +294,7 @@ Instance data is a top-level object keyed by type names whose values are arrays 
 
 ### Schema-Aware Raw Instance Builder
 
-`instance.BuilderFor(schema, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, cardinality mismatches, and the `EdgeTo`-vs-`EdgeToWith` split all surface from `Build()` with file:line locators captured via `runtime.Callers`. This shifts shape failures out of `ValidateOne`'s domain and eliminates the "Schema declares X (one), so yammm expects a single edge object" class of hand-maintained comments in consumer code:
+`instance.BuilderFor(schema, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, and cardinality mismatches all surface from `Build()` with file:line locators captured via `runtime.Callers`. This shifts shape failures out of `ValidateOne`'s domain:
 
 ```go
 b, err := instance.BuilderFor(s, "Person")
@@ -315,17 +310,9 @@ raw, err := b.
     Build()
 ```
 
-For associations that declare edge properties, use `EdgeToWith`:
-
-```go
-raw, err := b.
-    Property("id", "e1").
-    EdgeToWith("works_at", []any{"c1"}, map[string]any{
-        "role":  "Engineer",
-        "since": "2020-01-01",
-    }).
-    Build()
-```
+The builder covers properties and property-less association edges; an
+association that declares edge properties, and a composition, each record a
+shape error — construct such instances from raw data instead.
 
 For compositions, pass child builders — the parent enforces target-type matching at build time:
 
@@ -346,10 +333,7 @@ The variadic `Composed(name, children...)` accepts single, multiple-positional, 
 | `BuilderFor(s, typeName)` | Construct a builder bound to a schema type. Errors on nil schema, unknown type, or abstract type. |
 | `Property(name, value)` | Set a property value. Unknown names accumulate as errors surfaced at Build. |
 | `EdgeTo(name, targetKey...)` | Add an edge target on an association without edge properties. Variadic key supports composite PKs. |
-| `EdgeToWith(name, targetKey, props)` | Add an edge target on an association with edge properties. `targetKey` is an explicit `[]any` to avoid absorbing `props` into variadic slots. |
-| `Composed(name, children...)` | Add composed children. Variadic supports single, multiple, or slice-unpack shapes. |
 | `Build()` | Produce the `RawInstance`. Returns the first accumulated error (with a "(and N more)" suffix when more exist). |
-| `MustBuild()` | Panic on error. Test-only; production code should use `Build` and propagate. |
 
 Build errors include the bound type's name, the offending property/relation, and the caller's file:line. `errors.Unwrap` walks into composition-child chains so `errors.As` reaches the primary cause when nesting.
 
@@ -422,15 +406,7 @@ qualityCollector.Merge(res.Snapshot.Diagnostics())
 
 **Post-finalize sentinel.** After `Finalize`, subsequent `Add` / `AddValid` calls return `graph.ErrAssemblerFinalized`, matchable via `errors.Is`. Consumers performing retry / cleanup logic key off the sentinel rather than the error string.
 
-**Validator-access modes.** Default mode serializes `ValidateOne` + `Graph.Add` through an internal `sync.Mutex` — appropriate for I/O-bound consumers (streaming ETL pipelines are the canonical example) where validation is a tiny fraction of per-record wall-clock. CPU-bound consumers profile-flag validation as the hot path opt into pool mode via `graph.WithValidatorPool(n)`, which distributes N pre-constructed validators through an internal buffered channel matching the goroutine-per-CPU-core shape:
-
-```go
-ba := graph.NewBatchAssembler(ctx, s,
-    graph.WithValidatorPool(runtime.NumCPU()))
-// ... concurrent Adds proceed in parallel up to N validators ...
-```
-
-Pool mode preserves every external contract (error shapes, Finalize one-shot semantics, success-count monotonicity) and is a one-option swap with no caller-side ripple. `n <= 0` panics at construction.
+**Validator access.** The assembler serializes `ValidateOne` + `Graph.Add` through an internal `sync.Mutex`, covering validation, the graph add, and the success-counter increment as one atomic step.
 
 **Concurrency contract.** `BatchAssembler` is safe for concurrent use across all methods (`Add`, `AddValid`, `Count`, `Graph`, `Finalize`). The library coordinates Add lifecycle against Finalize via an internal `sync.RWMutex` so every Add that returns nil is guaranteed to be in the finalized snapshot, and any Add that arrives after Finalize takes its lock returns `ErrAssemblerFinalized`. No external mutex required at call sites — the worker-pool pattern (one assembler shared across N scraper goroutines, coordinator goroutine calls Finalize at end-of-batch) is supported directly.
 
@@ -495,7 +471,6 @@ The `Snapshot` type provides read-only access to graph state:
 | `Schema()` | The schema used for validation |
 | `Types()` | All type identities (`[]schema.TypeID`, sorted by TypeID) |
 | `InstancesOf(typeID)` | Instances of a type (sorted by primary key) |
-| `Instances()` | Map of type identity to instance slices (non-deterministic iteration order) |
 | `AllInstances()` | Iterator over all instances in deterministic order |
 | `InstanceByKey(typeID, key)` | O(1) lookup by type identity and primary key |
 | `Edges()` | All resolved edges (sorted) |
@@ -519,8 +494,6 @@ The `Snapshot` type provides read-only access to graph state:
 - `Snapshot.Edges()`: Lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
 - `Snapshot.Duplicates()`: Lexicographic by (typeName, primaryKey)
 - `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
-
-The `Instances()` map has non-deterministic iteration order per Go semantics. For deterministic iteration, use `AllInstances()` (iterator) or `Types()` + `InstancesOf()` (slice-based).
 
 Types are identified by `schema.TypeID`, never by name. A name is a rendering of an identity — bare for a local type, alias-qualified for a directly imported one — so it cannot name a transitively imported type and cannot separate two same-named types in different schemas. Use `schema.TagForm(snap.Schema(), id)` where a name is wanted for output.
 
@@ -868,11 +841,9 @@ result.String()           // "OK" when OK(), formatted issues otherwise
 renderer := diag.NewRenderer(
     diag.WithSourceProvider(provider),   // source text for excerpts
     diag.WithExcerpts(true),             // show source excerpts
-    diag.WithMaxLineColumns(120),        // max columns for excerpts
     diag.WithModuleRoot("/project"),     // strip prefix from paths
     diag.WithColors(true),              // ANSI color output
     diag.WithDistinguishFatal(true),    // distinguish fatal from error
-    diag.WithTruncationIndicator("..."),  // truncation marker
 )
 output := renderer.FormatResult(result)
 
@@ -937,18 +908,10 @@ The `adapter/json` package parses JSON/JSONC into raw instances with optional lo
 ### Adapter Creation
 
 ```go
-adapter, err := json.New(registry, opts...)
+adapter := json.New()
 ```
 
-The `registry` parameter is a `location.PositionRegistry` used for byte-offset-to-position conversion when location tracking is enabled. It may be `nil` when `WithTrackLocations` is not set.
-
-### Parse Options
-
-| Option | Description |
-| ------ | ----------- |
-| `WithStrictJSON` | Use stdlib JSON only (no comments/trailing commas) |
-| `WithTrackLocations` | Enable source position tracking (requires non-nil registry) |
-| `WithTypeField` | Field name for type tagging (default: `$type`) |
+Input is preprocessed as JSONC: comments and trailing commas are tolerated.
 
 ### Parsing
 
@@ -977,8 +940,6 @@ data, err := adapter.MarshalObject(ctx, snap, writeOpts...)
 // Stream a snapshot to a writer (returns bytes written)
 n, err := adapter.WriteObject(ctx, w, snap, writeOpts...)
 
-// Serialize a single validated instance
-data, err := adapter.MarshalInstance(ctx, inst, schemaType, writeOpts...)
 ```
 
 The object output is keyed by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — `MarshalObject` and `WriteObject` return an error naming both identities instead of merging the pair under one key.
@@ -988,7 +949,6 @@ The object output is keyed by rendered type name. When two types in the snapshot
 | Option | Description |
 | ------ | ----------- |
 | `WithIndent` | Indentation string for formatted output |
-| `WithDiagnostics` | Include diagnostics in output |
 
 ### JSONC Support
 
@@ -1079,91 +1039,34 @@ shapes, result := adapter.ShapeForSchema(ctx, s)
 
 `ShapeForSchema` returns a `*GraphShape` containing a `Types` map of `NodeShape` values. Each `NodeShape` describes the `Type` (original yammm type name), `Label` (fully qualified Neo4j label), `PrimaryKeys`, and `RequiredFields` for a type.
 
-### Write Modes
+### Write Queries
 
-Write query generation supports two operational modes:
-
-- **Graph mode:** `BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes
-- **Instance mode:** `NodeQueryFor` accepts any `NodeSource` and `EdgeQueryFor`/`EdgeQueriesFor` generate edge queries from validated instance or edge data
-
-Both graph-mode entry points refuse a snapshot in which two types render the same type name — they would share one node shape and one label — returning an error that names both identities and the rendered name.
-
-`NodeQueryFor` accepts a `NodeSource` interface rather than a concrete type:
+`BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes. Both refuse a snapshot in which two types render the same type name — they would share one node shape and one label — returning an error that names both identities and the rendered name.
 
 ```go
-type NodeSource interface {
-    TypeName() string
-    Properties() immutable.Properties
-}
-```
-
-Both `*instance.ValidInstance` and `*graph.Instance` satisfy this interface.
-
-```go
-// Graph mode — batch queries from a snapshot
 shapes, _ := adapter.ShapeForSchema(ctx, s)
 nodeQueries, err := adapter.BatchNodeQueries(ctx, snap, shapes, writeOpts...)
 edgeQueries, err := adapter.BatchEdgeQueries(ctx, snap, shapes, writeOpts...)
-
-// Instance mode — single-instance queries
-nodeQuery, err := adapter.NodeQueryFor(ctx, &shape, inst, schemaType, writeOpts...)
-edgeQuery, err := adapter.EdgeQueryFor(ctx, edge, shapes, writeOpts...)
-edgeQueries, err := adapter.EdgeQueriesFor(ctx, validInst, schemaType, shapes, writeOpts...)
 ```
 
-All write methods return query structs (`NodeQuery`, `BatchNodeQuery`, `EdgeQuery`, `BatchEdgeQuery`) with `Statement` and `Params` fields, ready for driver execution.
+Both return query structs (`BatchNodeQuery`, `BatchEdgeQuery`) with `Statement` and `Params` fields, ready for driver execution.
 
 ### Write Options
 
 | Option | Description |
 | ------ | ----------- |
-| `WithImmutableKeys` | Properties only set on creation, not updated. Unions with schema-derived `@writeOnce` keys. Node merges only. |
 | `WithNodeChunkSize` | `UNWIND` batch size for node queries (default: 5000) |
 | `WithEdgeChunkSize` | `UNWIND` batch size for edge queries (default: 5000) |
 
-Explicitly-passed immutable keys union with the immutable keys derived from a type's `@writeOnce` annotations, which `ShapeForSchema` records on each `NodeShape` as `ImmutableKeys`. Because they travel on the shape, `NodeQueryFor` honors `@writeOnce` even when called with a nil `*schema.Type` — the documented streaming call shape. `ImmutableKeysFor(t *schema.Type) []string` returns a type's `@writeOnce` properties (own and inherited); the effective immutable set per written type is the union of explicit and derived keys, and `BatchNodeQueries` selects the `ON CREATE` / `ON MATCH` split per type (a non-empty explicit list still splits every type, preserving the prior contract).
+A type's write-once properties come from its `@writeOnce` annotations, which `ShapeForSchema` records on each `NodeShape` as `ImmutableKeys`; `ImmutableKeysFor(t *schema.Type) []string` returns them (own and inherited). The derived set per type drives the `ON CREATE` / `ON MATCH` split, selected per type in a batch. Node merges only — relationship merges have no `ON CREATE` / `ON MATCH` split.
 
-Only the explicitly-passed keys are validated against the schema at query-generation time: every one must name a declared property (own or inherited) of a node type being written. `NodeQueryFor` rejects a key that is not a property of its schema type (and skips both derivation and the check when `schemaType` is nil); `BatchNodeQueries` rejects a key that is a property of no node type in the snapshot, while accepting a key real for at least one written type (it may legitimately apply to a subset of a multi-type snapshot). A mistyped key would otherwise be honored silently and the real property rewritten on every re-MERGE, defeating the write-once guarantee. Derived `@writeOnce` keys are schema-true by construction and are not re-validated.
+### Relationship match counting
 
-### Cypher Builders
-
-The four exported builders produce the Cypher templates the `Adapter` write surface uses internally. They are pure functions — no execution, no driver dependency — and are exposed for advanced consumers (e.g. link engines, custom migration tooling) that want the template without the surrounding parameter-and-chunk plumbing that `BatchNodeQueries` / `BatchEdgeQueries` provide.
-
-```go
-// Node merge templates
-func BuildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string
-func BuildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string
-
-// Relationship merge templates (always end with RETURN count(*) AS matched_rows)
-func BuildRelationshipMergeQuery(
-    fromLabel string, fromKeyNames []string,
-    relType string,
-    toLabel string, toKeyNames []string,
-    hasProps bool,
-) string
-func BuildBatchRelationshipMergeQuery(
-    fromLabel string, fromKeyNames []string,
-    relType string,
-    toLabel string, toKeyNames []string,
-    hasProps bool,
-) string
-```
-
-The node builders' trailing `KeyMutability` parameter (`MutableKeys` or `ImmutableKeys`) selects the SET-clause shape. `MutableKeys` emits a single `SET n += $props`; `ImmutableKeys` emits the `ON CREATE SET n += $props` / `ON MATCH SET n += $update_props` split, and requires the caller to supply `$update_props` in the parameter map. The enum is complementary to `WithImmutableKeys`: the enum selects the template shape (per-call), while `WithImmutableKeys` at the `Adapter` layer carries the property-name filter that feeds `$update_props` at write time.
-
-Both relationship builders always end with `RETURN count(*) AS matched_rows`. The returned column reflects this call's (or this chunk's) MERGE match count only — 0 when the MERGE is a structural no-op (silent-failure condition), 1 (or the row count) when the relationship exists after the call. Consumers issuing multiple calls or chunks are responsible for summing `matched_rows` across results to detect silent no-ops. Node builders stay `RETURN`-free — constraint violations on nodes surface as driver errors, not silent zero-matches, so there is no analogous guard to emit.
-
-| Type / Constant | Description |
-| --------------- | ----------- |
-| `KeyMutability` | Enum selecting the node-builder SET-clause shape. Complementary to `WithImmutableKeys`. |
-| `MutableKeys` | Single `SET` clause; primary-key and property values are rewritten on MATCH. |
-| `ImmutableKeys` | `ON CREATE SET` / `ON MATCH SET` split; caller must supply `$update_props`. |
-
-For routine use, prefer `Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` — they call the same builders internally and handle parameter construction, chunking, and schema-aware property coercion.
+Every generated relationship statement ends with `RETURN count(*) AS matched_rows`, reflecting that call's (or chunk's) MERGE match count only — 0 when the MERGE is a structural no-op (silent-failure condition). Consumers issuing multiple chunks sum `matched_rows` across results to detect silent no-ops. Node statements stay `RETURN`-free: constraint violations on nodes surface as driver errors.
 
 ### Property Coercion
 
-The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` and the single-item `NodeQueryFor` / `EdgeQueriesFor`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The coercion chokepoint is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply the same rules:
+The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The coercion chokepoint is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply the same rules:
 
 ```go
 // Coerce a single SCALAR value to the driver-native type the constraint requires
@@ -1191,29 +1094,13 @@ func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, erro
 // "rows") for a nested param map — keys are dot-joined to match CoerceParams.
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes
 
-// ParamTypesForMergeKeys derives a ParamTypes for the MERGE-key parameters the
-// node builders read: one entry per primary key under the `key_` namespace.
-// Prefix "" gives $key_<pk> (BuildNodeMergeQuery); "rows" gives row.key_<pk>
-// (BuildBatchNodeMergeQuery).
-func ParamTypesForMergeKeys(t *schema.Type, prefix string) ParamTypes
 ```
 
 Coercion rules: `Float` ← any Go integer width (`int`, `int8`…`int64`, `uint`…`uint64`) or `float32` → `float64` (a `float64` passes through); `Timestamp` ← a string parsed against the constraint's custom Go layout when it declares one (`Timestamp["…"]`) or RFC3339 / RFC3339Nano otherwise → `time.Time` (a `time.Time` passes through); `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date` (a `dbtype.Date` passes through); every other scalar kind passes through unchanged. `List<T>` values are coerced element-wise into the concrete typed slice (`List<Float>` of `int64`s → `[]float64`, `List<Date>` of strings → `[]dbtype.Date`, and so on); a `List<Timestamp["…"]>` honors the element's custom layout too.
 
 The three transforming kinds (`Float`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value always passes through; an unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
-**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.NodeQueryFor` / `BatchNodeQueries` / `EdgeQueriesFor` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion — those coerce their own merge keys and endpoint keys as well as their properties. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one; it derives the element types lists need.
-
-**Cover the merge key too.** `ParamTypesForType` describes ONE shape: a map keyed by property name. A hand-built parameter map for `BuildNodeMergeQuery` or `BuildBatchNodeMergeQuery` also carries merge keys, which do not sit where the properties sit — and the merge key is the one value the pattern matches on, so leaving it uncoerced is the failure with no error attached: a `Date` primary key reaching the driver as a string matches no node whose property is a `DATE`, and every re-run inserts a duplicate. Take those from `ParamTypesForMergeKeys` and merge the two:
-
-```go
-// $key_<pk> at the top level, properties nested under $props.
-pt := neo4j.ParamTypesForType(t, "props")
-maps.Copy(pt, neo4j.ParamTypesForMergeKeys(t, ""))
-params, err := neo4j.CoerceParams(params, pt)
-```
-
-Two functions rather than one because a type may declare a property literally named `key_<pk>`: in a flat row that spelling is the property, and in `BuildBatchNodeMergeQuery`'s row shape it is the merge key (the properties live nested under `row.props`). One map cannot answer both without silently choosing. `CoerceParams` walks one level of nesting, so a two-level map needs one call per nested map. The relationship builders key on two types and have no single-type equivalent; their spellings are `$from_key_<pk>` / `$to_key_<pk>` and `row.from_<pk>` / `row.to_<pk>`.
+**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion — those coerce their own merge keys and endpoint keys as well as their properties. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one; it derives the element types lists need. When a hand-built merge key does not sit where the properties sit, coerce it explicitly — a `Date` primary key reaching the driver as a string matches no node whose property is a `DATE`, and every re-run inserts a duplicate.
 
 ### Schema Inference
 
@@ -1302,7 +1189,6 @@ The introspection types are:
 | -------- | ----------- |
 | `SanitizeIdentifier(s)` | Escape a string for use as a Neo4j label or property name |
 | `ValidateIdentifier(name, context)` | Validate that a name is a legal Neo4j identifier |
-| `CypherReservedKeywords()` | Return the set of Cypher reserved keywords |
 
 Cypher reserved words are not reserved by the DSL: a property named `match` or a
 type named `MATCH` is valid yammm and exports cleanly through the JSON and CSV
@@ -1328,11 +1214,9 @@ adapter := csv.New(opts...)
 
 | Option | Description |
 | ------ | ----------- |
-| `WithDelimiter` | Field delimiter rune (default: `,`) |
-| `WithHeader` | Whether input has a header row (default: true) |
-| `WithTypeColumn` | Column name for type tagging |
-| `WithNullValue` | String treated as nil (default: `""`) |
-| `WithListSeparator` | Separator for list values (default: `\|`) |
+| `WithTypeColumn` | Column name for type tagging (multi-type CSV) |
+
+The delimiter is `,`, the first row is the header, and list values join on `|`.
 
 ### Parsing
 
@@ -1354,10 +1238,6 @@ The `typeResolver` parameter is a `func(string) *schema.Type` that maps type col
 ### Serialization
 
 ```go
-// Serialize instances of a single type
-data, err := adapter.MarshalTyped(ctx, instances, schemaType, writeOpts...)
-n, err := adapter.WriteTyped(ctx, w, instances, schemaType, writeOpts...)
-
 // Serialize a full snapshot (returns one []byte per type)
 byType, err := adapter.MarshalSnapshot(ctx, snap, writeOpts...)
 
@@ -1366,13 +1246,6 @@ err := adapter.WriteSnapshot(ctx, writerFor, snap, writeOpts...)
 ```
 
 Both snapshot writers key their output by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — they return an error naming both identities instead of merging the pair, and `WriteSnapshot` requests no writer before that check passes.
-
-### Write Options
-
-| Option | Description |
-| ------ | ----------- |
-| `WithWriteHeader` | Include header row in output |
-| `WithWriteNullString` | String to emit for nil values |
 
 ### Type Coercion
 
@@ -1403,7 +1276,7 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
 data, err := gogen.Marshal(s, gogen.WithPackageName("model"))
 ```
 
-`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSources`/`LoadSourcesWithEntry`. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded `SerializedModel` and its round-trip self-check require the source.
+`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSourcesWithEntry`. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded `SerializedModel` and its round-trip self-check require the source.
 
 ### Options
 
@@ -1482,8 +1355,8 @@ data, err := jschema.Marshal(s, jschema.WithSchemaID("https://example.com/fleet.
 | Option | Description |
 | ------ | ----------- |
 | `WithSchemaID` | Set the document `"$id"` (omitted entirely when unset) |
-| `WithTitle` | Override the document title (default: the schema name) |
-| `WithDescription` | Override the generated top-level description |
+
+The document title is the schema name.
 
 ### The Emitted Document
 

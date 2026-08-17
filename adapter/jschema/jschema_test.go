@@ -143,8 +143,6 @@ func TestMarshal_Options(t *testing.T) {
 		out, err := Marshal(
 			s,
 			WithSchemaID("https://example.com/geo.schema.json"),
-			WithTitle("Custom Title"),
-			WithDescription("Custom description."),
 		)
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)
@@ -152,12 +150,6 @@ func TestMarshal_Options(t *testing.T) {
 		doc := decodeDoc(t, out)
 		if got := doc["$id"]; got != "https://example.com/geo.schema.json" {
 			t.Errorf("$id = %v", got)
-		}
-		if got := doc["title"]; got != "Custom Title" {
-			t.Errorf("title = %v", got)
-		}
-		if got := doc["description"]; got != "Custom description." {
-			t.Errorf("description = %v", got)
 		}
 	})
 }

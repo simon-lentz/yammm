@@ -14,7 +14,7 @@ func TestRelatedInfo_IsValid(t *testing.T) {
 			name: "valid span and message",
 			info: RelatedInfo{
 				Span:    Point(source, 10, 5),
-				Message: MsgPreviousDefinition,
+				Message: "previous definition here",
 			},
 			want: true,
 		},
@@ -28,7 +28,7 @@ func TestRelatedInfo_IsValid(t *testing.T) {
 		{
 			name: "no span, valid message",
 			info: RelatedInfo{
-				Message: MsgPreviousDefinition,
+				Message: "previous definition here",
 			},
 			want: true,
 		},
@@ -67,7 +67,7 @@ func TestRelatedInfo_String(t *testing.T) {
 			name: "span and message",
 			info: RelatedInfo{
 				Span:    Point(source, 10, 5),
-				Message: MsgPreviousDefinition,
+				Message: "previous definition here",
 			},
 			want: "test://unit:10:5: previous definition here",
 		},
@@ -81,7 +81,7 @@ func TestRelatedInfo_String(t *testing.T) {
 		{
 			name: "message only",
 			info: RelatedInfo{
-				Message: MsgPreviousDefinition,
+				Message: "previous definition here",
 			},
 			want: "previous definition here",
 		},
@@ -97,30 +97,6 @@ func TestRelatedInfo_String(t *testing.T) {
 			got := tt.info.String()
 			if got != tt.want {
 				t.Errorf("String() = %q; want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMessageConstants(t *testing.T) {
-	// Verify constants are as expected
-	tests := []struct {
-		name     string
-		constant string
-		want     string
-	}{
-		{"MsgPreviousDefinition", MsgPreviousDefinition, "previous definition here"},
-		{"MsgImportedFrom", MsgImportedFrom, "imported from here"},
-		{"MsgDeclaredHere", MsgDeclaredHere, "declared here"},
-		{"MsgRequiredBy", MsgRequiredBy, "required by this constraint"},
-		{"MsgReferencedFrom", MsgReferencedFrom, "referenced from here"},
-		{"MsgDefinedHere", MsgDefinedHere, "defined here"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.constant != tt.want {
-				t.Errorf("%s = %q; want %q", tt.name, tt.constant, tt.want)
 			}
 		})
 	}

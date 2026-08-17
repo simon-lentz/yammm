@@ -68,7 +68,7 @@ sources := map[string][]byte{
     "main.yammm":   mainContent,
     "common.yammm": commonContent,
 }
-s, result := schema.LoadSources(ctx, sources, "/module/root")
+s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/module/root")
 ```
 
 Use `LoadSourcesWithEntry` when the entry point is not the lexicographically first key:
@@ -86,7 +86,7 @@ schema.Load(ctx, path,
     schema.WithLogger(logger),
     schema.WithDisallowImports(),
     schema.WithRegistry(registry),
-    schema.WithSourcesOnly(), // hermetic: imports resolve only against in-memory sources — pair with LoadSources/LoadSourcesWithEntry, which seed them
+    schema.WithSourcesOnly(), // hermetic: imports resolve only against in-memory sources — pair with LoadSourcesWithEntry, which seeds them
 )
 ```
 
@@ -140,7 +140,6 @@ v := instance.NewValidator(s,
     instance.WithLogger(logger),
     instance.WithStrictPropertyNames(true),
     instance.WithAllowUnknownFields(false),
-    instance.WithMaxIssuesPerInstance(50),
 )
 ```
 
@@ -173,7 +172,7 @@ type RawInstance struct {
 
 ### Build RawInstances with SchemaBuilder
 
-`instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, and cardinality mismatches surface from `Build()` with the offending call site's file:line. Errors on nil schema, unknown type, or abstract type.
+`instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, and cardinality mismatches surface from `Build()` with the offending call site's file:line. Errors on nil schema, unknown type, or abstract type. The builder covers properties and property-less association edges; instances carrying edge properties or composed children are constructed from raw data instead.
 
 ```go
 b, err := instance.BuilderFor(s, "Person")
@@ -181,11 +180,7 @@ if err != nil { /* handle */ }
 raw, err := b.
     Property("id", "p1").
     Property("name", "Alice").
-    EdgeTo("works_at", "c1").                    // association; variadic key supports composite PKs
-    EdgeToWith("knows", []any{"p2"},             // association with edge properties
-        map[string]any{"since": "2020-01-01"}).
-    Composed("addresses",                        // composition: pass child builders
-        addr.Property("id", "a1")).
+    EdgeTo("works_at", "c1"). // association; variadic key supports composite PKs
     Build()
 ```
 
@@ -197,7 +192,7 @@ valid.PrimaryKey()                 // immutable.Key
 valid.Property("name")             // (immutable.Value, bool)
 valid.Properties()                 // immutable.Properties
 valid.Edge("WORKS_AT")             // (*ValidEdgeData, bool)
-valid.Composed("ITEMS")            // (immutable.Value, bool)
+valid.Compositions()               // iter.Seq2[string, immutable.Value]
 valid.Provenance()                 // *location.Provenance
 ```
 
@@ -331,7 +326,7 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 - **Validated instances** (`*instance.ValidInstance`) are immutable
 - **Graph snapshots** (`*graph.Snapshot`) are immutable
 - **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddComposed` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns an immutable snapshot
-- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe by default with opt-in `WithValidatorPool(n)` for CPU-bound consumers. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state). See the Batch Assembly section of `docs/API.md`
+- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---

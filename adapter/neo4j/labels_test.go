@@ -229,30 +229,3 @@ func TestLabel_SanitizationCollision(t *testing.T) {
 		t.Fatalf("Label(Foo-Bar) = %q, Label(Foo_Bar) = %q; sanitization should map both to one label", got, want)
 	}
 }
-
-func TestCypherReservedKeywords(t *testing.T) {
-	t.Parallel()
-
-	keywords := CypherReservedKeywords()
-
-	// Verify expected keywords are present.
-	mustContain := []string{"MATCH", "CREATE", "RETURN", "DELETE", "SET", "NULL", "TRUE", "FALSE", "CONSTRAINT", "DROP"}
-	for _, kw := range mustContain {
-		if !keywords[kw] {
-			t.Errorf("CypherReservedKeywords() missing %q", kw)
-		}
-	}
-
-	// The registry holds the Cypher 5 reserved words; assert a floor so a
-	// refactor that accidentally truncates the set fails loudly.
-	if len(keywords) < 50 {
-		t.Errorf("CypherReservedKeywords() returned %d entries; expected at least 50", len(keywords))
-	}
-
-	// Verify the map is a defensive copy.
-	keywords["INJECTED"] = true
-	fresh := CypherReservedKeywords()
-	if fresh["INJECTED"] {
-		t.Error("CypherReservedKeywords() should return a copy; modification affected subsequent call")
-	}
-}

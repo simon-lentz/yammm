@@ -585,20 +585,6 @@ func TestType_SubTypesSlice(t *testing.T) {
 	assert.Len(t, result, 1)
 }
 
-func TestType_IsSuperTypeOf(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
-	personType := schema.TestNewType("Person", sourceID, location.Span{}, "", false, false)
-	employeeID := schema.NewTypeID(sourceID, "Employee")
-	resolved := schema.NewResolvedTypeRef(
-		schema.NewTypeRef("", "Employee", location.Span{}),
-		employeeID,
-	)
-	schema.TestSetTypeSubTypes(personType, []schema.ResolvedTypeRef{resolved})
-
-	assert.True(t, personType.IsSuperTypeOf(employeeID))
-	assert.False(t, personType.IsSuperTypeOf(schema.NewTypeID(sourceID, "Unknown")))
-}
-
 func TestType_IsSubTypeOf(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://schema")
 	employeeType := schema.TestNewType("Employee", sourceID, location.Span{}, "", false, false)

@@ -411,17 +411,6 @@ func (t *Type) SubTypesSlice() []ResolvedTypeRef {
 	return slices.Clone(t.subTypes)
 }
 
-// IsSuperTypeOf reports whether this type is a supertype of the given type.
-// Uses TypeID for cross-schema comparison.
-func (t *Type) IsSuperTypeOf(id TypeID) bool {
-	for _, st := range t.subTypes {
-		if st.id == id {
-			return true
-		}
-	}
-	return false
-}
-
 // IsSubTypeOf reports whether this type is a subtype of the given type.
 // Uses TypeID for cross-schema comparison.
 func (t *Type) IsSubTypeOf(id TypeID) bool {

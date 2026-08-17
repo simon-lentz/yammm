@@ -53,16 +53,6 @@ func WithExcerpts(on bool) Option {
 	}
 }
 
-// WithMaxLineColumns sets the maximum line length before truncation.
-//
-// Lines longer than this are truncated with the truncation indicator.
-// Default is 120.
-func WithMaxLineColumns(n int) Option {
-	return func(c *rendererConfig) {
-		c.maxCols = n
-	}
-}
-
 // WithModuleRoot sets the module root for path relativization.
 //
 // When set, absolute paths that start with this root are displayed
@@ -88,15 +78,6 @@ func WithColors(on bool) Option {
 func WithDistinguishFatal(distinguish bool) Option {
 	return func(c *rendererConfig) {
 		c.distinguishFatal = distinguish
-	}
-}
-
-// WithTruncationIndicator sets the indicator for truncated lines.
-//
-// Default is "...".
-func WithTruncationIndicator(s string) Option {
-	return func(c *rendererConfig) {
-		c.truncationIndicator = s
 	}
 }
 
@@ -135,13 +116,6 @@ func NewRenderer(opts ...Option) *Renderer {
 	}
 }
 
-// FormatIssue formats a single issue as text.
-func (r *Renderer) FormatIssue(issue Issue) string {
-	var sb strings.Builder
-	r.formatIssueToBuilder(&sb, issue)
-	return sb.String()
-}
-
 // FormatResult formats all issues in a result as text.
 func (r *Renderer) FormatResult(res Result) string {
 	var sb strings.Builder
@@ -152,18 +126,6 @@ func (r *Renderer) FormatResult(res Result) string {
 		}
 		r.formatIssueToBuilder(&sb, issue)
 		first = false
-	}
-	return sb.String()
-}
-
-// FormatIssues formats a slice of issues as text.
-func (r *Renderer) FormatIssues(issues []Issue) string {
-	var sb strings.Builder
-	for i, issue := range issues {
-		if i > 0 {
-			sb.WriteString("\n")
-		}
-		r.formatIssueToBuilder(&sb, issue)
 	}
 	return sb.String()
 }

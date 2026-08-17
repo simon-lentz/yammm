@@ -1080,7 +1080,7 @@ func TestOwnership_Isolation(t *testing.T) {
 
 	childProp := func(t *testing.T, valid *instance.ValidInstance, relation string, idx int, prop, want string) {
 		t.Helper()
-		composed, ok := valid.Composed(relation)
+		composed, ok := composedOf(valid, relation)
 		require.True(t, ok)
 		composedSlice, ok := composed.Slice()
 		require.True(t, ok)
@@ -1128,7 +1128,7 @@ func TestOwnership_Isolation(t *testing.T) {
 			},
 			verify: func(t *testing.T, valid *instance.ValidInstance) {
 				t.Helper()
-				composed, ok := valid.Composed("notes")
+				composed, ok := composedOf(valid, "notes")
 				require.True(t, ok)
 				composedSlice, ok := composed.Slice()
 				require.True(t, ok)
@@ -1171,7 +1171,7 @@ func TestOwnership_Isolation(t *testing.T) {
 			verify: func(t *testing.T, valid *instance.ValidInstance) {
 				t.Helper()
 				childProp(t, valid, "details", 0, "value", "Original Value")
-				composed, _ := valid.Composed("details")
+				composed, _ := composedOf(valid, "details")
 				composedSlice, _ := composed.Slice()
 				child := composedSlice.Get(0).Unwrap().(*instance.ValidInstance)
 				assert.Equal(t, `["1"]`, child.PrimaryKey().String(), "isolation failed: PK was mutated")

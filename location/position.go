@@ -78,33 +78,3 @@ func (p Position) String() string {
 	}
 	return fmt.Sprintf("%d:%d", p.Line, p.Column)
 }
-
-// Before reports whether p is strictly before other.
-// Comparison is by Line first, then by Column. Byte offset is ignored.
-// Returns false if either position is not fully known (requires both Line > 0 and Column > 0).
-//
-// Byte offset is intentionally ignored because Position.Before/After are
-// designed for human-readable ordering (line/column), not byte-level precision.
-// For byte-level comparison, use [Span.Contains] or compare Byte fields directly.
-func (p Position) Before(other Position) bool {
-	if !p.IsKnown() || !other.IsKnown() {
-		return false
-	}
-	if p.Line != other.Line {
-		return p.Line < other.Line
-	}
-	return p.Column < other.Column
-}
-
-// After reports whether p is strictly after other.
-// Comparison is by Line first, then by Column. Byte offset is ignored.
-// Returns false if either position is not fully known (requires both Line > 0 and Column > 0).
-func (p Position) After(other Position) bool {
-	if !p.IsKnown() || !other.IsKnown() {
-		return false
-	}
-	if p.Line != other.Line {
-		return p.Line > other.Line
-	}
-	return p.Column > other.Column
-}

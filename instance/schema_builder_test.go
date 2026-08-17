@@ -2,11 +2,9 @@ package instance_test
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 
@@ -292,7 +290,7 @@ func TestSchemaBuilder_EdgeTo_OnCompositionRelation(t *testing.T) {
 	_, err = b.EdgeTo("addresses", "x").Build()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "composition")
-	assert.Contains(t, err.Error(), "use Composed")
+	assert.Contains(t, err.Error(), "does not support composed children")
 }
 
 func TestSchemaBuilder_EdgeTo_OnRelationWithEdgeProps(t *testing.T) {
@@ -303,7 +301,7 @@ func TestSchemaBuilder_EdgeTo_OnRelationWithEdgeProps(t *testing.T) {
 	_, err = b.Property("id", "e1").EdgeTo("works_at", "c1").Build()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "declares edge properties")
-	assert.Contains(t, err.Error(), "EdgeToWith")
+	assert.Contains(t, err.Error(), "does not support")
 }
 
 func TestSchemaBuilder_EdgeTo_ArityMismatch(t *testing.T) {
@@ -318,98 +316,6 @@ func TestSchemaBuilder_EdgeTo_ArityMismatch(t *testing.T) {
 }
 
 // ---------- EdgeToWith ----------
-
-func TestSchemaBuilder_EdgeToWith_Happy(t *testing.T) {
-	s := edgePropsSchema(t)
-	b, err := instance.BuilderFor(s, "Employee")
-	require.NoError(t, err)
-
-	raw, err := b.
-		Property("id", "e1").
-		EdgeToWith("works_at", []any{"c1"}, map[string]any{
-			"role":  "Engineer",
-			"since": "2020-01-01",
-		}).
-		Build()
-	require.NoError(t, err)
-
-	edge, ok := raw.Properties["works_at"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "c1", edge["_target_id"])
-	assert.Equal(t, "Engineer", edge["role"])
-	assert.Equal(t, "2020-01-01", edge["since"])
-}
-
-func TestSchemaBuilder_EdgeToWith_UnknownProp(t *testing.T) {
-	s := edgePropsSchema(t)
-	b, err := instance.BuilderFor(s, "Employee")
-	require.NoError(t, err)
-
-	_, err = b.
-		Property("id", "e1").
-		EdgeToWith("works_at", []any{"c1"}, map[string]any{
-			"role":   "Engineer",
-			"since":  "2020-01-01",
-			"bogus!": "x",
-		}).
-		Build()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown edge property")
-	assert.Contains(t, err.Error(), `"bogus!"`)
-}
-
-func TestSchemaBuilder_EdgeToWith_MissingRequiredProp(t *testing.T) {
-	s := edgePropsSchema(t)
-	b, err := instance.BuilderFor(s, "Employee")
-	require.NoError(t, err)
-
-	_, err = b.
-		Property("id", "e1").
-		EdgeToWith("works_at", []any{"c1"}, map[string]any{
-			"role": "Engineer",
-			// "since" omitted — it's required
-		}).
-		Build()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "missing required edge property")
-	assert.Contains(t, err.Error(), `"since"`)
-}
-
-func TestSchemaBuilder_EdgeToWith_OnRelationWithoutEdgeProps(t *testing.T) {
-	s := personSchema(t)
-	b, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-
-	_, err = b.Property("id", "p1").Property("name", "Alice").
-		EdgeToWith("works_at", []any{"c1"}, map[string]any{"k": "v"}).
-		Build()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "has no edge properties")
-	assert.Contains(t, err.Error(), "use EdgeTo")
-}
-
-func TestSchemaBuilder_EdgeToWith_EmptyPropsOptionalOnly(t *testing.T) {
-	// "visits" declares only optional edge properties; nil/empty props is valid.
-	s := edgePropsSchema(t)
-	b, err := instance.BuilderFor(s, "Employee")
-	require.NoError(t, err)
-
-	raw, err := b.
-		Property("id", "e1").
-		EdgeToWith("visits", []any{"oc1"}, nil).
-		EdgeToWith("visits", []any{"oc2"}, map[string]any{}).
-		Build()
-	require.NoError(t, err)
-	arr, ok := raw.Properties["visits"].([]any)
-	require.True(t, ok)
-	require.Len(t, arr, 2)
-	first, _ := arr[0].(map[string]any)
-	second, _ := arr[1].(map[string]any)
-	assert.Equal(t, "oc1", first["_target_id"])
-	assert.NotContains(t, first, "note")
-	assert.Equal(t, "oc2", second["_target_id"])
-	assert.NotContains(t, second, "note")
-}
 
 // ---------- Cardinality ----------
 
@@ -427,22 +333,6 @@ func TestSchemaBuilder_Cardinality_OneWithTwoEdgeTo(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cardinality mismatch")
 	assert.Contains(t, err.Error(), "works_at")
-}
-
-func TestSchemaBuilder_Cardinality_OneMixingEdgeShapes(t *testing.T) {
-	s := edgePropsSchema(t)
-	b, err := instance.BuilderFor(s, "Employee")
-	require.NoError(t, err)
-
-	_, err = b.
-		Property("id", "e1").
-		EdgeToWith("works_at", []any{"c1"}, map[string]any{"role": "x", "since": "y"}).
-		EdgeTo("works_at", "c2").
-		Build()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "declares edge properties")
-	// EdgeTo on a props-bearing relation gets rejected at the call itself (before
-	// it could even reach the mix check) — that's the stable, user-facing surface.
 }
 
 func TestSchemaBuilder_Cardinality_ManyZeroCalls(t *testing.T) {
@@ -486,174 +376,6 @@ func TestSchemaBuilder_RelationNameFormParity(t *testing.T) {
 }
 
 // ---------- Composed ----------
-
-func TestSchemaBuilder_Composed_Happy(t *testing.T) {
-	s := personSchema(t)
-	p, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-	a1, err := instance.BuilderFor(s, "Address")
-	require.NoError(t, err)
-	a2, err := instance.BuilderFor(s, "Address")
-	require.NoError(t, err)
-
-	raw, err := p.
-		Property("id", "alice").
-		Property("name", "Alice").
-		Composed(
-			"addresses",
-			a1.Property("id", "a1").Property("street", "Main St"),
-			a2.Property("id", "a2").Property("street", "Oak Ave"),
-		).
-		Build()
-	require.NoError(t, err)
-	arr, ok := raw.Properties["addresses"].([]any)
-	require.True(t, ok, "composition must always emit []any")
-	require.Len(t, arr, 2)
-	first, _ := arr[0].(map[string]any)
-	assert.Equal(t, "a1", first["id"])
-	assert.Equal(t, "Main St", first["street"])
-}
-
-func TestSchemaBuilder_Composed_OneCardinalityHappy(t *testing.T) {
-	// "primary_note" is a one-cardinality composition — still emits []any with 1 child.
-	s := personSchema(t)
-	p, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-	note, err := instance.BuilderFor(s, "Note")
-	require.NoError(t, err)
-
-	raw, err := p.
-		Property("id", "p1").
-		Property("name", "Alice").
-		Composed("primary_note", note.Property("body", "hello")).
-		Build()
-	require.NoError(t, err)
-	arr, ok := raw.Properties["primary_note"].([]any)
-	require.True(t, ok)
-	require.Len(t, arr, 1)
-}
-
-func TestSchemaBuilder_Composed_CallShapeParity(t *testing.T) {
-	// Same logical children, three call shapes → byte-identical Properties.
-	s := personSchema(t)
-
-	build := func(callShape func(p *instance.SchemaBuilder, children ...*instance.SchemaBuilder) *instance.SchemaBuilder) instance.RawInstance {
-		p, err := instance.BuilderFor(s, "Person")
-		require.NoError(t, err)
-		kids := make([]*instance.SchemaBuilder, 3)
-		for i := range kids {
-			c, err := instance.BuilderFor(s, "Address")
-			require.NoError(t, err)
-			kids[i] = c.Property("id", fmt.Sprintf("a%d", i)).Property("street", fmt.Sprintf("St %d", i))
-		}
-		raw, err := callShape(p.Property("id", "alice").Property("name", "Alice"), kids...).Build()
-		require.NoError(t, err)
-		return raw
-	}
-
-	multiPositional := build(func(p *instance.SchemaBuilder, c ...*instance.SchemaBuilder) *instance.SchemaBuilder {
-		return p.Composed("addresses", c[0], c[1], c[2])
-	})
-	sliceUnpack := build(func(p *instance.SchemaBuilder, c ...*instance.SchemaBuilder) *instance.SchemaBuilder {
-		return p.Composed("addresses", c...)
-	})
-	repeatedSingle := build(func(p *instance.SchemaBuilder, c ...*instance.SchemaBuilder) *instance.SchemaBuilder {
-		return p.Composed("addresses", c[0]).Composed("addresses", c[1]).Composed("addresses", c[2])
-	})
-
-	assertPropertiesEqual(t, multiPositional.Properties, sliceUnpack.Properties)
-	assertPropertiesEqual(t, multiPositional.Properties, repeatedSingle.Properties)
-}
-
-func TestSchemaBuilder_Composed_EmptyVariadic(t *testing.T) {
-	s := personSchema(t)
-	p, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-
-	raw, err := p.Property("id", "p1").Property("name", "Alice").Composed("addresses").Build()
-	require.NoError(t, err)
-	_, hasAddr := raw.Properties["addresses"]
-	assert.False(t, hasAddr, "empty variadic Composed should not emit the key")
-}
-
-func TestSchemaBuilder_Composed_WrongChildType(t *testing.T) {
-	s := personSchema(t)
-	p, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-	wrong, err := instance.BuilderFor(s, "Note")
-	require.NoError(t, err)
-
-	_, err = p.Property("id", "p1").Property("name", "Alice").
-		Composed("addresses", wrong.Property("body", "nope")).
-		Build()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `composition "addresses"`)
-	assert.Contains(t, err.Error(), "expected Address, got Note")
-	assert.Contains(t, err.Error(), "schema_builder_test.go:")
-}
-
-func TestSchemaBuilder_Composed_OneCardinalityTwoCalls(t *testing.T) {
-	s := personSchema(t)
-	p, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-	n1, err := instance.BuilderFor(s, "Note")
-	require.NoError(t, err)
-	n2, err := instance.BuilderFor(s, "Note")
-	require.NoError(t, err)
-
-	_, err = p.
-		Property("id", "p1").
-		Property("name", "Alice").
-		Composed("primary_note", n1.Property("body", "first")).
-		Composed("primary_note", n2.Property("body", "second")).
-		Build()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cardinality mismatch")
-	assert.Contains(t, err.Error(), "primary_note")
-}
-
-func TestSchemaBuilder_Composed_OneCardinalityTwoVariadic(t *testing.T) {
-	s := personSchema(t)
-	p, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-	n1, err := instance.BuilderFor(s, "Note")
-	require.NoError(t, err)
-	n2, err := instance.BuilderFor(s, "Note")
-	require.NoError(t, err)
-
-	_, err = p.
-		Property("id", "p1").
-		Property("name", "Alice").
-		Composed(
-			"primary_note",
-			n1.Property("body", "first"),
-			n2.Property("body", "second"),
-		).
-		Build()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cardinality mismatch")
-}
-
-func TestSchemaBuilder_Composed_ChildErrorPropagates(t *testing.T) {
-	s := personSchema(t)
-	p, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-	child, err := instance.BuilderFor(s, "Address")
-	require.NoError(t, err)
-
-	// Deliberately trip an error in the child.
-	_, err = p.
-		Property("id", "p1").
-		Property("name", "Alice").
-		Composed("addresses", child.Property("id", "a1").Property("bogus_field", "x")).
-		Build()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `composition "addresses"`)
-	assert.Contains(t, err.Error(), `unknown property "bogus_field"`)
-	// Both file:line locators present — parent's Composed caller + child's Property caller.
-	assert.GreaterOrEqual(t, strings.Count(err.Error(), "schema_builder_test.go:"), 2,
-		"parent Composed caller and child Property caller both surface")
-}
 
 // ---------- First-error-with-count ----------
 
@@ -704,30 +426,6 @@ func TestSchemaBuilder_CallerLocator_CrossFile(t *testing.T) {
 
 // ---------- MustBuild ----------
 
-func TestSchemaBuilder_MustBuild_Happy(t *testing.T) {
-	s := personSchema(t)
-	b, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-
-	raw := b.Property("id", "p1").Property("name", "Alice").MustBuild()
-	assert.Equal(t, "p1", raw.Properties["id"])
-}
-
-func TestSchemaBuilder_MustBuild_Panics(t *testing.T) {
-	s := personSchema(t)
-	b, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-
-	defer func() {
-		r := recover()
-		require.NotNil(t, r, "MustBuild should panic on error")
-		msg, _ := r.(string)
-		assert.Contains(t, msg, "instance.SchemaBuilder.MustBuild")
-		assert.Contains(t, msg, `unknown property "bogus"`)
-	}()
-	_ = b.Property("bogus", 1).MustBuild()
-}
-
 // ---------- Round-trip: builder → validator ----------
 
 func TestSchemaBuilder_RoundTrip_ValidatorAccepts(t *testing.T) {
@@ -736,15 +434,12 @@ func TestSchemaBuilder_RoundTrip_ValidatorAccepts(t *testing.T) {
 
 	p, err := instance.BuilderFor(s, "Person")
 	require.NoError(t, err)
-	addr, err := instance.BuilderFor(s, "Address")
-	require.NoError(t, err)
 
 	raw, err := p.
 		Property("id", "p1").
 		Property("name", "Alice").
 		EdgeTo("works_at", "c1").
 		EdgeTo("knows", "p2").
-		Composed("addresses", addr.Property("id", "a1").Property("street", "Main St")).
 		Build()
 	require.NoError(t, err)
 
@@ -790,25 +485,6 @@ func TestSchemaBuilder_NotConcurrentSafe_DocumentedShape(t *testing.T) {
 }
 
 // ---------- error-chain / errors.As ----------
-
-func TestSchemaBuilder_ErrorChain_UnwrapChildError(t *testing.T) {
-	s := personSchema(t)
-	p, err := instance.BuilderFor(s, "Person")
-	require.NoError(t, err)
-	addr, err := instance.BuilderFor(s, "Address")
-	require.NoError(t, err)
-
-	_, buildErr := p.
-		Property("id", "p1").
-		Property("name", "Alice").
-		Composed("addresses", addr.Property("id", "a1").Property("bad", "x")).
-		Build()
-	require.Error(t, buildErr)
-	// Walk the chain: outer build error → child error (also a build error).
-	inner := errors.Unwrap(buildErr)
-	require.Error(t, inner, "outer build error must unwrap to child's error")
-	assert.Contains(t, inner.Error(), `unknown property "bad"`)
-}
 
 // ---------- helpers ----------
 

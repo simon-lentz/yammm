@@ -50,7 +50,7 @@
 //
 // Issues must be constructed using [NewIssue] and [IssueBuilder]:
 //
-//	issue := diag.NewIssue(diag.Error, diag.E_TYPE_COLLISION, `type "Person" already defined`).
+//	issue := diag.NewIssue(diag.Error, diag.E_DUPLICATE_TYPE, `type "Person" already defined`).
 //	    WithSpan(span).
 //	    WithHint("rename one of the types").
 //	    WithRelated(location.RelatedInfo{Span: previousSpan, Message: "previous definition here"}).
@@ -77,9 +77,9 @@
 //	    // handle semantic failures
 //	}
 //
-// [Collector] is thread-safe and provides O(1) severity queries via [Collector.OK],
-// [Collector.HasErrors], and [Collector.HasFatal]. Both paths produce the same
-// deterministic issue ordering.
+// [Collector] is thread-safe and provides O(1) severity queries via
+// [Collector.HasErrors] and [Collector.ErrorCount]; the full query surface
+// lives on [Result]. Both paths produce the same deterministic issue ordering.
 //
 // # Rendering
 //

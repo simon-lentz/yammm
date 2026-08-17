@@ -2,15 +2,6 @@ package location
 
 // Common RelatedInfo message constants for consistent diagnostic output.
 // Using these constants ensures uniform casing and punctuation across the codebase.
-const (
-	MsgPreviousDefinition = "previous definition here"
-	MsgImportedFrom       = "imported from here"
-	MsgDeclaredHere       = "declared here"
-	MsgRequiredBy         = "required by this constraint"
-	MsgReferencedFrom     = "referenced from here"
-	MsgDefinedHere        = "defined here"
-)
-
 // RelatedInfo describes an additional location associated with a diagnostic.
 //
 // Used for supplementary context like "previous definition here" or
@@ -20,7 +11,6 @@ type RelatedInfo struct {
 	Span Span
 
 	// Message provides context about why this location is related.
-	// Prefer using the Msg* constants (e.g., MsgPreviousDefinition) for consistency.
 	Message string
 }
 

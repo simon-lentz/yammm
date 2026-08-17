@@ -3,7 +3,6 @@ package graph_test
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -397,9 +396,6 @@ func TestSnapshot_NilReceiver(t *testing.T) {
 	if r.InstancesOf(schema.TypeID{}) != nil {
 		t.Error("nil.InstancesOf() should return nil")
 	}
-	if r.Instances() != nil {
-		t.Error("nil.Instances() should return nil")
-	}
 	if _, ok := r.InstanceByKey(schema.TypeID{}, "any"); ok {
 		t.Error("nil.InstanceByKey() should return false")
 	}
@@ -415,10 +411,10 @@ func TestSnapshot_NilReceiver(t *testing.T) {
 	if r.Unresolved() != nil {
 		t.Error("nil.Unresolved() should return nil")
 	}
-	if !r.OK() {
+	if !r.Diagnostics().OK() {
 		t.Error("nil.OK() should return true")
 	}
-	if r.HasErrors() {
+	if r.Diagnostics().HasErrors() {
 		t.Error("nil.HasErrors() should return false")
 	}
 }
@@ -1350,19 +1346,13 @@ func TestResult_Instances(t *testing.T) {
 
 	snap := g.Snapshot()
 
-	// Test Instances() returns a map
-	instances := snap.Instances()
-	if instances == nil {
-		t.Error("Instances() returned nil")
-	}
-
-	// Count all instances in the map
+	// Count all instances via the deterministic iterator.
 	total := 0
-	for _, typeInstances := range instances {
-		total += len(typeInstances)
+	for range snap.AllInstances() {
+		total++
 	}
 	if total != 3 {
-		t.Errorf("Instances() returned %d total items, want 3", total)
+		t.Errorf("AllInstances() yielded %d items, want 3", total)
 	}
 }
 
@@ -1393,8 +1383,8 @@ func TestResult_DiagnosticsAndFlags(t *testing.T) {
 
 	// Test snapshot-level methods
 	snap := g.Snapshot()
-	snapOk := snap.OK()
-	snapHasErrors := snap.HasErrors()
+	snapOk := snap.Diagnostics().OK()
+	snapHasErrors := snap.Diagnostics().HasErrors()
 	if !snapOk {
 		t.Error("Expected snap OK to be true")
 	}
@@ -2149,188 +2139,6 @@ func TestNilContext_Panics(t *testing.T) {
 				}
 			}()
 			tc.fn()
-		})
-	}
-}
-
-// TestGraph_Logging drives every logged operation through one scenario
-// table: each row builds its schema, runs its graph operations against a
-// captured logger, then asserts the expected operation names, attributes,
-// messages, and warn-level presence in the records.
-func TestGraph_Logging(t *testing.T) {
-	tests := []struct {
-		name      string
-		schema    func(*testing.T) *schema.Schema
-		run       func(t *testing.T, g *graph.Graph, s *schema.Schema)
-		wantOps   []string
-		wantAttrs [][2]string
-		wantMsgs  []string
-		wantWarn  bool
-	}{
-		{
-			name:   "add",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-				if r := g.Add(t.Context(), company); !r.OK() {
-					t.Fatalf("Add failed: %s", r.String())
-				}
-			},
-			wantOps:   []string{"yammm.graph.add"},
-			wantAttrs: [][2]string{{"type", "Company"}, {"pk", `["acme"]`}},
-		},
-		{
-			name:   "add duplicate",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				company1 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-				if r := g.Add(t.Context(), company1); !r.OK() {
-					t.Fatalf("First Add failed: %s", r.String())
-				}
-				company2 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Inc"})
-				g.Add(t.Context(), company2)
-			},
-			wantMsgs: []string{"duplicate primary key"},
-			wantWarn: true,
-		},
-		{
-			name:   "edge resolution",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-				if r := g.Add(t.Context(), company); !r.OK() {
-					t.Fatalf("Add Company failed: %s", r.String())
-				}
-				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add Person failed: %s", r.String())
-				}
-			},
-			wantMsgs: []string{"edge resolved"},
-		},
-		{
-			name:   "forward reference",
-			schema: testSchemaWithOptionalAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add Person failed: %s", r.String())
-				}
-			},
-			wantMsgs: []string{"forward reference created"},
-		},
-		{
-			name:   "pending edges resolved",
-			schema: testSchemaWithOptionalAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add Person failed: %s", r.String())
-				}
-				company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-				if r := g.Add(t.Context(), company); !r.OK() {
-					t.Fatalf("Add Company failed: %s", r.String())
-				}
-			},
-			wantMsgs: []string{"pending edges resolved"},
-		},
-		{
-			name:   "check",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				person := mustValidInstance(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add failed: %s", r.String())
-				}
-				g.Check(t.Context())
-			},
-			wantOps: []string{"yammm.graph.check"},
-		},
-		{
-			name:   "check unresolved",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"missing"}})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add failed: %s", r.String())
-				}
-				g.Check(t.Context())
-			},
-			wantMsgs: []string{"unresolved required association"},
-			wantWarn: true,
-		},
-		{
-			name:   "add composed",
-			schema: testSchemaWithComposition,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-				if r := g.Add(t.Context(), parent); !r.OK() {
-					t.Fatalf("Add parent failed: %s", r.String())
-				}
-				child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-				if r := g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child); !r.OK() {
-					t.Fatalf("AddComposed failed: %s", r.String())
-				}
-			},
-			wantOps:   []string{"yammm.graph.add_composed"},
-			wantAttrs: [][2]string{{"parent_type", "Parent"}, {"relation", "children"}},
-		},
-		{
-			name:   "add composed duplicate",
-			schema: testSchemaWithComposition,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-				if r := g.Add(t.Context(), parent); !r.OK() {
-					t.Fatalf("Add parent failed: %s", r.String())
-				}
-				child1 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-				if r := g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child1); !r.OK() {
-					t.Fatalf("First AddComposed failed: %s", r.String())
-				}
-				child2 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1 Dup"})
-				g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child2)
-			},
-			wantMsgs: []string{"duplicate composed child"},
-			wantWarn: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := tt.schema(t)
-			h := yammmtest.NewRecordHandler(slog.LevelDebug)
-			g := graph.New(s, graph.WithLogger(slog.New(h)))
-
-			tt.run(t, g, s)
-
-			records := h.Records()
-			for _, op := range tt.wantOps {
-				if !yammmtest.HasAttr(records, "op", op) {
-					t.Errorf("expected %s operation to be logged", op)
-				}
-			}
-			for _, attr := range tt.wantAttrs {
-				if !yammmtest.HasAttr(records, attr[0], attr[1]) {
-					t.Errorf("expected %s=%s attribute", attr[0], attr[1])
-				}
-			}
-			for _, msg := range tt.wantMsgs {
-				if !yammmtest.HasMessage(records, msg) {
-					t.Errorf("expected %q message", msg)
-				}
-			}
-			if tt.wantWarn && yammmtest.CountLevel(records, slog.LevelWarn) == 0 {
-				t.Error("expected a Warn-level record")
-			}
 		})
 	}
 }

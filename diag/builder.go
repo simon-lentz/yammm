@@ -14,7 +14,7 @@ import (
 //
 // Example:
 //
-//	issue := diag.NewIssue(diag.Error, diag.E_TYPE_COLLISION, `type "Person" already defined`).
+//	issue := diag.NewIssue(diag.Error, diag.E_DUPLICATE_TYPE, `type "Person" already defined`).
 //	    WithSpan(span).
 //	    WithHint("rename one of the types").
 //	    Build()

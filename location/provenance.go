@@ -63,18 +63,6 @@ func (p *Provenance) Span() Span {
 	return p.span
 }
 
-// WithPath returns a new Provenance with a different path.
-func (p *Provenance) WithPath(newPath path.Builder) *Provenance {
-	if p == nil {
-		return &Provenance{path: newPath}
-	}
-	return &Provenance{
-		sourceName: p.sourceName,
-		path:       newPath,
-		span:       p.span,
-	}
-}
-
 // AtKey returns a new Provenance with the path extended by a key.
 func (p *Provenance) AtKey(key string) *Provenance {
 	if p == nil {
@@ -83,18 +71,6 @@ func (p *Provenance) AtKey(key string) *Provenance {
 	return &Provenance{
 		sourceName: p.sourceName,
 		path:       p.path.Key(key),
-		span:       p.span,
-	}
-}
-
-// AtIndex returns a new Provenance with the path extended by an index.
-func (p *Provenance) AtIndex(index int) *Provenance {
-	if p == nil {
-		return &Provenance{path: path.Root().Index(index)}
-	}
-	return &Provenance{
-		sourceName: p.sourceName,
-		path:       p.path.Index(index),
 		span:       p.span,
 	}
 }
@@ -126,14 +102,4 @@ func (p *Provenance) WithRawPath(raw string) *Provenance {
 		span:       p.span,
 		rawPath:    raw,
 	}
-}
-
-// HasSpan reports whether this provenance has a non-zero source location span.
-//
-// Returns false for provenance loaded from persisted snapshots (.ys files),
-// where source file byte offsets are not persisted. Consumers should use
-// HasSpan to guard span access in code that may operate on both constructed
-// and loaded provenance.
-func (p *Provenance) HasSpan() bool {
-	return p != nil && !p.span.IsZero()
 }

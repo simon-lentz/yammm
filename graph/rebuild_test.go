@@ -239,7 +239,7 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 	if dup.Instance.TypeName() != "Company" {
 		t.Errorf("duplicate type: got %q", dup.Instance.TypeName())
 	}
-	if dup.HasDiagnostic() {
+	if !dup.Diagnostic.IsZero() {
 		t.Error("loaded duplicate should not have diagnostic")
 	}
 	if dup.Conflict == nil {

@@ -22,7 +22,7 @@ func TestIssue_Accessors(t *testing.T) {
 		sourceName: "data.json",
 		path:       "$.items[0].name",
 		severity:   Error,
-		code:       E_TYPE_COLLISION,
+		code:       E_DUPLICATE_TYPE,
 		message:    "type collision detected",
 		hint:       "rename one of the types",
 		related:    related,
@@ -32,8 +32,8 @@ func TestIssue_Accessors(t *testing.T) {
 	if got := issue.Severity(); got != Error {
 		t.Errorf("Severity() = %v; want %v", got, Error)
 	}
-	if got := issue.Code(); got != E_TYPE_COLLISION {
-		t.Errorf("Code() = %v; want %v", got, E_TYPE_COLLISION)
+	if got := issue.Code(); got != E_DUPLICATE_TYPE {
+		t.Errorf("Code() = %v; want %v", got, E_DUPLICATE_TYPE)
 	}
 	if got := issue.Message(); got != "type collision detected" {
 		t.Errorf("Message() = %q; want %q", got, "type collision detected")
@@ -246,80 +246,6 @@ func TestIssue_IsValid(t *testing.T) {
 	}
 }
 
-func TestIssue_ProvenanceClassification(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
-	span := location.Point(source, 1, 1)
-
-	tests := []struct {
-		name           string
-		issue          Issue
-		wantSchemaOnly bool
-		wantInstOnly   bool
-		wantHybrid     bool
-	}{
-		{
-			name:           "zero issue",
-			issue:          Issue{},
-			wantSchemaOnly: false,
-			wantInstOnly:   false,
-			wantHybrid:     false,
-		},
-		{
-			name: "schema only (span, no path)",
-			issue: Issue{
-				span:     span,
-				severity: Error,
-				code:     E_SYNTAX,
-				message:  "test",
-			},
-			wantSchemaOnly: true,
-			wantInstOnly:   false,
-			wantHybrid:     false,
-		},
-		{
-			name: "instance only (path, no span)",
-			issue: Issue{
-				sourceName: "data.json",
-				path:       "$.x",
-				severity:   Error,
-				code:       E_TYPE_MISMATCH,
-				message:    "test",
-			},
-			wantSchemaOnly: false,
-			wantInstOnly:   true,
-			wantHybrid:     false,
-		},
-		{
-			name: "hybrid (both span and path)",
-			issue: Issue{
-				span:       span,
-				sourceName: "data.json",
-				path:       "$.x",
-				severity:   Error,
-				code:       E_TYPE_MISMATCH,
-				message:    "test",
-			},
-			wantSchemaOnly: false,
-			wantInstOnly:   false,
-			wantHybrid:     true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.issue.IsSchemaOnly(); got != tt.wantSchemaOnly {
-				t.Errorf("IsSchemaOnly() = %v; want %v", got, tt.wantSchemaOnly)
-			}
-			if got := tt.issue.IsInstanceOnly(); got != tt.wantInstOnly {
-				t.Errorf("IsInstanceOnly() = %v; want %v", got, tt.wantInstOnly)
-			}
-			if got := tt.issue.IsHybrid(); got != tt.wantHybrid {
-				t.Errorf("IsHybrid() = %v; want %v", got, tt.wantHybrid)
-			}
-		})
-	}
-}
-
 func TestIssue_Related_DefensiveCopy(t *testing.T) {
 	source := location.MustNewSourceID("test://schema.yammm")
 	original := []location.RelatedInfo{
@@ -410,7 +336,7 @@ func TestIssue_Clone(t *testing.T) {
 		sourceName: "data.json",
 		path:       "$.x",
 		severity:   Error,
-		code:       E_TYPE_COLLISION,
+		code:       E_DUPLICATE_TYPE,
 		message:    "original message",
 		hint:       "original hint",
 		related: []location.RelatedInfo{
@@ -543,7 +469,7 @@ func TestIssue_LogValue_MinimalIssue(t *testing.T) {
 
 func TestIssue_LogValue_FullIssue(t *testing.T) {
 	source := location.MustNewSourceID("test://schema.yammm")
-	issue := NewIssue(Error, E_TYPE_COLLISION, "full issue").
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, "full issue").
 		WithSpan(location.Point(source, 7, 3)).
 		WithPath("data.json", "$.Widget[0].name").
 		WithHint("rename it").
@@ -560,7 +486,7 @@ func TestIssue_LogValue_FullIssue(t *testing.T) {
 	if mv, _ := issueLogAttr(t, val, "message"); mv.String() != "full issue" {
 		t.Errorf("message = %q", mv.String())
 	}
-	if cv, _ := issueLogAttr(t, val, "code"); cv.String() != E_TYPE_COLLISION.String() {
+	if cv, _ := issueLogAttr(t, val, "code"); cv.String() != E_DUPLICATE_TYPE.String() {
 		t.Errorf("code = %q", cv.String())
 	}
 	if pv, _ := issueLogAttr(t, val, "path"); pv.String() != "$.Widget[0].name" {
@@ -604,7 +530,7 @@ func TestIssue_LogValue_FullIssue(t *testing.T) {
 func TestIssue_LogValue_OmitsEmptyFields(t *testing.T) {
 	// Instance-only issue (path but no span): assert path is present,
 	// location is absent. Hint left empty.
-	issue := NewIssue(Warning, E_TYPE_COLLISION, "instance-only").
+	issue := NewIssue(Warning, E_DUPLICATE_TYPE, "instance-only").
 		WithPath("source", "$.items[0]").
 		Build()
 	val := issue.LogValue()
@@ -624,7 +550,7 @@ func TestIssue_LogValue_OmitsEmptyFields(t *testing.T) {
 
 func TestIssue_LogValue_SchemaOnly_OmitsPath(t *testing.T) {
 	source := location.MustNewSourceID("test://schema.yammm")
-	issue := NewIssue(Error, E_TYPE_COLLISION, "schema-only").
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, "schema-only").
 		WithSpan(location.Point(source, 1, 1)).
 		Build()
 	val := issue.LogValue()

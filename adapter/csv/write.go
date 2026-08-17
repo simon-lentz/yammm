@@ -12,7 +12,6 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -29,56 +28,6 @@ func defaultWriteConfig() writeConfig {
 		includeHeader: true,
 		nullString:    "",
 	}
-}
-
-// WithWriteHeader controls whether the output includes a header row.
-// Default is true.
-func WithWriteHeader(include bool) WriteOption {
-	return func(c *writeConfig) {
-		c.includeHeader = include
-	}
-}
-
-// WithWriteNullString sets the string written for nil property values.
-// Default is the empty string "".
-func WithWriteNullString(s string) WriteOption {
-	return func(c *writeConfig) {
-		c.nullString = s
-	}
-}
-
-// MarshalTyped serializes validated instances of a single type to CSV bytes.
-//
-// Column order is determined by [schema.Type.AllPropertiesSlice] (sorted
-// alphabetically). FK columns from association relations are appended after
-// properties.
-//
-// Compositions are silently omitted (CSV is a flat format).
-func (a *Adapter) MarshalTyped(
-	ctx context.Context,
-	instances []*instance.ValidInstance,
-	schemaType *schema.Type,
-	opts ...WriteOption,
-) ([]byte, error) {
-	var buf bytes.Buffer
-	_, err := a.writeTypedTo(ctx, &buf, instances, schemaType, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// WriteTyped serializes validated instances of a single type to an [io.Writer].
-//
-// Returns the number of bytes written.
-func (a *Adapter) WriteTyped(
-	ctx context.Context,
-	w io.Writer,
-	instances []*instance.ValidInstance,
-	schemaType *schema.Type,
-	opts ...WriteOption,
-) (int64, error) {
-	return a.writeTypedTo(ctx, w, instances, schemaType, opts...)
 }
 
 // MarshalSnapshot serializes a graph snapshot to CSV, returning one byte slice
@@ -184,53 +133,6 @@ func renderedNameCollision(snap *graph.Snapshot) error {
 // Returns the target keys for the relation, or nil if none exist.
 type fkLookup func(rel *schema.Relation) []immutable.Key
 
-// writeTypedTo is the shared implementation for MarshalTyped and WriteTyped.
-// It uses ValidInstance edge data for FK resolution.
-func (a *Adapter) writeTypedTo(
-	ctx context.Context,
-	w io.Writer,
-	instances []*instance.ValidInstance,
-	schemaType *schema.Type,
-	opts ...WriteOption,
-) (int64, error) {
-	cfg := defaultWriteConfig()
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-
-	columns := buildColumnList(schemaType)
-
-	cw := &countWriter{w: w}
-	writer := csv.NewWriter(cw)
-	writer.Comma = a.config.delimiter
-
-	if cfg.includeHeader {
-		if err := writer.Write(columns); err != nil {
-			return cw.n, fmt.Errorf("csv write header: %w", err)
-		}
-	}
-
-	for _, inst := range instances {
-		if err := ctx.Err(); err != nil {
-			writer.Flush()
-			return cw.n, fmt.Errorf("csv write: %w", err)
-		}
-
-		// Build FK lookup from ValidInstance edge data.
-		lookup := validInstanceFKLookup(inst)
-		row := a.instanceToRow(inst.Properties(), lookup, columns, schemaType, &cfg)
-		if err := writer.Write(row); err != nil {
-			return cw.n, fmt.Errorf("csv write row: %w", err)
-		}
-	}
-
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		return cw.n, fmt.Errorf("csv flush: %w", err)
-	}
-	return cw.n, nil
-}
-
 // writeSnapshotTypeTo writes graph.Instance values from a snapshot as CSV rows.
 // It uses snap.EdgesFrom for FK resolution instead of ValidInstance edge data.
 func (a *Adapter) writeSnapshotTypeTo(
@@ -276,22 +178,6 @@ func (a *Adapter) writeSnapshotTypeTo(
 		return fmt.Errorf("csv flush: %w", err)
 	}
 	return nil
-}
-
-// validInstanceFKLookup returns an fkLookup that resolves FKs from ValidInstance edge data.
-func validInstanceFKLookup(inst *instance.ValidInstance) fkLookup {
-	return func(rel *schema.Relation) []immutable.Key {
-		edgeData, ok := inst.Edge(rel.Name())
-		if !ok || edgeData.IsEmpty() {
-			return nil
-		}
-		targets := edgeData.Targets()
-		keys := make([]immutable.Key, len(targets))
-		for i := range targets {
-			keys[i] = targets[i].TargetKey()
-		}
-		return keys
-	}
 }
 
 // snapshotFKLookup returns an fkLookup that resolves FKs from snapshot edge data.
@@ -457,16 +343,4 @@ func (a *Adapter) sliceToString(s immutable.Slice, cfg *writeConfig) string {
 		}
 	}
 	return strings.Join(parts, a.config.listSep)
-}
-
-// countWriter wraps an io.Writer and counts bytes written.
-type countWriter struct {
-	w io.Writer
-	n int64
-}
-
-func (cw *countWriter) Write(p []byte) (int, error) {
-	n, err := cw.w.Write(p)
-	cw.n += int64(n)
-	return n, err //nolint:wrapcheck // callers add context; wrapping here causes double-prefix chains
 }

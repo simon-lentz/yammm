@@ -48,17 +48,6 @@ type Duplicate struct {
 	Diagnostic diag.Issue
 }
 
-// HasDiagnostic reports whether this duplicate record has an associated
-// construction diagnostic.
-//
-// Returns false for duplicates loaded from persisted snapshots (.ys files),
-// where construction diagnostics are transient and not persisted. The
-// structural data (Instance, Conflict) is always available regardless of
-// this method's return value.
-func (d *Duplicate) HasDiagnostic() bool {
-	return !d.Diagnostic.Code().IsZero()
-}
-
 // UnresolvedEdge records an association edge whose target was not found in the graph.
 //
 // Unresolved edges occur when:

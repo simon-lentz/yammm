@@ -10,7 +10,7 @@ import "sync"
 type CodeCategory uint8
 
 const (
-	// CategorySentinel is for sentinel codes like E_LIMIT_REACHED and E_INTERNAL.
+	// CategorySentinel is for sentinel codes like E_INTERNAL and E_CONTEXT_CANCELLED.
 	CategorySentinel CodeCategory = iota
 
 	// CategorySchema is for schema compilation errors.
@@ -73,7 +73,7 @@ type Code struct {
 	cat   CodeCategory
 }
 
-// String returns the code's string representation (e.g., "E_TYPE_COLLISION").
+// String returns the code's string representation (e.g., "E_CASE_COLLISION").
 func (c Code) String() string {
 	return c.value
 }
@@ -119,12 +119,6 @@ func NewCode(value string, cat CodeCategory) Code {
 
 // Sentinel codes.
 var (
-	// E_LIMIT_REACHED is a sentinel code for explicit limit notification.
-	// It does not automatically trigger Result.LimitReached(); use
-	// Collector.LimitReached() to check limit status. Callers may inject
-	// this code manually when desired.
-	E_LIMIT_REACHED = NewCode("E_LIMIT_REACHED", CategorySentinel)
-
 	// E_INTERNAL indicates an unexpected invariant failure (internal bug indicator).
 	// Use for conditions that should never occur in correct code.
 	E_INTERNAL = NewCode("E_INTERNAL", CategorySentinel)
@@ -136,14 +130,8 @@ var (
 
 // Schema codes.
 var (
-	// E_TYPE_COLLISION indicates a type name is already defined.
-	E_TYPE_COLLISION = NewCode("E_TYPE_COLLISION", CategorySchema)
-
 	// E_INHERIT_CYCLE indicates an inheritance chain contains a cycle.
 	E_INHERIT_CYCLE = NewCode("E_INHERIT_CYCLE", CategorySchema)
-
-	// E_SCHEMA_TYPE_NOT_FOUND indicates a referenced type cannot be found during schema compilation.
-	E_SCHEMA_TYPE_NOT_FOUND = NewCode("E_SCHEMA_TYPE_NOT_FOUND", CategorySchema)
 
 	// E_UNKNOWN_PROPERTY indicates a referenced property cannot be found on its type.
 	E_UNKNOWN_PROPERTY = NewCode("E_UNKNOWN_PROPERTY", CategorySchema)
@@ -327,9 +315,6 @@ var (
 
 	// E_COMPOSITION_NOT_FOUND indicates a referenced composition cannot be found.
 	E_COMPOSITION_NOT_FOUND = NewCode("E_COMPOSITION_NOT_FOUND", CategoryInstance)
-
-	// E_MISSING_TYPE_TAG indicates a $type tag is missing.
-	E_MISSING_TYPE_TAG = NewCode("E_MISSING_TYPE_TAG", CategoryInstance)
 
 	// E_INVALID_TYPE_TAG indicates a $type tag has an invalid format.
 	E_INVALID_TYPE_TAG = NewCode("E_INVALID_TYPE_TAG", CategoryInstance)

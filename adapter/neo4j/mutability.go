@@ -1,7 +1,7 @@
 package neo4j
 
 // KeyMutability selects the SET-clause shape emitted by
-// [BuildNodeMergeQuery] and [BuildBatchNodeMergeQuery]. The enum replaces
+// [buildNodeMergeQuery] and [buildBatchNodeMergeQuery]. The enum replaces
 // an earlier trailing bool parameter so call sites read as
 // "this is the immutable-key variant" rather than "the third bool is true
 // here"; it matches the always-on RETURN design choice on the relationship
@@ -16,8 +16,8 @@ package neo4j
 // [Adapter.BatchNodeQueries] derive the enum from whether that
 // effective set is non-empty (per type, for the batch path) so the
 // pair stays consistent at the public-wrapper layer. Direct
-// [BuildNodeMergeQuery] /
-// [BuildBatchNodeMergeQuery] callers are responsible for supplying the
+// [buildNodeMergeQuery] /
+// [buildBatchNodeMergeQuery] callers are responsible for supplying the
 // matching parameter map themselves: [ImmutableKeys] requires the
 // caller to pass both `$props` and `$update_props`; [MutableKeys]
 // requires only `$props`.

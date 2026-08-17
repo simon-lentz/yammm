@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// BuildNodeMergeQuery returns the Cypher template for a single-node MERGE
+// buildNodeMergeQuery returns the Cypher template for a single-node MERGE
 // keyed on the given primary key fields. Pure function — no execution, no
 // driver dependency, no side effects.
 //
@@ -21,14 +21,14 @@ import (
 //	ON MATCH SET n += $update_props
 //
 // [ImmutableKeys] callers are responsible for supplying `$update_props`
-// in their parameter map. The enum selects the shape; [WithImmutableKeys]
-// at the [Adapter] layer builds the matching `update_props` value from
-// the declared immutable-property names.
+// in their parameter map. The enum selects the shape; the [Adapter] layer
+// builds the matching `update_props` value from the schema's declared
+// immutable-property names.
 //
 // Node merges do not emit a RETURN clause — constraint violations
 // surface as driver errors, not silent zero-matches, so there is no
 // silent-failure condition to guard against on nodes.
-func BuildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string {
+func buildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string {
 	var b strings.Builder
 	b.WriteString("MERGE (n:")
 	b.WriteString(label)
@@ -74,8 +74,8 @@ const (
 	relToRowPrefix        = "to_"
 )
 
-// BuildBatchNodeMergeQuery returns the UNWIND-batched variant of
-// [BuildNodeMergeQuery]. Parameter shape:
+// buildBatchNodeMergeQuery returns the UNWIND-batched variant of
+// [buildNodeMergeQuery]. Parameter shape:
 //
 //	{rows: [{key_<key_1>: v, props: map, [update_props: map]}, ...]}
 //
@@ -88,9 +88,9 @@ const (
 // `update_props` are themselves legal DSL property names: without the prefix a
 // primary key so named would collide with the property map in the same row.
 //
-// Node batch merges do not emit a RETURN clause; see [BuildNodeMergeQuery]
+// Node batch merges do not emit a RETURN clause; see [buildNodeMergeQuery]
 // for the rationale.
-func BuildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string {
+func buildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string {
 	var b strings.Builder
 	b.WriteString("UNWIND $rows AS row\n")
 	b.WriteString("MERGE (n:")
@@ -113,7 +113,7 @@ func BuildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutabilit
 	return b.String()
 }
 
-// BuildRelationshipMergeQuery returns the Cypher template for a single
+// buildRelationshipMergeQuery returns the Cypher template for a single
 // relationship MERGE between nodes identified by their (label, primary-key)
 // shapes. If hasProps is true, the generated query ends with
 // `SET r += $rel_props` so callers can pass edge properties.
@@ -131,9 +131,9 @@ func BuildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutabilit
 // after the call. Consumers issuing multiple calls (e.g., a loop over
 // distinct (from, to) pairs) are responsible for summing the per-call
 // values themselves. For UNWIND-batched workloads, prefer
-// [BuildBatchRelationshipMergeQuery] and apply the same summing guidance
+// [buildBatchRelationshipMergeQuery] and apply the same summing guidance
 // across chunk transactions.
-func BuildRelationshipMergeQuery(
+func buildRelationshipMergeQuery(
 	fromLabel string, fromKeyNames []string,
 	relType string,
 	toLabel string, toKeyNames []string,
@@ -170,13 +170,13 @@ func BuildRelationshipMergeQuery(
 	return b.String()
 }
 
-// BuildBatchRelationshipMergeQuery returns the UNWIND-batched variant of
-// [BuildRelationshipMergeQuery]. Parameter shape:
+// buildBatchRelationshipMergeQuery returns the UNWIND-batched variant of
+// [buildRelationshipMergeQuery]. Parameter shape:
 //
 //	{rows: [{from_<name>: v, to_<name>: v, [rel_props: map]}, ...]}
 //
 // The generated query always ends with `RETURN count(*) AS matched_rows`
-// — see [BuildRelationshipMergeQuery] for the rationale.
+// — see [buildRelationshipMergeQuery] for the rationale.
 //
 // Return-value semantics (matched_rows). Neo4j's transactional semantics
 // mean each chunk either fully commits (all matched_rows reflected in
@@ -198,7 +198,7 @@ func BuildRelationshipMergeQuery(
 // matched_rows as authoritative will false-positive "rule silently
 // no-op'd" any time the first chunk legitimately has zero matches even
 // though later chunks have nonzero matches.
-func BuildBatchRelationshipMergeQuery(
+func buildBatchRelationshipMergeQuery(
 	fromLabel string, fromKeyNames []string,
 	relType string,
 	toLabel string, toKeyNames []string,

@@ -257,32 +257,6 @@ func TestCanonicalPath_IsZero(t *testing.T) {
 	}
 }
 
-func TestCanonicalPath_Base(t *testing.T) {
-	tests := []struct {
-		path string
-		want string
-	}{
-		{"/a/b/c.txt", "c.txt"},
-		{"/a/b/c", "c"},
-		{"/a", "a"},
-	}
-
-	for _, tt := range tests {
-		if runtime.GOOS == "windows" {
-			continue
-		}
-		t.Run(tt.path, func(t *testing.T) {
-			cp, err := NewCanonicalPath(tt.path)
-			if err != nil {
-				t.Fatalf("NewCanonicalPath failed: %v", err)
-			}
-			if got := cp.Base(); got != tt.want {
-				t.Errorf("Base() = %q; want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCanonicalPath_Dir(t *testing.T) {
 	skipOnWindows(t, "Unix path test")
 
@@ -864,14 +838,9 @@ func TestCanonicalPath_Join_WindowsRootEscape(t *testing.T) {
 	}
 }
 
-// TestCanonicalPath_ZeroValue_Methods tests zero-value behavior for Base() and Dir().
+// TestCanonicalPath_ZeroValue_Methods tests zero-value behavior for Dir().
 func TestCanonicalPath_ZeroValue_Methods(t *testing.T) {
 	var zero CanonicalPath
-
-	// Base() should return empty string for zero value
-	if got := zero.Base(); got != "" {
-		t.Errorf("zero.Base() = %q; want empty string", got)
-	}
 
 	// Dir() should return zero value for zero value
 	if got := zero.Dir(); !got.IsZero() {
@@ -914,10 +883,6 @@ func TestCanonicalPath_CrossPlatformInvariants(t *testing.T) {
 
 	requireInvariants("path", cp.String())
 
-	if base := cp.Base(); base != "file.txt" {
-		t.Errorf("Base() = %q; want %q", base, "file.txt")
-	}
-
 	dir := cp.Dir()
 	requireInvariants("Dir()", dir.String())
 	if !strings.HasSuffix(dir.String(), "/dir") {
@@ -925,7 +890,7 @@ func TestCanonicalPath_CrossPlatformInvariants(t *testing.T) {
 	}
 
 	// Dir + Base must round-trip to the original.
-	rejoined, err := dir.Join(cp.Base())
+	rejoined, err := dir.Join(filepath.Base(cp.String()))
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}

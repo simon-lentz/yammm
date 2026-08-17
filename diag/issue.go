@@ -108,38 +108,6 @@ func (i Issue) IsValid() bool {
 		i.severity <= Hint // Hint (4) is the highest valid severity value
 }
 
-// IsSchemaOnly reports whether the issue has span provenance but no instance path.
-//
-// Schema-only issues are typically from schema compilation and have source
-// location information but no instance path.
-//
-// Note: SourceName without Path provides file-level instance provenance but is
-// not sufficient for instance-specific classification. This method only checks
-// Span and Path—issues with only SourceName return false.
-func (i Issue) IsSchemaOnly() bool {
-	return i.HasSpan() && i.path == ""
-}
-
-// IsInstanceOnly reports whether the issue has instance path but no span.
-//
-// Instance-only issues are typically from instance validation where source
-// locations are not available (e.g., database-sourced instances).
-//
-// Note: SourceName without Path provides file-level provenance but is not
-// considered instance-specific. This method requires a non-empty Path for
-// instance classification.
-func (i Issue) IsInstanceOnly() bool {
-	return !i.HasSpan() && i.path != ""
-}
-
-// IsHybrid reports whether the issue has both span and path information.
-//
-// Hybrid issues occur when instance data has source location tracking enabled
-// (e.g., JSON adapter with TrackLocations: true).
-func (i Issue) IsHybrid() bool {
-	return i.HasSpan() && i.path != ""
-}
-
 // Related returns a copy of the related location information.
 //
 // Returns nil if no related info is present. The returned slice is a defensive

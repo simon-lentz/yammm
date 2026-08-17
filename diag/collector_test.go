@@ -12,13 +12,13 @@ import (
 func TestNewCollector(t *testing.T) {
 	c := NewCollector(100)
 
-	if c.Len() != 0 {
-		t.Errorf("Len() = %d; want 0", c.Len())
+	if len(c.issues) != 0 {
+		t.Errorf("len(c.issues) = %d; want 0", len(c.issues))
 	}
-	if !c.OK() {
+	if !c.Result().OK() {
 		t.Error("OK() = false; want true for empty collector")
 	}
-	if c.LimitReached() {
+	if c.limitReached {
 		t.Error("LimitReached() = true; want false")
 	}
 }
@@ -29,10 +29,10 @@ func TestCollector_Collect(t *testing.T) {
 	issue := NewIssue(Error, E_SYNTAX, "test error").Build()
 	c.Collect(issue)
 
-	if c.Len() != 1 {
-		t.Errorf("Len() = %d; want 1", c.Len())
+	if len(c.issues) != 1 {
+		t.Errorf("len(c.issues) = %d; want 1", len(c.issues))
 	}
-	if c.OK() {
+	if c.Result().OK() {
 		t.Error("OK() = true; want false after collecting error")
 	}
 	if !c.HasErrors() {
@@ -98,13 +98,13 @@ func TestCollector_CollectAll(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "error 1").Build(),
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
-		NewIssue(Error, E_TYPE_COLLISION, "error 2").Build(),
+		NewIssue(Error, E_DUPLICATE_TYPE, "error 2").Build(),
 	}
 
 	c.CollectAll(issues)
 
-	if c.Len() != 3 {
-		t.Errorf("Len() = %d; want 3", c.Len())
+	if len(c.issues) != 3 {
+		t.Errorf("len(c.issues) = %d; want 3", len(c.issues))
 	}
 }
 
@@ -133,11 +133,11 @@ func TestCollector_Merge(t *testing.T) {
 	result := c1.Result()
 
 	c2 := NewCollector(0)
-	c2.Collect(NewIssue(Error, E_TYPE_COLLISION, "error 2").Build())
+	c2.Collect(NewIssue(Error, E_DUPLICATE_TYPE, "error 2").Build())
 	c2.Merge(result)
 
-	if c2.Len() != 3 {
-		t.Errorf("Len() = %d; want 3 after merge", c2.Len())
+	if len(c2.issues) != 3 {
+		t.Errorf("len(c2.issues) = %d; want 3 after merge", len(c2.issues))
 	}
 }
 
@@ -173,7 +173,7 @@ func TestCollector_MergeTruncatedResult_PreservesCountsAndTruncation(t *testing.
 	}
 	// The surviving warning is stored; the dropped error is counted, not listed.
 	if res.Len() != 1 {
-		t.Errorf("Len() = %d; want 1 (the survivor; the dropped error is counted, not stored)", res.Len())
+		t.Errorf("Result.Len() = %d; want 1 (the survivor; the dropped error is counted, not stored)", res.Len())
 	}
 }
 
@@ -183,20 +183,20 @@ func TestCollector_Limit(t *testing.T) {
 	c.Collect(NewIssue(Error, E_SYNTAX, "first").Build())
 	c.Collect(NewIssue(Error, E_SYNTAX, "second").Build())
 
-	if c.LimitReached() {
+	if c.limitReached {
 		t.Error("LimitReached() = true; want false (at limit but not over)")
 	}
 
 	c.Collect(NewIssue(Error, E_SYNTAX, "third").Build())
 
-	if !c.LimitReached() {
+	if !c.limitReached {
 		t.Error("LimitReached() = false; want true")
 	}
-	if c.Len() != 2 {
-		t.Errorf("Len() = %d; want 2 (limit)", c.Len())
+	if len(c.issues) != 2 {
+		t.Errorf("len(c.issues) = %d; want 2 (limit)", len(c.issues))
 	}
-	if c.DroppedCount() != 1 {
-		t.Errorf("DroppedCount() = %d; want 1", c.DroppedCount())
+	if c.droppedCount != 1 {
+		t.Errorf("DroppedCount() = %d; want 1", c.droppedCount)
 	}
 }
 
@@ -210,10 +210,10 @@ func TestCollector_DroppedErrorStillCounts(t *testing.T) {
 	c.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
 	c.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
 
-	if c.Len() != 1 {
-		t.Errorf("Len() = %d; want 1 (one stored, one dropped)", c.Len())
+	if len(c.issues) != 1 {
+		t.Errorf("len(c.issues) = %d; want 1 (one stored, one dropped)", len(c.issues))
 	}
-	if !c.LimitReached() {
+	if !c.limitReached {
 		t.Error("LimitReached() = false; want true")
 	}
 	if got := c.ErrorCount(); got != 1 {
@@ -222,7 +222,7 @@ func TestCollector_DroppedErrorStillCounts(t *testing.T) {
 	if !c.HasErrors() {
 		t.Error("HasErrors() = false; want true (a dropped error is still an error)")
 	}
-	if c.OK() {
+	if c.Result().OK() {
 		t.Error("OK() = true; want false (a dropped error is still an error)")
 	}
 
@@ -287,7 +287,7 @@ func TestCollector_Result_Cached(t *testing.T) {
 	result3 := c.Result()
 
 	if result3.Len() != 2 {
-		t.Errorf("Len() = %d; want 2 after new collect", result3.Len())
+		t.Errorf("Result.Len() = %d; want 2 after new collect", result3.Len())
 	}
 }
 
@@ -297,7 +297,7 @@ func TestCollector_Result_Independent(t *testing.T) {
 
 	result1 := c.Result()
 
-	c.Collect(NewIssue(Error, E_TYPE_COLLISION, "second").Build())
+	c.Collect(NewIssue(Error, E_DUPLICATE_TYPE, "second").Build())
 
 	// result1 should still have only 1 issue
 	if result1.Len() != 1 {
@@ -314,25 +314,25 @@ func TestCollector_SeverityQueries(t *testing.T) {
 	c := NewCollector(0)
 
 	// Initially OK
-	if !c.OK() {
+	if !c.Result().OK() {
 		t.Error("empty collector should be OK")
 	}
 	if c.HasErrors() {
 		t.Error("empty collector should not have errors")
 	}
-	if c.HasFatal() {
+	if c.Result().HasFatal() {
 		t.Error("empty collector should not have fatal")
 	}
 
 	// Add warning - still OK
 	c.Collect(NewIssue(Warning, E_INVALID_NAME, "warning").Build())
-	if !c.OK() {
+	if !c.Result().OK() {
 		t.Error("collector with only warnings should be OK")
 	}
 
 	// Add error - not OK
 	c.Collect(NewIssue(Error, E_SYNTAX, "error").Build())
-	if c.OK() {
+	if c.Result().OK() {
 		t.Error("collector with error should not be OK")
 	}
 	if !c.HasErrors() {
@@ -340,8 +340,8 @@ func TestCollector_SeverityQueries(t *testing.T) {
 	}
 
 	// Add fatal
-	c.Collect(NewIssue(Fatal, E_LIMIT_REACHED, "fatal").Build())
-	if !c.HasFatal() {
+	c.Collect(NewIssue(Fatal, E_INTERNAL, "fatal").Build())
+	if !c.Result().HasFatal() {
 		t.Error("collector with fatal should have fatal")
 	}
 }
@@ -371,9 +371,9 @@ func TestCollector_ThreadSafety(t *testing.T) {
 	for range numGoroutines / 2 {
 		wg.Go(func() {
 			for range issuesPerGoroutine {
-				_ = c.OK()
+				_ = c.Result().OK()
 				_ = c.HasErrors()
-				_ = c.Len()
+				_ = c.ErrorCount()
 			}
 		})
 	}
@@ -381,8 +381,8 @@ func TestCollector_ThreadSafety(t *testing.T) {
 	wg.Wait()
 
 	expected := numGoroutines * issuesPerGoroutine
-	if c.Len() != expected {
-		t.Errorf("Len() = %d; want %d", c.Len(), expected)
+	if got := c.Result().Len(); got != expected {
+		t.Errorf("Result().Len() = %d; want %d", got, expected)
 	}
 }
 
@@ -436,8 +436,8 @@ func TestCollector_ThreadSafety_Merge(t *testing.T) {
 	wg.Wait()
 
 	// Should have 50 issues (5 merges * 10 issues each)
-	if c.Len() != 50 {
-		t.Errorf("Len() = %d; want 50", c.Len())
+	if len(c.issues) != 50 {
+		t.Errorf("len(c.issues) = %d; want 50", len(c.issues))
 	}
 }
 
@@ -449,10 +449,10 @@ func TestCollector_NoLimit(t *testing.T) {
 		c.Collect(NewIssue(Error, E_SYNTAX, "test").Build())
 	}
 
-	if c.Len() != 1000 {
-		t.Errorf("Len() = %d; want 1000", c.Len())
+	if len(c.issues) != 1000 {
+		t.Errorf("len(c.issues) = %d; want 1000", len(c.issues))
 	}
-	if c.LimitReached() {
+	if c.limitReached {
 		t.Error("LimitReached() = true; want false (no limit)")
 	}
 }
@@ -464,10 +464,10 @@ func TestCollector_NegativeLimit(t *testing.T) {
 		c.Collect(NewIssue(Error, E_SYNTAX, "test").Build())
 	}
 
-	if c.Len() != 100 {
-		t.Errorf("Len() = %d; want 100", c.Len())
+	if len(c.issues) != 100 {
+		t.Errorf("len(c.issues) = %d; want 100", len(c.issues))
 	}
-	if c.LimitReached() {
+	if c.limitReached {
 		t.Error("LimitReached() = true; want false (negative = no limit)")
 	}
 }
@@ -858,13 +858,13 @@ func TestNewCollector_NegativeLimitActsAsUnlimited(t *testing.T) {
 		c.Collect(issue)
 	}
 
-	if c.Len() != 100 {
-		t.Errorf("Len() = %d; want 100 (unlimited)", c.Len())
+	if len(c.issues) != 100 {
+		t.Errorf("len(c.issues) = %d; want 100 (unlimited)", len(c.issues))
 	}
-	if c.LimitReached() {
+	if c.limitReached {
 		t.Error("LimitReached() = true; want false (unlimited)")
 	}
-	if c.DroppedCount() != 0 {
-		t.Errorf("DroppedCount() = %d; want 0 (unlimited)", c.DroppedCount())
+	if c.droppedCount != 0 {
+		t.Errorf("DroppedCount() = %d; want 0 (unlimited)", c.droppedCount)
 	}
 }

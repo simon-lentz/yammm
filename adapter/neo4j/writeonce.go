@@ -36,31 +36,6 @@ func ImmutableKeysFor(t *schema.Type) []string {
 	return slices.Compact(keys)
 }
 
-// effectiveImmutableKeys returns the union of explicitly-passed immutable keys
-// and a type's derived @writeOnce keys, deduplicated and in that order.
-//
-// The derived side comes from [NodeShape.ImmutableKeys], computed once when the
-// shape was built, so the write path does no per-node derivation. When there
-// are no derived keys the explicit slice is returned as-is, so an explicit-only
-// call allocates nothing and its parameter map is byte-for-byte unchanged.
-func effectiveImmutableKeys(explicit, derived []string) []string {
-	if len(derived) == 0 {
-		return explicit
-	}
-	if len(explicit) == 0 {
-		return derived
-	}
-	seen := make(map[string]bool, len(explicit)+len(derived))
-	union := make([]string, 0, len(explicit)+len(derived))
-	for _, k := range slices.Concat(explicit, derived) {
-		if !seen[k] {
-			seen[k] = true
-			union = append(union, k)
-		}
-	}
-	return union
-}
-
 // derivedImmutableKeys returns a type's @writeOnce keys for the write path.
 //
 // [Adapter.ShapeForSchema] records them on the shape, which every write entry

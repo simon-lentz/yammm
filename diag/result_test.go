@@ -157,17 +157,17 @@ func TestCollector_LimitRetainsMostSevere(t *testing.T) {
 func TestCollector_LimitEvictsLatestOfLeastSevere(t *testing.T) {
 	c := NewCollector(2)
 	c.Collect(NewIssue(Warning, E_SYNTAX, "first warning").Build())
-	c.Collect(NewIssue(Warning, E_INTERNAL, "second warning").Build())
-	c.Collect(NewIssue(Error, E_LIMIT_REACHED, "error displaces the LAST warning").Build())
+	c.Collect(NewIssue(Warning, E_INVALID_NAME, "second warning").Build())
+	c.Collect(NewIssue(Error, E_INTERNAL, "error displaces the LAST warning").Build())
 	r := c.Result()
 
 	if !r.HasCode(E_SYNTAX) {
 		t.Error("the first warning should survive; eviction takes the latest of the least severe")
 	}
-	if r.HasCode(E_INTERNAL) {
+	if r.HasCode(E_INVALID_NAME) {
 		t.Error("the second warning should have been evicted")
 	}
-	if !r.HasCode(E_LIMIT_REACHED) {
+	if !r.HasCode(E_INTERNAL) {
 		t.Error("the error should be retained")
 	}
 }
@@ -192,7 +192,7 @@ func TestCollector_MergeRetainsMostSevere(t *testing.T) {
 
 func TestResult_SeverityQueries(t *testing.T) {
 	issues := []Issue{
-		NewIssue(Fatal, E_LIMIT_REACHED, "limit").Build(),
+		NewIssue(Fatal, E_INTERNAL, "limit").Build(),
 		NewIssue(Error, E_SYNTAX, "error").Build(),
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
 		NewIssue(Info, E_INTERNAL, "info").Build(),
@@ -212,12 +212,6 @@ func TestResult_SeverityQueries(t *testing.T) {
 	}
 	if !r.HasWarnings() {
 		t.Error("HasWarnings() = false; want true")
-	}
-	if !r.HasInfo() {
-		t.Error("HasInfo() = false; want true")
-	}
-	if !r.HasHints() {
-		t.Error("HasHints() = false; want true")
 	}
 
 	counts := r.SeverityCounts()
@@ -274,7 +268,7 @@ func TestResult_Issues_Iterator(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "first").Build(),
 		NewIssue(Warning, E_INVALID_NAME, "second").Build(),
-		NewIssue(Error, E_TYPE_COLLISION, "third").Build(),
+		NewIssue(Error, E_DUPLICATE_TYPE, "third").Build(),
 	}
 
 	r := newResult(issues, 0, false, 0)
@@ -318,7 +312,7 @@ func TestResult_Issues_EarlyBreak(t *testing.T) {
 
 func TestResult_Errors(t *testing.T) {
 	issues := []Issue{
-		NewIssue(Fatal, E_LIMIT_REACHED, "fatal").Build(),
+		NewIssue(Fatal, E_INTERNAL, "fatal").Build(),
 		NewIssue(Error, E_SYNTAX, "error").Build(),
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
 	}
@@ -338,31 +332,9 @@ func TestResult_Errors(t *testing.T) {
 	}
 }
 
-func TestResult_Warnings(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "error").Build(),
-		NewIssue(Warning, E_INVALID_NAME, "warning1").Build(),
-		NewIssue(Warning, E_RESERVED_PREFIX, "warning2").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	var count int
-	for issue := range r.Warnings() {
-		if issue.Severity() != Warning {
-			t.Errorf("Warnings() yielded %s issue", issue.Severity())
-		}
-		count++
-	}
-
-	if count != 2 {
-		t.Errorf("Warnings() yielded %d; want 2", count)
-	}
-}
-
 func TestResult_BySeverity(t *testing.T) {
 	issues := []Issue{
-		NewIssue(Fatal, E_LIMIT_REACHED, "fatal").Build(),
+		NewIssue(Fatal, E_INTERNAL, "fatal").Build(),
 		NewIssue(Error, E_SYNTAX, "error").Build(),
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
 		NewIssue(Info, E_INTERNAL, "info").Build(),
@@ -385,46 +357,6 @@ func TestResult_BySeverity(t *testing.T) {
 	}
 }
 
-func TestResult_IssuesAtLeastAsSevereAs(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Fatal, E_LIMIT_REACHED, "fatal").Build(),
-		NewIssue(Error, E_SYNTAX, "error").Build(),
-		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
-		NewIssue(Info, E_INTERNAL, "info").Build(),
-		NewIssue(Hint, E_INTERNAL, "hint").Build(),
-	}
-
-	r := newResult(issues, 0, false, 0)
-
-	tests := []struct {
-		threshold Severity
-		wantCount int
-	}{
-		{Fatal, 1},   // Only Fatal
-		{Error, 2},   // Fatal + Error
-		{Warning, 3}, // Fatal + Error + Warning
-		{Info, 4},    // Fatal + Error + Warning + Info
-		{Hint, 5},    // All
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.threshold.String(), func(t *testing.T) {
-			var count int
-			for issue := range r.IssuesAtLeastAsSevereAs(tt.threshold) {
-				if !issue.Severity().IsAtLeastAsSevereAs(tt.threshold) {
-					t.Errorf("IssuesAtLeastAsSevereAs(%s) yielded %s issue",
-						tt.threshold, issue.Severity())
-				}
-				count++
-			}
-			if count != tt.wantCount {
-				t.Errorf("IssuesAtLeastAsSevereAs(%s) yielded %d; want %d",
-					tt.threshold, count, tt.wantCount)
-			}
-		})
-	}
-}
-
 func TestResult_String_OK(t *testing.T) {
 	r := OK()
 
@@ -436,7 +368,7 @@ func TestResult_String_OK(t *testing.T) {
 func TestResult_String_WithErrors(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "syntax error").Build(),
-		NewIssue(Error, E_TYPE_COLLISION, "type collision").Build(),
+		NewIssue(Error, E_DUPLICATE_TYPE, "type collision").Build(),
 	}
 
 	r := newResult(issues, 0, false, 0)
@@ -498,32 +430,6 @@ func TestResult_Immutability(t *testing.T) {
 	}
 }
 
-// TestResult_IssuesAtLeastAsSevereAs_InvalidThreshold verifies that
-// IssuesAtLeastAsSevereAs yields all issues when given an invalid severity
-// threshold (> Hint).
-func TestResult_IssuesAtLeastAsSevereAs_InvalidThreshold(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "error").Build(),
-		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
-		NewIssue(Hint, E_INTERNAL, "hint").Build(),
-	}
-	r := newResult(issues, 0, false, 0)
-
-	// Invalid threshold (Severity(255) is > Hint)
-	invalidThreshold := Severity(255)
-
-	iteratorCount := 0
-	for range r.IssuesAtLeastAsSevereAs(invalidThreshold) {
-		iteratorCount++
-	}
-
-	// All issues are "at least as severe" as an invalid threshold because
-	// severity uses lower numeric values for higher severity.
-	if iteratorCount != len(issues) {
-		t.Errorf("iterator count = %d; want %d (all issues)", iteratorCount, len(issues))
-	}
-}
-
 func TestResult_Err_NilWhenOK(t *testing.T) {
 	r := OK()
 	if err := r.Err(); err != nil {
@@ -564,7 +470,7 @@ func TestResult_Err_NonNilOnError(t *testing.T) {
 
 func TestResult_Err_NonNilOnFatal(t *testing.T) {
 	issues := []Issue{
-		NewIssue(Fatal, E_LIMIT_REACHED, "limit reached").Build(),
+		NewIssue(Fatal, E_INTERNAL, "limit reached").Build(),
 	}
 	r := newResult(issues, 0, false, 0)
 
@@ -576,7 +482,7 @@ func TestResult_Err_NonNilOnFatal(t *testing.T) {
 
 func TestResult_Err_ErrorsAs(t *testing.T) {
 	issues := []Issue{
-		NewIssue(Error, E_TYPE_COLLISION, `type "Person" already defined`).Build(),
+		NewIssue(Error, E_DUPLICATE_TYPE, `type "Person" already defined`).Build(),
 		NewIssue(Warning, E_INVALID_NAME, "name looks odd").Build(),
 	}
 	r := newResult(issues, 0, false, 0)
@@ -616,7 +522,7 @@ func TestResult_Err_WrappableWithFmtErrorf(t *testing.T) {
 func TestResult_Err_MatchesString(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
-		NewIssue(Error, E_TYPE_COLLISION, "duplicate type").Build(),
+		NewIssue(Error, E_DUPLICATE_TYPE, "duplicate type").Build(),
 	}
 	r := newResult(issues, 0, false, 0)
 

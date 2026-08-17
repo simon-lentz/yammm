@@ -1608,15 +1608,14 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 
 **Sentinel** — internal conditions:
 
-- `E_LIMIT_REACHED` — issue collection limit reached
 - `E_INTERNAL` — unexpected invariant failure (internal bug indicator)
 - `E_CONTEXT_CANCELLED` — operation cancelled via context
 
 **Schema** — schema compilation errors:
 
-- `E_TYPE_COLLISION`, `E_DUPLICATE_TYPE` — type name conflicts
+- `E_DUPLICATE_TYPE` — type name conflicts
 - `E_INHERIT_CYCLE` — circular inheritance chain
-- `E_SCHEMA_TYPE_NOT_FOUND`, `E_UNKNOWN_TYPE` — unresolvable type reference
+- `E_UNKNOWN_TYPE` — unresolvable type reference
 - `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — property definition errors
 - `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION`, `E_RELATION_NORMALIZATION_COLLISION` — relation conflicts
 - `E_CASE_COLLISION` — names differ only by case
@@ -1669,7 +1668,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_EDGE_SHAPE_MISMATCH` — edge has wrong shape (object vs array)
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
 - `E_COMPOSITION_NOT_FOUND` — referenced composition not found
-- `E_MISSING_TYPE_TAG`, `E_INVALID_TYPE_TAG` — `$type` tag errors
+- `E_INVALID_TYPE_TAG` — `$type` tag errors
 - `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When colliding fields are detected (e.g., both `"Name"` and `"name"` in the input), the collision is reported and neither field is mapped
 
 **Graph** — graph construction errors:

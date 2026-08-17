@@ -155,56 +155,6 @@ func TestSchema_TypesSlice_DefensiveCopy(t *testing.T) {
 	assert.NotNil(t, slice2[0])
 }
 
-func TestSchema_TypeNames(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	t1 := schema.TestNewType("Beta", location.SourceID{}, location.Span{}, "", false, false)
-	t2 := schema.TestNewType("Alpha", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSetSchemaTypes(s, []*schema.Type{t1, t2})
-
-	names := s.TypeNames()
-
-	assert.Len(t, names, 2)
-	// Verify lexicographic order
-	assert.Equal(t, "Alpha", names[0])
-	assert.Equal(t, "Beta", names[1])
-}
-
-func TestSchema_TypeCount(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	assert.Equal(t, 0, s.TypeCount())
-
-	t1 := schema.TestNewType("Type1", location.SourceID{}, location.Span{}, "", false, false)
-	t2 := schema.TestNewType("Type2", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSetSchemaTypes(s, []*schema.Type{t1, t2})
-
-	assert.Equal(t, 2, s.TypeCount())
-}
-
-func TestSchema_DataTypeNames(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	dt1 := schema.TestNewDataType("Zebra", nil, location.Span{}, "")
-	dt2 := schema.TestNewDataType("Apple", nil, location.Span{}, "")
-	schema.TestSetSchemaDataTypes(s, []*schema.DataType{dt1, dt2})
-
-	names := s.DataTypeNames()
-
-	assert.Len(t, names, 2)
-	// Verify lexicographic order
-	assert.Equal(t, "Apple", names[0])
-	assert.Equal(t, "Zebra", names[1])
-}
-
-func TestSchema_ImportCount(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	assert.Equal(t, 0, s.ImportCount())
-
-	imp1 := schema.TestNewImport("./a.yammm", "a", location.SourceID{}, location.Span{})
-	imp2 := schema.TestNewImport("./b.yammm", "b", location.SourceID{}, location.Span{})
-	schema.TestSetSchemaImports(s, []*schema.Import{imp1, imp2})
-
-	assert.Equal(t, 2, s.ImportCount())
-}
-
 func TestSchema_ResolveType_Local(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 	typ := schema.TestNewType("Customer", location.SourceID{}, location.Span{}, "", false, false)

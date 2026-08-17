@@ -35,46 +35,11 @@ func New(opts ...Option) *Adapter {
 	return &Adapter{config: cfg}
 }
 
-// WithDelimiter sets the field delimiter. Default is comma (',').
-// Use '\t' for TSV files.
-func WithDelimiter(r rune) Option {
-	return func(c *adapterConfig) {
-		c.delimiter = r
-	}
-}
-
-// WithHeader configures whether input CSV has a header row.
-// Default is true. When false, column indices are used as property names
-// ("0", "1", "2", ...).
-func WithHeader(has bool) Option {
-	return func(c *adapterConfig) {
-		c.hasHeader = has
-	}
-}
-
 // WithTypeColumn sets the column name used for type discrimination
 // in [Adapter.ParseWithTypeColumn]. Required for that method; ignored
-// by [Adapter.ParseTyped] and [Adapter.ParseOne].
+// by [Adapter.ParseTyped].
 func WithTypeColumn(name string) Option {
 	return func(c *adapterConfig) {
 		c.typeColumn = name
-	}
-}
-
-// WithNullValue sets the string that represents a null value.
-// Default is the empty string "". Cells matching this value exactly
-// produce nil in the property map.
-func WithNullValue(s string) Option {
-	return func(c *adapterConfig) {
-		c.nullValue = s
-	}
-}
-
-// WithListSeparator sets the separator for list property values.
-// Default is "|". A cell "a|b|c" with a List<String> constraint
-// produces []any{"a", "b", "c"}.
-func WithListSeparator(sep string) Option {
-	return func(c *adapterConfig) {
-		c.listSep = sep
 	}
 }

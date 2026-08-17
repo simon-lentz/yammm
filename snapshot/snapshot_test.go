@@ -296,7 +296,7 @@ func TestMarshalLoad_LoadedDiagnostics(t *testing.T) {
 	if !loaded.Diagnostics().OK() {
 		t.Error("loaded Diagnostics() should be OK")
 	}
-	if loaded.HasErrors() {
+	if loaded.Diagnostics().HasErrors() {
 		t.Error("loaded HasErrors() should be false")
 	}
 }
@@ -1117,7 +1117,7 @@ func TestLoad_NullProvenanceRoundTrip(t *testing.T) {
 	}
 
 	// Provenance should be nil (no provenance was set).
-	if companies[0].HasProvenance() {
+	if companies[0].Provenance() != nil {
 		t.Error("expected nil provenance for instance without provenance")
 	}
 }
@@ -1148,7 +1148,7 @@ func TestMarshalLoad_DuplicateRoundTrip(t *testing.T) {
 	if dup.Instance.TypeName() != "Company" {
 		t.Errorf("duplicate type: got %q, want %q", dup.Instance.TypeName(), "Company")
 	}
-	if dup.HasDiagnostic() {
+	if !dup.Diagnostic.IsZero() {
 		t.Error("loaded duplicate should not have diagnostic")
 	}
 }

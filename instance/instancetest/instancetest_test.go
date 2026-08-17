@@ -73,8 +73,14 @@ func TestVI_Options(t *testing.T) {
 	if _, ok := vi.Edge("manager"); !ok {
 		t.Error("Edge(manager) missing")
 	}
-	if _, ok := vi.Composed("addresses"); !ok {
-		t.Error("Composed(addresses) missing")
+	foundAddresses := false
+	for rel := range vi.Compositions() {
+		if rel == "addresses" {
+			foundAddresses = true
+		}
+	}
+	if !foundAddresses {
+		t.Error("Compositions() missing addresses relation")
 	}
 	if vi.Provenance() == nil {
 		t.Error("Provenance() = nil, want set")
