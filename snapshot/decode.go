@@ -326,15 +326,7 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 			Build())
 	}
 
-	if inst.Provenance != nil && inst.Provenance.Path != "" {
-		if _, err := path.Parse(inst.Provenance.Path); err != nil {
-			sd.collector.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_PATH_FALLBACK,
-				fmt.Sprintf("provenance path %q could not be parsed, falling back to root path", inst.Provenance.Path)).
-				WithDetail(diag.DetailKeyOriginalPath, inst.Provenance.Path).
-				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
-				Build())
-		}
-	}
+	sd.checkProvenancePath(inst, row)
 
 	keyStr := formatWireKey(inst.Key)
 	if depth == 0 {
@@ -385,6 +377,23 @@ func (sd *streamDecoder) composedChildRow(child instWire, relName string, parent
 		fmt.Sprintf("composed child under %s.%s", sd.refAt(parentRow), relName))
 }
 
+// checkProvenancePath warns when a provenance path will not parse. The
+// materializer falls back to the root path silently, so the read surface is
+// where the loss becomes visible.
+func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
+	if inst.Provenance == nil || inst.Provenance.Path == "" {
+		return
+	}
+	if _, err := path.Parse(inst.Provenance.Path); err == nil {
+		return
+	}
+	sd.collector.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_PATH_FALLBACK,
+		fmt.Sprintf("provenance path %q could not be parsed, falling back to root path", inst.Provenance.Path)).
+		WithDetail(diag.DetailKeyOriginalPath, inst.Provenance.Path).
+		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+		Build())
+}
+
 // validateDiagnostics validates duplicate and unresolved records against the
 // walked index. Every conflict resolves at its stated address: a root
 // conflict through the instance index, a composed conflict through the
@@ -399,6 +408,16 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 				fmt.Sprintf("duplicate instance %s[%s] declares type row %d (%s) but its record states row %d (%s)",
 					sd.refAt(row), keyStr, *dup.Instance.Type, sd.refAt(*dup.Instance.Type), row, sd.refAt(row))).Build())
 		}
+
+		// Marshal rewrites the record's key from the instance it carries, so a
+		// disagreement is an address the next write would silently discard.
+		if instKey := formatWireKey(dup.Instance.Key); instKey != keyStr {
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+				fmt.Sprintf("duplicate record %d states key %s but its instance carries %s",
+					di, keyStr, instKey)).Build())
+		}
+
+		sd.checkProvenancePath(dup.Instance, row)
 
 		if len(dup.Instance.Composed) > 0 {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_COMPOSED_ON_DUPLICATE,
@@ -428,6 +447,11 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		conflictKey := formatWireKey(dup.Conflict.Key)
 
 		if dup.Relation == "" {
+			// Parent coordinates address a slot, and a root duplicate has none.
+			if dup.ParentType != nil || len(dup.ParentKey) > 0 {
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("duplicate record %d states no relation but carries parent coordinates", di)).Build())
+			}
 			if !idx.rootExists(conflictRow, conflictKey) {
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 					fmt.Sprintf("duplicate conflict %s[%s] references non-existent instance",

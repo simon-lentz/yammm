@@ -486,6 +486,122 @@ func rootDupDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 	})
 }
 
+// TestWireProbe_RootDuplicateWithParentCoordinates gives a root duplicate the
+// parent coordinates only a composed duplicate may carry. They address a slot,
+// and a root duplicate has none, so the record is malformed rather than a
+// record with two fields to ignore.
+func TestWireProbe_RootDuplicateWithParentCoordinates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+
+	data := rootDupDoc(ctx, t, s)
+	edited := spliceOnce(t, data, `"conflict":{`, `"parent_type":0,"parent_key":["a9"],"conflict":{`)
+
+	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]",
+		"load["+loadSig+"] verify["+verifySig+"]")
+}
+
+// TestWireProbe_DuplicateKeyDisagreesWithItsInstance states one key on the
+// duplicate record and another on the instance it carries. Marshal rewrites
+// the record's key from that instance, so the stated address would vanish on
+// the next write.
+func TestWireProbe_DuplicateKeyDisagreesWithItsInstance(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+
+	data := rootDupDoc(ctx, t, s)
+	edited := spliceOnce(t, data, `"instance":{"key":["a9"]`, `"instance":{"key":["a8"]`)
+
+	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]",
+		"load["+loadSig+"] verify["+verifySig+"]")
+}
+
+// rootDupTwoRowDoc is rootDupDoc plus a second type, so the table carries a
+// row a duplicate's instance can contradict without leaving the table.
+func rootDupTwoRowDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
+	t.Helper()
+	anchorID := mustTypeIDIn(t, s, "", "Anchor")
+	basinID := mustTypeIDIn(t, s, "base", "Basin")
+	inst := graph.InstanceParts{
+		TypeName:   tagForm(s, anchorID),
+		TypeID:     anchorID,
+		PrimaryKey: immutable.WrapKey([]any{"a9"}),
+		Properties: immutable.WrapProperties(map[string]any{"id": "a9", "depth": float64(4)}),
+	}
+	basin := graph.InstanceParts{
+		TypeName:   tagForm(s, basinID),
+		TypeID:     basinID,
+		PrimaryKey: immutable.WrapKey([]any{"b1"}),
+		Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(2)}),
+	}
+	return marshalParts(ctx, t, s, graph.SnapshotParts{
+		Types: []schema.TypeID{anchorID, basinID},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			anchorID: {inst},
+			basinID:  {basin},
+		},
+		Duplicates: []graph.DuplicateParts{{
+			Type:         anchorID,
+			Key:          immutable.WrapKey([]any{"a9"}),
+			Instance:     inst,
+			ConflictType: anchorID,
+			ConflictKey:  immutable.WrapKey([]any{"a9"}),
+		}},
+	})
+}
+
+// TestWireProbe_DuplicateInstanceTypeDisagreesWithItsRecord declares a type
+// row on a duplicate's instance that contradicts the record's own row. Marshal
+// writes no type there, so only a hand-built document reaches the guard. Both
+// rows are valid table rows, so the guard is tested on a disagreement rather
+// than on a reference that leaves the table.
+func TestWireProbe_DuplicateInstanceTypeDisagreesWithItsRecord(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+
+	data := rootDupTwoRowDoc(ctx, t, s)
+	other := childRow(t, data, "Basin")
+	if other == childRow(t, data, "Anchor") {
+		t.Fatal("fixture is vacuous: the contradicting row is the record's own row")
+	}
+	edited := spliceOnce(t, data, `"instance":{"key":["a9"],`,
+		fmt.Sprintf(`"instance":{"key":["a9"],"type":%d,`, other))
+
+	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
+	expectOutcome(t, "load[error:E_SNAPSHOT_TYPE_MISMATCH] verify[error:E_SNAPSHOT_TYPE_MISMATCH]",
+		"load["+loadSig+"] verify["+verifySig+"]")
+}
+
+// TestWireProbe_DuplicateInstanceUnparseableProvenance gives a duplicate's
+// instance a provenance path that cannot parse. The materializer falls back to
+// the root path for it exactly as it does for a root instance, so the warning
+// is owed at both positions.
+func TestWireProbe_DuplicateInstanceUnparseableProvenance(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+
+	data := rootDupDoc(ctx, t, s)
+	// The root instance and the duplicate's copy both carry a null provenance;
+	// the second occurrence is the duplicate's.
+	if n := bytes.Count(data, []byte(`"provenance":null`)); n != 2 {
+		t.Fatalf("fixture shape changed; %d null provenances, want 2:\n%s", n, data)
+	}
+	at := bytes.LastIndex(data, []byte(`"provenance":null`))
+	edited := append([]byte{}, data[:at]...)
+	edited = append(edited, []byte(`"provenance":{"source_name":"probe","path":"not a path ["}`)...)
+	edited = append(edited, data[at+len(`"provenance":null`):]...)
+
+	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
+	expectOutcome(t, "load[warning:E_SNAPSHOT_PATH_FALLBACK] verify[warning:E_SNAPSHOT_PATH_FALLBACK]",
+		"load["+loadSig+"] verify["+verifySig+"]")
+}
+
 // TestWireProbe_AbsentEdgeTargetType deletes an edge's target row. A
 // missing cross-reference is malformed and never binds to row 0.
 func TestWireProbe_AbsentEdgeTargetType(t *testing.T) {
