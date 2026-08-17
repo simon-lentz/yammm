@@ -1,8 +1,8 @@
 package immutable
 
 import (
-	"cmp"
 	"iter"
+	"maps"
 	"slices"
 )
 
@@ -44,7 +44,7 @@ func WrapProperties(props map[string]any, opts ...Option) Properties {
 	for k, v := range props {
 		entries[k] = Value{val: wrapValue(v, cfg.clone)}
 	}
-	sortedKeys := computeSortedKeys(entries)
+	sortedKeys := slices.Sorted(maps.Keys(entries))
 	return Properties{
 		entries:     entries,
 		sortedKeys:  sortedKeys,
@@ -92,13 +92,7 @@ func (p Properties) Len() int {
 // The iteration order is not guaranteed to be consistent across calls.
 // Use [Properties.SortedKeys] for deterministic ordering.
 func (p Properties) Keys() iter.Seq[string] {
-	return func(yield func(string) bool) {
-		for k := range p.entries {
-			if !yield(k) {
-				return
-			}
-		}
-	}
+	return maps.Keys(p.entries)
 }
 
 // SortedKeys returns an iterator over property names in sorted order.
@@ -106,40 +100,14 @@ func (p Properties) Keys() iter.Seq[string] {
 // This provides deterministic iteration order for stable output.
 // The sorted keys are precomputed at construction time.
 func (p Properties) SortedKeys() iter.Seq[string] {
-	return func(yield func(string) bool) {
-		for _, k := range p.sortedKeys {
-			if !yield(k) {
-				return
-			}
-		}
-	}
-}
-
-// computeSortedKeys computes the sorted key list for a property map.
-func computeSortedKeys(entries map[string]Value) []string {
-	if len(entries) == 0 {
-		return nil
-	}
-
-	keys := make([]string, 0, len(entries))
-	for k := range entries {
-		keys = append(keys, k)
-	}
-	slices.SortFunc(keys, cmp.Compare[string])
-	return keys
+	return slices.Values(p.sortedKeys)
 }
 
 // Range returns an iterator over property name-value pairs.
 //
 // The iteration order is not guaranteed to be consistent across calls.
 func (p Properties) Range() iter.Seq2[string, Value] {
-	return func(yield func(string, Value) bool) {
-		for k, v := range p.entries {
-			if !yield(k, v) {
-				return
-			}
-		}
-	}
+	return maps.All(p.entries)
 }
 
 // SortedRange returns an iterator over property name-value pairs in sorted key order.

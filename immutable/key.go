@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"slices"
 )
 
 // Key provides immutable access to primary or foreign key components.
@@ -65,13 +66,7 @@ func (k Key) Len() int {
 
 // Iter returns an iterator over the key components.
 func (k Key) Iter() iter.Seq[Value] {
-	return func(yield func(Value) bool) {
-		for _, c := range k.components {
-			if !yield(c) {
-				return
-			}
-		}
-	}
+	return slices.Values(k.components)
 }
 
 // Clone returns a deep copy of the key components as a mutable []any.

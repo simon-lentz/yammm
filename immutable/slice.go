@@ -2,6 +2,7 @@ package immutable
 
 import (
 	"iter"
+	"slices"
 )
 
 // Slice provides immutable access to a slice with pre-wrapped elements.
@@ -62,24 +63,12 @@ func (s Slice) Len() int {
 
 // Iter returns an iterator over the slice elements.
 func (s Slice) Iter() iter.Seq[Value] {
-	return func(yield func(Value) bool) {
-		for _, v := range s.elements {
-			if !yield(v) {
-				return
-			}
-		}
-	}
+	return slices.Values(s.elements)
 }
 
 // Iter2 returns an iterator over index-value pairs.
 func (s Slice) Iter2() iter.Seq2[int, Value] {
-	return func(yield func(int, Value) bool) {
-		for i, v := range s.elements {
-			if !yield(i, v) {
-				return
-			}
-		}
-	}
+	return slices.All(s.elements)
 }
 
 // Clone returns a deep copy of the slice as a mutable []any.

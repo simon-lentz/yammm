@@ -139,7 +139,7 @@
 //
 // # Dependencies
 //
-// immutable imports only stdlib packages (cmp, encoding/json, fmt, iter, math,
-// reflect, slices, strconv, strings).
+// immutable imports only stdlib packages (encoding/json, fmt, iter, maps,
+// math, reflect, slices, strconv, strings).
 // It must not import schema, instance, graph, or adapter.
 package immutable
