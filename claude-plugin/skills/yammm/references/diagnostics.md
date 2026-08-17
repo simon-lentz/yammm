@@ -188,9 +188,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
 | `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema |
-| `W_SNAPSHOT_AMBIGUOUS_TYPE` | Legacy type name declared by more than one schema in the closure |
-| `E_SNAPSHOT_TYPE_MISMATCH` | Types array inconsistent with instances |
-| `E_SNAPSHOT_TYPEID_MISMATCH` | Persisted type_id doesn't match schema |
+| `E_SNAPSHOT_TYPE_MISMATCH` | Instances section inconsistent with the types table |
 | `E_SNAPSHOT_DANGLING_REFERENCE` | Edge target references non-existent instance |
 | `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges (invalid) |
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |

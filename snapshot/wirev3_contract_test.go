@@ -18,6 +18,26 @@ import (
 // wrong in — a section that is not parallel to the table, a position that
 // carries no index at all, and a row whose schema no longer exists.
 
+// wireTypeTable reads a v3 document's types table.
+func wireTypeTable(t *testing.T, data []byte) []struct {
+	SchemaPath string `json:"schema_path"`
+	Name       string `json:"name"`
+	Tag        string `json:"tag"`
+} {
+	t.Helper()
+	var doc struct {
+		Types []struct {
+			SchemaPath string `json:"schema_path"`
+			Name       string `json:"name"`
+			Tag        string `json:"tag"`
+		} `json:"types"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("unmarshal types table: %v", err)
+	}
+	return doc.Types
+}
+
 // v3Doc marshals a small composed snapshot and returns the v3 bytes.
 func v3Doc(t *testing.T) []byte {
 	t.Helper()

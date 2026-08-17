@@ -1175,7 +1175,7 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 // property fidelity: edge properties declared on a forward reference to an
 // absent target must survive Marshal → Load intact. A prior implementation
 // silently dropped these both in the graph's unresolved-edge bookkeeping and
-// at the unresolvedWire layer; this test regresses on both failure modes.
+// at the wire layer; this test regresses on both failure modes.
 func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 	s := testSchema(t)
 	// Person with EMPLOYER edge to non-existent Company c99, carrying
@@ -1262,10 +1262,10 @@ func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 		"unresolved edge properties must survive round-trip and match the resolved shape")
 }
 
-// TestLoad_V1Rejected pins the retirement of wire v1. A v1 document loaded
-// cleanly through every reader up to v0.11.0; from v0.12.0 MinReadableVersion
-// is 2 and the same document is refused with the range named, rather than
-// being read under v2 rules it was never written to.
+// TestLoad_V1Rejected pins the retirement of the pre-v3 wire. A v1 document
+// loaded cleanly through every reader up to v0.11.0; from v0.12.0
+// MinReadableVersion is 3 and the same document is refused with the supported
+// version named, rather than being read under rules it was never written to.
 //
 // Integrity is not the point of this test (we are constructing a v1 doc by
 // hand rather than recomputing its SHA-256), so WithSkipIntegrityCheck
@@ -1285,18 +1285,18 @@ func TestLoad_V1Rejected(t *testing.T) {
 	loaded, result := snapshot.Load(ctx, []byte(doc), s, snapshot.WithSkipIntegrityCheck())
 	require.Nil(t, loaded, "a refused document yields no snapshot")
 	require.True(t, hasCode(result, diag.E_SNAPSHOT_UNSUPPORTED_VERSION),
-		"v1 must be refused with the supported range named: %v", result)
-	require.Contains(t, result.Err().Error(), "[2, 3]")
+		"v1 must be refused with the supported version named: %v", result)
+	require.Contains(t, result.Err().Error(), "supported: 3")
 }
 
 // TestLoad_UnsupportedVersion pins the rejection path for versions outside
-// the accept range on either side (v0, v1, v99). Each surfaces the
+// the accept range on either side (v0, v1, v2, v99). Each surfaces the
 // E_SNAPSHOT_UNSUPPORTED_VERSION code with the observed version and the
-// supported range named in the message.
+// supported version named in the message.
 func TestLoad_UnsupportedVersion(t *testing.T) {
 	s := testSchema(t)
 	schemaHash := schema.StructuralHash(s)
-	for _, v := range []int{0, 1, 99} {
+	for _, v := range []int{0, 1, 2, 99} {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			doc := fmt.Sprintf(`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":[],"instances":{},"diagnostics":{"duplicates":[],"unresolved":[]}}`, v, schemaHash)
 
@@ -1308,8 +1308,8 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 			for issue := range result.Errors() {
 				if issue.Code() == diag.E_SNAPSHOT_UNSUPPORTED_VERSION {
 					found = true
-					require.Contains(t, issue.Message(), "[2, 3]",
-						"reject message names the accept range")
+					require.Contains(t, issue.Message(), "supported: 3",
+						"reject message names the supported version")
 				}
 			}
 			require.True(t, found, "expected E_SNAPSHOT_UNSUPPORTED_VERSION")

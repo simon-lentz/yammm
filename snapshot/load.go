@@ -1,14 +1,10 @@
 package snapshot
 
 import (
-	"cmp"
 	"context"
-	"maps"
-	"slices"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -57,104 +53,5 @@ func Load(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption
 		return nil, sd.collector.Result()
 	}
 
-	if sd.isV3() {
-		return loadV3(ctx, sd, s)
-	}
-
-	// Decode remaining sections (instances + diagnostics).
-	instances, diags, err := sd.decodeSections()
-	if err != nil {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return nil, sd.collector.Result()
-	}
-
-	// Step 4: Decode instances (full materialization — decodeInstances).
-	exists, instParts, edgeParts, refs, err := sd.decodeInstances(ctx, instances)
-	if err != nil {
-		return nil, sd.collector.Result()
-	}
-
-	// Step 5: Validate diagnostics section.
-	sd.validateDiagnostics(diags, exists)
-
-	// Step 6: Integrity verification.
-	sd.verifyIntegrity()
-
-	// Step 7: Structural validation — edge references.
-	sd.validateEdgeRefs(refs, exists)
-
-	// If any errors, return nil snapshot.
-	if sd.collector.HasErrors() {
-		return nil, sd.collector.Result()
-	}
-
-	// Step 8: Assemble SnapshotParts and delegate to RebuildSnapshot.
-	dupParts := make([]graph.DuplicateParts, 0, len(diags.Duplicates))
-	for _, dw := range diags.Duplicates {
-		// The duplicate instance takes its own persisted identity; Type is the
-		// group holding the conflict it collided with, which is what the wire's
-		// own tag names.
-		var dupTypeID schema.TypeID
-		if st, ok := sd.resolveWireIdentity(dw.Type, dw.Instance.TypeID); ok {
-			dupTypeID = st.ID()
-		}
-		conflictTypeID := dupTypeID
-		if st, ok := resolveWireType(s, dw.Type, schema.TypeID{}); ok {
-			conflictTypeID = st.ID()
-		}
-		dp := graph.DuplicateParts{
-			Type:     conflictTypeID,
-			Key:      immutable.WrapKey(normalizeSlice(dw.Key)),
-			Instance: sd.wireToInstanceParts(dw.Type, dw.Instance, dupTypeID),
-		}
-		dupParts = append(dupParts, dp)
-	}
-
-	unresParts := make([]graph.UnresolvedParts, 0, len(diags.Unresolved))
-	for _, uw := range diags.Unresolved {
-		sourceID, ok := sd.bindWireTypeName(uw.SourceType, uw.Relation)
-		if !ok {
-			continue
-		}
-		targetID, ok := sd.bindWireTypeName(uw.TargetType, uw.Relation)
-		if !ok {
-			continue
-		}
-		up := graph.UnresolvedParts{
-			SourceType: sourceID,
-			SourceKey:  immutable.WrapKey(normalizeSlice(uw.SourceKey)),
-			Relation:   uw.Relation,
-			TargetType: targetID,
-			Required:   uw.Required,
-			Reason:     uw.Reason,
-			Properties: immutable.WrapProperties(normalizeMap(uw.Properties)),
-		}
-		if uw.TargetKey != nil {
-			up.TargetKey = immutable.WrapKey(normalizeSlice(uw.TargetKey))
-		}
-		unresParts = append(unresParts, up)
-	}
-
-	// One v2 tag group can resolve to more than one identity, so the type list
-	// is what the instances resolved to rather than the wire's own array.
-	typeIDs := slices.SortedFunc(maps.Keys(instParts), func(a, b schema.TypeID) int {
-		return cmp.Compare(a.String(), b.String())
-	})
-
-	parts := graph.SnapshotParts{
-		Types:      typeIDs,
-		Instances:  instParts,
-		Edges:      edgeParts,
-		Duplicates: dupParts,
-		Unresolved: unresParts,
-	}
-
-	snap, result := graph.RebuildSnapshot(s, parts)
-	if result.HasErrors() {
-		// Merge RebuildSnapshot diagnostics (Fatal E_INTERNAL) into our collector.
-		sd.collector.Merge(result)
-		return nil, sd.collector.Result()
-	}
-
-	return snap, sd.collector.Result()
+	return loadV3(ctx, sd, s)
 }

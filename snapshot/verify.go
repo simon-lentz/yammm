@@ -39,43 +39,17 @@ func Verify(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOpti
 		return sd.collector.Result()
 	}
 
-	if sd.isV3() {
-		sections, diags, err := sd.decodeSectionsV3()
-		if err != nil {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-			return sd.collector.Result()
-		}
-		exists, composed, refs, err := sd.validateInstancesV3(ctx, sections)
-		if err != nil {
-			return sd.collector.Result()
-		}
-		sd.validateDiagnosticsV3(diags, exists, composed)
-		sd.verifyIntegrity()
-		sd.validateEdgeRefsV3(refs, exists)
-		return sd.collector.Result()
-	}
-
-	// Decode remaining sections (instances + diagnostics).
-	instances, diags, err := sd.decodeSections()
+	sections, diags, err := sd.decodeSectionsV3()
 	if err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return sd.collector.Result()
 	}
-
-	// Step 4: Validate instances (lightweight path — validateInstances).
-	exists, refs, err := sd.validateInstances(ctx, instances)
+	exists, composed, refs, err := sd.validateInstancesV3(ctx, sections)
 	if err != nil {
 		return sd.collector.Result()
 	}
-
-	// Step 5: Validate diagnostics section.
-	sd.validateDiagnostics(diags, exists)
-
-	// Step 6: Integrity verification.
+	sd.validateDiagnosticsV3(diags, exists, composed)
 	sd.verifyIntegrity()
-
-	// Step 7: Structural validation — edge references.
-	sd.validateEdgeRefs(refs, exists)
-
+	sd.validateEdgeRefsV3(refs, exists)
 	return sd.collector.Result()
 }

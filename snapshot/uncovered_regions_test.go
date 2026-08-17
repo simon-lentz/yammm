@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/location"
@@ -291,40 +290,40 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 	}
 }
 
-// UpdateMetadata preserves a legacy int-shaped body while Marshal(Load(x))
-// heals it — the divergence the wire contract documents.
+// UpdateMetadata preserves an int-shaped body while Marshal(Load(x)) heals
+// it — the divergence the wire contract documents.
 //
 // Mutation: have UpdateMetadata rebuild the body rather than reuse it.
-func TestUpdateMetadata_PreservesALegacyIntShapedBodyThatReMarshalHeals(t *testing.T) {
+func TestUpdateMetadata_PreservesAnIntShapedBodyThatReMarshalHeals(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadWireTestSchema(t)
 	snap := buildWireTestSnapshot(t, s, float64(2), []any{float64(1)})
 
-	// MarshalLegacyV2 shares the emitter and cannot write the int-shaped form a
-	// pre-v0.12 writer produced, so it is put back by hand and re-sealed.
-	written, result := snapshot.MarshalLegacyV2(ctx, snap)
+	// Marshal always writes the healed form, so the int shape is put back by
+	// hand and the document re-sealed.
+	written, result := snapshot.Marshal(ctx, snap)
 	if err := result.Err(); err != nil {
-		t.Fatalf("MarshalLegacyV2: %v", err)
+		t.Fatalf("Marshal: %v", err)
 	}
 	if !bytes.Contains(written, []byte(`"reading":2.0`)) {
 		t.Fatalf("fixture does not carry the healed form to un-heal:\n%s", written)
 	}
-	legacy, result := snapshot.UpdateMetadata(ctx,
+	intShaped, result := snapshot.UpdateMetadata(ctx,
 		bytes.Replace(written, []byte(`"reading":2.0`), []byte(`"reading":2`), 1), nil)
 	if err := result.Err(); err != nil {
-		t.Fatalf("re-sealing the legacy fixture: %v", err)
+		t.Fatalf("re-sealing the int-shaped fixture: %v", err)
 	}
-	if !bytes.Contains(legacy, []byte(`"reading":2,`)) {
-		t.Fatalf("legacy fixture is not int-shaped:\n%s", legacy)
+	if !bytes.Contains(intShaped, []byte(`"reading":2,`)) {
+		t.Fatalf("fixture is not int-shaped:\n%s", intShaped)
 	}
 
-	updated, result := snapshot.UpdateMetadata(ctx, legacy, map[string]string{"stage": "done"})
+	updated, result := snapshot.UpdateMetadata(ctx, intShaped, map[string]string{"stage": "done"})
 	if err := result.Err(); err != nil {
 		t.Fatalf("UpdateMetadata: %v", err)
 	}
 
-	loaded, result := snapshot.Load(ctx, legacy, s)
+	loaded, result := snapshot.Load(ctx, intShaped, s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -340,41 +339,5 @@ func TestUpdateMetadata_PreservesALegacyIntShapedBodyThatReMarshalHeals(t *testi
 	}
 	if !bytes.Contains(healed, []byte(`"reading":2.0`)) {
 		t.Errorf("Marshal(Load(x)) did not heal the int-shaped float:\n%s", healed)
-	}
-}
-
-// The v2 decoder must reject a composed child carrying edges, through its own
-// recursion rather than the v3 path's.
-//
-// Mutation: drop the sd.processInstance recursion in decoder.go.
-func TestLoad_LegacyComposedChildWithEdgesIsReported(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadWireTestSchema(t)
-	snap := buildWireTestSnapshot(t, s, float64(2), []any{float64(1)})
-
-	written, result := snapshot.MarshalLegacyV2(ctx, snap)
-	if err := result.Err(); err != nil {
-		t.Fatalf("MarshalLegacyV2: %v", err)
-	}
-
-	// A composed child must not carry edges. RebuildSnapshot will not build one
-	// that does, so the shape is injected and the document re-sealed.
-	child := []byte(`{"key":["p1"],"properties":{"name":"p1","weight":3.0},"provenance":null}`)
-	withEdges := []byte(`{"key":["p1"],"properties":{"name":"p1","weight":3.0},` +
-		`"edges":{"FEED":[{"target_type":"Station","target_key":["st1"],"properties":{}}]},` +
-		`"provenance":null}`)
-	if !bytes.Contains(written, child) {
-		t.Fatalf("legacy composed child is not in the shape this test injects into:\n%s", written)
-	}
-	tampered, result := snapshot.UpdateMetadata(ctx, bytes.Replace(written, child, withEdges, 1), nil)
-	if err := result.Err(); err != nil {
-		t.Fatalf("re-sealing the tampered fixture: %v", err)
-	}
-
-	_, result = snapshot.Load(ctx, tampered, s)
-	if !hasCode(result, diag.E_SNAPSHOT_INVALID_COMPOSED) {
-		t.Errorf("result = %s, want E_SNAPSHOT_INVALID_COMPOSED — the composed-child "+
-			"edge invariant is never reached on the v2 path", result)
 	}
 }

@@ -1690,8 +1690,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
 - `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch
 - `E_SNAPSHOT_UNKNOWN_TYPE` — type name not found in schema
-- `E_SNAPSHOT_TYPE_MISMATCH` — types array inconsistent with instances
-- `E_SNAPSHOT_TYPEID_MISMATCH` — persisted type ID does not match schema
+- `E_SNAPSHOT_TYPE_MISMATCH` — instances section inconsistent with the types table
 - `E_SNAPSHOT_DANGLING_REFERENCE` — edge target or duplicate conflict not found
 - `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records

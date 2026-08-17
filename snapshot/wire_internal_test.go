@@ -10,7 +10,7 @@ import (
 // so reordering a field invalidates every saved .ys hash. The goldens catch a
 // reordering only where a fixture happens to carry the field, which leaves an
 // omitempty field on an unexercised path unpinned. This names the contract
-// directly, per struct, for both wire versions.
+// directly, per struct.
 func TestWireStructs_FieldOrder(t *testing.T) {
 	t.Parallel()
 
@@ -27,22 +27,7 @@ func TestWireStructs_FieldOrder(t *testing.T) {
 			"schema_name", "schema_source", "schema_hash", "integrity_hash",
 			"features", "created_at,omitempty", "metadata,omitempty",
 		}},
-		{reflect.TypeFor[typeIDWire](), []string{"schema_path", "name"}},
 		{reflect.TypeFor[provenanceWire](), []string{"source_name", "path"}},
-
-		// v2 body structs. Frozen: v2 is a read-only format from v0.12.0, and
-		// the decoder still parses documents written under this exact order.
-		{reflect.TypeFor[instWire](), []string{
-			"key", "type_id,omitempty", "properties", "edges,omitempty",
-			"composed,omitempty", "provenance",
-		}},
-		{reflect.TypeFor[edgeWire](), []string{"target_type", "target_key", "properties"}},
-		{reflect.TypeFor[dupWire](), []string{"type", "key", "instance"}},
-		{reflect.TypeFor[unresolvedWire](), []string{
-			"source_type", "source_key", "relation", "target_type", "target_key",
-			"required", "reason", "properties,omitempty",
-		}},
-		{reflect.TypeFor[diagWire](), []string{"duplicates", "unresolved"}},
 
 		// v3 body structs.
 		{reflect.TypeFor[typeTableEntry](), []string{"schema_path", "name", "tag"}},
@@ -84,17 +69,15 @@ func TestWireStructs_EveryStructIsPinned(t *testing.T) {
 	t.Parallel()
 
 	pinned := map[string]bool{
-		"headerWire": true, "marshalHeaderWire": true, "typeIDWire": true,
-		"provenanceWire": true, "instWire": true, "edgeWire": true,
-		"dupWire": true, "unresolvedWire": true, "diagWire": true,
+		"headerWire": true, "marshalHeaderWire": true,
+		"provenanceWire": true,
 		"typeTableEntry": true, "instWireV3": true, "edgeWireV3": true,
 		"dupWireV3": true, "unresolvedWireV3": true, "diagWireV3": true,
 	}
-	// Sampled through the two document roots, which reach every body struct by
+	// Sampled through the document roots, which reach every body struct by
 	// reference; a struct no root reaches is not on the wire at all.
 	roots := []reflect.Type{
 		reflect.TypeFor[headerWire](), reflect.TypeFor[marshalHeaderWire](),
-		reflect.TypeFor[instWire](), reflect.TypeFor[diagWire](),
 		reflect.TypeFor[instWireV3](), reflect.TypeFor[diagWireV3](),
 		reflect.TypeFor[typeTableEntry](),
 	}

@@ -2,7 +2,6 @@ package snapshot
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -11,39 +10,21 @@ import (
 	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 const maxComposedDepth = 32
 
-// instanceExistence tracks which instances exist for structural validation.
-// Used by both Verify (primary output) and Load (derived from InstanceParts keys).
-type instanceExistence map[string]map[string]bool // typeName → keyString → true
-
-// edgeRef is a lightweight edge reference for structural validation.
-type edgeRef struct {
-	sourceType string
-	sourceKey  string
-	targetType string
-	targetKey  string
-}
-
 // streamDecoder is the shared infrastructure for Verify, Load, Info, and
-// HeaderOnlyRead. Byte-based callers set data and leave reader nil;
-// reader-based callers set reader and leave data nil. decodeSections and
-// verifyIntegrity require data and must not be called on a reader-based
-// decoder (HeaderOnlyRead, the sole reader-based caller, only invokes
-// decodeHeader).
+// HeaderOnlyRead. Byte-based callers set data; reader-based callers set
+// reader and can only invoke decodeHeader, because decodeSectionsV3 and
+// verifyIntegrity require the full byte slice.
 type streamDecoder struct {
 	data      []byte           // raw input bytes; nil for reader-based callers
 	reader    io.Reader        // one-shot reader; non-nil only when data == nil
 	header    headerWire       // decoded header
-	types     []string         // decoded types array; legacy documents only
-	typeTable []typeTableEntry // decoded types table; v3 documents only
+	typeTable []typeTableEntry // decoded types table
 	tableIDs  []schema.TypeID  // identity per table row, zero where unresolved
 	collector *diag.Collector  // accumulates diagnostics
 
@@ -76,7 +57,7 @@ func newStreamDecoder(data []byte, s *schema.Schema, cfg loadConfig) *streamDeco
 }
 
 // newStreamDecoderFromReader creates a new streamDecoder backed by an
-// io.Reader. The reader is consumed once by decodeHeader; decodeSections
+// io.Reader. The reader is consumed once by decodeHeader; decodeSectionsV3
 // and verifyIntegrity require the full byte slice and must not be called
 // on a reader-based decoder.
 func newStreamDecoderFromReader(r io.Reader, s *schema.Schema, cfg loadConfig) *streamDecoder {
@@ -89,11 +70,11 @@ func newStreamDecoderFromReader(r io.Reader, s *schema.Schema, cfg loadConfig) *
 	}
 }
 
-// decodeHeader reads and validates the header and types array from the input.
+// decodeHeader reads and validates the header and types table from the input.
 // Returns error for JSON codec failures; validation issues go into the collector.
 //
 // For byte-based decoders (reader == nil) a fresh bytes.NewReader is created
-// per call so decodeHeader remains idempotent — decodeSections can re-scan
+// per call so decodeHeader remains idempotent — decodeSectionsV3 can re-scan
 // from the start without the header reader having consumed prefix bytes.
 // A nil data slice is passed through as bytes.NewReader(nil), which yields
 // io.EOF immediately and surfaces as a malformed-input diagnostic.
@@ -193,37 +174,11 @@ func (sd *streamDecoder) decodeHeader() error {
 			continue
 		}
 		if key == "types" {
-			if sd.isV3() {
-				if err := dec.Decode(&sd.typeTable); err != nil {
-					return fmt.Errorf("failed to decode types table: %w", err)
-				}
-				sd.resolveTypeTable()
-				return nil
+			if err := dec.Decode(&sd.typeTable); err != nil {
+				return fmt.Errorf("failed to decode types table: %w", err)
 			}
-			if err := dec.Decode(&sd.types); err != nil {
-				return fmt.Errorf("failed to decode types: %w", err)
-			}
-
-			// Validate types against schema.
-			if sd.schema != nil {
-				var closureNames map[string]bool
-				for _, typeName := range sd.types {
-					if _, ok := resolveWireType(sd.schema, typeName, schema.TypeID{}); ok {
-						continue
-					}
-					if closureNames == nil {
-						closureNames = closureTypeNames(sd.schema)
-					}
-					if closureNames[typeName] {
-						continue
-					}
-					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
-						fmt.Sprintf("type %q not found in schema", typeName)).
-						WithDetail(diag.DetailKeyTypeName, typeName).
-						Build())
-				}
-			}
-			return nil // Successfully decoded header + types.
+			sd.resolveTypeTable()
+			return nil
 		}
 		// Skip non-types keys.
 		var skip json.RawMessage
@@ -233,496 +188,6 @@ func (sd *streamDecoder) decodeHeader() error {
 	}
 
 	return errors.New("types key not found in document")
-}
-
-// decodeRemainingSection finds and decodes a section from the raw data by re-scanning.
-// This is used after decodeHeader has consumed the header and types.
-func (sd *streamDecoder) decodeSections() (map[string][]instWire, diagWire, error) {
-	dec := json.NewDecoder(bytes.NewReader(sd.data))
-	dec.UseNumber()
-
-	// Skip opening brace.
-	if _, err := dec.Token(); err != nil {
-		return nil, diagWire{}, fmt.Errorf("expected opening brace: %w", err)
-	}
-
-	var instances map[string][]instWire
-	var diags diagWire
-	diagsFound := false
-
-	for dec.More() {
-		tok, err := dec.Token()
-		if err != nil {
-			return nil, diagWire{}, fmt.Errorf("expected key token: %w", err)
-		}
-		key, ok := tok.(string)
-		if !ok {
-			continue
-		}
-
-		switch key {
-		case "instances":
-			if err := dec.Decode(&instances); err != nil {
-				return nil, diagWire{}, fmt.Errorf("failed to decode instances: %w", err)
-			}
-		case "diagnostics":
-			if err := dec.Decode(&diags); err != nil {
-				return nil, diagWire{}, fmt.Errorf("failed to decode diagnostics: %w", err)
-			}
-			diagsFound = true
-		default:
-			var skip json.RawMessage
-			if err := dec.Decode(&skip); err != nil {
-				return nil, diagWire{}, fmt.Errorf("failed to skip key %q: %w", key, err)
-			}
-		}
-	}
-
-	if instances == nil {
-		instances = make(map[string][]instWire)
-	}
-	if !diagsFound {
-		diags = diagWire{Duplicates: []dupWire{}, Unresolved: []unresolvedWire{}}
-	}
-
-	return instances, diags, nil
-}
-
-// validateInstances performs lightweight validation for Verify.
-// Returns the instance existence set and edge references.
-func (sd *streamDecoder) validateInstances(
-	ctx context.Context,
-	instances map[string][]instWire,
-) (instanceExistence, []edgeRef, error) {
-	exists := make(instanceExistence)
-	var refs []edgeRef
-
-	// Check types/instances key consistency.
-	sd.checkTypesConsistency(instances)
-
-	for typeName, insts := range instances {
-		if err := ctx.Err(); err != nil {
-			sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-			return nil, nil, fmt.Errorf("context cancelled: %w", err)
-		}
-
-		if exists[typeName] == nil {
-			exists[typeName] = make(map[string]bool, len(insts))
-		}
-
-		for _, inst := range insts {
-			sd.processInstance(typeName, inst, 0, func(typeName string, inst instWire, _ schema.TypeID) {
-				keyStr := formatWireKey(inst.Key)
-				exists[typeName][keyStr] = true
-
-				// Collect edge references.
-				for _, edgeTargets := range inst.Edges {
-					for _, et := range edgeTargets {
-						refs = append(refs, edgeRef{
-							sourceType: typeName,
-							sourceKey:  keyStr,
-							targetType: et.TargetType,
-							targetKey:  formatWireKey(et.TargetKey),
-						})
-					}
-				}
-			})
-		}
-	}
-
-	return exists, refs, nil
-}
-
-// decodeInstances performs full materialization for Load. Parts are keyed by
-// identity; exists and refs stay keyed by the document's own tag forms,
-// because they validate the wire against itself.
-func (sd *streamDecoder) decodeInstances(
-	ctx context.Context,
-	instances map[string][]instWire,
-) (instanceExistence, map[schema.TypeID][]graph.InstanceParts, []graph.EdgeParts, []edgeRef, error) {
-	exists := make(instanceExistence)
-	parts := make(map[schema.TypeID][]graph.InstanceParts, len(instances))
-	var edgeParts []graph.EdgeParts
-	var refs []edgeRef
-
-	// Check types/instances key consistency.
-	sd.checkTypesConsistency(instances)
-
-	for typeName, insts := range instances {
-		if err := ctx.Err(); err != nil {
-			sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-			return nil, nil, nil, nil, fmt.Errorf("context cancelled: %w", err)
-		}
-
-		if exists[typeName] == nil {
-			exists[typeName] = make(map[string]bool, len(insts))
-		}
-
-		for _, inst := range insts {
-			sd.processInstance(typeName, inst, 0, func(typeName string, inst instWire, typeID schema.TypeID) {
-				ip := sd.wireToInstanceParts(typeName, inst, typeID)
-				parts[typeID] = append(parts[typeID], ip)
-
-				keyStr := ip.PrimaryKey.String()
-				exists[typeName][keyStr] = true
-
-				// Build EdgeParts from per-instance edges.
-				for relName, targets := range inst.Edges {
-					for _, et := range targets {
-						refs = append(refs, edgeRef{
-							sourceType: typeName,
-							sourceKey:  keyStr,
-							targetType: et.TargetType,
-							targetKey:  formatWireKey(et.TargetKey),
-						})
-						targetID, ok := sd.bindWireTypeName(et.TargetType, relName)
-						if !ok {
-							continue
-						}
-						edgeParts = append(edgeParts, graph.EdgeParts{
-							Relation:   relName,
-							SourceType: typeID,
-							SourceKey:  ip.PrimaryKey,
-							TargetType: targetID,
-							TargetKey:  immutable.WrapKey(normalizeSlice(et.TargetKey)),
-							Properties: immutable.WrapProperties(normalizeMap(et.Properties)),
-						})
-					}
-				}
-			})
-		}
-	}
-
-	return exists, parts, edgeParts, refs, nil
-}
-
-// countInstances token-scans the instances section for Info.
-// Returns per-type instance counts and total edge count.
-func (sd *streamDecoder) countInstances(
-	instances map[string][]instWire,
-) (map[string]int, int) {
-	counts := make(map[string]int, len(instances))
-	totalEdges := 0
-
-	for typeName, insts := range instances {
-		counts[typeName] = len(insts)
-		for _, inst := range insts {
-			for _, targets := range inst.Edges {
-				totalEdges += len(targets)
-			}
-		}
-	}
-
-	return counts, totalEdges
-}
-
-// processInstance validates a single instWire and calls emit on success.
-// Validation: type_id cross-check, composed edge invariant, depth limit,
-// provenance path parse.
-func (sd *streamDecoder) processInstance(
-	typeName string,
-	inst instWire,
-	depth int,
-	emit func(typeName string, inst instWire, typeID schema.TypeID),
-) {
-	// Depth limit.
-	if depth > maxComposedDepth {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DEPTH_EXCEEDED,
-			fmt.Sprintf("composed nesting depth %d exceeds limit %d", depth, maxComposedDepth)).
-			WithDetail(diag.DetailKeyDepth, strconv.Itoa(depth)).
-			WithDetail(diag.DetailKeyTypeName, typeName).
-			Build())
-		return
-	}
-
-	// Resolve TypeID from schema.
-	var typeID schema.TypeID
-	var declType *schema.Type
-	if sd.schema != nil {
-		if t, ok := sd.resolveWireIdentity(typeName, inst.TypeID); ok {
-			typeID = t.ID()
-			declType = t
-		}
-		if tagType, ok := resolveWireType(sd.schema, typeName, schema.TypeID{}); ok {
-			sd.checkTypeIDAgreement(typeName, inst.TypeID, tagType.ID())
-		}
-	}
-
-	// Composed children edge invariant (only for depth > 0, i.e., composed children).
-	if depth > 0 && len(inst.Edges) > 0 {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INVALID_COMPOSED,
-			fmt.Sprintf("composed child %s has edges (composed children must not carry edges)", typeName)).
-			WithDetail(diag.DetailKeyTypeName, typeName).
-			Build())
-	}
-
-	// Provenance path parse (warning on fallback).
-	if inst.Provenance != nil && inst.Provenance.Path != "" {
-		if _, err := path.Parse(inst.Provenance.Path); err != nil {
-			sd.collector.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_PATH_FALLBACK,
-				fmt.Sprintf("provenance path %q could not be parsed, falling back to root path", inst.Provenance.Path)).
-				WithDetail(diag.DetailKeyOriginalPath, inst.Provenance.Path).
-				WithDetail(diag.DetailKeyTypeName, typeName).
-				Build())
-		}
-	}
-
-	// Process composed children recursively.
-	for relName, children := range inst.Composed {
-		for _, child := range children {
-			childTypeName, _ := sd.composedChildType(declType, relName, child)
-			sd.processInstance(childTypeName, child, depth+1, nil)
-		}
-	}
-
-	if emit != nil {
-		emit(typeName, inst, typeID)
-	}
-}
-
-// checkTypeIDAgreement reports a persisted identity that disagrees with what
-// the document's own tag form resolves to. A different name is a contradiction
-// and rejects the document; the same name in another schema is only the tag
-// form being unable to say which, so it warns and the identity decides.
-func (sd *streamDecoder) checkTypeIDAgreement(tagName string, persisted *typeIDWire, tagID schema.TypeID) {
-	if persisted == nil {
-		return
-	}
-	if persisted.Name != tagID.Name() {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPEID_MISMATCH,
-			fmt.Sprintf("persisted type_id name %q does not match schema type %q",
-				persisted.Name, tagID.Name())).
-			WithDetail(diag.DetailKeyTypeName, tagName).
-			Build())
-		return
-	}
-	// An unresolvable path means the schema moved since the write, which the
-	// name fallback already handles; only a resolvable one can disagree.
-	resolved, ok := typeByWireID(sd.schema, persisted)
-	if !ok || resolved.ID() == tagID {
-		return
-	}
-	sd.collector.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_TYPEID_MISMATCH,
-		fmt.Sprintf("persisted type_id names %q in schema %q, but %q resolves to the type declared in %q; the persisted identity is used",
-			persisted.Name, persisted.SchemaPath, tagName, tagID.SchemaPath().String())).
-		WithDetail(diag.DetailKeyTypeName, tagName).
-		Build())
-}
-
-// bindWireTypeName binds a legacy tag form to a type identity. A v2 document
-// names a type where it needs to denote one, so a tag the entry schema cannot
-// resolve is matched against the whole closure: unique binds, several binds the
-// first in closure order and reports the choice, none drops the record.
-func (sd *streamDecoder) bindWireTypeName(tagName, relation string) (schema.TypeID, bool) {
-	if t, ok := resolveWireType(sd.schema, tagName, schema.TypeID{}); ok {
-		return t.ID(), true
-	}
-	candidates := sd.closureTypesNamed(tagName)
-	switch len(candidates) {
-	case 0:
-		sd.collector.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_UNKNOWN_TYPE,
-			fmt.Sprintf("unresolved edge %q names type %q, which no schema in the import closure declares; the record is dropped",
-				relation, tagName)).
-			WithDetail(diag.DetailKeyTypeName, tagName).
-			WithDetail(diag.DetailKeyRelationName, relation).
-			Build())
-		return schema.TypeID{}, false
-	case 1:
-		return candidates[0], true
-	default:
-		sd.collector.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_AMBIGUOUS_TYPE,
-			fmt.Sprintf("unresolved edge %q names type %q, which %d schemas in the import closure declare; bound to the one in %q",
-				relation, tagName, len(candidates), candidates[0].SchemaPath().String())).
-			WithDetail(diag.DetailKeyTypeName, tagName).
-			WithDetail(diag.DetailKeyRelationName, relation).
-			Build())
-		return candidates[0], true
-	}
-}
-
-// closureTypesNamed returns every type in the closure declaring the given bare
-// name, in closure order: the entry schema first, then imports in declaration
-// order.
-func (sd *streamDecoder) closureTypesNamed(name string) []schema.TypeID {
-	if sd.schema == nil {
-		return nil
-	}
-	var out []schema.TypeID
-	for _, cs := range sd.schema.Closure() {
-		if t, ok := cs.Type(name); ok {
-			out = append(out, t.ID())
-		}
-	}
-	return out
-}
-
-// resolveWireIdentity resolves a persisted identity, falling back to the tag
-// form when the document carries none or when its schema path no longer
-// resolves. A stale path leaves the name good, so binding by name recovers an
-// identity where discarding both returns one that cannot be written back.
-func (sd *streamDecoder) resolveWireIdentity(tagName string, persisted *typeIDWire) (*schema.Type, bool) {
-	if persisted != nil {
-		if t, ok := typeByWireID(sd.schema, persisted); ok {
-			return t, true
-		}
-		return resolveWireType(sd.schema, persisted.Name, schema.TypeID{})
-	}
-	return resolveWireType(sd.schema, tagName, schema.TypeID{})
-}
-
-// composedChildType recovers a composed child's type in tag form, inverting
-// the writer's omission rule: type_id is absent exactly when the parent
-// relation's target identifies the child, so an explicit one means the target
-// is the wrong answer and must never override it.
-func (sd *streamDecoder) composedChildType(
-	parent *schema.Type,
-	relName string,
-	child instWire,
-) (string, schema.TypeID) {
-	if child.TypeID != nil {
-		if t, ok := sd.resolveWireIdentity("", child.TypeID); ok {
-			return schema.TagForm(sd.schema, t.ID()), t.ID()
-		}
-		return child.TypeID.Name, schema.TypeID{}
-	}
-
-	if sd.schema != nil && parent != nil {
-		if rel, ok := parent.Relation(relName); ok {
-			if target, ok := sd.schema.TypeByID(rel.TargetID()); ok {
-				return schema.TagForm(sd.schema, target.ID()), target.ID()
-			}
-		}
-	}
-	return relName, schema.TypeID{}
-}
-
-// wireToInstanceParts converts a wire instance to InstanceParts.
-func (sd *streamDecoder) wireToInstanceParts(
-	typeName string,
-	inst instWire,
-	typeID schema.TypeID,
-) graph.InstanceParts {
-	ip := graph.InstanceParts{
-		TypeName:   typeName,
-		TypeID:     typeID,
-		PrimaryKey: immutable.WrapKey(normalizeSlice(inst.Key)),
-		Properties: immutable.WrapProperties(normalizeMap(inst.Properties)),
-	}
-
-	// Composed children.
-	if len(inst.Composed) > 0 {
-		declType, _ := resolveWireType(sd.schema, typeName, typeID)
-		ip.Composed = make(map[string][]graph.InstanceParts, len(inst.Composed))
-		for relName, children := range inst.Composed {
-			childParts := make([]graph.InstanceParts, 0, len(children))
-			for _, child := range children {
-				childTypeName, childTypeID := sd.composedChildType(declType, relName, child)
-				cp := sd.wireToInstanceParts(childTypeName, child, childTypeID)
-				childParts = append(childParts, cp)
-			}
-			ip.Composed[relName] = childParts
-		}
-	}
-
-	// Provenance.
-	if inst.Provenance != nil {
-		parsedPath, parseErr := path.Parse(inst.Provenance.Path)
-		if parseErr != nil {
-			parsedPath = path.Root()
-		}
-		prov := location.NewProvenance(inst.Provenance.SourceName, parsedPath, location.Span{})
-		if parseErr != nil {
-			prov = prov.WithRawPath(inst.Provenance.Path)
-		}
-		ip.Provenance = prov
-	}
-
-	return ip
-}
-
-// checkTypesConsistency verifies the types array matches instances map keys.
-func (sd *streamDecoder) checkTypesConsistency(instances map[string][]instWire) {
-	// Types in the types array but not in instances.
-	for _, t := range sd.types {
-		if _, ok := instances[t]; !ok {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
-				fmt.Sprintf("type %q in types array but not in instances", t)).
-				WithDetail(diag.DetailKeyTypeName, t).
-				Build())
-		}
-	}
-
-	// Types in instances but not in the types array.
-	typeSet := make(map[string]bool, len(sd.types))
-	for _, t := range sd.types {
-		typeSet[t] = true
-	}
-	for t := range instances {
-		if !typeSet[t] {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
-				fmt.Sprintf("type %q in instances but not in types array", t)).
-				WithDetail(diag.DetailKeyTypeName, t).
-				Build())
-		}
-	}
-}
-
-// validateDiagnostics validates duplicate and unresolved records.
-func (sd *streamDecoder) validateDiagnostics(diags diagWire, exists instanceExistence) {
-	for _, dup := range diags.Duplicates {
-		keyStr := formatWireKey(dup.Key)
-
-		if sd.schema != nil {
-			if tagType, ok := resolveWireType(sd.schema, dup.Type, schema.TypeID{}); ok {
-				sd.checkTypeIDAgreement(dup.Type, dup.Instance.TypeID, tagType.ID())
-			}
-		}
-
-		// Validate duplicate conflict reference.
-		if typeIdx := exists[dup.Type]; typeIdx == nil || !typeIdx[keyStr] {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
-				fmt.Sprintf("duplicate conflict for %s[%s] references non-existent instance", dup.Type, keyStr)).
-				WithDetail(diag.DetailKeyTypeName, dup.Type).
-				WithDetail(diag.DetailKeyPrimaryKey, keyStr).
-				Build())
-		}
-
-		// Duplicate instance must not have composed children.
-		if len(dup.Instance.Composed) > 0 {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_COMPOSED_ON_DUPLICATE,
-				fmt.Sprintf("duplicate instance %s[%s] must not have composed children", dup.Type, keyStr)).
-				WithDetail(diag.DetailKeyTypeName, dup.Type).
-				WithDetail(diag.DetailKeyPrimaryKey, keyStr).
-				Build())
-		}
-
-		// Duplicate instance must not have edges.
-		if len(dup.Instance.Edges) > 0 {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_EDGES_ON_DUPLICATE,
-				fmt.Sprintf("duplicate instance %s[%s] must not have edges", dup.Type, keyStr)).
-				WithDetail(diag.DetailKeyTypeName, dup.Type).
-				WithDetail(diag.DetailKeyPrimaryKey, keyStr).
-				Build())
-		}
-	}
-}
-
-// validateEdgeRefs checks that all edge target references resolve.
-func (sd *streamDecoder) validateEdgeRefs(refs []edgeRef, exists instanceExistence) {
-	for _, ref := range refs {
-		typeIdx := exists[ref.targetType]
-		if typeIdx == nil || !typeIdx[ref.targetKey] {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
-				fmt.Sprintf("edge in %s[%s] references %s[%s] which does not exist",
-					ref.sourceType, ref.sourceKey, ref.targetType, ref.targetKey)).
-				WithDetail(diag.DetailKeyTypeName, ref.sourceType).
-				WithDetail(diag.DetailKeyPrimaryKey, ref.sourceKey).
-				WithDetail(diag.DetailKeyTargetType, ref.targetType).
-				WithDetail(diag.DetailKeyTargetPK, ref.targetKey).
-				WithHint("ensure the target instance is included in the snapshot").
-				Build())
-		}
-	}
 }
 
 // verifyIntegrity verifies the integrity hash.

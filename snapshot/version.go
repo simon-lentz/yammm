@@ -20,7 +20,7 @@ import (
 // so the "v2 reader rejects v3" asymmetric-bump contract can be pinned
 // at the unit-test layer by passing explicit bounds — tests do not need
 // to fork the decoder to simulate an older reader.
-func acceptVersion(v, minV, maxV int) (diag.Issue, bool) { //nolint:unparam // bounds are the older-reader test seam
+func acceptVersion(v, minV, maxV int) (diag.Issue, bool) {
 	if v >= minV && v <= maxV {
 		return diag.Issue{}, true
 	}

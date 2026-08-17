@@ -38,18 +38,9 @@ type edgeRefV3 struct {
 	targetKey  string
 }
 
-// isV3 reports whether the decoded header names a version carrying the types
-// table. Every fork in this package turns on it.
-func (sd *streamDecoder) isV3() bool {
-	return sd.header.Version >= 3
-}
-
 // typeTags renders the document's types as the names it uses for them, for the
-// public Info and HeaderOnly surfaces. A v3 table carries each tag verbatim.
+// public Info and HeaderOnly surfaces. The table carries each tag verbatim.
 func (sd *streamDecoder) typeTags() []string {
-	if !sd.isV3() {
-		return sd.types
-	}
 	tags := make([]string, len(sd.typeTable))
 	for i, e := range sd.typeTable {
 		tags[i] = e.Tag
@@ -67,8 +58,7 @@ func (sd *streamDecoder) resolveTypeTable() {
 		return
 	}
 	for i, e := range sd.typeTable {
-		wire := &typeIDWire{SchemaPath: e.SchemaPath, Name: e.Name}
-		if t, ok := typeByWireID(sd.schema, wire); ok {
+		if t, ok := typeByWireID(sd.schema, e.SchemaPath, e.Name); ok {
 			sd.tableIDs[i] = t.ID()
 			continue
 		}

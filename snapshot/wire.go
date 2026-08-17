@@ -53,13 +53,11 @@ package snapshot
 //
 //  3. Version preservation (introduced v0.12.0). UpdateMetadata rebuilds
 //     the header at the version it read, so it is a header rewrite and
-//     never a migration: a v2 document through UpdateMetadata is still
-//     v2. UpdateMetadataOrReMarshal preserves the version too on its
-//     fast path, and produces v3 from v2 only when UpdateMetadata
-//     refuses the input and it falls back to Load + Marshal. Load +
-//     Marshal is the migrating path, and re-marshalling freezes the
-//     reader's identity resolution, because v3 carries no tag form to
-//     re-resolve from.
+//     never a migration. From v0.12.0 the only readable version is 3:
+//     an older document is refused with
+//     E_SNAPSHOT_UNSUPPORTED_VERSION rather than rewritten, and
+//     UpdateMetadataOrReMarshal's Load + Marshal fallback refuses it
+//     the same way.
 //
 // These contracts are tested in snapshot/wire_test.go via:
 //   - TestWireFormat_TopLevelKeyOrder (token-level key-order pin)
@@ -81,22 +79,12 @@ package snapshot
 
 // MinReadableVersion is the lowest .ys wire-format version this package
 // accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead).
-//
-// The accept range is the closed interval [MinReadableVersion, currentVersion].
-// Documents whose version field falls outside the range are rejected with an
-// Error-severity [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] issue. The exported
-// constant lets consumers inspect the accept range without depending on the
-// unexported currentVersion.
-//
-// Asymmetric-reader semantics. yammm v0.12.0 bumped the wire format from
-// v2 to v3, replacing the types array of names with a table of full type
-// identities that every other position references by row. v3 readers accept
-// v2 documents and resolve their identity on the way in; v2 readers (yammm
-// v0.11.0 and earlier) reject v3 documents cleanly via the unknown-version
-// path rather than misreading the new sections. The same release retired v1,
-// which yammm v0.2.x produced and no consumer document carries.
-// See docs/VERSIONING.md for the full pre-1.0 / post-1.0 wire-format policy.
-const MinReadableVersion = 2
+// The accept range is the closed interval [MinReadableVersion, currentVersion],
+// which is [3, 3]: v0.12.0 introduced v3 and retired every earlier version.
+// A document outside the range draws an Error-severity
+// [diag.E_SNAPSHOT_UNSUPPORTED_VERSION]. The package doc's Wire Format
+// Versions section and docs/VERSIONING.md carry the full policy.
+const MinReadableVersion = 3
 
 const (
 	currentVersion         = 3
@@ -131,57 +119,10 @@ type marshalHeaderWire struct {
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
-// instWire is the wire representation of a single instance.
-// Used for both root instances and composed children (recursive).
-//
-// Provenance uses json:"provenance" (no omitempty) — null provenance is
-// semantically meaningful (no source tracking). Edges and Composed use
-// omitempty because absence is the default state.
-type instWire struct {
-	Key        []any                 `json:"key"`
-	TypeID     *typeIDWire           `json:"type_id,omitempty"`
-	Properties map[string]any        `json:"properties"`
-	Edges      map[string][]edgeWire `json:"edges,omitempty"`
-	Composed   map[string][]instWire `json:"composed,omitempty"`
-	Provenance *provenanceWire       `json:"provenance"`
-}
-
-// typeIDWire is the persisted type identity, omitted at each position where
-// that position's own recovery already lands on it: the instances-map key for
-// a root instance and for a duplicate, the parent relation's target for a
-// composed child. Present, it is authoritative for a composed child and a
-// cross-check for the other two.
-type typeIDWire struct {
-	SchemaPath string `json:"schema_path"`
-	Name       string `json:"name"`
-}
-
-// edgeWire represents an edge target within an instance's edges map.
-// Properties is always present (no omitempty) — even when empty, edge
-// properties are a typed field on a resolved edge, serialized as {}.
-type edgeWire struct {
-	TargetType string         `json:"target_type"`
-	TargetKey  []any          `json:"target_key"`
-	Properties map[string]any `json:"properties"`
-}
-
 // provenanceWire is the wire representation of instance provenance.
 type provenanceWire struct {
 	SourceName string `json:"source_name"`
 	Path       string `json:"path"`
-}
-
-// diagWire is the wire representation of the diagnostics section.
-type diagWire struct {
-	Duplicates []dupWire        `json:"duplicates"`
-	Unresolved []unresolvedWire `json:"unresolved"`
-}
-
-// dupWire is the wire representation of a duplicate record.
-type dupWire struct {
-	Type     string   `json:"type"`
-	Key      []any    `json:"key"`
-	Instance instWire `json:"instance"`
 }
 
 // typeTableEntry is one row of the v3 types table, where schema_path + name is
@@ -241,22 +182,4 @@ type unresolvedWireV3 struct {
 type diagWireV3 struct {
 	Duplicates []dupWireV3        `json:"duplicates"`
 	Unresolved []unresolvedWireV3 `json:"unresolved"`
-}
-
-// unresolvedWire is the wire representation of an unresolved edge record.
-//
-// Properties landed in yammm v0.3.0 and is carried by every readable wire
-// format. The `omitempty` tag keeps the field out of the wire for "absent" and
-// "empty" unresolved-edge reasons (which never had a target to attach
-// properties to) and for "target_missing" edges whose schema-declared
-// relationship carries no edge properties.
-type unresolvedWire struct {
-	SourceType string         `json:"source_type"`
-	SourceKey  []any          `json:"source_key"`
-	Relation   string         `json:"relation"`
-	TargetType string         `json:"target_type"`
-	TargetKey  []any          `json:"target_key"`
-	Required   bool           `json:"required"`
-	Reason     string         `json:"reason"`
-	Properties map[string]any `json:"properties,omitempty"`
 }

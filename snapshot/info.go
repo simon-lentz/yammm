@@ -78,25 +78,13 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 	}
 
 	// Decode remaining sections.
-	var counts map[string]int
-	var totalEdges, duplicateCount, unresolvedCount int
-	if sd.isV3() {
-		sections, diags, err := sd.decodeSectionsV3()
-		if err != nil {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-			return nil, sd.collector.Result()
-		}
-		counts, totalEdges = sd.countInstancesV3(sections)
-		duplicateCount, unresolvedCount = len(diags.Duplicates), len(diags.Unresolved)
-	} else {
-		instances, diags, err := sd.decodeSections()
-		if err != nil {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-			return nil, sd.collector.Result()
-		}
-		counts, totalEdges = sd.countInstances(instances)
-		duplicateCount, unresolvedCount = len(diags.Duplicates), len(diags.Unresolved)
+	sections, diags, err := sd.decodeSectionsV3()
+	if err != nil {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+		return nil, sd.collector.Result()
 	}
+	counts, totalEdges := sd.countInstancesV3(sections)
+	duplicateCount, unresolvedCount := len(diags.Duplicates), len(diags.Unresolved)
 
 	totalInstances := 0
 	for _, c := range counts {

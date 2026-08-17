@@ -177,7 +177,7 @@ func TestMarshal_FloatEmissionEveryPosition(t *testing.T) {
 }
 
 // TestMarshal_HealsNarrowedFloats pins the healing rule. Load never
-// re-validates, so a legacy document's int-shaped floats reach memory as
+// re-validates, so a document's int-shaped floats reach memory as
 // int64 — built here directly, which is the identical in-memory state — and
 // the next Marshal emits them in decimal form. An int64 beyond 2^53 passes
 // through instead: float64 conversion could corrupt it, and no narrowed
@@ -216,17 +216,17 @@ func TestMarshal_HealsNarrowedFloats(t *testing.T) {
 	}
 }
 
-// Healing changes a value's dynamic type on the first pass, so a legacy
+// Healing changes a value's dynamic type on the first pass, so an int-shaped
 // snapshot is not its own round-trip fixpoint — but healing is idempotent, so
 // the loaded document is. This is the exception [snapshottest.AssertRoundTrip]
 // documents, pinned rather than left to prose.
-func TestRoundTrip_LegacyNarrowedFloatStabilisesAfterOnePass(t *testing.T) {
+func TestRoundTrip_NarrowedFloatStabilisesAfterOnePass(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadWireTestSchema(t)
-	legacy := buildWireTestSnapshot(t, s, int64(1860000), []any{int64(3)})
+	narrowed := buildWireTestSnapshot(t, s, int64(1860000), []any{int64(3)})
 
-	data, result := snapshot.Marshal(ctx, legacy)
+	data, result := snapshot.Marshal(ctx, narrowed)
 	if err := result.Err(); err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}

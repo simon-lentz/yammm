@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
@@ -715,55 +714,6 @@ func TestIdentityOracle_ByteFixpoint(t *testing.T) {
 				t.Errorf("Marshal(Load(Marshal(x))) differs from Marshal(x)\nfirst:\n%s\nsecond:\n%s", first, second)
 			}
 		})
-	}
-}
-
-// TestIdentityOracle_ContradictoryNameAndIdentityIsReported supplies the
-// ingredient assertTagFormConsistent cannot otherwise reach: every case builder
-// sets TypeName from the same tagForm the assertion re-derives, so that
-// assertion cannot fail on a generated document. Built directly, the
-// disagreement must draw the cross-check rather than bind silently.
-func TestIdentityOracle_ContradictoryNameAndIdentityIsReported(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadIdentitySchema(t)
-
-	siteID := mustTypeIDIn(t, s, "", "Site")
-	anchorID := mustTypeIDIn(t, s, "", "Anchor")
-
-	// The name says Anchor; the identity says Site. Nothing else disagrees.
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{anchorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   "Anchor",
-				TypeID:     siteID,
-				PrimaryKey: immutable.WrapKey([]any{"x1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "x1"}),
-			}},
-		},
-	})
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
-	if anchorID == siteID {
-		t.Fatal("fixture is vacuous: Anchor and Site share an identity")
-	}
-
-	data, result := snapshot.MarshalLegacyV2(ctx, built)
-	if err := result.Err(); err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	_, result = snapshot.Load(ctx, data, s)
-	var found bool
-	for issue := range result.Errors() {
-		if issue.Code() == diag.E_SNAPSHOT_TYPEID_MISMATCH {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("a persisted identity contradicting its own tag form bound silently; want %s\n%s",
-			diag.E_SNAPSHOT_TYPEID_MISMATCH, data)
 	}
 }
 

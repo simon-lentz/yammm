@@ -397,17 +397,9 @@ var (
 	// in the provided schema.
 	E_SNAPSHOT_UNKNOWN_TYPE = NewCode("E_SNAPSHOT_UNKNOWN_TYPE", CategorySnapshot)
 
-	// W_SNAPSHOT_AMBIGUOUS_TYPE (Warning) indicates a legacy .ys type name that
-	// two closure schemas declare; the reader binds one and reports the choice.
-	W_SNAPSHOT_AMBIGUOUS_TYPE = NewCode("W_SNAPSHOT_AMBIGUOUS_TYPE", CategorySnapshot)
-
-	// E_SNAPSHOT_TYPE_MISMATCH indicates the types array is inconsistent with the
-	// instances map keys (structural malformation).
+	// E_SNAPSHOT_TYPE_MISMATCH indicates the instances section is inconsistent
+	// with the types table (structural malformation).
 	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH", CategorySnapshot)
-
-	// E_SNAPSHOT_TYPEID_MISMATCH indicates a persisted type_id does not match the
-	// corresponding type in the provided schema (schema evolution).
-	E_SNAPSHOT_TYPEID_MISMATCH = NewCode("E_SNAPSHOT_TYPEID_MISMATCH", CategorySnapshot)
 
 	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target or duplicate conflict
 	// references an instance that does not exist in the snapshot.

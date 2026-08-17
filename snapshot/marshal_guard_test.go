@@ -5,12 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/instancetest"
-	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/snapshot"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
@@ -27,49 +23,6 @@ func (p *probeTB) Helper() {}
 func (p *probeTB) Errorf(format string, args ...any) {
 	p.errored = true
 	p.msg = fmt.Sprintf(format, args...)
-}
-
-// A persisted type_id naming a resolvable type other than the one the tag form
-// resolves to is a contradiction, and the load reports it rather than silently
-// keeping the tag form's answer. The contradiction is expressible only on the
-// legacy wire, which names types where v3 denotes them.
-func TestLoad_ContradictoryTypeIDIsReported(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadIdentitySchema(t)
-
-	// TypeName says the local Part; TypeID says the imported one of the same
-	// name. Only a caller assembling parts directly can build this.
-	imported := mustTypeIDIn(t, s, "base", "Part")
-	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{tidOf(t, s, "Part")},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			tidOf(t, s, "Part"): {{
-				TypeName:   "Part",
-				TypeID:     imported,
-				PrimaryKey: immutable.WrapKey([]any{"p1"}),
-				Properties: immutable.WrapProperties(map[string]any{"name": "p1"}),
-			}},
-		},
-	})
-	if result.HasErrors() {
-		t.Fatalf("rebuild: %s", result)
-	}
-	data, mres := snapshot.MarshalLegacyV2(ctx, snap)
-	if err := mres.Err(); err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	_, lres := snapshot.Load(ctx, data, s)
-	found := false
-	for issue := range lres.Issues() {
-		if issue.Code() == diag.E_SNAPSHOT_TYPEID_MISMATCH {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("load accepted a document whose type_id contradicts its tag form: %s\n%s", lres, data)
-	}
 }
 
 // DiffSnapshots compares a duplicate's full instance tree, so a difference in

@@ -95,32 +95,19 @@ func resolveWireType(s *schema.Schema, tagName string, id schema.TypeID) (*schem
 	return s.ResolveType(schema.NewTypeRef(alias, name, location.Span{}))
 }
 
-// closureTypeNames collects every type name declared anywhere in s's import
-// closure. Callers build it once per document: it is an existence set, never a
-// binding table, because a name declared in two schemas resolves to neither.
-func closureTypeNames(s *schema.Schema) map[string]bool {
-	names := make(map[string]bool)
-	for _, cs := range s.Closure() {
-		for name := range cs.Types() {
-			names[name] = true
-		}
-	}
-	return names
-}
-
-// typeByWireID resolves a persisted type_id — schema path and name together —
+// typeByWireID resolves a persisted identity — schema path and name together —
 // against the entry schema's import closure. Matching the path as well as the
 // name is what keeps two same-named types in different schemas apart; a
 // name-only lookup silently rebinds one to the other.
-func typeByWireID(s *schema.Schema, w *typeIDWire) (*schema.Type, bool) {
-	if s == nil || w == nil {
+func typeByWireID(s *schema.Schema, schemaPath, name string) (*schema.Type, bool) {
+	if s == nil {
 		return nil, false
 	}
 	for _, cs := range s.Closure() {
-		if cs.SourceID().String() != w.SchemaPath {
+		if cs.SourceID().String() != schemaPath {
 			continue
 		}
-		if t, ok := cs.Type(w.Name); ok {
+		if t, ok := cs.Type(name); ok {
 			return t, true
 		}
 	}

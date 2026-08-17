@@ -163,32 +163,22 @@
 // # Wire Format Versions
 //
 // The .ys wire format uses a version field in the header for forward
-// evolution. yammm v0.12.0 introduced the v2 → v3 bump: the types
-// section became a table of full type identities that every other
-// position references by row index, and instances became an array
-// parallel to it. v2 named types where it needed to denote them, and
-// a name cannot express a transitively imported type or separate two
-// same-named types in different schemas.
+// evolution, and this package reads one version. yammm v0.12.0
+// introduced v3 — the types section is a table of full type identities
+// that every other position references by row index — and retired every
+// earlier version, because the v1/v2 name forms cannot express a
+// transitively imported type or separate two same-named types in
+// different schemas.
 //
 // [MinReadableVersion] names the lowest version this package accepts on
 // read paths; the accept range is the closed interval
-// [[MinReadableVersion], currentVersion], which is [2, 3] at yammm
+// [[MinReadableVersion], currentVersion], which is [3, 3] at yammm
 // v0.12.0. Documents outside the range surface an Error-severity
 // [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] with the observed version and
-// the supported range named in the message.
-//
-// Asymmetric-reader semantics. A v3 reader (yammm v0.12.0+) accepts
-// both v2 and v3 documents, resolving a v2 document's type identity on
-// the way in. A v2 reader (yammm v0.11.0 and earlier) rejects v3
-// documents via the unknown-version path — operators running an older
-// binary against a v0.12.0-written .ys see a structured diagnostic
-// rather than a misread types section. Migrating a v2 document is
-// [Load] followed by [Marshal]; [UpdateMetadata] preserves the input's
-// version and never migrates, and neither does
-// [UpdateMetadataOrReMarshal] on its fast path, which produces v3 only
-// when it falls back. The migration is one-way: re-marshalling freezes
-// the reader's identity resolution, because v3 carries no tag form to
-// re-resolve from. See docs/VERSIONING.md for the full
+// the supported range named in the message. An older reader (yammm
+// v0.11.0 and earlier) rejects a v3 document the same way, so an
+// operator running an older binary sees a structured diagnostic rather
+// than a misread types section. See docs/VERSIONING.md for the full
 // pre-1.0 / post-1.0 wire-format policy.
 //
 // # Thread Safety

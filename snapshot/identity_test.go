@@ -44,9 +44,8 @@ func loadCrossSchema(t *testing.T) *schema.Schema {
 }
 
 // A composed child's type identity survives a round trip even when the
-// relation is named differently from the type it targets. The wire omits
-// type_id for a child the parent relation identifies, so the decoder must
-// recover the child's type through that relation and not through its name.
+// relation is named differently from the type it targets — a reader that
+// derived the child's type from the relation name would rebind it.
 func TestRoundTrip_ComposedChildKeepsTypeIdentity(t *testing.T) {
 	ctx := context.Background()
 	s := loadWireTestSchema(t)
