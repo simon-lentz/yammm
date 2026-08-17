@@ -253,3 +253,55 @@ func TestRoundTrip_NarrowedFloatStabilisesAfterOnePass(t *testing.T) {
 func wrapKey(parts ...any) immutable.Key { return immutable.WrapKey(parts) }
 
 func wrapProps(m map[string]any) immutable.Properties { return immutable.WrapProperties(m) }
+
+// TestAssertRoundTrip_Float32Property drives a float32 through the round-trip
+// criterion: the exact float64 widening compares equal under DiffSnapshots,
+// and converting the loaded value back returns the original 32 bits.
+func TestAssertRoundTrip_Float32Property(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+	anchorID := mustTypeIDIn(t, s, "", "Anchor")
+
+	want := float32(0.1)
+	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types: []schema.TypeID{anchorID},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			anchorID: {{
+				TypeName:   tagForm(s, anchorID),
+				TypeID:     anchorID,
+				PrimaryKey: immutable.WrapKey([]any{"a1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": want}),
+			}},
+		},
+	})
+	if result.HasErrors() {
+		t.Fatalf("assembling: %s", result)
+	}
+
+	snapshottest.AssertRoundTrip(t, built, s)
+
+	data, res := snapshot.Marshal(ctx, built)
+	if err := res.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	loaded, res := snapshot.Load(ctx, data, s)
+	if err := res.Err(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	inst, ok := loaded.InstanceByKey(anchorID, graph.FormatKey("a1"))
+	if !ok {
+		t.Fatal("instance missing after round trip")
+	}
+	v, ok := inst.Property("depth")
+	if !ok {
+		t.Fatal("depth missing after round trip")
+	}
+	got, ok := v.Unwrap().(float64)
+	if !ok {
+		t.Fatalf("depth returned as %T, want float64", v.Unwrap())
+	}
+	if float32(got) != want {
+		t.Errorf("32-bit fidelity lost: went in %v, returned %v", want, got)
+	}
+}

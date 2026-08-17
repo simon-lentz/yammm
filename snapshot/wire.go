@@ -46,10 +46,7 @@ package snapshot
 //     call: UpdateMetadata writes newMeta and discards whatever the
 //     input carried, so a document holding metadata still matches a
 //     re-marshal when newMeta is empty, and a document holding none
-//     diverges when newMeta is not. A legacy document carrying
-//     int-shaped floats diverges for a third reason: UpdateMetadata
-//     preserves its body while a re-marshal heals KindFloat values into
-//     decimal form.
+//     diverges when newMeta is not.
 //
 //  3. Version preservation (introduced v0.12.0). UpdateMetadata rebuilds
 //     the header at the version it read, so it is a header rewrite and
@@ -107,7 +104,7 @@ type headerWire struct {
 }
 
 // marshalHeaderWire is used for encoding .ys headers. Version and
-// SchemaHashAlgorithm are written as literal constants in the manual
+// SchemaHashAlgorithm are written as literal parameters in the manual
 // byte assembly, not serialized from this struct.
 type marshalHeaderWire struct {
 	SchemaName    string            `json:"schema_name"`
@@ -125,61 +122,79 @@ type provenanceWire struct {
 	Path       string `json:"path"`
 }
 
-// typeTableEntry is one row of the v3 types table, where schema_path + name is
-// the lossless identity. Tag is carried rather than recomputed, because the
-// rule that renders it cannot express a transitively imported type.
+// typeTableEntry is one row of the types table — the document's denotation
+// set. SchemaPath plus Name is the lossless identity; every other position
+// references a row by index.
 type typeTableEntry struct {
 	SchemaPath string `json:"schema_path"`
 	Name       string `json:"name"`
-	Tag        string `json:"tag"`
 }
 
-// instWireV3 is the v3 wire representation of a single instance. Type indexes
-// the types table; it is omitted for a root instance, whose position in the
-// instances array denotes its type, and present at every other position.
-type instWireV3 struct {
-	Key        []any                   `json:"key"`
-	Type       *int                    `json:"type,omitempty"`
-	Properties map[string]any          `json:"properties"`
-	Edges      map[string][]edgeWireV3 `json:"edges,omitempty"`
-	Composed   map[string][]instWireV3 `json:"composed,omitempty"`
-	Provenance *provenanceWire         `json:"provenance"`
+// instanceGroupWire is one entry of the instances section: one table row's
+// root instances. Present with empty Items means the snapshot holds the
+// type with no instances; absent means the snapshot does not hold the type.
+type instanceGroupWire struct {
+	Type  *int       `json:"type"`
+	Items []instWire `json:"items"`
 }
 
-// edgeWireV3 is the v3 wire representation of an edge target.
-type edgeWireV3 struct {
-	TargetType int            `json:"target_type"`
+// instWire is the wire representation of a single instance. Type is
+// required at every composed-child position and absent for a root, whose
+// group entry denotes its type; a root carrying one is cross-checked.
+type instWire struct {
+	Key        []any                 `json:"key"`
+	Type       *int                  `json:"type,omitempty"`
+	Properties map[string]any        `json:"properties"`
+	Edges      map[string][]edgeWire `json:"edges,omitempty"`
+	Composed   map[string][]instWire `json:"composed,omitempty"`
+	Provenance *provenanceWire       `json:"provenance"`
+}
+
+// edgeWire is the wire representation of an edge target. TargetType is a
+// nullable row index: a null or absent reference is a malformed document
+// and never binds to row 0.
+type edgeWire struct {
+	TargetType *int           `json:"target_type"`
 	TargetKey  []any          `json:"target_key"`
 	Properties map[string]any `json:"properties"`
 }
 
-// dupWireV3 is the v3 wire representation of a duplicate record. The parent
-// coordinates are present only for a composed-child duplicate, whose conflict
-// resolves by walking parent → relation → child key rather than the instances
-// array, which composed children never appear in.
-type dupWireV3 struct {
-	Type       int        `json:"type"`
-	Key        []any      `json:"key"`
-	Instance   instWireV3 `json:"instance"`
-	ParentType *int       `json:"parent_type,omitempty"`
-	ParentKey  []any      `json:"parent_key,omitempty"`
-	Relation   string     `json:"relation,omitempty"`
+// conflictWire is the address of the instance a duplicate collided with.
+// Key is null for a keyless slot occupant, which the reader resolves
+// through the parent slot alone.
+type conflictWire struct {
+	Type *int  `json:"type"`
+	Key  []any `json:"key"`
 }
 
-// unresolvedWireV3 is the v3 wire representation of an unresolved edge record.
-type unresolvedWireV3 struct {
-	SourceType int            `json:"source_type"`
+// dupWire is the wire representation of a duplicate record. Type and Key
+// identify the rejected instance; Conflict addresses the instance it
+// collided with. The parent coordinates are present only for a
+// composed-child duplicate and must name a root instance.
+type dupWire struct {
+	Type       *int          `json:"type"`
+	Key        []any         `json:"key"`
+	Instance   instWire      `json:"instance"`
+	Conflict   *conflictWire `json:"conflict"`
+	ParentType *int          `json:"parent_type,omitempty"`
+	ParentKey  []any         `json:"parent_key,omitempty"`
+	Relation   string        `json:"relation,omitempty"`
+}
+
+// unresolvedWire is the wire representation of an unresolved edge record.
+type unresolvedWire struct {
+	SourceType *int           `json:"source_type"`
 	SourceKey  []any          `json:"source_key"`
 	Relation   string         `json:"relation"`
-	TargetType int            `json:"target_type"`
+	TargetType *int           `json:"target_type"`
 	TargetKey  []any          `json:"target_key"`
 	Required   bool           `json:"required"`
 	Reason     string         `json:"reason"`
 	Properties map[string]any `json:"properties,omitempty"`
 }
 
-// diagWireV3 is the v3 wire representation of the diagnostics section.
-type diagWireV3 struct {
-	Duplicates []dupWireV3        `json:"duplicates"`
-	Unresolved []unresolvedWireV3 `json:"unresolved"`
+// diagWire is the wire representation of the diagnostics section.
+type diagWire struct {
+	Duplicates []dupWire        `json:"duplicates"`
+	Unresolved []unresolvedWire `json:"unresolved"`
 }

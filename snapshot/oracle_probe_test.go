@@ -18,46 +18,12 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// Probes of the v3 wire's structural contract. Each probe builds a document —
+// Probes of the wire's structural contract. Each probe builds a document —
 // through the graph API, through [graph.RebuildSnapshot], or by splicing the
 // bytes of a marshalled document — drives it through Marshal, Load and
-// Verify, and renders what happened as a stable signature string checked
-// against probeOutcomes. An entry naming a silent acceptance or a wrong
-// binding documents behaviour the wire currently exhibits; one naming a
-// diagnostic documents a guard that holds.
-
-// probeOutcomes registers the signature the current tree produces for every
-// probe. A production change that moves a signature must move its entry in
-// the same commit; the suite is red in both directions until they agree.
-var probeOutcomes = map[string]string{
-	"duplicate_one_slot_conflict":                  "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]",
-	"duplicate_type_differs_from_conflict":         "load[fatal:E_INTERNAL] verify[ok]",
-	"duplicate_relation_without_parent":            "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]",
-	"duplicate_at_depth_two":                       "load[fatal:E_INTERNAL] verify[ok]",
-	"types_table_wider_than_instances":             "fixpoint broken: types 2 -> 1",
-	"table_row_stale_schema_path":                  "load[ok] verify[ok]; child bound to Part@entry.yammm",
-	"table_row_tag_contradicts_identity":           `load[ok] verify[ok]; TypeName="Imposter" TypeID=Anchor@entry.yammm`,
-	"root_type_index_contradicts_section":          "load[ok] verify[ok]; bound to section row Anchor@entry.yammm",
-	"root_group_key_contradicts_parts_identity":    "load[ok] verify[ok]; went in as Site@entry.yammm, returned as Anchor@entry.yammm",
-	"absent_edge_target_type":                      "load[ok] verify[ok]",
-	"absent_duplicate_type":                        "load[ok] verify[ok]; 1 duplicates survive",
-	"absent_unresolved_source_type":                "load[ok] verify[ok]; 1 unresolved survive",
-	"absent_unresolved_target_type":                "load[ok] verify[ok]; target bound to Basin@base.yammm",
-	"composed_child_row_ignores_relation_target":   "load[ok] verify[ok]; leaf bound to Root@nested.yammm",
-	"duplicate_identity_rows":                      "load[ok] verify[ok]",
-	"edge_target_row_out_of_range":                 "load[error:E_SNAPSHOT_DANGLING_REFERENCE error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]",
-	"unresolved_source_row_out_of_range":           "load[error:E_SNAPSHOT_MALFORMED]; snapshot=non-nil with 0 unresolved",
-	"composed_child_without_type_diagnostic_count": "load[error:E_SNAPSHOT_MALFORMED x2] verify[error:E_SNAPSHOT_MALFORMED]",
-	"zero_identity_instance_marshal":               "rebuild[fatal:E_INTERNAL]",
-	"float32_property_round_trip":                  "went in float32, returned float64",
-	"duplicate_conflict_row_out_of_range":          "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]",
-	"duplicate_with_edges_and_composed":            "load[error:E_SNAPSHOT_COMPOSED_ON_DUPLICATE error:E_SNAPSHOT_EDGES_ON_DUPLICATE] verify[error:E_SNAPSHOT_COMPOSED_ON_DUPLICATE error:E_SNAPSHOT_EDGES_ON_DUPLICATE]",
-	"composed_child_with_edges":                    "load[error:E_SNAPSHOT_INVALID_COMPOSED] verify[error:E_SNAPSHOT_INVALID_COMPOSED]",
-	"dangling_edge_target_key":                     "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]",
-	"unparseable_provenance_path":                  "load[warning:E_SNAPSHOT_PATH_FALLBACK] verify[warning:E_SNAPSHOT_PATH_FALLBACK]",
-	"composed_nesting_beyond_limit":                "load[error:E_SNAPSHOT_DEPTH_EXCEEDED] verify[error:E_SNAPSHOT_DEPTH_EXCEEDED]",
-	"composed_duplicate_second_generation":         `gen2 carries conflict Child@test_comp.yammm[["c1"]] under Parent@test_comp.yammm[["p1"]].CHILDREN`,
-}
+// Verify, and asserts the outcome as a stable signature string. Every
+// signature states intended behaviour: a diagnostic pins a guard, a clean
+// signature pins an acceptance the identity criterion requires.
 
 // sigOf renders a result as sorted severity:code atoms with multiplicities.
 func sigOf(res diag.Result) string {
@@ -77,15 +43,12 @@ func sigOf(res diag.Result) string {
 	return strings.Join(atoms, " ")
 }
 
-// checkProbe compares a probe's rendered outcome against its table entry.
-func checkProbe(t *testing.T, name, got string) {
+// expectOutcome compares a probe's rendered outcome against its expected
+// signature.
+func expectOutcome(t *testing.T, want, got string) {
 	t.Helper()
-	want, ok := probeOutcomes[name]
-	if !ok {
-		t.Fatalf("probe %q has no probeOutcomes entry; the tree produces:\n  %s", name, got)
-	}
 	if got != want {
-		t.Errorf("probe %q outcome moved\n  table: %s\n  tree:  %s", name, want, got)
+		t.Errorf("probe outcome moved\n  want: %s\n  got:  %s", want, got)
 	}
 }
 
@@ -188,12 +151,12 @@ func TestWireProbe_DuplicateOneSlotConflict(t *testing.T) {
 		t.Fatalf("marshal: %v", res)
 	}
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, data, s)
-	checkProbe(t, "duplicate_one_slot_conflict", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[ok] verify[ok]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_DuplicateTypeDiffersFromConflict edits a duplicate record's
-// type row: the record's one type field must serve as the duplicate's own
-// identity and as its conflict's coordinate at once.
+// own type row: the rejected instance's identity and the conflict block are
+// separate fields, so the edit moves one without corrupting the other.
 func TestWireProbe_DuplicateTypeDiffersFromConflict(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -205,7 +168,7 @@ func TestWireProbe_DuplicateTypeDiffersFromConflict(t *testing.T) {
 
 	edited := spliceOnce(t, data, `"duplicates":[{"type":0,`, `"duplicates":[{"type":1,`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "duplicate_type_differs_from_conflict", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[ok] verify[ok]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_DuplicateRelationWithoutParent deletes a composed duplicate's
@@ -222,12 +185,12 @@ func TestWireProbe_DuplicateRelationWithoutParent(t *testing.T) {
 
 	edited := spliceOnce(t, data, `,"parent_type":1,"parent_key":["p1"]`, ``)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "duplicate_relation_without_parent", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_DuplicateAtDepthTwo records a duplicate whose composing
-// parent is itself a composed child. The read-side existence check accepts
-// coordinates at any depth; what happens after it decides the outcome.
+// parent is itself a composed child. Parent coordinates must resolve in the
+// root instance index, so both read surfaces refuse the document.
 func TestWireProbe_DuplicateAtDepthTwo(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -237,10 +200,21 @@ func TestWireProbe_DuplicateAtDepthTwo(t *testing.T) {
 	}
 	data := nestedDoc(ctx, t, s)
 
-	dup := `{"type":0,"key":["l1"],"instance":{"key":["l1"],"type":0,"properties":{},"provenance":null},"parent_type":1,"parent_key":["m1"],"relation":"LEAF"}`
+	dup := `{"type":0,"key":["l1"],"instance":{"key":["l1"],"properties":{},"provenance":null},"conflict":{"type":0,"key":["l1"]},"parent_type":1,"parent_key":["m1"],"relation":"LEAF"}`
 	edited := spliceOnce(t, data, `"duplicates":[]`, `"duplicates":[`+dup+`]`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "duplicate_at_depth_two", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]", "load["+loadSig+"] verify["+verifySig+"]")
+
+	_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	var named bool
+	for iss := range loadRes.Issues() {
+		if strings.Contains(iss.Message(), "does not resolve to a root instance") {
+			named = true
+		}
+	}
+	if !named {
+		t.Error("the diagnostic does not name the root-parent rule")
+	}
 }
 
 // nestedDoc marshals the depth-two composition Root r1 → MID m1 → LEAF l1.
@@ -312,7 +286,10 @@ func TestWireProbe_TypesTableWiderThanInstances(t *testing.T) {
 	if !bytes.Equal(first, second) {
 		fact = fmt.Sprintf("fixpoint broken: types %d -> %d", 2, len(loaded.Types()))
 	}
-	checkProbe(t, "types_table_wider_than_instances", fact)
+	expectOutcome(t, "fixpoint holds", fact)
+	if !slices.Contains(loaded.Types(), basinID) {
+		t.Errorf("the instance-less type did not survive the round trip; loaded types: %v", loaded.Types())
+	}
 }
 
 // TestWireProbe_TableRowStaleSchemaPath rewrites a table row's schema path to
@@ -355,38 +332,7 @@ func TestWireProbe_TableRowStaleSchemaPath(t *testing.T) {
 			}
 		}
 	}
-	checkProbe(t, "table_row_stale_schema_path", "load["+loadSig+"] verify["+verifySig+"]"+fact)
-}
-
-// TestWireProbe_TableRowTagContradictsIdentity rewrites a row's tag to a name
-// that disagrees with the row's own schema path and name.
-func TestWireProbe_TableRowTagContradictsIdentity(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadIdentitySchema(t)
-	anchorID := mustTypeIDIn(t, s, "", "Anchor")
-
-	data := marshalParts(ctx, t, s, graph.SnapshotParts{
-		Types: []schema.TypeID{anchorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, anchorID),
-				TypeID:     anchorID,
-				PrimaryKey: immutable.WrapKey([]any{"a1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
-			}},
-		},
-	})
-
-	edited := spliceOnce(t, data, `"tag":"Anchor"`, `"tag":"Imposter"`)
-	loadSig, verifySig, loaded := loadAndVerify(ctx, t, edited, s)
-	fact := ""
-	if loaded != nil {
-		if inst, ok := loaded.InstanceByKey(anchorID, graph.FormatKey("a1")); ok {
-			fact = fmt.Sprintf("; TypeName=%q TypeID=%s", inst.TypeName(), ident(inst.TypeID()))
-		}
-	}
-	checkProbe(t, "table_row_tag_contradicts_identity", "load["+loadSig+"] verify["+verifySig+"]"+fact)
+	expectOutcome(t, "load[error:E_SNAPSHOT_UNKNOWN_TYPE] verify[error:E_SNAPSHOT_UNKNOWN_TYPE]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
 
 // TestWireProbe_RootTypeIndexContradictsSection gives a root instance an
@@ -427,7 +373,7 @@ func TestWireProbe_RootTypeIndexContradictsSection(t *testing.T) {
 			fact = "; bound to declared index " + ident(basinID)
 		}
 	}
-	checkProbe(t, "root_type_index_contradicts_section", "load["+loadSig+"] verify["+verifySig+"]"+fact)
+	expectOutcome(t, "load[error:E_SNAPSHOT_TYPE_MISMATCH] verify[error:E_SNAPSHOT_TYPE_MISMATCH]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
 
 // TestWireProbe_RootGroupKeyContradictsPartsIdentity assembles parts whose
@@ -462,7 +408,7 @@ func TestWireProbe_RootGroupKeyContradictsPartsIdentity(t *testing.T) {
 			fact = "; identity preserved as " + ident(siteID)
 		}
 	}
-	checkProbe(t, "root_group_key_contradicts_parts_identity", "load["+loadSig+"] verify["+verifySig+"]"+fact)
+	expectOutcome(t, "load[ok] verify[ok]; identity preserved as Site@entry.yammm", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
 
 // edgeDoc marshals two Basins joined by a NEAR edge.
@@ -540,9 +486,8 @@ func rootDupDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 	})
 }
 
-// TestWireProbe_AbsentEdgeTargetType deletes an edge's target row. The field
-// is a plain int, so its absence and an explicit row 0 are the same bytes to
-// the decoder.
+// TestWireProbe_AbsentEdgeTargetType deletes an edge's target row. A
+// missing cross-reference is malformed and never binds to row 0.
 func TestWireProbe_AbsentEdgeTargetType(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -551,7 +496,7 @@ func TestWireProbe_AbsentEdgeTargetType(t *testing.T) {
 
 	edited := spliceOnce(t, data, `{"target_type":0,`, `{`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "absent_edge_target_type", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_AbsentDuplicateType deletes a duplicate record's type row.
@@ -567,7 +512,7 @@ func TestWireProbe_AbsentDuplicateType(t *testing.T) {
 	if loaded != nil {
 		fact = fmt.Sprintf("; %d duplicates survive", len(loaded.Duplicates()))
 	}
-	checkProbe(t, "absent_duplicate_type", "load["+loadSig+"] verify["+verifySig+"]"+fact)
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
 
 // TestWireProbe_AbsentUnresolvedSourceType deletes an unresolved record's
@@ -584,7 +529,7 @@ func TestWireProbe_AbsentUnresolvedSourceType(t *testing.T) {
 	if loaded != nil {
 		fact = fmt.Sprintf("; %d unresolved survive", len(loaded.Unresolved()))
 	}
-	checkProbe(t, "absent_unresolved_source_type", "load["+loadSig+"] verify["+verifySig+"]"+fact)
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
 
 // TestWireProbe_AbsentUnresolvedTargetType deletes an unresolved record's
@@ -603,7 +548,7 @@ func TestWireProbe_AbsentUnresolvedTargetType(t *testing.T) {
 			fact = "; target bound to " + ident(u.TargetType)
 		}
 	}
-	checkProbe(t, "absent_unresolved_target_type", "load["+loadSig+"] verify["+verifySig+"]"+fact)
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
 
 // TestWireProbe_ComposedChildRowIgnoresRelationTarget rebinds a composed
@@ -630,11 +575,11 @@ func TestWireProbe_ComposedChildRowIgnoresRelationTarget(t *testing.T) {
 			}
 		}
 	}
-	checkProbe(t, "composed_child_row_ignores_relation_target", "load["+loadSig+"] verify["+verifySig+"]"+fact)
+	expectOutcome(t, "load[ok] verify[ok]; leaf bound to Root@nested.yammm", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
 
 // TestWireProbe_DuplicateIdentityRows appends a second table row carrying an
-// identity the table already holds, with its parallel empty section.
+// identity the table already holds.
 func TestWireProbe_DuplicateIdentityRows(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -663,9 +608,8 @@ func TestWireProbe_DuplicateIdentityRows(t *testing.T) {
 		t.Fatalf("fixture shape changed; expected one table row, got:\n%s", row)
 	}
 	edited := spliceOnce(t, data, row+`]`, row+`,`+row+`]`)
-	edited = spliceOnce(t, edited, `],"diagnostics":`, `,[]],"diagnostics":`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "duplicate_identity_rows", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_EdgeTargetRowOutOfRange points an edge at a table row that
@@ -678,7 +622,7 @@ func TestWireProbe_EdgeTargetRowOutOfRange(t *testing.T) {
 
 	edited := spliceOnce(t, data, `{"target_type":0,`, `{"target_type":9,`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "edge_target_row_out_of_range", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_UnresolvedSourceRowOutOfRange points an unresolved record's
@@ -696,7 +640,7 @@ func TestWireProbe_UnresolvedSourceRowOutOfRange(t *testing.T) {
 	if snap != nil {
 		fact = fmt.Sprintf("; snapshot=non-nil with %d unresolved", len(snap.Unresolved()))
 	}
-	checkProbe(t, "unresolved_source_row_out_of_range", "load["+sigOf(loadRes)+"]"+fact)
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED]; snapshot=nil", "load["+sigOf(loadRes)+"]"+fact)
 }
 
 // TestWireProbe_ComposedChildWithoutTypeDiagnosticCount counts what one
@@ -712,7 +656,7 @@ func TestWireProbe_ComposedChildWithoutTypeDiagnosticCount(t *testing.T) {
 
 	edited := spliceOnce(t, data, `"LEAF":[{"key":["l1"],"type":0,`, `"LEAF":[{"key":["l1"],`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "composed_child_without_type_diagnostic_count", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_ZeroIdentityInstanceMarshal marshals a snapshot whose Types
@@ -735,7 +679,7 @@ func TestWireProbe_ZeroIdentityInstanceMarshal(t *testing.T) {
 		},
 	})
 	if result.HasErrors() {
-		checkProbe(t, "zero_identity_instance_marshal", "rebuild["+sigOf(result)+"]")
+		expectOutcome(t, "rebuild[fatal:E_INTERNAL]", "rebuild["+sigOf(result)+"]")
 		return
 	}
 
@@ -744,7 +688,7 @@ func TestWireProbe_ZeroIdentityInstanceMarshal(t *testing.T) {
 	if data == nil {
 		fact = "; bytes=nil"
 	}
-	checkProbe(t, "zero_identity_instance_marshal", "marshal["+sigOf(res)+"]"+fact)
+	expectOutcome(t, "rebuild[fatal:E_INTERNAL]", "marshal["+sigOf(res)+"]"+fact)
 }
 
 // TestWireProbe_Float32PropertyRoundTrip sends a float32 property through the
@@ -769,7 +713,7 @@ func TestWireProbe_Float32PropertyRoundTrip(t *testing.T) {
 
 	loaded, res := snapshot.Load(ctx, data, s)
 	if err := res.Err(); err != nil {
-		checkProbe(t, "float32_property_round_trip", "load["+sigOf(res)+"]")
+		expectOutcome(t, "went in float32, returned float64", "load["+sigOf(res)+"]")
 		return
 	}
 	fact := "depth absent"
@@ -778,20 +722,20 @@ func TestWireProbe_Float32PropertyRoundTrip(t *testing.T) {
 			fact = fmt.Sprintf("went in float32, returned %T", v.Unwrap())
 		}
 	}
-	checkProbe(t, "float32_property_round_trip", fact)
+	expectOutcome(t, "went in float32, returned float64", fact)
 }
 
-// TestWireProbe_DuplicateConflictRowOutOfRange points a duplicate's type at a
-// row that does not exist.
+// TestWireProbe_DuplicateConflictRowOutOfRange points a duplicate's conflict
+// block at a row that does not exist.
 func TestWireProbe_DuplicateConflictRowOutOfRange(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
 	data := rootDupDoc(ctx, t, s)
 
-	edited := spliceOnce(t, data, `"duplicates":[{"type":0,`, `"duplicates":[{"type":9,`)
+	edited := spliceOnce(t, data, `"conflict":{"type":0,`, `"conflict":{"type":9,`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "duplicate_conflict_row_out_of_range", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_DuplicateWithEdgesAndComposed gives a duplicate record's
@@ -805,7 +749,7 @@ func TestWireProbe_DuplicateWithEdgesAndComposed(t *testing.T) {
 	extra := `"edges":{"E":[{"target_type":0,"target_key":["a9"],"properties":{}}]},"composed":{"C":[{"key":["x"],"type":0,"properties":{},"provenance":null}]},`
 	edited := spliceOnce(t, data, `"instance":{"key":["a9"],`, `"instance":{"key":["a9"],`+extra)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "duplicate_with_edges_and_composed", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_COMPOSED_ON_DUPLICATE error:E_SNAPSHOT_EDGES_ON_DUPLICATE] verify[error:E_SNAPSHOT_COMPOSED_ON_DUPLICATE error:E_SNAPSHOT_EDGES_ON_DUPLICATE]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_ComposedChildWithEdges gives a composed child an edges map.
@@ -820,7 +764,7 @@ func TestWireProbe_ComposedChildWithEdges(t *testing.T) {
 
 	edited := spliceOnce(t, data, `"LEAF":[{"key":["l1"],`, `"LEAF":[{"key":["l1"],"edges":{"E":[{"target_type":2,"target_key":["r1"],"properties":{}}]},`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "composed_child_with_edges", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_INVALID_COMPOSED] verify[error:E_SNAPSHOT_INVALID_COMPOSED]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_DanglingEdgeTargetKey points an edge at a key no instance
@@ -833,7 +777,7 @@ func TestWireProbe_DanglingEdgeTargetKey(t *testing.T) {
 
 	edited := spliceOnce(t, data, `"target_key":["b2"]`, `"target_key":["ghost"]`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "dangling_edge_target_key", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_UnparseableProvenancePath replaces an instance's null
@@ -858,7 +802,7 @@ func TestWireProbe_UnparseableProvenancePath(t *testing.T) {
 
 	edited := spliceOnce(t, data, `"provenance":null`, `"provenance":{"source_name":"probe","path":"not a path ["}`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "unparseable_provenance_path", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[warning:E_SNAPSHOT_PATH_FALLBACK] verify[warning:E_SNAPSHOT_PATH_FALLBACK]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_ComposedDuplicateSecondGeneration re-marshals a loaded
@@ -875,17 +819,17 @@ func TestWireProbe_ComposedDuplicateSecondGeneration(t *testing.T) {
 
 	gen1, res := snapshot.Load(ctx, first, s)
 	if err := res.Err(); err != nil {
-		checkProbe(t, "composed_duplicate_second_generation", "gen1 load["+sigOf(res)+"]")
+		expectOutcome(t, `gen2 carries conflict Child@test_comp.yammm[["c1"]] under Parent@test_comp.yammm[["p1"]].CHILDREN`, "gen1 load["+sigOf(res)+"]")
 		return
 	}
 	second, res := snapshot.Marshal(ctx, gen1)
 	if err := res.Err(); err != nil {
-		checkProbe(t, "composed_duplicate_second_generation", "gen2 marshal["+sigOf(res)+"]")
+		expectOutcome(t, `gen2 carries conflict Child@test_comp.yammm[["c1"]] under Parent@test_comp.yammm[["p1"]].CHILDREN`, "gen2 marshal["+sigOf(res)+"]")
 		return
 	}
 	gen2, res := snapshot.Load(ctx, second, s)
 	if err := res.Err(); err != nil {
-		checkProbe(t, "composed_duplicate_second_generation", "gen2 load["+sigOf(res)+"]")
+		expectOutcome(t, `gen2 carries conflict Child@test_comp.yammm[["c1"]] under Parent@test_comp.yammm[["p1"]].CHILDREN`, "gen2 load["+sigOf(res)+"]")
 		return
 	}
 
@@ -906,7 +850,7 @@ func TestWireProbe_ComposedDuplicateSecondGeneration(t *testing.T) {
 	if !bytes.Equal(first, second) {
 		fact += "; bytes moved between generations"
 	}
-	checkProbe(t, "composed_duplicate_second_generation", fact)
+	expectOutcome(t, `gen2 carries conflict Child@test_comp.yammm[["c1"]] under Parent@test_comp.yammm[["p1"]].CHILDREN`, fact)
 }
 
 // TestWireProbe_ComposedNestingBeyondLimit splices a composed chain deeper
@@ -927,5 +871,51 @@ func TestWireProbe_ComposedNestingBeyondLimit(t *testing.T) {
 	}
 	edited := spliceOnce(t, data, leaf, chain)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	checkProbe(t, "composed_nesting_beyond_limit", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_DEPTH_EXCEEDED] verify[error:E_SNAPSHOT_DEPTH_EXCEEDED]", "load["+loadSig+"] verify["+verifySig+"]")
+}
+
+// TestWireProbe_DuplicateConflictKeyNotInSlot points a composed duplicate's
+// conflict block at a key no slot occupant holds.
+func TestWireProbe_DuplicateConflictKeyNotInSlot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := testSchemaWithComposition(t)
+	data, res := snapshot.Marshal(ctx, composedPKCollision(t))
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+
+	edited := spliceOnce(t, data, `"conflict":{"type":0,"key":["c1"]}`, `"conflict":{"type":0,"key":["ghost"]}`)
+	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
+	expectOutcome(t, "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]", "load["+loadSig+"] verify["+verifySig+"]")
+}
+
+// TestWireProbe_AbsentDuplicateConflict deletes a duplicate record's conflict
+// block, which every record must carry.
+func TestWireProbe_AbsentDuplicateConflict(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := testSchemaWithComposition(t)
+	data, res := snapshot.Marshal(ctx, composedPKCollision(t))
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+
+	edited := spliceOnce(t, data, `,"conflict":{"type":0,"key":["c1"]}`, ``)
+	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]")
+}
+
+// TestWireProbe_UnresolvedSourceKeyNotPresent points an unresolved record's
+// source at a key no instance holds, which previously surfaced as a Fatal
+// internal-bug code from the rebuild instead of a document-shaped Error.
+func TestWireProbe_UnresolvedSourceKeyNotPresent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+	data := unresolvedDoc(ctx, t, s)
+
+	edited := spliceOnce(t, data, `"source_key":["b1"]`, `"source_key":["ghost"]`)
+	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
+	expectOutcome(t, "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]", "load["+loadSig+"] verify["+verifySig+"]")
 }

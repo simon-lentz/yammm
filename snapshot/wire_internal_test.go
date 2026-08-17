@@ -5,49 +5,58 @@ import (
 	"testing"
 )
 
-// Field order in the wire structs is part of the format contract: encoding/json
-// serializes in declaration order and the integrity hash covers the exact bytes,
-// so reordering a field invalidates every saved .ys hash. The goldens catch a
-// reordering only where a fixture happens to carry the field, which leaves an
-// omitempty field on an unexercised path unpinned. This names the contract
-// directly, per struct.
+// wireStructCases pins every wire struct's field order and tags —
+// encoding/json serializes in declaration order and the integrity hash
+// covers the exact bytes, so a reordering invalidates every saved .ys hash.
+// Goldens catch it only where a fixture carries the field; this names it.
+var wireStructCases = []struct {
+	typ  reflect.Type
+	tags []string
+}{
+	{reflect.TypeFor[headerWire](), []string{
+		"version", "schema_name", "schema_source", "schema_hash",
+		"schema_hash_algorithm", "integrity_hash", "features",
+		"created_at,omitempty", "metadata,omitempty",
+	}},
+	{reflect.TypeFor[marshalHeaderWire](), []string{
+		"schema_name", "schema_source", "schema_hash", "integrity_hash",
+		"features", "created_at,omitempty", "metadata,omitempty",
+	}},
+	{reflect.TypeFor[provenanceWire](), []string{"source_name", "path"}},
+
+	// Body structs.
+	{reflect.TypeFor[typeTableEntry](), []string{"schema_path", "name"}},
+	{reflect.TypeFor[instanceGroupWire](), []string{"type", "items"}},
+	{reflect.TypeFor[instWire](), []string{
+		"key", "type,omitempty", "properties", "edges,omitempty",
+		"composed,omitempty", "provenance",
+	}},
+	{reflect.TypeFor[edgeWire](), []string{"target_type", "target_key", "properties"}},
+	{reflect.TypeFor[conflictWire](), []string{"type", "key"}},
+	{reflect.TypeFor[dupWire](), []string{
+		"type", "key", "instance", "conflict",
+		"parent_type,omitempty", "parent_key,omitempty", "relation,omitempty",
+	}},
+	{reflect.TypeFor[unresolvedWire](), []string{
+		"source_type", "source_key", "relation", "target_type", "target_key",
+		"required", "reason", "properties,omitempty",
+	}},
+	{reflect.TypeFor[diagWire](), []string{"duplicates", "unresolved"}},
+}
+
+// wireRoots are the types Marshal serializes directly: the two header forms
+// and the three body sections. Every other wire struct must be reachable
+// from one of these, or it is not on the wire at all.
+var wireRoots = []reflect.Type{
+	reflect.TypeFor[headerWire](), reflect.TypeFor[marshalHeaderWire](),
+	reflect.TypeFor[typeTableEntry](), reflect.TypeFor[instanceGroupWire](),
+	reflect.TypeFor[diagWire](),
+}
+
 func TestWireStructs_FieldOrder(t *testing.T) {
 	t.Parallel()
 
-	cases := []struct {
-		typ  reflect.Type
-		tags []string
-	}{
-		{reflect.TypeFor[headerWire](), []string{
-			"version", "schema_name", "schema_source", "schema_hash",
-			"schema_hash_algorithm", "integrity_hash", "features",
-			"created_at,omitempty", "metadata,omitempty",
-		}},
-		{reflect.TypeFor[marshalHeaderWire](), []string{
-			"schema_name", "schema_source", "schema_hash", "integrity_hash",
-			"features", "created_at,omitempty", "metadata,omitempty",
-		}},
-		{reflect.TypeFor[provenanceWire](), []string{"source_name", "path"}},
-
-		// v3 body structs.
-		{reflect.TypeFor[typeTableEntry](), []string{"schema_path", "name", "tag"}},
-		{reflect.TypeFor[instWireV3](), []string{
-			"key", "type,omitempty", "properties", "edges,omitempty",
-			"composed,omitempty", "provenance",
-		}},
-		{reflect.TypeFor[edgeWireV3](), []string{"target_type", "target_key", "properties"}},
-		{reflect.TypeFor[dupWireV3](), []string{
-			"type", "key", "instance",
-			"parent_type,omitempty", "parent_key,omitempty", "relation,omitempty",
-		}},
-		{reflect.TypeFor[unresolvedWireV3](), []string{
-			"source_type", "source_key", "relation", "target_type", "target_key",
-			"required", "reason", "properties,omitempty",
-		}},
-		{reflect.TypeFor[diagWireV3](), []string{"duplicates", "unresolved"}},
-	}
-
-	for _, tc := range cases {
+	for _, tc := range wireStructCases {
 		t.Run(tc.typ.Name(), func(t *testing.T) {
 			t.Parallel()
 			got := make([]string, tc.typ.NumField())
@@ -62,24 +71,16 @@ func TestWireStructs_FieldOrder(t *testing.T) {
 	}
 }
 
-// Every wire struct is named above. A new one added without a row here ships
-// under a contract nothing checks, which is how five structs reached the tree
-// during the v3 bump.
+// TestWireStructs_EveryStructIsPinned holds the case inventory and the wire
+// closed over each other: every struct reachable from the document roots
+// must have a field-order row, and every row must be reachable — so a
+// stale row and an unpinned struct both fail, from one inventory.
 func TestWireStructs_EveryStructIsPinned(t *testing.T) {
 	t.Parallel()
 
-	pinned := map[string]bool{
-		"headerWire": true, "marshalHeaderWire": true,
-		"provenanceWire": true,
-		"typeTableEntry": true, "instWireV3": true, "edgeWireV3": true,
-		"dupWireV3": true, "unresolvedWireV3": true, "diagWireV3": true,
-	}
-	// Sampled through the document roots, which reach every body struct by
-	// reference; a struct no root reaches is not on the wire at all.
-	roots := []reflect.Type{
-		reflect.TypeFor[headerWire](), reflect.TypeFor[marshalHeaderWire](),
-		reflect.TypeFor[instWireV3](), reflect.TypeFor[diagWireV3](),
-		reflect.TypeFor[typeTableEntry](),
+	pinned := make(map[string]bool, len(wireStructCases))
+	for _, tc := range wireStructCases {
+		pinned[tc.typ.Name()] = true
 	}
 
 	seen := make(map[string]bool)
@@ -103,13 +104,18 @@ func TestWireStructs_EveryStructIsPinned(t *testing.T) {
 			walk(f.Type)
 		}
 	}
-	for _, r := range roots {
+	for _, r := range wireRoots {
 		walk(r)
 	}
 
 	for name := range seen {
 		if !pinned[name] {
 			t.Errorf("wire struct %s is reachable on the wire but has no field-order row", name)
+		}
+	}
+	for name := range pinned {
+		if !seen[name] {
+			t.Errorf("field-order row %s pins a struct no document root reaches — stale row or missing root", name)
 		}
 	}
 }

@@ -5,108 +5,110 @@
 		"schema_source": "string://wiretest.yammm",
 		"schema_hash": "sha256:38660474f3c3ee8d878a24c3033153024156fb9254e71964a6ce7691f14a9810",
 		"schema_hash_algorithm": 1,
-		"integrity_hash": "sha256:ee06e430d2b8c00482cd03f0293408c19fbd63227b691d047b92811b1d0e89e5",
+		"integrity_hash": "sha256:626328244dc444a0661931f6f89c96ba8000b4d28e179bb3e0e16a1f0cfbaa46",
 		"features": []
 	},
 	"types": [
 		{
 			"schema_path": "string://wiretest.yammm",
-			"name": "Part",
-			"tag": "Part"
+			"name": "Part"
 		},
 		{
 			"schema_path": "string://wiretest.yammm",
-			"name": "Sensor",
-			"tag": "Sensor"
+			"name": "Sensor"
 		},
 		{
 			"schema_path": "string://wiretest.yammm",
-			"name": "Station",
-			"tag": "Station"
+			"name": "Station"
 		}
 	],
 	"instances": [
-		[],
-		[
-			{
-				"key": [
-					"s1"
-				],
-				"properties": {
-					"embedding": [
-						0.25,
-						1.0,
-						2.0
+		{
+			"type": 1,
+			"items": [
+				{
+					"key": [
+						"s1"
 					],
-					"id": "s1",
-					"reading": 1860000.0,
-					"samples": [
-						1.0,
-						2.5
-					],
-					"scale": 5.0
-				},
-				"edges": {
-					"FEED": [
-						{
-							"target_type": 2,
-							"target_key": [
-								"st1"
-							],
-							"properties": {
-								"gain": 2.0
+					"properties": {
+						"embedding": [
+							0.25,
+							1.0,
+							2.0
+						],
+						"id": "s1",
+						"reading": 1860000.0,
+						"samples": [
+							1.0,
+							2.5
+						],
+						"scale": 5.0
+					},
+					"edges": {
+						"FEED": [
+							{
+								"target_type": 2,
+								"target_key": [
+									"st1"
+								],
+								"properties": {
+									"gain": 2.0
+								}
 							}
-						}
-					]
+						]
+					},
+					"composed": {
+						"PARTS": [
+							{
+								"key": [
+									"p1"
+								],
+								"type": 0,
+								"properties": {
+									"name": "p1",
+									"weight": 3.0
+								},
+								"provenance": null
+							}
+						]
+					},
+					"provenance": null
 				},
-				"composed": {
-					"PARTS": [
-						{
-							"key": [
-								"p1"
-							],
-							"type": 0,
-							"properties": {
-								"name": "p1",
-								"weight": 3.0
-							},
-							"provenance": null
-						}
-					]
-				},
-				"provenance": null
-			},
-			{
-				"key": [
-					"s2"
-				],
-				"properties": {
-					"embedding": [
-						0.25,
-						1.0,
-						2.0
+				{
+					"key": [
+						"s2"
 					],
-					"id": "s2",
-					"reading": 6.0,
-					"samples": [
-						8.0
+					"properties": {
+						"embedding": [
+							0.25,
+							1.0,
+							2.0
+						],
+						"id": "s2",
+						"reading": 6.0,
+						"samples": [
+							8.0
+						],
+						"scale": 5.0
+					},
+					"provenance": null
+				}
+			]
+		},
+		{
+			"type": 2,
+			"items": [
+				{
+					"key": [
+						"st1"
 					],
-					"scale": 5.0
-				},
-				"provenance": null
-			}
-		],
-		[
-			{
-				"key": [
-					"st1"
-				],
-				"properties": {
-					"id": "st1"
-				},
-				"provenance": null
-			}
-		]
+					"properties": {
+						"id": "st1"
+					},
+					"provenance": null
+				}
+			]
+		}
 	],
 	"diagnostics": {
 		"duplicates": [
@@ -119,7 +121,6 @@
 					"key": [
 						"s1"
 					],
-					"type": 1,
 					"properties": {
 						"embedding": [
 							0.25,
@@ -134,6 +135,12 @@
 						"scale": 5.0
 					},
 					"provenance": null
+				},
+				"conflict": {
+					"type": 1,
+					"key": [
+						"s1"
+					]
 				}
 			}
 		],

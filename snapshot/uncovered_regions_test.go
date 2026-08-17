@@ -218,7 +218,7 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 // the target's identity across the schema boundary — the position most likely
 // to lose an alias.
 //
-// Mutation: targetID := writerTypeID(inst, s) in marshalInstanceV3's edge loop.
+// Mutation: the e.Target().TypeID() row lookup in marshalInstance's edge loop.
 func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

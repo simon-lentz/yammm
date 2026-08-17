@@ -218,3 +218,44 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 			diag.DetailKeyJSONField)
 	}
 }
+
+// TestInfo_InstanceCountsKeyedByIdentity pins the schema-less Info surface
+// over a tag collision: two same-named types count under two distinct
+// TypeRef keys, and the per-type counts sum to the total.
+func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+	built, localBeacon, deepBeacon := collidingBeacons(t, s)
+
+	data, res := snapshot.Marshal(ctx, built)
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+	info, infoRes := snapshot.Info(ctx, data)
+	if err := infoRes.Err(); err != nil {
+		t.Fatalf("info: %v", err)
+	}
+
+	localRef := snapshot.TypeRef{SchemaPath: localBeacon.SchemaPath().String(), Name: localBeacon.Name()}
+	deepRef := snapshot.TypeRef{SchemaPath: deepBeacon.SchemaPath().String(), Name: deepBeacon.Name()}
+	if localRef == deepRef {
+		t.Fatal("fixture is vacuous: the two Beacons share one TypeRef")
+	}
+	if got := info.InstanceCounts[localRef]; got != 1 {
+		t.Errorf("InstanceCounts[%s] = %d, want 1", localRef, got)
+	}
+	if got := info.InstanceCounts[deepRef]; got != 1 {
+		t.Errorf("InstanceCounts[%s] = %d, want 1", deepRef, got)
+	}
+	if info.TotalInstances != 2 {
+		t.Errorf("TotalInstances = %d, want 2", info.TotalInstances)
+	}
+	sum := 0
+	for _, c := range info.InstanceCounts {
+		sum += c
+	}
+	if sum != info.TotalInstances {
+		t.Errorf("per-type counts sum to %d, total says %d", sum, info.TotalInstances)
+	}
+}

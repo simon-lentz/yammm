@@ -559,6 +559,51 @@ func identityCases() []identityCase {
 			build:    duplicateCase("", "Anchor", "a9", map[string]any{"id": "a9", "depth": float64(4)}),
 		},
 		{
+			// The conflict's key differs from the rejected child's, so only
+			// the walker's conflict coordinate can see a re-derived conflict.
+			name:     "duplicate_composed_slot",
+			origin:   "local",
+			position: "duplicate",
+			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+				t.Helper()
+				siteID := mustTypeIDIn(t, s, "", "Site")
+				partID := mustTypeIDIn(t, s, "", "Part")
+				occupant := graph.InstanceParts{
+					TypeName:   tagForm(s, partID),
+					TypeID:     partID,
+					PrimaryKey: immutable.WrapKey([]any{"lp1"}),
+					Properties: partProps("", "lp1"),
+				}
+				return graph.SnapshotParts{
+					Types: []schema.TypeID{siteID},
+					Instances: map[schema.TypeID][]graph.InstanceParts{
+						siteID: {{
+							TypeName:   tagForm(s, siteID),
+							TypeID:     siteID,
+							PrimaryKey: immutable.WrapKey([]any{"site9"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "site9"}),
+							Composed:   map[string][]graph.InstanceParts{"PARTS": {occupant}},
+						}},
+					},
+					Duplicates: []graph.DuplicateParts{{
+						Type: partID,
+						Key:  immutable.WrapKey([]any{"lp9"}),
+						Instance: graph.InstanceParts{
+							TypeName:   tagForm(s, partID),
+							TypeID:     partID,
+							PrimaryKey: immutable.WrapKey([]any{"lp9"}),
+							Properties: partProps("", "lp9"),
+						},
+						ConflictType: partID,
+						ConflictKey:  immutable.WrapKey([]any{"lp1"}),
+						ParentType:   siteID,
+						ParentKey:    immutable.WrapKey([]any{"site9"}),
+						Relation:     "PARTS",
+					}},
+				}
+			},
+		},
+		{
 			name:     "duplicate_imported",
 			origin:   "imported",
 			position: "duplicate",

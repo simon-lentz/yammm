@@ -9,6 +9,29 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
+// TypeRef is a type identity as a .ys document states it: declaring schema
+// path plus name. It is the schema-less display surface for the Info and
+// HeaderOnly readers, which run without an import closure to resolve
+// against; two same-named types in different schemas stay distinct.
+type TypeRef struct {
+	SchemaPath string
+	Name       string
+}
+
+// String renders the identity as "path#name". The '#' separator is
+// deliberate beside [schema.TypeID]'s "path:name": TypeID's rendering is
+// byte-order-bearing (the types-table sort rides it), so the display form
+// stays visibly distinct rather than moving wire bytes to unify them.
+func (r TypeRef) String() string {
+	return r.SchemaPath + "#" + r.Name
+}
+
+// MarshalText renders the "path#name" form, so a map keyed by TypeRef and a
+// TypeRef slice both serialize as strings under encoding/json.
+func (r TypeRef) MarshalText() ([]byte, error) {
+	return []byte(r.String()), nil
+}
+
 // SnapshotInfo contains summary metadata and statistics extracted from a
 // .ys file without full deserialization.
 //
@@ -27,9 +50,10 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 	CreatedAt           string            // RFC 3339 or empty
 	Metadata            map[string]string // user-provided annotations, nil if absent
 
-	// Content summary.
-	Types           []string
-	InstanceCounts  map[string]int // type name → count
+	// Content summary. Types is the whole denotation set; InstanceCounts
+	// holds one entry per type the snapshot itself holds.
+	Types           []TypeRef
+	InstanceCounts  map[TypeRef]int
 	TotalInstances  int
 	TotalEdges      int
 	DuplicateCount  int
@@ -78,12 +102,12 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 	}
 
 	// Decode remaining sections.
-	sections, diags, err := sd.decodeSectionsV3()
+	groups, diags, err := sd.decodeSections()
 	if err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, sd.collector.Result()
 	}
-	counts, totalEdges := sd.countInstancesV3(sections)
+	counts, totalEdges := sd.countInstances(groups)
 	duplicateCount, unresolvedCount := len(diags.Duplicates), len(diags.Unresolved)
 
 	totalInstances := 0
@@ -104,7 +128,7 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		IntegrityHash:       sd.header.IntegrityHash,
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
-		Types:               sd.typeTags(),
+		Types:               sd.typeRefs(),
 		InstanceCounts:      counts,
 		TotalInstances:      totalInstances,
 		TotalEdges:          totalEdges,
@@ -138,7 +162,7 @@ type HeaderInfo struct {
 
 	// Types array (adjacent to the header in the wire format; read in
 	// the same streaming pass by decodeHeader).
-	Types []string
+	Types []TypeRef
 
 	// File metadata.
 	FileSize int64 // len(data)
@@ -197,7 +221,7 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 		IntegrityHash:       sd.header.IntegrityHash,
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
-		Types:               sd.typeTags(),
+		Types:               sd.typeRefs(),
 		FileSize:            int64(len(data)),
 	}
 
@@ -296,7 +320,7 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 		IntegrityHash:       sd.header.IntegrityHash,
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
-		Types:               sd.typeTags(),
+		Types:               sd.typeRefs(),
 		// FileSize intentionally left 0: not known from an io.Reader.
 	}
 

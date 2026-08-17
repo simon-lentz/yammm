@@ -1,10 +1,13 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -156,5 +159,68 @@ func TestSnapshot_ComposedDuplicateCarriesParent(t *testing.T) {
 	}
 	if dup.Relation != "CHILDREN" {
 		t.Errorf("relation = %q, want %q", dup.Relation, "CHILDREN")
+	}
+}
+
+// TestRoundTrip_OneSlotKeylessConflict pins the null-key conflict address: a
+// keyless slot occupant cannot be named by key, so the conflict block
+// carries a null key and resolves through the slot alone.
+func TestRoundTrip_OneSlotKeylessConflict(t *testing.T) {
+	ctx := context.Background()
+	s, result := schema.NewBuilder().
+		WithName("slotless").
+		WithSourceID(location.MustNewSourceID("test://slotless.yammm")).
+		AddType("Holder").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithComposition("NOTE", schema.NewTypeRef("", "Note", location.Span{}), true, false).
+		Done().
+		AddType("Note").
+		AsPart().
+		WithProperty("text", schema.NewStringConstraint()).
+		Done().
+		Build()
+	if result.HasErrors() {
+		t.Fatalf("build schema: %s", result)
+	}
+
+	g := graph.New(s)
+	if res := g.Add(ctx, mustValidInstance(t, s, "Holder", []any{"h1"}, map[string]any{"id": "h1"})); res.HasErrors() {
+		t.Fatalf("Add holder: %v", res)
+	}
+	occupant := mustValidInstance(t, s, "Note", nil, map[string]any{"text": "first"})
+	if res := g.AddComposed(ctx, "Holder", graph.FormatKey("h1"), "NOTE", occupant); res.HasErrors() {
+		t.Fatalf("AddComposed occupant: %v", res)
+	}
+	rejected := mustValidInstance(t, s, "Note", nil, map[string]any{"text": "second"})
+	if res := g.AddComposed(ctx, "Holder", graph.FormatKey("h1"), "NOTE", rejected); !res.HasErrors() {
+		t.Fatal("a second child in a (one) slot must be rejected")
+	}
+
+	data, res := snapshot.Marshal(ctx, g.Snapshot())
+	if res.HasErrors() {
+		t.Fatalf("Marshal: %v", res)
+	}
+	if !bytes.Contains(data, []byte(`"conflict":{"type":1,"key":null}`)) {
+		t.Fatalf("conflict block does not carry a null key:\n%s", data)
+	}
+
+	loaded, loadRes := snapshot.Load(ctx, data, s)
+	if loadRes.HasErrors() {
+		t.Fatalf("Load rejected a document Marshal produced: %v", loadRes)
+	}
+	dups := loaded.Duplicates()
+	if len(dups) != 1 {
+		t.Fatalf("loaded snapshot holds %d duplicates, want 1", len(dups))
+	}
+	conflict := dups[0].Conflict
+	if conflict == nil {
+		t.Fatal("duplicate conflict pointer did not resolve")
+	}
+	v, ok := conflict.Property("text")
+	if !ok {
+		t.Fatal("conflict instance has no text property")
+	}
+	if got, _ := v.String(); got != "first" {
+		t.Errorf("conflict resolved to the wrong occupant: text = %q, want %q", got, "first")
 	}
 }

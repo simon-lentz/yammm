@@ -5,34 +5,34 @@
 		"schema_source": "test://test.yammm",
 		"schema_hash": "sha256:d10215e44a4c1b383b89b9f644c79d6e4f1192c46ae1fc52cbbd49ad37c9280e",
 		"schema_hash_algorithm": 1,
-		"integrity_hash": "sha256:666d597dae7d9bc63490570a32e7ebd62f781501e51215e584cb1764f352f8f0",
+		"integrity_hash": "sha256:9f0ab7b206756d7d998581f8827af6c4606d937ac8b0dbb4e153e50c35ef6ce7",
 		"features": []
 	},
 	"types": [
 		{
 			"schema_path": "test://test.yammm",
-			"name": "Company",
-			"tag": "Company"
+			"name": "Company"
 		},
 		{
 			"schema_path": "test://test.yammm",
-			"name": "Person",
-			"tag": "Person"
+			"name": "Person"
 		}
 	],
 	"instances": [
-		[],
-		[
-			{
-				"key": [
-					"p1"
-				],
-				"properties": {
-					"name": "Alice"
-				},
-				"provenance": null
-			}
-		]
+		{
+			"type": 1,
+			"items": [
+				{
+					"key": [
+						"p1"
+					],
+					"properties": {
+						"name": "Alice"
+					},
+					"provenance": null
+				}
+			]
+		}
 	],
 	"diagnostics": {
 		"duplicates": [],

@@ -214,7 +214,7 @@ func UpdateMetadata(
 	bodySuffix := data[bodyOffset:]
 
 	// Pass 1: build canonical form with empty integrity hash, compute SHA-256.
-	headerBytes := buildHeaderBytes(hdr, indent, sd.header.Version)
+	headerBytes := buildHeaderBytes(hdr, indent, sd.header.Version, sd.header.SchemaHashAlgorithm)
 	canon := make([]byte, 0, len(prefix)+len(headerBytes)+len(bodySuffix))
 	canon = append(canon, prefix...)
 	canon = append(canon, headerBytes...)
@@ -224,13 +224,13 @@ func UpdateMetadata(
 	hdr.IntegrityHash = fmt.Sprintf("sha256:%x", h)
 
 	// Pass 2: rebuild header with the computed hash and concatenate.
-	headerBytes = buildHeaderBytes(hdr, indent, sd.header.Version)
+	headerBytes = buildHeaderBytes(hdr, indent, sd.header.Version, sd.header.SchemaHashAlgorithm)
 	out := make([]byte, 0, len(prefix)+len(headerBytes)+len(bodySuffix))
 	out = append(out, prefix...)
 	out = append(out, headerBytes...)
 	out = append(out, bodySuffix...)
 
-	return out, diag.OK()
+	return out, sd.collector.Result()
 }
 
 // UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; on any failure

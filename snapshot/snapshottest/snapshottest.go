@@ -6,6 +6,7 @@ package snapshottest
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -83,7 +84,7 @@ func AssertDeterministic(tb testing.TB, snap *graph.Snapshot, opts ...snapshot.O
 type snapProjection struct {
 	Types      []string
 	Instances  map[string][]instProjection
-	Duplicates []instProjection
+	Duplicates []dupProjection
 	Unresolved []unresProjection
 }
 
@@ -95,6 +96,18 @@ type instProjection struct {
 	Edges      []edgeProjection
 	Composed   map[string][]instProjection
 	Provenance *provProjection
+}
+
+// dupProjection carries the duplicate's full coordinate set: a conflict that
+// re-resolves to a different instance, or parent coordinates lost on the
+// wire, are losses the rejected instance's own tree cannot show.
+type dupProjection struct {
+	Instance     instProjection
+	ConflictType string
+	ConflictKey  string
+	ParentType   string
+	ParentKey    string
+	Relation     string
 }
 
 // provProjection distinguishes an instance carrying provenance from one
@@ -129,9 +142,11 @@ type unresProjection struct {
 
 // DiffSnapshots compares two snapshots structurally with go-cmp and fails
 // the test with a (-want +got) diff on mismatch. Values compare exactly,
-// dynamic type included: schema-aware float emission keeps a KindFloat value
-// float64 across a marshal/load boundary, so an int64/float64 mismatch is a
-// real defect, not a wire artifact to tolerate.
+// dynamic type included — an int64/float64 mismatch is a real defect, not a
+// wire artifact to tolerate — with one deliberate exception: a float32
+// widened to float64 compares equal, because the widening is exact and the
+// wire carries value fidelity, not width. Load materializes dynamic numeric
+// values as int64 and float64 only.
 func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 	tb.Helper()
 	// EquateEmpty: a built snapshot carries nil property maps where a loaded
@@ -157,25 +172,37 @@ func project(s *graph.Snapshot) snapProjection {
 					Relation:   e.Relation(),
 					TargetType: e.Target().TypeID().String(),
 					TargetPK:   e.Target().PrimaryKey().String(),
-					Properties: e.Properties().Clone(),
+					Properties: widenFloat32Map(e.Properties().Clone()),
 				})
 			}
 			p.Instances[key] = append(p.Instances[key], ip)
 		}
 	}
 	for _, d := range s.Duplicates() {
-		p.Duplicates = append(p.Duplicates, projectInstanceTree(d.Instance))
+		dp := dupProjection{
+			Instance: projectInstanceTree(d.Instance),
+			Relation: d.Relation,
+		}
+		if d.Conflict != nil {
+			dp.ConflictType = d.Conflict.TypeID().String()
+			dp.ConflictKey = d.Conflict.PrimaryKey().String()
+		}
+		if d.Parent != nil {
+			dp.ParentType = d.Parent.TypeID().String()
+			dp.ParentKey = d.Parent.PrimaryKey().String()
+		}
+		p.Duplicates = append(p.Duplicates, dp)
 	}
 	for _, u := range s.Unresolved() {
 		p.Unresolved = append(p.Unresolved, unresProjection{
-			SourceType: u.Source.TypeName(),
+			SourceType: u.Source.TypeID().String(),
 			SourceKey:  u.Source.PrimaryKey().String(),
 			Relation:   u.Relation,
 			TargetType: u.TargetType.String(),
 			TargetKey:  u.TargetKey,
 			Required:   u.Required,
 			Reason:     u.Reason,
-			Properties: u.Properties().Clone(),
+			Properties: widenFloat32Map(u.Properties().Clone()),
 		})
 	}
 	return p
@@ -191,7 +218,7 @@ func projectInstanceTree(inst *graph.Instance) instProjection {
 		TypeName:   inst.TypeName(),
 		TypeID:     inst.TypeID().String(),
 		PK:         inst.PrimaryKey().String(),
-		Properties: inst.Properties().Clone(),
+		Properties: widenFloat32Map(inst.Properties().Clone()),
 	}
 	if rels := inst.ComposedRelations(); len(rels) > 0 {
 		ip.Composed = make(map[string][]instProjection, len(rels))
@@ -209,4 +236,36 @@ func projectInstanceTree(inst *graph.Instance) instProjection {
 		}
 	}
 	return ip
+}
+
+// widenFloat32Map applies [widenFloat32] to every value in a cloned
+// property map.
+func widenFloat32Map(m map[string]any) map[string]any {
+	for k, v := range m {
+		m[k] = widenFloat32(v)
+	}
+	return m
+}
+
+// widenFloat32 projects a float32 as the float64 its 32-bit shortest wire
+// form parses to — the value Load hands every reader — recursively through
+// containers. Two snapshots that differ only in float width at the same
+// 32-bit value project identically; a narrowed or drifted value still shows.
+func widenFloat32(v any) any {
+	switch n := v.(type) {
+	case float32:
+		f, err := strconv.ParseFloat(strconv.FormatFloat(float64(n), 'g', -1, 32), 64)
+		if err != nil {
+			return float64(n)
+		}
+		return f
+	case []any:
+		for i, e := range n {
+			n[i] = widenFloat32(e)
+		}
+		return n
+	case map[string]any:
+		return widenFloat32Map(n)
+	}
+	return v
 }

@@ -67,7 +67,11 @@ func runSnapshotInfo(cmd *cobra.Command, args []string) error {
 
 		w := cmd.OutOrStdout()
 		if outputFormat == cli.FormatJSON {
-			enc, _ := json.MarshalIndent(header, "", "  ")
+			enc, err := json.MarshalIndent(header, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: encode JSON: %v\n", err)
+				return &cli.ExitError{Code: cli.ExitRuntime}
+			}
 			fmt.Fprintln(w, string(enc))
 			return nil
 		}
@@ -91,7 +95,11 @@ func runSnapshotInfo(cmd *cobra.Command, args []string) error {
 	w := cmd.OutOrStdout()
 
 	if outputFormat == cli.FormatJSON {
-		enc, _ := json.MarshalIndent(info, "", "  ")
+		enc, err := json.MarshalIndent(info, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: encode JSON: %v\n", err)
+			return &cli.ExitError{Code: cli.ExitRuntime}
+		}
 		fmt.Fprintln(w, string(enc))
 		return nil
 	}
@@ -210,7 +218,11 @@ func runSnapshotInfoDir(cmd *cobra.Command, dirPath string, outputFormat cli.Out
 		for _, entry := range entries {
 			dtos = append(dtos, scanEntryToDTO(entry))
 		}
-		enc, _ := json.MarshalIndent(dtos, "", "  ")
+		enc, err := json.MarshalIndent(dtos, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: encode JSON: %v\n", err)
+			return &cli.ExitError{Code: cli.ExitRuntime}
+		}
 		fmt.Fprintln(w, string(enc))
 		return nil
 	}

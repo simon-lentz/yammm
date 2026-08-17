@@ -517,7 +517,9 @@ func TestHeaderOnly_Basic(t *testing.T) {
 	assert.NotEmpty(t, header.SchemaHash, "SchemaHash should be populated")
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash should be populated (value, not verified)")
 	assert.Equal(t, int64(len(data)), header.FileSize, "FileSize")
-	assert.ElementsMatch(t, []string{"Company", "Person"}, header.Types, "Types should include both types")
+	assert.ElementsMatch(t,
+		[]snapshot.TypeRef{{SchemaPath: "test://test.yammm", Name: "Company"}, {SchemaPath: "test://test.yammm", Name: "Person"}},
+		header.Types, "Types should include both types")
 }
 
 func TestHeaderOnly_WithMetadata(t *testing.T) {
@@ -691,7 +693,9 @@ func TestHeaderOnlyRead_HappyPath(t *testing.T) {
 	assert.Equal(t, "test", header.SchemaName)
 	assert.NotEmpty(t, header.SchemaHash)
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash is the stored value, not a verification result")
-	assert.ElementsMatch(t, []string{"Company", "Person"}, header.Types)
+	assert.ElementsMatch(t,
+		[]snapshot.TypeRef{{SchemaPath: "test://test.yammm", Name: "Company"}, {SchemaPath: "test://test.yammm", Name: "Person"}},
+		header.Types)
 	assert.Equal(t, int64(0), header.FileSize, "FileSize is not populated in the reader variant")
 }
 
@@ -862,7 +866,7 @@ func TestHeaderOnlyRead_SlowReader(t *testing.T) {
 	require.NoError(t, result.Err(), "slow reader should not surface an error on well-formed input")
 	require.NotNil(t, header)
 	assert.Equal(t, "test", header.SchemaName)
-	assert.ElementsMatch(t, []string{"Company"}, header.Types)
+	assert.ElementsMatch(t, []snapshot.TypeRef{{SchemaPath: "test://test.yammm", Name: "Company"}}, header.Types)
 }
 
 func TestHeaderOnlyRead_ContextCancellation(t *testing.T) {

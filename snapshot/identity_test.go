@@ -99,9 +99,9 @@ func TestDiffSnapshots_SeesComposedChildType(t *testing.T) {
 	snapshottest.DiffSnapshots(t, snap, loaded)
 }
 
-// A document holding an instance of an imported type loads back. Marshal
-// writes the alias-qualified tag form into the types array, so every
-// decode-side type lookup has to resolve that form and not only local names.
+// A document holding an instance of an imported type loads back. The types
+// table carries the imported type's own identity — declaring schema path
+// plus name — and the loaded instance's rendered name is derived from it.
 func TestRoundTrip_CrossSchemaInstance(t *testing.T) {
 	ctx := context.Background()
 	s := loadCrossSchema(t)
@@ -125,8 +125,8 @@ func TestRoundTrip_CrossSchemaInstance(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !strings.Contains(string(data), `"base.Basin"`) {
-		t.Fatalf("marshalled types array does not carry the qualified tag form:\n%s", data)
+	if !strings.Contains(string(data), `"name":"Basin"`) {
+		t.Fatalf("marshalled types table does not carry the imported identity:\n%s", data)
 	}
 
 	loaded, result := snapshot.Load(ctx, data, s)

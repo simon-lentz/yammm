@@ -7,10 +7,8 @@ import (
 	"math"
 	"reflect"
 	"strconv"
-	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -75,26 +73,6 @@ func appendWireFloat(v float64, bitSize int) ([]byte, error) {
 	return b, nil
 }
 
-// resolveWireType resolves a wire type reference, preferring the caller's
-// identity over the tag form because [schema.TagForm] is lossy and an identity
-// is not. The tag is the fallback for positions that persist no identity; a
-// miss returns (nil, false) and callers pass the value through unwrapped.
-func resolveWireType(s *schema.Schema, tagName string, id schema.TypeID) (*schema.Type, bool) {
-	if s == nil {
-		return nil, false
-	}
-	if !id.IsZero() {
-		if t, ok := s.TypeByID(id); ok {
-			return t, true
-		}
-	}
-	alias, name, qualified := strings.Cut(tagName, ".")
-	if !qualified {
-		alias, name = "", tagName
-	}
-	return s.ResolveType(schema.NewTypeRef(alias, name, location.Span{}))
-}
-
 // typeByWireID resolves a persisted identity — schema path and name together —
 // against the entry schema's import closure. Matching the path as well as the
 // name is what keeps two same-named types in different schemas apart; a
@@ -133,8 +111,8 @@ func wireProps(props immutable.Properties, t *schema.Type) map[string]any {
 
 // wireEdgeProps is wireProps for edge properties, whose constraints hang off
 // the source type's relation rather than any target type. The resolved and
-// unresolved paths agree because both derive rel from the source instance's own
-// identity through [writerTypeID] — the shared input, not the shared body.
+// unresolved paths agree because both derive rel from the source instance's
+// own TypeID — the shared input, not the shared body.
 func wireEdgeProps(props immutable.Properties, rel *schema.Relation) map[string]any {
 	m := props.Clone()
 	if len(m) == 0 || rel == nil {

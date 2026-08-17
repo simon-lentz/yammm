@@ -11,25 +11,23 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// The v3 wire contract.
+// The wire contract.
 //
-// v3 carries type identity once, in a types table, and every other position
-// references a row by index. These tests drive the shapes that reference goes
-// wrong in — a section that is not parallel to the table, a position that
+// The wire carries type identity once, in a types table, and every other
+// position references a row by index. These tests drive the shapes that
+// reference goes wrong in — two entries claiming one row, a position that
 // carries no index at all, and a row whose schema no longer exists.
 
 // wireTypeTable reads a v3 document's types table.
 func wireTypeTable(t *testing.T, data []byte) []struct {
 	SchemaPath string `json:"schema_path"`
 	Name       string `json:"name"`
-	Tag        string `json:"tag"`
 } {
 	t.Helper()
 	var doc struct {
 		Types []struct {
 			SchemaPath string `json:"schema_path"`
 			Name       string `json:"name"`
-			Tag        string `json:"tag"`
 		} `json:"types"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
@@ -49,10 +47,11 @@ func v3Doc(t *testing.T) []byte {
 	return data
 }
 
-// TestWireV3_SectionLengthMismatchIsReported pins the check that replaced the
-// name-keyed types/instances cross-check. The two sections denote the same
-// rows, so a length difference means the document cannot be read positionally.
-func TestWireV3_SectionLengthMismatchIsReported(t *testing.T) {
+// TestWireV3_DuplicateGroupEntryIsReported pins the structural rule that
+// replaced the parallel-array length check: the instances section holds at
+// most one entry per table row, so two entries claiming one row cannot be
+// read as one group.
+func TestWireV3_DuplicateGroupEntryIsReported(t *testing.T) {
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
 	data := v3Doc(t)
@@ -64,12 +63,12 @@ func TestWireV3_SectionLengthMismatchIsReported(t *testing.T) {
 	if idx < 0 {
 		t.Fatalf("fixture shape changed; %s not found in:\n%s", boundary, data)
 	}
-	edited := append(append([]byte{}, data[:idx]...), append([]byte(",[]"), data[idx:]...)...)
+	edited := append(append([]byte{}, data[:idx]...), append([]byte(`,{"type":1,"items":[]}`), data[idx:]...)...)
 
 	_, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
-	if !hasCode(res, diag.E_SNAPSHOT_TYPE_MISMATCH) {
-		t.Errorf("an instances section longer than the types table loaded without %s: %v",
-			diag.E_SNAPSHOT_TYPE_MISMATCH, res)
+	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("two instances entries referencing one table row loaded without %s: %v",
+			diag.E_SNAPSHOT_MALFORMED, res)
 	}
 }
 
@@ -105,10 +104,9 @@ func TestWireV3_ComposedChildWithoutTypeIsReported(t *testing.T) {
 	}
 }
 
-// TestWireV3_TableIsOrderedByIdentity pins the table's ordering. Two types can
-// render the same tag, so ordering on the tag is not a total order over the
-// rows; ordering on the identity is, and the instances section is positional
-// against it.
+// TestWireV3_TableIsOrderedByIdentity pins the table's ordering. Two types
+// can share a bare name, so ordering on a rendered name is not a total order
+// over the rows; ordering on the identity is.
 func TestWireV3_TableIsOrderedByIdentity(t *testing.T) {
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
@@ -124,14 +122,14 @@ func TestWireV3_TableIsOrderedByIdentity(t *testing.T) {
 		t.Fatalf("fixture is vacuous: table holds %d rows, want at least 2", len(table))
 	}
 
-	var sameTag int
+	var sameName int
 	for _, row := range table {
-		if row.Tag == table[0].Tag {
-			sameTag++
+		if row.Name == table[0].Name {
+			sameName++
 		}
 	}
-	if sameTag < 2 {
-		t.Fatalf("fixture is vacuous: no two rows share a tag:\n%s", data)
+	if sameName < 2 {
+		t.Fatalf("fixture is vacuous: no two rows share a name:\n%s", data)
 	}
 
 	for i := 1; i < len(table); i++ {
@@ -156,17 +154,16 @@ func TestWireV3_TableIsOrderedByIdentity(t *testing.T) {
 	}
 }
 
-// TestWireV3_UnresolvableSchemaPathFallsBackToName pins the shape a document
-// takes after its schema moved: the persisted path resolves to nothing, but the
-// name still names a type. Discarding both would yield an identity that cannot
-// be written back at all.
-func TestWireV3_UnresolvableSchemaPathFallsBackToName(t *testing.T) {
+// TestWireV3_UnresolvableSchemaPathIsReported pins the strict half of table
+// resolution: a document was written by a writer that resolved every
+// identity, so a row whose schema path no longer resolves means the schema
+// moved, and silent rebinding by bare name is the one wrong answer. The
+// document is refused with an Error the consumer can act on.
+func TestWireV3_UnresolvableSchemaPathIsReported(t *testing.T) {
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
 	data := v3Doc(t)
 
-	// Parent, not Child: a composed-only type holds no root instances, so its
-	// survival is not observable through Snapshot.Types.
 	const rooted = "Parent"
 	row := -1
 	for i, e := range wireTypeTable(t, data) {
@@ -186,24 +183,11 @@ func TestWireV3_UnresolvableSchemaPathFallsBackToName(t *testing.T) {
 	}
 
 	loaded, res := snapshot.Load(ctx, moved, s, snapshot.WithSkipIntegrityCheck())
-	if res.HasErrors() {
-		t.Fatalf("a moved schema path must fall back to the name: %v", res)
+	if !hasCode(res, diag.E_SNAPSHOT_UNKNOWN_TYPE) {
+		t.Errorf("a moved schema path loaded without %s: %v", diag.E_SNAPSHOT_UNKNOWN_TYPE, res)
 	}
-	if loaded == nil {
-		t.Fatal("no snapshot returned")
-	}
-
-	var found bool
-	for _, id := range loaded.Types() {
-		if id.Name() == rooted {
-			found = true
-			if id.SchemaPath().String() == "/nonexistent/moved.yammm" {
-				t.Errorf("the fallback kept the unresolvable path instead of binding the name")
-			}
-		}
-	}
-	if !found {
-		t.Errorf("type %q did not survive the fallback; loaded types: %v", rooted, loaded.Types())
+	if !res.HasErrors() || loaded != nil {
+		t.Errorf("a row the closure does not declare must refuse the document, not rebind it: %v", res)
 	}
 }
 
@@ -235,9 +219,9 @@ func TestWireV3_UnknownTableRowIsReported(t *testing.T) {
 	}
 }
 
-// TestWireV3_TableCarriesUnresolvedTargetTypes pins that a type denoted only as
-// an unresolved edge's target still takes a table row. Its instances row is
-// empty, which is what keeps the two sections parallel.
+// TestWireV3_TableCarriesUnresolvedTargetTypes pins that a type denoted only
+// as an unresolved edge's target still takes a table row; it holds no
+// instances, so it takes no instances entry.
 func TestWireV3_TableCarriesUnresolvedTargetTypes(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
