@@ -341,3 +341,91 @@ func TestUpdateMetadata_PreservesAnIntShapedBodyThatReMarshalHeals(t *testing.T)
 		t.Errorf("Marshal(Load(x)) did not heal the int-shaped float:\n%s", healed)
 	}
 }
+
+// parallelEdgeSchema declares many associations between one pair of instances,
+// so a document can hold edges that tie under graph's edge comparator.
+var parallelEdgeSchema = func() string {
+	var src strings.Builder
+	src.WriteString("schema \"parallel\"\n\ntype Node {\n\tid String primary\n")
+	for _, r := range parallelRelations {
+		src.WriteString("\t--> R" + string(r) + " (_) Node { w Float }\n")
+	}
+	src.WriteString("}\n")
+	return src.String()
+}()
+
+// parallelRelations names the associations the fixture declares and fills.
+const parallelRelations = "ABCDEFGHIJKLMNOP"
+
+// TestLoad_ParallelEdgeOrderIsDeterministic pins the round trip against map
+// iteration order. Edges differing only in properties tie under the edge
+// comparator, and the sort is not stable, so reading them in map order let a
+// reload permute them and move the output bytes.
+//
+// The fixture is deliberately large: Go's sort runs insertion sort below a
+// dozen elements and is stable there by accident, so a small fixture passes
+// whether or not the defect is present.
+func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, res := schema.LoadString(t.Context(), parallelEdgeSchema, "parallel.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load parallel schema: %s", res)
+	}
+	typ, ok := s.Type("Node")
+	if !ok {
+		t.Fatal("Node missing")
+	}
+	id := typ.ID()
+
+	node := func(k string) graph.InstanceParts {
+		return graph.InstanceParts{
+			TypeName:   "Node",
+			TypeID:     id,
+			PrimaryKey: immutable.WrapKey([]any{k}),
+			Properties: immutable.WrapProperties(map[string]any{"id": k}),
+		}
+	}
+	var edges []graph.EdgeParts
+	weight := 0.0
+	for _, r := range parallelRelations {
+		for range 3 {
+			weight++
+			edges = append(edges, graph.EdgeParts{
+				Relation:   "R" + string(r),
+				SourceType: id, SourceKey: immutable.WrapKey([]any{"n1"}),
+				TargetType: id, TargetKey: immutable.WrapKey([]any{"n2"}),
+				Properties: immutable.WrapProperties(map[string]any{"w": weight}),
+			})
+		}
+	}
+	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types:     []schema.TypeID{id},
+		Instances: map[schema.TypeID][]graph.InstanceParts{id: {node("n1"), node("n2")}},
+		Edges:     edges,
+	})
+	if res.HasErrors() {
+		t.Fatalf("assembling: %s", res)
+	}
+	if len(built.Edges()) != len(edges) {
+		t.Fatalf("fixture is vacuous: %d edges survived assembly, want %d", len(built.Edges()), len(edges))
+	}
+
+	first, mres := snapshot.Marshal(ctx, built)
+	if err := mres.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for i := range 16 {
+		loaded, lres := snapshot.Load(ctx, first, s)
+		if err := lres.Err(); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		again, ares := snapshot.Marshal(ctx, loaded)
+		if err := ares.Err(); err != nil {
+			t.Fatalf("re-marshal: %v", err)
+		}
+		if !bytes.Equal(first, again) {
+			t.Fatalf("reload %d produced different bytes: the round trip depends on map iteration order", i)
+		}
+	}
+}

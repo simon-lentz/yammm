@@ -221,13 +221,15 @@ func (a *Adapter) BatchEdgeQueries(
 			return nil, fmt.Errorf("no shape for target type %q", sig.targetType)
 		}
 
-		// Resolve the schema relation for this signature group so typed edge
-		// properties (Timestamp/Date/Float) coerce to driver-native types.
-		// Nil when the source type or relation is not found — coerceRelProps
-		// then passes properties through unchanged.
+		// Resolve the relation so typed edge properties coerce to
+		// driver-native types; nil means coerceRelProps passes them through.
+		// By identity, which reaches the whole closure — an imported type's
+		// rendered name is in no schema's local table.
 		var rel *schema.Relation
-		if srcType, ok := result.Schema().Type(sig.sourceType); ok {
-			rel, _ = srcType.Relation(sig.relType)
+		if len(sigEdges) > 0 {
+			if srcType, ok := result.Schema().TypeByID(sigEdges[0].Source().TypeID()); ok {
+				rel, _ = srcType.Relation(sig.relType)
+			}
 		}
 
 		// Detect if any edge in this group has properties.

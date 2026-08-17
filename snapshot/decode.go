@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -587,8 +589,10 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 		for _, item := range g.Items {
 			ip := sd.instanceParts(row, item)
 			parts = append(parts, ip)
-			for relName, targets := range item.Edges {
-				for _, e := range targets {
+			// Sorted, not map order: compareEdges ties on edges differing only
+			// in properties, and an unstable sort permutes ties by position.
+			for _, relName := range slices.Sorted(maps.Keys(item.Edges)) {
+				for _, e := range item.Edges[relName] {
 					edgeParts = append(edgeParts, graph.EdgeParts{
 						Relation:   relName,
 						SourceType: id,
