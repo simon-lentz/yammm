@@ -12,7 +12,9 @@ import (
 // TypeRef is a type identity as a .ys document states it: declaring schema
 // path plus name. It is the schema-less display surface for the Info and
 // HeaderOnly readers, which run without an import closure to resolve
-// against; two same-named types in different schemas stay distinct.
+// against; two same-named types in different schemas stay distinct. TypeRef
+// renders and does not parse: the Info surfaces are a report projection, so
+// there is no UnmarshalText and they serialize one way by design.
 type TypeRef struct {
 	SchemaPath string
 	Name       string
@@ -27,7 +29,8 @@ func (r TypeRef) String() string {
 }
 
 // MarshalText renders the "path#name" form, so a map keyed by TypeRef and a
-// TypeRef slice both serialize as strings under encoding/json.
+// TypeRef slice both serialize as strings under encoding/json. There is no
+// inverse; [TestTypeRef_IsWriteOnly] pins that as a decision rather than a gap.
 func (r TypeRef) MarshalText() ([]byte, error) {
 	return []byte(r.String()), nil
 }

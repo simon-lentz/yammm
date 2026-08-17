@@ -633,6 +633,8 @@ type SnapshotInfo struct {
 
 `snapshot.TypeRef{SchemaPath, Name string}` is the schema-less display surface: `Info`, `HeaderOnly` and `HeaderOnlyRead` run without an import closure to resolve against, so each type is reported as the identity the document states, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `path#name`. The `#` separator is deliberate beside `schema.TypeID.String()`'s `path:name` form: TypeID's rendering is byte-order-bearing (the wire's types-table sort rides it), so the display form stays visibly distinct rather than moving wire bytes to unify the two.
 
+`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `SnapshotInfo` and `HeaderInfo` serialize one way: `yammm snapshot info --format json` writes them, and nothing reads them back. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir` / `ScanDirSlice`, which hands back `HeaderInfo` values directly, and `path#name` is injective over the values yammm produces but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
+
 ### Header-Only Reads
 
 For dispatch-style workloads that classify many `.ys` files by header metadata alone — lifecycle state, schema-hash comparison, `CreatedAt` inspection — `HeaderOnly` (byte-slice variant) and `HeaderOnlyRead` (streaming io.Reader variant) return a compact `HeaderInfo`:

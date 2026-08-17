@@ -105,6 +105,8 @@ func buildTypeTable(view *writerView) *typeTable {
 		entries: make([]typeTableEntry, 0, len(ids)),
 		index:   make(map[schema.TypeID]int, len(ids)),
 	}
+	// Dedup is on TypeID while rows render (SourceID.String(), Name): the two
+	// agree only while location.ValidateSyntheticSourceID keeps String() injective.
 	for i, id := range ids {
 		tt.entries = append(tt.entries, typeTableEntry{
 			SchemaPath: id.SchemaPath().String(),

@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -257,5 +258,80 @@ func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 	}
 	if sum != info.TotalInstances {
 		t.Errorf("per-type counts sum to %d, total says %d", sum, info.TotalInstances)
+	}
+}
+
+// The TypeRef contract.
+//
+// TypeRef is a report projection, not a serialization format: it renders and
+// does not parse. These three tests pin the rendering, the reason the method
+// exists, and the decision that there is no inverse.
+
+const typeRefRendered = "test://a.yammm#Person"
+
+func sampleTypeRef() snapshot.TypeRef {
+	return snapshot.TypeRef{SchemaPath: "test://a.yammm", Name: "Person"}
+}
+
+// TestTypeRef_RendersPathHashName pins the ratified display form. The
+// separator is the contract: schema.TypeID renders "path:name" and TypeRef
+// renders "path#name" so a reader never confuses the byte-order-bearing
+// identity with the display form.
+func TestTypeRef_RendersPathHashName(t *testing.T) {
+	t.Parallel()
+	ref := sampleTypeRef()
+
+	if got := ref.String(); got != typeRefRendered {
+		t.Errorf("String() = %q, want %q", got, typeRefRendered)
+	}
+	text, err := ref.MarshalText()
+	if err != nil {
+		t.Fatalf("MarshalText: %v", err)
+	}
+	if string(text) != typeRefRendered {
+		t.Errorf("MarshalText() = %q, want %q", text, typeRefRendered)
+	}
+}
+
+// TestTypeRef_SerializesAsAStringKey pins what MarshalText is for. A
+// map[TypeRef]int has no JSON encoding without a TextMarshaler key, so
+// deleting the method takes `yammm snapshot info --format json` with it.
+func TestTypeRef_SerializesAsAStringKey(t *testing.T) {
+	t.Parallel()
+
+	enc, err := json.Marshal(map[snapshot.TypeRef]int{sampleTypeRef(): 2})
+	if err != nil {
+		t.Fatalf("marshal a TypeRef-keyed map: %v", err)
+	}
+	if want := `{"` + typeRefRendered + `":2}`; string(enc) != want {
+		t.Errorf("marshalled map as %s, want %s", enc, want)
+	}
+
+	list, err := json.Marshal([]snapshot.TypeRef{sampleTypeRef()})
+	if err != nil {
+		t.Fatalf("marshal a TypeRef slice: %v", err)
+	}
+	if want := `["` + typeRefRendered + `"]`; string(list) != want {
+		t.Errorf("marshalled slice as %s, want %s", list, want)
+	}
+}
+
+// TestTypeRef_IsWriteOnly pins a decision, not a defect. The rendering is
+// injective over the values yammm produces — a DSL type name is
+// [A-Z][A-Za-z0-9_]* and holds no '#' — but not over an arbitrary TypeRef, and
+// no consumer has asked for the inverse. Adding UnmarshalText is additive and
+// allowed; it moves this test and the write-only statement in docs/API.md
+// together.
+func TestTypeRef_IsWriteOnly(t *testing.T) {
+	t.Parallel()
+
+	var ref snapshot.TypeRef
+	if err := json.Unmarshal([]byte(`"`+typeRefRendered+`"`), &ref); err == nil {
+		t.Error("TypeRef decoded from its rendered form: it gained UnmarshalText, so its godoc and the write-only statement in docs/API.md need updating with it")
+	}
+
+	var info snapshot.HeaderInfo
+	if err := json.Unmarshal([]byte(`{"Types":["`+typeRefRendered+`"]}`), &info); err == nil {
+		t.Error("HeaderInfo decoded from the form yammm snapshot info writes; the surfaces are documented as one-way")
 	}
 }

@@ -182,7 +182,9 @@ func (sd *streamDecoder) decodeHeader() error {
 }
 
 // decodeSections decodes the instances and diagnostics sections by
-// re-scanning the raw data.
+// re-scanning the raw data. The wire contract fixes four top-level keys, so
+// an absent section is malformed rather than empty, and a null section is the
+// same absence dressed as presence.
 func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error) {
 	dec := json.NewDecoder(bytes.NewReader(sd.data))
 	dec.UseNumber()
@@ -192,7 +194,8 @@ func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error)
 	}
 
 	var groups []instanceGroupWire
-	var diags diagWire
+	var diags *diagWire
+	instancesFound := false
 	diagsFound := false
 
 	for dec.More() {
@@ -210,6 +213,7 @@ func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error)
 			if err := dec.Decode(&groups); err != nil {
 				return nil, diagWire{}, fmt.Errorf("failed to decode instances: %w", err)
 			}
+			instancesFound = true
 		case "diagnostics":
 			if err := dec.Decode(&diags); err != nil {
 				return nil, diagWire{}, fmt.Errorf("failed to decode diagnostics: %w", err)
@@ -223,14 +227,20 @@ func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error)
 		}
 	}
 
+	if !instancesFound {
+		return nil, diagWire{}, errors.New("instances key not found in document")
+	}
 	if groups == nil {
-		groups = []instanceGroupWire{}
+		return nil, diagWire{}, errors.New("instances section is null")
 	}
 	if !diagsFound {
-		diags = diagWire{Duplicates: []dupWire{}, Unresolved: []unresolvedWire{}}
+		return nil, diagWire{}, errors.New("diagnostics key not found in document")
+	}
+	if diags == nil {
+		return nil, diagWire{}, errors.New("diagnostics section is null")
 	}
 
-	return groups, diags, nil
+	return groups, *diags, nil
 }
 
 // slotCoord addresses one root instance's relation slot. Only root parents

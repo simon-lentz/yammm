@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -250,5 +251,159 @@ func TestWireV3_TableCarriesUnresolvedTargetTypes(t *testing.T) {
 
 	if _, res := snapshot.Load(ctx, data, s); res.HasErrors() {
 		t.Errorf("the document does not read back: %v", res)
+	}
+}
+
+// The four-key rule.
+//
+// The wire contract fixes four top-level keys. The reader used to normalise an
+// absent instances or diagnostics section into an empty one, so a truncated
+// document loaded as a valid empty snapshot. Presence is the signal — an
+// instances entry present with an empty items array means the snapshot holds
+// the type and no instance of it — so absence has to be malformed for presence
+// to mean anything. A null section is that same absence dressed as presence,
+// and every other wire position already refuses null.
+
+// sectionRange returns the byte range of one top-level section, from the comma
+// that precedes its key through the end of its value. It exploits the fixed key
+// order — instances runs to the diagnostics key, diagnostics runs to the
+// document's final brace — and fails loudly when the shape it assumes moves.
+func sectionRange(t *testing.T, data []byte, key string) (int, int) {
+	t.Helper()
+	anchor := fmt.Sprintf(`,%q:`, key)
+	start := bytes.Index(data, []byte(anchor))
+	if start < 0 {
+		t.Fatalf("fixture shape changed; %s not found in:\n%s", anchor, data)
+	}
+	switch key {
+	case "instances":
+		end := bytes.Index(data, []byte(`,"diagnostics":`))
+		if end < start {
+			t.Fatalf("fixture shape changed; diagnostics does not follow instances in:\n%s", data)
+		}
+		return start, end
+	case "diagnostics":
+		if !bytes.HasSuffix(data, []byte("}")) {
+			t.Fatalf("fixture shape changed; document does not end with a brace:\n%s", data)
+		}
+		return start, len(data) - 1
+	default:
+		t.Fatalf("sectionRange does not handle %q", key)
+		return 0, 0
+	}
+}
+
+// dropSection removes one top-level section. Spliced rather than
+// re-marshalled: top-level key order is part of the wire contract and a map
+// round trip loses it.
+func dropSection(t *testing.T, data []byte, key string) []byte {
+	t.Helper()
+	start, end := sectionRange(t, data, key)
+	return append(append([]byte{}, data[:start]...), data[end:]...)
+}
+
+// nullSection replaces one top-level section's value with null.
+func nullSection(t *testing.T, data []byte, key string) []byte {
+	t.Helper()
+	start, end := sectionRange(t, data, key)
+	out := append([]byte{}, data[:start]...)
+	out = append(out, fmt.Sprintf(`,%q:null`, key)...)
+	return append(out, data[end:]...)
+}
+
+// TestWireV3_AbsentSectionIsMalformed drives all three read surfaces against a
+// document missing a section, because the surfaces reach decodeSections by two
+// different routes: Load and Verify through the pipeline, Info on its own.
+func TestWireV3_AbsentSectionIsMalformed(t *testing.T) {
+	ctx := context.Background()
+	s := testSchemaWithComposition(t)
+	data := v3Doc(t)
+
+	// The reason is asserted, not only the code. Absence and a null value both
+	// draw E_SNAPSHOT_MALFORMED, so a test that reads the code alone cannot tell
+	// the two guards apart and passes when the reader reports the wrong one.
+	cases := []struct {
+		name       string
+		section    string
+		null       bool
+		wantReason string
+	}{
+		{"instances absent", "instances", false, "instances key not found in document"},
+		{"instances null", "instances", true, "instances section is null"},
+		{"diagnostics absent", "diagnostics", false, "diagnostics key not found in document"},
+		{"diagnostics null", "diagnostics", true, "diagnostics section is null"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			edited := dropSection(t, data, tc.section)
+			if tc.null {
+				edited = nullSection(t, data, tc.section)
+			}
+			if bytes.Equal(edited, data) {
+				t.Fatalf("edit is vacuous: the document is unchanged")
+			}
+
+			loaded, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+			if !hasMalformedReason(res, tc.wantReason) {
+				t.Errorf("Load did not report %q: %v", tc.wantReason, res)
+			}
+			if loaded != nil {
+				t.Errorf("Load returned a snapshot beside a malformed document")
+			}
+
+			vres := snapshot.Verify(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+			if !hasMalformedReason(vres, tc.wantReason) {
+				t.Errorf("Verify did not report %q: %v", tc.wantReason, vres)
+			}
+
+			info, ires := snapshot.Info(ctx, edited)
+			if !hasMalformedReason(ires, tc.wantReason) {
+				t.Errorf("Info did not report %q: %v", tc.wantReason, ires)
+			}
+			if info != nil {
+				t.Errorf("Info returned a summary beside a malformed document")
+			}
+		})
+	}
+}
+
+// hasMalformedReason reports whether the result carries E_SNAPSHOT_MALFORMED
+// naming the given reason.
+func hasMalformedReason(result diag.Result, reason string) bool {
+	for issue := range result.Issues() {
+		if issue.Code() == diag.E_SNAPSHOT_MALFORMED && strings.Contains(issue.Message(), reason) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestWireV3_EmptySectionsAreNotAbsence is the positive half of the rule. An
+// empty snapshot writes both sections present and empty, and every read surface
+// accepts it — so the refusal above is about absence, not about emptiness.
+func TestWireV3_EmptySectionsAreNotAbsence(t *testing.T) {
+	ctx := context.Background()
+	s := testSchemaWithComposition(t)
+
+	data, res := snapshot.Marshal(ctx, buildSnapshot(t, s))
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+	if !bytes.Contains(data, []byte(`"instances":[]`)) {
+		t.Fatalf("fixture is vacuous: an empty snapshot did not write an empty instances section:\n%s", data)
+	}
+	if !bytes.Contains(data, []byte(`"diagnostics":`)) {
+		t.Fatalf("fixture is vacuous: no diagnostics section:\n%s", data)
+	}
+
+	if loaded, lres := snapshot.Load(ctx, data, s); lres.HasErrors() || loaded == nil {
+		t.Errorf("Load refused a document whose sections are present and empty: %v", lres)
+	}
+	if vres := snapshot.Verify(ctx, data, s); vres.HasErrors() {
+		t.Errorf("Verify refused a document whose sections are present and empty: %v", vres)
+	}
+	if info, ires := snapshot.Info(ctx, data); ires.HasErrors() || info == nil {
+		t.Errorf("Info refused a document whose sections are present and empty: %v", ires)
 	}
 }
