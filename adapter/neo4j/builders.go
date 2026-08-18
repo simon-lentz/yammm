@@ -131,7 +131,7 @@ func buildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutabilit
 // after the call. Consumers issuing multiple calls (e.g., a loop over
 // distinct (from, to) pairs) are responsible for summing the per-call
 // values themselves. For UNWIND-batched workloads, prefer
-// [buildBatchRelationshipMergeQuery] and apply the same summing guidance
+// [BuildBatchRelationshipMergeQuery] and apply the same summing guidance
 // across chunk transactions.
 func buildRelationshipMergeQuery(
 	fromLabel string, fromKeyNames []string,
@@ -170,13 +170,19 @@ func buildRelationshipMergeQuery(
 	return b.String()
 }
 
-// buildBatchRelationshipMergeQuery returns the UNWIND-batched variant of
-// [buildRelationshipMergeQuery]. Parameter shape:
+// BuildBatchRelationshipMergeQuery returns the Cypher template for an
+// UNWIND-batched relationship MERGE between nodes identified by their
+// (label, primary-key) shapes. If hasProps is true, the generated query ends
+// with `SET r += row.rel_props` so callers can pass per-edge properties.
+// Parameter shape:
 //
 //	{rows: [{from_<name>: v, to_<name>: v, [rel_props: map]}, ...]}
 //
-// The generated query always ends with `RETURN count(*) AS matched_rows`
-// — see [buildRelationshipMergeQuery] for the rationale.
+// The generated query always ends with `RETURN count(*) AS matched_rows`.
+// Consumers implementing silent-failure detection on generated MERGEs sum the
+// column; consumers that do not care ignore it. Making the clause always-on
+// keeps the signature free of a trailing bool and the emitted output free of a
+// flag-controlled shape branch.
 //
 // Return-value semantics (matched_rows). Neo4j's transactional semantics
 // mean each chunk either fully commits (all matched_rows reflected in
@@ -198,7 +204,7 @@ func buildRelationshipMergeQuery(
 // matched_rows as authoritative will false-positive "rule silently
 // no-op'd" any time the first chunk legitimately has zero matches even
 // though later chunks have nonzero matches.
-func buildBatchRelationshipMergeQuery(
+func BuildBatchRelationshipMergeQuery(
 	fromLabel string, fromKeyNames []string,
 	relType string,
 	toLabel string, toKeyNames []string,
