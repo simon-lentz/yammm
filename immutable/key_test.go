@@ -132,8 +132,10 @@ func TestKey_String_Precomputed(t *testing.T) {
 }
 
 func TestKey_String_ZeroAndEmptyKey(t *testing.T) {
-	// All zero/empty key forms should return "[]" to satisfy the invariant:
-	// key.String() == graph.FormatKey(key.Clone()...)
+	// All zero/empty key forms report "[]". This is where String and
+	// graph.FormatKey(key.Clone()...) diverge rather than agree: Clone returns
+	// nil for a nil-constructed key, and FormatKey renders a spread nil slice as
+	// "null". The divergence is documented on Key.String.
 
 	// Zero key via WrapKey(nil)
 	zeroKey := WrapKey(nil)
@@ -499,9 +501,10 @@ func TestKey_String_MatchesJSONMarshal(t *testing.T) {
 	// We verify Key.String() == json.Marshal(key.Clone())
 	// which is the same underlying mechanism FormatKey will use.
 	//
-	// Note: For nil input, Clone() returns nil and json.Marshal(nil) = "null",
-	// but FormatKey() with zero args should return "[]". This is tested separately
-	// in TestKey_String_ZeroAndEmptyKey. Here we test non-nil inputs only.
+	// Note: for nil input Clone() returns nil and json.Marshal(nil) is "null",
+	// which is what graph.FormatKey renders for it too. String reports "[]"
+	// instead; TestKey_String_ZeroAndEmptyKey pins that side. Here we test
+	// non-nil inputs only.
 	tests := [][]any{
 		{"us", 12345},
 		{"id123"},

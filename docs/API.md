@@ -240,7 +240,6 @@ validator := instance.NewValidator(schema, opts...)
 
 | Option | Description |
 | ------ | ----------- |
-| `WithLogger` | Structured logger for debug output |
 | `WithStrictPropertyNames` | Require exact case matching (default: false) |
 | `WithAllowUnknownFields` | Silently ignore unknown fields (default: false) |
 
@@ -347,14 +346,12 @@ The `graph` package builds an in-memory graph from validated instances.
 
 ### Graph Options
 
-| Option | Description |
-| ------ | ----------- |
-| `WithLogger` | Structured logger for graph operations (additions, edge resolution, duplicates) |
+`graph.New` and `graph.NewFromSnapshot` accept `graph.Option` values. No options are defined at present, so every call passes none.
 
 ### Graph Operations
 
 ```go
-g := graph.New(schema, graph.WithLogger(logger))
+g := graph.New(schema)
 
 // Add validated instances
 result := g.Add(ctx, validInstance)
@@ -477,9 +474,7 @@ The `Snapshot` type provides read-only access to graph state:
 | `EdgesFrom(inst)` | Outgoing edges for a specific instance |
 | `Duplicates()` | Duplicate primary key records (sorted) |
 | `Unresolved()` | Unresolved edge records (sorted) |
-| `Diagnostics()` | Construction diagnostics |
-| `OK()` | No fatal or error diagnostics |
-| `HasErrors()` | Has error-level diagnostics |
+| `Diagnostics()` | Construction diagnostics (call `OK()` / `HasErrors()` on the returned `diag.Result`) |
 
 ### Thread Safety
 
@@ -496,6 +491,29 @@ The `Snapshot` type provides read-only access to graph state:
 - `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
 
 Types are identified by `schema.TypeID`, never by name. A name is a rendering of an identity — bare for a local type, alias-qualified for a directly imported one — so it cannot name a transitively imported type and cannot separate two same-named types in different schemas. Use `schema.TagForm(snap.Schema(), id)` where a name is wanted for output.
+
+### Key Formatting and Parsing
+
+A primary key is carried as a canonical JSON array string — the form `Snapshot.InstanceByKey` takes and `immutable.Key.String` produces.
+
+| Function | Description |
+| -------- | ----------- |
+| `FormatKey(values...)` | Render key components as a canonical JSON array string |
+| `FormatComposedKey(parentKey, relation, childKeyOrIndex)` | Render a composed child's identity |
+| `ParseKey(s)` | Decode a `FormatKey` string into `[]any` components |
+| `ParseKeyStrings(s)` | Decode a `FormatKey` string whose components are all strings |
+
+```go
+key := graph.FormatKey("us", int64(12345)) // `["us",12345]`
+inst, ok := snap.InstanceByKey(typeID, key)
+
+values, err := graph.ParseKey(key)         // []any{"us", int64(12345)}
+parts, err := graph.ParseKeyStrings(`["us","ca"]`) // []string{"us", "ca"}
+```
+
+`ParseKey` returns the component types a snapshot round trip produces — `string`, `int64`, `float64`, `bool`, `nil` — because it classifies numbers by lexical form, the same rule the `.ys` reader applies: a literal carrying `.`, `e`, or `E` is `float64`, an int-shaped literal is `int64`. An int-shaped literal beyond the int64 range comes back as `float64`; a literal with no finite Go value, such as `1e999`, is an error naming the component's index. So is a component that is itself an array or object: `FormatKey`'s domain is scalars.
+
+The round trip holds in both directions over those types, with one documented carve-out — `FormatKey(float64(5))` renders `5` and `ParseKey` reads it back as `int64(5)`. The wire has the same asymmetry, by the same rule. `FormatComposedKey` has no inverse: composed identities are rendered by the writers and read back by nobody.
 
 ## Import Closure & Type Lookup
 
@@ -649,14 +667,15 @@ type HeaderInfo struct {
     SchemaHash          string
     SchemaHashAlgorithm int
     IntegrityHash       string
-    CreatedAt           string
+    CreatedAt           string // RFC 3339 or empty
     Metadata            map[string]string
 
     // Types table (adjacent to the header; read in the same streaming pass).
     Types []TypeRef
 
-    // File metadata. Populated by HeaderOnly (len(data)); zero value
-    // from HeaderOnlyRead (not available from an io.Reader).
+    // File metadata. HeaderOnly reports len(data); ScanDir reports the
+    // file's size on disk; a bare HeaderOnlyRead reports zero, because a
+    // size is not knowable from an io.Reader.
     FileSize int64
 }
 ```
@@ -705,10 +724,11 @@ For dispatch-style workloads that enumerate every `.ys` file in a directory — 
 
 ```go
 type ScanEntry struct {
-    Name   string               // basename, e.g., "CA.ys"
-    Path   string               // full path, filepath.Join(dir, Name)
-    Header *snapshot.HeaderInfo // nil when Result has error-severity issues
-    Result diag.Result          // OK on the happy path; carries errors per-file
+    Name     string               // basename, e.g., "CA.ys"
+    Path     string               // full path, filepath.Join(dir, Name)
+    Header   *snapshot.HeaderInfo // nil when Result has error-severity issues
+    Result   diag.Result          // OK on the happy path; carries errors per-file
+    FileSize int64                // size on disk, or zero if the file could not be opened
 }
 
 // Lazy iterator — headers are parsed on demand; callers can break early
@@ -734,6 +754,12 @@ for entry, err := range snapshot.ScanDir(ctx, dir) {
 }
 ```
 
+Both `HeaderInfo` and `SnapshotInfo` carry `CreatedAtTime() (time.Time, bool)`, which parses `CreatedAt` under RFC 3339. It reports `false` for an empty value **and** for a malformed one: a caller that only wants the timestamp cannot act on the difference, and one that guesses picks the zero time, which sorts first and silently corrupts any chronological ordering. A caller that must tell absent from corrupt tests `CreatedAt != ""` first.
+
+yammm writes UTC at second precision, so a time given to `WithCreatedAt` does not round-trip its sub-second part. The parser accepts more than yammm writes, deliberately — `UpdateMetadata` preserves a foreign header byte-for-byte, and fractional seconds and non-UTC offsets both parse under this layout and keep their offset.
+
+`FileSize` is populated whenever the file was opened, **including when its header then failed to parse** — a corrupt file still occupies disk, and a caller accounting for space needs the size before it branches on `Header`. When the header did parse, `Header.FileSize` repeats it. Neither case needs a compensating `os.Stat` per entry.
+
 **Error surface, in two categories:**
 
 - The iterator's second yielded value (the `error`) is non-nil ONLY for operation-level failures that end iteration: a dir-open error (`ENOENT`, `EACCES`, `ENOTDIR`, ...) is yielded as a single `(ScanEntry{}, err)` pair wrapping the underlying `os` error; context cancellation observed between files is yielded as `(ScanEntry{}, ctx.Err())`. The zero-value `ScanEntry` signals "no file was reached." Cancellation observed between files takes precedence over any concurrent per-file failure.
@@ -741,16 +767,16 @@ for entry, err := range snapshot.ScanDir(ctx, dir) {
 
 **Filtering:**
 
-- Only regular files (not directories) whose basename ends with `.ys` are included. Subdirectories are skipped even when their name ends with `.ys`.
+- Only regular files are included, whatever an entry is named: a directory, FIFO, socket, or device ending in `.ys` is skipped rather than opened. Of those, only basenames ending in `.ys` are scanned.
 - Files whose basename ends with `snapshot.TmpSuffix` are skipped — the atomic-write staging files that `WriteFile` may leave behind on crash. Both primitives key off the shared exported constant; the single source of truth keeps them from drifting.
-- Symlinks are followed; broken symlinks yield a per-file Fatal `E_SNAPSHOT_IO` entry with the underlying `os.Open` error surfaced as a detail.
+- Symlinks are followed: one is included when its target is a regular file and skipped when it is not. A broken symlink is included and yields a per-file Fatal `E_SNAPSHOT_IO` entry with the underlying `os.Open` error surfaced as a detail.
 - Entries are yielded in the order returned by `os.ReadDir`, which sorts by filename.
 
 **`ScanDirSlice` semantics:**
 
 `ScanDirSlice` materializes the full iteration into a slice plus an outer `diag.Result`. The outer Result surfaces operation-level errors only (dir does not exist → Fatal `E_SNAPSHOT_IO`; context cancellation → Fatal `E_CONTEXT_CANCELLED`); per-file errors remain on each `ScanEntry.Result`. Context cancellation returns *partial* results — the returned slice contains entries processed before cancellation, and callers who want fail-fast-on-cancel check `result.HasFatal()` before consuming the slice.
 
-**CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, header, issues}` JSON array. The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
+**CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, file_size, header, issues}` JSON array. The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
 
 ### Metadata Updates
 
@@ -779,7 +805,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 **Speedup.** On a 20 MB `.ys` input, the fast path runs ~50× faster than the equivalent `Load + Marshal` round trip on M2-class hardware (~10 ms vs ~570 ms). The lower-bound CI gate is 3×; absolute numbers will vary across hardware but the ratio is the stable invariant. The companion benchmark `BenchmarkUpdateMetadataRatio` reports the measured ratio via `b.ReportMetric("x-speedup")` on every `go test -bench` invocation.
 
-**Preserve-vs-override.** By default `UpdateMetadata` preserves the existing `created_at` byte-for-byte from the input header. Pass `WithUpdateCreatedAt(t)` to override; there is no other way to change `created_at` via the metadata-rewrite path. `metadata` itself is replaced entirely — there is no merge. Callers retrieve the current metadata via `HeaderOnly`, copy it, apply their changes, and pass the result.
+**Preserve-vs-override.** By default `UpdateMetadata` preserves the existing `created_at` byte-for-byte from the input header. Pass `WithUpdateCreatedAt(t)` to override; there is no other way to change `created_at` via the metadata-rewrite path. A **zero** `time.Time` preserves rather than overriding, matching what `Marshal` does with a zero `WithCreatedAt` — so a caller that parsed a timestamp and lost it cannot stamp `0001-01-01T00:00:00Z` over a good value. Do not read `created_at` and hand it back to preserve it: preservation is the default, and re-formatting rewrites a foreign header's fractional seconds and offset for no gain. Read the value with `CreatedAtTime()` and leave the option alone. `metadata` itself is replaced entirely — there is no merge. Callers retrieve the current metadata via `HeaderOnly`, copy it, apply their changes, and pass the result.
 
 **Failure modes.** The primitive returns structured diagnostics with stable codes:
 
@@ -806,7 +832,7 @@ The `diag` package implements YAMMM's five-level severity model. See [Severity L
 
 ### Result Methods
 
-A `Result` is produced by a `Collector` or, for the terminal one-shot case, by `diag.Collect(issues...)`. The issue iterators return `iter.Seq[Issue]`; collect a `[]Issue` with `slices.Collect(result.Errors())` when you need one.
+Every `Result` comes from a `Collector`. For the terminal one-shot case, collect into an unlimited collector and take its `Result()` immediately (`c := diag.NewCollector(0); c.Collect(issue); return nil, c.Result()`). The issue iterators return `iter.Seq[Issue]`; collect a `[]Issue` with `slices.Collect(result.Errors())` when you need one.
 
 ```go
 // Status checks
@@ -814,17 +840,13 @@ result.OK()             // No fatal or error issues
 result.HasErrors()      // Has fatal or error issues
 result.HasFatal()       // Has fatal issues
 result.HasWarnings()    // Has warning issues
-result.HasInfo()        // Has info issues
-result.HasHints()       // Has hint issues
 result.HasCode(code)    // Has an issue with the given code, at any severity
 result.LimitReached()   // Issue collection limit was reached
 
 // Issue access (returns iter.Seq[Issue]; use slices.Collect for a []Issue)
 result.Issues()                          // All collected issues
 result.Errors()                          // Fatal and error issues
-result.Warnings()                        // Warning issues
 result.BySeverity(diag.Warning)          // Issues at a specific severity
-result.IssuesAtLeastAsSevereAs(diag.Warning) // Issues at or above a threshold
 
 // Metadata
 result.Len()              // Total issue count
@@ -1053,6 +1075,34 @@ edgeQueries, err := adapter.BatchEdgeQueries(ctx, snap, shapes, writeOpts...)
 
 Both return query structs (`BatchNodeQuery`, `BatchEdgeQuery`) with `Statement` and `Params` fields, ready for driver execution.
 
+`BuildBatchRelationshipMergeQuery` returns the UNWIND-batched relationship MERGE template those edge queries use internally. It is exported for a consumer resolving edges the adapter write path cannot see — one whose edges cross datasets, for instance — that wants the template without the surrounding param-and-chunk plumbing. It is a pure function: no execution, no driver dependency, no side effects.
+
+```go
+stmt := neo4j.BuildBatchRelationshipMergeQuery(
+    "app__Author", []string{"author_id"},
+    "WROTE",
+    "app__Book", []string{"book_id"},
+    true, // append SET r += row.rel_props
+)
+```
+
+The `$rows` parameter carries each endpoint's key properties under two exported prefixes, which are the row shape's contract:
+
+| Constant | Value | Meaning |
+| -------- | ----- | ------- |
+| `RelFromRowPrefix` | `from_` | Prefix for the source endpoint's key properties in a row |
+| `RelToRowPrefix` | `to_` | Prefix for the target endpoint's key properties in a row |
+
+```go
+rows := []map[string]any{{
+    neo4j.RelFromRowPrefix + "author_id": "a-1",
+    neo4j.RelToRowPrefix + "book_id":     "b-1",
+    "rel_props": map[string]any{"year": int64(1954)},
+}}
+```
+
+Assemble rows through the constants rather than through literals. A prefix the consumer spells itself is a prefix nothing keeps in step, and a disagreement is silent: the MATCH binds null, merges nothing, and reports no error. The template always ends with `RETURN count(*) AS matched_rows`; see [Relationship match counting](#relationship-match-counting) for what that column does and does not tell you.
+
 ### Write Options
 
 | Option | Description |
@@ -1149,6 +1199,15 @@ diff := adapter.DiffIndexes(desired, actual, owned)
 
 Fulltext rows participate in that classification exactly as range and vector rows do — **with one exclusion**: a multi-label fulltext index (`FOR (n:A|B)`) is a shape no per-type annotation can declare, so it is never matched, never dropped, and never treated as serving a single-label declaration's definition (the server creates the declaration beside it); it is counted in `Excluded`, while its **name** still blocks every `CREATE`.
 
+Two predicates behind the index diff are exported, for a consumer that classifies remote rows itself:
+
+| Function | Description |
+| -------- | ----------- |
+| `DeclarableIndexType(remoteType)` | Whether a remote index type string names a kind the DSL can declare (RANGE, VECTOR, FULLTEXT, case-insensitively) |
+| `RemoteIndex.Declarable()` | The whole rule: a declarable kind, at most one label, no owning constraint, and entity type NODE or unreported |
+
+`DiffIndexes` applies the method. The kind-only function is the half a consumer wants when it enforces its own ownership and entity-type rules — adopting the full rule instead is a behavior change, not a subset, because the label-count guard and the ownership guard answer different questions. The constraint-side counterpart is a method on `Adapter` rather than on the remote value, because edition gating is part of its answer; the two are not parallel by design.
+
 `Unverified` holds indexes that exist on both sides but whose definition could **not** be compared — the database reported no readable vector configuration (the reason names which setting was unread), or the index is still `POPULATING`. A setting the database did disclose and that disagrees outranks a second setting being unreadable, so a demonstrably wrong dimension is reported as drift rather than downgraded to unverified. They are neither confirmed in sync nor confirmed drifted. A drift gate must therefore treat a non-empty `Unverified` as an incomplete check, not a pass:
 
 ```go
@@ -1191,6 +1250,14 @@ The introspection types are:
 | -------- | ----------- |
 | `SanitizeIdentifier(s)` | Escape a string for use as a Neo4j label or property name |
 | `ValidateIdentifier(name, context)` | Validate that a name is a legal Neo4j identifier |
+| `DropConstraintStatement(name)` | Render `DROP CONSTRAINT <name> IF EXISTS` |
+| `DropIndexStatement(name)` | Render `DROP INDEX <name> IF EXISTS` |
+| `Constraint.DropStatement()` | The same, from a generated constraint's `Name` |
+| `Index.DropStatement()` | The same, from a generated index's `Name` |
+
+The DROP builders take a name the database already holds — from introspection or a diff result — rather than one this package generated, so they quote instead of reject. A name that would pass `ValidateIdentifier` interpolates bare; any other non-empty name, a reserved word included, is backtick-quoted with embedded backticks doubled. Rejecting a reserved word would make the object undroppable, which is the opposite of the point. An empty or all-space name is an error wrapping `ErrEmptyIdentifier`, and `Constraint.DropStatement` returns it under `WithNamedConstraints(false)`, which leaves every `Name` empty.
+
+The caller owns the verb. Index and constraint names share one namespace, so the object blocking a desired constraint may be an index: `ConstraintDrift.Actual` with an empty `Type` and a non-empty `Name` is that case, and it needs `DropIndexStatement`. These functions build statements; they never execute one.
 
 Cypher reserved words are not reserved by the DSL: a property named `match` or a
 type named `MATCH` is valid yammm and exports cleanly through the JSON and CSV

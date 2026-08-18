@@ -143,7 +143,7 @@
 // always true for a schema returned by
 // [github.com/simon-lentz/yammm/schema.Load],
 // [github.com/simon-lentz/yammm/schema.LoadString],
-// [github.com/simon-lentz/yammm/schema.LoadSources], or
+// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry], or
 // [github.com/simon-lentz/yammm/schema.Builder.Build]. jschema does not
 // require a source-backed schema (nothing is embedded), so Builder-built
 // schemas are accepted.
@@ -153,8 +153,6 @@
 //   - [WithSchemaID]: set the document's "$id". Omitted entirely when unset —
 //     "$id" is optional in draft 2020-12 and there is no meaningful default
 //     URI for an arbitrary schema.
-//   - [WithTitle]: override the document title (default: the schema name).
-//   - [WithDescription]: override the generated top-level description.
 //
 // # Error Conditions
 //

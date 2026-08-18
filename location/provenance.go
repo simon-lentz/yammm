@@ -12,12 +12,12 @@ import (
 //
 // # Nil Receiver Behavior
 //
-// All Provenance methods are safe to call on nil receivers. Navigation methods
-// (WithPath, AtKey, AtIndex) convert nil to a new Provenance with the specified
-// path but empty source information:
+// All Provenance methods are safe to call on nil receivers. The navigation
+// methods AtKey and WithRawPath convert nil to a new Provenance carrying the
+// specified path and empty source information:
 //
 //	var prov *Provenance = nil
-//	derived := prov.AtKey("foo").AtIndex(0)  // Safe, returns valid Provenance
+//	derived := prov.AtKey("items").AtKey("name") // Safe, returns valid Provenance
 //
 // After any navigation operation on nil, sourceName and span will be zero values.
 // This is intentional: it preserves path navigation for diagnostics while indicating

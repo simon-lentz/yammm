@@ -229,7 +229,7 @@ func (r Result) TruncationNote() string {
 }
 
 // Limit returns the configured issue limit (0 means unlimited).
-// Use [LimitReached] to check if the limit was actually reached.
+// Use [Result.LimitReached] to check if the limit was actually reached.
 func (r Result) Limit() int {
 	return r.limit
 }

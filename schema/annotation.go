@@ -148,8 +148,8 @@ func newAnnotation(name string, args []AnnotationArg, doc string, span location.
 	return &Annotation{name: name, args: args, doc: doc, span: span, argsMalformed: argsMalformed}
 }
 
-// setDetachedFrom records that this annotation was written on a later line
-// than the property it binds to. See [Annotation.detachedFromLine].
+// setDetachedFrom records the line this annotation was written on, when that
+// is later than the line of the property it binds to. Zero means attached.
 func (a *Annotation) setDetachedFrom(line int) { a.detachedFrom = line }
 
 // Name returns the annotation name, without the @ / @@ sigil.

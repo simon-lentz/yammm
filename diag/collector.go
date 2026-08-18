@@ -96,10 +96,10 @@ func (c *Collector) Collect(issue Issue) {
 
 // CollectAll adds multiple issues efficiently under a single lock.
 //
-// This is more efficient than calling [Collect] multiple times when adding
-// many issues at once.
+// This is more efficient than calling [Collector.Collect] multiple times when
+// adding many issues at once.
 //
-// Panics if any issue is invalid (see [Collect]).
+// Panics if any issue is invalid (see [Collector.Collect]).
 func (c *Collector) CollectAll(issues []Issue) {
 	// Validate all issues before acquiring lock
 	for _, issue := range issues {
@@ -122,7 +122,7 @@ func (c *Collector) CollectAll(issues []Issue) {
 // package APIs that use Collector internally. Therefore, Merge does not
 // re-validate issues.
 //
-// This differs from [Collect] and [CollectAll], which actively validate
+// This differs from [Collector.Collect] and [Collector.CollectAll], which actively validate
 // each issue because they accept Issue values directly.
 //
 // A truncated res merges losslessly in aggregate: its dropped issues cannot be

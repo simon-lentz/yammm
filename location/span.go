@@ -54,8 +54,7 @@ func Range(source SourceID, startLine, startCol, endLine, endCol int) Span {
 // Panics if end < start (geometric soundness invariant). When byte offsets are
 // present, the byte comparison takes precedence over line/column comparison.
 // This means a span may be considered valid even if line/column ordering appears
-// inverted, as long as byte ordering is correct. Use [Span.IsConsistent] to
-// verify that both orderings agree before converting to LSP ranges.
+// inverted, as long as byte ordering is correct.
 func RangeWithBytes(source SourceID, startLine, startCol, startByte, endLine, endCol, endByte int) Span {
 	start := Position{Line: startLine, Column: startCol, Byte: startByte}
 	end := Position{Line: endLine, Column: endCol, Byte: endByte}
@@ -154,8 +153,8 @@ func (s Span) String() string {
 // The span is half-open: Start is inclusive, End is exclusive.
 //
 // Note: Point spans (where Start == End) contain no positions by definition
-// of the half-open interval. For LSP-style operations where you need to match
-// the exact position of a point span, use [Span.ContainsOrEquals] instead.
+// of the half-open interval. An LSP-style operation that must match the exact
+// position of a point span compares the positions itself.
 //
 // Precondition: span must be geometrically sound (IsGeometricallySafe).
 func (s Span) Contains(p Position) bool {

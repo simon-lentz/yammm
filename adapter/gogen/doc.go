@@ -29,7 +29,8 @@
 //   - One EDGE_ struct per declared association (see Associations and the Graph
 //     Aggregate).
 //   - A Graph aggregate (see Associations and the Graph Aggregate).
-//   - The embedded SerializedModel and SchemaHash (see SerializedModel).
+//   - The embedded SerializedModel and SchemaHash (see the SerializedModel
+//     section below).
 //
 // A type's or property's schema doc-comment is carried through verbatim as the Go
 // declaration's doc-comment.
@@ -143,8 +144,7 @@
 // true for a schema returned by [github.com/simon-lentz/yammm/schema.Load] or
 // [github.com/simon-lentz/yammm/schema.Builder.Build] — and it must be
 // source-backed: loaded via [github.com/simon-lentz/yammm/schema.Load],
-// [github.com/simon-lentz/yammm/schema.LoadString],
-// [github.com/simon-lentz/yammm/schema.LoadSources], or
+// [github.com/simon-lentz/yammm/schema.LoadString], or
 // [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry]. A schema assembled
 // programmatically through [github.com/simon-lentz/yammm/schema.NewBuilder] without
 // retained source content has no source for the SerializedModel and its round-trip
@@ -183,7 +183,7 @@
 // write-once behaviour — that a Go type does not express, and
 // [github.com/simon-lentz/yammm/adapter/neo4j] is where they are read.
 //
-// They do survive in [SerializedModel], which embeds the schema source
+// They do survive in the embedded SerializedModel, which holds the schema source
 // verbatim. A schema re-loaded from that constant therefore carries its
 // annotations, and the store DDL derived from the re-loaded schema matches the
 // DDL derived from the original files — the whole point of embedding the source

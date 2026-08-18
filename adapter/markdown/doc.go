@@ -63,8 +63,11 @@
 // with a display label instead.
 //
 // Relations render in the type sections as DSL-notation bullets with the
-// target linked to its section ("--> OWNER (one) [Person](#person)"); an
-// inherited relation carries a "— from <Owner>" marker naming its declaring
+// target linked to its section:
+//
+//	--> OWNER (one) [Person](#person)
+//
+// An inherited relation carries a "— from <Owner>" marker naming its declaring
 // ancestor, the same provenance the property table gives inherited rows. A
 // relation's edge properties nest as a sub-table under its bullet, and its
 // doc-comment as an indented line.
@@ -103,7 +106,7 @@
 // always true for a schema returned by
 // [github.com/simon-lentz/yammm/schema.Load],
 // [github.com/simon-lentz/yammm/schema.LoadString],
-// [github.com/simon-lentz/yammm/schema.LoadSources], or
+// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry], or
 // [github.com/simon-lentz/yammm/schema.Builder.Build]. Source backing is
 // optional (see Invariants).
 //

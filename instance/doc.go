@@ -65,10 +65,8 @@
 //
 // [NewValidator] accepts [Option] values to configure behavior:
 //
-//   - [WithLogger]: structured logger for validation diagnostics
 //   - [WithStrictPropertyNames]: reject properties not defined in the schema
 //   - [WithAllowUnknownFields]: allow extra properties without diagnostics
-//   - [WithMaxIssuesPerInstance]: cap diagnostics per instance
 //
 // # Thread Safety
 //

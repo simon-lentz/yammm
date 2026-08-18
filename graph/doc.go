@@ -64,10 +64,8 @@
 //	}
 //	// res.Snapshot is always non-nil; pass to Marshal / WriteFile / etc.
 //
-// CPU-bound consumers that profile validation as the hot path can opt
-// into [WithValidatorPool] for goroutine-parallel validator access; the
-// default mutex-serialized mode is correct for I/O-bound consumers.
-// See [BatchAssembler] for the full thread-safety contract.
+// One validator serves every goroutine, serialized through an internal
+// mutex. See [BatchAssembler] for the full thread-safety contract.
 //
 // To resume assembly on top of a previously-persisted snapshot,
 // construct the assembler with [NewBatchAssemblerFromSnapshot]: the
@@ -114,9 +112,9 @@
 //
 // # Graph Options
 //
-// [graph.New] accepts [Option] values:
-//
-//   - [WithLogger]: structured logger for graph construction diagnostics
+// [New] and [NewFromSnapshot] accept [Option] values. No options are defined
+// at present; the type is the extension point, and passing none is the only
+// call shape.
 //
 // # Type Identity and Type Names
 //
@@ -139,7 +137,6 @@
 //   - [Snapshot.Types]
 //   - [Snapshot.InstancesOf]
 //   - [Snapshot.InstanceByKey]
-//   - [Snapshot.Instances] map keys
 //   - [SnapshotParts.Types] and [SnapshotParts.Instances] map keys
 //   - the type fields on [EdgeParts], [DuplicateParts] and [UnresolvedParts]
 //   - [UnresolvedEdge.TargetType]
@@ -160,8 +157,9 @@
 //
 // Use [FormatKey] to construct lookup keys for [Snapshot.InstanceByKey].
 //
-// For composed children, [FormatComposedKey] and [ParseComposedKey] provide
-// identity encoding that handles all special characters safely.
+// For composed children, [FormatComposedKey] encodes an identity that handles
+// all special characters safely. It has no inverse: composed identities are
+// rendered by the writers and read back by nobody.
 //
 // # Error Handling
 //
@@ -194,7 +192,7 @@
 // All slice-returning [Snapshot] methods produce deterministically sorted output,
 // independent of [Graph.Add] call order or concurrency:
 //
-//   - [Snapshot.Types]: lexicographic by type name
+//   - [Snapshot.Types]: lexicographic by TypeID (schema path, then name)
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
 //   - [Snapshot.Duplicates]: lexicographic by (typeName, primaryKey)

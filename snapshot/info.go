@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
@@ -181,8 +182,11 @@ type HeaderInfo struct {
 	// the same streaming pass by decodeHeader).
 	Types []TypeRef
 
-	// File metadata.
-	FileSize int64 // len(data)
+	// FileSize is the document's size in bytes, or zero when unknown. Three
+	// cases: [HeaderOnly] reports len(data); [ScanDir] reports the file's size
+	// on disk; a bare [HeaderOnlyRead] reports zero, because a size is not
+	// knowable from an io.Reader.
+	FileSize int64
 }
 
 // HeaderOnly reads header metadata from a .ys file without decoding the
@@ -195,12 +199,12 @@ type HeaderInfo struct {
 // file size — a property that [Info] cannot offer because it populates
 // instance counts and diagnostic counts by scanning the body.
 //
-// HeaderOnlyRead reads through a reader capped at [MaxHeaderSize] and never
-// holds the body, so unlike [HeaderOnly] it cannot check the document's
-// outermost shape: a document whose sections are absent, repeated, out of
-// order, or followed by trailing bytes reads its header here without
-// complaint. It does not accept such a document by omission — it does not see
-// it. Use [HeaderOnly], [Verify] or [Load] when that matters.
+// HeaderOnly holds the whole document, so it checks the outermost shape:
+// sections absent, repeated, out of order, or followed by trailing bytes are
+// rejected here. [HeaderOnlyRead] and [ScanDir] read through a capped reader
+// and never hold the body, so they cannot make that check — and say so on
+// their own documentation rather than accepting a misshapen document
+// silently.
 //
 // Integrity is not verified. The returned [HeaderInfo.IntegrityHash] is
 // the value stored in the file, not a verification result. Callers that
@@ -288,9 +292,8 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // from a generic JSON-parse failure. Integrity is not verified (matching
 // [HeaderOnly]).
 //
-// Schema cross-check: unlike [HeaderOnly] documentation promises,
-// HeaderOnlyRead takes no schema parameter and performs no schema-hash
-// verification during the read. Dispatch callers compare
+// Schema cross-check: HeaderOnlyRead takes no schema parameter and performs
+// no schema-hash verification during the read, matching [HeaderOnly]. Dispatch callers compare
 // [HeaderInfo.SchemaHash] against their loaded schema themselves via the
 // [HeaderInfo.SchemaHashMatches] helper — a cheap string equality check
 // against schema.StructuralHash(s) that captures intent at dispatch
@@ -311,9 +314,17 @@ const MaxHeaderSize = 16 * 1024 * 1024
 //
 // Cost: proportional to the actual header size (typically < 1 KiB), not
 // the underlying file size. The returned [HeaderInfo.FileSize] is not
-// populated (zero value) in the reader variant — consumers that need
-// file size call os.Stat separately or use the []byte form via
-// [HeaderOnly].
+// populated (zero value) in the reader variant — a size is not knowable
+// from an io.Reader. Consumers that need one use the []byte form via
+// [HeaderOnly], or [ScanDir], which stats the handle it opened and fills
+// the field in for every entry it yields.
+//
+// Shape: HeaderOnlyRead reads through a reader capped at [MaxHeaderSize] and
+// never holds the body, so it cannot check the document's outermost shape. A
+// document whose sections are absent, repeated, out of order, or followed by
+// trailing bytes reads its header here without complaint. It does not accept
+// such a document by omission — it does not see it. Use [HeaderOnly], [Verify]
+// or [Load] when that matters.
 //
 // Returns (nil, result) with Error-severity diagnostics for malformed
 // input. Follows the library's standard (T, diag.Result) return pattern.
@@ -360,6 +371,26 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 	return info, sd.collector.Result()
 }
 
+// CreatedAtTime parses the header's CreatedAt field.
+//
+// It reports false when CreatedAt is empty and when it is malformed, because a
+// caller that only wants the timestamp cannot act on the difference and a
+// caller that guesses picks the zero time, which sorts first and silently
+// corrupts any chronological ordering. A caller that must tell absent from
+// corrupt tests CreatedAt != "" first, then calls this.
+//
+// The layout is RFC 3339. yammm writes UTC at second precision, so a time
+// passed to [WithCreatedAt] does not round-trip its sub-second part. The parser
+// accepts more than yammm writes, deliberately: [UpdateMetadata] preserves a
+// foreign header's bytes, and fractional seconds and non-UTC offsets both parse
+// under this layout and keep their offset in the result.
+func (h *HeaderInfo) CreatedAtTime() (time.Time, bool) {
+	if h == nil {
+		return time.Time{}, false
+	}
+	return parseCreatedAt(h.CreatedAt)
+}
+
 // SchemaHashMatches reports whether the header's SchemaHash equals the
 // structural hash of s under the same algorithm version. This is the
 // documented cross-check dispatch callers perform after [HeaderOnly] or
@@ -393,4 +424,21 @@ func (h *HeaderInfo) SchemaHashMatches(s *schema.Schema) bool {
 		return false
 	}
 	return h.SchemaHash == hash
+}
+
+// CreatedAtTime parses the header's CreatedAt field. See
+// [HeaderInfo.CreatedAtTime] for the empty-versus-malformed rule and the
+// precision the writers commit to.
+func (s SnapshotInfo) CreatedAtTime() (time.Time, bool) {
+	return parseCreatedAt(s.CreatedAt)
+}
+
+// parseCreatedAt is the one CreatedAt parser, so the two carriers cannot
+// disagree on what counts as a usable timestamp.
+func parseCreatedAt(createdAt string) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }

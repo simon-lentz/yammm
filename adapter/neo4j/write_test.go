@@ -1014,9 +1014,9 @@ func TestEdgeQueries_CoerceEndpointKeysFromAGraph(t *testing.T) {
 		t.Fatalf("got %d batch queries; want 1", len(batches))
 	}
 	rows := batches[0].Params["rows"].([]map[string]any)
-	if to := rows[0][relToRowPrefix+"created_on"]; !isDateValue(to) {
+	if to := rows[0][RelToRowPrefix+"created_on"]; !isDateValue(to) {
 		t.Errorf("BatchEdgeQueries row.%screated_on = %#v (%T); want dbtype.Date",
-			relToRowPrefix, to, to)
+			RelToRowPrefix, to, to)
 	}
 }
 

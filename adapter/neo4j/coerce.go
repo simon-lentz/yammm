@@ -17,6 +17,13 @@ import (
 //     float64 passes through. Repairs the JSON round-trip where a whole-number
 //     Float decodes as int64 and Neo4j rejects it against an IS :: FLOAT
 //     constraint. A non-numeric value is a coercion failure and returns an error.
+//   - Integer: any Go signed/unsigned integer width, or a whole float, -> int64;
+//     an int64 passes through. Repairs the inverse round-trip, where a decode
+//     without UseNumber leaves an Integer value as float64 and Neo4j sees a
+//     Cypher FLOAT against an IS :: INTEGER constraint — a MERGE that matches
+//     nothing and reports no error. A fractional float, or a value past the
+//     int64 range, is a coercion failure and returns an error, as it is on the
+//     list path ([coerceSlice]), which applies the same rule per element.
 //   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
 //     constraint's custom Go layout when it declares one (Timestamp["…"]) and
 //     against RFC3339 / RFC3339Nano otherwise; a time.Time passes through. A
@@ -31,7 +38,7 @@ import (
 //   - Every other (non-transforming) kind is already driver-native and passes
 //     through unchanged.
 //
-// The three transforming kinds above are strict: they error on a value they can
+// The four transforming kinds above are strict: they error on a value they can
 // neither pass through as already-native nor repair, rather than handing a
 // wrong-typed value to the driver. This matches the list path ([coerceSlice]),
 // which must build a homogeneous typed slice and errors on a wrong-typed element.
@@ -39,8 +46,9 @@ import (
 // already driver-native, so there is nothing to repair or reject, and instance
 // validation is their type authority. On the validated node path a transforming
 // kind only ever receives the types its strict set accepts (Float: float64, or
-// int64 after a snapshot round-trip; Timestamp: string or time.Time; Date:
-// string), so strictness can only newly fire on a hand-built direct-Cypher param.
+// int64 after a snapshot round-trip; Integer: int64; Timestamp: string or
+// time.Time; Date: string), so strictness can only newly fire on a hand-built
+// direct-Cypher param.
 //
 // Coerce takes the full [schema.Constraint] (not just its kind) so a Timestamp's
 // custom layout is honored; the constraint's alias chain is resolved internally.
@@ -139,7 +147,13 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 		default:
 			return raw, fmt.Errorf("coerce %s: cannot convert %T to a date (want a YYYY-MM-DD string, time.Time, or dbtype.Date)", kind, raw)
 		}
-	case schema.KindString, schema.KindInteger, schema.KindBoolean,
+	case schema.KindInteger:
+		n, ok := repairInt64(raw)
+		if !ok {
+			return raw, fmt.Errorf("coerce %s: cannot convert %T to int64", kind, raw)
+		}
+		return n, nil
+	case schema.KindString, schema.KindBoolean,
 		schema.KindUUID, schema.KindEnum, schema.KindPattern,
 		schema.KindVector, schema.KindList, schema.KindAlias:
 		// Driver-native scalars; collection kinds are coerced elementwise by

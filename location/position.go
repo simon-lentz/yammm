@@ -26,7 +26,8 @@ type Position struct {
 // Use -1 for byte to indicate an unknown byte offset.
 //
 // Values are stored as-is without validation or clamping. Negative values are
-// permitted but may produce unexpected results with [IsZero] and [IsKnown]:
+// permitted but may produce unexpected results with [Position.IsZero] and
+// [Position.IsKnown]:
 //   - Negative line/column: IsZero returns false (not 0,0), IsKnown returns false (not > 0)
 //   - Zero line or column: the position is considered partial/incomplete
 //

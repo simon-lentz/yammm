@@ -62,8 +62,8 @@
 // adapter → validator → graph pipeline. It carries the source name,
 // a [github.com/simon-lentz/yammm/location/path] builder for JSONPath-like
 // instance paths, and an optional [Span] for byte-level source location.
-// Create via [NewProvenance]; use [Provenance.AtKey] and [Provenance.AtIndex]
-// to extend the path during recursive parsing.
+// Create via [NewProvenance]; use [Provenance.AtKey] to extend the path during
+// recursive parsing.
 //
 // # PositionRegistry
 //

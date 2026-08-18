@@ -353,7 +353,7 @@ func TestVectorIndexConfig_TypesAndCasing(t *testing.T) {
 }
 
 // A constraint's backing index must carry owningConstraint, which is what makes
-// declarableRemoteIndex able to keep it out of the index diff. The adapter's own
+// RemoteIndex.Declarable able to keep it out of the index diff. The adapter's own
 // introspection query filters these server-side, so the assertion is made
 // against an unfiltered SHOW INDEXES — the shape a consumer using `YIELD *`
 // hands in.

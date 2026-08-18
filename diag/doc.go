@@ -12,7 +12,7 @@
 //     ([location.Span], instance path strings), never embedded in message strings.
 //   - Immutable results: [Result] stores issues in unexported fields and exposes
 //     them only through iterators ([Result.Issues], [Result.Errors],
-//     [Result.Warnings]); callers wanting a mutable slice take an explicit copy
+//     [Result.BySeverity]); callers wanting a mutable slice take an explicit copy
 //     via slices.Collect. The [Issue] accessors that return reference types
 //     ([Issue.Related], [Issue.Details]) return defensive copies.
 //   - Stable error codes: [Code] values are stable identifiers that tools can
@@ -61,13 +61,16 @@
 //
 // # Collection and Results
 //
-// For the terminal case — one or more already-built issues to return as a
-// Result — use [Collect]:
+// One [Collector] serves both shapes. For the terminal case — one or more
+// already-built issues to return as a Result — collect into an unlimited one
+// and take its Result immediately:
 //
-//	return nil, diag.Collect(issue)
+//	c := diag.NewCollector(0)
+//	c.Collect(issue)
+//	return nil, c.Result()
 //
-// For incremental or concurrent accumulation during validation, use a
-// [Collector]:
+// For incremental or concurrent accumulation during validation, hold the
+// [Collector] across the operation:
 //
 //	collector := diag.NewCollector(100) // limit of 100 issues
 //	collector.Collect(issue)

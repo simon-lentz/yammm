@@ -405,7 +405,7 @@ func (a *Adapter) declarableRemoteConstraint(rc RemoteConstraint) bool {
 	if rc.EntityType != "" && !strings.EqualFold(rc.EntityType, "NODE") {
 		return false
 	}
-	// The fold covers case (as [declarableRemoteIndex] does — the column is
+	// The fold covers case (as [RemoteIndex.Declarable] does — the column is
 	// canonically upper-case, but a case difference must not hide a declarable
 	// constraint from matching and dropping) and the cross-generation spelling
 	// of the uniqueness type. Both must be absorbed here and in

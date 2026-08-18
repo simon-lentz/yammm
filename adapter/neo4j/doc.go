@@ -109,6 +109,10 @@
 // unscoped (empty schema name) label mode. For export-compatibility
 // feedback before write time, run [Adapter.ConstraintsForSchema] AND
 // [Adapter.IndexesForSchema], or call [ValidateIdentifier] on names directly.
+// The DROP builders take the opposite path, because they take a name the
+// database already holds rather than one this package generated: a name that
+// fails validation, reserved word included, is backtick-quoted rather than
+// rejected — see [DropConstraintStatement].
 // Under the default configuration the constraint pass already checks every
 // property it emits a constraint for, which is all of them; under
 // [WithScalarTypeConstraints](false) or [WithRequiredOnlyTypeConstraints](true)

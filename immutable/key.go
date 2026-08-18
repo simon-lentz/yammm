@@ -96,7 +96,10 @@ func (k Key) Clone() []any {
 // This format is suitable for use as a map key and is compatible with
 // [graph.FormatKey] output. The string is precomputed at construction time.
 //
-// The invariant key.String() == graph.FormatKey(key.Clone()...) always holds.
+// The invariant key.String() == graph.FormatKey(key.Clone()...) holds for every
+// key built from components. It does not hold for a key built from none:
+// [Key.Clone] returns nil there, and spreading a nil slice through a variadic
+// parameter renders `null`, while String reports `[]`.
 //
 // Examples:
 //

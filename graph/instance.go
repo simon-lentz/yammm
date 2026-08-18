@@ -14,7 +14,7 @@ import (
 // concurrent read access from multiple goroutines.
 //
 // Instances are created internally by [Graph.Add] and [Graph.AddComposed].
-// They are accessed via [Snapshot.Instances], [Snapshot.InstancesOf], or
+// They are accessed via [Snapshot.AllInstances], [Snapshot.InstancesOf], or
 // [Snapshot.InstanceByKey].
 type Instance struct {
 	// typeName is the canonical instance tag form.
@@ -47,7 +47,10 @@ type Instance struct {
 // For imported types, returns the alias-qualified name (e.g., "c.Entity")
 // using the bound schema's import alias.
 //
-// This matches the string used in [Snapshot.Types] and [Snapshot.Instances] keys.
+// The name is a rendering, not an identity: two types in different schemas can
+// render the same name. [Snapshot.Types] returns
+// [github.com/simon-lentz/yammm/schema.TypeID] values for that reason, and
+// [github.com/simon-lentz/yammm/schema.TagForm] renders one as this form.
 func (i *Instance) TypeName() string {
 	if i == nil {
 		return ""

@@ -56,22 +56,37 @@ func buildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) st
 // contract cannot drift apart.
 const batchKeyParamPrefix = "key_"
 
-// The relationship endpoint-key prefixes, one pair per wire contract. Each
-// builder and its parameter assembler spell them through these constants for
-// the same reason [batchKeyParamPrefix] exists: a template reading a key the
-// assembler never writes yields a MATCH against null, which merges nothing and
-// reports no error.
+// The single-relationship endpoint-key prefixes. The builder and its parameter
+// assembler spell them through these constants for the same reason
+// [batchKeyParamPrefix] exists: a template reading a key the assembler never
+// writes yields a MATCH against null, which merges nothing and reports no error.
 //
 // The single and batch contracts genuinely differ — `$from_key_<name>` against
 // `row.from_<name>` — because they are separate published parameter shapes, not
 // because one of them is stale. Nothing in an edge row can collide with an
 // endpoint key (a row holds only the two key sets and `rel_props`), so the batch
-// form has no reason to carry the extra segment.
+// form has no reason to carry the extra segment. These two stay unexported: the
+// single-relationship template is internal, so nothing outside assembles its
+// params.
 const (
 	relFromKeyParamPrefix = "from_key_"
 	relToKeyParamPrefix   = "to_key_"
-	relFromRowPrefix      = "from_"
-	relToRowPrefix        = "to_"
+)
+
+// The row-key prefixes of [BuildBatchRelationshipMergeQuery]'s `$rows`
+// parameter. Each row carries the source endpoint's key properties under
+// RelFromRowPrefix and the target's under RelToRowPrefix:
+//
+//	{rows: [{from_<name>: v, to_<name>: v, [rel_props: map]}, ...]}
+//
+// They are exported because that shape is the builder's contract in all but
+// name: a consumer holding the template has to assemble rows that match it, and
+// a prefix it spells as a literal is a prefix nothing keeps in step. A
+// disagreement is silent — the MATCH binds null, merges nothing, and reports no
+// error.
+const (
+	RelFromRowPrefix = "from_"
+	RelToRowPrefix   = "to_"
 )
 
 // buildBatchNodeMergeQuery returns the UNWIND-batched variant of
@@ -220,7 +235,7 @@ func BuildBatchRelationshipMergeQuery(
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: row.%s%s", name, relFromRowPrefix, name)
+		fmt.Fprintf(&b, "%s: row.%s%s", name, RelFromRowPrefix, name)
 	}
 	b.WriteString("})\n")
 
@@ -231,7 +246,7 @@ func BuildBatchRelationshipMergeQuery(
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s: row.%s%s", name, relToRowPrefix, name)
+		fmt.Fprintf(&b, "%s: row.%s%s", name, RelToRowPrefix, name)
 	}
 	fmt.Fprintf(&b, "})\nMERGE (from)-[r:%s]->(to)", relType)
 

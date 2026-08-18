@@ -25,7 +25,8 @@ import (
 //	}
 var ErrAssemblerFinalized = errors.New("graph: BatchAssembler.Add called after Finalize")
 
-// BatchAssembler composes a [Validator] and a [Graph] into a single
+// BatchAssembler composes a
+// [github.com/simon-lentz/yammm/instance.Validator] and a [Graph] into a single
 // call-surface for the common pipeline pattern:
 //
 //	validator.ValidateOne(...) → graph.Add(...) → graph.Check(...) → graph.Snapshot()

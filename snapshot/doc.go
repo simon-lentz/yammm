@@ -120,7 +120,7 @@
 // it runs [UpdateMetadata] on the happy path and transparently falls
 // back to [Load] + [Marshal] on recoverable Fatals (body-offset
 // failure, malformed header, or any non-cancellation Fatal), surfacing
-// a Warning-severity [W_UPDATE_METADATA_FALLBACK] on the returned
+// a Warning-severity [diag.W_UPDATE_METADATA_FALLBACK] on the returned
 // [diag.Result] so operators can observe fallback frequency.
 //
 // [WithUpdateCreatedAt] overrides the created_at header field on

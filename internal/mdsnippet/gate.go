@@ -12,8 +12,8 @@ import (
 // It is an interface of this package's own rather than testing.TB itself
 // because testing.TB is deliberately unimplementable outside the standard
 // library, and a gate whose failure path is unreachable from a test is a gate
-// that can silently stop failing. This one is stubbed in gate_test.go to prove
-// each Assert actually reports when its condition is violated.
+// that can silently stop failing. This one is stubbed in this package's test to
+// prove each Assert actually reports when its condition is violated.
 type TB interface {
 	Helper()
 	Errorf(format string, args ...any)

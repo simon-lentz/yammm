@@ -32,7 +32,7 @@ type IndexDiffResult struct {
 	// multi-label FULLTEXT index, a relationship index, and a constraint's
 	// backing index are all left out even on an owned label: none is something
 	// a schema edit could account for, so reporting them would be drift that
-	// never clears. See [declarableRemoteIndex].
+	// never clears. See [RemoteIndex.Declarable].
 	Drop []RemoteIndex
 
 	// Unverified contains indexes that exist in both by semantic key but whose
@@ -173,7 +173,7 @@ func (a *Adapter) DiffIndexes(
 	var ownedRemotes []scoped[RemoteIndex]
 	for _, ri := range actual {
 		label, isOwned := owned.ownedLabel(ri.LabelsOrTypes)
-		if !isOwned || !declarableRemoteIndex(ri) {
+		if !isOwned || !ri.Declarable() {
 			result.Excluded++
 			continue
 		}
@@ -355,7 +355,7 @@ func desiredIndexKey(idx Index) string {
 // sort so composite order remains significant — mirroring [desiredIndexKey],
 // not [remoteSemanticKey].
 //
-// Type is upper-cased because [declarableRemoteIndex] admits it case-insensitively
+// Type is upper-cased because [RemoteIndex.Declarable] admits it case-insensitively
 // while [desiredIndexKey] embeds the canonical upper-case [indexKindToRemoteType].
 // Without the fold here an index the declarability gate accepts could never pair
 // by identity, so a remote realising a declared index would read as an unrelated
@@ -392,38 +392,69 @@ func indexKindToRemoteType(kind IndexKind) string {
 	}
 }
 
-// declarableRemoteIndex reports whether a remote index is one the schema could
-// have declared, and therefore one the diff owns.
+// DeclarableIndexType reports whether a remote index type string names a kind
+// the DSL can declare — RANGE, VECTOR, or FULLTEXT, case-insensitively.
 //
+// It is the kind half of [RemoteIndex.Declarable], for a consumer that
+// classifies by kind alone and enforces its own rules on ownership, label
+// count, and entity type. An empty type is not declarable: nothing identifies
+// what kind an unreported one is, and guessing would classify it against a
+// desired index of some other kind.
+func DeclarableIndexType(remoteType string) bool {
+	for _, k := range allIndexKinds {
+		if strings.EqualFold(remoteType, indexKindToRemoteType(k)) {
+			return true
+		}
+	}
+	return false
+}
+
+// Declarable reports whether a remote index is one a schema could have
+// declared, and therefore one [Adapter.DiffIndexes] owns.
+//
+// Four rules, all of which must hold.
+//
+// The kind must be one the DSL has vocabulary for — see [DeclarableIndexType].
 // SHOW INDEXES reports every non-LOOKUP, non-constraint-backed index on a
-// schema-owned label — including kinds the DSL has no vocabulary for (TEXT,
-// POINT, and the Neo4j 4.x-historical BTREE) and relationship indexes, which
-// the adapter never emits. Classifying one of those as an undeclared drop
-// would report drift that no schema edit could resolve, leaving the
-// all-or-nothing constraints-only mode as the only escape.
+// schema-owned label, including TEXT, POINT, and the Neo4j 4.x-historical
+// BTREE, and including relationship indexes, which the adapter never emits.
+// Classifying one of those as an undeclared drop would report drift that no
+// schema edit could resolve, leaving the all-or-nothing constraints-only mode
+// as the only escape. An unreported kind is deliberately not declarable, for
+// the reason [DeclarableIndexType] gives; such an object still blocks names,
+// because blockers are collected before this filter, so it is not invisible,
+// only unclassified.
 //
-// A multi-label node index — FULLTEXT is the only kind the server creates that
-// way (`FOR (n:A|B)`) — is likewise not declarable: an annotation is per-type,
-// so a declaration always targets exactly one label, and a multi-label object
-// is a different index the server creates a single-label declaration beside.
-// The guard is on the label count, not the kind, so a future
-// multi-label-capable kind cannot silently escape it. The row's NAME still
-// blocks every CREATE — blockers are collected before this filter.
+// The index must own at most one label. A multi-label node index — FULLTEXT is
+// the only kind the server creates that way (`FOR (n:A|B)`) — is not
+// declarable: an annotation is per-type, so a declaration always targets
+// exactly one label, and a multi-label object is a different index the server
+// creates a single-label declaration beside. The guard is on the label count,
+// not the kind, so a future multi-label-capable kind cannot silently escape it.
 //
-// A constraint's backing index is likewise not declarable: it is created and
-// dropped with its constraint, so reporting one as an undeclared orphan advises
-// dropping the index behind a primary key. [IntrospectIndexesQuery] yields those
-// rows deliberately — they are blockers the diff must see — so this check is the
-// only thing keeping them out of matches and drops.
+// The index must not back a constraint. A backing index is created and dropped
+// with its constraint, so reporting one as an undeclared orphan advises
+// dropping the index behind a primary key. [IntrospectIndexesQuery] yields
+// those rows deliberately — they are blockers the diff must see — so this check
+// is the only thing keeping them out of matches and drops.
 //
-// An unreported entityType is treated as NODE: the field is absent only where a
-// server or fixture does not report it, and every index the adapter emits is a
-// node index. The reverse — treating an unreadable entityType as
-// not-a-node-index — would silently drop real drift on any server whose driver
-// shape this package does not recognise, which is the worse failure: an
-// admitted relationship index is at most a spurious drop line, a dropped node
-// index is undetected drift.
-func declarableRemoteIndex(ri RemoteIndex) bool {
+// The entity type must be NODE or unreported. An unreported one is treated as
+// NODE: the field is absent only where a server or fixture does not report it,
+// and every index the adapter emits is a node index. The reverse — treating an
+// unreadable entityType as not-a-node-index — would silently drop real drift on
+// any server whose driver shape this package does not recognise, which is the
+// worse failure: an admitted relationship index is at most a spurious drop
+// line, a dropped node index is undetected drift.
+//
+// Both string comparisons fold case. The columns are canonically upper-case,
+// but a consumer assembling records from its own SHOW INDEXES mapping may
+// normalise them, and a case difference must not make a genuinely declarable
+// index invisible to matching and dropping.
+//
+// The constraint-side counterpart is a method on [Adapter] rather than on the
+// remote value, because edition gating is part of its answer. The two are not
+// parallel by design.
+func (ri RemoteIndex) Declarable() bool {
 	if ri.OwningConstraint != "" {
 		return false
 	}
@@ -433,23 +464,7 @@ func declarableRemoteIndex(ri RemoteIndex) bool {
 	if ri.EntityType != "" && !strings.EqualFold(ri.EntityType, "NODE") {
 		return false
 	}
-	// EqualFold, matching the EntityType comparison above: the column is
-	// canonically upper-case, but a consumer assembling records from its own
-	// SHOW INDEXES mapping may normalise it. A case difference must not make a
-	// genuinely declarable index invisible to matching and dropping.
-	//
-	// An unreported Type is deliberately NOT declarable: unlike EntityType, where
-	// every index the adapter emits is a node index so NODE is a safe default,
-	// nothing identifies what kind an unreported one is, and guessing would
-	// classify it against a desired index of some other kind. Such an object
-	// still blocks names — blockers are collected before this filter — so it is
-	// not invisible, only unclassified.
-	for _, k := range allIndexKinds {
-		if strings.EqualFold(ri.Type, indexKindToRemoteType(k)) {
-			return true
-		}
-	}
-	return false
+	return DeclarableIndexType(ri.Type)
 }
 
 // vectorConfigUnreadable reports whether a matched VECTOR index cannot be

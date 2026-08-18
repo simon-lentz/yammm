@@ -161,7 +161,7 @@ func IntrospectConstraintsQuery() string {
 // cannot be declared or dropped.
 //
 // Constraint-backing indexes are deliberately INCLUDED. They are never matched
-// or dropped — [declarableRemoteIndex] rejects them on
+// or dropped — [RemoteIndex.Declarable] rejects them on
 // [RemoteIndex.OwningConstraint] — but they block: a server silently no-ops a
 // CREATE INDEX whose name they hold, and also one whose (label, properties,
 // kind) they already serve. Excluding them here would put both blocks outside

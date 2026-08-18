@@ -41,7 +41,8 @@ func canonicalSourceID(path string) (location.SourceID, error) {
 // It captures the complete state needed for LSP features: parsed schema,
 // diagnostics, symbol indices, and source content for position conversion.
 //
-// Snapshots are created by [Analyzer.Analyze] and stored in [Workspace]
+// Snapshots are created by [Analyzer.Analyze] and stored in
+// [github.com/simon-lentz/yammm/lsp/internal/workspace.Workspace]
 // keyed by entry file URI. Each edit triggers a new snapshot, replacing
 // the previous one.
 type Snapshot struct {
@@ -202,7 +203,7 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //     has parse or validation errors, but analysis completed normally.
 //     The snapshot contains diagnostics describing the issues.
 //   - error == nil && snapshot.Result.OK(): Success. The schema is valid.
-//     The snapshot may still contain warnings (check Result.Warnings()).
+//     The snapshot may still contain warnings (check Result.HasWarnings()).
 //
 // The opts parameter accepts optional [schema.LoadOption] values that are forwarded
 // to [schema.LoadSourcesWithEntry]. For example, callers may pass

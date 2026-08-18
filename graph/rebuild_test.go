@@ -327,8 +327,8 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 // cardinality relation, where the rejected child and the slot's occupant
 // share no key: the conflict resolves by the slot address with an empty
 // stated key, never by matching the rejected child's own key.
-// [TestWireProbe_DuplicateOneSlotConflict] drives the same relation from the
-// wire side.
+// TestWireProbe_DuplicateOneSlotConflict in the snapshot package drives the
+// same relation from the wire side.
 func TestRebuildSnapshot_OneSlotConflictResolvesThroughSlot(t *testing.T) {
 	s := testSchemaWithOneComposition(t)
 	parentID := mustTypeID(t, s, "Parent")

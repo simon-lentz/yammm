@@ -192,10 +192,13 @@ func printHeaderInfo(w interface{ Write([]byte) (int, error) }, header *snapshot
 // per-file basename, header (nil on failure), and a compact list of
 // diagnostic codes + messages for any issues on the entry's Result.
 type dirEntryDTO struct {
-	Name   string               `json:"name"`
-	Path   string               `json:"path"`
-	Header *snapshot.HeaderInfo `json:"header"`
-	Issues []dirIssueDTO        `json:"issues,omitempty"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// FileSize repeats the header's when the header parsed, and carries the
+	// size alone when it did not — a corrupt file still occupies disk.
+	FileSize int64                `json:"file_size"`
+	Header   *snapshot.HeaderInfo `json:"header"`
+	Issues   []dirIssueDTO        `json:"issues,omitempty"`
 }
 
 type dirIssueDTO struct {
@@ -233,9 +236,10 @@ func runSnapshotInfoDir(cmd *cobra.Command, dirPath string, outputFormat cli.Out
 
 func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {
 	dto := dirEntryDTO{
-		Name:   entry.Name,
-		Path:   entry.Path,
-		Header: entry.Header,
+		Name:     entry.Name,
+		Path:     entry.Path,
+		FileSize: entry.FileSize,
+		Header:   entry.Header,
 	}
 	for iss := range entry.Result.Issues() {
 		dto.Issues = append(dto.Issues, dirIssueDTO{

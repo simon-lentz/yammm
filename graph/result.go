@@ -25,9 +25,10 @@ import (
 //   - [Snapshot.Duplicates]: (type, primaryKey)
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType, targetKey)
 //
-// The [Snapshot.Instances] map has non-deterministic iteration order per Go semantics.
-// For deterministic iteration, use [Snapshot.AllInstances] (iterator) or
-// Types() + InstancesOf() (slice-based).
+// No instance map is exposed, so there is no iteration order to be surprised
+// by: [Snapshot.AllInstances] yields every root instance in the order above,
+// and [Snapshot.Types] with [Snapshot.InstancesOf] walks the same order a
+// slice at a time.
 type Snapshot struct {
 	// schema is the schema used for validation.
 	schema *schema.Schema

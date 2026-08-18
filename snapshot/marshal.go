@@ -13,7 +13,6 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -620,22 +619,20 @@ func assembleIndented(headerJSON, typesJSON, instancesJSON, diagJSON []byte, ind
 
 // parseTargetKey parses an UnresolvedEdge.TargetKey string into []any.
 // TargetKey is in Key.String() canonical form: e.g., `["c99"]` or `[1]`.
+//
+// A key this cannot parse yields nil rather than an error: an unresolved edge
+// carries the key it was written with, and a wire assembler has no better
+// answer than "no components" for one it cannot read. [graph.ParseKey] owns the
+// parsing, so the module holds one decoder rather than two that can drift.
 func parseTargetKey(keyStr string) []any {
 	if keyStr == "" || keyStr == "[]" {
 		return nil
 	}
-	// UseNumber, so an integer component beyond 2^53 is not rewritten by a
-	// float64 round trip on its way to the wire.
-	dec := json.NewDecoder(strings.NewReader(keyStr))
-	dec.UseNumber()
-	var result []any
-	if err := dec.Decode(&result); err != nil {
+	values, err := graph.ParseKey(keyStr)
+	if err != nil {
 		return nil
 	}
-	for i, v := range result {
-		result[i] = immutable.NormalizeValue(v)
-	}
-	return result
+	return values
 }
 
 // writeJSONString writes a JSON-encoded string to a strings.Builder.

@@ -23,7 +23,7 @@ const (
 )
 
 // allIndexKinds lists every [IndexKind], for the code that must enumerate the
-// enum rather than switch on one value — notably [declarableRemoteIndex],
+// enum rather than switch on one value — notably [RemoteIndex.Declarable],
 // deciding which remote index types the diff owns. A kind missing from this
 // list is invisible to the diff: its remote indexes are reported neither as
 // matched nor as a drop, and the operator sees a clean diff while a whole class

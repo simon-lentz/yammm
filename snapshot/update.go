@@ -78,12 +78,13 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //	if res.HasErrors() { return res.Err() }
 //	newMeta := maps.Clone(header.Metadata)
 //	newMeta["pipeline_completed"] = "true"
-//	var opts []snapshot.UpdateOption
-//	if header.CreatedAt != "" {
-//	    t, _ := time.Parse(time.RFC3339, header.CreatedAt)
-//	    opts = append(opts, snapshot.WithUpdateCreatedAt(t))
-//	}
-//	out, res := snapshot.UpdateMetadata(ctx, data, newMeta, opts...)
+//	out, res := snapshot.UpdateMetadata(ctx, data, newMeta)
+//
+// Pass no option for created_at. Preservation is the default, and it is
+// byte-for-byte: parsing the field and handing it back re-formats it, which
+// rewrites a foreign header's fractional seconds and offset for no gain. A
+// caller that needs the timestamp as a value reads it with
+// [HeaderInfo.CreatedAtTime] and leaves the option alone.
 //
 // UpdateMetadata copies the body bytes verbatim and does not validate what
 // they contain: it re-verifies no integrity hash, resolves no schema, and
@@ -206,7 +207,11 @@ func UpdateMetadata(
 	// Apply option overrides and preserve/override CreatedAt.
 	cfg := applyUpdateOptions(opts)
 	createdAt := sd.header.CreatedAt // byte-for-byte preserve by default
-	if cfg.createdAtSet {
+	// A zero time preserves rather than stamping 0001-01-01T00:00:00Z over a
+	// good value. Marshal's config path drops a zero WithCreatedAt for the same
+	// reason; without this the two disagree on one option's zero value, and the
+	// caller that lost its timestamp has no way to tell which path ran.
+	if cfg.createdAtSet && !cfg.createdAt.IsZero() {
 		createdAt = cfg.createdAt.UTC().Format(time.RFC3339)
 	}
 

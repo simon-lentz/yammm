@@ -137,7 +137,6 @@ Validate raw data against a loaded schema. Produces immutable `ValidInstance` va
 import "github.com/simon-lentz/yammm/instance"
 
 v := instance.NewValidator(s,
-    instance.WithLogger(logger),
     instance.WithStrictPropertyNames(true),
     instance.WithAllowUnknownFields(false),
 )
@@ -207,7 +206,7 @@ Build an instance graph from validated instances. The graph tracks associations,
 ```go
 import "github.com/simon-lentz/yammm/graph"
 
-g := graph.New(s, graph.WithLogger(logger))
+g := graph.New(s)
 
 // Add validated instances
 for _, inst := range validInstances {

@@ -42,15 +42,15 @@ func (i Issue) Code() Code {
 
 // Message returns the human-readable description.
 //
-// Messages should not contain embedded locations; use [Span], [SourceName],
-// and [Path] for location information.
+// Messages should not contain embedded locations; use [Issue.Span],
+// [Issue.SourceName], and [Issue.Path] for location information.
 func (i Issue) Message() string {
 	return i.message
 }
 
 // Span returns the source location span.
 //
-// Use [HasSpan] to check if the span is present, or check span.IsZero().
+// Use [Issue.HasSpan] to check if the span is present, or check span.IsZero().
 func (i Issue) Span() location.Span {
 	return i.span
 }
@@ -171,7 +171,7 @@ func (i Issue) Clone() Issue {
 //     [Code.IsZero] is true.
 //   - "path" (string): the canonical instance path. Omitted when empty.
 //   - "location" (group): {source, line, column} derived from the issue's
-//     span. Omitted when [HasSpan] is false.
+//     span. Omitted when [Issue.HasSpan] is false.
 //   - "hint" (string): the optional remediation hint. Omitted when empty.
 //   - "details" (group): the issue's [Detail] key-value pairs emitted as
 //     sub-attributes. Omitted when no details are present.
@@ -182,7 +182,7 @@ func (i Issue) Clone() Issue {
 //	    slog.Any("issue", issue))
 //
 // For the issues-slice shape surfaced by [ContextualError.LogValue],
-// each entry is materialized via [issueLogMap] (not [LogValue]) so that
+// each entry is materialized via [issueLogMap] (not [Issue.LogValue]) so that
 // [slog.JSONHandler] and other encoding/json-based handlers render a
 // JSON array of objects; slog does not recurse through [slog.LogValuer]
 // within slice elements.

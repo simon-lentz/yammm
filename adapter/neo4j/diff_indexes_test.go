@@ -247,7 +247,7 @@ func TestDiffIndexes_UndeclaredRangeStillDrops(t *testing.T) {
 //
 // The sweep is the whole point. Asking allIndexKinds what to check makes the
 // list agree with itself and proves nothing: the failure that matters is a kind
-// present in the mapper and ABSENT from the list, which declarableRemoteIndex
+// present in the mapper and ABSENT from the list, which RemoteIndex.Declarable
 // then stops recognising, silently dropping every remote index of that kind out
 // of the diff. So this asks the mapper instead, over a numeric range far wider
 // than the enum, and catches a new kind wherever it is placed — below
@@ -275,7 +275,7 @@ func TestIndexKind_EnumerationIsComplete(t *testing.T) {
 	for _, k := range mapped {
 		if !slices.Contains(allIndexKinds, k) {
 			t.Errorf("IndexKind %d maps to %q but is missing from allIndexKinds; "+
-				"declarableRemoteIndex would silently drop its remote indexes from the diff",
+				"RemoteIndex.Declarable would silently drop its remote indexes from the diff",
 				k, indexKindToRemoteType(k))
 		}
 	}
@@ -286,7 +286,7 @@ func TestIndexKind_EnumerationIsComplete(t *testing.T) {
 	}
 }
 
-// Every mapped kind must have a distinct remote type string: declarableRemoteIndex
+// Every mapped kind must have a distinct remote type string: RemoteIndex.Declarable
 // and the identity keys both compare on it, so two kinds sharing one string
 // would make a remote index of one match a desired index of the other.
 func TestIndexKind_RemoteTypesAreDistinct(t *testing.T) {

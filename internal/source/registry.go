@@ -118,7 +118,7 @@ func (r *Registry) ContentBySource(sourceID location.SourceID) ([]byte, bool) {
 // Content returns raw bytes for a source identified by the span's Source field.
 //
 // This method implements [diag.SourceProvider]. It extracts span.Source and
-// delegates to [ContentBySource].
+// delegates to [Registry.ContentBySource].
 //
 // The returned slice is a defensive copy. Callers may safely modify it
 // without affecting the registry.
