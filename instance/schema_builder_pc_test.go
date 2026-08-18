@@ -156,64 +156,6 @@ func TestEdgeStateFor_ShapeMismatch_NamesFirstUse(t *testing.T) {
 	}
 }
 
-// TestComposed_ChildLocators_AreParallelToChildren pins that callerPCs stays
-// index-aligned with children, so a failing child's error names the Composed
-// call that added THAT child.
-//
-// The correspondence had no coverage before: reversing the index survives every
-// other test in the package, because the existing composition tests add a single
-// child and any index resolves to the same PC. Two children added from two
-// distinct source lines is the smallest shape that can tell them apart.
-func TestComposed_ChildLocators_AreParallelToChildren(t *testing.T) {
-	t.Parallel()
-	s := pcTestSchema(t)
-	parent, err := BuilderFor(s, "Person")
-	if err != nil {
-		t.Fatalf("BuilderFor: %v", err)
-	}
-	good, err := BuilderFor(s, "Address")
-	if err != nil {
-		t.Fatalf("BuilderFor(Address): %v", err)
-	}
-	bad, err := BuilderFor(s, "Address")
-	if err != nil {
-		t.Fatalf("BuilderFor(Address): %v", err)
-	}
-	good.Property("id", "a1")
-	bad.Property("id", "a2").Property("nope", "x") // fails at the child's Build
-
-	parent.Property("id", "p1").Property("name", "Alice")
-
-	// Each Composed call is preceded by its own runtime.Caller(0), so the
-	// expected line is always "the line after this one" — no offset arithmetic
-	// that a later edit to the test body could silently invalidate.
-	_, _, goodMark, ok := runtime.Caller(0)
-	parent.Composed("addresses", good)
-	goodLine := goodMark + 1
-
-	_, _, badMark, ok2 := runtime.Caller(0)
-	parent.Composed("addresses", bad)
-	badLine := badMark + 1
-
-	if !ok || !ok2 {
-		t.Fatal("runtime.Caller failed")
-	}
-	if _, err = parent.Build(); err == nil {
-		t.Fatal("expected the failing child to surface")
-	}
-	msg := err.Error()
-
-	want := "schema_builder_pc_test.go:" + strconv.Itoa(badLine)
-	if !strings.Contains(msg, want) {
-		t.Errorf("error = %q,\nwant the locator of the Composed call that added the FAILING child (%s)", msg, want)
-	}
-	notWant := "schema_builder_pc_test.go:" + strconv.Itoa(goodLine)
-	if strings.Contains(msg, notWant) {
-		t.Errorf("error = %q,\nnames the Composed call for the SUCCEEDING child (%s); the "+
-			"callerPCs slice is no longer index-aligned with children", msg, notWant)
-	}
-}
-
 // TestSchemaBuilder_SuccessPath_IsAllocationFree is the ratchet for this change.
 // The whole point of storing a PC is that a successful builder call allocates
 // nothing for a locator it will never render; re-introducing eager symbolization

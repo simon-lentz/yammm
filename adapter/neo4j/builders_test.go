@@ -17,7 +17,7 @@ const returnCountSuffix = "\nRETURN count(*) AS matched_rows"
 
 func TestBuildNodeMergeQuery_MutableKeys_Golden(t *testing.T) {
 	t.Parallel()
-	got := BuildNodeMergeQuery("ns__Type", []string{"a", "b"}, MutableKeys)
+	got := buildNodeMergeQuery("ns__Type", []string{"a", "b"}, MutableKeys)
 	want := "MERGE (n:ns__Type {a: $key_a, b: $key_b})\nSET n += $props"
 	if got != want {
 		t.Errorf("MutableKeys shape mismatch\n got: %q\nwant: %q", got, want)
@@ -29,7 +29,7 @@ func TestBuildNodeMergeQuery_MutableKeys_Golden(t *testing.T) {
 
 func TestBuildNodeMergeQuery_ImmutableKeys_Golden(t *testing.T) {
 	t.Parallel()
-	got := BuildNodeMergeQuery("ns__Type", []string{"a", "b"}, ImmutableKeys)
+	got := buildNodeMergeQuery("ns__Type", []string{"a", "b"}, ImmutableKeys)
 	want := "MERGE (n:ns__Type {a: $key_a, b: $key_b})\n" +
 		"ON CREATE SET n += $props\n" +
 		"ON MATCH SET n += $update_props"
@@ -40,7 +40,7 @@ func TestBuildNodeMergeQuery_ImmutableKeys_Golden(t *testing.T) {
 
 func TestBuildBatchNodeMergeQuery_MutableKeys_Golden(t *testing.T) {
 	t.Parallel()
-	got := BuildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, MutableKeys)
+	got := buildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, MutableKeys)
 	want := "UNWIND $rows AS row\n" +
 		"MERGE (n:ns__Type {a: row.key_a, b: row.key_b})\n" +
 		"SET n += row.props"
@@ -54,7 +54,7 @@ func TestBuildBatchNodeMergeQuery_MutableKeys_Golden(t *testing.T) {
 
 func TestBuildBatchNodeMergeQuery_ImmutableKeys_Golden(t *testing.T) {
 	t.Parallel()
-	got := BuildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, ImmutableKeys)
+	got := buildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, ImmutableKeys)
 	want := "UNWIND $rows AS row\n" +
 		"MERGE (n:ns__Type {a: row.key_a, b: row.key_b})\n" +
 		"ON CREATE SET n += row.props\n" +
@@ -77,7 +77,7 @@ func TestBuildBatchNodeMergeQuery_ImmutableKeys_Golden(t *testing.T) {
 func TestBuildRelationshipMergeQuery_ReturnSuffix(t *testing.T) {
 	t.Parallel()
 	for _, hasProps := range []bool{false, true} {
-		got := BuildRelationshipMergeQuery(
+		got := buildRelationshipMergeQuery(
 			"A", []string{"x"},
 			"KNOWS",
 			"B", []string{"y"},
@@ -92,7 +92,7 @@ func TestBuildRelationshipMergeQuery_ReturnSuffix(t *testing.T) {
 func TestBuildBatchRelationshipMergeQuery_ReturnSuffix(t *testing.T) {
 	t.Parallel()
 	for _, hasProps := range []bool{false, true} {
-		got := BuildBatchRelationshipMergeQuery(
+		got := buildBatchRelationshipMergeQuery(
 			"A", []string{"x"},
 			"KNOWS",
 			"B", []string{"y"},
@@ -106,7 +106,7 @@ func TestBuildBatchRelationshipMergeQuery_ReturnSuffix(t *testing.T) {
 
 func TestBuildRelationshipMergeQuery_NoProps_Golden(t *testing.T) {
 	t.Parallel()
-	got := BuildRelationshipMergeQuery(
+	got := buildRelationshipMergeQuery(
 		"A", []string{"x"},
 		"KNOWS",
 		"B", []string{"y"},
@@ -126,7 +126,7 @@ func TestBuildRelationshipMergeQuery_NoProps_Golden(t *testing.T) {
 
 func TestBuildRelationshipMergeQuery_WithProps_Golden(t *testing.T) {
 	t.Parallel()
-	got := BuildRelationshipMergeQuery(
+	got := buildRelationshipMergeQuery(
 		"A", []string{"x"},
 		"KNOWS",
 		"B", []string{"y"},
@@ -144,7 +144,7 @@ func TestBuildRelationshipMergeQuery_WithProps_Golden(t *testing.T) {
 
 func TestBuildBatchRelationshipMergeQuery_NoProps_Golden(t *testing.T) {
 	t.Parallel()
-	got := BuildBatchRelationshipMergeQuery(
+	got := buildBatchRelationshipMergeQuery(
 		"A", []string{"x"},
 		"KNOWS",
 		"B", []string{"y"},
@@ -162,7 +162,7 @@ func TestBuildBatchRelationshipMergeQuery_NoProps_Golden(t *testing.T) {
 
 func TestBuildBatchRelationshipMergeQuery_WithProps_Golden(t *testing.T) {
 	t.Parallel()
-	got := BuildBatchRelationshipMergeQuery(
+	got := buildBatchRelationshipMergeQuery(
 		"A", []string{"x"},
 		"KNOWS",
 		"B", []string{"y"},
@@ -182,7 +182,7 @@ func TestBuildBatchRelationshipMergeQuery_WithProps_Golden(t *testing.T) {
 func TestBuildNodeMergeQuery_NoReturn(t *testing.T) {
 	t.Parallel()
 	for _, km := range []KeyMutability{MutableKeys, ImmutableKeys} {
-		got := BuildNodeMergeQuery("Entity", []string{"id"}, km)
+		got := buildNodeMergeQuery("Entity", []string{"id"}, km)
 		if strings.Contains(got, "RETURN") {
 			t.Errorf("km=%d: nodes must stay RETURN-free, got: %q", km, got)
 		}
@@ -192,7 +192,7 @@ func TestBuildNodeMergeQuery_NoReturn(t *testing.T) {
 func TestBuildBatchNodeMergeQuery_NoReturn(t *testing.T) {
 	t.Parallel()
 	for _, km := range []KeyMutability{MutableKeys, ImmutableKeys} {
-		got := BuildBatchNodeMergeQuery("Entity", []string{"id"}, km)
+		got := buildBatchNodeMergeQuery("Entity", []string{"id"}, km)
 		if strings.Contains(got, "RETURN") {
 			t.Errorf("km=%d: batch nodes must stay RETURN-free, got: %q", km, got)
 		}
@@ -208,7 +208,7 @@ func TestBuildBatchNodeMergeQuery_NoReturn(t *testing.T) {
 
 func TestBuildNodeMergeQuery_CompositeKeys(t *testing.T) {
 	t.Parallel()
-	got := BuildNodeMergeQuery("X", []string{"a", "b", "c"}, MutableKeys)
+	got := buildNodeMergeQuery("X", []string{"a", "b", "c"}, MutableKeys)
 	want := "MERGE (n:X {a: $key_a, b: $key_b, c: $key_c})\nSET n += $props"
 	if got != want {
 		t.Errorf("composite keys mismatch\n got: %q\nwant: %q", got, want)
@@ -217,7 +217,7 @@ func TestBuildNodeMergeQuery_CompositeKeys(t *testing.T) {
 
 func TestBuildBatchNodeMergeQuery_CompositeKeys(t *testing.T) {
 	t.Parallel()
-	got := BuildBatchNodeMergeQuery("X", []string{"a", "b", "c"}, MutableKeys)
+	got := buildBatchNodeMergeQuery("X", []string{"a", "b", "c"}, MutableKeys)
 	want := "UNWIND $rows AS row\n" +
 		"MERGE (n:X {a: row.key_a, b: row.key_b, c: row.key_c})\n" +
 		"SET n += row.props"
@@ -228,7 +228,7 @@ func TestBuildBatchNodeMergeQuery_CompositeKeys(t *testing.T) {
 
 func TestBuildRelationshipMergeQuery_CompositeKeys(t *testing.T) {
 	t.Parallel()
-	got := BuildRelationshipMergeQuery(
+	got := buildRelationshipMergeQuery(
 		"Src", []string{"a", "b"},
 		"REL",
 		"Tgt", []string{"x", "y"},
@@ -245,7 +245,7 @@ func TestBuildRelationshipMergeQuery_CompositeKeys(t *testing.T) {
 
 func TestBuildBatchRelationshipMergeQuery_CompositeKeys(t *testing.T) {
 	t.Parallel()
-	got := BuildBatchRelationshipMergeQuery(
+	got := buildBatchRelationshipMergeQuery(
 		"Src", []string{"a", "b"},
 		"REL",
 		"Tgt", []string{"x", "y"},

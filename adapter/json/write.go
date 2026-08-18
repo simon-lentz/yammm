@@ -1,7 +1,6 @@
 package json
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -18,8 +16,7 @@ type WriteOption func(*writeConfig)
 
 // writeConfig holds configuration for JSON serialization.
 type writeConfig struct {
-	indent             string
-	includeDiagnostics bool
+	indent string
 }
 
 // WithIndent sets the indentation string for pretty-printing.
@@ -28,15 +25,6 @@ type writeConfig struct {
 func WithIndent(indent string) WriteOption {
 	return func(c *writeConfig) {
 		c.indent = indent
-	}
-}
-
-// WithDiagnostics includes unresolved edges and duplicates in the output
-// under a "$diagnostics" key. This is disabled by default and intended
-// for debugging or diagnostic purposes.
-func WithDiagnostics(include bool) WriteOption {
-	return func(c *writeConfig) {
-		c.includeDiagnostics = include
 	}
 }
 
@@ -50,15 +38,19 @@ func WithDiagnostics(include bool) WriteOption {
 //	}
 //
 // Instances include their properties, composed children (inline), and foreign key
-// references for resolved associations. Use WithDiagnostics(true) to include
-// unresolved edges and duplicates in a "$diagnostics" section.
+// references for resolved associations.
 //
-// Returns ErrNilResult if result is nil.
+// Returns ErrNilResult if result is nil. When two types in the snapshot
+// render the same output name, returns an error naming both identities — a
+// name-keyed object cannot separate them.
 //
 //nolint:revive // ctx reserved for future use (cancellation, tracing)
 func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
 	if result == nil {
 		return nil, ErrNilResult
+	}
+	if err := renderedNameCollision(result); err != nil {
+		return nil, err
 	}
 
 	cfg := &writeConfig{}
@@ -66,7 +58,7 @@ func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opt
 		opt(cfg)
 	}
 
-	output := a.buildOutput(result, cfg)
+	output := a.buildOutput(result)
 
 	var data []byte
 	var err error
@@ -100,147 +92,32 @@ func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Sn
 	return int64(n), err
 }
 
-// MarshalInstance serializes a single ValidInstance to JSON bytes.
-//
-// Unlike [Adapter.MarshalObject] (which operates on a complete [*graph.Snapshot]),
-// this method works directly with a [*instance.ValidInstance]. It serializes:
-//   - Properties from [instance.ValidInstance.Properties]
-//   - FK references from [instance.ValidInstance.Edges] (as inline key arrays)
-//   - Composed children from [instance.ValidInstance.Compositions] (recursively)
-//
-// The schemaType determines field names and cardinality for edges and compositions.
-// If schemaType is nil, relation names are used as field names and all edge
-// collections are serialized as arrays.
-//
-// Returns [ErrNilInstance] if inst is nil.
-//
-//nolint:revive // ctx reserved for future use (cancellation, tracing)
-func (a *Adapter) MarshalInstance(
-	ctx context.Context,
-	inst *instance.ValidInstance,
-	schemaType *schema.Type,
-	opts ...WriteOption,
-) ([]byte, error) {
-	if inst == nil {
-		return nil, ErrNilInstance
-	}
-
-	cfg := &writeConfig{}
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
-	obj := serializeValidInstance(inst, schemaType)
-
-	var data []byte
-	var err error
-	if cfg.indent != "" {
-		data, err = json.MarshalIndent(obj, "", cfg.indent)
-	} else {
-		data, err = json.Marshal(obj)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("json marshal: %w", err)
-	}
-	return data, nil
-}
-
-// serializeValidInstance converts a ValidInstance to a JSON-serializable map.
-// This parallels [serializeInstance] but operates on ValidInstance directly,
-// reading edges and compositions from the instance's own data rather than
-// from a resolved graph snapshot.
-func serializeValidInstance(inst *instance.ValidInstance, schemaType *schema.Type) map[string]any {
-	obj := make(map[string]any)
-
-	// 1. Properties in sorted order for deterministic output.
-	for name, val := range inst.Properties().SortedRange() {
-		obj[name] = unwrapValue(val)
-	}
-
-	// 2. FK references from edges.
-	for relationName, edgeData := range inst.Edges() {
-		fieldName := relationName
-		isMany := true // default to array when schema unavailable
-		if schemaType != nil {
-			rel, ok := schemaType.Relation(relationName)
-			if !ok || rel.Kind() != schema.RelationAssociation {
-				continue
-			}
-			fieldName = rel.FieldName()
-			isMany = rel.IsMany()
+// renderedNameCollision reports an error when two type identities in the
+// snapshot render one output name. The rendering is lossy where the snapshot
+// is not, so the writer refuses rather than silently merging the pair.
+func renderedNameCollision(snap *graph.Snapshot) error {
+	s := snap.Schema()
+	seen := make(map[string]schema.TypeID)
+	for _, id := range snap.Types() {
+		name := schema.TagForm(s, id)
+		if first, ok := seen[name]; ok {
+			return fmt.Errorf("json adapter: type %s and type %s both render object key %q, so the output object cannot separate them",
+				first, id, name)
 		}
-
-		targets := edgeData.Targets()
-		if len(targets) == 0 {
-			continue
-		}
-
-		if isMany {
-			fks := make([]any, len(targets))
-			for i := range targets {
-				fks[i] = targets[i].TargetKey().Clone()
-			}
-			obj[fieldName] = fks
-		} else {
-			// Single cardinality: inline the key directly.
-			obj[fieldName] = targets[0].TargetKey().Clone()
-		}
+		seen[name] = id
 	}
-
-	// 3. Composed children.
-	for relationName, composedValue := range inst.Compositions() {
-		fieldName := relationName
-		isMany := true // default to array when schema unavailable
-		if schemaType != nil {
-			rel, ok := schemaType.Relation(relationName)
-			if !ok {
-				continue
-			}
-			fieldName = rel.FieldName()
-			isMany = rel.IsMany()
-		}
-
-		// Compositions wrap *instance.ValidInstance children inside immutable.Slice.
-		// Child schema type resolution is not available from the parent's
-		// *schema.Type alone, so children serialize with nil schemaType
-		// (properties still serialize; nested relation field names use raw names).
-		unwrapped := composedValue.Unwrap()
-		if slice, ok := unwrapped.(immutable.Slice); ok {
-			if isMany {
-				children := make([]map[string]any, 0, slice.Len())
-				for i := range slice.Len() {
-					childValid, ok := slice.Get(i).Unwrap().(*instance.ValidInstance)
-					if !ok {
-						continue
-					}
-					children = append(children, serializeValidInstance(childValid, nil))
-				}
-				obj[fieldName] = children
-			} else if slice.Len() > 0 {
-				if childValid, ok := slice.Get(0).Unwrap().(*instance.ValidInstance); ok {
-					obj[fieldName] = serializeValidInstance(childValid, nil)
-				}
-			}
-			continue
-		}
-
-		// Defensive: bare *ValidInstance (not wrapped in slice).
-		if childValid, ok := unwrapped.(*instance.ValidInstance); ok {
-			obj[fieldName] = serializeValidInstance(childValid, nil)
-		}
-	}
-
-	return obj
+	return nil
 }
 
 // buildOutput constructs the JSON-serializable output map from a graph snapshot.
-func (a *Adapter) buildOutput(result *graph.Snapshot, cfg *writeConfig) map[string]any {
+func (a *Adapter) buildOutput(result *graph.Snapshot) map[string]any {
 	output := make(map[string]any)
 	s := result.Schema()
 
 	// Iterate types in sorted order for deterministic output
-	for _, typeName := range result.Types() {
-		instances := result.InstancesOf(typeName)
+	for _, typeID := range result.Types() {
+		typeName := schema.TagForm(s, typeID)
+		instances := result.InstancesOf(typeID)
 		serialized := make([]map[string]any, 0, len(instances))
 
 		for _, inst := range instances {
@@ -251,36 +128,20 @@ func (a *Adapter) buildOutput(result *graph.Snapshot, cfg *writeConfig) map[stri
 		output[typeName] = serialized
 	}
 
-	// Optionally include diagnostics
-	if cfg.includeDiagnostics {
-		diag := serializeDiagnostics(result, s)
-		if len(diag) > 0 {
-			output["$diagnostics"] = diag
-		}
-	}
-
 	return output
 }
 
-// lookupType resolves a TypeID to its schema.Type by checking local types and imports.
+// lookupType resolves a TypeID to its schema.Type across the entry schema's
+// whole import closure. Identity, not name: a transitively imported type has
+// no alias to qualify with, so a name-keyed walk of local types and direct
+// imports cannot reach it.
 func lookupType(s *schema.Schema, id schema.TypeID) (*schema.Type, bool) {
 	if s == nil {
 		return nil, false
 	}
-
-	// Check local types
-	if id.SchemaPath() == s.SourceID() {
-		return s.Type(id.Name())
-	}
-
-	// Check imported schemas
-	for imp := range s.Imports() {
-		if imp.Schema() != nil && imp.Schema().SourceID() == id.SchemaPath() {
-			return imp.Schema().Type(id.Name())
-		}
-	}
-
-	return nil, false
+	// TypeByID indexes the whole import closure. Walking direct imports found
+	// no transitively imported type, which the v3 wire preserves through Load.
+	return s.TypeByID(id)
 }
 
 // serializeInstance converts a graph.Instance to a JSON-serializable map.
@@ -394,68 +255,4 @@ func unwrapValue(v immutable.Value) any {
 
 	// Primitives: return directly
 	return v.Unwrap()
-}
-
-// serializeDiagnostics creates the $diagnostics section with unresolved edges and duplicates.
-func serializeDiagnostics(result *graph.Snapshot, s *schema.Schema) map[string]any {
-	diag := make(map[string]any)
-
-	// Serialize unresolved edges
-	unresolved := result.Unresolved()
-	if len(unresolved) > 0 {
-		unresolvedArr := make([]map[string]any, len(unresolved))
-		for i, u := range unresolved {
-			// Get field name from schema if available
-			fieldName := u.Relation // fallback to relation name
-			if schemaType, ok := lookupType(s, u.Source.TypeID()); ok {
-				if rel, ok := schemaType.Relation(u.Relation); ok {
-					fieldName = rel.FieldName()
-				}
-			}
-			unresolvedArr[i] = map[string]any{
-				"source_type": u.Source.TypeName(),
-				"source_key":  u.Source.PrimaryKey().Clone(),
-				"relation":    fieldName,
-				"target_type": u.TargetType,
-				"target_key":  parseKeyString(u.TargetKey),
-			}
-		}
-		diag["unresolved"] = unresolvedArr
-	}
-
-	// Serialize duplicates
-	duplicates := result.Duplicates()
-	if len(duplicates) > 0 {
-		duplicatesArr := make([]map[string]any, len(duplicates))
-		for i, d := range duplicates {
-			duplicatesArr[i] = map[string]any{
-				"type":         d.Instance.TypeName(),
-				"key":          d.Instance.PrimaryKey().Clone(),
-				"conflict_key": d.Conflict.PrimaryKey().Clone(),
-			}
-		}
-		diag["duplicates"] = duplicatesArr
-	}
-
-	return diag
-}
-
-// parseKeyString parses a canonical key string back to []any.
-// Returns the original string wrapped in a slice if parsing fails.
-// Uses UseNumber to preserve integer types in diagnostic keys.
-func parseKeyString(s string) []any {
-	var result []any
-	dec := json.NewDecoder(bytes.NewReader([]byte(s)))
-	dec.UseNumber()
-	if err := dec.Decode(&result); err != nil {
-		// Fallback: return string as single-element slice
-		return []any{s}
-	}
-	// Normalize json.Number to int64/float64
-	for i, v := range result {
-		if num, ok := v.(json.Number); ok {
-			result[i] = immutable.NormalizeNumber(num)
-		}
-	}
-	return result
 }

@@ -1,10 +1,13 @@
 package snapshot
 
 import (
+	"cmp"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,19 +17,17 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Marshal serializes a Snapshot to the yammm snapshot persistence format (.ys).
-//
-// The output is deterministic by default: serializing the same snapshot with
-// the same options always produces identical bytes, enabling content-addressable
-// storage and diff-based comparison. The created_at header field is omitted by
-// default; use [WithCreatedAt] to opt in to a timestamp.
-//
-// Context cancellation: Marshal checks ctx.Err() at the start and once per
-// type during instance iteration. On cancellation, Marshal returns
-// (nil, result) where result contains a Fatal-severity E_CONTEXT_CANCELLED
-// diagnostic.
-//
-// Panics if snap is nil (programming error).
+// Marshal serializes a Snapshot to the yammm snapshot persistence format
+// (.ys). Output is deterministic by default — created_at is omitted unless
+// [WithCreatedAt] opts in — so one snapshot and one option set always
+// produce identical bytes. Marshal checks ctx.Err() at the start and once
+// per type group during emission, returning Fatal E_CONTEXT_CANCELLED on
+// cancellation; a caller-assembled state the writer cannot serialize
+// returns nil bytes with Fatal E_INTERNAL, and a snapshot built through
+// [graph.Graph] or [Load] never triggers that path. A snapshot nested deeper
+// than the reader accepts returns nil bytes with Error
+// E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises,
+// so the bound reads identically from both sides. Panics if snap is nil.
 func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap == nil {
 		panic("snapshot.Marshal: nil Snapshot")
@@ -44,113 +45,35 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 	schemaHash := schema.StructuralHash(s)
 	schemaSource := s.SourceID().String()
 
-	// Step 2: Serialize payload sections.
-	// Types array.
-	types := snap.Types()
-	if types == nil {
-		types = []string{}
-	}
+	// Step 2: Read the snapshot once, then serialize the payload sections —
+	// identity lives in the types table, every other position is a row index.
+	view := newWriterView(snap)
+	tt := buildTypeTable(view)
 
-	// Instances map.
-	instancesMap := make(map[string][]instWire, len(types))
-	var allEdgeParts []edgeCollected
-	for _, typeName := range types {
-		if err := ctx.Err(); err != nil {
+	groups, err := marshalInstances(ctx, view, s, tt)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
 			c := diag.NewCollector(0)
-			c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+			c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, ctxErr.Error()).Build())
 			return nil, c.Result()
 		}
-		instances := snap.InstancesOf(typeName)
-		wires := make([]instWire, 0, len(instances))
-		for _, inst := range instances {
-			w := marshalInstance(inst, snap, schemaSource, typeName)
-			// Collect edges from EdgesFrom for the global edge sort.
-			edges := snap.EdgesFrom(inst)
-			for _, e := range edges {
-				allEdgeParts = append(allEdgeParts, edgeCollected{edge: e})
-			}
-			wires = append(wires, w)
-		}
-		instancesMap[typeName] = wires
-	}
-	_ = allEdgeParts // edges are serialized per-instance, not globally
-
-	// Diagnostics section.
-	dups := snap.Duplicates()
-	dupWires := make([]dupWire, 0, len(dups))
-	for _, d := range dups {
-		dw := dupWire{
-			Type:     d.Instance.TypeName(),
-			Key:      d.Instance.PrimaryKey().Clone(),
-			Instance: marshalDuplicateInstance(d.Instance, schemaSource),
-		}
-		dupWires = append(dupWires, dw)
+		return nil, marshalFatalErr("instances", err)
 	}
 
-	unresolved := snap.Unresolved()
-	unresolvedWires := make([]unresolvedWire, 0, len(unresolved))
-	for _, u := range unresolved {
-		uw := unresolvedWire{
-			SourceType: u.Source.TypeName(),
-			SourceKey:  u.Source.PrimaryKey().Clone(),
-			Relation:   u.Relation,
-			TargetType: u.TargetType,
-			Required:   u.Required,
-			Reason:     u.Reason,
-		}
-		// TargetKey: null for "absent"/"empty", parsed array for "target_missing".
-		// Properties: populated only for "target_missing" — "absent" and
-		// "empty" describe a missing-or-empty target reference that never
-		// had a target to attach properties to. omitempty on the wire
-		// keeps those entries compact (no empty {} emitted).
-		switch u.Reason {
-		case "absent", "empty":
-			uw.TargetKey = nil
-		default:
-			uw.TargetKey = parseTargetKey(u.TargetKey)
-			uw.Properties = u.Properties().Clone()
-		}
-		unresolvedWires = append(unresolvedWires, uw)
+	diags, err := marshalDiagnostics(view, s, tt)
+	if err != nil {
+		return nil, marshalFatalErr("diagnostics", err)
 	}
 
-	diags := diagWire{
-		Duplicates: dupWires,
-		Unresolved: unresolvedWires,
-	}
-	if diags.Duplicates == nil {
-		diags.Duplicates = []dupWire{}
-	}
-	if diags.Unresolved == nil {
-		diags.Unresolved = []unresolvedWire{}
-	}
-
-	// Step 2 continued: Serialize each section to JSON.
-	var typesJSON, instancesJSON, diagJSON []byte
-	var marshalErr error
-
-	if cfg.indent != "" {
-		typesJSON, marshalErr = json.MarshalIndent(types, "  ", cfg.indent) //nolint:errchkjson // []string is always safe
-	} else {
-		typesJSON, marshalErr = json.Marshal(types) //nolint:errchkjson // []string is always safe
-	}
+	typesJSON, marshalErr := marshalSection(tt.entries, cfg.indent)
 	if marshalErr != nil {
 		return nil, marshalFatalErr("types", marshalErr)
 	}
-
-	if cfg.indent != "" {
-		instancesJSON, marshalErr = json.MarshalIndent(instancesMap, "  ", cfg.indent)
-	} else {
-		instancesJSON, marshalErr = json.Marshal(instancesMap)
-	}
+	instancesJSON, marshalErr := marshalSection(groups, cfg.indent)
 	if marshalErr != nil {
 		return nil, marshalFatalErr("instances", marshalErr)
 	}
-
-	if cfg.indent != "" {
-		diagJSON, marshalErr = json.MarshalIndent(diags, "  ", cfg.indent)
-	} else {
-		diagJSON, marshalErr = json.Marshal(diags)
-	}
+	diagJSON, marshalErr := marshalSection(diags, cfg.indent)
 	if marshalErr != nil {
 		return nil, marshalFatalErr("diagnostics", marshalErr)
 	}
@@ -170,8 +93,299 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 	return assembleDocument(
 		schemaHash, s.Name(), schemaSource, createdAt, features, metadata,
 		typesJSON, instancesJSON, diagJSON,
-		cfg.indent,
+		cfg.indent, currentVersion,
 	)
+}
+
+// marshalSection serializes one body section, compact or indented.
+func marshalSection(v any, indent string) ([]byte, error) {
+	var data []byte
+	var err error
+	if indent != "" {
+		data, err = json.MarshalIndent(v, indent, indent)
+	} else {
+		data, err = json.Marshal(v)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("encode: %w", err)
+	}
+	return data, nil
+}
+
+// writerGroup is one types-table row's root instances, filed by each
+// instance's own identity.
+type writerGroup struct {
+	id        schema.TypeID
+	instances []*graph.Instance
+}
+
+// writerView is one read of the snapshot the writer emits from, so the table
+// pass and the emit pass see the same data without re-walking the snapshot's
+// defensive-copy accessors.
+type writerView struct {
+	groups     []writerGroup
+	edges      map[*graph.Instance][]*graph.Edge
+	duplicates []*graph.Duplicate
+	unresolved []*graph.UnresolvedEdge
+}
+
+// newWriterView reads the snapshot once. Instances are grouped by their own
+// TypeID — the filing key is a container detail, and an instance whose group
+// differs from its identity would otherwise be silently rebound on load —
+// and a type the snapshot holds with no instances keeps an empty group.
+func newWriterView(snap *graph.Snapshot) *writerView {
+	// Types returns a fresh defensive copy per call, so it is taken once.
+	snapTypes := snap.Types()
+
+	byID := make(map[schema.TypeID][]*graph.Instance)
+	order := make([]schema.TypeID, 0, len(snapTypes))
+	edges := make(map[*graph.Instance][]*graph.Edge)
+
+	addGroup := func(id schema.TypeID) {
+		if _, ok := byID[id]; !ok {
+			byID[id] = nil
+			order = append(order, id)
+		}
+	}
+
+	for _, typeID := range snapTypes {
+		addGroup(typeID)
+		for _, inst := range snap.InstancesOf(typeID) {
+			id := inst.TypeID()
+			addGroup(id)
+			byID[id] = append(byID[id], inst)
+			if es := snap.EdgesFrom(inst); len(es) > 0 {
+				edges[inst] = es
+			}
+		}
+	}
+
+	groups := make([]writerGroup, 0, len(order))
+	for _, id := range order {
+		insts := byID[id]
+		slices.SortFunc(insts, func(a, b *graph.Instance) int {
+			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
+		})
+		groups = append(groups, writerGroup{id: id, instances: insts})
+	}
+	slices.SortFunc(groups, func(a, b writerGroup) int {
+		return cmp.Compare(a.id.String(), b.id.String())
+	})
+
+	return &writerView{
+		groups:     groups,
+		edges:      edges,
+		duplicates: snap.Duplicates(),
+		unresolved: snap.Unresolved(),
+	}
+}
+
+// marshalInstances builds the instances section: one entry per group, in
+// table-row order. A type denoted only as a reference target has no group
+// and no entry.
+func marshalInstances(ctx context.Context, view *writerView, s *schema.Schema, tt *typeTable) ([]instanceGroupWire, error) {
+	groups := make([]instanceGroupWire, 0, len(view.groups))
+	for _, group := range view.groups {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("marshalling instances: %w", err)
+		}
+		row, err := tt.rowRef(group.id, "instance type")
+		if err != nil {
+			return nil, err
+		}
+		items := make([]instWire, 0, len(group.instances))
+		for _, inst := range group.instances {
+			w, err := marshalInstance(inst, view.edges[inst], s, tt, false, 0)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, w)
+		}
+		groups = append(groups, instanceGroupWire{Type: row, Items: items})
+	}
+	return groups, nil
+}
+
+// marshalInstance converts an instance to its wire form. carryType is false
+// only where the position already denotes the type: a root instance (its
+// group entry) and a duplicate's rejected instance (its record).
+func marshalInstance(
+	inst *graph.Instance,
+	edges []*graph.Edge,
+	s *schema.Schema,
+	tt *typeTable,
+	carryType bool,
+	depth int,
+) (instWire, error) {
+	// The same bound the reader enforces, so Marshal never writes a document
+	// Load and Verify refuse whole.
+	if depth > maxComposedDepth {
+		return instWire{}, &depthExceededError{
+			depth: depth,
+			id:    inst.TypeID(),
+			key:   inst.PrimaryKey().String(),
+		}
+	}
+	id := inst.TypeID()
+	t, _ := s.TypeByID(id)
+	w := instWire{
+		Key:        inst.PrimaryKey().Clone(),
+		Properties: wireProps(inst.Properties(), t),
+	}
+
+	if carryType {
+		row, err := tt.rowRef(id, "instance type")
+		if err != nil {
+			return instWire{}, err
+		}
+		w.Type = row
+	}
+
+	if len(edges) > 0 {
+		edgeMap := make(map[string][]edgeWire)
+		for _, e := range edges {
+			var rel *schema.Relation
+			if t != nil {
+				rel, _ = t.Relation(e.Relation())
+			}
+			row, err := tt.rowRef(e.Target().TypeID(), "edge target")
+			if err != nil {
+				return instWire{}, err
+			}
+			ew := edgeWire{
+				TargetType: row,
+				TargetKey:  e.Target().PrimaryKey().Clone(),
+				Properties: wireEdgeProps(e.Properties(), rel),
+			}
+			if ew.Properties == nil {
+				ew.Properties = map[string]any{}
+			}
+			edgeMap[e.Relation()] = append(edgeMap[e.Relation()], ew)
+		}
+		w.Edges = edgeMap
+	}
+
+	compRels := inst.ComposedRelations()
+	if len(compRels) > 0 {
+		compMap := make(map[string][]instWire, len(compRels))
+		for _, relName := range compRels {
+			children := inst.Composed(relName)
+			childWires := make([]instWire, 0, len(children))
+			for _, child := range children {
+				cw, err := marshalInstance(child, nil, s, tt, true, depth+1)
+				if err != nil {
+					return instWire{}, err
+				}
+				childWires = append(childWires, cw)
+			}
+			compMap[relName] = childWires
+		}
+		w.Composed = compMap
+	}
+
+	w.Provenance = marshalProvenance(inst)
+	return w, nil
+}
+
+// marshalDiagnostics builds the diagnostics section. Every duplicate record
+// states its conflict's address; the graph API guarantees the invariants
+// checked here, so a violation is a caller-assembled inconsistency.
+func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diagWire, error) {
+	dupWires := make([]dupWire, 0, len(view.duplicates))
+	for _, d := range view.duplicates {
+		row, err := tt.rowRef(d.Instance.TypeID(), "duplicate type")
+		if err != nil {
+			return diagWire{}, err
+		}
+		inst, err := marshalInstance(d.Instance, nil, s, tt, false, 0)
+		if err != nil {
+			return diagWire{}, err
+		}
+		if d.Conflict == nil {
+			return diagWire{}, fmt.Errorf("duplicate %s[%s] carries no conflict instance",
+				d.Instance.TypeID(), d.Instance.PrimaryKey())
+		}
+		conflictRow, err := tt.rowRef(d.Conflict.TypeID(), "duplicate conflict type")
+		if err != nil {
+			return diagWire{}, err
+		}
+		conflict := &conflictWire{Type: conflictRow}
+		if key := d.Conflict.PrimaryKey(); key.Len() > 0 {
+			conflict.Key = key.Clone()
+		}
+		dw := dupWire{
+			Type:     row,
+			Key:      d.Instance.PrimaryKey().Clone(),
+			Instance: inst,
+			Conflict: conflict,
+		}
+		if d.Relation != "" {
+			if d.Parent == nil {
+				return diagWire{}, fmt.Errorf("duplicate %s[%s] carries relation %q with no parent",
+					d.Instance.TypeID(), d.Instance.PrimaryKey(), d.Relation)
+			}
+			parentRow, err := tt.rowRef(d.Parent.TypeID(), "duplicate parent type")
+			if err != nil {
+				return diagWire{}, err
+			}
+			dw.ParentType = parentRow
+			dw.ParentKey = d.Parent.PrimaryKey().Clone()
+			dw.Relation = d.Relation
+		}
+		dupWires = append(dupWires, dw)
+	}
+
+	unresWires := make([]unresolvedWire, 0, len(view.unresolved))
+	for _, u := range view.unresolved {
+		if u.Source == nil {
+			return diagWire{}, fmt.Errorf("unresolved edge record for relation %q carries no source instance", u.Relation)
+		}
+		sourceID := u.Source.TypeID()
+		sourceRow, err := tt.rowRef(sourceID, "unresolved source type")
+		if err != nil {
+			return diagWire{}, err
+		}
+		targetRow, err := tt.rowRef(u.TargetType, "unresolved target type")
+		if err != nil {
+			return diagWire{}, err
+		}
+		uw := unresolvedWire{
+			SourceType: sourceRow,
+			SourceKey:  u.Source.PrimaryKey().Clone(),
+			Relation:   u.Relation,
+			TargetType: targetRow,
+			Required:   u.Required,
+			Reason:     u.Reason,
+		}
+		switch u.Reason {
+		case "absent", "empty":
+			uw.TargetKey = nil
+		default:
+			uw.TargetKey = parseTargetKey(u.TargetKey)
+			var rel *schema.Relation
+			if srcType, ok := s.TypeByID(sourceID); ok {
+				rel, _ = srcType.Relation(u.Relation)
+			}
+			uw.Properties = wireEdgeProps(u.Properties(), rel)
+		}
+		unresWires = append(unresWires, uw)
+	}
+
+	return diagWire{Duplicates: dupWires, Unresolved: unresWires}, nil
+}
+
+// marshalProvenance converts an instance's provenance to its wire form,
+// preferring the raw path a failed parse preserved.
+func marshalProvenance(inst *graph.Instance) *provenanceWire {
+	prov := inst.Provenance()
+	if prov == nil {
+		return nil
+	}
+	pathStr := prov.RawPath()
+	if pathStr == "" {
+		pathStr = prov.Path().String()
+	}
+	return &provenanceWire{SourceName: prov.SourceName(), Path: pathStr}
 }
 
 // assembleDocument builds the full .ys document with integrity hash.
@@ -179,26 +393,25 @@ func assembleDocument(
 	schemaHash, schemaName, schemaSource, createdAt string,
 	features []string, metadata map[string]string,
 	typesJSON, instancesJSON, diagJSON []byte,
-	indent string,
+	indent string, version int,
 ) ([]byte, diag.Result) {
 	// Step 3-5: Build canonical-form document (integrity_hash = "").
 	canonBytes := buildDocument(
 		schemaHash, schemaName, schemaSource, createdAt, features, metadata,
 		"", // integrity_hash placeholder
 		typesJSON, instancesJSON, diagJSON,
-		indent,
+		indent, version,
 	)
 
 	// Step 6: Compute integrity hash.
-	h := sha256.Sum256(canonBytes)
-	integrityHash := fmt.Sprintf("sha256:%x", h)
+	integrityHash := sha256Sum(canonBytes)
 
 	// Step 7: Re-assemble with computed hash.
 	finalBytes := buildDocument(
 		schemaHash, schemaName, schemaSource, createdAt, features, metadata,
 		integrityHash,
 		typesJSON, instancesJSON, diagJSON,
-		indent,
+		indent, version,
 	)
 
 	return finalBytes, diag.OK()
@@ -210,7 +423,7 @@ func buildDocument(
 	features []string, metadata map[string]string,
 	integrityHash string,
 	typesJSON, instancesJSON, diagJSON []byte,
-	indent string,
+	indent string, version int,
 ) []byte {
 	hdr := marshalHeaderWire{
 		SchemaName:    schemaName,
@@ -223,8 +436,8 @@ func buildDocument(
 	}
 
 	// Build the header JSON with version and schema_hash_algorithm as
-	// literal constants, matching the headerWire field order exactly.
-	headerJSON := buildHeaderBytes(hdr, indent)
+	// parameters, matching the headerWire field order exactly.
+	headerJSON := buildHeaderBytes(hdr, indent, version, currentHashAlgoVersion)
 
 	if indent != "" {
 		return assembleIndented(headerJSON, typesJSON, instancesJSON, diagJSON, indent)
@@ -232,29 +445,26 @@ func buildDocument(
 	return assembleCompact(headerJSON, typesJSON, instancesJSON, diagJSON)
 }
 
-// buildHeaderBytes returns the JSON-encoded header object, selecting
-// between compact and indented form based on the indent parameter.
-// Shared between buildDocument (the Marshal path) and UpdateMetadata
-// (the metadata-rewrite fast path); both paths must produce byte-identical
-// headers given the same marshalHeaderWire + indent inputs so the
-// body-byte-range stability contract holds across both primitives.
-func buildHeaderBytes(hdr marshalHeaderWire, indent string) []byte {
+// buildHeaderBytes returns the JSON-encoded header object, compact or
+// indented per the indent parameter. Version and hashAlgo are parameters
+// because UpdateMetadata reuses its input's body verbatim, so writing the
+// current constants there would relabel an older body.
+func buildHeaderBytes(hdr marshalHeaderWire, indent string, version, hashAlgo int) []byte {
 	if indent != "" {
-		return buildHeaderIndented(hdr, indent)
+		return buildHeaderIndented(hdr, indent, version, hashAlgo)
 	}
-	return buildHeaderCompact(hdr)
+	return buildHeaderCompact(hdr, version, hashAlgo)
 }
 
 // buildHeaderCompact produces the header object JSON in compact mode.
-// Fields are written in headerWire declaration order with version and
-// schema_hash_algorithm as literal constants.
-func buildHeaderCompact(hdr marshalHeaderWire) []byte {
+// Fields are written in headerWire declaration order.
+func buildHeaderCompact(hdr marshalHeaderWire, version, hashAlgo int) []byte {
 	var b strings.Builder
 	b.WriteByte('{')
 
-	// version (literal constant)
+	// version
 	b.WriteString(`"version":`)
-	fmt.Fprintf(&b, "%d", currentVersion)
+	fmt.Fprintf(&b, "%d", version)
 
 	// schema_name
 	b.WriteString(`,"schema_name":`)
@@ -268,9 +478,9 @@ func buildHeaderCompact(hdr marshalHeaderWire) []byte {
 	b.WriteString(`,"schema_hash":`)
 	writeJSONString(&b, hdr.SchemaHash)
 
-	// schema_hash_algorithm (literal constant)
+	// schema_hash_algorithm
 	b.WriteString(`,"schema_hash_algorithm":`)
-	fmt.Fprintf(&b, "%d", currentHashAlgoVersion)
+	fmt.Fprintf(&b, "%d", hashAlgo)
 
 	// integrity_hash
 	b.WriteString(`,"integrity_hash":`)
@@ -299,7 +509,7 @@ func buildHeaderCompact(hdr marshalHeaderWire) []byte {
 }
 
 // buildHeaderIndented produces the header object JSON with indentation.
-func buildHeaderIndented(hdr marshalHeaderWire, indent string) []byte {
+func buildHeaderIndented(hdr marshalHeaderWire, indent string, version, hashAlgo int) []byte {
 	var b strings.Builder
 	pfx := indent + indent // header fields are nested inside yammm_snapshot
 	b.WriteString("{\n")
@@ -307,7 +517,7 @@ func buildHeaderIndented(hdr marshalHeaderWire, indent string) []byte {
 	// version
 	b.WriteString(pfx)
 	b.WriteString(`"version": `)
-	fmt.Fprintf(&b, "%d", currentVersion)
+	fmt.Fprintf(&b, "%d", version)
 
 	// schema_name
 	b.WriteString(",\n")
@@ -331,7 +541,7 @@ func buildHeaderIndented(hdr marshalHeaderWire, indent string) []byte {
 	b.WriteString(",\n")
 	b.WriteString(pfx)
 	b.WriteString(`"schema_hash_algorithm": `)
-	fmt.Fprintf(&b, "%d", currentHashAlgoVersion)
+	fmt.Fprintf(&b, "%d", hashAlgo)
 
 	// integrity_hash
 	b.WriteString(",\n")
@@ -408,168 +618,20 @@ func assembleIndented(headerJSON, typesJSON, instancesJSON, diagJSON []byte, ind
 	return b
 }
 
-// marshalInstance converts a graph.Instance to its wire representation.
-func marshalInstance(inst *graph.Instance, snap *graph.Snapshot, schemaSource, mapKey string) instWire {
-	w := instWire{
-		Key:        inst.PrimaryKey().Clone(),
-		Properties: inst.Properties().Clone(),
-	}
-
-	// type_id: omit when recoverable from context.
-	typeID := inst.TypeID()
-	if typeID.Name() != mapKey || typeID.SchemaPath().String() != schemaSource {
-		w.TypeID = &typeIDWire{
-			SchemaPath: typeID.SchemaPath().String(),
-			Name:       typeID.Name(),
-		}
-	}
-
-	// edges: group EdgesFrom by relation.
-	edges := snap.EdgesFrom(inst)
-	if len(edges) > 0 {
-		edgeMap := make(map[string][]edgeWire)
-		for _, e := range edges {
-			ew := edgeWire{
-				TargetType: e.Target().TypeName(),
-				TargetKey:  e.Target().PrimaryKey().Clone(),
-				Properties: e.Properties().Clone(),
-			}
-			if ew.Properties == nil {
-				ew.Properties = map[string]any{}
-			}
-			edgeMap[e.Relation()] = append(edgeMap[e.Relation()], ew)
-		}
-		w.Edges = edgeMap
-	}
-
-	// composed: recursive.
-	compRels := inst.ComposedRelations()
-	if len(compRels) > 0 {
-		compMap := make(map[string][]instWire, len(compRels))
-		for _, relName := range compRels {
-			children := inst.Composed(relName)
-			childWires := make([]instWire, 0, len(children))
-			for _, child := range children {
-				cw := marshalComposedChild(child, schemaSource, child.TypeName())
-				childWires = append(childWires, cw)
-			}
-			compMap[relName] = childWires
-		}
-		w.Composed = compMap
-	}
-
-	// provenance
-	prov := inst.Provenance()
-	if prov != nil {
-		pathStr := prov.RawPath()
-		if pathStr == "" {
-			pathStr = prov.Path().String()
-		}
-		w.Provenance = &provenanceWire{
-			SourceName: prov.SourceName(),
-			Path:       pathStr,
-		}
-	}
-
-	return w
-}
-
-// marshalComposedChild marshals a composed child instance.
-// Composed children never carry edges (omitempty handles this).
-func marshalComposedChild(inst *graph.Instance, schemaSource, mapKey string) instWire {
-	w := instWire{
-		Key:        inst.PrimaryKey().Clone(),
-		Properties: inst.Properties().Clone(),
-	}
-
-	// type_id
-	typeID := inst.TypeID()
-	if typeID.Name() != mapKey || typeID.SchemaPath().String() != schemaSource {
-		w.TypeID = &typeIDWire{
-			SchemaPath: typeID.SchemaPath().String(),
-			Name:       typeID.Name(),
-		}
-	}
-
-	// composed: recursive.
-	compRels := inst.ComposedRelations()
-	if len(compRels) > 0 {
-		compMap := make(map[string][]instWire, len(compRels))
-		for _, relName := range compRels {
-			children := inst.Composed(relName)
-			childWires := make([]instWire, 0, len(children))
-			for _, child := range children {
-				cw := marshalComposedChild(child, schemaSource, child.TypeName())
-				childWires = append(childWires, cw)
-			}
-			compMap[relName] = childWires
-		}
-		w.Composed = compMap
-	}
-
-	// provenance
-	prov := inst.Provenance()
-	if prov != nil {
-		pathStr := prov.RawPath()
-		if pathStr == "" {
-			pathStr = prov.Path().String()
-		}
-		w.Provenance = &provenanceWire{
-			SourceName: prov.SourceName(),
-			Path:       pathStr,
-		}
-	}
-
-	return w
-}
-
-// marshalDuplicateInstance marshals a duplicate record's instance.
-// Duplicate instances have no edges and no composed children.
-func marshalDuplicateInstance(inst *graph.Instance, schemaSource string) instWire {
-	w := instWire{
-		Key:        inst.PrimaryKey().Clone(),
-		Properties: inst.Properties().Clone(),
-	}
-
-	typeID := inst.TypeID()
-	if typeID.Name() != inst.TypeName() || typeID.SchemaPath().String() != schemaSource {
-		w.TypeID = &typeIDWire{
-			SchemaPath: typeID.SchemaPath().String(),
-			Name:       typeID.Name(),
-		}
-	}
-
-	prov := inst.Provenance()
-	if prov != nil {
-		pathStr := prov.RawPath()
-		if pathStr == "" {
-			pathStr = prov.Path().String()
-		}
-		w.Provenance = &provenanceWire{
-			SourceName: prov.SourceName(),
-			Path:       pathStr,
-		}
-	}
-
-	return w
-}
-
-// edgeCollected is an internal type used during edge collection.
-type edgeCollected struct {
-	edge *graph.Edge
-}
-
 // parseTargetKey parses an UnresolvedEdge.TargetKey string into []any.
 // TargetKey is in Key.String() canonical form: e.g., `["c99"]` or `[1]`.
 func parseTargetKey(keyStr string) []any {
 	if keyStr == "" || keyStr == "[]" {
 		return nil
 	}
+	// UseNumber, so an integer component beyond 2^53 is not rewritten by a
+	// float64 round trip on its way to the wire.
+	dec := json.NewDecoder(strings.NewReader(keyStr))
+	dec.UseNumber()
 	var result []any
-	if err := json.Unmarshal([]byte(keyStr), &result); err != nil {
+	if err := dec.Decode(&result); err != nil {
 		return nil
 	}
-	// Normalize json.Number values.
 	for i, v := range result {
 		result[i] = immutable.NormalizeValue(v)
 	}
@@ -585,6 +647,16 @@ func writeJSONString(b *strings.Builder, s string) {
 // marshalFatalErr creates a diag.Result with a Fatal E_INTERNAL for marshal failures.
 func marshalFatalErr(section string, err error) diag.Result {
 	c := diag.NewCollector(0)
+	// The composed-nesting bound is a property of the snapshot, not of the
+	// writer, and the reader already names it. Reporting it as an internal
+	// failure would leave a caller unable to tell the two apart.
+	if de, ok := errors.AsType[*depthExceededError](err); ok {
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DEPTH_EXCEEDED, de.Error()).
+			WithDetail(diag.DetailKeyDepth, strconv.Itoa(de.depth)).
+			WithDetail(diag.DetailKeyTypeName, de.id.String()).
+			Build())
+		return c.Result()
+	}
 	c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 		fmt.Sprintf("snapshot.Marshal: failed to serialize %s: %v", section, err)).Build())
 	return c.Result()

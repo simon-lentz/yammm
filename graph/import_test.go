@@ -103,7 +103,7 @@ func TestNewFromSnapshot_EmptySnapshot(t *testing.T) {
 	assert.True(t, result.OK())
 
 	reSnap := g.Snapshot()
-	assert.Len(t, reSnap.InstancesOf("Company"), 1)
+	assert.Len(t, reSnap.InstancesOf(mustTypeID(t, s, "Company")), 1)
 }
 
 func TestNewFromSnapshot_InstancesIndexed(t *testing.T) {
@@ -116,11 +116,11 @@ func TestNewFromSnapshot_InstancesIndexed(t *testing.T) {
 	g := graph.NewFromSnapshot(s, snap)
 	reSnap := g.Snapshot()
 
-	assert.Len(t, reSnap.InstancesOf("Company"), 1)
-	assert.Len(t, reSnap.InstancesOf("Person"), 1)
+	assert.Len(t, reSnap.InstancesOf(mustTypeID(t, s, "Company")), 1)
+	assert.Len(t, reSnap.InstancesOf(mustTypeID(t, s, "Person")), 1)
 
 	// InstanceByKey works.
-	inst, ok := reSnap.InstanceByKey("Company", `["c1"]`)
+	inst, ok := reSnap.InstanceByKey(mustTypeID(t, s, "Company"), `["c1"]`)
 	require.True(t, ok)
 	assert.Equal(t, "Company", inst.TypeName())
 }
@@ -146,7 +146,7 @@ func TestNewFromSnapshot_EdgesPreserved(t *testing.T) {
 	assert.Equal(t, "Company", edge.Target().TypeName())
 
 	// EdgesFrom works for imported instances.
-	personInst, ok := reSnap.InstanceByKey("Person", `["p1"]`)
+	personInst, ok := reSnap.InstanceByKey(mustTypeID(t, s, "Person"), `["p1"]`)
 	require.True(t, ok)
 	edges := reSnap.EdgesFrom(personInst)
 	assert.Len(t, edges, 1)
@@ -241,8 +241,8 @@ func TestNewFromSnapshot_AddAfterImport_NewType(t *testing.T) {
 	assert.True(t, result.OK())
 
 	reSnap := g.Snapshot()
-	assert.Len(t, reSnap.InstancesOf("Person"), 1)
-	assert.Len(t, reSnap.InstancesOf("Company"), 1)
+	assert.Len(t, reSnap.InstancesOf(mustTypeID(t, s, "Person")), 1)
+	assert.Len(t, reSnap.InstancesOf(mustTypeID(t, s, "Company")), 1)
 }
 
 func TestNewFromSnapshot_AddAfterImport_DuplicatePK(t *testing.T) {
@@ -261,7 +261,7 @@ func TestNewFromSnapshot_AddAfterImport_DuplicatePK(t *testing.T) {
 	assert.True(t, result.HasErrors()) // E_DUPLICATE_PK is an error
 
 	reSnap := g.Snapshot()
-	assert.Len(t, reSnap.InstancesOf("Company"), 1)
+	assert.Len(t, reSnap.InstancesOf(mustTypeID(t, s, "Company")), 1)
 	assert.Len(t, reSnap.Duplicates(), 1)
 }
 
@@ -341,6 +341,6 @@ func TestNewFromSnapshot_Independence(t *testing.T) {
 	g.Add(ctx, person)
 
 	// Original snapshot should be unaffected.
-	assert.Empty(t, snap.InstancesOf("Person"), "original snapshot should not be modified")
-	assert.Len(t, snap.InstancesOf("Company"), 1)
+	assert.Empty(t, snap.InstancesOf(mustTypeID(t, s, "Person")), "original snapshot should not be modified")
+	assert.Len(t, snap.InstancesOf(mustTypeID(t, s, "Company")), 1)
 }

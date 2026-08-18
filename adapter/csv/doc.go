@@ -19,7 +19,7 @@
 //   - Boolean properties: [strconv.ParseBool] ("true", "false", "1", "0")
 //   - Date properties: validated as "2006-01-02" format, kept as string
 //   - Timestamp properties: validated as RFC 3339 format, kept as string
-//   - List properties: split by list separator (default "|"), elements coerced
+//   - List properties: split by the "|" separator, elements coerced
 //
 // Date and Timestamp values remain as strings in [instance.RawInstance],
 // matching the JSON adapter's behavior. Temporal coercion to driver types
@@ -27,14 +27,12 @@
 //
 // # List Properties
 //
-// List values use a configurable separator (default "|"). A cell containing
-// "a|b|c" for a List<String> property produces []any{"a", "b", "c"}.
-// Configure via [WithListSeparator].
+// List values use the "|" separator. A cell containing "a|b|c" for a
+// List<String> property produces []any{"a", "b", "c"}.
 //
 // # Null Handling
 //
-// The configured null string (default: empty string "") is treated as nil.
-// Configure via [WithNullValue].
+// An empty cell is treated as nil.
 //
 // # Foreign Keys
 //
@@ -44,9 +42,7 @@
 //
 // During snapshot serialization ([Adapter.MarshalSnapshot], [Adapter.WriteSnapshot]),
 // FK columns are populated from the snapshot's edge index via [graph.Snapshot]
-// edge lookup. Both snapshot and typed serialization paths resolve FK data;
-// snapshot mode uses graph edges while typed mode uses [instance.ValidInstance]
-// edge data directly.
+// edge lookup.
 //
 // # Compositions
 //

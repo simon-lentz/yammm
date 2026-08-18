@@ -240,9 +240,9 @@ func parseTypeRef(typeName string) schema.TypeRef {
 // declaring-schema-relative — its qualifier is the declaring schema's import
 // alias, and its bare form names a declaring-schema type — so re-resolving it
 // against the entry schema misresolves relations declared on imported types
-// or inherited from cross-schema parents. A zero TargetID (a cross-schema
-// reference a registry-less Builder deferred) falls back to entry-relative
-// syntactic resolution, preserving that path's not-found reporting.
+// or inherited from cross-schema parents. A zero TargetID cannot arise through
+// public construction; the entry-relative fallback stays as defense,
+// preserving that path's not-found reporting.
 func resolveRelationTarget(s *schema.Schema, rel *schema.Relation) (*schema.Type, bool) {
 	if id := rel.TargetID(); !id.IsZero() {
 		return s.TypeByID(id)

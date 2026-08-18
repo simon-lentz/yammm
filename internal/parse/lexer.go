@@ -72,9 +72,9 @@ type Token struct {
 }
 
 // Lex returns every token in src, in source order, with nothing elided —
-// whitespace and comments included, EOF excluded. Callers that need the
-// un-elided stream, such as a formatter, read it here rather than from the
-// node tree.
+// whitespace and comments included, EOF excluded. A caller needing the stream
+// alongside the node tree uses [LexAndParse] instead, which returns both from
+// one lex; Lex is the stream on its own.
 //
 // The lexer is total: no input fails to lex, because the last rule matches any
 // single rune, so Lex reports no error and never rejects src.

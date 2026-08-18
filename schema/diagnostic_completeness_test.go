@@ -1002,11 +1002,12 @@ func TestBuild_RegistryQualifiedPrimaryKey_UndeclaredImport_SingleError(t *testi
 	})
 }
 
-// TestBuild_NoRegistryQualifiedExtends_DefersAtLinkTime is the control for the
-// registry-present fix above: without a registry, a qualified reference resolves
-// at link time, so it defers (no error, non-nil schema). This behavior is
-// unchanged — the fix narrows only the registry-present, nil-map case.
-func TestBuild_NoRegistryQualifiedExtends_DefersAtLinkTime(t *testing.T) {
+// TestBuild_NoRegistryQualifiedExtends_Errors pins that a registry-less Builder
+// rejects a qualified extends the same way the registry-present controls above
+// do: without a registry no link step ever comes, so the dangling supertype can
+// never resolve — deferring it would seal a schema that silently dropped its
+// inheritance.
+func TestBuild_NoRegistryQualifiedExtends_Errors(t *testing.T) {
 	t.Parallel()
 	s, res := schema.NewBuilder().
 		WithName("d").
@@ -1015,23 +1016,17 @@ func TestBuild_NoRegistryQualifiedExtends_DefersAtLinkTime(t *testing.T) {
 		Extends(schema.NewTypeRef("bogus", "Base", location.Span{})).
 		Done().
 		Build()
-	if res.HasErrors() {
-		t.Fatalf("a no-registry Builder defers qualified refs to link time, got: %v", res)
-	}
-	if s == nil {
-		t.Fatal("expected a non-nil schema (the qualified extends defers)")
-	}
+	requireBuildFailed(t, s)
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_UNKNOWN_TYPE: 1,
+	})
 }
 
-// TestBuild_NoRegistryQualifiedPrimaryKey_DefersAtLinkTime pins that a primary
-// key typed by a qualified datatype defers at link time on a no-registry Builder,
-// exactly as a qualified extends (above), relation target, and non-primary
-// property datatype already do. Without a registry the cross-schema datatype
-// cannot be resolved, so the type is unknowable here — not invalid: the
-// primary-key type check defers rather than rejecting with a misleading
-// E_INVALID_PRIMARY_KEY_TYPE that would nil a schema every sibling reference kind
-// loads clean.
-func TestBuild_NoRegistryQualifiedPrimaryKey_DefersAtLinkTime(t *testing.T) {
+// TestBuild_NoRegistryQualifiedPrimaryKey_Errors pins the same rejection on the
+// resolveAliasChain path: a primary key typed by a dangling qualified datatype
+// draws exactly one E_UNKNOWN_TYPE, with the primary-key type check deferring
+// to that report rather than stacking E_INVALID_PRIMARY_KEY_TYPE.
+func TestBuild_NoRegistryQualifiedPrimaryKey_Errors(t *testing.T) {
 	t.Parallel()
 	s, res := schema.NewBuilder().
 		WithName("d").
@@ -1039,54 +1034,12 @@ func TestBuild_NoRegistryQualifiedPrimaryKey_DefersAtLinkTime(t *testing.T) {
 		WithPrimaryKey("id", schema.NewAliasConstraint("bogus.IdType", nil)).
 		Done().
 		Build()
-	if res.HasErrors() {
-		t.Fatalf("a no-registry Builder defers a qualified primary-key datatype to link time, got: %v", res)
-	}
-	if s == nil {
-		t.Fatal("expected a non-nil schema (the qualified primary-key type defers)")
-	}
-}
-
-// TestBuild_NoRegistryQualifiedPrimaryKey_TerminalStaysUnresolved pins the
-// invariant completer.primaryKeyTypeDeferred depends on: alias-constraint
-// resolution ([completer.resolveAliasConstraints]) leaves a deferred datatype
-// reference as an *unresolved* AliasConstraint, the exact shape
-// primaryKeyTypeDeferred recognizes to skip the primary-key type check
-// (deferring to link time) rather than stacking a mis-attributed
-// E_INVALID_PRIMARY_KEY_TYPE.
-// TestBuild_NoRegistryQualifiedPrimaryKey_DefersAtLinkTime pins the resulting
-// behavior (a clean deferred load); this pins the mechanism, so a future change
-// that resolved such terminals to a placeholder fails here and forces
-// primaryKeyTypeDeferred to be revisited in lockstep.
-func TestBuild_NoRegistryQualifiedPrimaryKey_TerminalStaysUnresolved(t *testing.T) {
-	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("d").
-		AddType("Thing").
-		WithPrimaryKey("id", schema.NewAliasConstraint("bogus.IdType", nil)).
-		Done().
-		Build()
-	if res.HasErrors() || s == nil {
-		t.Fatalf("setup: want a clean deferred load; HasErrors=%v nilSchema=%v (%v)", res.HasErrors(), s == nil, res)
-	}
-
-	typ, ok := s.Type("Thing")
-	if !ok {
-		t.Fatal("type Thing missing from the built schema")
-	}
-	pks := typ.PrimaryKeysSlice()
-	if len(pks) != 1 {
-		t.Fatalf("PrimaryKeysSlice() = %d keys; want 1 (the deferred primary is kept as a key)", len(pks))
-	}
-	// ResolveAlias returns an unresolved alias unchanged, so the deferred
-	// primary-key terminal must still be an AliasConstraint reporting
-	// IsResolved()==false — exactly what primaryKeyTypeDeferred keys off.
-	terminal := schema.ResolveAlias(pks[0].Constraint())
-	alias, isAlias := terminal.(schema.AliasConstraint)
-	if !isAlias || alias.IsResolved() {
-		t.Errorf("primary-key terminal = %T (isAlias=%v resolved=%v); want an unresolved AliasConstraint",
-			terminal, isAlias, isAlias && alias.IsResolved())
-	}
+	requireBuildFailed(t, s)
+	wantCounts(t, res, map[diag.Code]int{
+		diag.E_UNKNOWN_TYPE:             1,
+		diag.E_INVALID_PRIMARY_KEY_TYPE: 0,
+		diag.E_NO_PRIMARY_KEY:           0,
+	})
 }
 
 // TestBuild_DatatypeAliasChainToUnknown_ReportedOnce pins that a datatype alias

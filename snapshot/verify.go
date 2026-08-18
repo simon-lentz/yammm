@@ -11,10 +11,10 @@ import (
 // file without materializing a Snapshot. Returns diag.Result with the same
 // diagnostic codes as Load.
 //
-// Verify uses the same validation logic as Load but discards instance data
-// after validation, keeping only an instance existence index and edge
-// references. Memory usage is O(keys + edge references) — typically less
-// than 5% of file size for property-heavy snapshots.
+// Verify runs Load's pipeline and stops before materialization, so it builds
+// no Snapshot and no instance objects. It does decode the instances section
+// first, holding every instance's properties, so peak memory scales with
+// document size rather than with key count.
 //
 // Panics if s is nil (programming error).
 func Verify(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption) diag.Result {
@@ -39,27 +39,6 @@ func Verify(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOpti
 		return sd.collector.Result()
 	}
 
-	// Decode remaining sections (instances + diagnostics).
-	instances, diags, err := sd.decodeSections()
-	if err != nil {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return sd.collector.Result()
-	}
-
-	// Step 4: Validate instances (lightweight path — validateInstances).
-	exists, refs, err := sd.validateInstances(ctx, instances)
-	if err != nil {
-		return sd.collector.Result()
-	}
-
-	// Step 5: Validate diagnostics section.
-	sd.validateDiagnostics(diags, exists)
-
-	// Step 6: Integrity verification.
-	sd.verifyIntegrity()
-
-	// Step 7: Structural validation — edge references.
-	sd.validateEdgeRefs(refs, exists)
-
+	sd.runPipeline(ctx)
 	return sd.collector.Result()
 }

@@ -180,7 +180,7 @@ linters:
       - path: "^format/(format)_test\\.go$"
         linters:
           - depguard
-      - path: "^graph/(duplicate|import|result)_test\\.go$"
+      - path: "^graph/(import|result)_test\\.go$"
         linters:
           - depguard
       - path: "^instance/(errors|options|raw|schema_builder|valid|validate_composition|validate_edge|validator)_test\\.go$"

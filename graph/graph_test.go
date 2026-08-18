@@ -3,7 +3,6 @@ package graph_test
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -220,11 +219,11 @@ func TestGraph_Add_Success(t *testing.T) {
 	// Verify instance is in graph
 	snap := g.Snapshot()
 	types := snap.Types()
-	if len(types) != 1 || types[0] != "Person" {
-		t.Errorf("Types() = %v, want [\"Person\"]", types)
+	if len(types) != 1 || types[0] != mustTypeID(t, s, "Person") {
+		t.Errorf("Types() = %v, want [Person]", types)
 	}
 
-	instances := snap.InstancesOf("Person")
+	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
 	if len(instances) != 1 {
 		t.Fatalf("InstancesOf(\"Person\") returned %d instances, want 1", len(instances))
 	}
@@ -326,7 +325,7 @@ func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 
 	// Verify sorted order in snapshot
 	snap := g.Snapshot()
-	instances := snap.InstancesOf("Person")
+	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
 	if len(instances) != 3 {
 		t.Fatalf("Expected 3 instances, got %d", len(instances))
 	}
@@ -361,7 +360,7 @@ func TestGraph_InstanceByKey(t *testing.T) {
 	snap := g.Snapshot()
 
 	// Lookup by key
-	found, ok := snap.InstanceByKey("Person", graph.FormatKey("alice"))
+	found, ok := snap.InstanceByKey(mustTypeID(t, s, "Person"), graph.FormatKey("alice"))
 	if !ok {
 		t.Fatal("InstanceByKey() should find the instance")
 	}
@@ -370,13 +369,13 @@ func TestGraph_InstanceByKey(t *testing.T) {
 	}
 
 	// Lookup non-existent
-	_, ok = snap.InstanceByKey("Person", graph.FormatKey("bob"))
+	_, ok = snap.InstanceByKey(mustTypeID(t, s, "Person"), graph.FormatKey("bob"))
 	if ok {
 		t.Error("InstanceByKey() should not find non-existent instance")
 	}
 
 	// Lookup non-existent type
-	_, ok = snap.InstanceByKey("NonExistent", graph.FormatKey("alice"))
+	_, ok = snap.InstanceByKey(schema.TypeID{}, graph.FormatKey("alice"))
 	if ok {
 		t.Error("InstanceByKey() should not find instance of non-existent type")
 	}
@@ -394,13 +393,10 @@ func TestSnapshot_NilReceiver(t *testing.T) {
 	if r.Types() != nil {
 		t.Error("nil.Types() should return nil")
 	}
-	if r.InstancesOf("any") != nil {
+	if r.InstancesOf(schema.TypeID{}) != nil {
 		t.Error("nil.InstancesOf() should return nil")
 	}
-	if r.Instances() != nil {
-		t.Error("nil.Instances() should return nil")
-	}
-	if _, ok := r.InstanceByKey("any", "any"); ok {
+	if _, ok := r.InstanceByKey(schema.TypeID{}, "any"); ok {
 		t.Error("nil.InstanceByKey() should return false")
 	}
 	if r.Edges() != nil {
@@ -415,10 +411,10 @@ func TestSnapshot_NilReceiver(t *testing.T) {
 	if r.Unresolved() != nil {
 		t.Error("nil.Unresolved() should return nil")
 	}
-	if !r.OK() {
+	if !r.Diagnostics().OK() {
 		t.Error("nil.OK() should return true")
 	}
-	if r.HasErrors() {
+	if r.Diagnostics().HasErrors() {
 		t.Error("nil.HasErrors() should return false")
 	}
 }
@@ -524,7 +520,7 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 
 	// Verify all 3 items are present
 	snap := g.Snapshot()
-	containers := snap.InstancesOf("Container")
+	containers := snap.InstancesOf(mustTypeID(t, s, "Container"))
 	if len(containers) != 1 {
 		t.Fatalf("Expected 1 container, got %d", len(containers))
 	}
@@ -589,7 +585,7 @@ func TestGraph_NestedComposition(t *testing.T) {
 
 	// Verify structure
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -747,7 +743,7 @@ func TestGraph_LargeGraph_Performance(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	instances := snap.InstancesOf("Person")
+	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
 
 	if len(instances) != 1000 {
 		t.Fatalf("Expected 1000 instances, got %d", len(instances))
@@ -802,14 +798,14 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	if len(snap.InstancesOf("Person")) != len(specialKeys) {
-		t.Errorf("Expected %d instances, got %d", len(specialKeys), len(snap.InstancesOf("Person")))
+	if len(snap.InstancesOf(mustTypeID(t, s, "Person"))) != len(specialKeys) {
+		t.Errorf("Expected %d instances, got %d", len(specialKeys), len(snap.InstancesOf(mustTypeID(t, s, "Person"))))
 	}
 
 	// Verify lookup works for each key
 	for _, key := range specialKeys {
 		formatted := graph.FormatKey(key)
-		_, ok := snap.InstanceByKey("Person", formatted)
+		_, ok := snap.InstanceByKey(mustTypeID(t, s, "Person"), formatted)
 		if !ok {
 			t.Errorf("InstanceByKey failed for key %q (formatted: %s)", key, formatted)
 		}
@@ -851,8 +847,8 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	if len(snap.InstancesOf("Person")) != len(unicodeKeys) {
-		t.Errorf("Expected %d instances, got %d", len(unicodeKeys), len(snap.InstancesOf("Person")))
+	if len(snap.InstancesOf(mustTypeID(t, s, "Person"))) != len(unicodeKeys) {
+		t.Errorf("Expected %d instances, got %d", len(unicodeKeys), len(snap.InstancesOf(mustTypeID(t, s, "Person"))))
 	}
 }
 
@@ -883,7 +879,7 @@ func TestGraph_CompositeKey_Large(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	instances := snap.InstancesOf("Record")
+	instances := snap.InstancesOf(mustTypeID(t, s, "Record"))
 
 	if len(instances) != 9 {
 		t.Fatalf("Expected 9 records, got %d", len(instances))
@@ -891,7 +887,7 @@ func TestGraph_CompositeKey_Large(t *testing.T) {
 
 	// Verify lookup by composite key works
 	key := graph.FormatKey("us-east", "id-0")
-	found, ok := snap.InstanceByKey("Record", key)
+	found, ok := snap.InstanceByKey(mustTypeID(t, s, "Record"), key)
 	if !ok {
 		t.Errorf("InstanceByKey failed for composite key %s", key)
 	}
@@ -925,7 +921,7 @@ func TestGraph_EmptyProperties(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	instances := snap.InstancesOf("Person")
+	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
 	if len(instances) != 1 {
 		t.Fatalf("Expected 1 instance, got %d", len(instances))
 	}
@@ -965,7 +961,7 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	docs := snap.InstancesOf("Document")
+	docs := snap.InstancesOf(mustTypeID(t, s, "Document"))
 	if len(docs) != 1 {
 		t.Fatalf("Expected 1 document, got %d", len(docs))
 	}
@@ -1017,7 +1013,7 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	docs := snap.InstancesOf("Document")
+	docs := snap.InstancesOf(mustTypeID(t, s, "Document"))
 
 	assertComposedCount(t, docs[0], "notes", 3)
 	assertComposedCount(t, docs[0], "tags", 2)
@@ -1092,11 +1088,11 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 	types := snap.Types()
 	hasUser := false
 	hasCEntity := false
-	for _, t := range types {
-		if t == "User" {
+	for _, id := range types {
+		switch schema.TagForm(mainSchema, id) {
+		case "User":
 			hasUser = true
-		}
-		if t == "c.Entity" {
+		case "c.Entity":
 			hasCEntity = true
 		}
 	}
@@ -1105,19 +1101,19 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 	}
 
 	// Verify InstancesOf() works with instance tag form
-	if snap.InstancesOf("User") == nil {
+	if snap.InstancesOf(tagID(t, mainSchema, "User")) == nil {
 		t.Error("InstancesOf(\"User\") should find local type")
 	}
-	if snap.InstancesOf("c.Entity") == nil {
+	if snap.InstancesOf(tagID(t, mainSchema, "c.Entity")) == nil {
 		t.Error("InstancesOf(\"c.Entity\") should find imported type")
 	}
 
 	// Verify graph.Instance.TypeName() returns instance tag form
-	users := snap.InstancesOf("User")
+	users := snap.InstancesOf(tagID(t, mainSchema, "User"))
 	if users[0].TypeName() != "User" {
 		t.Errorf("Instance.TypeName() should be \"User\", got %q", users[0].TypeName())
 	}
-	entities := snap.InstancesOf("c.Entity")
+	entities := snap.InstancesOf(tagID(t, mainSchema, "c.Entity"))
 	if entities[0].TypeName() != "c.Entity" {
 		t.Errorf("Instance.TypeName() should be \"c.Entity\", got %q", entities[0].TypeName())
 	}
@@ -1196,10 +1192,10 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 
 	// Verify both exist
 	snap := g.Snapshot()
-	if len(snap.InstancesOf("b.Product")) != 1 {
+	if len(snap.InstancesOf(tagID(t, mainSchema, "b.Product"))) != 1 {
 		t.Error("b.Product should exist")
 	}
-	if len(snap.InstancesOf("c.Product")) != 1 {
+	if len(snap.InstancesOf(tagID(t, mainSchema, "c.Product"))) != 1 {
 		t.Error("c.Product should exist")
 	}
 }
@@ -1350,19 +1346,13 @@ func TestResult_Instances(t *testing.T) {
 
 	snap := g.Snapshot()
 
-	// Test Instances() returns a map
-	instances := snap.Instances()
-	if instances == nil {
-		t.Error("Instances() returned nil")
-	}
-
-	// Count all instances in the map
+	// Count all instances via the deterministic iterator.
 	total := 0
-	for _, typeInstances := range instances {
-		total += len(typeInstances)
+	for range snap.AllInstances() {
+		total++
 	}
 	if total != 3 {
-		t.Errorf("Instances() returned %d total items, want 3", total)
+		t.Errorf("AllInstances() yielded %d items, want 3", total)
 	}
 }
 
@@ -1393,8 +1383,8 @@ func TestResult_DiagnosticsAndFlags(t *testing.T) {
 
 	// Test snapshot-level methods
 	snap := g.Snapshot()
-	snapOk := snap.OK()
-	snapHasErrors := snap.HasErrors()
+	snapOk := snap.Diagnostics().OK()
+	snapHasErrors := snap.Diagnostics().HasErrors()
 	if !snapOk {
 		t.Error("Expected snap OK to be true")
 	}
@@ -1456,7 +1446,7 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 
 	// Verify inline children were extracted
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -1515,7 +1505,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 
 	// Verify nested structure
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -1559,7 +1549,7 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 
 	// Verify no children
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	assertComposedCount(t, parents[0], "children", 0)
 }
 
@@ -1685,7 +1675,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 
 	// Verify nested structure
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -1761,7 +1751,7 @@ func TestExtractCompositions_OneCardinality_MultipleChildren_Error(t *testing.T)
 
 	// Verify only first child was attached
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -1810,7 +1800,7 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 
 	// Verify child was extracted from bare instance
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -2149,188 +2139,6 @@ func TestNilContext_Panics(t *testing.T) {
 				}
 			}()
 			tc.fn()
-		})
-	}
-}
-
-// TestGraph_Logging drives every logged operation through one scenario
-// table: each row builds its schema, runs its graph operations against a
-// captured logger, then asserts the expected operation names, attributes,
-// messages, and warn-level presence in the records.
-func TestGraph_Logging(t *testing.T) {
-	tests := []struct {
-		name      string
-		schema    func(*testing.T) *schema.Schema
-		run       func(t *testing.T, g *graph.Graph, s *schema.Schema)
-		wantOps   []string
-		wantAttrs [][2]string
-		wantMsgs  []string
-		wantWarn  bool
-	}{
-		{
-			name:   "add",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-				if r := g.Add(t.Context(), company); !r.OK() {
-					t.Fatalf("Add failed: %s", r.String())
-				}
-			},
-			wantOps:   []string{"yammm.graph.add"},
-			wantAttrs: [][2]string{{"type", "Company"}, {"pk", `["acme"]`}},
-		},
-		{
-			name:   "add duplicate",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				company1 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-				if r := g.Add(t.Context(), company1); !r.OK() {
-					t.Fatalf("First Add failed: %s", r.String())
-				}
-				company2 := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Inc"})
-				g.Add(t.Context(), company2)
-			},
-			wantMsgs: []string{"duplicate primary key"},
-			wantWarn: true,
-		},
-		{
-			name:   "edge resolution",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-				if r := g.Add(t.Context(), company); !r.OK() {
-					t.Fatalf("Add Company failed: %s", r.String())
-				}
-				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add Person failed: %s", r.String())
-				}
-			},
-			wantMsgs: []string{"edge resolved"},
-		},
-		{
-			name:   "forward reference",
-			schema: testSchemaWithOptionalAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add Person failed: %s", r.String())
-				}
-			},
-			wantMsgs: []string{"forward reference created"},
-		},
-		{
-			name:   "pending edges resolved",
-			schema: testSchemaWithOptionalAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add Person failed: %s", r.String())
-				}
-				company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-				if r := g.Add(t.Context(), company); !r.OK() {
-					t.Fatalf("Add Company failed: %s", r.String())
-				}
-			},
-			wantMsgs: []string{"pending edges resolved"},
-		},
-		{
-			name:   "check",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				person := mustValidInstance(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add failed: %s", r.String())
-				}
-				g.Check(t.Context())
-			},
-			wantOps: []string{"yammm.graph.check"},
-		},
-		{
-			name:   "check unresolved",
-			schema: testSchemaWithAssociation,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"}, "employer", [][]any{{"missing"}})
-				if r := g.Add(t.Context(), person); !r.OK() {
-					t.Fatalf("Add failed: %s", r.String())
-				}
-				g.Check(t.Context())
-			},
-			wantMsgs: []string{"unresolved required association"},
-			wantWarn: true,
-		},
-		{
-			name:   "add composed",
-			schema: testSchemaWithComposition,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-				if r := g.Add(t.Context(), parent); !r.OK() {
-					t.Fatalf("Add parent failed: %s", r.String())
-				}
-				child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-				if r := g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child); !r.OK() {
-					t.Fatalf("AddComposed failed: %s", r.String())
-				}
-			},
-			wantOps:   []string{"yammm.graph.add_composed"},
-			wantAttrs: [][2]string{{"parent_type", "Parent"}, {"relation", "children"}},
-		},
-		{
-			name:   "add composed duplicate",
-			schema: testSchemaWithComposition,
-			run: func(t *testing.T, g *graph.Graph, s *schema.Schema) {
-				t.Helper()
-				parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"})
-				if r := g.Add(t.Context(), parent); !r.OK() {
-					t.Fatalf("Add parent failed: %s", r.String())
-				}
-				child1 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
-				if r := g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child1); !r.OK() {
-					t.Fatalf("First AddComposed failed: %s", r.String())
-				}
-				child2 := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1 Dup"})
-				g.AddComposed(t.Context(), "Parent", graph.FormatKey("p1"), "children", child2)
-			},
-			wantMsgs: []string{"duplicate composed child"},
-			wantWarn: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := tt.schema(t)
-			h := yammmtest.NewRecordHandler(slog.LevelDebug)
-			g := graph.New(s, graph.WithLogger(slog.New(h)))
-
-			tt.run(t, g, s)
-
-			records := h.Records()
-			for _, op := range tt.wantOps {
-				if !yammmtest.HasAttr(records, "op", op) {
-					t.Errorf("expected %s operation to be logged", op)
-				}
-			}
-			for _, attr := range tt.wantAttrs {
-				if !yammmtest.HasAttr(records, attr[0], attr[1]) {
-					t.Errorf("expected %s=%s attribute", attr[0], attr[1])
-				}
-			}
-			for _, msg := range tt.wantMsgs {
-				if !yammmtest.HasMessage(records, msg) {
-					t.Errorf("expected %q message", msg)
-				}
-			}
-			if tt.wantWarn && yammmtest.CountLevel(records, slog.LevelWarn) == 0 {
-				t.Error("expected a Warn-level record")
-			}
 		})
 	}
 }

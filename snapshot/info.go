@@ -9,6 +9,32 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
+// TypeRef is a type identity as a .ys document states it: declaring schema
+// path plus name. It is the schema-less display surface for the Info and
+// HeaderOnly readers, which run without an import closure to resolve
+// against; two same-named types in different schemas stay distinct. TypeRef
+// renders and does not parse: the Info surfaces are a report projection, so
+// there is no UnmarshalText and they serialize one way by design.
+type TypeRef struct {
+	SchemaPath string
+	Name       string
+}
+
+// String renders the identity as "path#name". The '#' separator is
+// deliberate beside [schema.TypeID]'s "path:name": TypeID's rendering is
+// byte-order-bearing (the types-table sort rides it), so the display form
+// stays visibly distinct rather than moving wire bytes to unify them.
+func (r TypeRef) String() string {
+	return r.SchemaPath + "#" + r.Name
+}
+
+// MarshalText renders the "path#name" form, so a map keyed by TypeRef and a
+// TypeRef slice both serialize as strings under encoding/json. There is no
+// inverse; [TestTypeRef_IsWriteOnly] pins that as a decision rather than a gap.
+func (r TypeRef) MarshalText() ([]byte, error) {
+	return []byte(r.String()), nil
+}
+
 // SnapshotInfo contains summary metadata and statistics extracted from a
 // .ys file without full deserialization.
 //
@@ -27,9 +53,10 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 	CreatedAt           string            // RFC 3339 or empty
 	Metadata            map[string]string // user-provided annotations, nil if absent
 
-	// Content summary.
-	Types           []string
-	InstanceCounts  map[string]int // type name → count
+	// Content summary. Types is the whole denotation set; InstanceCounts
+	// holds one entry per type the snapshot itself holds.
+	Types           []TypeRef
+	InstanceCounts  map[TypeRef]int
 	TotalInstances  int
 	TotalEdges      int
 	DuplicateCount  int
@@ -43,8 +70,8 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // Info reads summary metadata and statistics from a .ys file without
 // loading the schema or materializing instance objects.
 //
-// Info uses the shared streamDecoder infrastructure. Memory usage is
-// constant regardless of snapshot size.
+// Info uses the shared streamDecoder infrastructure. It holds the decoded
+// instances section in memory, so peak usage scales with document size.
 //
 // Info verifies the integrity hash and reports the result in IntegrityStatus.
 // Schema hash cannot be verified (no schema available).
@@ -56,7 +83,18 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // instance body, making its cost proportional to the header size rather
 // than the full file.
 //
-// Returns (nil, result) with Error-severity diagnostics for malformed input.
+// Returns (nil, result) when the document cannot be summarized at all: an
+// unreadable header, an unsupported version, an unrecognized feature, an
+// undecodable section, or a cancelled context. A document that decodes but
+// fails a structural check returns a summary beside Error-severity
+// diagnostics — an integrity mismatch reports
+// IntegrityStatus "mismatch", and a reference naming no table row is reported
+// and left out of the counts. Read the result before the summary.
+//
+// Info runs the same structural validation as [Load] and [Verify] and stops
+// before materialization, so the three surfaces classify every document
+// identically. It resolves no schema, so a document Info summarizes cleanly
+// can still fail Load or Verify on schema resolution — never on structure.
 //
 // Info follows the library's standard (T, diag.Result) return pattern.
 func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
@@ -78,14 +116,16 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 	}
 
 	// Decode remaining sections.
-	instances, diags, err := sd.decodeSections()
+	groups, diags, err := sd.decodeSections()
 	if err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, sd.collector.Result()
 	}
-
-	// Count instances and edges.
-	counts, totalEdges := sd.countInstances(instances)
+	if err := sd.validateBody(ctx, groups, diags); err != nil {
+		return nil, sd.collector.Result()
+	}
+	counts, totalEdges := sd.countInstances(groups)
+	duplicateCount, unresolvedCount := len(diags.Duplicates), len(diags.Unresolved)
 
 	totalInstances := 0
 	for _, c := range counts {
@@ -105,12 +145,12 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		IntegrityHash:       sd.header.IntegrityHash,
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
-		Types:               sd.types,
+		Types:               sd.typeRefs(),
 		InstanceCounts:      counts,
 		TotalInstances:      totalInstances,
 		TotalEdges:          totalEdges,
-		DuplicateCount:      len(diags.Duplicates),
-		UnresolvedCount:     len(diags.Unresolved),
+		DuplicateCount:      duplicateCount,
+		UnresolvedCount:     unresolvedCount,
 		FileSize:            int64(len(data)),
 		IntegrityStatus:     integrityStatus,
 	}
@@ -139,7 +179,7 @@ type HeaderInfo struct {
 
 	// Types array (adjacent to the header in the wire format; read in
 	// the same streaming pass by decodeHeader).
-	Types []string
+	Types []TypeRef
 
 	// File metadata.
 	FileSize int64 // len(data)
@@ -154,6 +194,13 @@ type HeaderInfo struct {
 // to the header size (< 1 KiB for typical .ys files), not the total
 // file size — a property that [Info] cannot offer because it populates
 // instance counts and diagnostic counts by scanning the body.
+//
+// HeaderOnlyRead reads through a reader capped at [MaxHeaderSize] and never
+// holds the body, so unlike [HeaderOnly] it cannot check the document's
+// outermost shape: a document whose sections are absent, repeated, out of
+// order, or followed by trailing bytes reads its header here without
+// complaint. It does not accept such a document by omission — it does not see
+// it. Use [HeaderOnly], [Verify] or [Load] when that matters.
 //
 // Integrity is not verified. The returned [HeaderInfo.IntegrityHash] is
 // the value stored in the file, not a verification result. Callers that
@@ -174,6 +221,15 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, c.Result()
+	}
+
+	// HeaderOnly holds the whole document, so it owes the outermost-shape check
+	// every other whole-document surface runs. HeaderOnlyRead and ScanDir do
+	// not hold it and say so on their own godoc.
+	c := diag.NewCollector(0)
+	if err := checkTopLevelKeys(data); err != nil {
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, c.Result()
 	}
 
@@ -198,7 +254,7 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 		IntegrityHash:       sd.header.IntegrityHash,
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
-		Types:               sd.types,
+		Types:               sd.typeRefs(),
 		FileSize:            int64(len(data)),
 	}
 
@@ -297,7 +353,7 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 		IntegrityHash:       sd.header.IntegrityHash,
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
-		Types:               sd.types,
+		Types:               sd.typeRefs(),
 		// FileSize intentionally left 0: not known from an io.Reader.
 	}
 

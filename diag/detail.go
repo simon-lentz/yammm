@@ -28,9 +28,6 @@ const (
 	// DetailKeyPropertyName is the property name involved.
 	DetailKeyPropertyName = "property"
 
-	// DetailKeyPrefix is the reserved prefix that was violated.
-	DetailKeyPrefix = "prefix"
-
 	// DetailKeyRelationName is the relation name involved.
 	DetailKeyRelationName = "relation"
 
@@ -68,10 +65,6 @@ const (
 	// DetailKeyAlias is the import alias (for alias validation errors).
 	DetailKeyAlias = "alias"
 
-	// DetailKeyCycle is the cycle participants as JSON array
-	// (for cycle detection errors).
-	DetailKeyCycle = "cycle"
-
 	// DetailKeyName is the invalid identifier name (for naming errors).
 	DetailKeyName = "name"
 
@@ -81,17 +74,9 @@ const (
 	// DetailKeyID is the identifier value (e.g., synthetic SourceID).
 	DetailKeyID = "id"
 
-	// DetailKeyFunction is the builtin function name
-	// (for expression evaluation errors).
-	DetailKeyFunction = "function"
-
 	// DetailKeyTypeSchema is the schema path where a type is defined.
 	// Used for transitive import diagnostics (E_GRAPH_TYPE_NOT_FOUND).
 	DetailKeyTypeSchema = "type_schema"
-
-	// DetailKeyImportedVia is the direct import that provides transitive access.
-	// Used for transitive import diagnostics (E_GRAPH_TYPE_NOT_FOUND).
-	DetailKeyImportedVia = "imported_via"
 
 	// DetailKeyFirstAlias is the first import alias in duplicate detection.
 	DetailKeyFirstAlias = "first_alias"
@@ -167,16 +152,6 @@ func TypeProp(typeName, propName string) []Detail {
 	return []Detail{
 		{Key: DetailKeyTypeName, Value: typeName},
 		{Key: DetailKeyPropertyName, Value: propName},
-	}
-}
-
-// TypeRelation creates detail entries for type+relation diagnostics.
-//
-// Use for diagnostics involving a specific relation on a type.
-func TypeRelation(typeName, relationName string) []Detail {
-	return []Detail{
-		{Key: DetailKeyTypeName, Value: typeName},
-		{Key: DetailKeyRelationName, Value: relationName},
 	}
 }
 

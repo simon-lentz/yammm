@@ -8,8 +8,10 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema/expr"
@@ -405,6 +407,9 @@ func builtinLen(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 	case []any:
 		return int64(len(v)), nil
 	case immutable.Slice:
+		return int64(v.Len()), nil
+	case immutable.Map[string]:
+		// A Map is a struct, so the reflect.Map arm below never sees it.
 		return int64(v.Len()), nil
 	}
 
@@ -990,10 +995,51 @@ func builtinMatch(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Ex
 // --- Utility Builtin implementations ---
 
 func builtinTypeOf(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if lhs == nil {
-		return "nil", nil
+	return dslTypeName(lhs), nil
+}
+
+// dslTypeName maps an evaluator value onto the DSL type vocabulary that TypeOf
+// reports: "nil", "boolean", "integer", "float", "string", "list", "map",
+// "pattern", "timestamp", or "unknown" for any shape outside it. It recognises
+// the Go scalar types [value.TypeStrata] does but reports them at finer grain —
+// strata group every numeric together and patterns with strings, where the DSL
+// vocabulary separates both.
+func dslTypeName(v any) string {
+	if v == nil {
+		return "nil"
 	}
-	return fmt.Sprintf("%T", lhs), nil
+	switch v.(type) {
+	case bool:
+		return "boolean"
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, uintptr:
+		return "integer"
+	case float32, float64:
+		return "float"
+	case string:
+		return "string"
+	case *regexp.Regexp:
+		return "pattern"
+	case time.Time:
+		return "timestamp"
+	case uuid.UUID:
+		// A UUID is [16]byte, so without this case it reaches the array arm
+		// below and reports as a list.
+		return "uuid"
+	case immutable.Slice:
+		return "list"
+	case immutable.Map[string]:
+		return "map"
+	}
+	if t := reflect.TypeOf(v); t != nil {
+		switch t.Kind() {
+		case reflect.Slice, reflect.Array:
+			return "list"
+		case reflect.Map:
+			return "map"
+		}
+	}
+	return "unknown"
 }
 
 func builtinIsNil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {

@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -319,23 +320,29 @@ func TestUpdateMetadata_ConcurrentAccess(t *testing.T) {
 	}
 }
 
+// Each malformed shape pins the exact code its branch draws, so neither
+// branch can go dead behind the other.
 func TestUpdateMetadata_BodyOffsetFailure(t *testing.T) {
-	// An input whose header parses successfully but whose body offset
-	// points at '}' (not ','). Constructed by hand to exercise the
-	// sanity check.
 	ctx := context.Background()
+	const header = `{"yammm_snapshot":{"version":3,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":1,"integrity_hash":"","features":[]}`
 
-	// Valid header object with every required field, followed by an
-	// empty diagnostics section and closing '}'. The decoder should
-	// reject this because 'types' is missing (MALFORMED), or our sanity
-	// check should reject because the byte at bodyOffset is '}' not ','.
-	data := []byte(`{"yammm_snapshot":{"version":1,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":1,"integrity_hash":"","features":[]}}`)
-	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"k": "v"})
-	require.True(t, res.HasErrors(), "expected error on shape mismatch")
-	gotMalformed := res.HasCode(diag.E_SNAPSHOT_MALFORMED)
-	gotBodyOffset := res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET)
-	assert.True(t, gotMalformed || gotBodyOffset,
-		"expected E_SNAPSHOT_MALFORMED or E_UPDATE_METADATA_BODY_OFFSET; got: %v", res)
+	// A document that ends at the header: the decoder rejects it for the
+	// missing types key before the body offset is ever consulted.
+	_, res := snapshot.UpdateMetadata(ctx, []byte(header+`}`), map[string]string{"k": "v"})
+	if !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("a document with no types key drew %v, want %s", res, diag.E_SNAPSHOT_MALFORMED)
+	}
+	if res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET) {
+		t.Errorf("the body-offset guard fired before the decoder rejected the document: %v", res)
+	}
+
+	// A complete document whose byte after the header is not ',': the header
+	// parses clean and the body-offset shape check is the branch that fires.
+	spaced := header + ` ,"types":[],"instances":[],"diagnostics":{"duplicates":[],"unresolved":[]}}`
+	_, res = snapshot.UpdateMetadata(ctx, []byte(spaced), map[string]string{"k": "v"})
+	if !res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET) {
+		t.Errorf("a non-Marshal-shaped body boundary drew %v, want %s", res, diag.E_UPDATE_METADATA_BODY_OFFSET)
+	}
 }
 
 func TestUpdateMetadata_GoldenCorpus(t *testing.T) {
@@ -623,4 +630,99 @@ func seedCorpus(dir string) error {
 		}
 	}
 	return nil
+}
+
+// rehashDocument recomputes a hand-edited document's integrity hash so every
+// read path accepts the edited bytes.
+func rehashDocument(t *testing.T, data []byte) []byte {
+	t.Helper()
+	const key = `"integrity_hash":"`
+	i := bytes.Index(data, []byte(key))
+	if i < 0 {
+		t.Fatal("rehashDocument: no integrity_hash value found")
+	}
+	start := i + len(key)
+	end := bytes.IndexByte(data[start:], '"')
+	if end < 0 {
+		t.Fatal("rehashDocument: unterminated integrity_hash value")
+	}
+	end += start
+
+	canon := append(append([]byte{}, data[:start]...), data[end:]...)
+	sum := sha256.Sum256(canon)
+	newVal := fmt.Sprintf("sha256:%x", sum)
+
+	out := append(append(append([]byte{}, data[:start]...), newVal...), data[end:]...)
+	return out
+}
+
+// TestUpdateMetadataOrReMarshal_FallbackRecoversNonMarshalShape pins the
+// fallback path: an input whose body boundary is not Marshal-shaped is
+// refused by the fast path and recovered through Load + Marshal, with the
+// transition surfaced as W_UPDATE_METADATA_FALLBACK naming the trigger.
+func TestUpdateMetadataOrReMarshal_FallbackRecoversNonMarshalShape(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+	data, res := snapshot.Marshal(ctx, snap)
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+
+	// A JSON-insignificant space after the header object breaks the
+	// body-suffix shape while every read path still accepts the bytes.
+	spaced := bytes.Replace(data, []byte(`},"types":`), []byte(`} ,"types":`), 1)
+	if bytes.Equal(spaced, data) {
+		t.Fatal("fixture shape changed; header boundary not found")
+	}
+	spaced = rehashDocument(t, spaced)
+
+	if _, fastRes := snapshot.UpdateMetadata(ctx, spaced, nil); !hasCode(fastRes, diag.E_UPDATE_METADATA_BODY_OFFSET) {
+		t.Fatalf("the fast path accepted a non-Marshal shape: %v", fastRes)
+	}
+
+	when := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	newMeta := map[string]string{"stage": "fallback"}
+	out, outRes := snapshot.UpdateMetadataOrReMarshal(ctx, spaced, newMeta, s,
+		snapshot.WithUpdateCreatedAt(when))
+	if outRes.HasErrors() {
+		t.Fatalf("the fallback failed: %v", outRes)
+	}
+
+	var sawFallback bool
+	for iss := range outRes.Issues() {
+		if iss.Code() != diag.W_UPDATE_METADATA_FALLBACK {
+			continue
+		}
+		sawFallback = true
+		var codes string
+		for _, d := range iss.Details() {
+			if d.Key == "triggering_codes" {
+				codes = d.Value
+			}
+		}
+		if !strings.Contains(codes, "E_UPDATE_METADATA_BODY_OFFSET") {
+			t.Errorf("fallback warning names %q, want it to carry E_UPDATE_METADATA_BODY_OFFSET", codes)
+		}
+	}
+	if !sawFallback {
+		t.Fatalf("no W_UPDATE_METADATA_FALLBACK warning on the fallback path: %v", outRes)
+	}
+
+	// The correctness floor: byte-identical to a direct Marshal of the
+	// loaded document under the equivalent options.
+	loaded, loadRes := snapshot.Load(ctx, spaced, s)
+	if err := loadRes.Err(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	want, wantRes := snapshot.Marshal(ctx, loaded,
+		snapshot.WithMetadata(newMeta), snapshot.WithCreatedAt(when))
+	if err := wantRes.Err(); err != nil {
+		t.Fatalf("floor marshal: %v", err)
+	}
+	if !bytes.Equal(out, want) {
+		t.Errorf("fallback output diverges from the Load + Marshal floor\n got:  %s\n want: %s", out, want)
+	}
 }

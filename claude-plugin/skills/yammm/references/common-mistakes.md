@@ -306,7 +306,7 @@ age Integer
 
 All built-in functions in invariants are capitalized. A lowercase name is not a
 built-in, so the schema still **loads clean** — the failure surfaces at
-validation time (`E_UNKNOWN_BUILTIN` / `E_EVAL_ERROR`), not at load. Nothing
+validation time as `E_EVAL_ERROR` ("unknown method"), not at load. Nothing
 catches this for you at compile time.
 
 ```yammm-snippet

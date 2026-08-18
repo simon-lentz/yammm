@@ -30,8 +30,8 @@
 //
 // [BuilderFor] and [SchemaBuilder] provide fluent, schema-aware construction
 // of [RawInstance] values. Unlike a free-form map literal, SchemaBuilder
-// validates property names, relation names, cardinality, and the
-// EdgeTo-vs-EdgeToWith split at [SchemaBuilder.Build] time with call-site
+// validates property names, relation names, and cardinality at
+// [SchemaBuilder.Build] time with call-site
 // file:line locators — shifting shape errors out of ValidateOne's domain:
 //
 //	b, err := instance.BuilderFor(s, "Person")

@@ -39,31 +39,11 @@ var ErrAssemblerFinalized = errors.New("graph: BatchAssembler.Add called after F
 //
 // BatchAssembler is safe for concurrent use: Add, AddValid, Count, Graph,
 // and Finalize may all be called from multiple goroutines against the same
-// instance. The assembler supports two validator-access modes, selected at
-// construction time via options:
+// instance. A single shared Validator is serialized through an internal
+// sync.Mutex; the lock covers ValidateOne, Graph.Add, and the
+// success-counter increment as one atomic step.
 //
-//   - Default mode (mutex-serialized). A single shared Validator is
-//     serialized through an internal sync.Mutex. The lock covers
-//     ValidateOne, Graph.Add, and the success-counter increment as one
-//     atomic step. Appropriate for I/O-bound workloads where validation
-//     is a tiny fraction of per-record wall-clock — the default;
-//     suitable for streaming ETL pipelines and similar scrape-or-fetch-
-//     dominated consumers.
-//
-//   - Pool mode (opt-in via [WithValidatorPool]). N pre-constructed
-//     Validators are distributed through an internal buffered
-//     chan *instance.Validator, matching the "goroutine-per-CPU-core"
-//     shape. Each Add claims a validator, runs ValidateOne outside any
-//     shared lock, returns the validator to the pool, then performs
-//     Graph.Add (Graph is concurrent-safe by its own contract) and
-//     increments the success counter via sync/atomic. When the pool is
-//     exhausted (all N validators are claimed), subsequent Add calls
-//     block on the pool's return channel until a validator is freed —
-//     intentional back-pressure matching a bounded goroutine pool.
-//     Appropriate for CPU-bound workloads where validation is material
-//     relative to per-record wall-clock.
-//
-// Finalize is orthogonal to the validator-access mode: it sets a
+// Finalize sets a
 // finalized flag, then acquires an internal sync.RWMutex write lock —
 // which by Go's RWMutex semantics waits for every outstanding Add's
 // RLock to release before granting. Once the write lock is held, no
@@ -80,14 +60,6 @@ var ErrAssemblerFinalized = errors.New("graph: BatchAssembler.Add called after F
 // goroutine calling Finalize at end-of-batch. No external mutex
 // required at call sites.
 //
-// # Mode-selection guidance
-//
-// Default mode for I/O-bound consumers. WithValidatorPool(runtime.NumCPU())
-// for CPU-bound consumers where profiling shows validation as a material
-// fraction of per-record wall-clock. Passing WithValidatorPool(1) is
-// semantically equivalent to the default but adds channel-send/receive
-// overhead per Add — prefer the default in that case.
-//
 // BatchAssembler is a convenience primitive. Consumers who need
 // finer-grained control (per-record error handling, mid-batch
 // validator switching, custom diagnostic aggregation) should use the
@@ -97,14 +69,9 @@ type BatchAssembler struct {
 	schema *schema.Schema
 	graph  *Graph
 
-	// Validator access — exactly one of these is populated based on mode.
-	// Default mode populates `validator`; pool mode populates `pool`.
-	validator *instance.Validator      // default mode
-	pool      chan *instance.Validator // pool mode (cap == n, pre-filled)
+	validator *instance.Validator
 
-	// addMu serializes ValidateOne + Graph.Add + counter ops in default
-	// mode. Unused in pool mode (validators are claimed via channel
-	// receive instead).
+	// addMu serializes ValidateOne + Graph.Add + counter ops.
 	addMu sync.Mutex
 
 	// lifecycleMu coordinates Add lifecycle against Finalize.
@@ -170,72 +137,10 @@ type FinalizeResult struct {
 type BatchAssemblerOption func(*batchAssemblerConfig)
 
 // batchAssemblerConfig holds internal configuration for a BatchAssembler.
-type batchAssemblerConfig struct {
-	validatorOpts []instance.Option
-	graphOpts     []Option
-	poolSize      int // 0 == default mutex mode; n>=1 == pool mode
-}
-
-// WithValidatorOptions forwards [instance.Option] values to the underlying
-// Validator. Use [instance.RecommendedOptions] for the standard preset.
-func WithValidatorOptions(opts ...instance.Option) BatchAssemblerOption {
-	return func(c *batchAssemblerConfig) {
-		c.validatorOpts = append(c.validatorOpts, opts...)
-	}
-}
-
-// WithGraphOptions forwards [Option] values to the underlying Graph.
-func WithGraphOptions(opts ...Option) BatchAssemblerOption {
-	return func(c *batchAssemblerConfig) {
-		c.graphOpts = append(c.graphOpts, opts...)
-	}
-}
-
-// WithValidatorPool configures the assembler to use a pool of n
-// pre-constructed Validators distributed via an internal buffered
-// chan *instance.Validator, replacing the default mutex-serialized
-// single-validator shape. Each Add claims a validator from the pool
-// for the duration of its ValidateOne call and returns it on
-// completion; concurrent Adds proceed in parallel up to the pool size,
-// after which they block on a channel receive until a validator is
-// freed.
-//
-// Use this for CPU-bound workloads where validation cost is material
-// relative to per-record wall-clock. For I/O-bound consumers (streaming ETL
-// pipelines are the canonical example), the default mutex-serialized
-// path is preferable: validation is a tiny fraction of per-record
-// wall-clock, and passing this option adds memory overhead (n
-// validator instances) without measurable throughput gain.
-//
-// # Sizing guidance
-//
-// n = runtime.NumCPU() matches the "goroutine-per-CPU-core" shape and
-// is the suggested starting point for pool mode. Values below
-// NumCPU() under-use available parallelism; values above NumCPU()
-// add memory overhead without throughput gain (the extra validators
-// contend for the same CPUs). n must be >= 1; the constructor panics
-// on n <= 0 since that is a programmer error, not a runtime
-// condition.
-//
-// # Semantics when n == 1
-//
-// Equivalent to the default mutex-serialized mode but adds
-// channel-send/receive overhead per Add. Prefer the default in that
-// case — the option exists for n > 1 use cases.
-//
-// Pool mode changes the internal concurrency shape but preserves
-// every external contract (error shapes, Finalize one-shot semantics,
-// success-count monotonicity). Switching a call site between default
-// and pool mode is a one-option change with no ripple into caller
-// code.
-func WithValidatorPool(n int) BatchAssemblerOption {
-	if n <= 0 {
-		panic(fmt.Sprintf("graph.WithValidatorPool: pool size n must be >= 1, got %d", n))
-	}
-	return func(c *batchAssemblerConfig) {
-		c.poolSize = n
-	}
-}
+// It is currently empty: construction-time options were removed with the
+// unexercised option surface, and [BatchAssemblerOption] stays as the
+// extension point.
+type batchAssemblerConfig struct{}
 
 // applyBatchAssemblerOptions folds opts into a batchAssemblerConfig.
 func applyBatchAssemblerOptions(opts []BatchAssemblerOption) batchAssemblerConfig {
@@ -269,7 +174,7 @@ func NewBatchAssembler(ctx context.Context, s *schema.Schema, opts ...BatchAssem
 	}
 
 	cfg := applyBatchAssemblerOptions(opts)
-	return newBatchAssembler(ctx, s, New(s, cfg.graphOpts...), cfg)
+	return newBatchAssembler(ctx, s, New(s), cfg)
 }
 
 // NewBatchAssemblerFromSnapshot constructs an assembler bound to schema s
@@ -328,36 +233,28 @@ func NewBatchAssemblerFromSnapshot(ctx context.Context, s *schema.Schema, snap *
 	}
 
 	cfg := applyBatchAssemblerOptions(opts)
-	return newBatchAssembler(ctx, s, NewFromSnapshot(s, snap, cfg.graphOpts...), cfg)
+	return newBatchAssembler(ctx, s, NewFromSnapshot(s, snap), cfg)
 }
 
-// newBatchAssembler wires the validator-access mode (single shared
-// validator or pre-filled pool) around an already-constructed graph.
-// Both exported constructors funnel here; they differ only in how the
-// graph is built (empty via [New], or seeded via [NewFromSnapshot]).
-func newBatchAssembler(ctx context.Context, s *schema.Schema, g *Graph, cfg batchAssemblerConfig) *BatchAssembler {
+// newBatchAssembler wires a single shared validator around an
+// already-constructed graph. Both exported constructors funnel here; they
+// differ only in how the graph is built (empty via [New], or seeded via
+// [NewFromSnapshot]).
+func newBatchAssembler(ctx context.Context, s *schema.Schema, g *Graph, _ batchAssemblerConfig) *BatchAssembler {
 	ba := &BatchAssembler{
 		ctx:    ctx,
 		schema: s,
 		graph:  g,
 	}
 
-	if cfg.poolSize == 0 {
-		ba.validator = instance.NewValidator(s, cfg.validatorOpts...)
-	} else {
-		ba.pool = make(chan *instance.Validator, cfg.poolSize)
-		for range cfg.poolSize {
-			ba.pool <- instance.NewValidator(s, cfg.validatorOpts...)
-		}
-	}
+	ba.validator = instance.NewValidator(s)
 
 	return ba
 }
 
 // Add validates raw against typeName and adds the resulting instance
 // to the underlying Graph. Safe for concurrent use from multiple
-// goroutines; in default mode validator calls are serialized
-// internally via mutex, in pool mode via a bounded validator pool.
+// goroutines; validator calls are serialized internally via mutex.
 //
 // Returns an error annotated with typeName and the current call index
 // if validation or add fails; the returned error's cause is a
@@ -385,9 +282,6 @@ func (ba *BatchAssembler) Add(typeName string, raw instance.RawInstance) error {
 
 	attemptN := ba.attempts.Add(1)
 
-	if ba.pool != nil {
-		return ba.addPooled(typeName, raw, attemptN)
-	}
 	return ba.addSerial(typeName, raw, attemptN)
 }
 
@@ -406,38 +300,6 @@ func (ba *BatchAssembler) addSerial(typeName string, raw instance.RawInstance, a
 	}
 
 	valid, vRes := ba.validator.ValidateOne(ba.ctx, typeName, raw)
-	if vRes.HasErrors() {
-		return ba.wrapAddError(typeName, attemptN, vRes)
-	}
-	addRes := ba.graph.Add(ba.ctx, valid)
-	if addRes.HasErrors() {
-		return ba.wrapAddError(typeName, attemptN, addRes)
-	}
-	ba.successes.Add(1)
-	return nil
-}
-
-// addPooled handles the pool-mode Add path. Claims a validator from
-// the bounded pool, runs ValidateOne outside any shared lock, returns
-// the validator, then performs Graph.Add (which is concurrent-safe by
-// Graph's own contract) and increments the success counter atomically.
-func (ba *BatchAssembler) addPooled(typeName string, raw instance.RawInstance, attemptN int64) error {
-	var v *instance.Validator
-	select {
-	case v = <-ba.pool:
-	case <-ba.ctx.Done():
-		return ba.ctx.Err() //nolint:wrapcheck // ctx cancellation propagates verbatim
-	}
-	defer func() { ba.pool <- v }()
-
-	// Optimistic re-check: if Finalize set the flag while we were
-	// blocked on the pool channel, bail early. Same reasoning as
-	// addSerial's mid-mutex re-check.
-	if ba.finalized.Load() {
-		return ErrAssemblerFinalized
-	}
-
-	valid, vRes := v.ValidateOne(ba.ctx, typeName, raw)
 	if vRes.HasErrors() {
 		return ba.wrapAddError(typeName, attemptN, vRes)
 	}
@@ -474,14 +336,10 @@ func (ba *BatchAssembler) AddValid(valid *instance.ValidInstance) error {
 	attemptN := ba.attempts.Add(1)
 
 	// AddValid does not need validator access, but the success-counter
-	// increment must still be coherent with concurrent default-mode
-	// Adds. Take the addMu in default mode to keep the increment +
-	// Graph.Add atomic; pool mode relies on Graph's own concurrency
-	// guarantee and atomic counter.
-	if ba.pool == nil {
-		ba.addMu.Lock()
-		defer ba.addMu.Unlock()
-	}
+	// increment must stay coherent with concurrent Adds, so it takes the
+	// same addMu to keep the increment + Graph.Add atomic.
+	ba.addMu.Lock()
+	defer ba.addMu.Unlock()
 
 	addRes := ba.graph.Add(ba.ctx, valid)
 	if addRes.HasErrors() {

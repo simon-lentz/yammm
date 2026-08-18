@@ -8,23 +8,13 @@ import (
 	"maps"
 	"math"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
-
-// NodeQuery represents a parameterized Cypher query for a single node upsert.
-//
-// Construct via [Adapter.NodeQueryFor]; do not create directly.
-type NodeQuery struct {
-	Statement string         // Cypher MERGE ... SET statement
-	Params    map[string]any // Query parameters
-}
 
 // BatchNodeQuery represents an UNWIND-based batch node upsert.
 //
@@ -32,14 +22,6 @@ type NodeQuery struct {
 type BatchNodeQuery struct {
 	Statement string         // Cypher UNWIND $rows AS row MERGE ... SET statement
 	Params    map[string]any // Contains "rows" key with []map[string]any value
-}
-
-// EdgeQuery represents a parameterized Cypher query for a relationship merge.
-//
-// Construct via [Adapter.EdgeQueryFor]; do not create directly.
-type EdgeQuery struct {
-	Statement string         // Cypher MATCH ... MERGE ... SET statement
-	Params    map[string]any // Query parameters
 }
 
 // BatchEdgeQuery represents an UNWIND-based batch relationship merge.
@@ -55,7 +37,6 @@ type BatchEdgeQuery struct {
 type WriteOption func(*writeConfig)
 
 type writeConfig struct {
-	immutableKeys []string
 	nodeChunkSize int
 	edgeChunkSize int
 }
@@ -69,41 +50,6 @@ func defaultWriteConfig() writeConfig {
 	return writeConfig{
 		nodeChunkSize: defaultNodeChunkSize,
 		edgeChunkSize: defaultEdgeChunkSize,
-	}
-}
-
-// WithImmutableKeys specifies properties that should only be set when a node
-// is first created (ON CREATE SET), not when merging with an existing node.
-// Example: "first_seen_at" should not be overwritten on re-ingestion.
-//
-// These explicitly-passed keys UNION with the immutable keys derived from a
-// type's @writeOnce annotations (see [ImmutableKeysFor]). The effective
-// immutable set for a written type is therefore
-// explicit-keys ∪ derived-@writeOnce-keys. A node's write splits into
-// ON CREATE SET / ON MATCH SET whenever that effective set is non-empty, and
-// $update_props excludes every member of it.
-//
-// [Adapter.BatchNodeQueries] selects the shape per type: a type with derived or
-// explicit immutable keys gets the split shape, while an unannotated type in the
-// same snapshot stays mutable. A non-empty explicit list still produces the split
-// shape for every written type, preserving the prior contract.
-//
-// Only the explicitly-passed keys are validated: every one must name a declared
-// property (own or inherited) of a node type being written. [Adapter.NodeQueryFor]
-// rejects a key that is not a property of its schema type, and
-// [Adapter.BatchNodeQueries] rejects a key that is a property of no node type in
-// the snapshot. A mistyped key would otherwise be honored silently — the real
-// property would stay in $update_props and be rewritten on every re-MERGE,
-// defeating the write-once guarantee with no diagnostic. Derived @writeOnce keys
-// are schema-true by construction and are not re-validated. A nil schema type
-// skips this validation, matching the nil pass-through coercion behavior; the
-// derived keys are unaffected, since they travel on the shape.
-//
-// The option affects node merges only: relationship merges have no
-// ON CREATE / ON MATCH split, so edge query generation ignores it.
-func WithImmutableKeys(keys ...string) WriteOption {
-	return func(c *writeConfig) {
-		c.immutableKeys = keys
 	}
 }
 
@@ -123,112 +69,17 @@ func WithEdgeChunkSize(size int) WriteOption {
 	}
 }
 
-// NodeSource provides the data needed to generate a node MERGE query.
-//
-// Both [*graph.Instance] and [*instance.ValidInstance] satisfy this interface.
-type NodeSource interface {
-	TypeName() string
-	Properties() immutable.Properties
-}
-
-// NodeQueryFor generates a single-node MERGE query for an instance.
-//
-// The query uses the NodeShape's label and primary keys for MERGE matching,
-// and SET for all properties. When the effective immutable set is non-empty —
-// explicitly-passed [WithImmutableKeys] unioned with the type's derived
-// @writeOnce keys — the query uses ON CREATE SET / ON MATCH SET to preserve
-// those values.
-//
-// schemaType provides constraint metadata for schema-aware coercion of $props
-// (e.g., converting []any to []string for List<String> properties), matching the
-// coercion behavior of [Adapter.BatchNodeQueries]. Derived @writeOnce keys come
-// from the shape, not from this argument; schemaType is consulted for them only
-// when the shape carries none, which is the case for a hand-built one.
-//
-// The MERGE keys are coerced from the shape, not from schemaType, so a nil
-// schemaType still binds them as the driver-native types the properties are
-// stored as — see [NodeShape] and [coerceKey].
-//
-// Explicitly-passed immutable keys (see [WithImmutableKeys]) are validated
-// against schemaType: a key that names no property (own or inherited) of the
-// type is an error. A nil schemaType skips that validation and skips $props
-// coercion.
-//
-// It does NOT skip the @writeOnce guarantee. The derived keys travel on
-// [NodeShape.ImmutableKeys], which every call already supplies, so a @writeOnce
-// property is excluded from $update_props whichever way this is called. There is
-// no argument that opts out of it: [WithImmutableKeys] only ever adds to the
-// effective set.
-//
-// Any type satisfying [NodeSource] may be passed — both [*graph.Instance]
-// (graph-based path) and [*instance.ValidInstance] (streaming path) work.
-//
-//nolint:revive // ctx reserved for future use (cancellation, tracing)
-func (a *Adapter) NodeQueryFor(
-	ctx context.Context,
-	shape *NodeShape,
-	inst NodeSource,
-	schemaType *schema.Type,
-	opts ...WriteOption,
-) (*NodeQuery, error) {
-	cfg := defaultWriteConfig()
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-
-	if len(cfg.immutableKeys) > 0 && schemaType != nil {
-		if err := validateImmutableKeys(cfg.immutableKeys, schemaType); err != nil {
-			return nil, err
-		}
-	}
-
-	keyProps, err := extractKeyProps(inst.Properties(), shape)
-	if err != nil {
-		return nil, fmt.Errorf("type %q: %w", inst.TypeName(), err)
-	}
-
-	props, err := propsToParamMap(inst.Properties(), schemaType)
-	if err != nil {
-		return nil, fmt.Errorf("type %q: %w", inst.TypeName(), err)
-	}
-
-	params := make(map[string]any)
-	for k, v := range keyProps {
-		params[batchKeyParamPrefix+k] = v
-	}
-	params["props"] = props
-
-	// Effective immutable set: explicitly-passed keys union the type's derived
-	// @writeOnce keys. The shape carries them, which is what makes the guarantee
-	// hold for a caller passing a nil schema type — the documented streaming call
-	// shape. A shape built before that field existed, or by hand, carries none;
-	// deriving from schemaType then keeps the guarantee rather than silently
-	// dropping it, since the authoritative type is already in hand.
-	immutableKeys := effectiveImmutableKeys(cfg.immutableKeys, derivedImmutableKeys(shape, schemaType))
-	km := MutableKeys
-	if len(immutableKeys) > 0 {
-		km = ImmutableKeys
-		params["update_props"] = removeKeys(props, immutableKeys)
-	}
-
-	stmt := BuildNodeMergeQuery(shape.Label, shape.PrimaryKeys, km)
-	return &NodeQuery{Statement: stmt, Params: params}, nil
-}
-
 // BatchNodeQueries generates UNWIND-batched MERGE queries for all instances
 // of each type in a graph result.
 //
 // The immutable-key shape is selected per type: a type with derived @writeOnce
-// keys or explicit keys gets the ON CREATE / ON MATCH split, while an
-// unannotated type in the same snapshot stays mutable (a non-empty explicit
-// list still splits every type). Explicitly-passed immutable keys (see
-// [WithImmutableKeys]) are validated against the snapshot's node types before
-// any query is built: a key that names a property of no written type is an
-// error, while a key real for at least one written type is accepted (it may
-// legitimately apply to a subset of a multi-type snapshot).
+// keys gets the ON CREATE / ON MATCH split, while an unannotated type in the
+// same snapshot stays mutable.
 //
 // Returns one [BatchNodeQuery] per type per chunk. Types with more instances
-// than the chunk size produce multiple queries.
+// than the chunk size produce multiple queries. When two types in the
+// snapshot render the same type name, returns an error naming both
+// identities — they would share one node shape and one label.
 func (a *Adapter) BatchNodeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -240,37 +91,34 @@ func (a *Adapter) BatchNodeQueries(
 		opt(&cfg)
 	}
 
-	if len(cfg.immutableKeys) > 0 {
-		if err := validateSnapshotImmutableKeys(cfg.immutableKeys, result); err != nil {
-			return nil, err
-		}
+	if err := renderedNameCollision(result); err != nil {
+		return nil, err
 	}
 	var queries []*BatchNodeQuery
 
-	for _, typeName := range result.Types() {
+	for _, typeID := range result.Types() {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("batch node queries: %w", err)
 		}
-		nodeShape, ok := shapes.Types[typeName]
+		typeName := schema.TagForm(result.Schema(), typeID)
+		nodeShape, ok := shapes.Types[typeID]
 		if !ok {
-			return nil, fmt.Errorf("no shape for type %q", typeName)
+			return nil, fmt.Errorf("no shape for type %s", typeID)
 		}
 
-		schemaType, ok := result.Schema().Type(typeName)
+		schemaType, ok := result.Schema().TypeByID(typeID)
 		if !ok {
 			return nil, fmt.Errorf("type %q not found in schema", typeName)
 		}
 
-		// Effective immutable set is per type: explicit keys union the type's
-		// derived @writeOnce keys. A non-empty explicit list still splits every
-		// type (today's contract); an annotated type splits individually.
-		immutableKeys := effectiveImmutableKeys(cfg.immutableKeys, derivedImmutableKeys(&nodeShape, schemaType))
+		// The effective immutable set is the type's derived @writeOnce keys.
+		immutableKeys := derivedImmutableKeys(&nodeShape, schemaType)
 		km := MutableKeys
 		if len(immutableKeys) > 0 {
 			km = ImmutableKeys
 		}
 
-		instances := result.InstancesOf(typeName)
+		instances := result.InstancesOf(typeID)
 		var rows []map[string]any
 
 		for _, inst := range instances {
@@ -284,7 +132,7 @@ func (a *Adapter) BatchNodeQueries(
 				return nil, fmt.Errorf("type %q: %w", typeName, err)
 			}
 			// Key entries are prefixed to keep them in a namespace disjoint from
-			// `props` and `update_props`; see [BuildBatchNodeMergeQuery], whose
+			// `props` and `update_props`; see [buildBatchNodeMergeQuery], whose
 			// template reads them back as row.key_<name>.
 			row := make(map[string]any, len(keyProps)+2)
 			for k, v := range keyProps {
@@ -297,7 +145,7 @@ func (a *Adapter) BatchNodeQueries(
 			rows = append(rows, row)
 		}
 
-		stmt := BuildBatchNodeMergeQuery(nodeShape.Label, nodeShape.PrimaryKeys, km)
+		stmt := buildBatchNodeMergeQuery(nodeShape.Label, nodeShape.PrimaryKeys, km)
 		for _, chunk := range chunkSlice(rows, cfg.nodeChunkSize) {
 			queries = append(queries, &BatchNodeQuery{
 				Statement: stmt,
@@ -309,162 +157,13 @@ func (a *Adapter) BatchNodeQueries(
 	return queries, nil
 }
 
-// EdgeQueryFor generates a single relationship MERGE query for a graph edge.
-//
-// Endpoint keys are coerced against the shapes' declared key constraints, so a
-// Date- or Timestamp-keyed endpoint is MATCHed as the driver-native type its
-// nodes are stored as. EDGE properties, by contrast, are passed through
-// uncoerced: EdgeQueryFor takes a resolved [*graph.Edge] with no schema handle,
-// so unlike the schema-aware [Adapter.EdgeQueriesFor] and
-// [Adapter.BatchEdgeQueries] it cannot map typed relationship properties
-// (Timestamp/Date/Float) to driver-native types. No current schema declares
-// typed relationship properties, so this is latent; thread a [*schema.Relation]
-// through this signature when one first does.
-//
-//nolint:revive // opts reserved for future edge-level write options
-func (a *Adapter) EdgeQueryFor(
-	ctx context.Context,
-	edge *graph.Edge,
-	shapes *GraphShape,
-	opts ...WriteOption,
-) (*EdgeQuery, error) {
-	if err := ValidateIdentifier(edge.Relation(), "relationship type"); err != nil {
-		return nil, err
-	}
-
-	srcShape, ok := shapes.Types[edge.Source().TypeName()]
-	if !ok {
-		return nil, fmt.Errorf("no shape for source type %q", edge.Source().TypeName())
-	}
-	tgtShape, ok := shapes.Types[edge.Target().TypeName()]
-	if !ok {
-		return nil, fmt.Errorf("no shape for target type %q", edge.Target().TypeName())
-	}
-
-	srcKeys, err := extractKeyProps(edge.Source().Properties(), &srcShape)
-	if err != nil {
-		return nil, fmt.Errorf("source %q: %w", edge.Source().TypeName(), err)
-	}
-	tgtKeys, err := extractKeyProps(edge.Target().Properties(), &tgtShape)
-	if err != nil {
-		return nil, fmt.Errorf("target %q: %w", edge.Target().TypeName(), err)
-	}
-
-	params := make(map[string]any)
-	for k, v := range srcKeys {
-		params[relFromKeyParamPrefix+k] = v
-	}
-	for k, v := range tgtKeys {
-		params[relToKeyParamPrefix+k] = v
-	}
-
-	hasProps := edge.HasProperties()
-	if hasProps {
-		params["rel_props"] = edge.Properties().Clone()
-	}
-
-	stmt := BuildRelationshipMergeQuery(
-		srcShape.Label, srcShape.PrimaryKeys,
-		edge.Relation(),
-		tgtShape.Label, tgtShape.PrimaryKeys,
-		hasProps,
-	)
-
-	return &EdgeQuery{Statement: stmt, Params: params}, nil
-}
-
-// EdgeQueriesFor generates relationship MERGE queries for all association
-// edges of a validated instance.
-//
-// Unlike [Adapter.EdgeQueryFor] (which operates on a single resolved [*graph.Edge]),
-// this method works directly with a [*instance.ValidInstance], generating one
-// [EdgeQuery] per edge target across all association relations.
-//
-// The schemaType resolves relation metadata (target type, cardinality).
-// The shapes map must contain [NodeShape] entries for both the source type
-// and all target types referenced by the instance's edges.
-//
-//nolint:revive // opts reserved for future edge-level write options
-func (a *Adapter) EdgeQueriesFor(
-	ctx context.Context,
-	inst *instance.ValidInstance,
-	schemaType *schema.Type,
-	shapes *GraphShape,
-	opts ...WriteOption,
-) ([]*EdgeQuery, error) {
-	srcShape, ok := shapes.Types[inst.TypeName()]
-	if !ok {
-		return nil, fmt.Errorf("no shape for source type %q", inst.TypeName())
-	}
-
-	var queries []*EdgeQuery
-
-	for relationName, edgeData := range inst.Edges() {
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("edge queries for: %w", err)
-		}
-
-		rel, ok := schemaType.Relation(relationName)
-		if !ok || rel.Kind() != schema.RelationAssociation {
-			continue
-		}
-
-		if err := ValidateIdentifier(relationName, "relationship type"); err != nil {
-			return nil, err
-		}
-
-		targetTypeName := rel.TargetID().Name()
-		tgtShape, ok := shapes.Types[targetTypeName]
-		if !ok {
-			return nil, fmt.Errorf("no shape for target type %q (relation %q)", targetTypeName, relationName)
-		}
-
-		srcKeys, err := extractKeyProps(inst.Properties(), &srcShape)
-		if err != nil {
-			return nil, fmt.Errorf("source %q: %w", inst.TypeName(), err)
-		}
-
-		for target := range edgeData.TargetsIter() {
-			tgtKeys, err := extractKeyFromImmutableKey(target.TargetKey(), &tgtShape)
-			if err != nil {
-				return nil, fmt.Errorf("target %q (relation %q): %w", targetTypeName, relationName, err)
-			}
-
-			params := make(map[string]any)
-			for k, v := range srcKeys {
-				params[relFromKeyParamPrefix+k] = v
-			}
-			for k, v := range tgtKeys {
-				params[relToKeyParamPrefix+k] = v
-			}
-
-			hasProps := target.HasProperties()
-			if hasProps {
-				relProps, err := coerceRelProps(target.Properties().Clone(), rel)
-				if err != nil {
-					return nil, fmt.Errorf("target %q (relation %q): %w", targetTypeName, relationName, err)
-				}
-				params["rel_props"] = relProps
-			}
-
-			stmt := BuildRelationshipMergeQuery(
-				srcShape.Label, srcShape.PrimaryKeys,
-				relationName,
-				tgtShape.Label, tgtShape.PrimaryKeys,
-				hasProps,
-			)
-
-			queries = append(queries, &EdgeQuery{Statement: stmt, Params: params})
-		}
-	}
-
-	return queries, nil
-}
-
 // BatchEdgeQueries generates UNWIND-batched MERGE queries for edges,
 // grouped by (sourceType, relationType, targetType) signature.
 //
-// Returns one [BatchEdgeQuery] per signature per chunk.
+// Returns one [BatchEdgeQuery] per signature per chunk. When two types in
+// the snapshot render the same type name, returns an error naming both
+// identities — the writer refuses a rendering it cannot make unambiguous, rather than
+// writing two types under one label.
 func (a *Adapter) BatchEdgeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -474,6 +173,10 @@ func (a *Adapter) BatchEdgeQueries(
 	cfg := defaultWriteConfig()
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+
+	if err := renderedNameCollision(result); err != nil {
+		return nil, err
 	}
 
 	edges := result.Edges()
@@ -493,13 +196,13 @@ func (a *Adapter) BatchEdgeQueries(
 		sigs = append(sigs, sig)
 	}
 	slices.SortFunc(sigs, func(a, b edgeSignature) int {
-		if v := cmp.Compare(a.sourceType, b.sourceType); v != 0 {
+		if v := cmp.Compare(a.sourceType.String(), b.sourceType.String()); v != 0 {
 			return v
 		}
 		if v := cmp.Compare(a.relType, b.relType); v != 0 {
 			return v
 		}
-		return cmp.Compare(a.targetType, b.targetType)
+		return cmp.Compare(a.targetType.String(), b.targetType.String())
 	})
 
 	var queries []*BatchEdgeQuery
@@ -512,20 +215,22 @@ func (a *Adapter) BatchEdgeQueries(
 
 		srcShape, ok := shapes.Types[sig.sourceType]
 		if !ok {
-			return nil, fmt.Errorf("no shape for source type %q", sig.sourceType)
+			return nil, fmt.Errorf("no shape for source type %s", sig.sourceType)
 		}
 		tgtShape, ok := shapes.Types[sig.targetType]
 		if !ok {
-			return nil, fmt.Errorf("no shape for target type %q", sig.targetType)
+			return nil, fmt.Errorf("no shape for target type %s", sig.targetType)
 		}
 
-		// Resolve the schema relation for this signature group so typed edge
-		// properties (Timestamp/Date/Float) coerce to driver-native types.
-		// Nil when the source type or relation is not found — coerceRelProps
-		// then passes properties through unchanged.
+		// Resolve the relation so typed edge properties coerce to
+		// driver-native types; nil means coerceRelProps passes them through.
+		// By identity, which reaches the whole closure — an imported type's
+		// rendered name is in no schema's local table.
 		var rel *schema.Relation
-		if srcType, ok := result.Schema().Type(sig.sourceType); ok {
-			rel, _ = srcType.Relation(sig.relType)
+		if len(sigEdges) > 0 {
+			if srcType, ok := result.Schema().TypeByID(sigEdges[0].Source().TypeID()); ok {
+				rel, _ = srcType.Relation(sig.relType)
+			}
 		}
 
 		// Detect if any edge in this group has properties.
@@ -541,11 +246,11 @@ func (a *Adapter) BatchEdgeQueries(
 		for _, edge := range sigEdges {
 			srcKeys, err := extractKeyProps(edge.Source().Properties(), &srcShape)
 			if err != nil {
-				return nil, fmt.Errorf("source %q: %w", sig.sourceType, err)
+				return nil, fmt.Errorf("source %s: %w", sig.sourceType, err)
 			}
 			tgtKeys, err := extractKeyProps(edge.Target().Properties(), &tgtShape)
 			if err != nil {
-				return nil, fmt.Errorf("target %q: %w", sig.targetType, err)
+				return nil, fmt.Errorf("target %s: %w", sig.targetType, err)
 			}
 
 			row := make(map[string]any)
@@ -569,7 +274,7 @@ func (a *Adapter) BatchEdgeQueries(
 			rows = append(rows, row)
 		}
 
-		stmt := BuildBatchRelationshipMergeQuery(
+		stmt := buildBatchRelationshipMergeQuery(
 			srcShape.Label, srcShape.PrimaryKeys,
 			sig.relType,
 			tgtShape.Label, tgtShape.PrimaryKeys,
@@ -585,6 +290,23 @@ func (a *Adapter) BatchEdgeQueries(
 	}
 
 	return queries, nil
+}
+
+// renderedNameCollision reports an error when two type identities in the
+// snapshot render one type name. The rendering is lossy where the snapshot
+// is not, so the writer refuses rather than silently merging the pair.
+func renderedNameCollision(snap *graph.Snapshot) error {
+	s := snap.Schema()
+	seen := make(map[string]schema.TypeID)
+	for _, id := range snap.Types() {
+		name := schema.TagForm(s, id)
+		if first, ok := seen[name]; ok {
+			return fmt.Errorf("neo4j adapter: type %s and type %s both render type name %q, so they would share one node shape and label",
+				first, id, name)
+		}
+		seen[name] = id
+	}
+	return nil
 }
 
 // propsToParamMap converts instance properties to a Neo4j-driver-compatible
@@ -629,8 +351,8 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // homogeneous Go slice Neo4j requires ([]string, []float64, []dbtype.Date, ...).
 // A Vector is float-valued by definition (matching the eval package's checkVector
 // / coerceVector), so it coerces elementwise exactly as a List<Float> would; this
-// is what repairs a snapshot-loaded vector, which arrives as []any with whole
-// numbers narrowed to int64 by NormalizeValue. Per-element conversion delegates
+// is what repairs a vector loaded from a pre-v0.12 snapshot, whose whole floats
+// were written int-shaped and arrive narrowed to int64. Per-element conversion delegates
 // to [Coerce] (the Float width-repair and Date/Timestamp parse rules) or, for
 // Integer elements, to [repairInt64] (every Go int/uint width -> int64, mirroring
 // Coerce's Float repair), so the repair rules live in one place; coerceSlice owns
@@ -769,10 +491,11 @@ func repairInt64(v any) (int64, bool) {
 	case int64:
 		return n, true
 	case uint:
-		if uint64(n) > math.MaxInt64 {
+		u := uint64(n)
+		if u > math.MaxInt64 {
 			return 0, false
 		}
-		return int64(n), true
+		return int64(u), true
 	case uint8:
 		return int64(n), true
 	case uint16:
@@ -885,107 +608,6 @@ func extractKeyProps(props immutable.Properties, shape *NodeShape) (map[string]a
 	return result, nil
 }
 
-// extractKeyFromImmutableKey extracts the shape's key properties from a
-// positional immutable.Key, coercing each against its declared constraint as
-// [extractKeyProps] does. It zips key components with the shape's key names, so
-// the key must have exactly that many components.
-func extractKeyFromImmutableKey(key immutable.Key, shape *NodeShape) (map[string]any, error) {
-	keyNames := shape.PrimaryKeys
-	if len(keyNames) == 0 {
-		return nil, errors.New("no primary keys defined")
-	}
-	if key.Len() != len(keyNames) {
-		return nil, fmt.Errorf("key has %d components but %d key names provided", key.Len(), len(keyNames))
-	}
-
-	result := make(map[string]any, len(keyNames))
-	var nilKeys []string
-	for i, name := range keyNames {
-		val := key.Get(i).Unwrap()
-		if val == nil {
-			nilKeys = append(nilKeys, name)
-			continue
-		}
-		cv, err := coerceKey(shape, name, val)
-		if err != nil {
-			return nil, err
-		}
-		result[name] = cv
-	}
-	if len(nilKeys) > 0 {
-		return nil, fmt.Errorf("nil primary key(s): %v", nilKeys)
-	}
-	return result, nil
-}
-
-// validateImmutableKeys reports an error when any immutable key names no
-// property (own or inherited) of the type being written. Left unvalidated, a
-// mistyped key is a silent no-op in [removeKeys]: the real property stays in
-// $update_props and is rewritten on every re-MERGE, so the write-once
-// guarantee is lost without any diagnostic. Validation runs against the
-// schema type's declared properties, not the instance's present properties —
-// an immutable key may legitimately be a declared-but-absent optional
-// property on a given instance.
-func validateImmutableKeys(keys []string, schemaType *schema.Type) error {
-	seen := make(map[string]bool, len(keys))
-	var unknown []string
-	for _, k := range keys {
-		if seen[k] {
-			continue
-		}
-		seen[k] = true
-		if _, ok := schemaType.Property(k); !ok {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) == 0 {
-		return nil
-	}
-	var names []string
-	for p := range schemaType.AllProperties() {
-		names = append(names, p.Name())
-	}
-	slices.Sort(names)
-	return fmt.Errorf("immutable key(s) %q do not name a property of type %q (properties: %s)",
-		unknown, schemaType.Name(), strings.Join(names, ", "))
-}
-
-// validateSnapshotImmutableKeys reports an error when any immutable key names
-// a property of no node type present in the snapshot. A key real for at least
-// one written type is accepted — it may legitimately apply to a subset of a
-// multi-type snapshot — so only a key real for no written type (a typo or a
-// stale field name) fails. A snapshot with no types generates no queries and
-// validates vacuously.
-func validateSnapshotImmutableKeys(keys []string, result *graph.Snapshot) error {
-	typeNames := result.Types()
-	if len(typeNames) == 0 {
-		return nil
-	}
-	matched := make(map[string]bool, len(keys))
-	for _, typeName := range typeNames {
-		schemaType, ok := result.Schema().Type(typeName)
-		if !ok {
-			return fmt.Errorf("type %q not found in schema", typeName)
-		}
-		for _, k := range keys {
-			if _, ok := schemaType.Property(k); ok {
-				matched[k] = true
-			}
-		}
-	}
-	var unknown []string
-	for _, k := range keys {
-		if !matched[k] && !slices.Contains(unknown, k) {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) == 0 {
-		return nil
-	}
-	return fmt.Errorf("immutable key(s) %q do not name a property of any written type (%s)",
-		unknown, strings.Join(typeNames, ", "))
-}
-
 // removeKeys creates a copy of props without the specified keys.
 func removeKeys(props map[string]any, keys []string) map[string]any {
 	result := make(map[string]any, len(props))
@@ -1009,11 +631,15 @@ func chunkSlice[T any](items []T, size int) [][]T {
 	return chunks
 }
 
-// edgeSignature identifies edges that can be batched together.
+// edgeSignature identifies edges that can be batched together. The endpoints
+// are identities, not rendered names, so a group is homogeneous by
+// construction: two same-named types in different schemas never share a
+// signature, and the shape each group resolves is the shape of the type its
+// edges actually hold.
 type edgeSignature struct {
-	sourceType string
+	sourceType schema.TypeID
 	relType    string
-	targetType string
+	targetType schema.TypeID
 }
 
 // groupEdgesBySignature groups edges by their (sourceType, relationType, targetType) signature.
@@ -1021,9 +647,9 @@ func groupEdgesBySignature(edges []*graph.Edge) map[edgeSignature][]*graph.Edge 
 	groups := make(map[edgeSignature][]*graph.Edge)
 	for _, edge := range edges {
 		sig := edgeSignature{
-			sourceType: edge.Source().TypeName(),
+			sourceType: edge.Source().TypeID(),
 			relType:    edge.Relation(),
-			targetType: edge.Target().TypeName(),
+			targetType: edge.Target().TypeID(),
 		}
 		groups[sig] = append(groups[sig], edge)
 	}

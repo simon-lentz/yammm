@@ -85,7 +85,7 @@ func TestValidateEdges_SingleFK(t *testing.T) {
 	edge, ok := valid.Edge("employer")
 	require.True(t, ok)
 	require.NotNil(t, edge)
-	assert.Equal(t, 1, edge.TargetCount())
+	assert.Len(t, edge.Targets(), 1)
 	assert.Equal(t, `["42"]`, edge.Targets()[0].TargetKey().String())
 }
 
@@ -113,7 +113,7 @@ func TestValidateEdges_Many(t *testing.T) {
 	edge, ok := valid.Edge("employer")
 	require.True(t, ok)
 	require.NotNil(t, edge)
-	assert.Equal(t, 3, edge.TargetCount())
+	assert.Len(t, edge.Targets(), 3)
 }
 
 func TestValidateEdges_Optional_Nil(t *testing.T) {
@@ -298,7 +298,7 @@ type Person {
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
 	require.NotNil(t, edge)
-	assert.Equal(t, 1, edge.TargetCount())
+	assert.Len(t, edge.Targets(), 1)
 
 	// Check edge property
 	roleVal, ok := edge.Targets()[0].Properties().Get("role")
@@ -488,7 +488,7 @@ func TestValidateEdges_CompositeFK(t *testing.T) {
 	edge, ok := valid.Edge("enrollment")
 	require.True(t, ok)
 	require.NotNil(t, edge)
-	assert.Equal(t, 1, edge.TargetCount())
+	assert.Len(t, edge.Targets(), 1)
 	// Key should have both components
 	assert.Equal(t, 2, edge.Targets()[0].TargetKey().Len())
 }
@@ -1009,10 +1009,10 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 				edge, ok := valid.Edge("employer")
 				if tc.expectEdges > 0 {
 					require.True(t, ok, "%s: should have edge", tc.description)
-					assert.Equal(t, tc.expectEdges, edge.TargetCount(), "%s: edge count", tc.description)
+					assert.Len(t, edge.Targets(), tc.expectEdges, "%s: edge count", tc.description)
 				} else if ok {
 					// Zero edges means either no edge data or empty
-					assert.Equal(t, 0, edge.TargetCount(), "%s: should have 0 targets", tc.description)
+					assert.Empty(t, edge.Targets(), "%s: should have 0 targets", tc.description)
 				}
 			} else {
 				assert.Nil(t, valid, "%s: should fail but got valid", tc.description)

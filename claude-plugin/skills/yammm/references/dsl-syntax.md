@@ -117,7 +117,7 @@ field_name Type            // optional (nullable)
 ### Built-in Constraint Types
 
 | Type | Syntax | Description |
-|------|--------|-------------|
+| ---- | ------ | ----------- |
 | `String` | `String[min, max]` | String with rune-length bounds |
 | `Integer` | `Integer[min, max]` | Signed integer with inclusive bounds |
 | `Float` | `Float[min, max]` | Floating point with inclusive bounds |
@@ -192,7 +192,7 @@ Composition targets must be `part type`.
 ### Multiplicity
 
 | Syntax | Required | Cardinality |
-|--------|----------|-------------|
+| ------ | -------- | ----------- |
 | (omitted) / `(_)` / `(_:one)` | No | One |
 | `(one)` / `(one:one)` | Yes | One |
 | `(_:many)` / `(many)` | No | Many (0+) |
@@ -216,7 +216,7 @@ first_seen   Timestamp   @writeOnce
 Blessed annotations:
 
 | Annotation | Placement | Arguments | Target |
-|---|---|---|---|
+| - | - | - | - |
 | `@index` | property | none | a scalar property that is not the sole primary key |
 | `@@index(p, …)` | type | one or more property references (ordered) | scalar properties; primary-key members allowed |
 | `@vector(sim)` | property | `cosine` \| `euclidean` | a `Vector[N]` property |

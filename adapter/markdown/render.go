@@ -244,8 +244,8 @@ func (g *generator) typeBadges(t *schema.Type) string {
 }
 
 // superLink resolves a declared extends reference to a link on the parent
-// type's section, falling back to the reference's own spelling when the
-// parent did not resolve (a deferred import).
+// type's section, falling back to the reference's own spelling when the parent
+// is absent from this document's type map.
 func (g *generator) superLink(t *schema.Type, ref schema.TypeRef) string {
 	if e, ok := g.resolveSuper(t, ref); ok {
 		return "[" + e.display + "](#" + e.anchor + ")"
@@ -357,9 +357,9 @@ func (g *generator) relationList(label string, rels []*schema.Relation, origin f
 	return b.String()
 }
 
-// relationTarget links the relation's resolved target type; when the
-// target never resolved (a deferred import on a Builder-built schema) it
-// degrades to the reference's own spelling, unlinked.
+// relationTarget links the relation's target type; when the target is absent
+// from this document's type map it degrades to the reference's own spelling,
+// unlinked.
 func (g *generator) relationTarget(rel *schema.Relation) string {
 	if e, ok := g.types[rel.TargetID()]; ok {
 		return "[" + e.display + "](#" + e.anchor + ")"

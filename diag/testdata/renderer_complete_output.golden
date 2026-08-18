@@ -1,4 +1,4 @@
-src/schema.yammm:1:6: error[E_TYPE_COLLISION]: type 'User' is already defined
+src/schema.yammm:1:6: error[E_DUPLICATE_TYPE]: type 'User' is already defined
   hint: consider renaming one of the types
     |
 1 | type User {

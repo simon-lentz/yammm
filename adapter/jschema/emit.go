@@ -22,18 +22,10 @@ func buildDocument(s *schema.Schema, table *defsTable, cfg config) (val, map[str
 	if cfg.schemaID != "" {
 		pairs = append(pairs, kv{K: "$id", V: scalar(cfg.schemaID)})
 	}
-	title := cfg.title
-	if title == "" {
-		title = s.Name()
-	}
-	desc := cfg.description
-	if desc == "" {
-		desc = defaultDescription
-	}
 	pairs = append(
 		pairs,
-		kv{K: "title", V: scalar(title)},
-		kv{K: "description", V: scalar(desc)},
+		kv{K: "title", V: scalar(s.Name())},
+		kv{K: "description", V: scalar(defaultDescription)},
 		kv{K: "type", V: scalar("object")},
 	)
 

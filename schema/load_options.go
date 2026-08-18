@@ -27,13 +27,6 @@ func defaultLoadConfig() *loadConfig {
 	}
 }
 
-// applyLoadOptions applies all options to the loadConfig.
-func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
-	for _, opt := range opts {
-		opt(cfg)
-	}
-}
-
 // WithRegistry provides a schema registry for cross-schema type resolution.
 // Schemas loaded via imports will be registered automatically. If nil, a
 // fresh Registry is created for the Load operation (the default, safe for
@@ -65,6 +58,13 @@ func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 func WithRegistry(r *Registry) LoadOption {
 	return func(c *loadConfig) {
 		c.registry = r
+	}
+}
+
+// applyLoadOptions applies all options to the loadConfig.
+func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
+	for _, opt := range opts {
+		opt(cfg)
 	}
 }
 

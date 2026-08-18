@@ -28,7 +28,7 @@ const (
 
 // String returns the canonical lowercase label for the severity.
 //
-// These values are used by FormatIssueJSON/FormatResultJSON and are part of
+// These values are used by FormatResultJSON and are part of
 // the wire format stability guarantee. The returned strings are:
 // "fatal", "error", "warning", "info", "hint".
 func (s Severity) String() string {

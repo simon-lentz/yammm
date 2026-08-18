@@ -9,11 +9,20 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
+// marshalIssueWire renders one issue's wire object — the per-issue shape
+// [Renderer.FormatResultJSON] emits inside its envelope.
+func marshalIssueWire(issue Issue) json.RawMessage {
+	data, err := json.Marshal(toIssueWire(issue))
+	if err != nil {
+		panic("diag: unexpected JSON marshal error: " + err.Error())
+	}
+	return data
+}
+
 func TestFormatIssueJSON_Basic(t *testing.T) {
 	issue := NewIssue(Error, E_SYNTAX, "syntax error").Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -58,11 +67,10 @@ func TestFormatIssueJSON_AllSeverities(t *testing.T) {
 		{Hint, "hint"},
 	}
 
-	r := NewRenderer()
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
 			issue := NewIssue(tt.severity, E_SYNTAX, "msg").Build()
-			data := r.FormatIssueJSON(issue)
+			data := marshalIssueWire(issue)
 
 			var parsed map[string]any
 			if err := json.Unmarshal(data, &parsed); err != nil {
@@ -86,8 +94,7 @@ func TestFormatIssueJSON_WithSpan(t *testing.T) {
 		}).
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	// The golden pins the complete JSON wire format — the span object with
 	// line/column/byte for both endpoints is the behavior under test, and
@@ -139,7 +146,6 @@ func TestFormatIssueJSON_ByteOffsetEncoding(t *testing.T) {
 		},
 	}
 
-	r := NewRenderer()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			issue := NewIssue(Error, E_SYNTAX, "msg").
@@ -150,7 +156,7 @@ func TestFormatIssueJSON_ByteOffsetEncoding(t *testing.T) {
 				}).
 				Build()
 
-			data := r.FormatIssueJSON(issue)
+			data := marshalIssueWire(issue)
 
 			var parsed map[string]any
 			if err := json.Unmarshal(data, &parsed); err != nil {
@@ -211,8 +217,7 @@ func TestFormatIssueJSON_UnknownPosition(t *testing.T) {
 		}).
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -277,8 +282,7 @@ func TestFormatIssueJSON_PositionZeroValueFootgun(t *testing.T) {
 		}).
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -301,8 +305,7 @@ func TestFormatIssueJSON_WithHint(t *testing.T) {
 		WithHint("try this instead").
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -316,7 +319,7 @@ func TestFormatIssueJSON_WithHint(t *testing.T) {
 
 func TestFormatIssueJSON_WithRelated(t *testing.T) {
 	source := location.MustNewSourceID("test://file.yammm")
-	issue := NewIssue(Error, E_TYPE_COLLISION, "collision").
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, "collision").
 		WithRelated(
 			location.RelatedInfo{
 				Message: "first definition here",
@@ -329,8 +332,7 @@ func TestFormatIssueJSON_WithRelated(t *testing.T) {
 		).
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -362,8 +364,7 @@ func TestFormatIssueJSON_WithDetails(t *testing.T) {
 		).
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -393,8 +394,7 @@ func TestFormatIssueJSON_WithPath(t *testing.T) {
 		WithPath("data.json", "$.items[0]").
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -438,11 +438,11 @@ func TestFormatResultJSON_Empty(t *testing.T) {
 }
 
 func TestFormatResultJSON_WithIssues(t *testing.T) {
+	r := NewRenderer()
 	c := NewCollector(0)
 	c.Collect(NewIssue(Error, E_SYNTAX, "first error").Build())
 	c.Collect(NewIssue(Warning, E_INVALID_NAME, "second warning").Build())
 
-	r := NewRenderer()
 	data := r.FormatResultJSON(c.Result())
 
 	var parsed map[string]any
@@ -475,13 +475,13 @@ func TestFormatResultJSON_WithIssues(t *testing.T) {
 }
 
 func TestFormatResultJSON_WithLimit(t *testing.T) {
+	r := NewRenderer()
 	c := NewCollector(2)
 	c.Collect(NewIssue(Error, E_SYNTAX, "first").Build())
 	c.Collect(NewIssue(Error, E_SYNTAX, "second").Build())
 	c.Collect(NewIssue(Error, E_SYNTAX, "third").Build())  // Dropped
 	c.Collect(NewIssue(Error, E_SYNTAX, "fourth").Build()) // Dropped
 
-	r := NewRenderer()
 	data := r.FormatResultJSON(c.Result())
 
 	var parsed map[string]any
@@ -504,7 +504,7 @@ func TestFormatResultJSON_WithLimit(t *testing.T) {
 
 func TestFormatIssueJSON_CompleteIssue(t *testing.T) {
 	source := location.MustNewSourceID("test://complete.yammm")
-	issue := NewIssue(Error, E_TYPE_COLLISION, "complete test").
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, "complete test").
 		WithSpan(location.Span{
 			Source: source,
 			Start:  location.NewPosition(10, 5, 100),
@@ -518,8 +518,7 @@ func TestFormatIssueJSON_CompleteIssue(t *testing.T) {
 		WithDetails(Detail{Key: "key", Value: "value"}).
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	// Verify it's valid JSON
 	var parsed map[string]any
@@ -544,8 +543,7 @@ func TestFormatIssueJSON_RelatedWithoutSpan(t *testing.T) {
 		}).
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(issue)
+	data := marshalIssueWire(issue)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -574,8 +572,7 @@ func TestJSON_RoundTrip(t *testing.T) {
 		}).
 		Build()
 
-	r := NewRenderer()
-	data := r.FormatIssueJSON(original)
+	data := marshalIssueWire(original)
 
 	// Re-marshal should produce identical output
 	var parsed issueWire

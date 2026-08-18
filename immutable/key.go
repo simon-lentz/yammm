@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"slices"
 )
 
 // Key provides immutable access to primary or foreign key components.
@@ -65,13 +66,7 @@ func (k Key) Len() int {
 
 // Iter returns an iterator over the key components.
 func (k Key) Iter() iter.Seq[Value] {
-	return func(yield func(Value) bool) {
-		for _, c := range k.components {
-			if !yield(c) {
-				return
-			}
-		}
-	}
+	return slices.Values(k.components)
 }
 
 // Clone returns a deep copy of the key components as a mutable []any.
@@ -114,30 +109,6 @@ func (k Key) String() string {
 		return "[]" // Handle literal Key{} zero value
 	}
 	return k.str
-}
-
-// SingleString returns the key as a single string component if the key
-// has exactly one component that is a string.
-//
-// Returns ("", false) if the key has zero or multiple components,
-// or if the single component is not a string.
-func (k Key) SingleString() (string, bool) {
-	if len(k.components) != 1 {
-		return "", false
-	}
-	return k.components[0].String()
-}
-
-// SingleInt returns the key as a single int64 component if the key
-// has exactly one component that is an integer type.
-//
-// Returns (0, false) if the key has zero or multiple components,
-// or if the single component is not an integer type.
-func (k Key) SingleInt() (int64, bool) {
-	if len(k.components) != 1 {
-		return 0, false
-	}
-	return k.components[0].Int()
 }
 
 // computeKeyString computes the canonical JSON array string for wrapped components.

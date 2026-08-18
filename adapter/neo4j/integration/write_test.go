@@ -113,8 +113,8 @@ func TestBatchMerge_WriteOncePreservedOnMatch(t *testing.T) {
 	}
 }
 
-// The single-node template's parameter namespace must match what NodeQueryFor
-// builds, the same agreement the batch path needs.
+// The single-node template's parameter namespace must match the row shape the
+// adapter assembles, the same agreement the batch path needs.
 func TestSingleNodeMerge_KeyParamNamespace(t *testing.T) {
 	ctx := context.Background()
 	driver(t)

@@ -417,7 +417,10 @@ func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 
 func (e *Evaluator) evalSlice(children []expr.Expression, scope Scope) (any, error) {
 	if len(children) < 2 {
-		return nil, errors.New("slice access requires at least 2 operands")
+		return nil, errors.New("slice access requires an index")
+	}
+	if len(children) > 2 {
+		return nil, errors.New("slice access accepts exactly one index")
 	}
 
 	// Evaluate the receiver
@@ -452,6 +455,21 @@ func (e *Evaluator) accessIndex(obj, idx any) (any, error) {
 			return nil, nil //nolint:nilnil // out of bounds returns nil
 		}
 		return slice[int(i)], nil
+	}
+
+	// A List-typed property arrives as immutable.Slice, not []any — that is
+	// what Value.Unwrap returns for a collection.
+	if slice, ok := obj.(immutable.Slice); ok {
+		// Bounds-check in int64 like the arms above: narrowing first would
+		// wrap a large index into range on a 32-bit build.
+		if i < 0 || i >= int64(slice.Len()) {
+			return nil, nil //nolint:nilnil // out of bounds returns nil
+		}
+		v, ok := slice.GetOK(int(i))
+		if !ok {
+			return nil, nil //nolint:nilnil // out of bounds returns nil
+		}
+		return v.Unwrap(), nil
 	}
 
 	// Handle string - index by rune, not byte (per SPEC)

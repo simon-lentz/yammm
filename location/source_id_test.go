@@ -139,27 +139,6 @@ func TestMustSourceIDFromPath(t *testing.T) {
 	}
 }
 
-func TestSourceIDFromCanonicalPath(t *testing.T) {
-	cp, err := NewCanonicalPath(".")
-	if err != nil {
-		t.Fatalf("NewCanonicalPath failed: %v", err)
-	}
-
-	sid := SourceIDFromCanonicalPath(cp)
-	if !sid.IsFilePath() {
-		t.Error("should create file-backed SourceID")
-	}
-
-	// CanonicalPath() should return the exact same value
-	gotCP, ok := sid.CanonicalPath()
-	if !ok {
-		t.Fatal("CanonicalPath() should return ok=true for file-backed SourceID")
-	}
-	if gotCP != cp {
-		t.Error("CanonicalPath() should return the exact stored value")
-	}
-}
-
 func TestSourceIDFromAbsolutePath(t *testing.T) {
 	tests := []struct {
 		name    string

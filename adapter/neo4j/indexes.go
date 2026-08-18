@@ -93,12 +93,11 @@ func (k IndexKind) String() string {
 // the property's Vector[N] constraint; property-level @fulltext and type-level
 // @@fulltext yield fulltext indexes over text properties. Load-time validation
 // guarantees target
-// eligibility wherever it can resolve the type's full member set; where it must
-// defer — a supertype that never resolved, and every qualified reference in a
-// registry-less [schema.NewBuilder] schema — the adapter re-checks that each
-// named property exists and that its type can carry the index it was annotated
-// with, rather than emitting DDL for a property that does not exist or cannot
-// be indexed.
+// eligibility for every schema a public entry point returns; the adapter
+// re-checks anyway — that each named property exists and that its type can
+// carry the index it was annotated with — as defense against a model
+// assembled outside those guarantees, rather than emitting DDL for a property
+// that does not exist or cannot be indexed.
 //
 // Abstract types are skipped (they have no Neo4j label). Part types are NOT
 // skipped: they receive a label and constraints today, so they receive index
@@ -166,9 +165,9 @@ func (a *Adapter) IndexesStructured(ctx context.Context, s *schema.Schema) ([]In
 // and a schema's type list is small enough that one extra pass costs less than
 // the coupling a shared walk would create between a diagnostic and an emitter.
 //
-// The type name is trimmed, and the trimmed form is what both the label and
-// [Adapter.ShapeForSchema]'s map key are built from, so a consumer looking a
-// shape up by the name it derived the label from finds it. Both schema front
+// The type name is trimmed, and the trimmed form is what the label is built
+// from. [Adapter.ShapeForSchema]'s map is keyed by [schema.TypeID], so no
+// lookup depends on the trim. Both schema front
 // doors reject a name with surrounding whitespace anyway (the grammar's UC_WORD
 // production; [schema.NewBuilder] reports E_INVALID_NAME), so the trim only
 // matters to a construction path that bypasses both.
@@ -442,12 +441,11 @@ func validIndexName(t *schema.Type, prop *schema.Property, ann *schema.Annotatio
 // validScalarTarget reports whether a property named by @index or @@index can be
 // emitted: a usable Neo4j identifier, and a type the loader's own rule accepts.
 //
-// The type check is not redundant with load-time validation. The loader defers
-// its eligibility check whenever the target's type cannot be resolved — a type
-// whose supertype never resolved, and every qualified reference in a
-// registry-less [schema.NewBuilder] schema — so a schema can seal cleanly with
-// @index on a List or on an unresolved alias. Trusting the sealed model there
-// would emit a range index over a property the DSL's own rule forbids.
+// The type check is defense in depth. Every public entry point rejects the
+// dangling references that once sealed cleanly, but a model assembled outside
+// those guarantees could still carry @index on a List or on an unresolved
+// alias — trusting it would emit a range index over a property the DSL's own
+// rule forbids.
 func validScalarTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
 	collector *diag.Collector, reported reportedTargets,
 ) bool {
@@ -461,7 +459,7 @@ func validScalarTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 		indexTargetRef{ann: ann, name: prop.Name(), code: E_NEO4J_INVALID_INDEX_TARGET},
 		ann, E_NEO4J_INVALID_INDEX_TARGET, targetScope(t, prop),
 		fmt.Sprintf("index annotation names property %q, which is not an indexable scalar", prop.Name()),
-		"a range index requires a scalar property; the loader could not check this target because its type never resolved")
+		"a range index requires a scalar property")
 	return false
 }
 
@@ -469,13 +467,13 @@ func validScalarTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 // The caller has already resolved the constraint and passes the result, so the
 // assertion happens once and drives both the check and the emission.
 //
-// Deferred load-time validation is the same hole validScalarTarget covers, with
-// a sharper consequence: skipping a @vector whose target never resolved would
-// drop the declared ANN index entirely — no DDL and no diagnostic, so every
-// vector query falls back to a brute-force scan and the diff reports no problem
-// because the index is missing from the desired set too. A non-positive
-// dimension is rejected here for a related reason: Neo4j refuses the statement
-// at execution, aborting a DDL apply midway through.
+// The type check is defense in depth on the same terms as [validScalarTarget],
+// with a sharper consequence: emitting nothing for a @vector whose target is
+// not a Vector drops the declared ANN index entirely — no DDL and no
+// diagnostic, so every vector query falls back to a brute-force scan and the
+// diff reports no problem because the index is missing from the desired set
+// too. A non-positive dimension is rejected for a related reason: Neo4j
+// refuses the statement at execution, aborting a DDL apply midway through.
 func validVectorTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
 	vc schema.VectorConstraint, isVector bool,
 	collector *diag.Collector, reported reportedTargets,
@@ -492,7 +490,7 @@ func validVectorTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 	if !isVector {
 		return report(
 			fmt.Sprintf("@vector names property %q, which is not a Vector", prop.Name()),
-			"a vector index requires a Vector property; the loader could not check this target because its type never resolved",
+			"a vector index requires a Vector property",
 		)
 	}
 	if vc.Dimension() <= 0 {
@@ -508,11 +506,11 @@ func validVectorTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 // @@fulltext can be emitted: a usable Neo4j identifier, and a text type the
 // loader's own rule accepts.
 //
-// The type check is not redundant with load-time validation for the same
-// reason [validScalarTarget]'s is not: the loader defers its eligibility check
-// whenever the target's type cannot be resolved, so a schema can seal cleanly
-// with @fulltext on an unresolved alias. Trusting the sealed model there would
-// emit a fulltext index over a property the DSL's own rule forbids.
+// The type check is defense in depth on the same terms as [validScalarTarget]:
+// every public entry point rejects the references that once sealed cleanly, but
+// a model assembled outside those guarantees could still carry @fulltext on a
+// non-text property, and trusting it would emit a fulltext index over a
+// property the DSL's own rule forbids.
 func validFulltextTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
 	collector *diag.Collector, reported reportedTargets,
 ) bool {
@@ -526,7 +524,7 @@ func validFulltextTarget(t *schema.Type, prop *schema.Property, ann *schema.Anno
 		indexTargetRef{ann: ann, name: prop.Name(), code: E_NEO4J_INVALID_INDEX_TARGET},
 		ann, E_NEO4J_INVALID_INDEX_TARGET, targetScope(t, prop),
 		fmt.Sprintf("fulltext annotation names property %q, which is not a text property", prop.Name()),
-		"a fulltext index requires a String, Pattern, or Enum property; the loader could not check this target because its type never resolved")
+		"a fulltext index requires a String, Pattern, or Enum property")
 	return false
 }
 

@@ -217,10 +217,7 @@ func (w *Workspace) AddRoot(uri string) {
 		return
 	}
 
-	canonicalPath := path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		canonicalPath = filepath.Clean(resolved)
-	}
+	canonicalPath := lsputil.CanonicalPath(path)
 
 	if slices.Contains(w.roots, canonicalPath) {
 		w.logger.Debug("workspace root already exists", slog.String("path", canonicalPath))
@@ -246,10 +243,7 @@ func (w *Workspace) RemoveRoot(uri string) {
 		return
 	}
 
-	canonicalPath := path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		canonicalPath = filepath.Clean(resolved)
-	}
+	canonicalPath := lsputil.CanonicalPath(path)
 
 	lenBefore := len(w.roots)
 	w.roots = slices.DeleteFunc(w.roots, func(root string) bool {
@@ -291,13 +285,7 @@ func (w *Workspace) documentOpened(uri string, version int, text string) {
 		return
 	}
 
-	// Resolve symlinks to get canonical path matching the loader's behavior.
-	// The loader uses makeCanonicalPath which resolves symlinks, so we need
-	// to do the same here to ensure SourceID matches loader output.
-	canonicalPath := path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		canonicalPath = filepath.Clean(resolved)
-	}
+	canonicalPath := lsputil.CanonicalPath(path)
 
 	sourceID, err := location.SourceIDFromAbsolutePath(canonicalPath)
 	if err != nil {
@@ -397,10 +385,7 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 		return
 	}
 
-	canonicalPath := path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		canonicalPath = filepath.Clean(resolved)
-	}
+	canonicalPath := lsputil.CanonicalPath(path)
 
 	moduleRoot := w.FindModuleRoot(canonicalPath)
 
@@ -465,11 +450,7 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 func (w *Workspace) FileChanged(uri string, changeType protocol.UInteger) {
 	canonicalURI := uri
 	if path, err := lsputil.URIToPath(uri); err == nil {
-		if resolved, err := filepath.EvalSymlinks(path); err == nil {
-			path = filepath.Clean(resolved)
-		} else {
-			path = filepath.Clean(path)
-		}
+		path = lsputil.CanonicalPath(path)
 		if sourceID, err := location.SourceIDFromAbsolutePath(path); err == nil {
 			canonicalURI = lsputil.PathToURI(sourceID.String())
 		}

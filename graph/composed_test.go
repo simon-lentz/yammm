@@ -40,7 +40,7 @@ func TestAddComposed_OneCardinality_Success(t *testing.T) {
 
 	// Verify child is attached
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -104,7 +104,7 @@ func TestAddComposed_ManyWithPK_Success(t *testing.T) {
 
 	// Verify all children attached
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	assertComposedCount(t, parents[0], "children", 3)
 }
 
@@ -164,7 +164,7 @@ func TestAddComposed_ManyWithoutPK_Appends(t *testing.T) {
 
 	// Verify all items attached
 	snap := g.Snapshot()
-	containers := snap.InstancesOf("Container")
+	containers := snap.InstancesOf(mustTypeID(t, s, "Container"))
 	assertComposedCount(t, containers[0], "items", 3)
 }
 
@@ -283,7 +283,7 @@ func TestAddComposed_AfterAdd_Mixed(t *testing.T) {
 
 	// Verify both children are present
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	assertComposedCount(t, parents[0], "children", 2)
 
 	// Verify child details

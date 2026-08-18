@@ -3,6 +3,7 @@ package graph
 import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // Duplicate records a duplicate primary key detected during graph construction.
@@ -29,25 +30,22 @@ type Duplicate struct {
 	// This instance remains in the graph.
 	Conflict *Instance
 
+	// Parent is the composing parent for a composed-child duplicate, and nil
+	// for a root duplicate. With Relation it locates a Conflict no index holds.
+	Parent *Instance
+
+	// Relation is the composing relation name for a composed-child duplicate,
+	// and empty for a root duplicate.
+	Relation string
+
 	// Diagnostic contains the E_DUPLICATE_PK or E_DUPLICATE_COMPOSED_PK issue
 	// with details about the conflict.
 	//
 	// For snapshots loaded from persisted .ys files, this field is zero-valued
-	// because construction diagnostics are transient and not persisted. Use
-	// [Duplicate.HasDiagnostic] to guard access to this field in code that may
-	// operate on both constructed and loaded snapshots.
+	// because construction diagnostics are transient and not persisted. Code
+	// that runs on both constructed and loaded snapshots guards on
+	// [diag.Issue.IsZero].
 	Diagnostic diag.Issue
-}
-
-// HasDiagnostic reports whether this duplicate record has an associated
-// construction diagnostic.
-//
-// Returns false for duplicates loaded from persisted snapshots (.ys files),
-// where construction diagnostics are transient and not persisted. The
-// structural data (Instance, Conflict) is always available regardless of
-// this method's return value.
-func (d *Duplicate) HasDiagnostic() bool {
-	return !d.Diagnostic.Code().IsZero()
 }
 
 // UnresolvedEdge records an association edge whose target was not found in the graph.
@@ -69,9 +67,9 @@ type UnresolvedEdge struct {
 	// Relation is the DSL relation name (e.g., "OWNER").
 	Relation string
 
-	// TargetType is the expected target type name in instance tag form.
-	// This is resolved from the schema's relation definition.
-	TargetType string
+	// TargetType is the expected target type's identity, resolved from the
+	// schema's relation definition.
+	TargetType schema.TypeID
 
 	// TargetKey is the foreign key value in canonical string form.
 	// This is the FormatKey() output of the FK values.
@@ -95,10 +93,8 @@ type UnresolvedEdge struct {
 	// is the zero-value immutable.Properties there.
 	//
 	// Accessed via [UnresolvedEdge.Property] and [UnresolvedEdge.Properties].
-	// Survives Marshal/Load round-trips in .ys wire format v2 and later
-	// (v1 documents produced before v0.3.0 have no properties field;
-	// v2 readers load them as empty Properties, which is lossless —
-	// v1 never carried the data).
+	// Survives Marshal/Load round-trips in every readable .ys wire
+	// format.
 	properties immutable.Properties
 }
 
@@ -127,17 +123,20 @@ func (u *UnresolvedEdge) Properties() immutable.Properties {
 	return u.properties
 }
 
-// newDuplicate creates a Duplicate record.
-func newDuplicate(instance, conflict *Instance, diagnostic diag.Issue) *Duplicate {
+// newDuplicate creates a Duplicate record. parent and relation are the
+// composing coordinates, zero for a root duplicate.
+func newDuplicate(instance, conflict, parent *Instance, relation string, diagnostic diag.Issue) *Duplicate {
 	return &Duplicate{
 		Instance:   instance,
 		Conflict:   conflict,
+		Parent:     parent,
+		Relation:   relation,
 		Diagnostic: diagnostic,
 	}
 }
 
 // newUnresolvedEdge creates an UnresolvedEdge record.
-func newUnresolvedEdge(source *Instance, relation, targetType, targetKey string, required bool, reason string, properties immutable.Properties) *UnresolvedEdge {
+func newUnresolvedEdge(source *Instance, relation string, targetType schema.TypeID, targetKey string, required bool, reason string, properties immutable.Properties) *UnresolvedEdge {
 	return &UnresolvedEdge{
 		Source:     source,
 		Relation:   relation,

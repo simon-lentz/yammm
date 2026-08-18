@@ -75,7 +75,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 ## Reference Files
 
 | File | Covers | Consult when... |
-|------|--------|-----------------|
+| ---- | ------ | --------------- |
 | `references/quick-reference.md` | Compact syntax cheat sheet | Quick DSL syntax lookup |
 | `references/common-mistakes.md` | 20 wrong/right patterns | Checking or fixing common errors |
 | `references/dsl-syntax.md` | Full grammar: types, properties, relationships, annotations, imports | Writing or modifying `.yammm` schemas |

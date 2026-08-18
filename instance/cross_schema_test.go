@@ -3,6 +3,7 @@ package instance_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -70,7 +71,7 @@ type Basin {
 	if !ok {
 		t.Fatal("IN_BASIN edge missing from validated instance")
 	}
-	if got := edge.TargetCount(); got != 1 {
+	if got := len(edge.Targets()); got != 1 {
 		t.Errorf("target count = %d, want 1", got)
 	}
 }
@@ -179,8 +180,13 @@ part type Piece {
 	if !result.OK() {
 		t.Fatalf("imported-type composition must validate: %s", result)
 	}
-	children, ok := valid.Composed("HAS_PIECE")
-	if !ok || children.IsNil() {
+	foundPiece := false
+	for rel, children := range valid.Compositions() {
+		if rel == "HAS_PIECE" && !children.IsNil() {
+			foundPiece = true
+		}
+	}
+	if !foundPiece {
 		t.Fatal("HAS_PIECE children missing from validated instance")
 	}
 }
@@ -234,11 +240,16 @@ func TestValidate_CrossSchemaInheritedRelations(t *testing.T) {
 	if !ok {
 		t.Fatal("IN_REGION edge missing from validated instance")
 	}
-	if got := edge.TargetCount(); got != 1 {
+	if got := len(edge.Targets()); got != 1 {
 		t.Errorf("target count = %d, want 1", got)
 	}
-	children, ok := valid.Composed("HAS_MARKER")
-	if !ok || children.IsNil() {
+	foundMarker := false
+	for rel, children := range valid.Compositions() {
+		if rel == "HAS_MARKER" && !children.IsNil() {
+			foundMarker = true
+		}
+	}
+	if !foundMarker {
 		t.Fatal("HAS_MARKER children missing from validated instance")
 	}
 }
@@ -327,62 +338,14 @@ func TestSchemaBuilder_CrossSchemaTargets(t *testing.T) {
 			t.Fatal("validated instance is nil")
 		}
 	})
-
-	t.Run("Composed on an imported-type composition", func(t *testing.T) {
-		s := loadCrossSchema(t, map[string]string{
-			"entry.yammm": `schema "app"
-
-import "common.yammm" as common
-
-type Anchor {
-	id String primary
-}
-`,
-			"common.yammm": `schema "common"
-
-type Box {
-	id String primary
-	*-> HOLDS (many) Item
 }
 
-part type Item {
-	sku String primary
-}
-`,
-		})
-		child, err := instance.BuilderFor(s, "common.Item")
-		if err != nil {
-			t.Fatalf("BuilderFor(child): %v", err)
-		}
-		child.Property("sku", "S1")
-
-		b, err := instance.BuilderFor(s, "common.Box")
-		if err != nil {
-			t.Fatalf("BuilderFor: %v", err)
-		}
-		raw, err := b.
-			Property("id", "B1").
-			Composed("HOLDS", child).
-			Build()
-		if err != nil {
-			t.Fatalf("Composed must resolve the declaring schema's target: %v", err)
-		}
-
-		v := instance.NewValidator(s)
-		valid, result := v.ValidateOne(t.Context(), "common.Box", raw)
-		if !result.OK() {
-			t.Fatalf("built instance must validate: %s", result)
-		}
-		if valid == nil {
-			t.Fatal("validated instance is nil")
-		}
-	})
-}
-
-// A registry-less schema.Builder defers a qualified cross-schema relation
-// target, leaving a zero TargetID; validation falls back to syntactic
-// entry-relative resolution and reports the target as not found.
-func TestValidate_DeferredTargetFallback(t *testing.T) {
+// TestValidate_DanglingQualifiedTargetRejectedAtBuild pins that the dangling
+// cross-schema relation target the instance layer once had to handle at
+// validation time is now rejected at schema construction: a registry-less
+// Builder draws E_UNKNOWN_TYPE and nils the schema, so no validator can see a
+// zero-TargetID relation through a public entry point.
+func TestValidate_DanglingQualifiedTargetRejectedAtBuild(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("app").
 		AddType("Node").
@@ -390,36 +353,10 @@ func TestValidate_DeferredTargetFallback(t *testing.T) {
 		WithRelation("LINKED", schema.NewTypeRef("ext", "Thing", location.Span{}), true, false).
 		Done().
 		Build()
-	if result.HasErrors() {
-		t.Fatalf("build: %v", result.Err())
+	if s != nil {
+		t.Fatal("a dangling qualified relation target must nil the schema")
 	}
-
-	node, ok := s.Type("Node")
-	if !ok {
-		t.Fatal("type Node missing")
-	}
-	rel, ok := node.Relation("LINKED")
-	if !ok {
-		t.Fatal("relation LINKED missing")
-	}
-	if !rel.TargetID().IsZero() {
-		t.Fatal("fixture must exercise the deferred (zero-TargetID) path")
-	}
-
-	v := instance.NewValidator(s)
-	valid, vres := v.ValidateOne(t.Context(), "Node", instance.RawInstance{
-		Properties: map[string]any{
-			"id":     "N1",
-			"linked": map[string]any{"_target_id": "T1"},
-		},
-	})
-	if valid != nil {
-		t.Error("deferred-target edge must not produce a valid instance")
-	}
-	if vres.OK() {
-		t.Fatal("deferred-target edge must be rejected")
-	}
-	if !vres.HasCode(instance.ErrTypeNotFound) {
-		t.Errorf("want E_INSTANCE_TYPE_NOT_FOUND, got: %s", vres)
+	if !result.HasCode(diag.E_UNKNOWN_TYPE) {
+		t.Errorf("want E_UNKNOWN_TYPE, got: %s", result)
 	}
 }

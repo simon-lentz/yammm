@@ -304,7 +304,13 @@ func TestSources_FailedLoadKeepsOverlays(t *testing.T) {
 	require.Nil(t, snapshot.Schema, "the load must fail for this contract to apply")
 	require.True(t, snapshot.Result.HasErrors())
 
-	mainSourceID, err := location.SourceIDFromAbsolutePath(mainPath)
+	// The registry keys overlays canonically (symlinks resolved), matching
+	// the loader's identity, so the expected ID is minted the same way.
+	mainCanonical, err := filepath.EvalSymlinks(mainPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", mainPath, err)
+	}
+	mainSourceID, err := location.SourceIDFromAbsolutePath(mainCanonical)
 	require.NoError(t, err)
 	assert.True(t, snapshot.Sources.Has(mainSourceID), "overlay content stays available")
 	assert.Equal(t, 1, snapshot.Sources.Len(), "no partially-loaded sources beyond the overlays")

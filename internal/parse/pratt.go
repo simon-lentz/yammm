@@ -162,7 +162,9 @@ func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
 }
 
 // conditional parses the "{ then : else }" tail of a conditional whose '?' the
-// caller has already consumed. The else branch is optional.
+// caller has already consumed. The else branch is required: a two-operand
+// conditional can never evaluate, so the missing ':' is a syntax error here
+// rather than a guaranteed evaluation error later.
 func (p *exprParser) conditional(cond expr.Expression) (expr.Expression, error) {
 	if err := p.expect(p.tok.lbrace, "'{' after '?'"); err != nil {
 		return nil, err
@@ -171,21 +173,17 @@ func (p *exprParser) conditional(cond expr.Expression) (expr.Expression, error) 
 	if err != nil {
 		return nil, err
 	}
-	var falseBranch expr.Expression
-	if p.lx.Peek().Type == p.tok.colon {
-		p.next()
-		falseBranch, err = p.parse(0)
-		if err != nil {
-			return nil, err
-		}
+	if err := p.expect(p.tok.colon, "':' and an else branch in a conditional"); err != nil {
+		return nil, err
+	}
+	falseBranch, err := p.parse(0)
+	if err != nil {
+		return nil, err
 	}
 	if err := p.expect(p.tok.rbrace, "'}' closing conditional"); err != nil {
 		return nil, err
 	}
-	if falseBranch != nil {
-		return expr.SExpr{expr.Op("?"), cond, trueBranch, falseBranch}, nil
-	}
-	return expr.SExpr{expr.Op("?"), cond, trueBranch}, nil
+	return expr.SExpr{expr.Op("?"), cond, trueBranch, falseBranch}, nil
 }
 
 func (p *exprParser) prefix() (expr.Expression, error) {
@@ -256,9 +254,11 @@ func (p *exprParser) literal(t *lexer.Token) expr.Expression {
 	start, end := t.Pos.Offset, t.Pos.Offset+len(t.Value)
 	switch t.Type {
 	case p.tok.str:
-		s, err := strconv.Unquote(t.Value)
+		s, err := unquote(t.Value)
 		if err != nil {
-			p.diagf(start, end, "invalid string literal: %v", err)
+			// This site supplies its own context, so it reports the cause
+			// alone rather than double-prefixing a text consumers match.
+			p.diagf(start, end, "invalid string literal: %s", unquoteSyntaxCause)
 			return expr.NewLiteral(nil)
 		}
 		return expr.NewLiteral(s)

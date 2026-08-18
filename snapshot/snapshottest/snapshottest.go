@@ -6,6 +6,7 @@ package snapshottest
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -33,6 +34,12 @@ func BuildSnapshot(tb testing.TB, s *schema.Schema, instances ...*instance.Valid
 // AssertRoundTrip marshals a snapshot, loads it back, and verifies
 // structural equivalence via [DiffSnapshots]. Fails the test with a
 // (-want +got) diff on mismatch.
+//
+// Not valid for a snapshot whose whole floats are stored as int64, because the
+// round trip heals them to float64 while [DiffSnapshots] compares exactly.
+// Round-trip such a snapshot once first; healing is idempotent, so every later
+// round trip holds. The composed-child identity repair this also warned about
+// is gone with the reader that needed it.
 func AssertRoundTrip(tb testing.TB, snap *graph.Snapshot, s *schema.Schema, opts ...snapshot.Option) {
 	tb.Helper()
 	ctx := context.Background()
@@ -77,11 +84,13 @@ func AssertDeterministic(tb testing.TB, snap *graph.Snapshot, opts ...snapshot.O
 type snapProjection struct {
 	Types      []string
 	Instances  map[string][]instProjection
-	Duplicates []string
+	Duplicates []dupProjection
 	Unresolved []unresProjection
 }
 
 type instProjection struct {
+	TypeName   string
+	TypeID     string
 	PK         string
 	Properties map[string]any
 	Edges      []edgeProjection
@@ -89,13 +98,26 @@ type instProjection struct {
 	Provenance *provProjection
 }
 
+// dupProjection carries the duplicate's full coordinate set: a conflict that
+// re-resolves to a different instance, or parent coordinates lost on the
+// wire, are losses the rejected instance's own tree cannot show.
+type dupProjection struct {
+	Instance     instProjection
+	ConflictType string
+	ConflictKey  string
+	ParentType   string
+	ParentKey    string
+	Relation     string
+}
+
 // provProjection distinguishes an instance carrying provenance from one
-// without: a nil pointer means no provenance, a zero-valued one means
-// provenance whose fields are empty — a distinction a round trip must
-// preserve.
+// without: a nil pointer means none, a zero-valued one means empty fields.
+// Both path forms are carried because RawPath is populated only on a parse
+// failure, so it alone leaves a well-formed path empty on both sides.
 type provProjection struct {
 	SourceName string
 	Path       string
+	RawPath    string
 }
 
 type edgeProjection struct {
@@ -105,8 +127,11 @@ type edgeProjection struct {
 	Properties map[string]any
 }
 
+// SourceKey is load-bearing: without it two unresolved records hanging off
+// different source instances of the same type compare equal.
 type unresProjection struct {
 	SourceType string
+	SourceKey  string
 	Relation   string
 	TargetType string
 	TargetKey  string
@@ -116,67 +141,68 @@ type unresProjection struct {
 }
 
 // DiffSnapshots compares two snapshots structurally with go-cmp and fails
-// the test with a (-want +got) diff on mismatch. Mixed int64/float64
-// property pairs compare by float64 value, tolerating the wire format's
-// whole-float narrowing across a marshal/load boundary; same-typed pairs
-// compare exactly, so integer corruption above 2^53 is not masked by a
-// float64 collapse.
+// the test with a (-want +got) diff on mismatch. Values compare exactly,
+// dynamic type included — an int64/float64 mismatch is a real defect, not a
+// wire artifact to tolerate — with one deliberate exception: a float32
+// widened to float64 compares equal, because the widening is exact and the
+// wire carries value fidelity, not width. Load materializes dynamic numeric
+// values as int64 and float64 only.
 func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 	tb.Helper()
-	numericCoercion := cmp.FilterValues(func(a, b any) bool {
-		_, aInt := a.(int64)
-		_, aFloat := a.(float64)
-		_, bInt := b.(int64)
-		_, bFloat := b.(float64)
-		return (aInt && bFloat) || (aFloat && bInt)
-	}, cmp.Transformer("toFloat64", func(v any) float64 {
-		switch n := v.(type) {
-		case int64:
-			return float64(n)
-		case float64:
-			return n
-		}
-		panic("unreachable: filter admits only int64/float64")
-	}))
-	// EquateEmpty: a built snapshot carries nil property maps where a
-	// loaded one carries empty maps; the distinction is not part of the
-	// structural contract.
-	if d := cmp.Diff(project(want), project(got), numericCoercion, cmpopts.EquateEmpty()); d != "" {
+	// EquateEmpty: a built snapshot carries nil property maps where a loaded
+	// one carries empty maps; that distinction is outside the contract.
+	if d := cmp.Diff(project(want), project(got), cmpopts.EquateEmpty()); d != "" {
 		tb.Errorf("snapshots differ (-want +got):\n%s", d)
 	}
 }
 
 func project(s *graph.Snapshot) snapProjection {
+	ids := s.Types()
 	p := snapProjection{
-		Types:     s.Types(),
-		Instances: make(map[string][]instProjection, len(s.Types())),
+		Types:     make([]string, 0, len(ids)),
+		Instances: make(map[string][]instProjection, len(ids)),
 	}
-	for _, typeName := range s.Types() {
-		for _, inst := range s.InstancesOf(typeName) {
+	for _, typeID := range ids {
+		key := typeID.String()
+		p.Types = append(p.Types, key)
+		for _, inst := range s.InstancesOf(typeID) {
 			ip := projectInstanceTree(inst)
 			for _, e := range s.EdgesFrom(inst) {
 				ip.Edges = append(ip.Edges, edgeProjection{
 					Relation:   e.Relation(),
-					TargetType: e.Target().TypeName(),
+					TargetType: e.Target().TypeID().String(),
 					TargetPK:   e.Target().PrimaryKey().String(),
-					Properties: e.Properties().Clone(),
+					Properties: widenFloat32Map(e.Properties().Clone()),
 				})
 			}
-			p.Instances[typeName] = append(p.Instances[typeName], ip)
+			p.Instances[key] = append(p.Instances[key], ip)
 		}
 	}
 	for _, d := range s.Duplicates() {
-		p.Duplicates = append(p.Duplicates, d.Instance.TypeName()+d.Instance.PrimaryKey().String())
+		dp := dupProjection{
+			Instance: projectInstanceTree(d.Instance),
+			Relation: d.Relation,
+		}
+		if d.Conflict != nil {
+			dp.ConflictType = d.Conflict.TypeID().String()
+			dp.ConflictKey = d.Conflict.PrimaryKey().String()
+		}
+		if d.Parent != nil {
+			dp.ParentType = d.Parent.TypeID().String()
+			dp.ParentKey = d.Parent.PrimaryKey().String()
+		}
+		p.Duplicates = append(p.Duplicates, dp)
 	}
 	for _, u := range s.Unresolved() {
 		p.Unresolved = append(p.Unresolved, unresProjection{
-			SourceType: u.Source.TypeName(),
+			SourceType: u.Source.TypeID().String(),
+			SourceKey:  u.Source.PrimaryKey().String(),
 			Relation:   u.Relation,
-			TargetType: u.TargetType,
+			TargetType: u.TargetType.String(),
 			TargetKey:  u.TargetKey,
 			Required:   u.Required,
 			Reason:     u.Reason,
-			Properties: u.Properties().Clone(),
+			Properties: widenFloat32Map(u.Properties().Clone()),
 		})
 	}
 	return p
@@ -189,8 +215,10 @@ func project(s *graph.Snapshot) snapProjection {
 // carry edges.
 func projectInstanceTree(inst *graph.Instance) instProjection {
 	ip := instProjection{
+		TypeName:   inst.TypeName(),
+		TypeID:     inst.TypeID().String(),
 		PK:         inst.PrimaryKey().String(),
-		Properties: inst.Properties().Clone(),
+		Properties: widenFloat32Map(inst.Properties().Clone()),
 	}
 	if rels := inst.ComposedRelations(); len(rels) > 0 {
 		ip.Composed = make(map[string][]instProjection, len(rels))
@@ -203,8 +231,41 @@ func projectInstanceTree(inst *graph.Instance) instProjection {
 	if prov := inst.Provenance(); prov != nil {
 		ip.Provenance = &provProjection{
 			SourceName: prov.SourceName(),
-			Path:       prov.RawPath(),
+			Path:       prov.Path().String(),
+			RawPath:    prov.RawPath(),
 		}
 	}
 	return ip
+}
+
+// widenFloat32Map applies [widenFloat32] to every value in a cloned
+// property map.
+func widenFloat32Map(m map[string]any) map[string]any {
+	for k, v := range m {
+		m[k] = widenFloat32(v)
+	}
+	return m
+}
+
+// widenFloat32 projects a float32 as the float64 its 32-bit shortest wire
+// form parses to — the value Load hands every reader — recursively through
+// containers. Two snapshots that differ only in float width at the same
+// 32-bit value project identically; a narrowed or drifted value still shows.
+func widenFloat32(v any) any {
+	switch n := v.(type) {
+	case float32:
+		f, err := strconv.ParseFloat(strconv.FormatFloat(float64(n), 'g', -1, 32), 64)
+		if err != nil {
+			return float64(n)
+		}
+		return f
+	case []any:
+		for i, e := range n {
+			n[i] = widenFloat32(e)
+		}
+		return n
+	case map[string]any:
+		return widenFloat32Map(n)
+	}
+	return v
 }

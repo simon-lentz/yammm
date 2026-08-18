@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -51,8 +52,8 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 	// Snapshot should have User but the Entity add should have triggered diagnostics
 	// because the type name lookup would fail with unqualified "Entity"
 	snap := g.Snapshot()
-	if len(snap.InstancesOf("User")) != 1 {
-		t.Errorf("Expected 1 User instance, got %d", len(snap.InstancesOf("User")))
+	if len(snap.InstancesOf(tagID(t, mainSchema, "User"))) != 1 {
+		t.Errorf("Expected 1 User instance, got %d", len(snap.InstancesOf(tagID(t, mainSchema, "User"))))
 	}
 }
 
@@ -79,7 +80,7 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 
 	// Verify entity is in graph with qualified type name
 	snap := g.Snapshot()
-	instances := snap.InstancesOf("c.Entity")
+	instances := snap.InstancesOf(tagID(t, mainSchema, "c.Entity"))
 	if len(instances) != 1 {
 		t.Errorf("Expected 1 c.Entity instance, got %d", len(instances))
 	}
@@ -130,7 +131,7 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 	snap := g.Snapshot()
 
 	// Lookup by qualified name should work
-	found, ok := snap.InstanceByKey("c.Entity", graph.FormatKey("e1"))
+	found, ok := snap.InstanceByKey(tagID(t, mainSchema, "c.Entity"), graph.FormatKey("e1"))
 	if !ok {
 		t.Error("InstanceByKey should find c.Entity")
 	}
@@ -138,10 +139,12 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 		t.Errorf("Instance type should be c.Entity, got %s", found.TypeName())
 	}
 
-	// Lookup by unqualified name should NOT work
-	_, ok = snap.InstanceByKey("Entity", graph.FormatKey("e1"))
+	// A different type's identity must not find it. The qualified-versus-bare
+	// distinction this once tested is gone: an identity names one type, so
+	// there is no unqualified spelling of it to get wrong.
+	_, ok = snap.InstanceByKey(mustTypeID(t, mainSchema, "User"), graph.FormatKey("e1"))
 	if ok {
-		t.Error("InstanceByKey should not find Entity without qualifier")
+		t.Error("InstanceByKey should not find an instance under another type's identity")
 	}
 }
 
@@ -183,12 +186,17 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 		t.Fatalf("Expected 2 types, got %d: %v", len(types), types)
 	}
 
-	// Types should be sorted: "User" < "c.Entity" lexicographically
-	expected := []string{"User", "c.Entity"}
-	for i, typeName := range types {
-		if typeName != expected[i] {
-			t.Errorf("Type[%d] should be %q, got %q", i, expected[i], typeName)
-		}
+	// Types() carries identities, and schema.TagForm renders each as the name
+	// a snapshot writes: bare for a local type, alias-qualified for an
+	// imported one. Ordering is by TypeID, which groups by schema path.
+	got := make([]string, len(types))
+	for i, id := range types {
+		got[i] = schema.TagForm(mainSchema, id)
+	}
+	slices.Sort(got)
+	want := []string{"User", "c.Entity"}
+	if !slices.Equal(got, want) {
+		t.Errorf("rendered types = %v, want %v", got, want)
 	}
 }
 
@@ -341,12 +349,12 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 	// Verify both are in graph with correct types
 	snap := g.Snapshot()
 
-	bInstances := snap.InstancesOf("b.Resource")
+	bInstances := snap.InstancesOf(tagID(t, schemaA, "b.Resource"))
 	if len(bInstances) != 1 {
 		t.Errorf("Expected 1 b.Resource, got %d", len(bInstances))
 	}
 
-	cInstances := snap.InstancesOf("c.Resource")
+	cInstances := snap.InstancesOf(tagID(t, schemaA, "c.Resource"))
 	if len(cInstances) != 1 {
 		t.Errorf("Expected 1 c.Resource, got %d", len(cInstances))
 	}

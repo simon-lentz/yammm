@@ -54,7 +54,7 @@ func TestIssueBuilder_WithPath(t *testing.T) {
 }
 
 func TestIssueBuilder_WithHint(t *testing.T) {
-	issue := NewIssue(Error, E_TYPE_COLLISION, "test").
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, "test").
 		WithHint("rename one of the types").
 		Build()
 
@@ -74,7 +74,7 @@ func TestIssueBuilder_WithRelated(t *testing.T) {
 		Message: "also defined here",
 	}
 
-	issue := NewIssue(Error, E_TYPE_COLLISION, "test").
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, "test").
 		WithRelated(related1).
 		WithRelated(related2).
 		Build()
@@ -98,7 +98,7 @@ func TestIssueBuilder_WithRelated_Variadic(t *testing.T) {
 		{Span: location.Point(source, 10, 1), Message: "second"},
 	}
 
-	issue := NewIssue(Error, E_TYPE_COLLISION, "test").
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, "test").
 		WithRelated(related...).
 		Build()
 
@@ -182,7 +182,7 @@ func TestIssueBuilder_FluentChaining(t *testing.T) {
 		Message: "previous definition",
 	}
 
-	issue := NewIssue(Error, E_TYPE_COLLISION, `type "Person" already defined`).
+	issue := NewIssue(Error, E_DUPLICATE_TYPE, `type "Person" already defined`).
 		WithSpan(span).
 		WithHint("rename one of the types").
 		WithRelated(related).
@@ -210,7 +210,7 @@ func TestIssueBuilder_FluentChaining(t *testing.T) {
 func TestIssueBuilder_BuildImmutability(t *testing.T) {
 	source := location.MustNewSourceID("test://schema.yammm")
 
-	builder := NewIssue(Error, E_TYPE_COLLISION, "test").
+	builder := NewIssue(Error, E_DUPLICATE_TYPE, "test").
 		WithRelated(location.RelatedInfo{
 			Span:    location.Point(source, 5, 1),
 			Message: "original",
@@ -252,7 +252,7 @@ func TestIssueBuilder_BuildDeepCopy(t *testing.T) {
 	source := location.MustNewSourceID("test://schema.yammm")
 
 	// Create builder with slices
-	builder := NewIssue(Error, E_TYPE_COLLISION, "test").
+	builder := NewIssue(Error, E_DUPLICATE_TYPE, "test").
 		WithRelated(location.RelatedInfo{
 			Span:    location.Point(source, 5, 1),
 			Message: "related",

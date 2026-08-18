@@ -4,6 +4,7 @@ package analysis
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
@@ -22,6 +23,19 @@ import (
 
 // diagnosticSource is the value used for the Source field in LSP diagnostics.
 const diagnosticSource = "yammm"
+
+// canonicalSourceID mints a SourceID whose key matches the loader's, so
+// SpanToLSPRange finds the content instead of falling back to rune columns.
+// The server already hands Analyze canonical paths; this holds the property
+// for a caller that does not.
+func canonicalSourceID(path string) (location.SourceID, error) {
+	canonical := lsputil.CanonicalPath(path)
+	id, err := location.SourceIDFromAbsolutePath(canonical)
+	if err != nil {
+		return location.SourceID{}, fmt.Errorf("mint source ID for %q: %w", canonical, err)
+	}
+	return id, nil
+}
 
 // Snapshot represents an immutable analysis result for a single entry file.
 // It captures the complete state needed for LSP features: parsed schema,
@@ -219,7 +233,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 
 	// Pre-register overlay content
 	for path, content := range overlays {
-		id, err := location.SourceIDFromAbsolutePath(path)
+		id, err := canonicalSourceID(path)
 		if err != nil {
 			a.logger.Warn(
 				"failed to create source ID",
@@ -287,7 +301,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 		)
 	}
 
-	entrySourceID, idErr := location.SourceIDFromAbsolutePath(entryPath)
+	entrySourceID, idErr := canonicalSourceID(entryPath)
 	if idErr != nil {
 		a.logger.Warn(
 			"failed to create entry source ID",

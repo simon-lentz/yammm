@@ -1,39 +1,49 @@
 {
   "yammm_snapshot": {
-    "version": 2,
+    "version": 3,
     "schema_name": "test",
     "schema_source": "test://test.yammm",
     "schema_hash": "sha256:d10215e44a4c1b383b89b9f644c79d6e4f1192c46ae1fc52cbbd49ad37c9280e",
     "schema_hash_algorithm": 1,
-    "integrity_hash": "sha256:b4b19ef70839367f2c2da18ce3484e88fc86ff6cedfaa270d2133aae46c8ce9c",
+    "integrity_hash": "sha256:5c2760fa0020877f2c0abe8c3a7e1789ca4e3adc7ee3514f1193266ee5eefbbf",
     "features": []
   },
   "types": [
-    "Person"
+    {
+      "schema_path": "test://test.yammm",
+      "name": "Company"
+    },
+    {
+      "schema_path": "test://test.yammm",
+      "name": "Person"
+    }
   ],
-  "instances": {
-    "Person": [
-      {
-        "key": [
-          "p1"
-        ],
-        "properties": {
-          "name": "Alice"
-        },
-        "provenance": null
-      }
-    ]
-  },
+  "instances": [
+    {
+      "type": 1,
+      "items": [
+        {
+          "key": [
+            "p1"
+          ],
+          "properties": {
+            "name": "Alice"
+          },
+          "provenance": null
+        }
+      ]
+    }
+  ],
   "diagnostics": {
     "duplicates": [],
     "unresolved": [
       {
-        "source_type": "Person",
+        "source_type": 1,
         "source_key": [
           "p1"
         ],
         "relation": "EMPLOYER",
-        "target_type": "Company",
+        "target_type": 0,
         "target_key": null,
         "required": true,
         "reason": "absent"

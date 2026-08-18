@@ -18,7 +18,7 @@ import (
 // broken by arrival order. Once the store is full an incoming issue that is more
 // severe than the least severe stored one takes its slot (see storeLocked), so a
 // flood of warnings can never starve the errors that explain why an operation
-// failed. Truncation never affects [Collector.OK]; use [Collector.LimitReached]
+// failed. Truncation never affects [Result.OK]; use [Result.LimitReached]
 // to detect it. This design allows callers to handle truncated results
 // appropriately without forcing failure semantics.
 //
@@ -377,15 +377,6 @@ func compareRelated(a, b []location.RelatedInfo) int {
 	return cmp.Compare(len(a), len(b))
 }
 
-// HasFatal reports whether any Fatal issue has been collected.
-//
-// This is an O(1) operation using precomputed counts.
-func (c *Collector) HasFatal() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.counts.Fatal > 0
-}
-
 // HasErrors reports whether any Fatal or Error issue has been collected.
 //
 // This is an O(1) operation using precomputed counts.
@@ -393,15 +384,6 @@ func (c *Collector) HasErrors() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.counts.Fatal > 0 || c.counts.Errors > 0
-}
-
-// OK reports whether no Fatal or Error issues have been collected.
-//
-// This is an O(1) operation using precomputed counts.
-func (c *Collector) OK() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.counts.Fatal == 0 && c.counts.Errors == 0
 }
 
 // ErrorCount returns the number of Fatal and Error issues collected so far.
@@ -415,25 +397,4 @@ func (c *Collector) ErrorCount() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.counts.Fatal + c.counts.Errors
-}
-
-// Len returns the number of collected issues.
-func (c *Collector) Len() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.issues)
-}
-
-// LimitReached reports whether the limit was reached.
-func (c *Collector) LimitReached() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.limitReached
-}
-
-// DroppedCount returns how many issues were dropped after hitting the limit.
-func (c *Collector) DroppedCount() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.droppedCount
 }

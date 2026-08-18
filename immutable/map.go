@@ -2,6 +2,7 @@ package immutable
 
 import (
 	"iter"
+	"maps"
 	"reflect"
 )
 
@@ -54,26 +55,14 @@ func (m Map[K]) Len() int {
 // The iteration order is not guaranteed to be consistent across calls.
 // Use this for iteration without needing values.
 func (m Map[K]) Keys() iter.Seq[K] {
-	return func(yield func(K) bool) {
-		for k := range m.entries {
-			if !yield(k) {
-				return
-			}
-		}
-	}
+	return maps.Keys(m.entries)
 }
 
 // Range returns an iterator over key-value pairs.
 //
 // The iteration order is not guaranteed to be consistent across calls.
 func (m Map[K]) Range() iter.Seq2[K, Value] {
-	return func(yield func(K, Value) bool) {
-		for k, v := range m.entries {
-			if !yield(k, v) {
-				return
-			}
-		}
-	}
+	return maps.All(m.entries)
 }
 
 // Clone returns a deep copy of the map as a mutable map[K]any.

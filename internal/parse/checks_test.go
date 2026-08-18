@@ -275,6 +275,78 @@ func TestChecks_UnquoteFailuresAreSyntaxErrors(t *testing.T) {
 	}
 }
 
+// TestChecks_UnquoteResolvesLexerEscapeVocabulary pins unquote to exactly the
+// lexer's STRING escape set. The lexer admits every spelling below, so each
+// must resolve — the strconv-backed predecessor rejected an unescaped '"' in
+// single quotes, every \' escape, and bare \0, leaving no way to write an
+// apostrophe in a single-quoted literal.
+func TestChecks_UnquoteResolvesLexerEscapeVocabulary(t *testing.T) {
+	accepted := []struct{ name, in, want string }{
+		{"unquoted passthrough", `abc`, `abc`},
+		{"double quoted", `"a"`, `a`},
+		{"single quoted", `'a'`, `a`},
+		{"named escapes", `"\b\t\n\f\r\0"`, "\b\t\n\f\r\x00"},
+		{"hex escape", `"\x41"`, `A`},
+		{"unicode escape", `"\u00e9"`, "é"},
+		{"escaped double quote", `"\""`, `"`},
+		{"escaped single quote in double quotes", `"\'"`, `'`},
+		{"escaped single quote in single quotes", `'\''`, `'`},
+		{"literal double quote in single quotes", `'a"b'`, `a"b`},
+		{"literal single quote in double quotes", `"a'b"`, `a'b`},
+		{"zero escape is not octal", `'\012'`, "\x0012"},
+		{"valid multi-byte rune", "\"café\"", "café"},
+		{"invalid utf-8 byte", "\"a\xffb\"", "a�b"},
+		{"truncated utf-8 sequence", "\"a\xe2\x82b\"", "a��b"},
+	}
+	for _, tc := range accepted {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := unquote(tc.in)
+			if err != nil {
+				t.Fatalf("unquote(%q) = error %v, want %q", tc.in, err, tc.want)
+			}
+			if got != tc.want {
+				t.Errorf("unquote(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	rejected := []struct{ name, in string }{
+		{"bare x escape", `"\x"`},
+		{"one hex digit", `"\x4"`},
+		{"bad hex digits", `"\xZZ"`},
+		{"short unicode escape", `"\u12"`},
+		{"surrogate rune", `"\uD800"`},
+		{"unknown escape", `"\q"`},
+		{"trailing backslash", `"\"`},
+	}
+	for _, tc := range rejected {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := unquote(tc.in); err == nil {
+				t.Errorf("unquote(%q) succeeded, want error", tc.in)
+			} else if err.Error() != "unquote string: invalid syntax" {
+				t.Errorf("unquote(%q) error = %q, want the pinned message", tc.in, err)
+			}
+		})
+	}
+}
+
+// TestChecks_SingleQuotedLiteralsLoadAtEveryUnquoteSite pins the loosening at
+// the parse level: a single-quoted literal carrying an unescaped '"' or a \'
+// escape reaches every unquote site and loads without a diagnostic.
+func TestChecks_SingleQuotedLiteralsLoadAtEveryUnquoteSite(t *testing.T) {
+	src := "schema 'sc\"hema'\n" +
+		"type T {\n" +
+		"\tid String primary\n" +
+		"\tkind Enum['a\"b', 'don\\'t']\n" +
+		"\tcode Pattern['^x\"?$']\n" +
+		"\tts Timestamp['2006-01-02T15:04:05Z07:00']\n" +
+		"}\n"
+	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 0 {
+		t.Fatalf("single-quoted spellings drew %d diagnostics, want none: %v", len(issues), issues)
+	}
+}
+
 // TestChecks_SchemaNameUnquoteFailureMarksTheFileFailed pins the shape a later
 // phase depends on: a header that parses but whose literal will not unquote
 // leaves no usable schema name, exactly as a header that did not parse at all.
@@ -524,4 +596,43 @@ func TestChecks_PatternListIsTruncatedAtTheCap(t *testing.T) {
 		t.Errorf("PatternRegexps() = %d, want %d — the list past the cap must not reach the constraint",
 			got, maxPatterns)
 	}
+}
+
+// The two reporting sites for an unquote failure carry different prefixes and
+// both texts are a consumer contract: the checks sites name what failed and
+// carry the unquoter's own message, while the expression site supplies its own
+// context and must not repeat it.
+func TestChecks_UnquoteFailureTextIsStableAtBothSites(t *testing.T) {
+	t.Parallel()
+
+	_, issues := Parse([]byte("schema \"\\x\"\ntype T {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
+	if !hasMessage(issues, "invalid schema name: unquote string: invalid syntax") {
+		t.Errorf("schema-name site text moved; got %s", messages(issues))
+	}
+
+	src := "schema \"s\"\n\ntype T {\n\tid String primary\n\t! \"m\" id == \"\\x\"\n}\n"
+	_, issues = Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if !hasMessage(issues, "invalid string literal: invalid syntax") {
+		t.Errorf("expression site text moved; got %s", messages(issues))
+	}
+	if hasMessage(issues, "invalid string literal: unquote string: invalid syntax") {
+		t.Errorf("expression site double-prefixed the cause; got %s", messages(issues))
+	}
+}
+
+func hasMessage(issues []diag.Issue, want string) bool {
+	for _, i := range issues {
+		if strings.Contains(i.Message(), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func messages(issues []diag.Issue) string {
+	out := make([]string, 0, len(issues))
+	for _, i := range issues {
+		out = append(out, i.Message())
+	}
+	return strings.Join(out, " | ")
 }

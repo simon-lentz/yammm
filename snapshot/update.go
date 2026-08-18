@@ -2,7 +2,6 @@ package snapshot
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"maps"
 	"sort"
@@ -86,15 +85,28 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //	}
 //	out, res := snapshot.UpdateMetadata(ctx, data, newMeta, opts...)
 //
-// UpdateMetadata trusts the caller-provided body bytes verbatim. It does
-// not re-verify the integrity hash of the input. Callers that need to
-// confirm the input is well-formed should pair UpdateMetadata with a
-// prior HeaderOnly call (cheap structural validation) or Verify (full
-// verification) on the same bytes.
+// UpdateMetadata copies the body bytes verbatim and does not validate what
+// they contain: it re-verifies no integrity hash, resolves no schema, and
+// reads no instance. It does check everything it can see without decoding the
+// body — the four-key top-level shape, and a types table that states one
+// identity twice — because the output carries a freshly computed integrity
+// hash, so accepting a document no read path accepts would hand back a
+// malformed document that passes verification. Callers needing more than that
+// pair UpdateMetadata with a prior [Verify] on the same bytes; [HeaderOnly] is
+// not that check, because it now validates the same outermost shape and adds
+// only the header and types table.
 //
 // Failure modes and error codes:
 //
-//   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse.
+//   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse, its
+//     top-level keys are not the four the format fixes in their fixed order
+//     and none null, or its types table states one identity on two rows.
+//   - [diag.E_SNAPSHOT_UNSUPPORTED_FEATURE] — the header names a feature this
+//     version does not implement. Refused rather than carried through, because
+//     the output would claim support it does not have.
+//   - [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] — the header states a version
+//     no read path accepts. The document is refused rather than
+//     relabelled; UpdateMetadata is a header rewrite, never a migration.
 //   - [diag.E_UPDATE_METADATA_BODY_OFFSET] — the header parsed cleanly
 //     but the body-boundary tracking could not resolve a valid byte
 //     range for the body. This indicates the input does not match the
@@ -130,6 +142,17 @@ func UpdateMetadata(
 		return nil, c.Result()
 	}
 
+	// The output carries a freshly computed integrity hash, so a shape no
+	// read path accepts must not be blessed here. The four-key check reads
+	// tokens and skips values, so the body stays undecoded and the
+	// trust-the-body contract holds.
+	if err := checkTopLevelKeys(data); err != nil {
+		c := diag.NewCollector(0)
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("snapshot.UpdateMetadata: %v", err)).Build())
+		return nil, c.Result()
+	}
+
 	// Decode the existing header via the streaming decoder. We skip the
 	// integrity check: UpdateMetadata's contract is "trust caller-provided
 	// body bytes"; a fresh hash is computed at write time.
@@ -139,6 +162,11 @@ func UpdateMetadata(
 		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("snapshot.UpdateMetadata: header parse failed: %v", err)).Build())
 		return nil, c.Result()
+	}
+	// decodeHeader reports a rejected version or features field on the collector
+	// and returns nil, so the error alone would accept unreadable documents.
+	if sd.collector.HasErrors() {
+		return nil, sd.collector.Result()
 	}
 
 	// Resolve the body offset. decodeHeader captures dec.InputOffset()
@@ -182,11 +210,9 @@ func UpdateMetadata(
 		createdAt = cfg.createdAt.UTC().Format(time.RFC3339)
 	}
 
-	// Normalize features: Marshal always emits a non-nil array.
+	// Non-nil: decodeHeader reports a nil features field and the gate above
+	// returns on it, so no document reaching here carries one.
 	features := sd.header.Features
-	if features == nil {
-		features = []string{}
-	}
 
 	// Normalize newMeta: empty maps round-trip as omitempty (no key emitted),
 	// matching WithMetadata's shallow-copy-or-nil normalization at
@@ -209,23 +235,17 @@ func UpdateMetadata(
 	bodySuffix := data[bodyOffset:]
 
 	// Pass 1: build canonical form with empty integrity hash, compute SHA-256.
-	headerBytes := buildHeaderBytes(hdr, indent)
-	canon := make([]byte, 0, len(prefix)+len(headerBytes)+len(bodySuffix))
-	canon = append(canon, prefix...)
-	canon = append(canon, headerBytes...)
-	canon = append(canon, bodySuffix...)
-
-	h := sha256.Sum256(canon)
-	hdr.IntegrityHash = fmt.Sprintf("sha256:%x", h)
+	headerBytes := buildHeaderBytes(hdr, indent, sd.header.Version, sd.header.SchemaHashAlgorithm)
+	hdr.IntegrityHash = sha256Sum([]byte(prefix), headerBytes, bodySuffix)
 
 	// Pass 2: rebuild header with the computed hash and concatenate.
-	headerBytes = buildHeaderBytes(hdr, indent)
+	headerBytes = buildHeaderBytes(hdr, indent, sd.header.Version, sd.header.SchemaHashAlgorithm)
 	out := make([]byte, 0, len(prefix)+len(headerBytes)+len(bodySuffix))
 	out = append(out, prefix...)
 	out = append(out, headerBytes...)
 	out = append(out, bodySuffix...)
 
-	return out, diag.OK()
+	return out, sd.collector.Result()
 }
 
 // UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; on any failure
@@ -303,9 +323,8 @@ func UpdateMetadataOrReMarshal(
 	return reMarshaled, c.Result()
 }
 
-// detectIndent sniffs the input's indentation unit using the pinned
-// algorithm from the api_enhancements plan. Matches Marshal's emission
-// shape: assembleCompact writes `{"yammm_snapshot":...` (q == 1);
+// detectIndent sniffs the input's indentation unit. Matches Marshal's
+// emission shape: assembleCompact writes `{"yammm_snapshot":...` (q == 1);
 // assembleIndented writes `{\n<indent>"yammm_snapshot": ...` (data[1]
 // == '\n' and indent == data[2:q]).
 func detectIndent(data []byte) string {

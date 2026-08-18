@@ -18,10 +18,26 @@ jobs:
           go-version-file: go.mod
         id: go
       # Root module
+      #
+      # The linter is built from this module's tool dependency, not downloaded.
+      # A release binary and a `go build` of the same golangci-lint version are
+      # not the same linter: the release embeds whichever golang.org/x/tools its
+      # own build resolved, while this one links the version go.mod pins, so the
+      # two disagree about which modernize analyzers exist. Downloading it makes
+      # the lint surface move with golangci-lint's release cadence and puts this
+      # step beyond the reach of any local check; building it makes go.mod the
+      # single source of truth, so the surface moves only on a deliberate
+      # x/tools bump and `go tool golangci-lint run` reproduces this step
+      # exactly. install-mode: none keeps the action's inline PR annotations
+      # while running the binary built here.
+      - name: Build the pinned linter
+        run: |
+          go build -o "${{ runner.temp }}/bin/golangci-lint" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+          echo "${{ runner.temp }}/bin" >> "$GITHUB_PATH"
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.10.1
+          install-mode: none
           args: --config=.golangci.yml
       - name: Test
         # -race enforces the data-race gate in CI rather than as local

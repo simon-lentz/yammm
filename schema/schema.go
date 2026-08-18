@@ -97,17 +97,6 @@ func (s *Schema) TypesSlice() []*Type {
 	return slices.Clone(s.types)
 }
 
-// TypeNames returns all local type names in lexicographic order.
-// This ensures deterministic iteration for CLI output and tests.
-func (s *Schema) TypeNames() []string {
-	return slices.Sorted(maps.Keys(s.typeByName))
-}
-
-// TypeCount returns the number of local types in the schema.
-func (s *Schema) TypeCount() int {
-	return len(s.typeByName)
-}
-
 // ResolveType resolves a TypeRef to a Type, handling qualified references
 // to imported types.
 func (s *Schema) ResolveType(ref TypeRef) (*Type, bool) {
@@ -145,11 +134,6 @@ func (s *Schema) DataTypesSlice() []*DataType {
 	return slices.Clone(s.dataTypes)
 }
 
-// DataTypeNames returns all data type names in lexicographic order.
-func (s *Schema) DataTypeNames() []string {
-	return slices.Sorted(maps.Keys(s.dataByName))
-}
-
 // ResolveDataType resolves a DataTypeRef to a DataType, handling qualified
 // references to imported data types.
 func (s *Schema) ResolveDataType(ref DataTypeRef) (*DataType, bool) {
@@ -178,11 +162,6 @@ func (s *Schema) Imports() iter.Seq[*Import] {
 // ImportsSlice returns a defensive copy of imports.
 func (s *Schema) ImportsSlice() []*Import {
 	return slices.Clone(s.imports)
-}
-
-// ImportCount returns the number of imports in the schema.
-func (s *Schema) ImportCount() int {
-	return len(s.imports)
 }
 
 // ImportByAlias returns the import with the given alias.

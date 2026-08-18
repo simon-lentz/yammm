@@ -117,13 +117,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 }
 
 func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string) error {
-	adapter, err := adapterjson.New(nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: create json adapter: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
-	}
-
-	data, err := adapter.MarshalObject(cmd.Context(), snapshot, adapterjson.WithIndent("\t"))
+	data, err := adapterjson.New().MarshalObject(cmd.Context(), snapshot, adapterjson.WithIndent("\t"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: marshal json: %v\n", err)
 		return &cli.ExitError{Code: cli.ExitRuntime}
@@ -181,7 +175,7 @@ func exportCSV(cmd *cobra.Command, snapshot *graph.Snapshot, _ *schema.Schema, o
 	return &cli.ExitError{Code: cli.ExitUsage}
 }
 
-func exportCSVToDir(cmd *cobra.Command, adapter *csv.Adapter, snapshot *graph.Snapshot, types []string, outputDir string) error {
+func exportCSVToDir(cmd *cobra.Command, adapter *csv.Adapter, snapshot *graph.Snapshot, types []schema.TypeID, outputDir string) error {
 	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		fmt.Fprintf(os.Stderr, "error: create output directory: %v\n", err)
 		return &cli.ExitError{Code: cli.ExitRuntime}

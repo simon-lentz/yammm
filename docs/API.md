@@ -26,9 +26,6 @@ s, result := schema.Load(ctx, "path/to/schema.yammm", opts...)
 // Load from string content (sourceCode first, then sourceName)
 s, result := schema.LoadString(ctx, content, "source-name", opts...)
 
-// Load from in-memory sources with import resolution (moduleRoot is required)
-s, result := schema.LoadSources(ctx, sources, moduleRoot, opts...)
-
 // Load from in-memory sources with an explicit entry point
 // Useful in LSP scenarios where multiple documents are open but only one is being analyzed
 s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, opts...)
@@ -179,6 +176,15 @@ digits, or underscores. Violations fail the build with `E_INVALID_NAME`.
 Schema names and invariant names are quoted strings in the DSL and stay
 free-form; import aliases are validated during completion (`E_INVALID_ALIAS`).
 
+A qualified reference (`alias.Type` in `Extends`, a relation or composition
+target, or a qualified datatype constraint) must resolve at build time: the
+alias must name a declared import backed by a registry (`WithRegistry` +
+`AddImport`). No later link step exists that could resolve one, so the build
+fails either way — but with different codes. An alias no `AddImport` declares
+fails with `E_UNKNOWN_TYPE`, with or without a registry. An alias that *is*
+declared but whose path resolves to nothing in the registry fails earlier, at
+import resolution, with `E_IMPORT_RESOLVE`.
+
 ### TypeBuilder Methods
 
 | Method | Description |
@@ -201,8 +207,8 @@ free-form; import aliases are validated during completion (`E_INVALID_ALIAS`).
 
 Annotations declared in `.yammm` (or via the Builder methods above) are carried on the loaded schema:
 
-- `Property.Annotations()` / `AnnotationsSlice()` / `Annotation(name) (*Annotation, bool)` — a property's `@name` annotations.
-- `Type.Annotations()` / `AllAnnotations()` (with `*Slice` variants) — a type's `@@` members (own, and own-plus-inherited).
+- `Property.AnnotationsSlice()` / `Annotation(name) (*Annotation, bool)` — a property's `@name` annotations.
+- `Type.AnnotationsSlice()` / `AllAnnotations()` / `AllAnnotationsSlice()` — a type's `@@` members (own, and own-plus-inherited).
 - `Annotation` exposes `Name()`, `Args() []AnnotationArg`, `Documentation()`, `Span()`; `AnnotationArg` exposes `Text()`, `Kind() AnnotationArgKind`, `Span()`.
 - `schema.AnnotationSpecs() []AnnotationSpec` returns the built-in registry for editor tooling — a read-only surface, not a registration API. Each `AnnotationSpec` exposes `Name()`, `Placement() AnnotationPlacement` (`PlacementProperty` or `PlacementType`), `Documentation()`, and `ArgHint()`.
 - `schema.VectorSimilarityFunctions() []string` returns the similarity keywords `@vector` accepts, so tooling cannot suggest one the loader rejects.
@@ -237,8 +243,6 @@ validator := instance.NewValidator(schema, opts...)
 | `WithLogger` | Structured logger for debug output |
 | `WithStrictPropertyNames` | Require exact case matching (default: false) |
 | `WithAllowUnknownFields` | Silently ignore unknown fields (default: false) |
-| `WithMaxIssuesPerInstance` | Maximum issues per instance (default: 100) |
-| `WithValueRegistry` | Custom value registry for type classification |
 
 The `RecommendedOptions()` function returns a curated set of defaults (`WithStrictPropertyNames(true)`, `WithAllowUnknownFields(false)`) as a starting point for common use cases.
 
@@ -290,7 +294,7 @@ Instance data is a top-level object keyed by type names whose values are arrays 
 
 ### Schema-Aware Raw Instance Builder
 
-`instance.BuilderFor(schema, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, cardinality mismatches, and the `EdgeTo`-vs-`EdgeToWith` split all surface from `Build()` with file:line locators captured via `runtime.Callers`. This shifts shape failures out of `ValidateOne`'s domain and eliminates the "Schema declares X (one), so yammm expects a single edge object" class of hand-maintained comments in consumer code:
+`instance.BuilderFor(schema, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, and cardinality mismatches all surface from `Build()` with file:line locators captured via `runtime.Callers`. This shifts shape failures out of `ValidateOne`'s domain:
 
 ```go
 b, err := instance.BuilderFor(s, "Person")
@@ -306,17 +310,9 @@ raw, err := b.
     Build()
 ```
 
-For associations that declare edge properties, use `EdgeToWith`:
-
-```go
-raw, err := b.
-    Property("id", "e1").
-    EdgeToWith("works_at", []any{"c1"}, map[string]any{
-        "role":  "Engineer",
-        "since": "2020-01-01",
-    }).
-    Build()
-```
+The builder covers properties and property-less association edges; an
+association that declares edge properties, and a composition, each record a
+shape error — construct such instances from raw data instead.
 
 For compositions, pass child builders — the parent enforces target-type matching at build time:
 
@@ -337,11 +333,7 @@ The variadic `Composed(name, children...)` accepts single, multiple-positional, 
 | `BuilderFor(s, typeName)` | Construct a builder bound to a schema type. Errors on nil schema, unknown type, or abstract type. |
 | `Property(name, value)` | Set a property value. Unknown names accumulate as errors surfaced at Build. |
 | `EdgeTo(name, targetKey...)` | Add an edge target on an association without edge properties. Variadic key supports composite PKs. |
-| `EdgeToWith(name, targetKey, props)` | Add an edge target on an association with edge properties. `targetKey` is an explicit `[]any` to avoid absorbing `props` into variadic slots. |
-| `Composed(name, children...)` | Add composed children. Variadic supports single, multiple, or slice-unpack shapes. |
-| `WithProvenance(sourceName, pathStr)` | Attach source location metadata. |
 | `Build()` | Produce the `RawInstance`. Returns the first accumulated error (with a "(and N more)" suffix when more exist). |
-| `MustBuild()` | Panic on error. Test-only; production code should use `Build` and propagate. |
 
 Build errors include the bound type's name, the offending property/relation, and the caller's file:line. `errors.Unwrap` walks into composition-child chains so `errors.As` reaches the primary cause when nesting.
 
@@ -378,8 +370,8 @@ result = g.Check(ctx)
 
 // Get immutable snapshot
 snap := g.Snapshot()
-for _, typeName := range snap.Types() {
-    for _, inst := range snap.InstancesOf(typeName) {
+for _, typeID := range snap.Types() {
+    for _, inst := range snap.InstancesOf(typeID) {
         // Process instances
     }
 }
@@ -390,8 +382,7 @@ for _, typeName := range snap.Types() {
 `graph.BatchAssembler` composes a `Validator` and a `Graph` into a single call surface for the common pipeline pattern: validate → add → check → snapshot. The assembler encodes the ordering invariant (validate before add, check before snapshot) so consumers cannot get the sequence wrong, and is concurrent-safe so multiple goroutines may share one assembler:
 
 ```go
-ba := graph.NewBatchAssembler(ctx, s,
-    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+ba := graph.NewBatchAssembler(ctx, s)
 
 for i, rec := range records {
     if err := ba.Add("TypeName", buildRawInstance(rec)); err != nil {
@@ -415,15 +406,7 @@ qualityCollector.Merge(res.Snapshot.Diagnostics())
 
 **Post-finalize sentinel.** After `Finalize`, subsequent `Add` / `AddValid` calls return `graph.ErrAssemblerFinalized`, matchable via `errors.Is`. Consumers performing retry / cleanup logic key off the sentinel rather than the error string.
 
-**Validator-access modes.** Default mode serializes `ValidateOne` + `Graph.Add` through an internal `sync.Mutex` — appropriate for I/O-bound consumers (streaming ETL pipelines are the canonical example) where validation is a tiny fraction of per-record wall-clock. CPU-bound consumers profile-flag validation as the hot path opt into pool mode via `graph.WithValidatorPool(n)`, which distributes N pre-constructed validators through an internal buffered channel matching the goroutine-per-CPU-core shape:
-
-```go
-ba := graph.NewBatchAssembler(ctx, s,
-    graph.WithValidatorPool(runtime.NumCPU()))
-// ... concurrent Adds proceed in parallel up to N validators ...
-```
-
-Pool mode preserves every external contract (error shapes, Finalize one-shot semantics, success-count monotonicity) and is a one-option swap with no caller-side ripple. `n <= 0` panics at construction.
+**Validator access.** The assembler serializes `ValidateOne` + `Graph.Add` through an internal `sync.Mutex`, covering validation, the graph add, and the success-counter increment as one atomic step.
 
 **Concurrency contract.** `BatchAssembler` is safe for concurrent use across all methods (`Add`, `AddValid`, `Count`, `Graph`, `Finalize`). The library coordinates Add lifecycle against Finalize via an internal `sync.RWMutex` so every Add that returns nil is guaranteed to be in the finalized snapshot, and any Add that arrives after Finalize takes its lock returns `ErrAssemblerFinalized`. No external mutex required at call sites — the worker-pool pattern (one assembler shared across N scraper goroutines, coordinator goroutine calls Finalize at end-of-batch) is supported directly.
 
@@ -433,8 +416,7 @@ Pool mode preserves every external contract (error shapes, Finalize one-shot sem
 snap, res := snapshot.Load(ctx, data, s) // prior batch's .ys
 if res.HasErrors() { /* handle */ }
 
-ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, snap,
-    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)
 for _, rec := range outstanding { // e.g. resume-by-set-difference
     if err := ba.Add("TypeName", rec); err != nil { /* handle */ }
 }
@@ -443,7 +425,7 @@ finRes, err := ba.Finalize(ctx)
 
 New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK`, and `Finalize`'s check covers the union — a required association imported from the seed and still unresolved fails the batch with `E_UNRESOLVED_REQUIRED`. `Count()` reflects only records added through the assembler (seeded instances are not counted), and construction diagnostics are not carried over from the seed (`.ys`-loaded snapshots carry none by design; `Duplicates` and `Unresolved` are the persistent structural records, and both import). The seed snapshot must originate from the same schema — taken from a `Graph` bound to it, or loaded via `snapshot.Load` against it, which verifies structural compatibility. Every other contract — lifecycle, finalize barrier, validator-access modes, `FinalizeResult` — is identical to `NewBatchAssembler`.
 
-**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `instance/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees, provenance-presence-aware, and exact for same-typed numeric properties (only mixed `int64`/`float64` pairs coerce, matching the wire's whole-float narrowing).
+**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `instance/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict, parent and relation coordinates), provenance-presence-aware, and exact for every numeric property, dynamic type included: schema-aware float emission keeps `KindFloat` values `float64` across a marshal/load round trip, so an `int64`/`float64` mismatch is a real defect, not a wire artifact. One deliberate exception: a `float32` compares equal to the `float64` its 32-bit shortest wire form parses to, because `Load` materializes dynamic numerics as `int64` and `float64` only and the wire carries value fidelity, not width.
 
 ### Seeding from a Snapshot
 
@@ -474,7 +456,9 @@ snap, result := graph.RebuildSnapshot(schema, parts)
 
 The `SnapshotParts` struct holds fully-resolved instances, edges, duplicates, and unresolved records using value types (`InstanceParts`, `EdgeParts`, `DuplicateParts`, `UnresolvedParts`). Pointer-based cross-references are resolved internally.
 
-`UnresolvedParts.Properties` carries DSL-declared edge property values from the forward reference and is populated only when `Reason` is `"target_missing"` — `"absent"` and `"empty"` describe a missing/empty reference that never had a target. For documents in `.ys` wire-format version 1 (produced before yammm v0.3.0) the field is always empty; v2 documents persist the values through Marshal/Load symmetric with resolved `Edge.Properties`. See the snapshot package's [Wire Format Versions](#wire-format-versions) subsection for the v1 → v2 bump rationale.
+`UnresolvedParts.Properties` carries DSL-declared edge property values from the forward reference and is populated only when `Reason` is `"target_missing"` — `"absent"` and `"empty"` describe a missing/empty reference that never had a target. The wire persists the values through Marshal/Load, symmetric with resolved `Edge.Properties`. See the snapshot package's [Wire Format Versions](#wire-format-versions) subsection for the current accept range.
+
+`DuplicateParts` states the conflict's address (`ConflictType`, `ConflictKey`) beside the rejected instance's own identity, plus `ParentType` / `ParentKey` / `Relation` for a composed-child duplicate: a root conflict resolves through the instance index, a composed conflict through the parent's relation slot, and an empty stated key addresses the slot's sole occupant. `RebuildSnapshot` rejects a zero `schema.TypeID` at any parts position with a Fatal `E_INTERNAL` naming the position and key — identity is total at this boundary.
 
 Most users should construct snapshots via `Graph.Add` + `Graph.Snapshot`. `RebuildSnapshot` exists for the `snapshot.Load` deserialization path and testing.
 
@@ -485,11 +469,10 @@ The `Snapshot` type provides read-only access to graph state:
 | Method | Description |
 | ------ | ----------- |
 | `Schema()` | The schema used for validation |
-| `Types()` | All type names (sorted) |
-| `InstancesOf(typeName)` | Instances of a type (sorted by primary key) |
-| `Instances()` | Map of type name to instance slices (non-deterministic iteration order) |
+| `Types()` | All type identities (`[]schema.TypeID`, sorted by TypeID) |
+| `InstancesOf(typeID)` | Instances of a type (sorted by primary key) |
 | `AllInstances()` | Iterator over all instances in deterministic order |
-| `InstanceByKey(typeName, key)` | O(1) lookup by type and primary key |
+| `InstanceByKey(typeID, key)` | O(1) lookup by type identity and primary key |
 | `Edges()` | All resolved edges (sorted) |
 | `EdgesFrom(inst)` | Outgoing edges for a specific instance |
 | `Duplicates()` | Duplicate primary key records (sorted) |
@@ -506,13 +489,13 @@ The `Snapshot` type provides read-only access to graph state:
 
 ### Ordering Guarantees
 
-- `Snapshot.Types()`: Lexicographic by type name
+- `Snapshot.Types()`: Lexicographic by `TypeID` — schema path, then name
 - `Snapshot.InstancesOf()`: Lexicographic by primary key
 - `Snapshot.Edges()`: Lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
 - `Snapshot.Duplicates()`: Lexicographic by (typeName, primaryKey)
 - `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
 
-The `Instances()` map has non-deterministic iteration order per Go semantics. For deterministic iteration, use `AllInstances()` (iterator) or `Types()` + `InstancesOf()` (slice-based).
+Types are identified by `schema.TypeID`, never by name. A name is a rendering of an identity — bare for a local type, alias-qualified for a directly imported one — so it cannot name a transitively imported type and cannot separate two same-named types in different schemas. Use `schema.TagForm(snap.Schema(), id)` where a name is wanted for output.
 
 ## Import Closure & Type Lookup
 
@@ -557,11 +540,11 @@ The `snapshot` package serializes and deserializes `graph.Snapshot` values to an
 
 ### File Format
 
-The `.ys` format is JSON-based and preserves full structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip.
+The `.ys` format is JSON-based and preserves structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip. One numeric qualification: the wire carries value fidelity, not width — `Load` materializes dynamic numeric values as `int64` and `float64` only, so a `float32` property returns as the `float64` its 32-bit shortest wire form parses to (converting it back to `float32` returns the original). A caller-assembled snapshot the writer cannot serialize (for example, a zero type identity at any position) returns nil bytes with a Fatal `E_INTERNAL`; snapshots built through `graph.Graph` or `Load` never trigger that path.
 
 The format includes:
 
-- A **version** field for format evolution (current value: `2`, unchanged since yammm v0.3.0; see [Wire Format Versions](#wire-format-versions))
+- A **version** field for format evolution (current value: `3` since yammm v0.12.0, the only readable version; see [Wire Format Versions](#wire-format-versions))
 - A **schema structural hash** for compatibility verification (see [Schema Identity](#schema-identity))
 - An **integrity hash** (SHA-256 over the document body) for corruption detection
 - A **features array** for forward compatibility
@@ -590,7 +573,7 @@ header, result := snapshot.HeaderOnly(ctx, data)
 
 // Streaming sibling: read header metadata from any io.Reader without
 // materializing the full document into memory. Reads at most
-// snapshot.MaxHeaderSize (64 KiB) bytes from the reader.
+// snapshot.MaxHeaderSize (16 MiB) bytes from the reader.
 header, result := snapshot.HeaderOnlyRead(ctx, r)
 
 // Write .ys bytes atomically to disk — tmp+fsync+rename. Consumers
@@ -633,9 +616,10 @@ type SnapshotInfo struct {
     CreatedAt           string            // RFC 3339 or empty
     Metadata            map[string]string // user-provided annotations, nil if absent
 
-    // Content summary.
-    Types           []string
-    InstanceCounts  map[string]int // type name -> count
+    // Content summary. Types is the whole denotation set; InstanceCounts
+    // holds one entry per type the snapshot itself holds.
+    Types           []TypeRef
+    InstanceCounts  map[TypeRef]int
     TotalInstances  int
     TotalEdges      int
     DuplicateCount  int
@@ -646,6 +630,10 @@ type SnapshotInfo struct {
     IntegrityStatus string // "ok", "mismatch", or "skipped"
 }
 ```
+
+`snapshot.TypeRef{SchemaPath, Name string}` is the schema-less display surface: `Info`, `HeaderOnly` and `HeaderOnlyRead` run without an import closure to resolve against, so each type is reported as the identity the document states, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `path#name`. The `#` separator is deliberate beside `schema.TypeID.String()`'s `path:name` form: TypeID's rendering is byte-order-bearing (the wire's types-table sort rides it), so the display form stays visibly distinct rather than moving wire bytes to unify the two.
+
+`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `SnapshotInfo` and `HeaderInfo` serialize one way: `yammm snapshot info --format json` writes them, and nothing reads them back. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir` / `ScanDirSlice`, which hands back `HeaderInfo` values directly, and `path#name` is injective over the values yammm produces but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
 
 ### Header-Only Reads
 
@@ -664,8 +652,8 @@ type HeaderInfo struct {
     CreatedAt           string
     Metadata            map[string]string
 
-    // Types array (adjacent to the header; read in the same streaming pass).
-    Types []string
+    // Types table (adjacent to the header; read in the same streaming pass).
+    Types []TypeRef
 
     // File metadata. Populated by HeaderOnly (len(data)); zero value
     // from HeaderOnlyRead (not available from an io.Reader).
@@ -673,7 +661,7 @@ type HeaderInfo struct {
 }
 ```
 
-`HeaderOnlyRead` accepts any `io.Reader` and reads at most `snapshot.MaxHeaderSize = 64 * 1024` bytes. Larger headers are rejected with a Fatal-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. Reader errors (`io.EOF`, `io.ErrUnexpectedEOF`, or arbitrary I/O errors) during the header read surface uniformly as `E_SNAPSHOT_MALFORMED` rather than as a bare error return. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read.
+`HeaderOnlyRead` accepts any `io.Reader` and reads at most `snapshot.MaxHeaderSize = 16 * 1024 * 1024` bytes (16 MiB — headroom for consumers that carry large work-set arrays in header metadata). Larger headers are rejected with an Error-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. Reader errors (`io.EOF`, `io.ErrUnexpectedEOF`, or arbitrary I/O errors) during the header read surface uniformly as `E_SNAPSHOT_MALFORMED` rather than as a bare error return. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read.
 
 #### SchemaHashMatches — dispatch-site cross-check
 
@@ -796,6 +784,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 **Failure modes.** The primitive returns structured diagnostics with stable codes:
 
 - `E_SNAPSHOT_MALFORMED` — the input header does not parse (truncated JSON, missing required fields, wrong first key). Same code `HeaderOnly` / `HeaderOnlyRead` emit for equivalent conditions.
+- `E_SNAPSHOT_UNSUPPORTED_VERSION` — the header states a version no read path accepts (v1 and v2 included; v3 is the only readable version). The document is refused rather than relabelled — `UpdateMetadata` is a header rewrite, never a migration — and `UpdateMetadataOrReMarshal`'s `Load` fallback refuses it the same way.
 - `E_UPDATE_METADATA_BODY_OFFSET` — the header parsed cleanly but the body-boundary tracking resolved to an unexpected byte pattern, indicating the input does not match the shape `Marshal` produces. Byte-identical recovery via the fast path is not possible; `UpdateMetadataOrReMarshal` falls back to `Load + Marshal` automatically.
 - `E_CONTEXT_CANCELLED` — ctx was cancelled at entry. Propagates as cancellation without re-attempting via the slow path.
 
@@ -805,11 +794,9 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 ### Wire Format Versions
 
-The `.ys` wire format uses an integer version field in the header for forward evolution. yammm v0.3.0 introduced the v1 → v2 bump paired with [`UnresolvedEdge.Properties`](#graph) — the new persisted `"properties"` field on unresolved-edge wire entries cannot be `omitempty`-safe alone (a pre-v0.3.0 reader would silently drop the field), so the version bump pairs with the existing unknown-version-rejection path to force older readers to error cleanly instead.
+The `.ys` wire format uses an integer version field in the header for forward evolution, and this package reads one version. yammm v0.12.0 introduced v3 — the `types` section is a table of `{schema_path, name}` identity rows, `instances` is a list of `{type, items}` groups keyed by table row, and every other type reference is a nullable row index that never defaults — and retired every earlier version. v2 named types where it needed to denote them, which no name can do for a transitively imported type or for two same-named types in different schemas.
 
-`snapshot.MinReadableVersion` (exported constant, value `1`) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `2`, unchanged since yammm v0.3.0) is the version emitted on every write. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Fatal `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported range named in the message.
-
-**Asymmetric-reader semantics.** A v2 reader (yammm v0.3.0+) accepts both v1 and v2 documents. v1 documents simply lack the new `"properties"` field on unresolved-edge wires; the load path populates the in-memory `UnresolvedEdge.Properties` as empty, which is lossless since v1 never carried the data. A v1 reader (yammm v0.2.x and earlier) rejects v2 documents via the unknown-version path — operators running an older binary against a v0.3.0-written `.ys` see a structured diagnostic rather than a silently-incomplete document.
+`snapshot.MinReadableVersion` (exported constant, value `3` since yammm v0.12.0) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `3`) is the version emitted on every write. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Error-severity `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported version named in the message. **v1 and v2 documents are no longer read** — v3 is the only readable version. An older reader (yammm v0.11.0 and earlier) rejects a v3 document the same way, so an operator running an older binary against a v0.12.0-written `.ys` sees a structured diagnostic rather than a misread types section.
 
 See [`docs/VERSIONING.md`](VERSIONING.md) for the full pre-1.0 / post-1.0 wire-format policy.
 
@@ -856,11 +843,9 @@ result.String()           // "OK" when OK(), formatted issues otherwise
 renderer := diag.NewRenderer(
     diag.WithSourceProvider(provider),   // source text for excerpts
     diag.WithExcerpts(true),             // show source excerpts
-    diag.WithMaxLineColumns(120),        // max columns for excerpts
     diag.WithModuleRoot("/project"),     // strip prefix from paths
     diag.WithColors(true),              // ANSI color output
     diag.WithDistinguishFatal(true),    // distinguish fatal from error
-    diag.WithTruncationIndicator("..."),  // truncation marker
 )
 output := renderer.FormatResult(result)
 
@@ -925,18 +910,10 @@ The `adapter/json` package parses JSON/JSONC into raw instances with optional lo
 ### Adapter Creation
 
 ```go
-adapter, err := json.New(registry, opts...)
+adapter := json.New()
 ```
 
-The `registry` parameter is a `location.PositionRegistry` used for byte-offset-to-position conversion when location tracking is enabled. It may be `nil` when `WithTrackLocations` is not set.
-
-### Parse Options
-
-| Option | Description |
-| ------ | ----------- |
-| `WithStrictJSON` | Use stdlib JSON only (no comments/trailing commas) |
-| `WithTrackLocations` | Enable source position tracking (requires non-nil registry) |
-| `WithTypeField` | Field name for type tagging (default: `$type`) |
+Input is preprocessed as JSONC: comments and trailing commas are tolerated.
 
 ### Parsing
 
@@ -965,16 +942,15 @@ data, err := adapter.MarshalObject(ctx, snap, writeOpts...)
 // Stream a snapshot to a writer (returns bytes written)
 n, err := adapter.WriteObject(ctx, w, snap, writeOpts...)
 
-// Serialize a single validated instance
-data, err := adapter.MarshalInstance(ctx, inst, schemaType, writeOpts...)
 ```
+
+The object output is keyed by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — `MarshalObject` and `WriteObject` return an error naming both identities instead of merging the pair under one key.
 
 ### Write Options
 
 | Option | Description |
 | ------ | ----------- |
 | `WithIndent` | Indentation string for formatted output |
-| `WithDiagnostics` | Include diagnostics in output |
 
 ### JSONC Support
 
@@ -1063,91 +1039,36 @@ A declared fulltext index carries no analyzer or `eventually_consistent` configu
 shapes, result := adapter.ShapeForSchema(ctx, s)
 ```
 
-`ShapeForSchema` returns a `*GraphShape` containing a `Types` map of `NodeShape` values. Each `NodeShape` describes the `Type` (original yammm type name), `Label` (fully qualified Neo4j label), `PrimaryKeys`, and `RequiredFields` for a type.
+`ShapeForSchema` returns a `*GraphShape` whose `Types` map is keyed by `schema.TypeID` and holds `NodeShape` values. Each `NodeShape` describes the `Type` (original yammm type name), `Label` (fully qualified Neo4j label), `PrimaryKeys`, and `RequiredFields` for a type.
 
-### Write Modes
+### Write Queries
 
-Write query generation supports two operational modes:
-
-- **Graph mode:** `BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes
-- **Instance mode:** `NodeQueryFor` accepts any `NodeSource` and `EdgeQueryFor`/`EdgeQueriesFor` generate edge queries from validated instance or edge data
-
-`NodeQueryFor` accepts a `NodeSource` interface rather than a concrete type:
+`BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes. Both refuse a snapshot in which two types render the same type name — they would share one node shape and one label — returning an error that names both identities and the rendered name.
 
 ```go
-type NodeSource interface {
-    TypeName() string
-    Properties() immutable.Properties
-}
-```
-
-Both `*instance.ValidInstance` and `*graph.Instance` satisfy this interface.
-
-```go
-// Graph mode — batch queries from a snapshot
 shapes, _ := adapter.ShapeForSchema(ctx, s)
 nodeQueries, err := adapter.BatchNodeQueries(ctx, snap, shapes, writeOpts...)
 edgeQueries, err := adapter.BatchEdgeQueries(ctx, snap, shapes, writeOpts...)
-
-// Instance mode — single-instance queries
-nodeQuery, err := adapter.NodeQueryFor(ctx, &shape, inst, schemaType, writeOpts...)
-edgeQuery, err := adapter.EdgeQueryFor(ctx, edge, shapes, writeOpts...)
-edgeQueries, err := adapter.EdgeQueriesFor(ctx, validInst, schemaType, shapes, writeOpts...)
 ```
 
-All write methods return query structs (`NodeQuery`, `BatchNodeQuery`, `EdgeQuery`, `BatchEdgeQuery`) with `Statement` and `Params` fields, ready for driver execution.
+Both return query structs (`BatchNodeQuery`, `BatchEdgeQuery`) with `Statement` and `Params` fields, ready for driver execution.
 
 ### Write Options
 
 | Option | Description |
 | ------ | ----------- |
-| `WithImmutableKeys` | Properties only set on creation, not updated. Unions with schema-derived `@writeOnce` keys. Node merges only. |
 | `WithNodeChunkSize` | `UNWIND` batch size for node queries (default: 5000) |
 | `WithEdgeChunkSize` | `UNWIND` batch size for edge queries (default: 5000) |
 
-Explicitly-passed immutable keys union with the immutable keys derived from a type's `@writeOnce` annotations, which `ShapeForSchema` records on each `NodeShape` as `ImmutableKeys`. Because they travel on the shape, `NodeQueryFor` honors `@writeOnce` even when called with a nil `*schema.Type` — the documented streaming call shape. `ImmutableKeysFor(t *schema.Type) []string` returns a type's `@writeOnce` properties (own and inherited); the effective immutable set per written type is the union of explicit and derived keys, and `BatchNodeQueries` selects the `ON CREATE` / `ON MATCH` split per type (a non-empty explicit list still splits every type, preserving the prior contract).
+A type's write-once properties come from its `@writeOnce` annotations, which `ShapeForSchema` records on each `NodeShape` as `ImmutableKeys`; `ImmutableKeysFor(t *schema.Type) []string` returns them (own and inherited). The derived set per type drives the `ON CREATE` / `ON MATCH` split, selected per type in a batch. Node merges only — relationship merges have no `ON CREATE` / `ON MATCH` split.
 
-Only the explicitly-passed keys are validated against the schema at query-generation time: every one must name a declared property (own or inherited) of a node type being written. `NodeQueryFor` rejects a key that is not a property of its schema type (and skips both derivation and the check when `schemaType` is nil); `BatchNodeQueries` rejects a key that is a property of no node type in the snapshot, while accepting a key real for at least one written type (it may legitimately apply to a subset of a multi-type snapshot). A mistyped key would otherwise be honored silently and the real property rewritten on every re-MERGE, defeating the write-once guarantee. Derived `@writeOnce` keys are schema-true by construction and are not re-validated.
+### Relationship match counting
 
-### Cypher Builders
-
-The four exported builders produce the Cypher templates the `Adapter` write surface uses internally. They are pure functions — no execution, no driver dependency — and are exposed for advanced consumers (e.g. link engines, custom migration tooling) that want the template without the surrounding parameter-and-chunk plumbing that `BatchNodeQueries` / `BatchEdgeQueries` provide.
-
-```go
-// Node merge templates
-func BuildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string
-func BuildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string
-
-// Relationship merge templates (always end with RETURN count(*) AS matched_rows)
-func BuildRelationshipMergeQuery(
-    fromLabel string, fromKeyNames []string,
-    relType string,
-    toLabel string, toKeyNames []string,
-    hasProps bool,
-) string
-func BuildBatchRelationshipMergeQuery(
-    fromLabel string, fromKeyNames []string,
-    relType string,
-    toLabel string, toKeyNames []string,
-    hasProps bool,
-) string
-```
-
-The node builders' trailing `KeyMutability` parameter (`MutableKeys` or `ImmutableKeys`) selects the SET-clause shape. `MutableKeys` emits a single `SET n += $props`; `ImmutableKeys` emits the `ON CREATE SET n += $props` / `ON MATCH SET n += $update_props` split, and requires the caller to supply `$update_props` in the parameter map. The enum is complementary to `WithImmutableKeys`: the enum selects the template shape (per-call), while `WithImmutableKeys` at the `Adapter` layer carries the property-name filter that feeds `$update_props` at write time.
-
-Both relationship builders always end with `RETURN count(*) AS matched_rows`. The returned column reflects this call's (or this chunk's) MERGE match count only — 0 when the MERGE is a structural no-op (silent-failure condition), 1 (or the row count) when the relationship exists after the call. Consumers issuing multiple calls or chunks are responsible for summing `matched_rows` across results to detect silent no-ops. Node builders stay `RETURN`-free — constraint violations on nodes surface as driver errors, not silent zero-matches, so there is no analogous guard to emit.
-
-| Type / Constant | Description |
-| --------------- | ----------- |
-| `KeyMutability` | Enum selecting the node-builder SET-clause shape. Complementary to `WithImmutableKeys`. |
-| `MutableKeys` | Single `SET` clause; primary-key and property values are rewritten on MATCH. |
-| `ImmutableKeys` | `ON CREATE SET` / `ON MATCH SET` split; caller must supply `$update_props`. |
-
-For routine use, prefer `Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` — they call the same builders internally and handle parameter construction, chunking, and schema-aware property coercion.
+Every generated relationship statement ends with `RETURN count(*) AS matched_rows`, reflecting that call's (or chunk's) MERGE match count only — 0 when the MERGE is a structural no-op (silent-failure condition). Consumers issuing multiple chunks sum `matched_rows` across results to detect silent no-ops. Node statements stay `RETURN`-free: constraint violations on nodes surface as driver errors.
 
 ### Property Coercion
 
-The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries` and the single-item `NodeQueryFor` / `EdgeQueriesFor`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The coercion chokepoint is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply the same rules:
+The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The coercion chokepoint is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply the same rules:
 
 ```go
 // Coerce a single SCALAR value to the driver-native type the constraint requires
@@ -1175,29 +1096,13 @@ func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, erro
 // "rows") for a nested param map — keys are dot-joined to match CoerceParams.
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes
 
-// ParamTypesForMergeKeys derives a ParamTypes for the MERGE-key parameters the
-// node builders read: one entry per primary key under the `key_` namespace.
-// Prefix "" gives $key_<pk> (BuildNodeMergeQuery); "rows" gives row.key_<pk>
-// (BuildBatchNodeMergeQuery).
-func ParamTypesForMergeKeys(t *schema.Type, prefix string) ParamTypes
 ```
 
 Coercion rules: `Float` ← any Go integer width (`int`, `int8`…`int64`, `uint`…`uint64`) or `float32` → `float64` (a `float64` passes through); `Timestamp` ← a string parsed against the constraint's custom Go layout when it declares one (`Timestamp["…"]`) or RFC3339 / RFC3339Nano otherwise → `time.Time` (a `time.Time` passes through); `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date` (a `dbtype.Date` passes through); every other scalar kind passes through unchanged. `List<T>` values are coerced element-wise into the concrete typed slice (`List<Float>` of `int64`s → `[]float64`, `List<Date>` of strings → `[]dbtype.Date`, and so on); a `List<Timestamp["…"]>` honors the element's custom layout too.
 
 The three transforming kinds (`Float`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value always passes through; an unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
-**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.NodeQueryFor` / `BatchNodeQueries` / `EdgeQueriesFor` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion — those coerce their own merge keys and endpoint keys as well as their properties. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one; it derives the element types lists need.
-
-**Cover the merge key too.** `ParamTypesForType` describes ONE shape: a map keyed by property name. A hand-built parameter map for `BuildNodeMergeQuery` or `BuildBatchNodeMergeQuery` also carries merge keys, which do not sit where the properties sit — and the merge key is the one value the pattern matches on, so leaving it uncoerced is the failure with no error attached: a `Date` primary key reaching the driver as a string matches no node whose property is a `DATE`, and every re-run inserts a duplicate. Take those from `ParamTypesForMergeKeys` and merge the two:
-
-```go
-// $key_<pk> at the top level, properties nested under $props.
-pt := neo4j.ParamTypesForType(t, "props")
-maps.Copy(pt, neo4j.ParamTypesForMergeKeys(t, ""))
-params, err := neo4j.CoerceParams(params, pt)
-```
-
-Two functions rather than one because a type may declare a property literally named `key_<pk>`: in a flat row that spelling is the property, and in `BuildBatchNodeMergeQuery`'s row shape it is the merge key (the properties live nested under `row.props`). One map cannot answer both without silently choosing. `CoerceParams` walks one level of nesting, so a two-level map needs one call per nested map. The relationship builders key on two types and have no single-type equivalent; their spellings are `$from_key_<pk>` / `$to_key_<pk>` and `row.from_<pk>` / `row.to_<pk>`.
+**When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion — those coerce their own merge keys and endpoint keys as well as their properties. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one; it derives the element types lists need. When a hand-built merge key does not sit where the properties sit, coerce it explicitly — a `Date` primary key reaching the driver as a string matches no node whose property is a `DATE`, and every re-run inserts a duplicate.
 
 ### Schema Inference
 
@@ -1286,7 +1191,6 @@ The introspection types are:
 | -------- | ----------- |
 | `SanitizeIdentifier(s)` | Escape a string for use as a Neo4j label or property name |
 | `ValidateIdentifier(name, context)` | Validate that a name is a legal Neo4j identifier |
-| `CypherReservedKeywords()` | Return the set of Cypher reserved keywords |
 
 Cypher reserved words are not reserved by the DSL: a property named `match` or a
 type named `MATCH` is valid yammm and exports cleanly through the JSON and CSV
@@ -1312,11 +1216,9 @@ adapter := csv.New(opts...)
 
 | Option | Description |
 | ------ | ----------- |
-| `WithDelimiter` | Field delimiter rune (default: `,`) |
-| `WithHeader` | Whether input has a header row (default: true) |
-| `WithTypeColumn` | Column name for type tagging |
-| `WithNullValue` | String treated as nil (default: `""`) |
-| `WithListSeparator` | Separator for list values (default: `\|`) |
+| `WithTypeColumn` | Column name for type tagging (multi-type CSV) |
+
+The delimiter is `,`, the first row is the header, and list values join on `|`.
 
 ### Parsing
 
@@ -1338,10 +1240,6 @@ The `typeResolver` parameter is a `func(string) *schema.Type` that maps type col
 ### Serialization
 
 ```go
-// Serialize instances of a single type
-data, err := adapter.MarshalTyped(ctx, instances, schemaType, writeOpts...)
-n, err := adapter.WriteTyped(ctx, w, instances, schemaType, writeOpts...)
-
 // Serialize a full snapshot (returns one []byte per type)
 byType, err := adapter.MarshalSnapshot(ctx, snap, writeOpts...)
 
@@ -1349,12 +1247,7 @@ byType, err := adapter.MarshalSnapshot(ctx, snap, writeOpts...)
 err := adapter.WriteSnapshot(ctx, writerFor, snap, writeOpts...)
 ```
 
-### Write Options
-
-| Option | Description |
-| ------ | ----------- |
-| `WithWriteHeader` | Include header row in output |
-| `WithWriteNullString` | String to emit for nil values |
+Both snapshot writers key their output by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — they return an error naming both identities instead of merging the pair, and `WriteSnapshot` requests no writer before that check passes.
 
 ### Type Coercion
 
@@ -1385,7 +1278,7 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
 data, err := gogen.Marshal(s, gogen.WithPackageName("model"))
 ```
 
-`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSources`/`LoadSourcesWithEntry`. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded `SerializedModel` and its round-trip self-check require the source.
+`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSourcesWithEntry`. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded `SerializedModel` and its round-trip self-check require the source.
 
 ### Options
 
@@ -1464,8 +1357,8 @@ data, err := jschema.Marshal(s, jschema.WithSchemaID("https://example.com/fleet.
 | Option | Description |
 | ------ | ----------- |
 | `WithSchemaID` | Set the document `"$id"` (omitted entirely when unset) |
-| `WithTitle` | Override the document title (default: the schema name) |
-| `WithDescription` | Override the generated top-level description |
+
+The document title is the schema name.
 
 ### The Emitted Document
 

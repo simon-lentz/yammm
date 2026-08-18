@@ -66,12 +66,8 @@ func validateEmitted(t *testing.T, compiled *jsonschema.Schema, data []byte) err
 func yammmErrors(t *testing.T, s *schema.Schema, data []byte) []string {
 	t.Helper()
 	ctx := context.Background()
-	adapter, err := yamjson.New(nil)
-	if err != nil {
-		t.Fatalf("json.New: %v", err)
-	}
 	var errs []string
-	raws, res := adapter.ParseObject(ctx, location.MustNewSourceID("test://jschema/contract.json"), data)
+	raws, res := yamjson.New().ParseObject(ctx, location.MustNewSourceID("test://jschema/contract.json"), data)
 	if res.HasErrors() {
 		errs = append(errs, res.Err().Error())
 	}

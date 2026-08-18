@@ -42,7 +42,7 @@
 // claim the surrounding prose makes about the loader into a test of the loader.
 //
 // The code must be one the LOADER can report. An instance-validation code —
-// E_INVARIANT_FAIL, E_UNKNOWN_BUILTIN, E_CONSTRAINT_FAIL — describes what
+// E_INVARIANT_FAIL, E_EVAL_ERROR, E_CONSTRAINT_FAIL — describes what
 // happens to data long after the schema compiled, so asserting it against a
 // load produces a failure that is about the harness rather than the example.
 // Name a runtime code in the prose around the block, not in a comment inside

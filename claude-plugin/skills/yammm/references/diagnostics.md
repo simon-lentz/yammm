@@ -23,14 +23,14 @@ result.TruncationNote() // dropped-issues one-liner when the limit was hit
 
 ### Contextual Wrap (ContextualError)
 
-`result.WithContext(tag)` converts a failed Result into an `error` — a `*diag.ContextualError` carrying the tag plus the full Result — and returns `nil` when the Result is OK, so it slots directly into `return result.WithContext("load users")`. Recover the diagnostics downstream with `errors.As` or `diag.AsContextualError(err, fallbackTag)`. `diag.Collect(issues...)` builds a Result directly from issues. `diag.IsImportDeclarationCode(code)` classifies import-*declaration* codes (the import line itself is wrong) apart from import-*resolution* codes.
+`result.WithContext(tag)` converts a failed Result into an `error` — a `*diag.ContextualError` carrying the tag plus the full Result — and returns `nil` when the Result is OK, so it slots directly into `return result.WithContext("load users")`. Recover the diagnostics downstream with `errors.As` or `diag.AsContextualError(err, fallbackTag)`. `diag.IsImportDeclarationCode(code)` classifies import-*declaration* codes (the import line itself is wrong) apart from import-*resolution* codes.
 
 ### diag.Issue
 
 Each issue contains:
 
 | Field | Description |
-|-------|-------------|
+| ----- | ----------- |
 | `Code()` | Stable identifier (e.g., `E_CONSTRAINT_FAIL`) |
 | `Severity()` | Fatal, Error, Warning, Info, or Hint |
 | `Message()` | Human-readable description |
@@ -41,7 +41,7 @@ Each issue contains:
 ### Severity Levels
 
 | Level | Meaning | Stops pipeline? |
-|-------|---------|-----------------|
+| ----- | ------- | --------------- |
 | Fatal | Unrecoverable failure | Yes |
 | Error | Invalid input or state | Yes (via `HasErrors()`) |
 | Warning | Likely problem, not blocking | No |
@@ -82,21 +82,20 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Sentinel
 
 | Code | Meaning |
-|------|---------|
-| `E_LIMIT_REACHED` | Issue collection limit reached; remaining issues dropped |
+| ---- | ------- |
 | `E_INTERNAL` | Unexpected internal failure (likely a bug) |
 | `E_CONTEXT_CANCELLED` | Operation cancelled via context |
 
 ### Syntax
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_SYNTAX` | Syntax error in `.yammm` source |
 
 ### Import
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_IMPORT_RESOLVE` | Import path could not be resolved |
 | `E_IMPORT_CYCLE` | Circular import dependency |
 | `E_INVALID_ALIAS` | Import alias is not a valid identifier |
@@ -108,10 +107,8 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Schema Compilation
 
 | Code | Meaning |
-|------|---------|
-| `E_TYPE_COLLISION` | Type name already defined |
+| ---- | ------- |
 | `E_INHERIT_CYCLE` | Inheritance chain contains a cycle |
-| `E_SCHEMA_TYPE_NOT_FOUND` | Referenced type not found during compilation |
 | `E_UNKNOWN_PROPERTY` | Referenced property not found on its type |
 | `E_DUPLICATE_PROPERTY` | Property defined more than once on a type |
 | `E_DUPLICATE_RELATION` | Relation defined more than once on a type |
@@ -119,7 +116,6 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_PROPERTY_RELATION_COLLISION` | Property and relation share the same name |
 | `E_RELATION_NORMALIZATION_COLLISION` | Relation names collide after normalization |
 | `E_RESERVED_PREFIX` | Name uses a reserved prefix |
-| `E_INVALID_RELATION` | Relation definition is invalid |
 | `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type |
 | `E_INVALID_COMPOSITION_TARGET` | Composition targets an invalid type |
 | `E_INVALID_CONSTRAINT` | Constraint definition is invalid |
@@ -145,7 +141,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Instance Validation
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_INSTANCE_TYPE_NOT_FOUND` | Type referenced in instance data not found |
 | `E_ABSTRACT_TYPE` | Attempt to instantiate an abstract type |
 | `E_PART_TYPE_DIRECT` | Attempt to directly instantiate a part type |
@@ -156,21 +152,19 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_CONSTRAINT_FAIL` | Constraint check failed (bounds, pattern, enum) |
 | `E_INVARIANT_FAIL` | Invariant expression evaluated to false |
 | `E_EVAL_ERROR` | Error during expression evaluation |
-| `E_UNKNOWN_BUILTIN` | Unknown built-in function referenced |
 | `E_MISSING_FK_TARGET` | Foreign key target is missing |
 | `E_PARTIAL_COMPOSITE_FK` | Partial composite foreign key |
 | `E_UNKNOWN_EDGE_FIELD` | Unknown field in edge data |
 | `E_EDGE_SHAPE_MISMATCH` | Edge has wrong shape |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_NOT_FOUND` | Referenced composition not found |
-| `E_MISSING_TYPE_TAG` | `$type` tag is missing |
 | `E_INVALID_TYPE_TAG` | `$type` tag has invalid format |
 | `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
 
 ### Graph
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_DUPLICATE_PK` | Duplicate primary key in graph |
 | `E_DUPLICATE_COMPOSED_PK` | Duplicate composed child primary key |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
@@ -182,14 +176,13 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Snapshot
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON or wrong structure |
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
 | `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema |
-| `E_SNAPSHOT_TYPE_MISMATCH` | Types array inconsistent with instances |
-| `E_SNAPSHOT_TYPEID_MISMATCH` | Persisted type_id doesn't match schema |
+| `E_SNAPSHOT_TYPE_MISMATCH` | Instances section inconsistent with the types table |
 | `E_SNAPSHOT_DANGLING_REFERENCE` | Edge target references non-existent instance |
 | `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges (invalid) |
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |
@@ -205,7 +198,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 ### Adapter
 
 | Code | Adapter | Meaning |
-|------|---------|---------|
+| ---- | ------- | ------- |
 | `E_ADAPTER_PARSE` | All | Format-specific parsing error |
 | `E_CSV_COERCE` | CSV | Cell value could not be coerced to expected type |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |

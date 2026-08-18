@@ -328,21 +328,9 @@ func (t *Type) AllInvariantsSlice() []*Invariant {
 	return slices.Clone(t.allInvariants)
 }
 
-// Annotations returns an iterator over the type-level annotations declared in
-// this type body (@@name(args) members). Does NOT include inherited
-// annotations; use AllAnnotations for that.
-func (t *Type) Annotations() iter.Seq[*Annotation] {
-	return func(yield func(*Annotation) bool) {
-		for _, a := range t.annotations {
-			if !yield(a) {
-				return
-			}
-		}
-	}
-}
-
 // AnnotationsSlice returns a defensive copy of the type-level annotations
-// declared in this type body.
+// declared in this type body (@@name(args) members). Does NOT include
+// inherited annotations; use [Type.AllAnnotations] for that.
 func (t *Type) AnnotationsSlice() []*Annotation {
 	return slices.Clone(t.annotations)
 }
@@ -421,17 +409,6 @@ func (t *Type) SubTypes() iter.Seq[ResolvedTypeRef] {
 // for why a cross-schema descendant is absent and what to walk instead.
 func (t *Type) SubTypesSlice() []ResolvedTypeRef {
 	return slices.Clone(t.subTypes)
-}
-
-// IsSuperTypeOf reports whether this type is a supertype of the given type.
-// Uses TypeID for cross-schema comparison.
-func (t *Type) IsSuperTypeOf(id TypeID) bool {
-	for _, st := range t.subTypes {
-		if st.id == id {
-			return true
-		}
-	}
-	return false
 }
 
 // IsSubTypeOf reports whether this type is a subtype of the given type.

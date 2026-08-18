@@ -109,15 +109,6 @@ func (c CanonicalPath) IsZero() bool {
 	return c.path == ""
 }
 
-// Base returns the last element of the path (the file name).
-// For the zero value, returns an empty string.
-func (c CanonicalPath) Base() string {
-	if c.IsZero() {
-		return ""
-	}
-	return path.Base(c.path)
-}
-
 // Dir returns the directory portion as a CanonicalPath.
 // The result maintains all CanonicalPath invariants (absolute, clean, NFC, forward slashes).
 //

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -271,7 +270,7 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 		t.Errorf("expected E_UNRESOLVED_REQUIRED in error result; got: %s", ce.Result.String())
 	}
 	// The Person is still inspectable in the partial snapshot.
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != 1 {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != 1 {
 		t.Errorf("expected 1 Person in partial snapshot, got %d", len(persons))
 	}
 }
@@ -373,7 +372,7 @@ func TestBatchAssembler_AddValid_BypassesValidator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != 1 {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != 1 {
 		t.Errorf("expected 1 Person, got %d", len(persons))
 	}
 }
@@ -453,7 +452,7 @@ func TestBatchAssembler_Concurrent_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != expected {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != expected {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
@@ -480,7 +479,6 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 		opts []graph.BatchAssemblerOption
 	}{
 		{"default", nil},
-		{"pool4", []graph.BatchAssemblerOption{graph.WithValidatorPool(4)}},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			ba := graph.NewBatchAssembler(ctx, s, mode.opts...)
@@ -540,7 +538,7 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 
 			// INV-1: every key that was reported as a successful Add must be
 			// in the final snapshot.
-			persons := finalRes.Snapshot.InstancesOf("Person")
+			persons := finalRes.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))
 			snapKeys := make(map[string]struct{}, len(persons))
 			for _, p := range persons {
 				snapKeys[p.PrimaryKey().String()] = struct{}{}
@@ -602,7 +600,7 @@ func TestBatchAssembler_Concurrent_AddValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != expected {
+	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != expected {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
@@ -611,171 +609,17 @@ func TestBatchAssembler_Concurrent_AddValid(t *testing.T) {
 // Test 11: WithValidatorPool correctness (pool size 4, N=8, M=1000).
 // -----------------------------------------------------------------------------
 
-func TestBatchAssembler_WithValidatorPool_Correctness(t *testing.T) {
-	s := batchAssemblerTestSchema(t)
-	ctx := t.Context()
-
-	const numGoroutines = 8
-	const perGoroutine = 1000
-	expected := numGoroutines * perGoroutine
-
-	ba := graph.NewBatchAssembler(ctx, s, graph.WithValidatorPool(4))
-	var wg sync.WaitGroup
-	for i := range numGoroutines {
-		wg.Go(func() {
-			for j := range perGoroutine {
-				id := fmt.Sprintf("p-%d-%d", i, j)
-				if err := ba.Add("Person", personRaw(id, id)); err != nil {
-					t.Errorf("Add(%s): %v", id, err)
-					return
-				}
-			}
-		})
-	}
-	wg.Wait()
-
-	if got := ba.Count(); got != expected {
-		t.Errorf("Count: got %d, want %d", got, expected)
-	}
-
-	res, err := ba.Finalize(ctx)
-	if err != nil {
-		t.Fatalf("Finalize: %v", err)
-	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != expected {
-		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
-	}
-}
-
 // -----------------------------------------------------------------------------
 // Test 12: Pool back-pressure with n=1 — 4 concurrent Adds all complete.
 // -----------------------------------------------------------------------------
-
-func TestBatchAssembler_WithValidatorPool_BackPressure_N1(t *testing.T) {
-	s := batchAssemblerTestSchema(t)
-	ctx := t.Context()
-
-	ba := graph.NewBatchAssembler(ctx, s, graph.WithValidatorPool(1))
-
-	const numAdds = 4
-	var wg sync.WaitGroup
-	var seq atomic.Int64
-
-	for i := range numAdds {
-		wg.Go(func() {
-			id := fmt.Sprintf("p-%d", i)
-			if err := ba.Add("Person", personRaw(id, id)); err != nil {
-				t.Errorf("Add(%s): %v", id, err)
-				return
-			}
-			seq.Add(1)
-		})
-	}
-
-	// Bound: with n=1, completion is sequential; should still finish well
-	// within a few seconds even on slow CI.
-	doneCh := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(doneCh)
-	}()
-	select {
-	case <-doneCh:
-	case <-time.After(10 * time.Second):
-		t.Fatalf("deadlock: only %d/%d Adds completed within 10s", seq.Load(), numAdds)
-	}
-
-	if got := int(seq.Load()); got != numAdds {
-		t.Errorf("Adds completed: got %d, want %d", got, numAdds)
-	}
-	res, err := ba.Finalize(ctx)
-	if err != nil {
-		t.Fatalf("Finalize: %v", err)
-	}
-	if persons := res.Snapshot.InstancesOf("Person"); len(persons) != numAdds {
-		t.Errorf("snapshot Person count: got %d, want %d", len(persons), numAdds)
-	}
-}
 
 // -----------------------------------------------------------------------------
 // Test 13: WithValidatorPool panics on n <= 0 (table-driven).
 // -----------------------------------------------------------------------------
 
-func TestBatchAssembler_WithValidatorPool_PanicsOnInvalidN(t *testing.T) {
-	for _, n := range []int{0, -1, -100} {
-		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			defer func() {
-				r := recover()
-				if r == nil {
-					t.Fatalf("expected panic for n=%d, got nil", n)
-				}
-				msg := fmt.Sprint(r)
-				wantSub := fmt.Sprintf("got %d", n)
-				if !contains(msg, wantSub) {
-					t.Errorf("panic message %q does not contain %q", msg, wantSub)
-				}
-			}()
-			_ = graph.WithValidatorPool(n)
-		})
-	}
-}
-
 // -----------------------------------------------------------------------------
 // Test 14: Mode parity — default vs pool mode produce identical output.
 // -----------------------------------------------------------------------------
-
-func TestBatchAssembler_ModeParity(t *testing.T) {
-	s := batchAssemblerTestSchema(t)
-	ctx := t.Context()
-
-	// Sequential, deterministic input — same record sequence both modes.
-	// INV-3 holds only when the input set produces zero diagnostics; this
-	// fixture is an issue-free shape by construction.
-	records := []struct {
-		typeName string
-		raw      instance.RawInstance
-	}{
-		{"Company", companyRaw("acme", "ACME")},
-		{"Company", companyRaw("globex", "Globex")},
-		{"Person", personRaw("alice", "Alice")},
-		{"Person", personRaw("bob", "Bob")},
-		{"Person", personRaw("carol", "Carol")},
-	}
-
-	build := func(opts ...graph.BatchAssemblerOption) (*graph.Snapshot, []byte) {
-		ba := graph.NewBatchAssembler(ctx, s, opts...)
-		// Submit sequentially in both modes — the test pins parity for the
-		// SAME input order. Concurrent submission would non-deterministically
-		// reorder construction-time diagnostics in pool mode (no diagnostics
-		// here, so it would still parity, but sequential submission keeps
-		// the assertion crisp).
-		for _, rec := range records {
-			if err := ba.Add(rec.typeName, rec.raw); err != nil {
-				t.Fatalf("Add(%s): %v", rec.typeName, err)
-			}
-		}
-		res, err := ba.Finalize(ctx)
-		if err != nil {
-			t.Fatalf("Finalize: %v", err)
-		}
-		bytes, mRes := snapshot.Marshal(ctx, res.Snapshot)
-		if mRes.HasErrors() {
-			t.Fatalf("Marshal: %s", mRes.String())
-		}
-		return res.Snapshot, bytes
-	}
-
-	defaultSnap, defaultBytes := build()
-	poolSnap, poolBytes := build(graph.WithValidatorPool(4))
-
-	// Structural parity.
-	snapshottest.DiffSnapshots(t, defaultSnap, poolSnap)
-	// Wire-level parity via byte-exact Marshal output.
-	if string(defaultBytes) != string(poolBytes) {
-		t.Errorf("byte-level marshal mismatch between modes (default=%d, pool=%d)",
-			len(defaultBytes), len(poolBytes))
-	}
-}
 
 // -----------------------------------------------------------------------------
 // Seed-snapshot fixture for the NewBatchAssemblerFromSnapshot tests.
@@ -864,10 +708,10 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if got := len(res.Snapshot.InstancesOf("Person")); got != 2 {
+	if got := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); got != 2 {
 		t.Errorf("Person count: got %d, want 2 (seeded alice + new bob)", got)
 	}
-	if got := len(res.Snapshot.InstancesOf("Company")); got != 1 {
+	if got := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Company"))); got != 1 {
 		t.Errorf("Company count: got %d, want 1", got)
 	}
 	edges := res.Snapshot.Edges()
@@ -882,7 +726,7 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 	}
 
 	// The source snapshot is independent of the resumed batch.
-	if got := len(seed.InstancesOf("Person")); got != 1 {
+	if got := len(seed.InstancesOf(mustTypeID(t, s, "Person"))); got != 1 {
 		t.Errorf("seed Person count mutated: got %d, want 1", got)
 	}
 	if got := len(seed.Edges()); got != 0 {
@@ -1018,7 +862,7 @@ func TestNewBatchAssemblerFromSnapshot_DuplicateAgainstSeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if got := len(res.Snapshot.InstancesOf("Person")); got != 1 {
+	if got := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); got != 1 {
 		t.Errorf("Person count: got %d, want 1 (seeded alice only)", got)
 	}
 	if got := len(res.Snapshot.Duplicates()); got != 1 {
@@ -1082,7 +926,6 @@ func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T
 		opts []graph.BatchAssemblerOption
 	}{
 		{"default", nil},
-		{"pool4", []graph.BatchAssemblerOption{graph.WithValidatorPool(4)}},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed, mode.opts...)
@@ -1139,7 +982,7 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 	if lRes.HasErrors() {
 		t.Fatalf("run 2: load: %s", lRes.String())
 	}
-	if !loaded.OK() {
+	if !loaded.Diagnostics().OK() {
 		t.Fatalf("run 2: loaded snapshot diagnostics not OK: %s", loaded.Diagnostics().String())
 	}
 
@@ -1155,10 +998,10 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 		t.Fatalf("run 2: Finalize: %v", err)
 	}
 
-	if got := len(res2.Snapshot.InstancesOf("Person")); got != 2 {
+	if got := len(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); got != 2 {
 		t.Errorf("Person count: got %d, want 2", got)
 	}
-	if got := len(res2.Snapshot.InstancesOf("Company")); got != 1 {
+	if got := len(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Company"))); got != 1 {
 		t.Errorf("Company count: got %d, want 1", got)
 	}
 	if got := len(res2.Snapshot.Edges()); got != 2 {
@@ -1174,21 +1017,6 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 // -----------------------------------------------------------------------------
 // helpers
 // -----------------------------------------------------------------------------
-
-func contains(s, substr string) bool {
-	return len(substr) == 0 || (len(s) >= len(substr) &&
-		(stringIndex(s, substr) >= 0))
-}
-
-// stringIndex avoids importing strings just for one call site.
-func stringIndex(s, substr string) int {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
 
 // _ keeps the unused-import linter quiet on context for subtests that
 // happen to not use it. The package-level imports are all genuinely used,

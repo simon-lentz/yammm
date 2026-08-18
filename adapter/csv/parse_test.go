@@ -57,32 +57,6 @@ func TestParseTyped_NullHandling(t *testing.T) {
 	assert.Nil(t, results[0].Properties["count"])
 }
 
-func TestParseTyped_CustomDelimiter(t *testing.T) {
-	t.Parallel()
-	a := New(WithDelimiter('\t'))
-
-	input := "id\tname\ne1\tAlice\n"
-	results, result := a.ParseTyped(context.Background(), location.SourceID{}, "Entity", strings.NewReader(input), nil)
-	require.True(t, result.OK(), result.String())
-	require.Len(t, results, 1)
-	assert.Equal(t, "e1", results[0].Properties["id"])
-	assert.Equal(t, "Alice", results[0].Properties["name"])
-}
-
-func TestParseTyped_NoHeader(t *testing.T) {
-	t.Parallel()
-	a := New(WithHeader(false))
-
-	input := "e1,Alice,5\n"
-	results, result := a.ParseTyped(context.Background(), location.SourceID{}, "Entity", strings.NewReader(input), nil)
-	require.True(t, result.OK(), result.String())
-	require.Len(t, results, 1)
-
-	// Columns are numbered when no header.
-	assert.Equal(t, "e1", results[0].Properties["0"])
-	assert.Equal(t, "Alice", results[0].Properties["1"])
-}
-
 func TestParseTyped_CoercionError(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
@@ -154,22 +128,6 @@ func TestParseWithTypeColumn_NoTypeColumnConfigured(t *testing.T) {
 
 	_, result := a.ParseWithTypeColumn(context.Background(), location.SourceID{}, strings.NewReader(""), nil)
 	assert.False(t, result.OK())
-}
-
-func TestParseOne_Basic(t *testing.T) {
-	t.Parallel()
-	s := loadTestSchema(t, "basic.yammm")
-	st, _ := s.Type("Entity")
-	a := New()
-
-	raw, result := a.ParseOne(context.Background(), location.SourceID{}, "Entity",
-		[]string{"id", "name", "count"},
-		[]string{"e1", "Alice", "5"},
-		st)
-
-	require.True(t, result.OK(), result.String())
-	assert.Equal(t, "e1", raw.Properties["id"])
-	assert.Equal(t, int64(5), raw.Properties["count"])
 }
 
 func TestParseTyped_ContextCancellation(t *testing.T) {

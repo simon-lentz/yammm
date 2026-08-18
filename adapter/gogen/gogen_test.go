@@ -68,7 +68,7 @@ func TestMarshal_NotSourceBacked(t *testing.T) {
 // successful Marshal also proves the multi-source round-trip self-check passed.
 func TestMarshal_Imports(t *testing.T) {
 	s := loadSchema(t, "imports/main")
-	if s.ImportCount() == 0 {
+	if len(s.ImportsSlice()) == 0 {
 		t.Fatal("expected imports/main to declare an import")
 	}
 	got, err := gogen.Marshal(s)

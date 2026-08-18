@@ -5,7 +5,6 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -24,6 +23,11 @@ import (
 // Load does not re-validate instance data. The persisted snapshot is
 // assumed to contain valid data. However, Load performs structural
 // validation of the .ys format itself.
+//
+// Dynamic numeric values materialize as int64 or float64: the wire carries no
+// width, so a float32 stored at write time returns as float64 carrying the
+// same value exactly — converting it back to float32 returns the original. A
+// literal no finite float64 can hold returns as a json.Number, unconverted.
 //
 // The returned Snapshot's Schema() method returns the schema provided to
 // Load, not the schema used at original construction time.
@@ -54,88 +58,15 @@ func Load(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption
 		return nil, sd.collector.Result()
 	}
 
-	// Decode remaining sections (instances + diagnostics).
-	instances, diags, err := sd.decodeSections()
-	if err != nil {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+	groups, diags, ok := sd.runPipeline(ctx)
+	if !ok {
 		return nil, sd.collector.Result()
 	}
 
-	// Step 4: Decode instances (full materialization — decodeInstances).
-	exists, instParts, edgeParts, err := sd.decodeInstances(ctx, instances)
-	if err != nil {
-		return nil, sd.collector.Result()
-	}
-
-	// Step 5: Validate diagnostics section.
-	sd.validateDiagnostics(diags, exists)
-
-	// Step 6: Integrity verification.
-	sd.verifyIntegrity()
-
-	// Step 7: Structural validation — edge references.
-	refs := make([]edgeRef, 0, len(edgeParts))
-	for _, ep := range edgeParts {
-		refs = append(refs, edgeRef{
-			sourceType: ep.SourceType,
-			sourceKey:  ep.SourceKey.String(),
-			targetType: ep.TargetType,
-			targetKey:  ep.TargetKey.String(),
-		})
-	}
-	sd.validateEdgeRefs(refs, exists)
-
-	// If any errors, return nil snapshot.
-	if sd.collector.HasErrors() {
-		return nil, sd.collector.Result()
-	}
-
-	// Step 8: Assemble SnapshotParts and delegate to RebuildSnapshot.
-	dupParts := make([]graph.DuplicateParts, 0, len(diags.Duplicates))
-	for _, dw := range diags.Duplicates {
-		var dupTypeID schema.TypeID
-		if st, ok := s.Type(dw.Type); ok {
-			dupTypeID = st.ID()
-		}
-		dp := graph.DuplicateParts{
-			Type:     dw.Type,
-			Key:      immutable.WrapKey(normalizeSlice(dw.Key)),
-			Instance: sd.wireToInstanceParts(dw.Type, dw.Instance, dupTypeID),
-		}
-		dupParts = append(dupParts, dp)
-	}
-
-	unresParts := make([]graph.UnresolvedParts, 0, len(diags.Unresolved))
-	for _, uw := range diags.Unresolved {
-		up := graph.UnresolvedParts{
-			SourceType: uw.SourceType,
-			SourceKey:  immutable.WrapKey(normalizeSlice(uw.SourceKey)),
-			Relation:   uw.Relation,
-			TargetType: uw.TargetType,
-			Required:   uw.Required,
-			Reason:     uw.Reason,
-			Properties: immutable.WrapProperties(normalizeMap(uw.Properties)),
-		}
-		if uw.TargetKey != nil {
-			up.TargetKey = immutable.WrapKey(normalizeSlice(uw.TargetKey))
-		}
-		unresParts = append(unresParts, up)
-	}
-
-	parts := graph.SnapshotParts{
-		Types:      sd.types,
-		Instances:  instParts,
-		Edges:      edgeParts,
-		Duplicates: dupParts,
-		Unresolved: unresParts,
-	}
-
-	snap, result := graph.RebuildSnapshot(s, parts)
+	snap, result := graph.RebuildSnapshot(s, sd.loadDocument(groups, diags))
 	if result.HasErrors() {
-		// Merge RebuildSnapshot diagnostics (Fatal E_INTERNAL) into our collector.
 		sd.collector.Merge(result)
 		return nil, sd.collector.Result()
 	}
-
 	return snap, sd.collector.Result()
 }

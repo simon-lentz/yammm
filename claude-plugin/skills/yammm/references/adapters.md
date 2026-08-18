@@ -15,14 +15,10 @@ import jsonAdapter "github.com/simon-lentz/yammm/adapter/json"
 ### Constructor
 
 ```go
-adapter, err := jsonAdapter.New(registry,
-    jsonAdapter.WithStrictJSON(false),        // allow JSONC (comments, trailing commas)
-    jsonAdapter.WithTrackLocations(true),     // track source positions for diagnostics
-    jsonAdapter.WithTypeField("$type"),       // custom type discriminator field
-)
+adapter := jsonAdapter.New()
 ```
 
-The `registry` is a `location.PositionRegistry` for tracking source positions. Pass `nil` unless `WithTrackLocations(true)` is set (a nil registry with tracking enabled is a construction error).
+Input is preprocessed as JSONC: comments and trailing commas are tolerated.
 
 ### Parsing
 
@@ -48,14 +44,10 @@ All parse methods return `RawInstance` values ready for `instance.Validator.Vali
 // Marshal snapshot to JSON bytes
 data, err := adapter.MarshalObject(ctx, snapshot,
     jsonAdapter.WithIndent("  "),
-    jsonAdapter.WithDiagnostics(true),       // include $diagnostics section
 )
 
 // Write snapshot to io.Writer
 n, err := adapter.WriteObject(ctx, writer, snapshot)
-
-// Marshal a single validated instance
-data, err := adapter.MarshalInstance(ctx, validInst, schemaType)
 ```
 
 ---
@@ -70,13 +62,11 @@ import csvAdapter "github.com/simon-lentz/yammm/adapter/csv"
 
 ```go
 adapter := csvAdapter.New(
-    csvAdapter.WithDelimiter(','),            // field delimiter (use '\t' for TSV)
-    csvAdapter.WithHeader(true),              // first row is header
-    csvAdapter.WithTypeColumn("$type"),       // column for type discrimination
-    csvAdapter.WithNullValue(""),             // string representing nil
-    csvAdapter.WithListSeparator("|"),        // list element separator
+    csvAdapter.WithTypeColumn("$type"), // column for type discrimination (multi-type CSV)
 )
 ```
+
+The delimiter is `,`, the first row is the header, and list values join on `|`.
 
 ### Parsing
 
@@ -87,8 +77,6 @@ raws, result := adapter.ParseTyped(ctx, sourceID, "User", reader, schemaType)
 // Parse CSV with a type column (multi-type)
 parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, reader, typeResolver)
 
-// Parse a single row
-raw, result := adapter.ParseOne(ctx, sourceID, "User", columns, row, schemaType)
 ```
 
 Type coercion: CSV values are strings. The adapter coerces them to the schema's expected types (integers, floats, booleans, timestamps, UUIDs, lists). Coercion failures produce `E_CSV_COERCE` diagnostics.
@@ -98,15 +86,6 @@ BOM stripping: UTF-8 BOM bytes at the start of input are automatically stripped.
 ### Writing
 
 ```go
-// Marshal instances of one type to CSV bytes
-data, err := adapter.MarshalTyped(ctx, instances, schemaType,
-    csvAdapter.WithWriteHeader(true),
-    csvAdapter.WithWriteNullString(""),
-)
-
-// Write instances to an io.Writer
-n, err := adapter.WriteTyped(ctx, writer, instances, schemaType)
-
 // Marshal entire snapshot (one CSV per type)
 files, err := adapter.MarshalSnapshot(ctx, snapshot)
 // files is map[string][]byte: type name -> CSV bytes
@@ -139,6 +118,7 @@ adapter := neo4jAdapter.New(
 ```
 
 **Edition differences:**
+
 - `Enterprise`: Supports UNIQUE, NOT NULL, property type, and NODE KEY constraints
 - `Community`: UNIQUE constraints only
 
@@ -185,8 +165,7 @@ shape, result := adapter.ShapeForSchema(ctx, s)
 ```go
 // Batch node queries for an entire snapshot
 nodeQueries, err := adapter.BatchNodeQueries(ctx, snapshot, shape,
-    neo4jAdapter.WithImmutableKeys("first_seen_at"), // properties set only on creation
-    neo4jAdapter.WithNodeChunkSize(5000),             // max nodes per UNWIND batch
+    neo4jAdapter.WithNodeChunkSize(5000), // max nodes per UNWIND batch
 )
 
 // Batch edge queries
@@ -197,11 +176,11 @@ edgeQueries, err := adapter.BatchEdgeQueries(ctx, snapshot, shape,
 
 Each `BatchNodeQuery` / `BatchEdgeQuery` contains a Cypher statement and parameters map ready for driver execution.
 
-`WithImmutableKeys` unions with the immutable keys derived from a type's `@writeOnce` annotations (`ImmutableKeysFor(t)` returns a type's `@writeOnce` properties, own and inherited); the effective set per type drives the ON CREATE / ON MATCH split, selected per type in a batch. Only the explicitly-passed keys are validated against the schema at query generation: every one must name a declared property (own or inherited) of a node type being written, otherwise the call errors — a mistyped key would silently defeat the write-once guarantee. The option affects node merges only (relationship merges have no ON CREATE / ON MATCH split).
+A type's write-once properties come from its `@writeOnce` annotations (`ImmutableKeysFor(t)` returns them, own and inherited); the derived set per type drives the ON CREATE / ON MATCH split, selected per type in a batch. Node merges only — relationship merges have no ON CREATE / ON MATCH split.
 
 ### Parameter Coercion (Direct-Cypher Path)
 
-Values passing through `BatchNodeQueries` / `NodeQueryFor` are coerced to driver-native types automatically. Consumers hand-building Cypher parameters use the same chokepoint directly:
+Values passing through `BatchNodeQueries` are coerced to driver-native types automatically. Consumers hand-building Cypher parameters use the same chokepoint directly:
 
 ```go
 v, err := neo4jAdapter.Coerce(constraint, raw)   // one value against one constraint
@@ -294,7 +273,7 @@ Full API semantics: the gogen section of `docs/API.md`. CLI form: `yammm gen --t
 import "github.com/simon-lentz/yammm/adapter/jschema"
 ```
 
-Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` accepts — one top-level key per concrete type (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset), `WithTitle`, `WithDescription`. Plain `error`, no instance-data path, no source-backing requirement (Builder-built schemas accepted).
+Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` accepts — one top-level key per concrete type (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset). Plain `error`, no instance-data path, no source-backing requirement.
 
 Wire the generated document into an editor for completion and validation while authoring data files (e.g. `# yaml-language-server: $schema=./fleet.schema.json`).
 
@@ -317,7 +296,7 @@ Full API semantics: the Markdown Documentation Generation section of `docs/API.m
 ## Adapter Error Codes
 
 | Code | Adapter | Meaning |
-|------|---------|---------|
+| ---- | ------- | ------- |
 | `E_ADAPTER_PARSE` | All | Format-specific parsing error |
 | `E_CSV_COERCE` | CSV | Cell value could not be coerced to expected type |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |

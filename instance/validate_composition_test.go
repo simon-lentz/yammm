@@ -6,11 +6,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
+
+// composedOf reads one composition relation through the Compositions
+// iterator, the surviving accessor.
+func composedOf(vi *instance.ValidInstance, relation string) (immutable.Value, bool) {
+	for rel, children := range vi.Compositions() {
+		if rel == relation {
+			return children, true
+		}
+	}
+	return immutable.Value{}, false
+}
 
 // compositionSchema builds the canonical composition schema — part type
 // Address(id) plus Person(id) with a many-valued "addresses" composition —
@@ -60,7 +72,7 @@ func TestValidateCompositions_Single(t *testing.T) {
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
-	composed, ok := valid.Composed("addresses")
+	composed, ok := composedOf(valid, "addresses")
 	require.True(t, ok)
 	require.False(t, composed.IsNil())
 }
@@ -97,7 +109,7 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
-	composed, ok := valid.Composed("addresses")
+	composed, ok := composedOf(valid, "addresses")
 	require.True(t, ok)
 	require.False(t, composed.IsNil())
 }
@@ -120,7 +132,7 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 	require.NotNil(t, valid)
 
 	// No composition should be present
-	composed, ok := valid.Composed("addresses")
+	composed, ok := composedOf(valid, "addresses")
 	assert.False(t, ok)
 	assert.True(t, composed.IsNil())
 }
@@ -143,7 +155,7 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 	require.NotNil(t, valid)
 
 	// Composition should be present but empty
-	composed, ok := valid.Composed("addresses")
+	composed, ok := composedOf(valid, "addresses")
 	require.True(t, ok)
 	require.False(t, composed.IsNil())
 }

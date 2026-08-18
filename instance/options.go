@@ -27,14 +27,6 @@ func defaultConfig() *validatorConfig {
 	}
 }
 
-// WithLogger sets the logger for debug output during validation.
-// If not set, no logging is performed.
-func WithLogger(logger *slog.Logger) Option {
-	return func(c *validatorConfig) {
-		c.logger = logger
-	}
-}
-
 // WithStrictPropertyNames controls property name matching.
 //
 // When true, property names must match exactly (case-sensitive).
@@ -52,33 +44,6 @@ func WithStrictPropertyNames(strict bool) Option {
 func WithAllowUnknownFields(allow bool) Option {
 	return func(c *validatorConfig) {
 		c.allowUnknownFields = allow
-	}
-}
-
-// WithMaxIssuesPerInstance sets the maximum number of issues to collect
-// per instance before stopping validation of that instance.
-// Default is 100.
-func WithMaxIssuesPerInstance(n int) Option {
-	return func(c *validatorConfig) {
-		if n > 0 {
-			c.maxIssuesPerInstance = n
-		}
-	}
-}
-
-// WithValueRegistry sets a custom value registry for type classification.
-// This enables recognition of custom Go types (e.g., `type MyInt int64`)
-// during constraint checking.
-//
-// Note: The registry affects type classification in CheckValue, allowing
-// custom types to pass type checks. However, CoerceValue converts values
-// to canonical Go types (int64, float64, etc.), so the original custom
-// type information is not preserved in validated instances.
-//
-// A zero-value Registry uses built-in type detection only.
-func WithValueRegistry(reg value.Registry) Option {
-	return func(c *validatorConfig) {
-		c.valueRegistry = reg
 	}
 }
 

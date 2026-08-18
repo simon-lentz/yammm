@@ -45,20 +45,13 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	// pointers → graph instance pointers for steps 2-4.
 	cloneMap := make(map[*Instance]*Instance)
 
-	for _, typeName := range snap.Types() {
-		typeID, ok := g.resolveTypeName(typeName)
-		if !ok {
-			continue // type not in schema — should not happen after schema hash verification
-		}
-
+	for _, typeID := range snap.Types() {
 		if g.instances[typeID] == nil {
 			g.instances[typeID] = make(map[string]*Instance)
 		}
-
-		for _, inst := range snap.InstancesOf(typeName) {
+		for _, inst := range snap.InstancesOf(typeID) {
 			cloned := cloneInstance(inst, cloneMap)
-			pkString := cloned.PrimaryKey().String()
-			g.instances[typeID][pkString] = cloned
+			g.instances[typeID][cloned.PrimaryKey().String()] = cloned
 		}
 	}
 
@@ -77,32 +70,23 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	for _, unres := range snap.Unresolved() {
 		srcClone := cloneMap[unres.Source]
 
-		targetTypeID, ok := g.resolveTypeName(unres.TargetType)
-		if !ok {
-			continue
-		}
-
-		// Reverse the reason mapping from Snapshot(). Graph.Add() stores
-		// forward references with reasonDetail="" (empty string). Snapshot()
-		// converts "" to "target_missing" at graph.go:821-824. Restoring
-		// the original form ensures pending edge resolution in Add() works
-		// unchanged.
+		// Reverse the reason mapping from [Graph.Snapshot], which converts the
+		// empty reasonDetail [Graph.Add] stores into "target_missing".
 		reasonDetail := unres.Reason
 		if reasonDetail == "target_missing" {
 			reasonDetail = ""
 		}
 
-		// Reconstruct the JSON field name from the schema for diagnostic
-		// fidelity. This is not persisted in the .ys format. Falls back to
-		// empty string for imported types or if the relation is not found.
+		// Not persisted in .ys, so rebuilt here. Resolved by identity, which
+		// reaches the whole closure where the source's tag form does not.
 		jsonField := ""
-		if typ, ok := g.schema.Type(unres.Source.TypeName()); ok {
+		if typ, ok := g.schema.TypeByID(unres.Source.TypeID()); ok {
 			if rel, ok := typ.Relation(unres.Relation); ok {
 				jsonField = rel.FieldName()
 			}
 		}
 
-		pk := pendingKey{targetTypeID: targetTypeID, targetKey: unres.TargetKey}
+		pk := pendingKey{targetTypeID: unres.TargetType, targetKey: unres.TargetKey}
 		g.pending[pk] = append(g.pending[pk], &pendingEdge{
 			source:       srcClone,
 			relation:     unres.Relation,
@@ -128,8 +112,16 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 
 		conflictClone := cloneMap[dup.Conflict]
 
-		// Diagnostic is zero-value for loaded snapshots (HasDiagnostic() == false).
-		g.duplicates = append(g.duplicates, newDuplicate(instClone, conflictClone, dup.Diagnostic))
+		var parentClone *Instance
+		if dup.Parent != nil {
+			parentClone = cloneMap[dup.Parent]
+			if parentClone == nil {
+				parentClone = cloneInstance(dup.Parent, cloneMap)
+			}
+		}
+
+		// Diagnostic is zero-value for loaded snapshots.
+		g.duplicates = append(g.duplicates, newDuplicate(instClone, conflictClone, parentClone, dup.Relation, dup.Diagnostic))
 	}
 
 	// Step 5: Diagnostics — no-op.

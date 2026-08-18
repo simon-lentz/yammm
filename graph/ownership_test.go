@@ -45,8 +45,8 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	snap2 := g.Snapshot()
 
 	// Verify both snapshots have the parent
-	parents1 := snap1.InstancesOf("Parent")
-	parents2 := snap2.InstancesOf("Parent")
+	parents1 := snap1.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents2 := snap2.InstancesOf(mustTypeID(t, s, "Parent"))
 
 	if len(parents1) != 1 || len(parents2) != 1 {
 		t.Fatalf("Expected 1 parent in each snapshot, got %d and %d", len(parents1), len(parents2))
@@ -66,7 +66,7 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	}
 
 	// Within the same snapshot, multiple calls return the same pointer
-	parents1Again := snap1.InstancesOf("Parent")
+	parents1Again := snap1.InstancesOf(mustTypeID(t, s, "Parent"))
 	if parents1[0] != parents1Again[0] {
 		t.Error("Same snapshot should return same instance pointer")
 	}
@@ -121,7 +121,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 
 	// Access composed children via snapshot
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -197,7 +197,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	snap2 := g.Snapshot()
 
 	// snap1 should show ZERO children (immutable snapshot)
-	parents1 := snap1.InstancesOf("Parent")
+	parents1 := snap1.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents1) != 1 {
 		t.Fatalf("Expected 1 parent in snap1, got %d", len(parents1))
 	}
@@ -207,7 +207,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	}
 
 	// snap2 should show ONE child
-	parents2 := snap2.InstancesOf("Parent")
+	parents2 := snap2.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents2) != 1 {
 		t.Fatalf("Expected 1 parent in snap2, got %d", len(parents2))
 	}
@@ -243,8 +243,8 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 
 	// Access the instance multiple times within the SAME snapshot
 	snap := g.Snapshot()
-	instances1 := snap.InstancesOf("Person")
-	instances2 := snap.InstancesOf("Person")
+	instances1 := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	instances2 := snap.InstancesOf(mustTypeID(t, s, "Person"))
 
 	if len(instances1) != 1 || len(instances2) != 1 {
 		t.Fatalf("Expected 1 instance each time, got %d and %d", len(instances1), len(instances2))
@@ -257,7 +257,7 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 
 	// Different snapshot should return different reference
 	snap2 := g.Snapshot()
-	instances3 := snap2.InstancesOf("Person")
+	instances3 := snap2.InstancesOf(mustTypeID(t, s, "Person"))
 	if instances1[0] == instances3[0] {
 		t.Error("Different snapshots should NOT share instance pointers")
 	}
@@ -299,11 +299,11 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	snap := g.Snapshot()
 
 	// Get instances via direct lookup
-	company1, ok := snap.InstanceByKey("Company", graph.FormatKey("acme"))
+	company1, ok := snap.InstanceByKey(mustTypeID(t, s, "Company"), graph.FormatKey("acme"))
 	if !ok {
 		t.Fatal("Expected to find Company by key")
 	}
-	person1, ok := snap.InstanceByKey("Person", graph.FormatKey("alice"))
+	person1, ok := snap.InstanceByKey(mustTypeID(t, s, "Person"), graph.FormatKey("alice"))
 	if !ok {
 		t.Fatal("Expected to find Person by key")
 	}

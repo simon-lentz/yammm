@@ -130,7 +130,7 @@ func TestValidInstance_Edge(t *testing.T) {
 		edge, ok := vi.Edge("manager")
 		require.True(t, ok)
 		require.NotNil(t, edge)
-		assert.Equal(t, 1, edge.TargetCount())
+		assert.Len(t, edge.Targets(), 1)
 	})
 
 	t.Run("missing_edge", func(t *testing.T) {
@@ -157,53 +157,6 @@ func TestValidInstance_Edge(t *testing.T) {
 		edge, ok := vi.Edge("nonexistent")
 		assert.False(t, ok)
 		assert.Nil(t, edge)
-	})
-}
-
-func TestValidInstance_Composed(t *testing.T) {
-	t.Run("existing_composition", func(t *testing.T) {
-		composedChildren := immutable.Wrap([]any{
-			map[string]any{"id": int64(1), "street": "Main St"},
-			map[string]any{"id": int64(2), "street": "Oak Ave"},
-		})
-		composed := map[string]immutable.Value{
-			"addresses": composedChildren,
-		}
-		vi := instancetest.VI(
-			"Person",
-			instancetest.PK(int64(1)),
-			instancetest.Composed(composed),
-		)
-
-		val, ok := vi.Composed("addresses")
-		require.True(t, ok)
-		slice, ok := val.Slice()
-		require.True(t, ok)
-		assert.Equal(t, 2, slice.Len())
-	})
-
-	t.Run("missing_composition", func(t *testing.T) {
-		vi := instancetest.VI(
-			"Person",
-			instancetest.PK(int64(1)),
-		)
-
-		_, ok := vi.Composed("addresses")
-		assert.False(t, ok)
-	})
-
-	t.Run("nonexistent_relation", func(t *testing.T) {
-		composed := map[string]immutable.Value{
-			"addresses": immutable.Wrap([]any{}),
-		}
-		vi := instancetest.VI(
-			"Person",
-			instancetest.PK(int64(1)),
-			instancetest.Composed(composed),
-		)
-
-		_, ok := vi.Composed("nonexistent")
-		assert.False(t, ok)
 	})
 }
 
@@ -265,29 +218,6 @@ func TestValidEdgeData_Targets(t *testing.T) {
 	})
 }
 
-func TestValidEdgeData_TargetCount(t *testing.T) {
-	t.Run("with_targets", func(t *testing.T) {
-		targets := []instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(1)}), immutable.WrapProperties(nil)),
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(2)}), immutable.WrapProperties(nil)),
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(3)}), immutable.WrapProperties(nil)),
-		}
-		edge := instance.NewValidEdgeData(targets)
-
-		assert.Equal(t, 3, edge.TargetCount())
-	})
-
-	t.Run("nil_edge", func(t *testing.T) {
-		var edge *instance.ValidEdgeData
-		assert.Equal(t, 0, edge.TargetCount())
-	})
-
-	t.Run("empty_targets", func(t *testing.T) {
-		edge := instance.NewValidEdgeData([]instance.ValidEdgeTarget{})
-		assert.Equal(t, 0, edge.TargetCount())
-	})
-}
-
 func TestValidEdgeData_IsEmpty(t *testing.T) {
 	t.Run("with_targets", func(t *testing.T) {
 		targets := []instance.ValidEdgeTarget{
@@ -344,32 +274,6 @@ func TestValidEdgeTarget_Properties(t *testing.T) {
 		result := target.Properties()
 		_, ok := result.Get("anything")
 		assert.False(t, ok)
-	})
-}
-
-func TestValidInstance_HasProvenance(t *testing.T) {
-	t.Run("with_provenance", func(t *testing.T) {
-		prov := location.NewProvenance(
-			"test.json",
-			path.Root(),
-			location.Span{},
-		)
-		vi := instancetest.VI(
-			"User",
-			instancetest.PK(int64(1)),
-			instancetest.Provenance(prov),
-		)
-
-		assert.True(t, vi.HasProvenance())
-	})
-
-	t.Run("without_provenance", func(t *testing.T) {
-		vi := instancetest.VI(
-			"User",
-			instancetest.PK(int64(1)),
-		)
-
-		assert.False(t, vi.HasProvenance())
 	})
 }
 

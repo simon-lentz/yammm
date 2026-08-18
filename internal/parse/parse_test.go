@@ -751,8 +751,10 @@ func TestParse_ReportsEveryDocumentedCode(t *testing.T) {
 			diag.E_INVALID_CONSTRAINT,
 		},
 		{
+			// A hex escape short of its two digits: the lexer's STRING class
+			// admits it, the unquoter rejects it.
 			"E_INVALID_INVARIANT",
-			"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id != 'ab'\n}\n",
+			"schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id != \"\\x4\"\n}\n",
 			diag.E_INVALID_INVARIANT,
 		},
 	}
@@ -803,6 +805,85 @@ func TestParse_CallArgumentsAcceptOneBareComma(t *testing.T) {
 			}
 		})
 	}
+}
+
+// malformedStreamSources are syntactically broken inputs the tracked corpus
+// does not contain. Lex is total, so the equivalence below must hold on them
+// too — and it is on a failed parse that the two producers could most easily
+// diverge, since the parse view is the one that gives up.
+var malformedStreamSources = []string{
+	"schema \"s\"\ntype T {\n\tid String primary\n",
+	"schema \"s\"\ntype T {\n\tid String[\n}\n",
+	"schema \"s\"\ntype T extends 3 {\n\tid String primary\n}\n",
+	"schema \"s\"\ntype T {\n\t! \"m\" id ->\n}\n",
+	"schema \"s\"\ntype T {\n\tid String primary\n\t--> r B /\n}\n",
+	"\x00\xff not yammm at all \x00",
+	"",
+}
+
+// TestLexAndParse_StreamEqualsLex pins the equivalence the formatter's
+// correctness rides on: the token view LexAndParse returns from its
+// single lex is exactly what Lex returns from its own. The tracked corpus is
+// entirely well-formed, so malformed sources are supplied separately —
+// without them the "valid and malformed alike" claim was prose, not coverage.
+func TestLexAndParse_StreamEqualsLex(t *testing.T) {
+	entries := walkCorpus(t)
+	if len(entries) < 100 {
+		t.Fatalf("corpus walk found %d fixtures, floor is 100", len(entries))
+	}
+
+	check := func(label, src string) {
+		t.Helper()
+		_, stream, _ := LexAndParse(src, location.NewSourceID("s.yammm"))
+		want := Lex(src)
+		if !slices.Equal(stream, want) {
+			t.Errorf("%s: LexAndParse stream diverges from Lex (%d vs %d tokens)",
+				label, len(stream), len(want))
+		}
+	}
+
+	for _, e := range entries {
+		check(e.Path, e.Src)
+	}
+
+	var sawFailedParse bool
+	for i, src := range malformedStreamSources {
+		check(fmt.Sprintf("malformed[%d]", i), src)
+		if _, issues := Parse([]byte(src), location.NewSourceID("s.yammm")); len(issues) > 0 {
+			sawFailedParse = true
+		}
+	}
+	if !sawFailedParse {
+		t.Error("no malformed source drew a diagnostic — the malformed arm proves nothing")
+	}
+}
+
+// TestParse_ConditionalRequiresElse pins the ternary arity at the grammar: a
+// two-operand conditional can never evaluate, so "cond ? { x }" is a load-time
+// syntax error rather than a guaranteed evaluation error.
+func TestParse_ConditionalRequiresElse(t *testing.T) {
+	body := func(e string) string {
+		return "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + e + "\n}\n"
+	}
+	t.Run("with else accepted", func(t *testing.T) {
+		_, issues := Parse([]byte(body("id != nil ? { true : false }")), location.NewSourceID("s.yammm"))
+		if len(issues) != 0 {
+			t.Errorf("ternary with else drew %v, want none", issues)
+		}
+	})
+	t.Run("without else rejected", func(t *testing.T) {
+		_, issues := Parse([]byte(body("id != nil ? { true }")), location.NewSourceID("s.yammm"))
+		if len(issues) != 1 {
+			t.Fatalf("else-less ternary drew %d diagnostics, want 1: %v", len(issues), issues)
+		}
+		if issues[0].Code() != diag.E_SYNTAX {
+			t.Errorf("code = %v, want %v", issues[0].Code(), diag.E_SYNTAX)
+		}
+		const want = "expected ':' and an else branch in a conditional"
+		if issues[0].Message() != want {
+			t.Errorf("message = %q, want %q", issues[0].Message(), want)
+		}
+	})
 }
 
 // TestParse_IntegerBoundsRejectAFloat pins the split between the two numeric

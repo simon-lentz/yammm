@@ -7,7 +7,7 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 ## Command Reference
 
 | Command | Description |
-|---------|-------------|
+| ------- | ----------- |
 | `yammm validate <schema>` | Validate a schema file |
 | `yammm fmt <schema>` | Format a schema file |
 | `yammm check <schema> <data>` | Validate data against a schema |
@@ -28,7 +28,7 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 ## Global Flags
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| ---- | ------- | ----------- |
 | `--format` | `text` | Diagnostic output format: `text` or `json` |
 | `--no-color` | `false` | Disable ANSI color in output |
 
@@ -77,7 +77,7 @@ yammm check --from csv schema.yammm data.tsv --type User
 Validates data against a schema without building a full graph. Reports constraint violations, missing fields, and invariant failures.
 
 | Flag | Description |
-|------|-------------|
+| ---- | ----------- |
 | `--from` | Input format override (`json` or `csv`; auto-detected if omitted) |
 | `--type` | Type name for single-type CSV |
 | `--type-column` | Column name containing type names (multi-type CSV) |
@@ -106,7 +106,7 @@ yammm snapshot save -o output.ys -m env=prod -m version=2 schema.yammm data.json
 Builds a graph snapshot from one or more data files and persists it as a `.ys` file.
 
 | Flag | Description |
-|------|-------------|
+| ---- | ----------- |
 | `-o, --output` | Output path for `.ys` file (required) |
 | `--from` | Input format override |
 | `--type` | Type name for single-type CSV |
@@ -142,7 +142,7 @@ yammm snapshot update-metadata --unset env output.ys
 Rewrites metadata on an existing `.ys` file. Uses a fast path that reuses the snapshot body when possible; when it cannot, it falls back to a full load + re-marshal and reports `W_UPDATE_METADATA_FALLBACK`.
 
 | Flag | Description |
-|------|-------------|
+| ---- | ----------- |
 | `-s, --set` | `key=value` metadata pair to set (repeatable) |
 | `--unset` | Metadata key to remove (repeatable) |
 
@@ -166,7 +166,7 @@ yammm export --to json --output result.json schema.yammm data.csv --type User
 ```
 
 | Flag | Description |
-|------|-------------|
+| ---- | ----------- |
 | `--to` | Output format: `json`, `csv`, or `cypher` (required) |
 | `--from` | Input format override |
 | `--output` | Output file path (default: stdout) |
@@ -195,7 +195,7 @@ yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 `--to md` (alias `markdown`) generates a Markdown reference document via the `adapter/markdown` adapter: a Mermaid class diagram of the whole import closure plus per-type sections (flattened property tables with `from <Owner>` inherited-row markers, relation bullets with edge-property sub-tables, invariant source fences) and data-type tables. Same closure flattening; output is deterministic and structurally self-checked before being written.
 
 | Flag | Description |
-|------|-------------|
+| ---- | ----------- |
 | `--to` | Target: `go`, `jsonschema`, or `md` (required) |
 | `--package` | go target: generated package name (default: derived from schema name) |
 | `--output` | Output file path (default: stdout) |
@@ -213,7 +213,7 @@ Per-target flags are enforced with a usage error: `--package`/`--initialisms` ap
 All `neo4j` subcommands share connection flags (also available via environment variables):
 
 | Flag | Env Var | Default | Description |
-|------|---------|---------|-------------|
+| ---- | ------- | ------- | ----------- |
 | `--uri` | `$YAMMM_NEO4J_URI` | -- | Neo4j bolt URI |
 | `--username` | `$YAMMM_NEO4J_USERNAME` | `neo4j` | Username |
 | `--password` | `$YAMMM_NEO4J_PASSWORD` | -- | Password |
@@ -230,7 +230,7 @@ yammm neo4j constraints --named=false schema.yammm
 Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| ---- | ------- | ----------- |
 | `--edition` | `enterprise` | `enterprise` or `community` |
 | `--named` | `true` | Generate named constraints |
 | `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
@@ -248,7 +248,7 @@ yammm neo4j indexes schema.yammm
 Generates `CREATE INDEX` / `CREATE VECTOR INDEX` / `CREATE FULLTEXT INDEX ... IF NOT EXISTS` Cypher statements from a schema's `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` annotations. Index names are always emitted and indexes apply to every edition, so this command takes the label flags but none of the constraint-shape flags (`--edition`, `--named`, `--node-keys`, `--scalar-types`, `--required-only-types`).
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| ---- | ------- | ----------- |
 | `--separator` | `__` | Label separator (schema__Type) |
 | `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
 
@@ -264,7 +264,7 @@ Compares desired schema constraints **and indexes** against the live database (i
 `diff` computes its desired side exactly as `constraints` and `indexes` emit it, so it takes **the same flags** — set every one of them to match how the target graph was generated. A flag left at its default when the graph was built with another value makes the desired side disagree with the database by construction, and the plan reports drift the operator never introduced.
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| ---- | ------- | ----------- |
 | `--indexes` | `true` | Include index drift in the diff and the exit code; `--indexes=false` is constraints-only |
 | `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed, on **both** sides) |
 | `--named` | `true` | Named constraints; with `false` every pairing falls through to semantic identity |
@@ -286,7 +286,7 @@ yammm neo4j introspect --uri bolt://localhost:7687 --schema inventory --output i
 Infers a `.yammm` schema from a live Neo4j database by reading constraints and relationships.
 
 | Flag | Description |
-|------|-------------|
+| ---- | ----------- |
 | `--schema` | Filter to specific schema name prefix |
 | `--output` | Output file (default: stdout) |
 
@@ -303,7 +303,7 @@ yammm export --to cypher schema.yammm data.json | cypher-shell -u neo4j
 ## Exit Codes
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------- |
 | 0 | Success (no errors) |
 | 1 | Errors in input (validation failures, constraint violations) |
 | 2 | Usage error (bad flags, missing arguments) |

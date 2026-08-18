@@ -138,16 +138,18 @@ func normalizeFixtureProps(m map[string]any) map[string]any {
 func extractResolvedEdgeProperties(t *testing.T, data []byte, relation string) []byte {
 	t.Helper()
 	var doc struct {
-		Instances map[string][]struct {
-			Edges map[string][]struct {
-				Properties json.RawMessage `json:"properties"`
-			} `json:"edges"`
+		Instances []struct {
+			Items []struct {
+				Edges map[string][]struct {
+					Properties json.RawMessage `json:"properties"`
+				} `json:"edges"`
+			} `json:"items"`
 		} `json:"instances"`
 	}
 	require.NoError(t, json.Unmarshal(data, &doc))
 
-	for _, insts := range doc.Instances {
-		for _, inst := range insts {
+	for _, group := range doc.Instances {
+		for _, inst := range group.Items {
 			edges := inst.Edges[relation]
 			if len(edges) > 0 {
 				return []byte(edges[0].Properties)

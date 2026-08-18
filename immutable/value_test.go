@@ -1252,8 +1252,6 @@ func TestConcurrent_Key_Read(t *testing.T) {
 		_ = k.Get(0)
 		_ = k.Get(1)
 		_ = k.String()
-		_, _ = k.SingleString()
-		_, _ = k.SingleInt()
 
 		// Iterator operations
 		for range k.Iter() {

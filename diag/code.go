@@ -10,7 +10,7 @@ import "sync"
 type CodeCategory uint8
 
 const (
-	// CategorySentinel is for sentinel codes like E_LIMIT_REACHED and E_INTERNAL.
+	// CategorySentinel is for sentinel codes like E_INTERNAL and E_CONTEXT_CANCELLED.
 	CategorySentinel CodeCategory = iota
 
 	// CategorySchema is for schema compilation errors.
@@ -73,7 +73,7 @@ type Code struct {
 	cat   CodeCategory
 }
 
-// String returns the code's string representation (e.g., "E_TYPE_COLLISION").
+// String returns the code's string representation (e.g., "E_CASE_COLLISION").
 func (c Code) String() string {
 	return c.value
 }
@@ -119,12 +119,6 @@ func NewCode(value string, cat CodeCategory) Code {
 
 // Sentinel codes.
 var (
-	// E_LIMIT_REACHED is a sentinel code for explicit limit notification.
-	// It does not automatically trigger Result.LimitReached(); use
-	// Collector.LimitReached() to check limit status. Callers may inject
-	// this code manually when desired.
-	E_LIMIT_REACHED = NewCode("E_LIMIT_REACHED", CategorySentinel)
-
 	// E_INTERNAL indicates an unexpected invariant failure (internal bug indicator).
 	// Use for conditions that should never occur in correct code.
 	E_INTERNAL = NewCode("E_INTERNAL", CategorySentinel)
@@ -136,14 +130,8 @@ var (
 
 // Schema codes.
 var (
-	// E_TYPE_COLLISION indicates a type name is already defined.
-	E_TYPE_COLLISION = NewCode("E_TYPE_COLLISION", CategorySchema)
-
 	// E_INHERIT_CYCLE indicates an inheritance chain contains a cycle.
 	E_INHERIT_CYCLE = NewCode("E_INHERIT_CYCLE", CategorySchema)
-
-	// E_SCHEMA_TYPE_NOT_FOUND indicates a referenced type cannot be found during schema compilation.
-	E_SCHEMA_TYPE_NOT_FOUND = NewCode("E_SCHEMA_TYPE_NOT_FOUND", CategorySchema)
 
 	// E_UNKNOWN_PROPERTY indicates a referenced property cannot be found on its type.
 	E_UNKNOWN_PROPERTY = NewCode("E_UNKNOWN_PROPERTY", CategorySchema)
@@ -165,9 +153,6 @@ var (
 
 	// E_RESERVED_PREFIX indicates a name uses a reserved prefix.
 	E_RESERVED_PREFIX = NewCode("E_RESERVED_PREFIX", CategorySchema)
-
-	// E_INVALID_RELATION indicates a relation definition is invalid.
-	E_INVALID_RELATION = NewCode("E_INVALID_RELATION", CategorySchema)
 
 	// E_INVALID_ASSOCIATION_TARGET indicates an association targets an invalid type.
 	E_INVALID_ASSOCIATION_TARGET = NewCode("E_INVALID_ASSOCIATION_TARGET", CategorySchema)
@@ -313,9 +298,6 @@ var (
 	// E_EVAL_ERROR indicates an error during expression evaluation.
 	E_EVAL_ERROR = NewCode("E_EVAL_ERROR", CategoryInstance)
 
-	// E_UNKNOWN_BUILTIN indicates an unknown builtin function was referenced.
-	E_UNKNOWN_BUILTIN = NewCode("E_UNKNOWN_BUILTIN", CategoryInstance)
-
 	// E_MISSING_FK_TARGET indicates a foreign key target is missing.
 	E_MISSING_FK_TARGET = NewCode("E_MISSING_FK_TARGET", CategoryInstance)
 
@@ -333,9 +315,6 @@ var (
 
 	// E_COMPOSITION_NOT_FOUND indicates a referenced composition cannot be found.
 	E_COMPOSITION_NOT_FOUND = NewCode("E_COMPOSITION_NOT_FOUND", CategoryInstance)
-
-	// E_MISSING_TYPE_TAG indicates a $type tag is missing.
-	E_MISSING_TYPE_TAG = NewCode("E_MISSING_TYPE_TAG", CategoryInstance)
 
 	// E_INVALID_TYPE_TAG indicates a $type tag has an invalid format.
 	E_INVALID_TYPE_TAG = NewCode("E_INVALID_TYPE_TAG", CategoryInstance)
@@ -397,13 +376,9 @@ var (
 	// in the provided schema.
 	E_SNAPSHOT_UNKNOWN_TYPE = NewCode("E_SNAPSHOT_UNKNOWN_TYPE", CategorySnapshot)
 
-	// E_SNAPSHOT_TYPE_MISMATCH indicates the types array is inconsistent with the
-	// instances map keys (structural malformation).
+	// E_SNAPSHOT_TYPE_MISMATCH indicates the instances section is inconsistent
+	// with the types table (structural malformation).
 	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH", CategorySnapshot)
-
-	// E_SNAPSHOT_TYPEID_MISMATCH indicates a persisted type_id does not match the
-	// corresponding type in the provided schema (schema evolution).
-	E_SNAPSHOT_TYPEID_MISMATCH = NewCode("E_SNAPSHOT_TYPEID_MISMATCH", CategorySnapshot)
 
 	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target or duplicate conflict
 	// references an instance that does not exist in the snapshot.

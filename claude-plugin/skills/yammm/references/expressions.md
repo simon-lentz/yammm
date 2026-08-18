@@ -7,7 +7,7 @@ The expression language is used within invariant declarations (`! "message" expr
 ## Operators
 
 | Operator | Description |
-|----------|-------------|
+| -------- | ----------- |
 | `+` | Addition (numbers), concatenation (strings), or concatenation (slices/arrays) |
 | `-` | Subtraction or unary negation |
 | `*` | Multiplication |
@@ -65,6 +65,7 @@ Supported type keywords: `String`, `Integer` (alias `Int`), `Float` (alias `Numb
 ### Addition / Concatenation
 
 The `+` operator is polymorphic:
+
 - **Numbers**: arithmetic addition
 - **Strings**: string concatenation
 - **Slices/arrays**: concatenation (produces a new slice containing elements from both operands)
@@ -76,7 +77,7 @@ The `+` operator is polymorphic:
 From highest to lowest:
 
 | Precedence | Operators | Associativity |
-|------------|-----------|---------------|
+| ---------- | --------- | ------------- |
 | 1 | Literals, list literals `[...]` | -- |
 | 2 | Unary minus `-x` | Right |
 | 3 | Indexing `expr[i]` | Left |
@@ -159,7 +160,27 @@ items[0]            // first element
 items[2]            // third element
 ```
 
-Works on strings (rune-indexed) and arrays/slices. Out-of-bounds indexing returns **nil** rather than raising an error.
+Works on strings (rune-indexed) and lists. Out-of-bounds indexing returns **nil** rather than raising an error, as does indexing `nil`. A non-integer index is an evaluation error.
+
+The bracket takes exactly one index. There is no range slice: `expr[a, b]` draws an evaluation error, and so does the empty `expr[]`. The grammar admits both spellings and a trailing comma (`expr[a,]`, evaluated as `expr[a]`) -- do not write any of them.
+
+These spellings are checked against the loader when this document is tested:
+
+```yammm-snippet
+! "first tag is alpha" tags[0] == "alpha"
+! "every instance has properties" $self -> Len > 0
+! "a uuid reports as one" id -> TypeOf == "uuid"
+```
+
+The else-less ternary is rejected at load time, not at evaluation:
+
+```yammm-invalid
+! "no else branch" tags -> Len > 0 ? { true }  // E_SYNTAX
+```
+
+The bracket arity rules and the `TypeOf` vocabulary are evaluation-time
+outcomes, which the fence vocabulary cannot decide; they are pinned by the
+tracked contract corpus at `instance/testdata/contract/`.
 
 ---
 
@@ -192,7 +213,7 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 ### String Functions
 
 | Function | Signature | Description |
-|----------|-----------|-------------|
+| -------- | --------- | ----------- |
 | `Len` | `s -> Len` | Length in runes (nil yields 0) |
 | `Upper` | `s -> Upper` | Convert to uppercase |
 | `Lower` | `s -> Lower` | Convert to lowercase |
@@ -210,8 +231,8 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 ### Collection Functions
 
 | Function | Signature | Description |
-|----------|-----------|-------------|
-| `Len` | `list -> Len` | Number of elements (nil yields 0) |
+| -------- | --------- | ----------- |
+| `Len` | `list -> Len` | Number of elements; also counts a map's entries, so `$self -> Len` is the instance's property count (nil yields 0) |
 | `All` | `list -> All \|$x\| { pred }` | True if all match (true on empty) |
 | `Any` | `list -> Any \|$x\| { pred }` | True if any match (false on empty) |
 | `AllOrNone` | `list -> AllOrNone \|$x\| { pred }` | True if all match or none match (true on empty) |
@@ -239,7 +260,7 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 ### Math Functions
 
 | Function | Signature | Description |
-|----------|-----------|-------------|
+| -------- | --------- | ----------- |
 | `Abs` | `n -> Abs` | Absolute value |
 | `Min` | `a -> Min(b)` or `list -> Min` | Minimum of two values or collection |
 | `Max` | `a -> Max(b)` or `list -> Max` | Maximum of two values or collection |
@@ -251,7 +272,7 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 ### Control Flow Functions
 
 | Function | Signature | Description |
-|----------|-----------|-------------|
+| -------- | --------- | ----------- |
 | `Then` | `val -> Then \|$v\| { expr }` | Execute body when val is non-nil; returns nil otherwise |
 | `Lest` | `val -> Lest { expr }` | Execute body when val is nil; returns val otherwise. Accepts but ignores a lambda parameter. |
 | `With` | `val -> With \|$v\| { expr }` | Bind value to parameter and execute body |
@@ -261,8 +282,8 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 ### Type Functions
 
 | Function | Signature | Description |
-|----------|-----------|-------------|
-| `TypeOf` | `val -> TypeOf` | Get runtime type name as string |
+| -------- | --------- | ----------- |
+| `TypeOf` | `val -> TypeOf` | DSL type name as string: `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, `"pattern"`, `"timestamp"`, or `"uuid"` (`"unknown"` for anything else). The name comes from the value, not the declared property type: a `Timestamp`, `Date` or `UUID` holding a string yields `"string"` |
 | `IsNil` | `val -> IsNil` | True if value is nil |
 
 ---

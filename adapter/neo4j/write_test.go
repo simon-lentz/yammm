@@ -2,7 +2,6 @@ package neo4j
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -10,335 +9,9 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
-	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
-
-// Compile-time interface assertions.
-var (
-	_ NodeSource = (*graph.Instance)(nil)
-	_ NodeSource = (*instance.ValidInstance)(nil)
-)
-
-func TestNodeQueryFor_SinglePK(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "basic.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(5), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-	ns := shape.Types["Entity"]
-	st, _ := s.Type("Entity")
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The statement must be exactly the builder output for this shape — the
-	// Cypher text itself is pinned by the builder tests; this test owns the
-	// write-layer wiring (shape-derived label/keys, mutable-key mode).
-	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
-		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
-	}
-	if q.Params["key_id"] != "e1" {
-		t.Errorf("key_id = %v; want e1", q.Params["key_id"])
-	}
-	if q.Params["props"] == nil {
-		t.Error("props should not be nil")
-	}
-}
-
-func TestNodeQueryFor_CompositePK(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "composite_pk.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Record": {{"schema_id": "s1", "record_id": "r1", "name": "test"}},
-	})
-
-	inst := graphResult.InstancesOf("Record")[0]
-	ns := shape.Types["Record"]
-	st, _ := s.Type("Record")
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
-		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
-	}
-	if q.Params["key_schema_id"] != "s1" || q.Params["key_record_id"] != "r1" {
-		t.Errorf("composite key params = %v; want key_schema_id=s1, key_record_id=r1", q.Params)
-	}
-}
-
-func TestNodeQueryFor_ImmutableKeys(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "basic.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-	ns := shape.Types["Entity"]
-	st, _ := s.Type("Entity")
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st, WithImmutableKeys("created_at"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// WithImmutableKeys must select the immutable-key builder variant.
-	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, ImmutableKeys); q.Statement != want {
-		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
-	}
-
-	updateProps, ok := q.Params["update_props"].(map[string]any)
-	if !ok {
-		t.Fatal("update_props should be map[string]any")
-	}
-	if _, has := updateProps["created_at"]; has {
-		t.Error("update_props should not contain immutable key 'created_at'")
-	}
-}
-
-func TestNodeQueryFor_ImmutableKeyUnknown(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "basic.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-	ns := shape.Types["Entity"]
-	st, _ := s.Type("Entity")
-
-	// A mistyped immutable key must fail loudly: honored silently, the real
-	// property would stay in update_props and be rewritten on every re-MERGE,
-	// defeating write-once. A valid key alongside it must not mask the error.
-	_, err := a.NodeQueryFor(context.Background(), &ns, inst, st, WithImmutableKeys("created_at", "craeted_at"))
-	if err == nil {
-		t.Fatal("expected error for unknown immutable key")
-	}
-	if !strings.Contains(err.Error(), "craeted_at") {
-		t.Errorf("error should name the unknown key: %v", err)
-	}
-	if !strings.Contains(err.Error(), "Entity") {
-		t.Errorf("error should name the type: %v", err)
-	}
-}
-
-func TestNodeQueryFor_ImmutableKeyInherited(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "inheritance.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "run_id": "r1", "source_fetched_at": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-	ns := shape.Types["Entity"]
-	st, _ := s.Type("Entity")
-
-	// An inherited property is a real property of the type and must validate.
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st, WithImmutableKeys("source_fetched_at"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	updateProps, ok := q.Params["update_props"].(map[string]any)
-	if !ok {
-		t.Fatal("update_props should be map[string]any")
-	}
-	if _, has := updateProps["source_fetched_at"]; has {
-		t.Error("update_props should not contain immutable key 'source_fetched_at'")
-	}
-}
-
-func TestNodeQueryFor_ImmutableKeysNilSchemaType(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "basic.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-	ns := shape.Types["Entity"]
-
-	// With no schema type there is nothing to validate against; the key is
-	// honored unvalidated, matching the nil pass-through coercion contract.
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, nil, WithImmutableKeys("created_at"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	updateProps, ok := q.Params["update_props"].(map[string]any)
-	if !ok {
-		t.Fatal("update_props should be map[string]any")
-	}
-	if _, has := updateProps["created_at"]; has {
-		t.Error("update_props should not contain immutable key 'created_at'")
-	}
-}
-
-func TestNodeQueryFor_DerivedImmutableKeys(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "writeonce.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-	ns := shape.Types["Entity"]
-	st, _ := s.Type("Entity")
-
-	// No WithImmutableKeys option: the @writeOnce annotations alone drive the
-	// immutable-key split.
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, ImmutableKeys); q.Statement != want {
-		t.Errorf("Statement = %q; want immutable-key builder output %q", q.Statement, want)
-	}
-	updateProps, ok := q.Params["update_props"].(map[string]any)
-	if !ok {
-		t.Fatal("update_props should be map[string]any")
-	}
-	for _, k := range []string{"first_seen", "origin"} {
-		if _, has := updateProps[k]; has {
-			t.Errorf("update_props should not contain derived immutable key %q", k)
-		}
-	}
-	if _, has := updateProps["name"]; !has {
-		t.Error("update_props should retain the mutable 'name' property")
-	}
-}
-
-func TestNodeQueryFor_DerivedUnionExplicit(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "writeonce.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-	ns := shape.Types["Entity"]
-	st, _ := s.Type("Entity")
-
-	// Explicit "name" unions with derived first_seen/origin: all three excluded.
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st, WithImmutableKeys("name"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	updateProps, ok := q.Params["update_props"].(map[string]any)
-	if !ok {
-		t.Fatal("update_props should be map[string]any")
-	}
-	for _, k := range []string{"first_seen", "origin", "name"} {
-		if _, has := updateProps[k]; has {
-			t.Errorf("update_props should exclude union member %q", k)
-		}
-	}
-}
-
-func TestNodeQueryFor_UnannotatedTypeUnchanged(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "writeonce.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Plain": {{"id": "p1", "name": "n"}},
-	})
-
-	inst := graphResult.InstancesOf("Plain")[0]
-	ns := shape.Types["Plain"]
-	st, _ := s.Type("Plain")
-
-	// No annotations and no explicit keys → mutable shape, no update_props.
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
-		t.Errorf("Statement = %q; want mutable builder output %q", q.Statement, want)
-	}
-	if _, has := q.Params["update_props"]; has {
-		t.Error("update_props should be absent for an unannotated type with no explicit keys")
-	}
-}
-
-// A nil schemaType is the documented streaming call shape — a caller holding an
-// instance but not the *schema.Type. It skips $props coercion and explicit-key
-// validation, but it must NOT skip the @writeOnce guarantee: the immutable keys
-// come from the NodeShape, which was built from the schema and is always in
-// hand. A caller that got the mutable shape here would overwrite every
-// @writeOnce property on each re-ingestion MERGE — destroying exactly the
-// first-observation values the annotation exists to protect, with no error and
-// no warning.
-func TestNodeQueryFor_NilSchemaTypeStillHonorsWriteOnce(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "writeonce.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-	ns := shape.Types["Entity"]
-
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, ImmutableKeys); q.Statement != want {
-		t.Errorf("Statement = %q; want immutable split %q even with a nil schemaType", q.Statement, want)
-	}
-	updateProps, ok := q.Params["update_props"].(map[string]any)
-	if !ok {
-		t.Fatal("update_props should be present when the shape carries @writeOnce keys")
-	}
-	for _, k := range []string{"first_seen", "origin"} {
-		if _, has := updateProps[k]; has {
-			t.Errorf("update_props should exclude derived immutable key %q", k)
-		}
-	}
-	if _, has := updateProps["name"]; !has {
-		t.Error("update_props should retain the mutable 'name' property")
-	}
-}
-
-// An unannotated type still gets the mutable shape through the same nil-type
-// path, so the fix above turns on the schema's annotations rather than on the
-// nil argument itself.
-func TestNodeQueryFor_NilSchemaTypeUnannotatedStaysMutable(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "writeonce.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Plain": {{"id": "p1", "name": "n"}},
-	})
-
-	inst := graphResult.InstancesOf("Plain")[0]
-	ns := shape.Types["Plain"]
-
-	q, err := a.NodeQueryFor(context.Background(), &ns, inst, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
-		t.Errorf("Statement = %q; want mutable builder output %q", q.Statement, want)
-	}
-	if _, has := q.Params["update_props"]; has {
-		t.Error("update_props should be absent for an unannotated type with no explicit keys")
-	}
-}
 
 func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
 	t.Parallel()
@@ -374,12 +47,12 @@ func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
 		t.Fatal("no Plain query")
 	}
 
-	entityNS := shape.Types["Entity"]
-	if want := BuildBatchNodeMergeQuery(entityNS.Label, entityNS.PrimaryKeys, ImmutableKeys); entityQ.Statement != want {
+	entityNS := shape.Types[typeID(t, s, "Entity")]
+	if want := buildBatchNodeMergeQuery(entityNS.Label, entityNS.PrimaryKeys, ImmutableKeys); entityQ.Statement != want {
 		t.Errorf("Entity statement = %q; want immutable split %q", entityQ.Statement, want)
 	}
-	plainNS := shape.Types["Plain"]
-	if want := BuildBatchNodeMergeQuery(plainNS.Label, plainNS.PrimaryKeys, MutableKeys); plainQ.Statement != want {
+	plainNS := shape.Types[typeID(t, s, "Plain")]
+	if want := buildBatchNodeMergeQuery(plainNS.Label, plainNS.PrimaryKeys, MutableKeys); plainQ.Statement != want {
 		t.Errorf("Plain statement = %q; want mutable %q", plainQ.Statement, want)
 	}
 
@@ -400,136 +73,6 @@ func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
 		if _, has := row["update_props"]; has {
 			t.Error("Plain row should have no update_props")
 		}
-	}
-}
-
-// TestBatchNodeQueries_ExplicitKeysStillSplitEveryType pins the back-compat
-// contract: a non-empty explicit key list produces the split shape for every
-// type, including an unannotated one — byte-for-byte today's behavior.
-func TestBatchNodeQueries_ExplicitKeysStillSplitEveryType(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "writeonce.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
-		"Plain":  {{"id": "p1", "name": "n"}},
-	})
-
-	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("name"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, q := range queries {
-		if !strings.Contains(q.Statement, "ON CREATE SET") {
-			t.Errorf("an explicit key should force the split shape for every type: %q", q.Statement)
-		}
-	}
-}
-
-func TestBatchNodeQueries_ImmutableKeyUnknown(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "basic.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-
-	_, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("frist_seen_at"))
-	if err == nil {
-		t.Fatal("expected error for unknown immutable key")
-	}
-	if !strings.Contains(err.Error(), "frist_seen_at") {
-		t.Errorf("error should name the unknown key: %v", err)
-	}
-	if !strings.Contains(err.Error(), "Entity") {
-		t.Errorf("error should name the written type(s): %v", err)
-	}
-}
-
-func TestBatchNodeQueries_ImmutableKeyPartialTypeMatch(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "multiple_types.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Widget": {{"id": "w1", "code": "c1"}},
-		"Gadget": {{"uid": "u1", "sku": "s1", "optional_note": "n"}},
-	})
-
-	// optional_note is a property of Gadget but not Widget: real for at least
-	// one written type, so the batch is accepted; removeKeys no-ops on the
-	// Widget rows.
-	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("optional_note"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(queries) != 2 {
-		t.Fatalf("expected 2 queries, got %d", len(queries))
-	}
-
-	// Regression on the valid-key behavior: rows carrying the property keep it
-	// in props and exclude it from update_props.
-	for _, q := range queries {
-		rows, ok := q.Params["rows"].([]map[string]any)
-		if !ok {
-			t.Fatal("rows should be []map[string]any")
-		}
-		for _, row := range rows {
-			props, ok := row["props"].(map[string]any)
-			if !ok {
-				t.Fatal("props should be map[string]any")
-			}
-			updateProps, ok := row["update_props"].(map[string]any)
-			if !ok {
-				t.Fatal("update_props should be map[string]any")
-			}
-			if _, has := props["optional_note"]; !has {
-				continue
-			}
-			if _, still := updateProps["optional_note"]; still {
-				t.Error("update_props should not contain immutable key 'optional_note'")
-			}
-		}
-	}
-}
-
-func TestBatchNodeQueries_ImmutableKeyMatchesNoType(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "multiple_types.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Widget": {{"id": "w1", "code": "c1"}},
-		"Gadget": {{"uid": "u1", "sku": "s1"}},
-	})
-
-	_, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("optional_note", "does_not_exist"))
-	if err == nil {
-		t.Fatal("expected error for immutable key naming no written type's property")
-	}
-	if !strings.Contains(err.Error(), "does_not_exist") {
-		t.Errorf("error should name the unknown key: %v", err)
-	}
-	if strings.Contains(err.Error(), "optional_note") {
-		t.Errorf("error should not name the key that matched a written type: %v", err)
-	}
-	if !strings.Contains(err.Error(), "Widget") || !strings.Contains(err.Error(), "Gadget") {
-		t.Errorf("error should name the written types: %v", err)
-	}
-}
-
-func TestBatchNodeQueries_ImmutableKeysEmptySnapshot(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "basic.yammm")
-
-	graphResult := buildGraphResult(t, s, v, nil)
-
-	// An empty snapshot generates no queries, so there is no write-once
-	// invariant to defeat; a legitimately-empty pipeline run must not fail.
-	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithImmutableKeys("anything"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(queries) != 0 {
-		t.Errorf("expected no queries for empty snapshot, got %d", len(queries))
 	}
 }
 
@@ -554,8 +97,8 @@ func TestBatchNodeQueries_SingleType(t *testing.T) {
 	}
 
 	q := queries[0]
-	ns := shape.Types["Entity"]
-	if want := BuildBatchNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
+	ns := shape.Types[typeID(t, s, "Entity")]
+	if want := buildBatchNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
 		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
 	}
 	rows, ok := q.Params["rows"].([]map[string]any)
@@ -592,40 +135,6 @@ func TestBatchNodeQueries_Chunking(t *testing.T) {
 	// 5 instances / chunk size 2 = 3 chunks (2+2+1).
 	if len(queries) != 3 {
 		t.Errorf("expected 3 queries for 5 instances with chunk size 2, got %d", len(queries))
-	}
-}
-
-func TestEdgeQueryFor_Basic(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "write_basic.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Publisher": {{"publisher_id": "iss1", "name": "Test Publisher"}},
-		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test Book", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
-	})
-
-	edges := graphResult.Edges()
-	if len(edges) != 1 {
-		t.Fatalf("expected exactly the BY_PUBLISHER edge, got %d edges", len(edges))
-	}
-
-	q, err := a.EdgeQueryFor(context.Background(), edges[0], shape)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Exactly the builder output for Book→BY_PUBLISHER→Publisher with no edge
-	// properties (the fixture's relation declares none) — which also pins
-	// that no SET r += clause is emitted for a propertyless edge.
-	book, publisher := shape.Types["Book"], shape.Types["Publisher"]
-	want := BuildRelationshipMergeQuery(
-		book.Label, book.PrimaryKeys,
-		"BY_PUBLISHER",
-		publisher.Label, publisher.PrimaryKeys,
-		false,
-	)
-	if q.Statement != want {
-		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
 	}
 }
 
@@ -1084,52 +593,6 @@ func TestPropsToParamMap_TemporalErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestNodeQueryFor_MissingKey(t *testing.T) {
-	t.Parallel()
-	a, s, v, _ := setupWrite(t, "basic.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-
-	// Use a shape with a PK that doesn't exist in the instance.
-	badShape := NodeShape{
-		Label:       "test__Entity",
-		PrimaryKeys: []string{"nonexistent_key"},
-	}
-
-	_, err := a.NodeQueryFor(context.Background(), &badShape, inst, nil)
-	if err == nil {
-		t.Error("expected error for missing key")
-	}
-}
-
-func TestNodeQueryFor_EmptyPrimaryKeys(t *testing.T) {
-	t.Parallel()
-	s, v := loadSchemaAndValidator(t, "basic.yammm")
-	a := New()
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-
-	inst := graphResult.InstancesOf("Entity")[0]
-	emptyPKShape := NodeShape{
-		Label:       "test__Entity",
-		PrimaryKeys: nil,
-	}
-
-	_, err := a.NodeQueryFor(context.Background(), &emptyPKShape, inst, nil)
-	if err == nil {
-		t.Error("expected error for empty primary keys")
-	}
-	if !strings.Contains(err.Error(), "no primary keys defined") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
 func TestBatchNodeQueries_MissingShape(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
@@ -1140,40 +603,12 @@ func TestBatchNodeQueries_MissingShape(t *testing.T) {
 	})
 
 	// Pass an empty shape map — no shape for "Entity".
-	emptyShapes := &GraphShape{Types: map[string]NodeShape{}}
+	emptyShapes := &GraphShape{Types: map[schema.TypeID]NodeShape{}}
 	_, err := a.BatchNodeQueries(context.Background(), graphResult, emptyShapes)
 	if err == nil {
 		t.Error("expected error for missing shape")
 	}
 	if !strings.Contains(err.Error(), "no shape for type") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-func TestEdgeQueryFor_MissingSourceShape(t *testing.T) {
-	t.Parallel()
-	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
-	a := New()
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Publisher": {{"publisher_id": "iss1", "name": "Test"}},
-		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
-	})
-
-	edges := graphResult.Edges()
-	if len(edges) == 0 {
-		t.Fatal("expected edges")
-	}
-
-	// Shape map with only one type — whichever type is the source will be missing.
-	partialShapes := &GraphShape{Types: map[string]NodeShape{
-		"__none__": {Label: "x", PrimaryKeys: []string{"x"}},
-	}}
-	_, err := a.EdgeQueryFor(context.Background(), edges[0], partialShapes)
-	if err == nil {
-		t.Error("expected error for missing source/target shape")
-	}
-	if !strings.Contains(err.Error(), "no shape for") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -1188,7 +623,7 @@ func TestBatchEdgeQueries_MissingShape(t *testing.T) {
 		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
-	emptyShapes := &GraphShape{Types: map[string]NodeShape{}}
+	emptyShapes := &GraphShape{Types: map[schema.TypeID]NodeShape{}}
 	_, err := a.BatchEdgeQueries(context.Background(), graphResult, emptyShapes)
 	if err == nil {
 		t.Error("expected error for missing shape")
@@ -1297,39 +732,6 @@ func TestCoerceRelProps(t *testing.T) {
 	}
 }
 
-func TestEdgeQueriesFor_CoercesTypedRelProps(t *testing.T) {
-	t.Parallel()
-	a, s, v, shapes := setupWrite(t, "edge_typed_props.yammm")
-
-	valid := validateInstance(t, v, "Source", map[string]any{
-		"source_id": "s1",
-		"linked_at": map[string]any{
-			"_target_target_id": "t1",
-			"observed_at":       "2024-01-01T00:00:00Z",
-			"weight":            int64(5),
-		},
-	})
-
-	st, _ := s.Type("Source")
-	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(queries) != 1 {
-		t.Fatalf("got %d queries; want 1", len(queries))
-	}
-	relProps, ok := queries[0].Params["rel_props"].(map[string]any)
-	if !ok {
-		t.Fatalf("rel_props missing or wrong type: %T", queries[0].Params["rel_props"])
-	}
-	if _, isTime := relProps["observed_at"].(time.Time); !isTime {
-		t.Errorf("observed_at should be coerced to time.Time, got %T", relProps["observed_at"])
-	}
-	if _, isFloat := relProps["weight"].(float64); !isFloat {
-		t.Errorf("weight should be coerced to float64, got %T", relProps["weight"])
-	}
-}
-
 func TestBatchEdgeQueries_CoercesTypedRelProps(t *testing.T) {
 	t.Parallel()
 	a, s, v, shapes := setupWrite(t, "edge_typed_props.yammm")
@@ -1365,327 +767,6 @@ func TestBatchEdgeQueries_CoercesTypedRelProps(t *testing.T) {
 	}
 	if _, isTime := relProps["observed_at"].(time.Time); !isTime {
 		t.Errorf("observed_at should be coerced to time.Time, got %T", relProps["observed_at"])
-	}
-}
-
-func TestEdgeQueryFor_InvalidRelType(t *testing.T) {
-	t.Parallel()
-	// A relation named with a Cypher reserved word produces edges whose
-	// relation type fails ValidateIdentifier. Both edge entry points must
-	// refuse to emit Cypher for it rather than hand the driver a statement
-	// with a bare reserved word in the MERGE.
-	s, result := schema.NewBuilder().
-		WithName("badrel").
-		AddType("Target").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
-		AddType("Source").WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("MATCH", schema.NewTypeRef("", "Target", location.Span{}), false, false).Done().
-		Build()
-	if err := result.Err(); err != nil {
-		t.Fatalf("build schema: %v", err)
-	}
-
-	a := New()
-	shape, shapeResult := a.ShapeForSchema(context.Background(), s)
-	if err := shapeResult.Err(); err != nil {
-		t.Fatal(err)
-	}
-	v := instance.NewValidator(s)
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Target": {{"id": "t1"}},
-		"Source": {{"id": "s1", "match": map[string]any{"_target_id": "t1"}}},
-	})
-
-	edges := graphResult.Edges()
-	if len(edges) != 1 {
-		t.Fatalf("expected the MATCH edge, got %d edges", len(edges))
-	}
-
-	if _, err := a.EdgeQueryFor(context.Background(), edges[0], shape); !errors.Is(err, ErrReservedKeyword) {
-		t.Errorf("EdgeQueryFor error = %v; want ErrReservedKeyword", err)
-	}
-	if _, err := a.BatchEdgeQueries(context.Background(), graphResult, shape); !errors.Is(err, ErrReservedKeyword) {
-		t.Errorf("BatchEdgeQueries error = %v; want ErrReservedKeyword", err)
-	}
-}
-
-// validateInstance validates a single instance without building a graph.
-func validateInstance(t *testing.T, v *instance.Validator, typeName string, props map[string]any) *instance.ValidInstance {
-	t.Helper()
-	valid, result := v.ValidateOne(context.Background(), typeName, instance.RawInstance{Properties: props})
-	if !result.OK() {
-		t.Fatalf("validate %s: %v", typeName, result)
-	}
-	return valid
-}
-
-func TestEdgeQueriesFor_Basic(t *testing.T) {
-	t.Parallel()
-	a, s, v, shapes := setupWrite(t, "write_basic.yammm")
-
-	// Create a Book that references a Publisher via BY_PUBLISHER.
-	valid := validateInstance(t, v, "Book", map[string]any{
-		"publisher_id": "iss1",
-		"book_id":      "book1",
-		"title":        "Test Book",
-		"by_publisher": map[string]any{"_target_publisher_id": "iss1"},
-	})
-
-	st, _ := s.Type("Book")
-	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(queries) != 1 {
-		t.Fatalf("got %d queries; want 1", len(queries))
-	}
-
-	q := queries[0]
-	book, publisher := shapes.Types["Book"], shapes.Types["Publisher"]
-	want := BuildRelationshipMergeQuery(
-		book.Label, book.PrimaryKeys,
-		"BY_PUBLISHER",
-		publisher.Label, publisher.PrimaryKeys,
-		false,
-	)
-	if q.Statement != want {
-		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
-	}
-	// Source keys use from_key_ prefix.
-	if q.Params["from_key_publisher_id"] != "iss1" || q.Params["from_key_book_id"] != "book1" {
-		t.Errorf("unexpected source key params: %v", q.Params)
-	}
-	// Target key uses to_key_ prefix.
-	if q.Params["to_key_publisher_id"] != "iss1" {
-		t.Errorf("unexpected target key params: %v", q.Params)
-	}
-}
-
-func TestEdgeQueriesFor_MultiTarget(t *testing.T) {
-	t.Parallel()
-	a, s, v, shapes := setupWrite(t, "write_basic.yammm")
-
-	// Publisher with PUBLISHES pointing to multiple Books.
-	valid := validateInstance(t, v, "Publisher", map[string]any{
-		"publisher_id": "iss1",
-		"name":         "Test Publisher",
-		"publishes": []any{
-			map[string]any{"_target_publisher_id": "iss1", "_target_book_id": "book1"},
-			map[string]any{"_target_publisher_id": "iss1", "_target_book_id": "book2"},
-		},
-	})
-
-	st, _ := s.Type("Publisher")
-	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(queries) != 2 {
-		t.Fatalf("got %d queries; want 2", len(queries))
-	}
-	publisher, book := shapes.Types["Publisher"], shapes.Types["Book"]
-	want := BuildRelationshipMergeQuery(
-		publisher.Label, publisher.PrimaryKeys,
-		"PUBLISHES",
-		book.Label, book.PrimaryKeys,
-		false,
-	)
-	for i, q := range queries {
-		if q.Statement != want {
-			t.Errorf("query %d Statement = %q; want builder output %q", i, q.Statement, want)
-		}
-	}
-}
-
-func TestEdgeQueriesFor_EdgeProperties(t *testing.T) {
-	t.Parallel()
-	a, s, v, shapes := setupWrite(t, "edge_mixed.yammm")
-
-	// Employee with WORKS_AT edge that includes "note" property.
-	valid := validateInstance(t, v, "Employee", map[string]any{
-		"employee_id": "emp1",
-		"name":        "Alice",
-		"works_at": map[string]any{
-			"_target_company_id": "c1",
-			"note":               "senior engineer",
-		},
-	})
-
-	st, _ := s.Type("Employee")
-	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(queries) != 1 {
-		t.Fatalf("got %d queries; want 1", len(queries))
-	}
-
-	q := queries[0]
-	employee, company := shapes.Types["Employee"], shapes.Types["Company"]
-	// hasProps=true selects the SET r += $rel_props variant.
-	want := BuildRelationshipMergeQuery(
-		employee.Label, employee.PrimaryKeys,
-		"WORKS_AT",
-		company.Label, company.PrimaryKeys,
-		true,
-	)
-	if q.Statement != want {
-		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
-	}
-	relProps, ok := q.Params["rel_props"].(map[string]any)
-	if !ok {
-		t.Fatalf("rel_props not map[string]any: %T", q.Params["rel_props"])
-	}
-	if relProps["note"] != "senior engineer" {
-		t.Errorf("rel_props[note] = %v; want 'senior engineer'", relProps["note"])
-	}
-}
-
-func TestEdgeQueriesFor_NoEdges(t *testing.T) {
-	t.Parallel()
-	a, s, v, shapes := setupWrite(t, "basic.yammm")
-
-	valid := validateInstance(t, v, "Entity", map[string]any{
-		"id":         "e1",
-		"name":       "test",
-		"count":      int64(5),
-		"active":     true,
-		"created_at": "2024-01-01T00:00:00Z",
-	})
-
-	st, _ := s.Type("Entity")
-	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(queries) != 0 {
-		t.Errorf("got %d queries; want 0", len(queries))
-	}
-}
-
-func TestEdgeQueriesFor_MissingTargetShape(t *testing.T) {
-	t.Parallel()
-	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
-	a := New()
-
-	valid := validateInstance(t, v, "Book", map[string]any{
-		"publisher_id": "iss1",
-		"book_id":      "book1",
-		"title":        "Test",
-		"by_publisher": map[string]any{"_target_publisher_id": "iss1"},
-	})
-
-	// Provide shapes with only Book (no Publisher shape).
-	incompleteShapes := &GraphShape{
-		Types: map[string]NodeShape{
-			"Book": {
-				Type:        "Book",
-				Label:       "write_test__Book",
-				PrimaryKeys: []string{"publisher_id", "book_id"},
-			},
-		},
-	}
-
-	st, _ := s.Type("Book")
-	_, err := a.EdgeQueriesFor(context.Background(), valid, st, incompleteShapes)
-	if err == nil {
-		t.Fatal("expected error for missing target shape")
-	}
-	if !strings.Contains(err.Error(), "no shape for target type") {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestNodeQueryFor_ValidInstance(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "basic.yammm")
-
-	// Use ValidInstance directly (streaming path) instead of *graph.Instance.
-	valid := validateInstance(t, v, "Entity", map[string]any{
-		"id":         "e1",
-		"name":       "test",
-		"count":      int64(5),
-		"active":     true,
-		"created_at": "2024-01-01T00:00:00Z",
-	})
-
-	ns := shape.Types["Entity"]
-	st, _ := s.Type("Entity")
-	q, err := a.NodeQueryFor(context.Background(), &ns, valid, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if want := BuildNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
-		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
-	}
-	if q.Params["key_id"] != "e1" {
-		t.Errorf("key_id = %v; want e1", q.Params["key_id"])
-	}
-}
-
-func TestExtractKeyFromImmutableKey(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name       string
-		components []any
-		keyNames   []string
-		want       map[string]any
-		wantErr    string // substring of the expected error; empty = success
-	}{
-		{
-			name:       "single component",
-			components: []any{"val1"},
-			keyNames:   []string{"id"},
-			want:       map[string]any{"id": "val1"},
-		},
-		{
-			name:       "composite",
-			components: []any{"s1", "r1"},
-			keyNames:   []string{"schema_id", "record_id"},
-			want:       map[string]any{"schema_id": "s1", "record_id": "r1"},
-		},
-		{
-			name:       "length mismatch",
-			components: []any{"val1"},
-			keyNames:   []string{"a", "b"},
-			wantErr:    "1 components but 2 key names",
-		},
-		{
-			name:       "no key names",
-			components: []any{"val1"},
-			keyNames:   nil,
-			wantErr:    "no",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := extractKeyFromImmutableKey(
-				immutable.WrapKey(tc.components), &NodeShape{PrimaryKeys: tc.keyNames},
-			)
-			if tc.wantErr != "" {
-				if err == nil {
-					t.Fatalf("want error containing %q, got nil", tc.wantErr)
-				}
-				if !strings.Contains(err.Error(), tc.wantErr) {
-					t.Errorf("error = %v; want substring %q", err, tc.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			for k, want := range tc.want {
-				if got[k] != want {
-					t.Errorf("%s = %v; want %v", k, got[k], want)
-				}
-			}
-		})
 	}
 }
 
@@ -1772,12 +853,6 @@ type Doc extends Base { title String required }
 		t.Fatal("type Doc not found")
 	}
 
-	if _, ok := ParamTypesForMergeKeys(dt, "rows")["rows.key_created_on"]; !ok {
-		t.Error("no rows.key_created_on entry; the batch template matches on row.key_created_on")
-	}
-	if _, ok := ParamTypesForMergeKeys(dt, "")["key_created_on"]; !ok {
-		t.Error("no key_created_on entry; the single-node template binds $key_created_on")
-	}
 	if _, ok := ParamTypesForType(dt, "rows")["rows.created_on"]; !ok {
 		t.Error("no rows.created_on entry; an inherited property belongs in a flat row too")
 	}
@@ -1791,7 +866,7 @@ func TestShapeForSchema_ImmutableKeysNonNilWhenEmpty(t *testing.T) {
 	t.Parallel()
 	_, s, _, shape := setupWrite(t, "writeonce.yammm")
 	_ = s
-	plain := shape.Types["Plain"]
+	plain := shape.Types[typeID(t, s, "Plain")]
 	if plain.ImmutableKeys == nil {
 		t.Error("Plain has no @writeOnce properties, but its ImmutableKeys is nil — indistinguishable from a shape that never computed them")
 	}
@@ -1811,10 +886,10 @@ func TestBatchNodeQueries_HandBuiltShapeStillHonorsWriteOnce(t *testing.T) {
 	})
 
 	// A shape as a pre-upgrade caller would have built it: no ImmutableKeys.
-	stale := &GraphShape{Types: map[string]NodeShape{}}
-	for name, ns := range shape.Types {
+	stale := &GraphShape{Types: map[schema.TypeID]NodeShape{}}
+	for id, ns := range shape.Types {
 		ns.ImmutableKeys = nil
-		stale.Types[name] = ns
+		stale.Types[id] = ns
 	}
 
 	queries, err := a.BatchNodeQueries(context.Background(), graphResult, stale)
@@ -1855,7 +930,7 @@ func TestBatchNodeQueries_RowCarriesTheKeyTheTemplateReads(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ns := shape.Types["Plain"]
+	ns := shape.Types[typeID(t, s, "Plain")]
 	var checked int
 	for _, q := range queries {
 		if !strings.Contains(q.Statement, ns.Label) {
@@ -1884,39 +959,6 @@ func TestBatchNodeQueries_RowCarriesTheKeyTheTemplateReads(t *testing.T) {
 	}
 }
 
-// A MERGE key must reach the driver as the same Neo4j-native type $props stores
-// the property as. A Date primary key bound as a string matches no node whose
-// property is a DATE, so each write inserts another duplicate.
-func TestNodeQueryFor_CoercesMergeKey(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "temporal_pk.yammm")
-
-	valid := validateInstance(t, v, "Doc", map[string]any{
-		"created_on": "2024-01-02",
-		"updated_on": "2024-03-04",
-		"title":      "t",
-	})
-
-	ns := shape.Types["Doc"]
-	st, _ := s.Type("Doc")
-	q, err := a.NodeQueryFor(context.Background(), &ns, valid, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	key := q.Params[batchKeyParamPrefix+"created_on"]
-	if _, isDate := key.(dbtype.Date); !isDate {
-		t.Errorf("$%screated_on = %#v (%T); want dbtype.Date", batchKeyParamPrefix, key, key)
-	}
-	// Control: the property the MERGE key is drawn from carries the same type,
-	// which is the invariant — the two maps must agree.
-	props := q.Params["props"].(map[string]any)
-	if props["created_on"] != key {
-		t.Errorf("key %#v and property %#v disagree; the MERGE matches nothing",
-			key, props["created_on"])
-	}
-}
-
 // The batch path carries the same guarantee as the single-node path: both read
 // the key out of the same instance, so both must coerce it.
 func TestBatchNodeQueries_CoercesMergeKey(t *testing.T) {
@@ -1933,7 +975,7 @@ func TestBatchNodeQueries_CoercesMergeKey(t *testing.T) {
 
 	var checked int
 	for _, q := range queries {
-		if !strings.Contains(q.Statement, shape.Types["Doc"].Label) {
+		if !strings.Contains(q.Statement, shape.Types[typeID(t, s, "Doc")].Label) {
 			continue
 		}
 		for _, row := range q.Params["rows"].([]map[string]any) {
@@ -1950,40 +992,7 @@ func TestBatchNodeQueries_CoercesMergeKey(t *testing.T) {
 	}
 }
 
-// An endpoint key is MATCHed against nodes the node path already wrote, so it
-// must be coerced the same way. Bound raw it matches nothing, the MERGE never
-// executes, and matched_rows is a legitimate-looking 0 with no error.
-func TestEdgeQueriesFor_CoercesEndpointKeys(t *testing.T) {
-	t.Parallel()
-	a, s, v, shapes := setupWrite(t, "temporal_pk.yammm")
-
-	valid := validateInstance(t, v, "Citation", map[string]any{
-		"citation_id": "c1",
-		"cites":       map[string]any{"_target_created_on": "2024-01-02"},
-	})
-
-	st, _ := s.Type("Citation")
-	queries, err := a.EdgeQueriesFor(context.Background(), valid, st, shapes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(queries) != 1 {
-		t.Fatalf("got %d queries; want 1", len(queries))
-	}
-
-	to := queries[0].Params[relToKeyParamPrefix+"created_on"]
-	if _, isDate := to.(dbtype.Date); !isDate {
-		t.Errorf("$%screated_on = %#v (%T); want dbtype.Date", relToKeyParamPrefix, to, to)
-	}
-	// Control: the source key is a String, which coerces to itself — so the
-	// assertion above turns on the Date endpoint, not on coercion running at all.
-	from := queries[0].Params[relFromKeyParamPrefix+"citation_id"]
-	if from != "c1" {
-		t.Errorf("$%scitation_id = %#v; want the String key unchanged", relFromKeyParamPrefix, from)
-	}
-}
-
-// Both edge paths that hold a resolved graph must coerce both endpoints.
+// The batch edge path must coerce both endpoint keys.
 func TestEdgeQueries_CoerceEndpointKeysFromAGraph(t *testing.T) {
 	t.Parallel()
 	a, s, v, shapes := setupWrite(t, "temporal_pk.yammm")
@@ -1993,18 +1002,8 @@ func TestEdgeQueries_CoerceEndpointKeysFromAGraph(t *testing.T) {
 		"Citation": {{"citation_id": "c1", "cites": map[string]any{"_target_created_on": "2024-01-02"}}},
 	})
 
-	edges := graphResult.Edges()
-	if len(edges) != 1 {
+	if edges := graphResult.Edges(); len(edges) != 1 {
 		t.Fatalf("got %d edges; want 1", len(edges))
-	}
-
-	single, err := a.EdgeQueryFor(context.Background(), edges[0], shapes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if to := single.Params[relToKeyParamPrefix+"created_on"]; !isDateValue(to) {
-		t.Errorf("EdgeQueryFor $%screated_on = %#v (%T); want dbtype.Date",
-			relToKeyParamPrefix, to, to)
 	}
 
 	batches, err := a.BatchEdgeQueries(context.Background(), graphResult, shapes)
@@ -2024,30 +1023,4 @@ func TestEdgeQueries_CoerceEndpointKeysFromAGraph(t *testing.T) {
 func isDateValue(v any) bool {
 	_, ok := v.(dbtype.Date)
 	return ok
-}
-
-// A shape carrying no key constraints — hand-built, or restored from a
-// serialization that cannot hold one — passes keys through rather than failing,
-// which is the behaviour of a shape that never declared their types.
-func TestNodeQueryFor_ShapeWithoutKeyConstraintsPassesKeysThrough(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "temporal_pk.yammm")
-
-	valid := validateInstance(t, v, "Doc", map[string]any{
-		"created_on": "2024-01-02",
-		"updated_on": "2024-03-04",
-		"title":      "t",
-	})
-
-	handBuilt := shape.Types["Doc"]
-	handBuilt.keyConstraints = nil
-	st, _ := s.Type("Doc")
-	q, err := a.NodeQueryFor(context.Background(), &handBuilt, valid, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := q.Params[batchKeyParamPrefix+"created_on"]; got != "2024-01-02" {
-		t.Errorf("$%screated_on = %#v; want the raw value passed through",
-			batchKeyParamPrefix, got)
-	}
 }

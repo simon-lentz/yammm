@@ -68,7 +68,7 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 
 	// Verify all instances were added
 	snap := g.Snapshot()
-	instances := snap.InstancesOf("Person")
+	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
 	expectedCount := numGoroutines * instancesPerGoroutine
 
 	if len(instances) != expectedCount {
@@ -121,7 +121,7 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 
 	// Verify snapshot
 	snap := g.Snapshot()
-	instances := snap.InstancesOf("Person")
+	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
 	if len(instances) != 1 {
 		t.Errorf("Expected 1 instance, got %d", len(instances))
 	}
@@ -186,8 +186,8 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 
 	// Verify counts
 	snap := g.Snapshot()
-	persons := snap.InstancesOf("Person")
-	companies := snap.InstancesOf("Company")
+	persons := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	companies := snap.InstancesOf(mustTypeID(t, s, "Company"))
 	expectedPerType := numGoroutines * instancesPerGoroutine
 
 	if len(persons) != expectedPerType {
@@ -241,11 +241,11 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 				snap := g.Snapshot()
 				// Verify snapshot is self-consistent
 				types := snap.Types()
-				for _, typeName := range types {
-					instances := snap.InstancesOf(typeName)
+				for _, typeID := range types {
+					instances := snap.InstancesOf(typeID)
 					for _, inst := range instances {
-						if inst.TypeName() != typeName {
-							t.Errorf("Instance type mismatch: %q vs %q", inst.TypeName(), typeName)
+						if inst.TypeID() != typeID {
+							t.Errorf("Instance type mismatch: %q vs %q", inst.TypeID(), typeID)
 						}
 					}
 				}
@@ -257,7 +257,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 
 	// Final verification
 	snap := g.Snapshot()
-	instances := snap.InstancesOf("Person")
+	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
 	expectedCount := numWriters * instancesPerWriter
 
 	if len(instances) != expectedCount {
@@ -338,7 +338,7 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 		wg.Wait()
 
 		snap := g.Snapshot()
-		instances := snap.InstancesOf("Person")
+		instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
 
 		var currentOrder []string
 		for _, inst := range instances {
@@ -455,10 +455,10 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 
 	// Verify what was added successfully
 	snap := g.Snapshot()
-	if len(snap.InstancesOf("TopType")) != 1 {
+	if len(snap.InstancesOf(tagID(t, schemaA, "TopType"))) != 1 {
 		t.Error("TopType should be in graph")
 	}
-	if len(snap.InstancesOf("b.MiddleType")) != 1 {
+	if len(snap.InstancesOf(tagID(t, schemaA, "b.MiddleType"))) != 1 {
 		t.Error("b.MiddleType should be in graph")
 	}
 }
@@ -534,7 +534,7 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 
 	// Verify all children are attached
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -620,8 +620,8 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 	expectedPersons := numWorkers * opsPerWorker
 	expectedCompanies := numWorkers * opsPerWorker
 
-	persons := snap.InstancesOf("Person")
-	companies := snap.InstancesOf("Company")
+	persons := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	companies := snap.InstancesOf(mustTypeID(t, s, "Company"))
 
 	if len(persons) != expectedPersons {
 		t.Errorf("Expected %d persons, got %d", expectedPersons, len(persons))
@@ -726,7 +726,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 		wg.Go(func() {
 			for range opsPerWorker {
 				snap := g.Snapshot()
-				parents := snap.InstancesOf("Parent")
+				parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 				if len(parents) > 0 {
 					// Access Composed() - this would race with addComposed() before the fix
 					_ = parents[0].Composed("children")
@@ -742,7 +742,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 	// If we get here without race detector errors, the test passes
 	// Verify final state is consistent
 	snap := g.Snapshot()
-	parents := snap.InstancesOf("Parent")
+	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}

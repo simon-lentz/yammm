@@ -12,7 +12,6 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -31,61 +30,13 @@ func defaultWriteConfig() writeConfig {
 	}
 }
 
-// WithWriteHeader controls whether the output includes a header row.
-// Default is true.
-func WithWriteHeader(include bool) WriteOption {
-	return func(c *writeConfig) {
-		c.includeHeader = include
-	}
-}
-
-// WithWriteNullString sets the string written for nil property values.
-// Default is the empty string "".
-func WithWriteNullString(s string) WriteOption {
-	return func(c *writeConfig) {
-		c.nullString = s
-	}
-}
-
-// MarshalTyped serializes validated instances of a single type to CSV bytes.
-//
-// Column order is determined by [schema.Type.AllPropertiesSlice] (sorted
-// alphabetically). FK columns from association relations are appended after
-// properties.
-//
-// Compositions are silently omitted (CSV is a flat format).
-func (a *Adapter) MarshalTyped(
-	ctx context.Context,
-	instances []*instance.ValidInstance,
-	schemaType *schema.Type,
-	opts ...WriteOption,
-) ([]byte, error) {
-	var buf bytes.Buffer
-	_, err := a.writeTypedTo(ctx, &buf, instances, schemaType, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// WriteTyped serializes validated instances of a single type to an [io.Writer].
-//
-// Returns the number of bytes written.
-func (a *Adapter) WriteTyped(
-	ctx context.Context,
-	w io.Writer,
-	instances []*instance.ValidInstance,
-	schemaType *schema.Type,
-	opts ...WriteOption,
-) (int64, error) {
-	return a.writeTypedTo(ctx, w, instances, schemaType, opts...)
-}
-
 // MarshalSnapshot serializes a graph snapshot to CSV, returning one byte slice
 // per type. CSV is inherently single-type-per-file, so the output is a map
 // from type name to CSV bytes.
 //
-// Returns [ErrNilSnapshot] if result is nil.
+// Returns [ErrNilSnapshot] if result is nil. When two types in the snapshot
+// render the same output name, returns an error naming both identities — a
+// name-keyed map cannot separate them.
 func (a *Adapter) MarshalSnapshot(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -94,16 +45,20 @@ func (a *Adapter) MarshalSnapshot(
 	if result == nil {
 		return nil, ErrNilSnapshot
 	}
+	if err := renderedNameCollision(result); err != nil {
+		return nil, err
+	}
 
 	output := make(map[string][]byte, len(result.Types()))
 
-	for _, typeName := range result.Types() {
+	for _, typeID := range result.Types() {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("csv marshal snapshot: %w", err)
 		}
 
-		schemaType, _ := result.Schema().Type(typeName)
-		instances := result.InstancesOf(typeName)
+		typeName := schema.TagForm(result.Schema(), typeID)
+		schemaType, _ := result.Schema().TypeByID(typeID)
+		instances := result.InstancesOf(typeID)
 
 		var buf bytes.Buffer
 		if err := a.writeSnapshotTypeTo(ctx, &buf, instances, result, schemaType, opts...); err != nil {
@@ -118,7 +73,10 @@ func (a *Adapter) MarshalSnapshot(
 // WriteSnapshot writes a graph snapshot to per-type writers. The writerFor
 // function is called once per type to obtain the destination writer.
 //
-// Returns [ErrNilSnapshot] if result is nil.
+// Returns [ErrNilSnapshot] if result is nil. When two types in the snapshot
+// render the same output name, returns an error naming both identities before
+// any writer is requested — two writers obtained under one name would target
+// one destination.
 func (a *Adapter) WriteSnapshot(
 	ctx context.Context,
 	writerFor func(typeName string) (io.Writer, error),
@@ -128,19 +86,23 @@ func (a *Adapter) WriteSnapshot(
 	if result == nil {
 		return ErrNilSnapshot
 	}
+	if err := renderedNameCollision(result); err != nil {
+		return err
+	}
 
-	for _, typeName := range result.Types() {
+	for _, typeID := range result.Types() {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("csv write snapshot: %w", err)
 		}
 
+		typeName := schema.TagForm(result.Schema(), typeID)
 		w, err := writerFor(typeName)
 		if err != nil {
 			return fmt.Errorf("writer for type %q: %w", typeName, err)
 		}
 
-		schemaType, _ := result.Schema().Type(typeName)
-		instances := result.InstancesOf(typeName)
+		schemaType, _ := result.Schema().TypeByID(typeID)
+		instances := result.InstancesOf(typeID)
 
 		if err := a.writeSnapshotTypeTo(ctx, w, instances, result, schemaType, opts...); err != nil {
 			return fmt.Errorf("type %q: %w", typeName, err)
@@ -150,56 +112,26 @@ func (a *Adapter) WriteSnapshot(
 	return nil
 }
 
+// renderedNameCollision reports an error when two type identities in the
+// snapshot render one output name. The rendering is lossy where the snapshot
+// is not, so the writer refuses rather than silently merging the pair.
+func renderedNameCollision(snap *graph.Snapshot) error {
+	s := snap.Schema()
+	seen := make(map[string]schema.TypeID)
+	for _, id := range snap.Types() {
+		name := schema.TagForm(s, id)
+		if first, ok := seen[name]; ok {
+			return fmt.Errorf("csv adapter: type %s and type %s both render output name %q, so per-type CSV output cannot separate them",
+				first, id, name)
+		}
+		seen[name] = id
+	}
+	return nil
+}
+
 // fkLookup resolves the foreign key targets for a given relation.
 // Returns the target keys for the relation, or nil if none exist.
 type fkLookup func(rel *schema.Relation) []immutable.Key
-
-// writeTypedTo is the shared implementation for MarshalTyped and WriteTyped.
-// It uses ValidInstance edge data for FK resolution.
-func (a *Adapter) writeTypedTo(
-	ctx context.Context,
-	w io.Writer,
-	instances []*instance.ValidInstance,
-	schemaType *schema.Type,
-	opts ...WriteOption,
-) (int64, error) {
-	cfg := defaultWriteConfig()
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-
-	columns := buildColumnList(schemaType)
-
-	cw := &countWriter{w: w}
-	writer := csv.NewWriter(cw)
-	writer.Comma = a.config.delimiter
-
-	if cfg.includeHeader {
-		if err := writer.Write(columns); err != nil {
-			return cw.n, fmt.Errorf("csv write header: %w", err)
-		}
-	}
-
-	for _, inst := range instances {
-		if err := ctx.Err(); err != nil {
-			writer.Flush()
-			return cw.n, fmt.Errorf("csv write: %w", err)
-		}
-
-		// Build FK lookup from ValidInstance edge data.
-		lookup := validInstanceFKLookup(inst)
-		row := a.instanceToRow(inst.Properties(), lookup, columns, schemaType, &cfg)
-		if err := writer.Write(row); err != nil {
-			return cw.n, fmt.Errorf("csv write row: %w", err)
-		}
-	}
-
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		return cw.n, fmt.Errorf("csv flush: %w", err)
-	}
-	return cw.n, nil
-}
 
 // writeSnapshotTypeTo writes graph.Instance values from a snapshot as CSV rows.
 // It uses snap.EdgesFrom for FK resolution instead of ValidInstance edge data.
@@ -246,22 +178,6 @@ func (a *Adapter) writeSnapshotTypeTo(
 		return fmt.Errorf("csv flush: %w", err)
 	}
 	return nil
-}
-
-// validInstanceFKLookup returns an fkLookup that resolves FKs from ValidInstance edge data.
-func validInstanceFKLookup(inst *instance.ValidInstance) fkLookup {
-	return func(rel *schema.Relation) []immutable.Key {
-		edgeData, ok := inst.Edge(rel.Name())
-		if !ok || edgeData.IsEmpty() {
-			return nil
-		}
-		targets := edgeData.Targets()
-		keys := make([]immutable.Key, len(targets))
-		for i := range targets {
-			keys[i] = targets[i].TargetKey()
-		}
-		return keys
-	}
 }
 
 // snapshotFKLookup returns an fkLookup that resolves FKs from snapshot edge data.
@@ -427,16 +343,4 @@ func (a *Adapter) sliceToString(s immutable.Slice, cfg *writeConfig) string {
 		}
 	}
 	return strings.Join(parts, a.config.listSep)
-}
-
-// countWriter wraps an io.Writer and counts bytes written.
-type countWriter struct {
-	w io.Writer
-	n int64
-}
-
-func (cw *countWriter) Write(p []byte) (int, error) {
-	n, err := cw.w.Write(p)
-	cw.n += int64(n)
-	return n, err //nolint:wrapcheck // callers add context; wrapping here causes double-prefix chains
 }

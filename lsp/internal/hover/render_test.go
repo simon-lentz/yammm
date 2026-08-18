@@ -48,7 +48,7 @@ func TestRenderSymbol_Golden(t *testing.T) {
 					"/test/main.yammm":  []byte("schema \"main\"\nimport \"./parts\" as parts\n"),
 					"/test/parts.yammm": []byte("schema \"parts\"\ntype Wheel {\n  id String primary\n}\n"),
 				}
-				s, result := schema.LoadSources(t.Context(), sources, "/test")
+				s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "/test/main.yammm", "/test")
 				require.False(t, result.HasErrors(), "load: %s", result)
 				var imp *schema.Import
 				for i := range s.Imports() {

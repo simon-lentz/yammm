@@ -176,7 +176,7 @@ func TestSources_SimpleSchema(t *testing.T) {
 	}
 	ctx := t.Context()
 
-	s, result := schema.LoadSources(ctx, sources, "/project")
+	s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/project")
 
 	require.NotNil(t, s)
 	assert.Equal(t, "main", s.Name())
@@ -187,7 +187,7 @@ func TestSources_EmptySources(t *testing.T) {
 	sources := map[string][]byte{}
 	ctx := t.Context()
 
-	_, result := schema.LoadSources(ctx, sources, "/project")
+	_, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/project")
 
 	require.True(t, result.HasFatal())
 	assert.Contains(t, result.String(), "no sources provided")
@@ -199,7 +199,7 @@ func TestSources_NilContextPanics(t *testing.T) {
 	}
 
 	assert.Panics(t, func() {
-		_, _ = schema.LoadSources(nil, sources, "/project") //nolint:staticcheck // intentional nil
+		_, _ = schema.LoadSourcesWithEntry(nil, sources, "main.yammm", "/project") //nolint:staticcheck // intentional nil
 	})
 }
 
@@ -703,7 +703,7 @@ type Person {
 }`),
 	}
 
-	s1, result1 := schema.LoadSources(ctx, brokenSources, tmpDir)
+	s1, result1 := schema.LoadSourcesWithEntry(ctx, brokenSources, "main.yammm", tmpDir)
 	require.True(t, result1.HasErrors(), "should have parse errors")
 	require.Nil(t, s1, "schema should be nil on errors")
 
@@ -717,7 +717,7 @@ type Person {
 }`),
 	}
 
-	s2, result2 := schema.LoadSources(ctx, fixedSources, tmpDir)
+	s2, result2 := schema.LoadSourcesWithEntry(ctx, fixedSources, "main.yammm", tmpDir)
 	require.False(t, result2.HasErrors(), "fixed schema should have no errors: %v", result2)
 	require.NotNil(t, s2, "fixed schema should load successfully")
 }
@@ -794,12 +794,12 @@ func TestSources_RecoveryAfterImportFailure(t *testing.T) {
 		"main.yammm": []byte(`schema "main"
 import "./helper"
 type Person {
-	name String
+	name String primary
 }`),
 		"helper.yammm": []byte(`INVALID`),
 	}
 
-	s1, result1 := schema.LoadSources(ctx, brokenSources, tmpDir)
+	s1, result1 := schema.LoadSourcesWithEntry(ctx, brokenSources, "main.yammm", tmpDir)
 	require.True(t, result1.HasErrors())
 	require.Nil(t, s1)
 
@@ -809,7 +809,7 @@ type Person {
 		"main.yammm": []byte(`schema "main"
 import "./helper"
 type Person {
-	name String
+	name String primary
 }`),
 		"helper.yammm": []byte(`schema "helper"
 type Base {
@@ -817,7 +817,7 @@ type Base {
 }`),
 	}
 
-	s2, result2 := schema.LoadSources(ctx, fixedSources, tmpDir)
+	s2, result2 := schema.LoadSourcesWithEntry(ctx, fixedSources, "main.yammm", tmpDir)
 	require.False(t, result2.HasErrors(), "should not report false import cycle: %v", result2)
 	require.NotNil(t, s2)
 }
@@ -1353,7 +1353,7 @@ type Derived extends b.BaseEntity {
 		derivedPath: derivedContent,
 	}
 
-	s, result := schema.LoadSources(ctx, sources, moduleRoot)
+	s, result := schema.LoadSourcesWithEntry(ctx, sources, derivedPath, moduleRoot)
 	if result.HasErrors() {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
@@ -1378,7 +1378,7 @@ func TestSources_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	s, result := schema.LoadSources(ctx, sources, moduleRoot)
+	s, result := schema.LoadSourcesWithEntry(ctx, sources, mainPath, moduleRoot)
 
 	require.True(t, result.HasFatal(), "cancellation should produce fatal diagnostic")
 	assert.Nil(t, s)

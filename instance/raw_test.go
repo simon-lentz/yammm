@@ -60,33 +60,6 @@ func TestProvenance_Span(t *testing.T) {
 	})
 }
 
-func TestProvenance_WithPath(t *testing.T) {
-	t.Run("non_nil", func(t *testing.T) {
-		span := location.Range(location.SourceID{}, 1, 1, 2, 3)
-		original := location.NewProvenance("test.json", path.Root().Key("old"), span)
-		newPath := path.Root().Key("new").Index(0)
-
-		updated := original.WithPath(newPath)
-
-		assert.Equal(t, "test.json", updated.SourceName())
-		assert.Equal(t, `$.new[0]`, updated.Path().String())
-		assert.Equal(t, span, updated.Span())
-		// Original should be unchanged
-		assert.Equal(t, `$.old`, original.Path().String())
-	})
-
-	t.Run("nil_creates_new_with_path", func(t *testing.T) {
-		var prov *location.Provenance
-		newPath := path.Root().Key("data")
-
-		updated := prov.WithPath(newPath)
-
-		assert.Empty(t, updated.SourceName())
-		assert.Equal(t, `$.data`, updated.Path().String())
-		assert.Equal(t, location.Span{}, updated.Span())
-	})
-}
-
 func TestProvenance_AtKey(t *testing.T) {
 	t.Run("non_nil", func(t *testing.T) {
 		span := location.Range(location.SourceID{}, 5, 1, 10, 20)
@@ -117,48 +90,6 @@ func TestProvenance_AtKey(t *testing.T) {
 
 		assert.Equal(t, `$["my field"]`, extended.Path().String())
 	})
-}
-
-func TestProvenance_AtIndex(t *testing.T) {
-	t.Run("non_nil", func(t *testing.T) {
-		span := location.Range(location.SourceID{}, 1, 1, 2, 3)
-		prov := location.NewProvenance("test.json", path.Root().Key("items"), span)
-
-		extended := prov.AtIndex(42)
-
-		assert.Equal(t, "test.json", extended.SourceName())
-		assert.Equal(t, `$.items[42]`, extended.Path().String())
-		assert.Equal(t, span, extended.Span())
-		// Original should be unchanged
-		assert.Equal(t, `$.items`, prov.Path().String())
-	})
-
-	t.Run("nil_creates_new_with_index", func(t *testing.T) {
-		var prov *location.Provenance
-
-		extended := prov.AtIndex(0)
-
-		assert.Empty(t, extended.SourceName())
-		assert.Equal(t, `$[0]`, extended.Path().String())
-	})
-
-	t.Run("multiple_indices", func(t *testing.T) {
-		prov := location.NewProvenance("test.json", path.Root(), location.Span{})
-
-		result := prov.AtIndex(0).AtIndex(1).AtIndex(2)
-
-		assert.Equal(t, `$[0][1][2]`, result.Path().String())
-	})
-}
-
-func TestProvenance_Chaining(t *testing.T) {
-	// Test complex path construction via chaining
-	prov := location.NewProvenance("complex.json", path.Root(), location.Span{})
-
-	result := prov.AtKey("users").AtIndex(0).AtKey("addresses").AtIndex(2).AtKey("city")
-
-	assert.Equal(t, `$.users[0].addresses[2].city`, result.Path().String())
-	assert.Equal(t, "complex.json", result.SourceName())
 }
 
 func TestRawInstance(t *testing.T) {

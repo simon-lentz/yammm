@@ -262,11 +262,14 @@ Several escape sequences allow arbitrary values to be encoded as ASCII text:
 \0           U+0000 null character
 ```
 
+This is the complete escape vocabulary — a backslash before any other character does not lex. `\0` always means U+0000 and is not an octal prefix: `'\012'` is the null character followed by the two characters `12`. The quote character not delimiting the literal may appear unescaped: `'say "hi"'` and `"don't"` are both valid, so single-quoted literals can carry double quotes directly and vice versa.
+
 Examples:
 
 ```text
 "hello"
 'world'
+'say "hi"'
 "line1\nline2"
 "path\\to\\file"
 "unicode: \u00e9"
@@ -289,6 +292,8 @@ Examples:
 /^[A-Z][a-z]+$/      // capitalized word
 /\d{3}-\d{4}/        // phone number pattern
 ```
+
+> **Two `/` on one source line lex as a regex literal.** The lexer cannot distinguish a second division from a pattern, so `(0.0 / 0.0) == (0.0 / 0.0)` fails to parse — the span between the first and second `/` becomes a regex literal. This is reachable from ordinary arithmetic. The workaround is one `/` per source line — counting the `//` of a line comment, which is itself two: `(x / 2.0) > 0.0 // halve it` fails to parse for the same reason. Put the comment on its own line.
 
 ### Boolean Literals
 
@@ -1195,6 +1200,8 @@ type Person {
 }
 ```
 
+An invariant whose expression evaluates to `nil` **fails** the invariant (`E_INVARIANT_FAIL` — nil is falsey). An invariant whose expression evaluates to any non-boolean, non-nil value is an **evaluation error** (`E_EVAL_ERROR`).
+
 ### Expression Grammar
 
 Expressions support a rich set of operators and built-in functions.
@@ -1203,7 +1210,7 @@ Expressions support a rich set of operators and built-in functions.
 Expr = Literal
      | "[" [ Expr { "," Expr } [ "," ] ] "]"           // list
      | "-" Expr                                         // unary minus
-     | Expr "[" [ Expr { "," Expr } ] "]"              // indexing/slicing
+     | Expr "[" [ Expr { "," Expr } ] "]"              // indexing
      | Expr "->" Name [ Arguments ] [ Parameters ] [ "{" Expr "}" ]  // pipeline
      | Expr "." Expr                                    // property access
      | "!" Expr                                         // logical not
@@ -1215,7 +1222,7 @@ Expr = Literal
      | Expr ( "==" | "!=" ) Expr                       // equality
      | Expr "&&" Expr                                   // logical and
      | Expr ( "||" | "^" ) Expr                        // logical or/xor
-     | Expr "?" "{" Expr [ ":" Expr ] "}"              // ternary
+     | Expr "?" "{" Expr ":" Expr "}"                  // ternary
      | "(" Expr ")"                                     // grouping
      | VARIABLE                                         // variable reference
      | PropertyName                                     // property reference
@@ -1239,7 +1246,7 @@ Operators are listed from highest to lowest precedence:
 | ---------- | --------- | ------------- |
 | 1 | Literals, list literals `[...]` | - |
 | 2 | Unary minus `-x` | Right |
-| 3 | Indexing/slicing `expr[i]`, `expr[a,b]` | Left |
+| 3 | Indexing `expr[i]` | Left |
 | 4 | Pipeline `lhs -> name(args)\|$params\|{body}` | Left |
 | 5 | Property access `lhs.property` | Left |
 | 6 | Logical not `!expr` | Right |
@@ -1260,12 +1267,14 @@ Parentheses group as usual.
 #### Arithmetic Operators
 
 ```text
-+    addition (numbers) or concatenation (strings)
++    addition (numbers) or concatenation (strings and lists)
 -    subtraction or unary negation
 *    multiplication
 /    division
 %    modulo (integers only)
 ```
+
+`+` is polymorphic three ways: numbers add (mixed integer/float promotes to float), strings concatenate, and lists concatenate (`[1] + [2]` is `[1, 2]`).
 
 #### Comparison Operators
 
@@ -1278,7 +1287,11 @@ Parentheses group as usual.
 >=   greater than or equal
 ```
 
-Comparisons across mismatched operand types do not raise evaluation errors: `==` evaluates to not-equal (false) and `!=` to true, `in` evaluates to false when element types do not match, and ordered comparisons (`<`, `<=`, `>`, `>=`) evaluate to false for incomparable operands.
+`==` and `!=` do not raise evaluation errors across mismatched operand types: `==` evaluates to not-equal (false) and `!=` to true, and `in` evaluates to false when element types do not match.
+
+Ordered comparisons (`<`, `<=`, `>`, `>=`) follow a **total order across type strata** — `nil` < booleans < numbers < strings < lists — so a mixed-type ordered comparison is defined, not false: `1 < "a"` is true, `nil < 0` is true, and `false < true` is true. Within the numeric stratum, integers and floats compare exactly. Floats order `-Inf` < finite < `+Inf` < `NaN`, and `NaN` equals `NaN`, so `Sort`, `Unique`, and `Contains` treat non-finite values consistently. An ordered comparison on an unsupported shape (a map) is an evaluation error.
+
+Timestamp comparison is string comparison: RFC 3339 values with mixed UTC offsets do not order by instant. `Date` values (`YYYY-MM-DD`) order correctly by construction.
 
 #### Logical Operators
 
@@ -1334,6 +1347,8 @@ Supported datatype keywords for type checking:
 - `Timestamp` - checks for valid timestamp values
 - `Date` - checks for valid date values
 
+Numeric type checks are cross-form: `5 =~ Float` and `5.0 =~ Integer` both hold — a whole number matches both numeric types.
+
 #### Ternary Operator
 
 ```text
@@ -1346,23 +1361,34 @@ Example:
 ! "adult status" age >= 18 ? { "adult" : "minor" } == category
 ```
 
-### Indexing and Slicing
+The else branch is required. Omitting the `:` branch is a load-time syntax error:
 
-The bracket operator supports:
+```yammm-invalid
+schema "bad"
+
+type T {
+    id String primary
+    // E_SYNTAX: a conditional requires an else branch
+    ! "no else" id != nil ? { true }
+}
+```
+
+### Indexing
+
+The bracket operator accepts exactly one index:
 
 ```text
 expr[index]        // single element access
-expr[start, end]   // range slice
 ```
 
 Works on:
 
 - Strings (rune indexing)
-- Arrays and slices
+- Lists
 
-Invalid indices or ranges return evaluation errors with start/end/len details.
+A non-integer index is an evaluation error. An out-of-range index evaluates to `nil`, not an error. Indexing `nil` evaluates to `nil`. There is no range slice: two or more bracket arguments draw an evaluation error.
 
-Only these two forms have a defined meaning. The bracket grammar is more permissive than the language: it also accepts an empty list, three or more arguments, and a trailing comma (`expr[]`, `expr[a, b, c,]`). These parse without a diagnostic and are not valid YAMMM — do not write them.
+The bracket grammar is more permissive than the language: it also accepts an empty index list (`expr[]`, an evaluation error) and a trailing comma (`expr[a,]`, evaluated as `expr[a]`). These parse without a diagnostic — do not write either.
 
 ### Property Access
 
@@ -1374,7 +1400,7 @@ name               // implicit property reference
 $item.price        // lambda parameter property
 ```
 
-Property lookups are **strict**: unknown properties and non-map dereferences raise errors, not `nil`.
+Property references are checked **statically**: a reference to a property not declared on the type is rejected at schema load (`E_UNKNOWN_PROPERTY`). At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
 
 ### Variables and Scope
 
@@ -1418,15 +1444,25 @@ expr -> function(args)|$params|{ body }
 Notes:
 
 - `nil` inputs are treated as empty collections
-- `Any` returns `false` on empty collections
-- `All` returns `true` on empty collections (vacuous truth)
-- `AllOrNone` returns `true` on empty collections (vacuous truth)
+- A scalar receiver is never a collection: piping a number or string into a collection function is an evaluation error
+
+Results on an empty collection are a mixed family:
+
+| Functions | Result on empty |
+| --------- | --------------- |
+| `All`, `AllOrNone` | `true` (vacuous truth) |
+| `Any` | `false` |
+| `First`, `Last` | `nil` |
+| `Sum` | `0` |
+| `Sort`, `Reverse`, `Flatten`, `Unique`, `Compact` | empty list |
+| `Min`, `Max` | evaluation error |
+| `Reduce` without an initial value | evaluation error |
 
 #### Numeric Functions
 
 | Function | Description |
 | -------- | ----------- |
-| `Len` | Length of string (runes) or slice (nil yields 0) |
+| `Len` | Length of string (runes), list, or map (nil yields 0) |
 | `Abs` | Absolute value |
 | `Floor` | Floor of float |
 | `Ceil` | Ceiling of float |
@@ -1449,7 +1485,7 @@ Notes:
 | `StartsWith` | Check prefix: `s -> StartsWith("pre")` |
 | `EndsWith` | Check suffix: `s -> EndsWith("suf")` |
 | `Replace` | Replace all occurrences: `s -> Replace("old", "new")` |
-| `Substring` | Extract substring: `s -> Substring(start, end)` |
+| `Substring` | Extract substring: `s -> Substring(start)` or `s -> Substring(start, end)`; negative indices count from the end; out-of-range indices clamp |
 
 #### Control Flow Functions
 
@@ -1469,7 +1505,7 @@ Notes:
 
 | Function | Description |
 | -------- | ----------- |
-| `TypeOf` | Get type name as string: `value -> TypeOf` |
+| `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, `"pattern"`, `"timestamp"`, or `"uuid"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type: a `Timestamp`, `Date` or `UUID` property holding a string yields `"string"`. Only a Go-native value yields the last two — a `time.Time` yields `"timestamp"` and a `uuid.UUID` yields `"uuid"` — so data arriving as JSON never produces either |
 | `IsNil` | Check if nil: `value -> IsNil` |
 | `Default` | Return default if nil: `value -> Default(fallback)` |
 | `Coalesce` | Return first non-nil: `a -> Coalesce(b, c)` |
@@ -1525,7 +1561,7 @@ type Person {
 
 - The evaluator only works against the in-memory instance graph
 - There is no implicit database lookup or multi-hop relation navigation
-- Evaluation errors (undefined property/variable, type errors) surface as error-severity diagnostics; validation continues collecting further issues
+- Evaluation errors (undefined named variables, type errors) surface as error-severity diagnostics; validation continues collecting further issues. A reference to an undeclared property is a load-time error, not an evaluation error, and a declared-but-absent property evaluates to `nil`
 - Panics (e.g., divide-by-zero) are recovered as errors annotated with the operator stack
 
 ### Evaluation Model
@@ -1572,21 +1608,20 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 
 **Sentinel** — internal conditions:
 
-- `E_LIMIT_REACHED` — issue collection limit reached
 - `E_INTERNAL` — unexpected invariant failure (internal bug indicator)
 - `E_CONTEXT_CANCELLED` — operation cancelled via context
 
 **Schema** — schema compilation errors:
 
-- `E_TYPE_COLLISION`, `E_DUPLICATE_TYPE` — type name conflicts
+- `E_DUPLICATE_TYPE` — type name conflicts
 - `E_INHERIT_CYCLE` — circular inheritance chain
-- `E_SCHEMA_TYPE_NOT_FOUND`, `E_UNKNOWN_TYPE` — unresolvable type reference
+- `E_UNKNOWN_TYPE` — unresolvable type reference
 - `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — property definition errors
 - `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION`, `E_RELATION_NORMALIZATION_COLLISION` — relation conflicts
 - `E_CASE_COLLISION` — names differ only by case
 - `E_PROPERTY_RELATION_COLLISION` — property and relation share a name
 - `E_RESERVED_PREFIX` — name uses a reserved prefix
-- `E_INVALID_RELATION`, `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
+- `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
 - `E_INVALID_CONSTRAINT` — constraint definition error
 - `E_INVALID_INVARIANT` — invariant expression error
 - `E_INVALID_NAME` — invalid identifier format
@@ -1626,15 +1661,14 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UNKNOWN_FIELD` — unexpected field in instance data
 - `E_CONSTRAINT_FAIL` — constraint check failed
 - `E_INVARIANT_FAIL` — invariant check failed
-- `E_EVAL_ERROR` — expression evaluation error
-- `E_UNKNOWN_BUILTIN` — unknown built-in function
+- `E_EVAL_ERROR` — expression evaluation error, including a call to an unknown built-in function
 - `E_MISSING_FK_TARGET` — foreign key target missing
 - `E_PARTIAL_COMPOSITE_FK` — partial composite foreign key
 - `E_UNKNOWN_EDGE_FIELD` — unknown field in edge data
 - `E_EDGE_SHAPE_MISMATCH` — edge has wrong shape (object vs array)
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
 - `E_COMPOSITION_NOT_FOUND` — referenced composition not found
-- `E_MISSING_TYPE_TAG`, `E_INVALID_TYPE_TAG` — `$type` tag errors
+- `E_INVALID_TYPE_TAG` — `$type` tag errors
 - `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When colliding fields are detected (e.g., both `"Name"` and `"name"` in the input), the collision is reported and neither field is mapped
 
 **Graph** — graph construction errors:
@@ -1654,8 +1688,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
 - `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch
 - `E_SNAPSHOT_UNKNOWN_TYPE` — type name not found in schema
-- `E_SNAPSHOT_TYPE_MISMATCH` — types array inconsistent with instances
-- `E_SNAPSHOT_TYPEID_MISMATCH` — persisted type ID does not match schema
+- `E_SNAPSHOT_TYPE_MISMATCH` — instances section inconsistent with the types table
 - `E_SNAPSHOT_DANGLING_REFERENCE` — edge target or duplicate conflict not found
 - `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records

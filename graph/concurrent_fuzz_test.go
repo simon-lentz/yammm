@@ -118,7 +118,7 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 		case 3: // InstanceByKey
 			id := r.Intn(100)
 			snap := g.Snapshot()
-			_, _ = snap.InstanceByKey("Person", graph.FormatKey(formatID(workerID, id)))
+			_, _ = snap.InstanceByKey(mustTypeID(t, s, "Person"), graph.FormatKey(formatID(workerID, id)))
 		}
 	}
 }
@@ -152,7 +152,7 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 
 	// All edges should have valid source instances
 	for _, edge := range snap.Edges() {
-		srcType := edge.Source().TypeName()
+		srcType := edge.Source().TypeID()
 		srcKey := edge.Source().PrimaryKey().String()
 		_, ok := snap.InstanceByKey(srcType, srcKey)
 		if !ok {
@@ -203,7 +203,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 
 		// Graph should have exactly the unique instances (duplicates ignored)
 		snap := g.Snapshot()
-		instanceCount := len(snap.InstancesOf("Person"))
+		instanceCount := len(snap.InstancesOf(mustTypeID(t, s, "Person")))
 		if instanceCount != len(uniqueIDs) {
 			t.Errorf("Expected %d instances, got %d", len(uniqueIDs), instanceCount)
 		}

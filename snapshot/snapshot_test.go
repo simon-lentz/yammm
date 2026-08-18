@@ -261,7 +261,7 @@ func TestMarshalLoad_EdgeReconstruction(t *testing.T) {
 	}
 
 	// Verify EdgesFrom on loaded snapshot.
-	persons := loaded.InstancesOf("Person")
+	persons := loaded.InstancesOf(tidOf(t, s, "Person"))
 	if len(persons) != 1 {
 		t.Fatalf("expected 1 Person, got %d", len(persons))
 	}
@@ -296,7 +296,7 @@ func TestMarshalLoad_LoadedDiagnostics(t *testing.T) {
 	if !loaded.Diagnostics().OK() {
 		t.Error("loaded Diagnostics() should be OK")
 	}
-	if loaded.HasErrors() {
+	if loaded.Diagnostics().HasErrors() {
 		t.Error("loaded HasErrors() should be false")
 	}
 }
@@ -460,8 +460,8 @@ func TestInfo_Basic(t *testing.T) {
 		t.Fatal("Info returned nil")
 	}
 
-	if info.Version != 2 {
-		t.Errorf("Version: got %d, want 2", info.Version)
+	if info.Version != 3 {
+		t.Errorf("Version: got %d, want 3", info.Version)
 	}
 	if info.SchemaName != "test" {
 		t.Errorf("SchemaName: got %q, want %q", info.SchemaName, "test")
@@ -512,12 +512,14 @@ func TestHeaderOnly_Basic(t *testing.T) {
 	require.NoError(t, result.Err(), "HeaderOnly should succeed")
 	require.NotNil(t, header, "HeaderOnly should return a non-nil HeaderInfo")
 
-	assert.Equal(t, 2, header.Version, "Version")
+	assert.Equal(t, 3, header.Version, "Version")
 	assert.Equal(t, "test", header.SchemaName, "SchemaName")
 	assert.NotEmpty(t, header.SchemaHash, "SchemaHash should be populated")
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash should be populated (value, not verified)")
 	assert.Equal(t, int64(len(data)), header.FileSize, "FileSize")
-	assert.ElementsMatch(t, []string{"Company", "Person"}, header.Types, "Types should include both types")
+	assert.ElementsMatch(t,
+		[]snapshot.TypeRef{{SchemaPath: "test://test.yammm", Name: "Company"}, {SchemaPath: "test://test.yammm", Name: "Person"}},
+		header.Types, "Types should include both types")
 }
 
 func TestHeaderOnly_WithMetadata(t *testing.T) {
@@ -687,11 +689,13 @@ func TestHeaderOnlyRead_HappyPath(t *testing.T) {
 	require.NoError(t, result.Err(), "HeaderOnlyRead should succeed on well-formed input")
 	require.NotNil(t, header, "HeaderOnlyRead should return a non-nil HeaderInfo")
 
-	assert.Equal(t, 2, header.Version)
+	assert.Equal(t, 3, header.Version)
 	assert.Equal(t, "test", header.SchemaName)
 	assert.NotEmpty(t, header.SchemaHash)
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash is the stored value, not a verification result")
-	assert.ElementsMatch(t, []string{"Company", "Person"}, header.Types)
+	assert.ElementsMatch(t,
+		[]snapshot.TypeRef{{SchemaPath: "test://test.yammm", Name: "Company"}, {SchemaPath: "test://test.yammm", Name: "Person"}},
+		header.Types)
 	assert.Equal(t, int64(0), header.FileSize, "FileSize is not populated in the reader variant")
 }
 
@@ -862,7 +866,7 @@ func TestHeaderOnlyRead_SlowReader(t *testing.T) {
 	require.NoError(t, result.Err(), "slow reader should not surface an error on well-formed input")
 	require.NotNil(t, header)
 	assert.Equal(t, "test", header.SchemaName)
-	assert.ElementsMatch(t, []string{"Company"}, header.Types)
+	assert.ElementsMatch(t, []snapshot.TypeRef{{SchemaPath: "test://test.yammm", Name: "Company"}}, header.Types)
 }
 
 func TestHeaderOnlyRead_ContextCancellation(t *testing.T) {
@@ -1082,7 +1086,7 @@ func TestLoad_TypeIDReconstruction(t *testing.T) {
 	data, _ := snapshot.Marshal(ctx, snap)
 	loaded, _ := snapshot.Load(ctx, data, s)
 
-	companies := loaded.InstancesOf("Company")
+	companies := loaded.InstancesOf(tidOf(t, s, "Company"))
 	if len(companies) != 1 {
 		t.Fatalf("expected 1 Company, got %d", len(companies))
 	}
@@ -1107,13 +1111,13 @@ func TestLoad_NullProvenanceRoundTrip(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	companies := loaded.InstancesOf("Company")
+	companies := loaded.InstancesOf(tidOf(t, s, "Company"))
 	if len(companies) != 1 {
 		t.Fatalf("expected 1 Company, got %d", len(companies))
 	}
 
 	// Provenance should be nil (no provenance was set).
-	if companies[0].HasProvenance() {
+	if companies[0].Provenance() != nil {
 		t.Error("expected nil provenance for instance without provenance")
 	}
 }
@@ -1144,7 +1148,7 @@ func TestMarshalLoad_DuplicateRoundTrip(t *testing.T) {
 	if dup.Instance.TypeName() != "Company" {
 		t.Errorf("duplicate type: got %q, want %q", dup.Instance.TypeName(), "Company")
 	}
-	if dup.HasDiagnostic() {
+	if !dup.Diagnostic.IsZero() {
 		t.Error("loaded duplicate should not have diagnostic")
 	}
 }
@@ -1175,7 +1179,7 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 // property fidelity: edge properties declared on a forward reference to an
 // absent target must survive Marshal → Load intact. A prior implementation
 // silently dropped these both in the graph's unresolved-edge bookkeeping and
-// at the unresolvedWire layer; this test regresses on both failure modes.
+// at the wire layer; this test regresses on both failure modes.
 func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 	s := testSchema(t)
 	// Person with EMPLOYER edge to non-existent Company c99, carrying
@@ -1262,16 +1266,15 @@ func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 		"unresolved edge properties must survive round-trip and match the resolved shape")
 }
 
-// TestLoad_V1Compatibility pins the "v2 reader accepts v1 files losslessly"
-// half of the asymmetric-bump contract. A hand-crafted v1 document (no
-// "properties" field on unresolvedWire entries) loads cleanly through the
-// v0.3.0 decoder; the resulting UnresolvedEdge has empty Properties —
-// equivalent to the v1 in-memory semantics.
+// TestLoad_V1Rejected pins the retirement of the pre-v3 wire. A v1 document
+// loaded cleanly through every reader up to v0.11.0; from v0.12.0
+// MinReadableVersion is 3 and the same document is refused with the supported
+// version named, rather than being read under rules it was never written to.
 //
 // Integrity is not the point of this test (we are constructing a v1 doc by
 // hand rather than recomputing its SHA-256), so WithSkipIntegrityCheck
 // keeps the test focused on version-acceptance semantics.
-func TestLoad_V1Compatibility(t *testing.T) {
+func TestLoad_V1Rejected(t *testing.T) {
 	s := testSchema(t)
 	// Minimal v1-style document. The unresolved-edge entry has NO
 	// "properties" field (the v1 shape). The schema_hash matches
@@ -1284,22 +1287,20 @@ func TestLoad_V1Compatibility(t *testing.T) {
 
 	ctx := context.Background()
 	loaded, result := snapshot.Load(ctx, []byte(doc), s, snapshot.WithSkipIntegrityCheck())
-	require.NoError(t, result.Err(), "v2 reader must accept v1 documents cleanly: %v", result)
-
-	require.Len(t, loaded.Unresolved(), 1)
-	u := loaded.Unresolved()[0]
-	require.Equal(t, 0, u.Properties().Len(),
-		"v1 document has no properties field on unresolved wire; v2 reader loads as empty Properties")
+	require.Nil(t, loaded, "a refused document yields no snapshot")
+	require.True(t, hasCode(result, diag.E_SNAPSHOT_UNSUPPORTED_VERSION),
+		"v1 must be refused with the supported version named: %v", result)
+	require.Contains(t, result.Err().Error(), "supported: 3")
 }
 
 // TestLoad_UnsupportedVersion pins the rejection path for versions outside
-// the accept range on either side (v0, v3, v99). Each surfaces the
+// the accept range on either side (v0, v1, v2, v99). Each surfaces the
 // E_SNAPSHOT_UNSUPPORTED_VERSION code with the observed version and the
-// supported range named in the message.
+// supported version named in the message.
 func TestLoad_UnsupportedVersion(t *testing.T) {
 	s := testSchema(t)
 	schemaHash := schema.StructuralHash(s)
-	for _, v := range []int{0, 3, 99} {
+	for _, v := range []int{0, 1, 2, 99} {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			doc := fmt.Sprintf(`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":[],"instances":{},"diagnostics":{"duplicates":[],"unresolved":[]}}`, v, schemaHash)
 
@@ -1311,8 +1312,8 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 			for issue := range result.Errors() {
 				if issue.Code() == diag.E_SNAPSHOT_UNSUPPORTED_VERSION {
 					found = true
-					require.Contains(t, issue.Message(), "[1, 2]",
-						"reject message names the accept range")
+					require.Contains(t, issue.Message(), "supported: 3",
+						"reject message names the supported version")
 				}
 			}
 			require.True(t, found, "expected E_SNAPSHOT_UNSUPPORTED_VERSION")
@@ -1357,7 +1358,7 @@ func fidelityRoundTrip(t *testing.T, s *schema.Schema, v *instance.Validator, va
 	loaded, lr := snapshot.Load(t.Context(), data, s)
 	require.True(t, lr.OK(), "load: %s", lr)
 
-	items := loaded.InstancesOf("Item")
+	items := loaded.InstancesOf(tidOf(t, s, "Item"))
 	require.Len(t, items, 1)
 	return items[0].Properties().Clone()
 }
@@ -1386,10 +1387,10 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		assert.InDelta(t, 1.5e10, props["val"], 1.0)
 	})
 
-	t.Run("float_type_narrowing", func(t *testing.T) {
+	t.Run("whole_float_stays_float", func(t *testing.T) {
 		t.Parallel()
-		// float64(1.0) marshals as JSON "1", normalizes to int64(1) on load.
-		// The typed accessor should still return 1.0 via Float().
+		// KindFloat values emit in decimal form ("1.0"), so the round trip
+		// preserves the dynamic type exactly — no narrowing, no coercion.
 		s, v := fidelitySchema(t, "Float")
 		raw := instance.RawInstance{Properties: map[string]any{"id": "x", "val": float64(1.0)}}
 		valid, result := v.ValidateOne(t.Context(), "Item", raw)
@@ -1401,16 +1402,23 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 
 		data, mr := snapshot.Marshal(t.Context(), snap)
 		require.True(t, mr.OK())
+		if !strings.Contains(string(data), `"val":1.0`) {
+			t.Fatalf("marshal output lacks %q, so the whole float did not emit in decimal form", `"val":1.0`)
+		}
 		loaded, lr := snapshot.Load(t.Context(), data, s)
 		require.True(t, lr.OK())
 
-		items := loaded.InstancesOf("Item")
+		items := loaded.InstancesOf(tidOf(t, s, "Item"))
 		require.Len(t, items, 1)
 		val, ok := items[0].Properties().Get("val")
 		require.True(t, ok)
-		f, fok := val.Float()
-		require.True(t, fok)
-		assert.Equal(t, float64(1.0), f)
+		got, isFloat := val.Unwrap().(float64)
+		if !isFloat {
+			t.Fatalf("round trip produced %T, want float64 — the whole float narrowed", val.Unwrap())
+		}
+		if got != 1.0 {
+			t.Errorf("round trip produced %v, want 1.0", got)
+		}
 	})
 
 	t.Run("boolean_true_false", func(t *testing.T) {

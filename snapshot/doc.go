@@ -163,29 +163,23 @@
 // # Wire Format Versions
 //
 // The .ys wire format uses a version field in the header for forward
-// evolution. yammm v0.3.0 introduced the v1 → v2 bump paired with
-// [graph.UnresolvedEdge.Properties] — the new persisted "properties"
-// field on unresolved-edge wire entries cannot be `omitempty`-safe
-// alone (a pre-v0.3.0 reader would silently drop the field), so the
-// version bump pairs with the existing unknown-version-rejection path
-// to force older readers to error cleanly instead.
+// evolution, and this package reads one version. yammm v0.12.0
+// introduced v3 — the types section is a table of full type identities
+// that every other position references by row index — and retired every
+// earlier version, because the v1/v2 name forms cannot express a
+// transitively imported type or separate two same-named types in
+// different schemas.
 //
 // [MinReadableVersion] names the lowest version this package accepts on
 // read paths; the accept range is the closed interval
-// [[MinReadableVersion], currentVersion] and the current version is 2
-// at yammm v0.3.0. Documents outside the range surface Fatal
+// [[MinReadableVersion], currentVersion], which is [3, 3] at yammm
+// v0.12.0. Documents outside the range surface an Error-severity
 // [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] with the observed version and
-// the supported range named in the message.
-//
-// Asymmetric-reader semantics. A v2 reader (yammm v0.3.0+) accepts
-// both v1 and v2 documents. v1 documents simply lack the new
-// "properties" field on unresolved-edge wires; the load path populates
-// the in-memory Properties as empty, which is lossless since v1 never
-// carried the data. A v1 reader (yammm v0.2.x) rejects v2 documents
-// via the unknown-version path — operators running an older binary
-// against a v0.3.0-written .ys see a structured diagnostic rather
-// than a silently-incomplete document. See docs/VERSIONING.md for
-// the full pre-1.0 / post-1.0 wire-format policy.
+// the supported range named in the message. An older reader (yammm
+// v0.11.0 and earlier) rejects a v3 document the same way, so an
+// operator running an older binary sees a structured diagnostic rather
+// than a misread types section. See docs/VERSIONING.md for the full
+// pre-1.0 / post-1.0 wire-format policy.
 //
 // # Thread Safety
 //
@@ -193,5 +187,5 @@
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, schema, instance, diag, location, immutable
+//	snapshot  ──imports──▶  graph, schema, diag, location, location/path, immutable
 package snapshot

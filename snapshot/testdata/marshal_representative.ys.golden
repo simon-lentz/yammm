@@ -1,97 +1,109 @@
 {
 	"yammm_snapshot": {
-		"version": 2,
+		"version": 3,
 		"schema_name": "test",
 		"schema_source": "test://test.yammm",
 		"schema_hash": "sha256:d10215e44a4c1b383b89b9f644c79d6e4f1192c46ae1fc52cbbd49ad37c9280e",
 		"schema_hash_algorithm": 1,
-		"integrity_hash": "sha256:27ca04ef2ecec18e75baaef5b680f0b11d91d593d5ddddf8e526b16c1af73a2d",
+		"integrity_hash": "sha256:147f00dfd5d70bf01c0fbf1fc82563d4b074c8cb171509a971631de54eaff811",
 		"features": []
 	},
 	"types": [
-  	"Company",
-  	"Person"
-  ],
-	"instances": {
-  	"Company": [
-  		{
-  			"key": [
-  				"c1"
-  			],
-  			"properties": {
-  				"title": "Acme"
-  			},
-  			"provenance": null
-  		}
-  	],
-  	"Person": [
-  		{
-  			"key": [
-  				"p1"
-  			],
-  			"properties": {
-  				"name": "Alice"
-  			},
-  			"provenance": null
-  		},
-  		{
-  			"key": [
-  				"p2"
-  			],
-  			"properties": {
-  				"name": "Bob"
-  			},
-  			"edges": {
-  				"EMPLOYER": [
-  					{
-  						"target_type": "Company",
-  						"target_key": [
-  							"c1"
-  						],
-  						"properties": {}
-  					}
-  				]
-  			},
-  			"provenance": null
-  		},
-  		{
-  			"key": [
-  				"p3"
-  			],
-  			"properties": {
-  				"name": "Cara"
-  			},
-  			"provenance": null
-  		}
-  	]
-  },
+		{
+			"schema_path": "test://test.yammm",
+			"name": "Company"
+		},
+		{
+			"schema_path": "test://test.yammm",
+			"name": "Person"
+		}
+	],
+	"instances": [
+		{
+			"type": 0,
+			"items": [
+				{
+					"key": [
+						"c1"
+					],
+					"properties": {
+						"title": "Acme"
+					},
+					"provenance": null
+				}
+			]
+		},
+		{
+			"type": 1,
+			"items": [
+				{
+					"key": [
+						"p1"
+					],
+					"properties": {
+						"name": "Alice"
+					},
+					"provenance": null
+				},
+				{
+					"key": [
+						"p2"
+					],
+					"properties": {
+						"name": "Bob"
+					},
+					"edges": {
+						"EMPLOYER": [
+							{
+								"target_type": 0,
+								"target_key": [
+									"c1"
+								],
+								"properties": {}
+							}
+						]
+					},
+					"provenance": null
+				},
+				{
+					"key": [
+						"p3"
+					],
+					"properties": {
+						"name": "Cara"
+					},
+					"provenance": null
+				}
+			]
+		}
+	],
 	"diagnostics": {
-  	"duplicates": [],
-  	"unresolved": [
-  		{
-  			"source_type": "Person",
-  			"source_key": [
-  				"p1"
-  			],
-  			"relation": "EMPLOYER",
-  			"target_type": "Company",
-  			"target_key": null,
-  			"required": true,
-  			"reason": "absent"
-  		},
-  		{
-  			"source_type": "Person",
-  			"source_key": [
-  				"p3"
-  			],
-  			"relation": "EMPLOYER",
-  			"target_type": "Company",
-  			"target_key": [
-  				"c-missing"
-  			],
-  			"required": true,
-  			"reason": "target_missing"
-  		}
-  	]
-  }
+		"duplicates": [],
+		"unresolved": [
+			{
+				"source_type": 1,
+				"source_key": [
+					"p1"
+				],
+				"relation": "EMPLOYER",
+				"target_type": 0,
+				"target_key": null,
+				"required": true,
+				"reason": "absent"
+			},
+			{
+				"source_type": 1,
+				"source_key": [
+					"p3"
+				],
+				"relation": "EMPLOYER",
+				"target_type": 0,
+				"target_key": [
+					"c-missing"
+				],
+				"required": true,
+				"reason": "target_missing"
+			}
+		]
+	}
 }

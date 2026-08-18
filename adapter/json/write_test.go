@@ -222,21 +222,6 @@ func mustAddComposed(t *testing.T, g *graph.Graph, parentType, parentKey, relati
 	}
 }
 
-// marshalToMap marshals the snapshot and decodes the bytes for structural
-// assertions.
-func marshalToMap(t *testing.T, a *Adapter, result *graph.Snapshot, opts ...WriteOption) map[string]any {
-	t.Helper()
-	data, err := a.MarshalObject(context.Background(), result, opts...)
-	if err != nil {
-		t.Fatalf("MarshalObject: %v", err)
-	}
-	var output map[string]any
-	if err := json.Unmarshal(data, &output); err != nil {
-		t.Fatalf("unmarshal output: %v", err)
-	}
-	return output
-}
-
 // Tests
 
 func TestMarshalObject_NilResult(t *testing.T) {
@@ -401,16 +386,6 @@ func TestMarshalObject_Golden(t *testing.T) {
 				)
 			},
 		},
-		{
-			name:   "diagnostics_unresolved",
-			schema: testSchemaWithAssociation,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
-				t.Helper()
-				mustAdd(t, g, mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
-					map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"missing-company"}}))
-			},
-			opts: []WriteOption{WithDiagnostics(true)},
-		},
 	}
 
 	for _, tc := range cases {
@@ -427,41 +402,6 @@ func TestMarshalObject_Golden(t *testing.T) {
 			yammmtest.Golden(t, "marshal_"+tc.name, append(data, '\n'))
 		})
 	}
-}
-
-// TestMarshalObject_DiagnosticsDuplicates needs a raw g.Add: adding the
-// duplicate is the scenario, so the fail-fast helper does not apply.
-func TestMarshalObject_DiagnosticsDuplicates(t *testing.T) {
-	ctx := t.Context()
-	s := testSchemaSimple(t)
-	g := graph.New(s)
-
-	mustAdd(t, g, mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{
-		"id": "p1", "name": "Alice", "age": int64(30),
-	}))
-	// Duplicate PK — expected to be reported, not fatal.
-	g.Add(ctx, mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{
-		"id": "p1", "name": "Bob", "age": int64(25),
-	}))
-
-	adapter := newAdapter(t)
-	data, err := adapter.MarshalObject(context.Background(), g.Snapshot(), WithDiagnostics(true), WithIndent("  "))
-	require.NoError(t, err)
-	yammmtest.Golden(t, "marshal_diagnostics_duplicates", append(data, '\n'))
-}
-
-func TestMarshalObject_WithDiagnostics_NoIssues(t *testing.T) {
-	s := testSchemaSimple(t)
-	g := graph.New(s)
-	mustAdd(t, g, mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{
-		"id": "p1", "name": "Alice", "age": int64(30),
-	}))
-
-	output := marshalToMap(t, newAdapter(t), g.Snapshot(), WithDiagnostics(true))
-
-	// No diagnostics section if there are no issues.
-	_, hasDiag := output["$diagnostics"]
-	assert.False(t, hasDiag, "Should not have $diagnostics when no issues")
 }
 
 func TestMarshalObject_WithIndent(t *testing.T) {
@@ -610,156 +550,4 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 	}
 	w.n += len(p)
 	return len(p), nil
-}
-
-func TestParseKeyString(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []any
-	}{
-		{"single string", `["abc"]`, []any{"abc"}},
-		{"single int", `[123]`, []any{int64(123)}},
-		{"composite with int", `["us",12345]`, []any{"us", int64(12345)}},
-		{"empty", `[]`, []any{}},
-		{"invalid json fallback", `not-json`, []any{"not-json"}},
-		{"large int", `[9007199254740993]`, []any{int64(9007199254740993)}},
-		{"float preserved", `[1.5]`, []any{float64(1.5)}},
-		{"negative int", `[-42]`, []any{int64(-42)}},
-		{"zero", `[0]`, []any{int64(0)}},
-		{"mixed types", `["key",123,4.5]`, []any{"key", int64(123), float64(4.5)}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := parseKeyString(tc.input)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
-}
-
-func TestMarshalInstance_NilInstance(t *testing.T) {
-	t.Parallel()
-	a := newAdapter(t)
-
-	_, err := a.MarshalInstance(context.Background(), nil, nil)
-	assert.ErrorIs(t, err, ErrNilInstance)
-}
-
-func TestMarshalInstance_Properties(t *testing.T) {
-	t.Parallel()
-	s := testSchemaSimple(t)
-	a := newAdapter(t)
-
-	v := instance.NewValidator(s)
-	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
-		Properties: map[string]any{"id": "p1", "name": "Alice", "age": int64(30)},
-	})
-	require.True(t, result.OK(), result.String())
-
-	st, _ := s.Type("Person")
-	data, err := a.MarshalInstance(context.Background(), valid, st)
-	require.NoError(t, err)
-
-	var obj map[string]any
-	require.NoError(t, json.Unmarshal(data, &obj))
-	assert.Equal(t, "p1", obj["id"])
-	assert.Equal(t, "Alice", obj["name"])
-	assert.Equal(t, float64(30), obj["age"]) // JSON numbers are float64
-}
-
-func TestMarshalInstance_WithEdge(t *testing.T) {
-	t.Parallel()
-	s := testSchemaWithAssociation(t)
-	a := newAdapter(t)
-
-	v := instance.NewValidator(s)
-	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
-		Properties: map[string]any{
-			"id":       "p1",
-			"name":     "Alice",
-			"employer": map[string]any{"_target_id": "c1"},
-		},
-	})
-	require.True(t, result.OK(), result.String())
-
-	st, _ := s.Type("Person")
-	data, err := a.MarshalInstance(context.Background(), valid, st)
-	require.NoError(t, err)
-
-	var obj map[string]any
-	require.NoError(t, json.Unmarshal(data, &obj))
-	assert.Equal(t, "p1", obj["id"])
-	// FK is serialized as the key array (single cardinality).
-	assert.Equal(t, []any{"c1"}, obj["employer"])
-}
-
-func TestMarshalInstance_WithManyEdges(t *testing.T) {
-	t.Parallel()
-	s := testSchemaWithManyAssociation(t)
-	a := newAdapter(t)
-
-	v := instance.NewValidator(s)
-	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
-		Properties: map[string]any{
-			"id":   "p1",
-			"name": "Alice",
-			"employers": []any{
-				map[string]any{"_target_id": "c1"},
-				map[string]any{"_target_id": "c2"},
-			},
-		},
-	})
-	require.True(t, result.OK(), result.String())
-
-	st, _ := s.Type("Person")
-	data, err := a.MarshalInstance(context.Background(), valid, st)
-	require.NoError(t, err)
-
-	var obj map[string]any
-	require.NoError(t, json.Unmarshal(data, &obj))
-	// Many cardinality: array of key arrays.
-	fks, ok := obj["employers"].([]any)
-	require.True(t, ok, "employers should be array, got %T", obj["employers"])
-	assert.Len(t, fks, 2)
-}
-
-func TestMarshalInstance_WithIndent(t *testing.T) {
-	t.Parallel()
-	s := testSchemaSimple(t)
-	a := newAdapter(t)
-
-	v := instance.NewValidator(s)
-	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
-		Properties: map[string]any{"id": "p1", "name": "Bob", "age": int64(25)},
-	})
-	require.True(t, result.OK(), result.String())
-
-	st, _ := s.Type("Person")
-	data, err := a.MarshalInstance(context.Background(), valid, st, WithIndent("  "))
-	require.NoError(t, err)
-
-	assert.Contains(t, string(data), "\n")
-	assert.Contains(t, string(data), "  ")
-}
-
-func TestMarshalInstance_NilSchemaType(t *testing.T) {
-	t.Parallel()
-	s := testSchemaSimple(t)
-	a := newAdapter(t)
-
-	v := instance.NewValidator(s)
-	valid, result := v.ValidateOne(context.Background(), "Person", instance.RawInstance{
-		Properties: map[string]any{"id": "p1", "name": "Carol", "age": int64(40)},
-	})
-	require.True(t, result.OK(), result.String())
-
-	// Pass nil schemaType — should still serialize properties.
-	data, err := a.MarshalInstance(context.Background(), valid, nil)
-	require.NoError(t, err)
-
-	var obj map[string]any
-	require.NoError(t, json.Unmarshal(data, &obj))
-	assert.Equal(t, "p1", obj["id"])
-	assert.Equal(t, "Carol", obj["name"])
 }

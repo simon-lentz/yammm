@@ -1,5 +1,13 @@
 package snapshot
 
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+)
+
 // FIELD ORDER IN WIRE STRUCTS IS PART OF THE FORMAT CONTRACT.
 //
 // encoding/json serializes struct fields in declaration order. The integrity
@@ -10,14 +18,20 @@ package snapshot
 //   - Do NOT reorder existing fields within a format version.
 //   - New fields may be appended (with omitempty for backward compatibility).
 //   - Removing or reordering fields requires a format version bump.
-//   - The wire struct field ordering test in snapshot_test.go enforces this.
+//   - TestWireStructs_FieldOrder in wire_internal_test.go pins every wire
+//     struct's field order and tags by name, and
+//     TestWireStructs_EveryStructIsPinned fails when a new wire struct is
+//     added without a row there.
 //
 // TOP-LEVEL KEY ORDER AND BODY-SUFFIX STABILITY CONTRACT.
 //
-// The .ys wire format commits to two complementary structural contracts
-// beyond the per-struct field order above. Both are load-bearing for
-// UpdateMetadata's byte-surgery primitive; relaxing either silently
-// breaks every existing and future metadata-rewrite call site.
+// The .ys wire format commits to two structural contracts beyond the
+// per-struct field order above, and UpdateMetadata adds a third rule of its
+// own. The two format contracts are load-bearing for UpdateMetadata's
+// byte-surgery primitive: they are properties of the bytes Marshal emits, and
+// relaxing either silently breaks every existing and future metadata-rewrite
+// call site. The third is a behaviour of UpdateMetadata rather than of the
+// format, and relaxing it would announce itself through the version field.
 //
 //  1. Field-order contract (established pre-v0.3.0). The top-level
 //     document has exactly four keys in a fixed order:
@@ -34,10 +48,35 @@ package snapshot
 //     that insert a fifth top-level key, shift the header-body
 //     transition, or change the inter-key separator pattern silently
 //     break UpdateMetadata even without relaxing the field-order rule.
+//     UpdateMetadata(x, newMeta) == Marshal(Load(x)) for a document the
+//     current Marshal produced that carries no created_at, when newMeta
+//     is empty. The two conditions are not the same kind of condition.
+//     created_at is a condition on the document: UpdateMetadata preserves
+//     it from the input header and Load does not return it, so a
+//     re-marshal cannot reproduce it. Metadata is a condition on the
+//     call: UpdateMetadata writes newMeta and discards whatever the
+//     input carried, so a document holding metadata still matches a
+//     re-marshal when newMeta is empty, and a document holding none
+//     diverges when newMeta is not.
 //
-// Both contracts are tested in snapshot/wire_test.go via:
+//  3. Version preservation (introduced v0.12.0). UpdateMetadata rebuilds
+//     the header at the version it read, so it is a header rewrite and
+//     never a migration. From v0.12.0 the only readable version is 3:
+//     an older document is refused with
+//     E_SNAPSHOT_UNSUPPORTED_VERSION rather than rewritten, and
+//     UpdateMetadataOrReMarshal's Load + Marshal fallback refuses it
+//     the same way.
+//
+// These contracts are tested in snapshot/wire_test.go via:
 //   - TestWireFormat_TopLevelKeyOrder (token-level key-order pin)
 //   - TestWireFormat_BodySuffixContract (bodyOffset-capture + shape pin)
+//
+// the equivalence above in snapshot/wire_equivalence_test.go via
+// TestWireContract_UpdateMetadataMatchesReMarshal, which pins the
+// equality, the created_at divergence and both metadata directions in
+// the same test, and version preservation in
+// snapshot/update_contract_test.go via
+// TestUpdateMetadata_PreservesInputVersion.
 //
 // These tests run across a representative corpus of Marshal outputs
 // under every supported Option combination, so a future Marshal-side
@@ -46,29 +85,104 @@ package snapshot
 // See snapshot/update.go for the UpdateMetadata primitive that consumes
 // these contracts.
 
+// topLevelKeys is the exact key sequence contract 1 fixes. A document that
+// does not present these four keys, in this order, exactly once each, and none
+// of them null, did not come from Marshal.
+var topLevelKeys = [...]string{"yammm_snapshot", "types", "instances", "diagnostics"}
+
+// checkTopLevelKeys is the one definition of the document's outermost shape:
+// presence, order, uniqueness and non-nullness of the four top-level keys, and
+// that the document ends where the object does. Every surface holding the whole
+// document runs it. [HeaderOnlyRead] and [ScanDir] cannot and say so on their
+// own godoc: they read through a capped reader and never hold the body.
+//
+// It is not free: it scans the whole document and copies each top-level value
+// to skip it, so a caller that never decodes the body still pays a pass over
+// it. That cost is pinned by TestUpdateMetadataRatioFloor rather
+// than described here, because the first draft of this comment asserted a cost
+// profile nobody had measured and was false.
+func checkTopLevelKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return fmt.Errorf("expected JSON object: %w", err)
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return fmt.Errorf("expected JSON object, got %v", tok)
+	}
+
+	seen := 0
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("expected top-level key: %w", err)
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return fmt.Errorf("expected a top-level key, got %v", tok)
+		}
+		if seen == len(topLevelKeys) {
+			return fmt.Errorf("document carries a fifth top-level key %q; the format has exactly %d",
+				key, len(topLevelKeys))
+		}
+		if key != topLevelKeys[seen] {
+			return fmt.Errorf("top-level key %d is %q, expected %q", seen, key, topLevelKeys[seen])
+		}
+		if err := skipValue(dec, key); err != nil {
+			return err
+		}
+		seen++
+	}
+	if seen != len(topLevelKeys) {
+		return fmt.Errorf("document carries %d top-level keys, expected %d; %q is missing",
+			seen, len(topLevelKeys), topLevelKeys[seen])
+	}
+
+	// More reports false at the object's closing delimiter and at end of input
+	// alike, so the loop above exits identically on a complete document and on
+	// one truncated before its final brace. Reading the next token separates
+	// them, and there is no third outcome: a decoder that reports no more values
+	// at object level returns either that closing brace or an error, so the
+	// brace itself is not worth a branch nothing can drive.
+	if _, err := dec.Token(); err != nil {
+		return fmt.Errorf("document ends before the top-level object closes: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("document carries trailing data after the top-level object")
+	}
+	return nil
+}
+
+// skipValue advances past one top-level value and reports a null.
+//
+// It decodes into a json.RawMessage, which copies the value. A token walk
+// avoids the copy and is *slower* — encoding/json finds a value's bounds with
+// its scanner and only tokenizes on demand, so walking every token to skip a
+// section costs more than copying it. Measured: the token form put
+// UpdateMetadata below the 3x floor TestUpdateMetadataRatioFloor
+// pins. The copy is the cheaper of the two.
+func skipValue(dec *json.Decoder, key string) error {
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		return fmt.Errorf("failed to read the value of %q: %w", key, err)
+	}
+	if string(raw) == "null" {
+		return fmt.Errorf("top-level key %q is null", key)
+	}
+	return nil
+}
+
 // MinReadableVersion is the lowest .ys wire-format version this package
 // accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead).
-//
-// The accept range is the closed interval [MinReadableVersion, currentVersion].
-// Documents whose version field falls outside the range are rejected with a
-// Fatal [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] issue. The exported constant
-// lets consumers inspect the accept range without depending on the
-// unexported currentVersion.
-//
-// Asymmetric-reader semantics. yammm v0.3.0 bumped the wire format from
-// v1 to v2 alongside the addition of edge-property persistence on
-// unresolved edges (see [graph.UnresolvedEdge.Properties]). v2 readers
-// (yammm v0.3.0+) accept v1 documents losslessly — a v1 document simply
-// has no properties field on unresolved-edge wires, and the load path
-// populates the in-memory Properties as empty. v1 readers (yammm v0.2.x
-// and earlier) reject v2 documents cleanly via the existing
-// unknown-version rejection path rather than silently dropping edge
-// properties on cross-batch unresolved edges. See docs/VERSIONING.md
-// for the full pre-1.0 / post-1.0 wire-format policy.
-const MinReadableVersion = 1
+// The accept range is the closed interval [MinReadableVersion, currentVersion],
+// which is [3, 3]: v0.12.0 introduced v3 and retired every earlier version.
+// A document outside the range draws an Error-severity
+// [diag.E_SNAPSHOT_UNSUPPORTED_VERSION]. The package doc's Wire Format
+// Versions section and docs/VERSIONING.md carry the full policy.
+const MinReadableVersion = 3
 
 const (
-	currentVersion         = 2
+	currentVersion         = 3
 	currentHashAlgoVersion = 1
 )
 
@@ -88,7 +202,7 @@ type headerWire struct {
 }
 
 // marshalHeaderWire is used for encoding .ys headers. Version and
-// SchemaHashAlgorithm are written as literal constants in the manual
+// SchemaHashAlgorithm are written as literal parameters in the manual
 // byte assembly, not serialized from this struct.
 type marshalHeaderWire struct {
 	SchemaName    string            `json:"schema_name"`
@@ -100,73 +214,85 @@ type marshalHeaderWire struct {
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
-// instWire is the wire representation of a single instance.
-// Used for both root instances and composed children (recursive).
-//
-// Provenance uses json:"provenance" (no omitempty) — null provenance is
-// semantically meaningful (no source tracking). Edges and Composed use
-// omitempty because absence is the default state.
-type instWire struct {
-	Key        []any                 `json:"key"`
-	TypeID     *typeIDWire           `json:"type_id,omitempty"`
-	Properties map[string]any        `json:"properties"`
-	Edges      map[string][]edgeWire `json:"edges,omitempty"`
-	Composed   map[string][]instWire `json:"composed,omitempty"`
-	Provenance *provenanceWire       `json:"provenance"`
-}
-
-// typeIDWire is the optional cross-validation type identity.
-// Omitted when recoverable from context (single-schema case).
-type typeIDWire struct {
-	SchemaPath string `json:"schema_path"`
-	Name       string `json:"name"`
-}
-
-// edgeWire represents an edge target within an instance's edges map.
-// Properties is always present (no omitempty) — even when empty, edge
-// properties are a typed field on a resolved edge, serialized as {}.
-type edgeWire struct {
-	TargetType string         `json:"target_type"`
-	TargetKey  []any          `json:"target_key"`
-	Properties map[string]any `json:"properties"`
-}
-
 // provenanceWire is the wire representation of instance provenance.
 type provenanceWire struct {
 	SourceName string `json:"source_name"`
 	Path       string `json:"path"`
 }
 
-// diagWire is the wire representation of the diagnostics section.
-type diagWire struct {
-	Duplicates []dupWire        `json:"duplicates"`
-	Unresolved []unresolvedWire `json:"unresolved"`
+// typeTableEntry is one row of the types table — the document's denotation
+// set. SchemaPath plus Name is the lossless identity; every other position
+// references a row by index.
+type typeTableEntry struct {
+	SchemaPath string `json:"schema_path"`
+	Name       string `json:"name"`
 }
 
-// dupWire is the wire representation of a duplicate record.
+// instanceGroupWire is one entry of the instances section: one table row's
+// root instances. Present with empty Items means the snapshot holds the
+// type with no instances; absent means the snapshot does not hold the type.
+type instanceGroupWire struct {
+	Type  *int       `json:"type"`
+	Items []instWire `json:"items"`
+}
+
+// instWire is the wire representation of a single instance. Type is
+// required at every composed-child position and absent for a root, whose
+// group entry denotes its type; a root carrying one is cross-checked.
+type instWire struct {
+	Key        []any                 `json:"key"`
+	Type       *int                  `json:"type,omitempty"`
+	Properties map[string]any        `json:"properties"`
+	Edges      map[string][]edgeWire `json:"edges,omitempty"`
+	Composed   map[string][]instWire `json:"composed,omitempty"`
+	Provenance *provenanceWire       `json:"provenance"`
+}
+
+// edgeWire is the wire representation of an edge target. TargetType is a
+// nullable row index: a null or absent reference is a malformed document
+// and never binds to row 0.
+type edgeWire struct {
+	TargetType *int           `json:"target_type"`
+	TargetKey  []any          `json:"target_key"`
+	Properties map[string]any `json:"properties"`
+}
+
+// conflictWire is the address of the instance a duplicate collided with.
+// Key is null for a keyless slot occupant, which the reader resolves
+// through the parent slot alone.
+type conflictWire struct {
+	Type *int  `json:"type"`
+	Key  []any `json:"key"`
+}
+
+// dupWire is the wire representation of a duplicate record. Type and Key
+// identify the rejected instance; Conflict addresses the instance it
+// collided with. The parent coordinates are present only for a
+// composed-child duplicate and must name a root instance.
 type dupWire struct {
-	Type     string   `json:"type"`
-	Key      []any    `json:"key"`
-	Instance instWire `json:"instance"`
+	Type       *int          `json:"type"`
+	Key        []any         `json:"key"`
+	Instance   instWire      `json:"instance"`
+	Conflict   *conflictWire `json:"conflict"`
+	ParentType *int          `json:"parent_type,omitempty"`
+	ParentKey  []any         `json:"parent_key,omitempty"`
+	Relation   string        `json:"relation,omitempty"`
 }
 
 // unresolvedWire is the wire representation of an unresolved edge record.
-//
-// Properties is a v2 field (wire-format version 2+, landed in yammm v0.3.0).
-// v1 documents — produced by yammm v0.2.x — have no properties field on
-// unresolved-edge entries; v2 readers parse those documents losslessly,
-// populating the in-memory [graph.UnresolvedEdge] with empty Properties.
-// The `omitempty` tag keeps the field out of the wire for "absent" and
-// "empty" unresolved-edge reasons (which never had a target to attach
-// properties to) and for "target_missing" edges whose schema-declared
-// relationship carries no edge properties.
 type unresolvedWire struct {
-	SourceType string         `json:"source_type"`
+	SourceType *int           `json:"source_type"`
 	SourceKey  []any          `json:"source_key"`
 	Relation   string         `json:"relation"`
-	TargetType string         `json:"target_type"`
+	TargetType *int           `json:"target_type"`
 	TargetKey  []any          `json:"target_key"`
 	Required   bool           `json:"required"`
 	Reason     string         `json:"reason"`
 	Properties map[string]any `json:"properties,omitempty"`
+}
+
+// diagWire is the wire representation of the diagnostics section.
+type diagWire struct {
+	Duplicates []dupWire        `json:"duplicates"`
+	Unresolved []unresolvedWire `json:"unresolved"`
 }

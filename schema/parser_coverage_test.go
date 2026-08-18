@@ -1513,7 +1513,7 @@ type Thing {
 	id UUID primary
 	a Integer
 	b Integer
-	! "Conditional check" a > 0 ? { b > 0 }
+	! "Conditional check" a > 0 ? { b > 0 : true }
 }`,
 			wantOK: true,
 		},

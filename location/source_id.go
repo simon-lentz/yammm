@@ -103,13 +103,6 @@ func MustSourceIDFromPath(path string) SourceID {
 	return sid
 }
 
-// SourceIDFromCanonicalPath creates a SourceID from an already-canonical path.
-//
-// The CanonicalPath is stored directly—no conversion to string and back.
-func SourceIDFromCanonicalPath(cp CanonicalPath) SourceID {
-	return SourceID{cp: cp}
-}
-
 // SourceIDFromAbsolutePath creates a file-backed SourceID using
 // filesystem-independent canonicalization.
 //

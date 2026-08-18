@@ -37,8 +37,8 @@
 //
 //	// Get snapshot for inspection
 //	snap := g.Snapshot()
-//	for _, typeName := range snap.Types() {
-//	    for _, inst := range snap.InstancesOf(typeName) {
+//	for _, typeID := range snap.Types() {
+//	    for _, inst := range snap.InstancesOf(typeID) {
 //	        // Process instances
 //	    }
 //	}
@@ -52,8 +52,7 @@
 // Check, and is concurrent-safe by default — multiple goroutines may
 // share one assembler:
 //
-//	ba := graph.NewBatchAssembler(ctx, s,
-//	    graph.WithValidatorOptions(instance.RecommendedOptions()...))
+//	ba := graph.NewBatchAssembler(ctx, s)
 //	for i, rec := range records {
 //	    if err := ba.Add("TypeName", buildRawInstance(rec)); err != nil {
 //	        return fmt.Errorf("record %d: %w", i, err)
@@ -119,21 +118,37 @@
 //
 //   - [WithLogger]: structured logger for graph construction diagnostics
 //
-// # Type Names
+// # Type Identity and Type Names
 //
-// All string-based type name parameters and return values use the
-// canonical instance tag form:
+// A type is identified by [github.com/simon-lentz/yammm/schema.TypeID] — its
+// declaring schema path plus its name. A type *name* is a rendering of that
+// identity, in canonical instance tag form:
 //
 //   - Local types: unqualified name (e.g., "Person")
 //   - Imported types: alias-qualified name (e.g., "c.Entity")
 //
-// This applies to:
+// The rendering is lossy, and only ever suitable for display. A type reachable
+// only through an intermediate import has no alias to qualify with and renders
+// bare, so it can collide with a local type of the same name; two same-named
+// types in different schemas render identically. Keying anything by a rendering
+// therefore merges types that are not the same type, silently and before any
+// diagnostic can see it.
+//
+// So every place that must denote a type exactly takes an identity:
 //
 //   - [Snapshot.Types]
 //   - [Snapshot.InstancesOf]
 //   - [Snapshot.InstanceByKey]
 //   - [Snapshot.Instances] map keys
-//   - [Instance.TypeName]
+//   - [SnapshotParts.Types] and [SnapshotParts.Instances] map keys
+//   - the type fields on [EdgeParts], [DuplicateParts] and [UnresolvedParts]
+//   - [UnresolvedEdge.TargetType]
+//
+// [Instance.TypeName] still carries the rendered name, because an instance
+// carries its identity beside it ([Instance.TypeID]) and the name is what a
+// document was written with. Use
+// [github.com/simon-lentz/yammm/schema.TagForm] to render an identity where
+// output needs a name — Cypher labels, CSV filenames, JSON object keys.
 //
 // # Key Formatting
 //

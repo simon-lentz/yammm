@@ -173,24 +173,6 @@ func (a *Adapter) ParseWithTypeColumn(
 	return results, collector.Result()
 }
 
-// ParseOne parses a single pre-split CSV row into a RawInstance.
-//
-// The columns and row parameters are the natural output of [csv.Reader.Read]
-// paired with a previously read header row. This method supports streaming
-// pipelines where the caller controls CSV reading.
-func (a *Adapter) ParseOne(
-	ctx context.Context, //nolint:revive // reserved for future use (cancellation)
-	source location.SourceID, //nolint:revive // reserved for future provenance tracking
-	typeName string,
-	columns []string,
-	row []string,
-	schemaType *schema.Type,
-) (instance.RawInstance, diag.Result) {
-	collector := diag.NewCollector(0)
-	props := a.recordToProps(row, columns, schemaType, 0, typeName, collector)
-	return instance.RawInstance{Properties: props}, collector.Result()
-}
-
 // readHeader reads the header row (if configured) and returns column names
 // and the starting row number for data rows.
 func (a *Adapter) readHeader(reader *csv.Reader) (columns []string, startRow int, err error) {
