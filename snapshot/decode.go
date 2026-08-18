@@ -32,6 +32,7 @@ type streamDecoder struct {
 	header    headerWire       // decoded header
 	typeTable []typeTableEntry // decoded types table
 	tableIDs  []schema.TypeID  // identity per table row, zero where unresolved
+	tableTags []string         // rendered tag per table row; nil when schema is nil
 	collector *diag.Collector  // accumulates diagnostics
 
 	// loadCfg holds deserialization options (e.g., skip integrity check).
@@ -279,7 +280,7 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 			sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
 			return nil, fmt.Errorf("context cancelled: %w", err)
 		}
-		row, ok := sd.requireRow(g.Type, fmt.Sprintf("instances entry %d", gi))
+		row, ok := sd.requireRow(g.Type, func() string { return fmt.Sprintf("instances entry %d", gi) })
 		if !ok {
 			continue
 		}
@@ -337,8 +338,9 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 
 	for relName, targets := range inst.Edges {
 		for ei, e := range targets {
-			targetRow, ok := sd.requireRow(e.TargetType,
-				fmt.Sprintf("edge %d under %s.%s", ei, sd.refAt(row), relName))
+			targetRow, ok := sd.requireRow(e.TargetType, func() string {
+				return fmt.Sprintf("edge %d under %s.%s", ei, sd.refAt(row), relName)
+			})
 			if !ok {
 				continue
 			}
@@ -355,7 +357,11 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 
 	for relName, children := range inst.Composed {
 		for _, child := range children {
-			childRow, ok := sd.composedChildRow(child, relName, row)
+			// The writer emits a row at every non-root position, so an absent
+			// one is malformed rather than a value to recover from context.
+			childRow, ok := sd.requireRow(child.Type, func() string {
+				return fmt.Sprintf("composed child under %s.%s", sd.refAt(row), relName)
+			})
 			if !ok {
 				continue
 			}
@@ -366,14 +372,6 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 			sd.walkInstance(childRow, child, depth+1, childSlot, idx)
 		}
 	}
-}
-
-// composedChildRow reads a composed child's declared table row. The writer
-// emits one at every non-root position, so its absence is a malformed
-// document rather than a value to recover from context.
-func (sd *streamDecoder) composedChildRow(child instWire, relName string, parentRow int) (int, bool) {
-	return sd.requireRow(child.Type,
-		fmt.Sprintf("composed child under %s.%s", sd.refAt(parentRow), relName))
 }
 
 // checkProvenancePath warns when a provenance path will not parse. The
@@ -401,7 +399,7 @@ func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
 // parent's slot, where a null stated key needs a sole occupant.
 func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 	for di, dup := range diags.Duplicates {
-		row, rowOK := sd.requireRow(dup.Type, fmt.Sprintf("duplicate record %d", di))
+		row, rowOK := sd.requireRow(dup.Type, func() string { return fmt.Sprintf("duplicate record %d", di) })
 		keyStr := formatWireKey(dup.Key)
 
 		if rowOK && dup.Instance.Type != nil && *dup.Instance.Type != row {
@@ -442,8 +440,9 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 				fmt.Sprintf("duplicate record %d (%s[%s]) carries no conflict block", di, sd.refAt(row), keyStr)).Build())
 			continue
 		}
-		conflictRow, conflictOK := sd.requireRow(dup.Conflict.Type,
-			fmt.Sprintf("duplicate record %d conflict", di))
+		conflictRow, conflictOK := sd.requireRow(dup.Conflict.Type, func() string {
+			return fmt.Sprintf("duplicate record %d conflict", di)
+		})
 		if !conflictOK {
 			continue
 		}
@@ -471,7 +470,9 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 				fmt.Sprintf("duplicate record %d carries relation %q with no parent coordinates", di, dup.Relation)).Build())
 			continue
 		}
-		parentRow, ok := sd.requireRow(dup.ParentType, fmt.Sprintf("duplicate record %d parent", di))
+		parentRow, ok := sd.requireRow(dup.ParentType, func() string {
+			return fmt.Sprintf("duplicate record %d parent", di)
+		})
 		if !ok {
 			continue
 		}
@@ -498,7 +499,9 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 
 	for ui, u := range diags.Unresolved {
 		sd.checkUnresolvedReason(ui, u)
-		sourceRow, ok := sd.requireRow(u.SourceType, fmt.Sprintf("unresolved record %d source", ui))
+		sourceRow, ok := sd.requireRow(u.SourceType, func() string {
+			return fmt.Sprintf("unresolved record %d source", ui)
+		})
 		if ok {
 			sourceKey := formatWireKey(u.SourceKey)
 			if !idx.rootExists(sourceRow, sourceKey) {
@@ -510,7 +513,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 					Build())
 			}
 		}
-		sd.requireRow(u.TargetType, fmt.Sprintf("unresolved record %d target", ui))
+		sd.requireRow(u.TargetType, func() string { return fmt.Sprintf("unresolved record %d target", ui) })
 	}
 }
 
@@ -702,7 +705,7 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 func (sd *streamDecoder) instanceParts(row int, inst instWire) graph.InstanceParts {
 	id := sd.tableIDs[row]
 	ip := graph.InstanceParts{
-		TypeName:   schema.TagForm(sd.schema, id),
+		TypeName:   sd.tableTags[row],
 		TypeID:     id,
 		PrimaryKey: immutable.WrapKey(normalizeSlice(inst.Key)),
 		Properties: immutable.WrapProperties(normalizeMap(inst.Properties)),
@@ -767,16 +770,15 @@ func (sd *streamDecoder) verifyIntegrity() string {
 		return "skipped"
 	}
 
-	// Locate "integrity_hash" key and replace its value with "".
-	canonical := replaceIntegrityHash(sd.data, sd.header.IntegrityHash)
-	if canonical == nil {
+	prefix, suffix, ok := integrityHashSpans(sd.data)
+	if !ok {
 		// Could not locate the integrity hash in the raw bytes.
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INTEGRITY_MISMATCH,
 			"could not locate integrity_hash in document for verification").Build())
 		return "mismatch"
 	}
 
-	h := sha256Sum(canonical)
+	h := sha256Sum(prefix, emptyJSONString, suffix)
 	if h != sd.header.IntegrityHash {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INTEGRITY_MISMATCH,
 			"integrity hash does not match document content").
@@ -790,15 +792,19 @@ func (sd *streamDecoder) verifyIntegrity() string {
 	return "ok"
 }
 
-// replaceIntegrityHash replaces the integrity_hash value in the raw bytes
-// with "" (empty string) to reconstruct the canonical form.
-func replaceIntegrityHash(data []byte, _ string) []byte {
+// emptyJSONString is the integrity_hash value the canonical form carries.
+var emptyJSONString = []byte(`""`)
+
+// integrityHashSpans locates the integrity_hash value and returns the bytes
+// on either side of it. The canonical form is prefix + `""` + suffix, which
+// the caller hashes segment by segment rather than materializing.
+func integrityHashSpans(data []byte) (prefix, suffix []byte, ok bool) {
 	// Find the integrity_hash key in the data.
 	// The key appears as "integrity_hash" followed by : and the value.
 	keyBytes := []byte(`"integrity_hash"`)
 	idx := bytes.Index(data, keyBytes)
 	if idx < 0 {
-		return nil
+		return nil, nil, false
 	}
 
 	// Advance past the key to find the colon.
@@ -807,7 +813,7 @@ func replaceIntegrityHash(data []byte, _ string) []byte {
 		pos++
 	}
 	if pos >= len(data) || data[pos] != ':' {
-		return nil
+		return nil, nil, false
 	}
 	pos++ // skip colon
 
@@ -816,7 +822,7 @@ func replaceIntegrityHash(data []byte, _ string) []byte {
 		pos++
 	}
 	if pos >= len(data) || data[pos] != '"' {
-		return nil
+		return nil, nil, false
 	}
 
 	// Find the end of the quoted string value.
@@ -829,22 +835,21 @@ func replaceIntegrityHash(data []byte, _ string) []byte {
 		pos++
 	}
 	if pos >= len(data) {
-		return nil
+		return nil, nil, false
 	}
 	valueEnd := pos + 1 // position after closing quote
 
-	// Replace the value with "".
-	var result []byte
-	result = append(result, data[:valueStart]...)
-	result = append(result, `""`...)
-	result = append(result, data[valueEnd:]...)
-	return result
+	return data[:valueStart], data[valueEnd:], true
 }
 
-// sha256Sum computes the SHA-256 hash of data and formats it as "sha256:<hex>".
-func sha256Sum(data []byte) string {
-	h := sha256.Sum256(data)
-	return fmt.Sprintf("sha256:%x", h)
+// sha256Sum hashes the concatenation of segments and formats the digest as
+// "sha256:<hex>". It is the one definition of that form.
+func sha256Sum(segments ...[]byte) string {
+	h := sha256.New()
+	for _, seg := range segments {
+		h.Write(seg)
+	}
+	return fmt.Sprintf("sha256:%x", h.Sum(nil))
 }
 
 // formatWireKey formats a wire key ([]any) as a canonical string.

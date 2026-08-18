@@ -3,7 +3,6 @@ package snapshot
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,8 +134,11 @@ type writerView struct {
 // differs from its identity would otherwise be silently rebound on load —
 // and a type the snapshot holds with no instances keeps an empty group.
 func newWriterView(snap *graph.Snapshot) *writerView {
+	// Types returns a fresh defensive copy per call, so it is taken once.
+	snapTypes := snap.Types()
+
 	byID := make(map[schema.TypeID][]*graph.Instance)
-	order := make([]schema.TypeID, 0, len(snap.Types()))
+	order := make([]schema.TypeID, 0, len(snapTypes))
 	edges := make(map[*graph.Instance][]*graph.Edge)
 
 	addGroup := func(id schema.TypeID) {
@@ -146,7 +148,7 @@ func newWriterView(snap *graph.Snapshot) *writerView {
 		}
 	}
 
-	for _, typeID := range snap.Types() {
+	for _, typeID := range snapTypes {
 		addGroup(typeID)
 		for _, inst := range snap.InstancesOf(typeID) {
 			id := inst.TypeID()
@@ -402,8 +404,7 @@ func assembleDocument(
 	)
 
 	// Step 6: Compute integrity hash.
-	h := sha256.Sum256(canonBytes)
-	integrityHash := fmt.Sprintf("sha256:%x", h)
+	integrityHash := sha256Sum(canonBytes)
 
 	// Step 7: Re-assemble with computed hash.
 	finalBytes := buildDocument(

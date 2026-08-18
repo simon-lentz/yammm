@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"context"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -227,11 +228,7 @@ func recordOf(position string, inst *graph.Instance) identityRecord {
 // renderProps carries each value's dynamic type into the record: a whole float
 // narrowed to int64 is a fidelity loss the value alone does not show.
 func renderProps(props map[string]any) string {
-	keys := make([]string, 0, len(props))
-	for k := range props {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
+	keys := slices.Sorted(maps.Keys(props))
 	rendered := make([]string, len(keys))
 	for i, k := range keys {
 		rendered[i] = k + "=" + renderValue(props[k])

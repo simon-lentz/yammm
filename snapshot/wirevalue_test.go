@@ -305,3 +305,74 @@ func TestAssertRoundTrip_Float32Property(t *testing.T) {
 		t.Errorf("32-bit fidelity lost: went in %v, returned %v", want, got)
 	}
 }
+
+// listIntSchema declares a List whose element constraint is not Float, which
+// is the arm the float healer must leave alone.
+const listIntSchema = `schema "listint"
+
+type Tally {
+	id String primary
+	counts List<Integer>
+}
+`
+
+// TestMarshal_ListOfIntegerElementsStayIntShaped pins the KindList arm's
+// recursion into a non-Float element constraint. Routing list elements
+// through wireNumeric instead of wireValue heals Integer elements into
+// floats, which no List<Float> fixture can detect.
+func TestMarshal_ListOfIntegerElementsStayIntShaped(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	s, result := schema.LoadString(ctx, listIntSchema, "listint.yammm")
+	if result.HasErrors() {
+		t.Fatalf("load listint schema: %s", result)
+	}
+
+	g := graph.New(s)
+	g.Add(ctx, mustValidInstance(t, s, "Tally", []any{"t1"}, map[string]any{
+		"id":     "t1",
+		"counts": []any{int64(1), int64(2), int64(3)},
+	}))
+
+	data, res := snapshot.Marshal(ctx, g.Snapshot())
+	if err := res.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	doc := string(data)
+
+	if !strings.Contains(doc, `"counts":[1,2,3]`) {
+		t.Errorf("Integer list elements did not emit int-shaped:\n%s", doc)
+	}
+	if strings.Contains(doc, "1.0") {
+		t.Errorf("Integer list elements were healed into floats:\n%s", doc)
+	}
+}
+
+// TestMarshal_Float64ArmEmitsAtFullWidth pins the width wireNumeric's float64
+// arm emits at. A value carrying more mantissa than float32 holds renders
+// differently at bitSize 32, so emitting it through wireFloat32 silently
+// truncates a property the document declared as a Float.
+func TestMarshal_Float64ArmEmitsAtFullWidth(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadWireTestSchema(t)
+
+	// float32(3.141592653589793) renders "3.1415927": the two forms diverge
+	// at the ninth digit, so neither is a substring of the other.
+	const wide = 3.141592653589793
+	snap := buildWireTestSnapshot(t, s, wide, []any{float64(1), 2.5})
+
+	data, res := snapshot.Marshal(ctx, snap)
+	if err := res.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	doc := string(data)
+
+	if !strings.Contains(doc, "3.141592653589793") {
+		t.Errorf("float64 property did not emit at 64-bit width:\n%s", doc)
+	}
+	if strings.Contains(doc, "3.1415927") {
+		t.Errorf("float64 property emitted at 32-bit width:\n%s", doc)
+	}
+}

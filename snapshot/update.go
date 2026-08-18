@@ -2,7 +2,6 @@ package snapshot
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"maps"
 	"sort"
@@ -237,13 +236,7 @@ func UpdateMetadata(
 
 	// Pass 1: build canonical form with empty integrity hash, compute SHA-256.
 	headerBytes := buildHeaderBytes(hdr, indent, sd.header.Version, sd.header.SchemaHashAlgorithm)
-	canon := make([]byte, 0, len(prefix)+len(headerBytes)+len(bodySuffix))
-	canon = append(canon, prefix...)
-	canon = append(canon, headerBytes...)
-	canon = append(canon, bodySuffix...)
-
-	h := sha256.Sum256(canon)
-	hdr.IntegrityHash = fmt.Sprintf("sha256:%x", h)
+	hdr.IntegrityHash = sha256Sum([]byte(prefix), headerBytes, bodySuffix)
 
 	// Pass 2: rebuild header with the computed hash and concatenate.
 	headerBytes = buildHeaderBytes(hdr, indent, sd.header.Version, sd.header.SchemaHashAlgorithm)

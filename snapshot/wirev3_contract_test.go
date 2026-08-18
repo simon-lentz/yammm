@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -571,5 +573,91 @@ func TestWireV3_RejectedRowDoesNotAttributeAWarning(t *testing.T) {
 	}
 	if hasCode(res, diag.E_SNAPSHOT_PATH_FALLBACK) {
 		t.Errorf("a rejected type row still drew a provenance warning, which can only name row 0's type: %v", res)
+	}
+}
+
+// TestWireV3_NegativeRowIndexIsMalformed pins the lower half of requireRow's
+// bounds check. The upper half is driven by an out-of-range row; nothing drove
+// a negative one, so the `*row < 0` clause carried no assertion and a reader
+// that bound it to row 0 would have read every reference as the first type.
+func TestWireV3_NegativeRowIndexIsMalformed(t *testing.T) {
+	ctx := context.Background()
+	s := testSchemaWithComposition(t)
+	data := v3Doc(t)
+
+	marker := []byte(`"instances":[{"type":`)
+	at := bytes.Index(data, marker)
+	if at < 0 {
+		t.Fatalf("instances section does not start with a group entry: %s", data)
+	}
+	end := at + len(marker)
+	for end < len(data) && data[end] >= '0' && data[end] <= '9' {
+		end++
+	}
+	edited := append(append([]byte{}, data[:at+len(marker)]...), append([]byte("-1"), data[end:]...)...)
+	if bytes.Equal(edited, data) {
+		t.Fatalf("edit is vacuous: the document is unchanged")
+	}
+
+	const wantReason = "instances entry 0 references types table row -1"
+
+	loaded, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	if !hasMalformedReason(res, wantReason) {
+		t.Errorf("Load did not report %q: %v", wantReason, res)
+	}
+	if loaded != nil {
+		t.Errorf("Load returned a snapshot for a negative row reference")
+	}
+
+	vres := snapshot.Verify(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	if !hasMalformedReason(vres, wantReason) {
+		t.Errorf("Verify did not report %q: %v", wantReason, vres)
+	}
+}
+
+// TestWireV3_InstancelessTypeEmitsAnEmptyGroup pins the byte shape the
+// enumeration's fixpoint claim rests on: a type the document denotes but holds
+// no instances of survives as a group with an empty item list. The byte
+// fixpoint cannot detect the loss, because dropping the group cancels across
+// both generations of the round trip.
+func TestWireV3_InstancelessTypeEmitsAnEmptyGroup(t *testing.T) {
+	ctx := context.Background()
+	s := testSchemaWithComposition(t)
+
+	populated := mustTypeID(t, s, "Parent")
+	empty := mustTypeID(t, s, "Child")
+
+	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types: []schema.TypeID{populated, empty},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			populated: {{
+				TypeName:   "Parent",
+				TypeID:     populated,
+				PrimaryKey: immutable.WrapKey([]any{"p1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
+			}},
+		},
+	})
+	if res.HasErrors() {
+		t.Fatalf("assembling: %s", res)
+	}
+
+	emptyRow := -1
+	data, mres := snapshot.Marshal(ctx, built)
+	if mres.HasErrors() {
+		t.Fatalf("marshal: %v", mres)
+	}
+	for i, e := range wireTypeTable(t, data) {
+		if e.Name == "Child" {
+			emptyRow = i
+		}
+	}
+	if emptyRow < 0 {
+		t.Fatalf("an instance-less type left the types table entirely:\n%s", data)
+	}
+
+	want := fmt.Sprintf(`{"type":%d,"items":[]}`, emptyRow)
+	if !strings.Contains(string(data), want) {
+		t.Errorf("instance-less type did not emit %s:\n%s", want, data)
 	}
 }

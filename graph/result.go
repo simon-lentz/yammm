@@ -110,15 +110,12 @@ func (r *Snapshot) InstancesOf(id schema.TypeID) []*Instance {
 	return result
 }
 
-// AllInstances returns an iterator over every instance in the graph in
-// deterministic order: types sorted lexicographically, instances within
-// each type sorted by primary key.
+// AllInstances returns an iterator over every root instance in the graph, in
+// deterministic order: types by identity, instances within each type by
+// primary key. The order is stable across calls.
 //
-// This is the simplest way to iterate all instances without composition
-// structure. For composition-aware traversal, use [walk.Walk].
-//
-// Unlike [Snapshot.Instances] (which returns a map with non-deterministic
-// iteration order), AllInstances guarantees stable ordering across calls.
+// Composed children are not yielded. For the subtree beneath a root, walk
+// [Instance.ComposedRelations] and [Instance.Composed].
 func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
 	return func(yield func(*Instance) bool) {
 		if r == nil {

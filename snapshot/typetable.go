@@ -3,6 +3,7 @@ package snapshot
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -43,18 +44,12 @@ type typeTable struct {
 	index   map[schema.TypeID]int
 }
 
-// indexOf returns the table row for id. A miss means the collection pass did
-// not reach a position the writer is now emitting, which is an internal
-// inconsistency rather than a property of the data.
-func (tt *typeTable) indexOf(id schema.TypeID) (int, bool) {
-	i, ok := tt.index[id]
-	return i, ok
-}
-
 // rowRef returns a fresh pointer to the table row for id, for the nullable
-// row-index wire fields.
+// row-index wire fields. A miss means the collection pass did not reach a
+// position the writer is now emitting, which is an internal inconsistency
+// rather than a property of the data.
 func (tt *typeTable) rowRef(id schema.TypeID, position string) (*int, error) {
-	row, ok := tt.indexOf(id)
+	row, ok := tt.index[id]
 	if !ok {
 		return nil, &tableMissError{id: id, position: position}
 	}
@@ -108,11 +103,7 @@ func buildTypeTable(view *writerView) *typeTable {
 		seen[u.TargetType] = struct{}{}
 	}
 
-	ids := make([]schema.TypeID, 0, len(seen))
-	for id := range seen {
-		ids = append(ids, id)
-	}
-	slices.SortFunc(ids, func(a, b schema.TypeID) int {
+	ids := slices.SortedFunc(maps.Keys(seen), func(a, b schema.TypeID) int {
 		return cmp.Compare(a.String(), b.String())
 	})
 
@@ -152,9 +143,13 @@ func (sd *streamDecoder) resolveTypeTable() {
 	if sd.schema == nil {
 		return
 	}
+	// The tag renders from the row alone, so it is derived once here rather
+	// than per instance and per composed child during materialization.
+	sd.tableTags = make([]string, len(sd.typeTable))
 	for i, e := range sd.typeTable {
 		if t, ok := typeByWireID(sd.schema, e.SchemaPath, e.Name); ok {
 			sd.tableIDs[i] = t.ID()
+			sd.tableTags[i] = schema.TagForm(sd.schema, t.ID())
 			continue
 		}
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
@@ -176,19 +171,21 @@ func (sd *streamDecoder) rowAt(row *int) (int, bool) {
 }
 
 // requireRow is rowAt with a diagnostic: nil and out-of-range each draw an
-// Error naming the position, and neither ever binds to row 0.
-func (sd *streamDecoder) requireRow(row *int, position string) (int, bool) {
+// Error naming the position, and neither ever binds to row 0. position runs
+// only on the failure paths — the walk asks for a row per edge and per
+// composed child, and discards the message whenever the reference resolves.
+func (sd *streamDecoder) requireRow(row *int, position func() string) (int, bool) {
 	if r, ok := sd.rowAt(row); ok {
 		return r, true
 	}
 	if row == nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			position+" carries no types-table row").Build())
+			position()+" carries no types-table row").Build())
 		return 0, false
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 		fmt.Sprintf("%s references types table row %d, which holds %d rows",
-			position, *row, len(sd.typeTable))).Build())
+			position(), *row, len(sd.typeTable))).Build())
 	return 0, false
 }
 
