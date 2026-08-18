@@ -19,8 +19,7 @@ import (
 // W_ANNOTATION_SHADOWED. Returns nil for a nil type or one with no @writeOnce
 // properties.
 //
-// The result unions with any keys passed via [WithImmutableKeys]; see that
-// option for the effective-set contract.
+// The write path selects a type's immutable-key query shape from this set.
 func ImmutableKeysFor(t *schema.Type) []string {
 	if t == nil {
 		return nil

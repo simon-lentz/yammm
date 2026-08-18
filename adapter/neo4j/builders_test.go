@@ -92,7 +92,7 @@ func TestBuildRelationshipMergeQuery_ReturnSuffix(t *testing.T) {
 func TestBuildBatchRelationshipMergeQuery_ReturnSuffix(t *testing.T) {
 	t.Parallel()
 	for _, hasProps := range []bool{false, true} {
-		got := buildBatchRelationshipMergeQuery(
+		got := BuildBatchRelationshipMergeQuery(
 			"A", []string{"x"},
 			"KNOWS",
 			"B", []string{"y"},
@@ -144,7 +144,7 @@ func TestBuildRelationshipMergeQuery_WithProps_Golden(t *testing.T) {
 
 func TestBuildBatchRelationshipMergeQuery_NoProps_Golden(t *testing.T) {
 	t.Parallel()
-	got := buildBatchRelationshipMergeQuery(
+	got := BuildBatchRelationshipMergeQuery(
 		"A", []string{"x"},
 		"KNOWS",
 		"B", []string{"y"},
@@ -162,7 +162,7 @@ func TestBuildBatchRelationshipMergeQuery_NoProps_Golden(t *testing.T) {
 
 func TestBuildBatchRelationshipMergeQuery_WithProps_Golden(t *testing.T) {
 	t.Parallel()
-	got := buildBatchRelationshipMergeQuery(
+	got := BuildBatchRelationshipMergeQuery(
 		"A", []string{"x"},
 		"KNOWS",
 		"B", []string{"y"},
@@ -245,7 +245,7 @@ func TestBuildRelationshipMergeQuery_CompositeKeys(t *testing.T) {
 
 func TestBuildBatchRelationshipMergeQuery_CompositeKeys(t *testing.T) {
 	t.Parallel()
-	got := buildBatchRelationshipMergeQuery(
+	got := BuildBatchRelationshipMergeQuery(
 		"Src", []string{"a", "b"},
 		"REL",
 		"Tgt", []string{"x", "y"},

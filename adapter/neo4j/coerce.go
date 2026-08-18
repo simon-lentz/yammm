@@ -306,11 +306,11 @@ func paramKey(prefix, name string) string {
 //
 // MERGE keys are NOT included, because they do not sit where the properties sit
 // and describing both in one map means guessing which of the two a colliding
-// name belongs to: in a flat row `key_id` is a property so named, while in
-// [buildBatchNodeMergeQuery]'s row shape `key_id` is the merge key for `id` and
-// the properties live nested under row.props. Take them from
-// [ParamTypesForMergeKeys], which describes that shape, and merge the two when
-// the caller's own shape is the one that carries both.
+// name belongs to: in a flat row `key_id` is a property so named, while in the
+// batched node-merge row shape `key_id` is the merge key for `id` and the
+// properties live nested under row.props. A caller whose own shape carries
+// both is responsible for describing the merge keys itself and merging the two
+// maps.
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
 	pt := make(ParamTypes)
 	// AllProperties, not Properties: an inherited property is as present in a

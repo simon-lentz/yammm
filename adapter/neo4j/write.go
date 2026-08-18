@@ -274,7 +274,7 @@ func (a *Adapter) BatchEdgeQueries(
 			rows = append(rows, row)
 		}
 
-		stmt := buildBatchRelationshipMergeQuery(
+		stmt := BuildBatchRelationshipMergeQuery(
 			srcShape.Label, srcShape.PrimaryKeys,
 			sig.relType,
 			tgtShape.Label, tgtShape.PrimaryKeys,

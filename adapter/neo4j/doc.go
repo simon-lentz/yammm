@@ -93,7 +93,7 @@
 // [Adapter.Label] generates namespaced Neo4j labels from schema and type names.
 // [Adapter.DetectLabelCollisions] checks for collisions after sanitization.
 // [SanitizeIdentifier] and [ValidateIdentifier] apply Neo4j naming rules,
-// and [CypherReservedKeywords] returns the set of reserved keywords.
+// rejecting reserved keywords with [ErrReservedKeyword].
 //
 // # Cypher Reserved Words
 //
@@ -126,54 +126,41 @@
 //
 // Write query generation supports two operational modes:
 //
-//   - Graph mode: [Adapter.BatchNodeQueries] and [Adapter.BatchEdgeQueries]
-//     operate on a complete [graph.Snapshot] for high-throughput batch writes.
-//
-//   - Instance mode: [Adapter.NodeQueryFor] accepts any [NodeSource] (including
-//     [*instance.ValidInstance]), and [Adapter.EdgeQueriesFor] generates edge
-//     queries directly from a validated instance's edge data — no graph needed.
-//
-// Single-instance queries ([Adapter.NodeQueryFor], [Adapter.EdgeQueryFor])
-// complement the batch entry points for streaming pipelines.
+// [Adapter.BatchNodeQueries] and [Adapter.BatchEdgeQueries] operate on a
+// complete [graph.Snapshot] for high-throughput batch writes. Both refuse a
+// snapshot in which two type identities render one type name, rather than
+// writing two types under one label.
 //
 // # Write-Once Derivation
 //
 // [ImmutableKeysFor] returns a type's @writeOnce-annotated properties (own and
 // inherited). [Adapter.ShapeForSchema] records them on each [NodeShape], and the
-// node write path unions that set with any keys passed via [WithImmutableKeys],
+// node write path selects the immutable-key shape per type from that set,
 // so a @writeOnce property is set on node creation and never rewritten on a
 // subsequent MERGE.
 //
 // The guarantee does not depend on the caller holding a [schema.Type]: the keys
-// travel on the shape, which every write entry point already receives, so
-// [Adapter.NodeQueryFor] honors @writeOnce even in the streaming call shape that
-// passes a nil schema type. Passing a property to [WithImmutableKeys] adds to
-// the set and never removes from it, so there is no way to opt a @writeOnce
-// property back into being rewritten.
+// travel on the shape, which every write entry point already receives. Nothing
+// in the write surface removes a key from that set, so there is no way to opt a
+// @writeOnce property back into being rewritten.
 //
 // # Cypher Builders
 //
-// The four exported builders produce the Cypher templates the write
-// surface uses internally, exposed for advanced consumers (e.g.,
-// a link engine) that want the template without the surrounding
-// param-and-chunk plumbing:
+// [BuildBatchRelationshipMergeQuery] produces the UNWIND-batched relationship
+// MERGE template the write surface uses internally. It is exported for
+// consumers — a link engine resolving edges across datasets, for instance —
+// that want the template without the surrounding param-and-chunk plumbing.
 //
-//   - [buildNodeMergeQuery] / [buildBatchNodeMergeQuery] — node MERGE
-//     templates; the trailing [KeyMutability] parameter ([MutableKeys]
-//     or [ImmutableKeys]) selects between a single `SET` clause and
-//     the `ON CREATE SET` / `ON MATCH SET` split.
-//   - [buildRelationshipMergeQuery] / [buildBatchRelationshipMergeQuery]
-//     — relationship MERGE templates. Both variants always end with
-//     `RETURN count(*) AS matched_rows` so consumers implementing
-//     silent-failure detection have a stable column to sum across
-//     calls (per-call for the single variant, per-chunk for the batch
-//     variant; cross-call / cross-chunk aggregation is the consumer's).
-//     Node builders stay RETURN-free — constraint violations on nodes
-//     surface as driver errors, not silent zero-matches.
+// It is a pure function: no execution, no driver dependency, no side effects.
+// Callers pair the returned string with their own parameter map and feed both
+// to a driver session at the call site. The template always ends with
+// `RETURN count(*) AS matched_rows`, so a consumer implementing
+// silent-failure detection has a stable column to sum; aggregation across
+// chunks is the consumer's.
 //
-// All four are pure functions — no execution, no driver dependency, no
-// side effects. Callers pair the returned string with their own
-// parameter map and feed both to a driver session at the call site.
+// The node-merge and single-relationship templates are internal. Node
+// templates stay RETURN-free — a constraint violation on a node surfaces as a
+// driver error, not a silent zero-match.
 //
 // # Introspection
 //
@@ -285,10 +272,6 @@
 //
 // Write options control query generation:
 //
-//   - [WithImmutableKeys]: properties set only on node creation; explicit keys
-//     are validated against the written node types' declared properties, then
-//     unioned with schema-derived @writeOnce keys (see [ImmutableKeysFor]), and
-//     the effective set is selected per type on the batch path
 //   - [WithNodeChunkSize] / [WithEdgeChunkSize]: max rows per UNWIND batch
 //
 // # Edition Gating
