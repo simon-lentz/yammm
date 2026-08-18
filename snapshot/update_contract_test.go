@@ -115,7 +115,7 @@ func TestUpdateMetadata_HashAlgorithmWarningStillPasses(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
 	data := fmt.Appendf(nil,
-		`{"yammm_snapshot":{"version":3,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":99,"integrity_hash":"","features":[]},"types":[{"schema_path":"test://test.yammm","name":"Person","tag":"Person"}],"instances":[[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
+		`{"yammm_snapshot":{"version":3,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":99,"integrity_hash":"","features":[]},"types":[{"schema_path":"test://test.yammm","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
 		schema.StructuralHash(s))
 
 	if _, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"}); res.HasErrors() {

@@ -1,9 +1,9 @@
 package graph
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
@@ -383,22 +383,44 @@ func compareEdges(a, b *Edge) int {
 	if c := cmpString(a.target.primaryKey.String(), b.target.primaryKey.String()); c != 0 {
 		return c
 	}
-	return cmpString(propsKey(a.properties), propsKey(b.properties))
+	return compareProps(a.properties, b.properties)
 }
 
-// propsKey renders properties in a canonical, order-independent form so a
-// comparator can break a tie on them. Two parallel edges differing only in
-// their properties are distinct records, and an ordering that cannot separate
-// them leaves their positions to whatever order the input arrived in.
-func propsKey(p immutable.Properties) string {
-	if p.Len() == 0 {
-		return ""
+// compareProps orders two property sets by walking both in sorted key order.
+//
+// It compares field by field rather than rendering each set to one string:
+// a "name=value;" rendering collides whenever a value holds the separators, so
+// an ordinary String edge property containing ';' or '=' made two distinct sets
+// compare equal and put map-iteration order back into the document. Values are
+// discriminated by type before value, so an int64 1 and the string "1" do not
+// tie.
+//
+// What this does not promise: two values of one type whose %v forms are equal
+// still tie. For the scalar types an edge property can hold, %v is injective;
+// for a composite it may not be, and that residue is stated rather than
+// claimed away.
+func compareProps(a, b immutable.Properties) int {
+	an := slices.Sorted(a.Keys())
+	bn := slices.Sorted(b.Keys())
+	for i := range min(len(an), len(bn)) {
+		if c := cmpString(an[i], bn[i]); c != 0 {
+			return c
+		}
+		av, _ := a.Get(an[i])
+		bv, _ := b.Get(bn[i])
+		if c := cmpString(renderValue(av), renderValue(bv)); c != 0 {
+			return c
+		}
 	}
-	var b strings.Builder
-	for name, v := range p.SortedRange() {
-		fmt.Fprintf(&b, "%s=%v;", name, v.Unwrap())
-	}
-	return b.String()
+	return cmp.Compare(len(an), len(bn))
+}
+
+// renderValue renders one property value with its type, so values of different
+// types never compare equal. A Go type name holds no '|', so the split is
+// unambiguous.
+func renderValue(v immutable.Value) string {
+	u := v.Unwrap()
+	return fmt.Sprintf("%T|%v", u, u)
 }
 
 func cmpString(a, b string) int {
@@ -411,7 +433,7 @@ func cmpString(a, b string) int {
 	return 0
 }
 
-// compareUnresolved orders unresolved records totally. Graph.pending is a map,
+// compareUnresolved orders unresolved records. Graph.pending is a map,
 // so the slice these are collected into arrives in map-iteration order; an
 // ordering that leaves any two distinct records equal hands their positions to
 // that order, and Marshal's documented determinism fails across process runs.
@@ -442,10 +464,10 @@ func compareUnresolved(a, b *UnresolvedEdge) int {
 		}
 		return -1
 	}
-	return cmpString(propsKey(a.properties), propsKey(b.properties))
+	return compareProps(a.properties, b.properties)
 }
 
-// compareDuplicates orders duplicate records totally. Two rejections of one
+// compareDuplicates orders duplicate records. Two rejections of one
 // key against one conflict differ only in the instance they carry, so the
 // rejected instance's properties are the last discriminator.
 func compareDuplicates(a, b *Duplicate) int {
@@ -464,5 +486,19 @@ func compareDuplicates(a, b *Duplicate) int {
 	if c := cmpString(a.Conflict.PrimaryKey().String(), b.Conflict.PrimaryKey().String()); c != 0 {
 		return c
 	}
-	return cmpString(propsKey(a.Instance.Properties()), propsKey(b.Instance.Properties()))
+	if c := cmpString(parentKeyOf(a), parentKeyOf(b)); c != 0 {
+		return c
+	}
+	return compareProps(a.Instance.Properties(), b.Instance.Properties())
+}
+
+// parentKeyOf renders a duplicate's parent slot, or the empty string for a root
+// duplicate. The wire carries the parent coordinates, so two composed
+// duplicates rejected from different slots are different records and an
+// ordering that ignores the parent leaves their positions to the input order.
+func parentKeyOf(d *Duplicate) string {
+	if d.Parent == nil {
+		return ""
+	}
+	return d.Parent.TypeID().String() + "\x00" + d.Parent.PrimaryKey().String()
 }

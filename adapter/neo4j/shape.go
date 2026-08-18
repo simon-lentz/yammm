@@ -69,9 +69,8 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphS
 	}
 
 	for t, label := range a.emittableTypes(ctx, s, collector) {
-		// Trimmed, matching the name the label was built from: a consumer that
-		// looks a shape up by the same name it used to derive the label must
-		// find it.
+		// Trimmed to match the label, which is built from the same form. The
+		// map is keyed by identity, so this is the display name alone.
 		name := strings.TrimSpace(t.Name())
 
 		immutable := ImmutableKeysFor(t)

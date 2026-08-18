@@ -85,9 +85,9 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 //
 // Returns (nil, result) when the document cannot be summarized at all: an
 // unreadable header, an unsupported version, an unrecognized feature, an
-// undecodable section, a structurally malformed body, or a cancelled
-// context. A document that decodes but fails a check returns a
-// summary beside Error-severity diagnostics — an integrity mismatch reports
+// undecodable section, or a cancelled context. A document that decodes but
+// fails a structural check returns a summary beside Error-severity
+// diagnostics — an integrity mismatch reports
 // IntegrityStatus "mismatch", and a reference naming no table row is reported
 // and left out of the counts. Read the result before the summary.
 //
@@ -195,6 +195,13 @@ type HeaderInfo struct {
 // file size — a property that [Info] cannot offer because it populates
 // instance counts and diagnostic counts by scanning the body.
 //
+// HeaderOnlyRead reads through a reader capped at [MaxHeaderSize] and never
+// holds the body, so unlike [HeaderOnly] it cannot check the document's
+// outermost shape: a document whose sections are absent, repeated, out of
+// order, or followed by trailing bytes reads its header here without
+// complaint. It does not accept such a document by omission — it does not see
+// it. Use [HeaderOnly], [Verify] or [Load] when that matters.
+//
 // Integrity is not verified. The returned [HeaderInfo.IntegrityHash] is
 // the value stored in the file, not a verification result. Callers that
 // need to confirm the hash matches the document content should use
@@ -214,6 +221,15 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, c.Result()
+	}
+
+	// HeaderOnly holds the whole document, so it owes the outermost-shape check
+	// every other whole-document surface runs. HeaderOnlyRead and ScanDir do
+	// not hold it and say so on their own godoc.
+	c := diag.NewCollector(0)
+	if err := checkTopLevelKeys(data); err != nil {
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, c.Result()
 	}
 

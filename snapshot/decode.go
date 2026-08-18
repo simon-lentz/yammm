@@ -634,8 +634,9 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 		for _, item := range g.Items {
 			ip := sd.instanceParts(row, item)
 			parts = append(parts, ip)
-			// Sorted, not map order: compareEdges ties on edges differing only
-			// in properties, and an unstable sort permutes ties by position.
+			// Sorted, not map order: the rebuild sorts with an unstable sort, so
+			// a deterministic input order is what keeps two Loads of one
+			// document identical.
 			for _, relName := range slices.Sorted(maps.Keys(item.Edges)) {
 				for _, e := range item.Edges[relName] {
 					edgeParts = append(edgeParts, graph.EdgeParts{

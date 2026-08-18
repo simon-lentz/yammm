@@ -3,7 +3,9 @@ package snapshot
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 )
 
 // FIELD ORDER IN WIRE STRUCTS IS PART OF THE FORMAT CONTRACT.
@@ -89,11 +91,16 @@ import (
 var topLevelKeys = [...]string{"yammm_snapshot", "types", "instances", "diagnostics"}
 
 // checkTopLevelKeys is the one definition of the document's outermost shape:
-// presence, order, uniqueness and non-nullness of the four top-level keys.
-// Every surface that reads or rewrites a document runs it, including the ones
-// that never decode the body — it reads tokens and skips values, so a header
-// rewrite can afford it. Enforcing this in one place is what keeps a surface
-// that writes without reading from blessing a document a reader refuses.
+// presence, order, uniqueness and non-nullness of the four top-level keys, and
+// that the document ends where the object does. Every surface holding the whole
+// document runs it. [HeaderOnlyRead] and [ScanDir] cannot and say so on their
+// own godoc: they read through a capped reader and never hold the body.
+//
+// It is not free: it scans the whole document and copies each top-level value
+// to skip it, so a caller that never decodes the body still pays a pass over
+// it. That cost is pinned by TestUpdateMetadataRatioFloor rather
+// than described here, because the first draft of this comment asserted a cost
+// profile nobody had measured and was false.
 func checkTopLevelKeys(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	tok, err := dec.Token()
@@ -121,18 +128,46 @@ func checkTopLevelKeys(data []byte) error {
 		if key != topLevelKeys[seen] {
 			return fmt.Errorf("top-level key %d is %q, expected %q", seen, key, topLevelKeys[seen])
 		}
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
-			return fmt.Errorf("failed to read the value of %q: %w", key, err)
-		}
-		if string(raw) == "null" {
-			return fmt.Errorf("top-level key %q is null", key)
+		if err := skipValue(dec, key); err != nil {
+			return err
 		}
 		seen++
 	}
 	if seen != len(topLevelKeys) {
 		return fmt.Errorf("document carries %d top-level keys, expected %d; %q is missing",
 			seen, len(topLevelKeys), topLevelKeys[seen])
+	}
+
+	// More reports false at the object's closing delimiter and at end of input
+	// alike, so the loop above exits identically on a complete document and on
+	// one truncated before its final brace. Reading the next token separates
+	// them, and there is no third outcome: a decoder that reports no more values
+	// at object level returns either that closing brace or an error, so the
+	// brace itself is not worth a branch nothing can drive.
+	if _, err := dec.Token(); err != nil {
+		return fmt.Errorf("document ends before the top-level object closes: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("document carries trailing data after the top-level object")
+	}
+	return nil
+}
+
+// skipValue advances past one top-level value and reports a null.
+//
+// It decodes into a json.RawMessage, which copies the value. A token walk
+// avoids the copy and is *slower* — encoding/json finds a value's bounds with
+// its scanner and only tokenizes on demand, so walking every token to skip a
+// section costs more than copying it. Measured: the token form put
+// UpdateMetadata below the 3x floor TestUpdateMetadataRatioFloor
+// pins. The copy is the cheaper of the two.
+func skipValue(dec *json.Decoder, key string) error {
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		return fmt.Errorf("failed to read the value of %q: %w", key, err)
+	}
+	if string(raw) == "null" {
+		return fmt.Errorf("top-level key %q is null", key)
 	}
 	return nil
 }

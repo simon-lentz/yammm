@@ -41,7 +41,8 @@ type ScanEntry struct {
 // ScanDir iterates over every .ys file in dir, yielding one
 // (ScanEntry, nil) per file. The iterator is lazy: the directory is
 // read once on first iteration, and each file's header is parsed on-
-// demand via [HeaderOnlyRead]. Callers can break early without paying
+// demand via [HeaderOnlyRead], and inherits its limit: ScanDir validates each
+// file's header and types table, never the document's outermost shape. Callers can break early without paying
 // the parse cost for remaining files.
 //
 // Filtering:

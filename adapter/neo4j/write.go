@@ -162,7 +162,8 @@ func (a *Adapter) BatchNodeQueries(
 //
 // Returns one [BatchEdgeQuery] per signature per chunk. When two types in
 // the snapshot render the same type name, returns an error naming both
-// identities — the signature and shape lookups key on that name.
+// identities — the writer refuses a rendering it cannot make unambiguous, rather than
+// writing two types under one label.
 func (a *Adapter) BatchEdgeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,

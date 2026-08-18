@@ -165,9 +165,9 @@ func (a *Adapter) IndexesStructured(ctx context.Context, s *schema.Schema) ([]In
 // and a schema's type list is small enough that one extra pass costs less than
 // the coupling a shared walk would create between a diagnostic and an emitter.
 //
-// The type name is trimmed, and the trimmed form is what both the label and
-// [Adapter.ShapeForSchema]'s map key are built from, so a consumer looking a
-// shape up by the name it derived the label from finds it. Both schema front
+// The type name is trimmed, and the trimmed form is what the label is built
+// from. [Adapter.ShapeForSchema]'s map is keyed by [schema.TypeID], so no
+// lookup depends on the trim. Both schema front
 // doors reject a name with surrounding whitespace anyway (the grammar's UC_WORD
 // production; [schema.NewBuilder] reports E_INVALID_NAME), so the trim only
 // matters to a construction path that bypasses both.

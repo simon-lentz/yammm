@@ -92,9 +92,10 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 // body — the four-key top-level shape, and a types table that states one
 // identity twice — because the output carries a freshly computed integrity
 // hash, so accepting a document no read path accepts would hand back a
-// malformed document that passes verification. Callers needing more than that pair UpdateMetadata
-// with a prior [HeaderOnly] call (cheap structural validation) or [Verify]
-// (full verification) on the same bytes.
+// malformed document that passes verification. Callers needing more than that
+// pair UpdateMetadata with a prior [Verify] on the same bytes; [HeaderOnly] is
+// not that check, because it now validates the same outermost shape and adds
+// only the header and types table.
 //
 // Failure modes and error codes:
 //

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -226,6 +228,21 @@ func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
 		if issue.Severity() != diag.Error {
 			t.Errorf("Marshal reported the depth bound at %s, the reader reports it at %s",
 				issue.Severity(), diag.Error)
+		}
+		// The payload, not only the code: a consumer branches on the detail and
+		// reads the message, and both can be wrong with the code right.
+		details := map[string]string{}
+		for _, d := range issue.Details() {
+			details[d.Key] = d.Value
+		}
+		if got := details[diag.DetailKeyDepth]; got != strconv.Itoa(maxComposedDepth+1) {
+			t.Errorf("depth detail = %q, want %q", got, strconv.Itoa(maxComposedDepth+1))
+		}
+		if got := details[diag.DetailKeyTypeName]; got != node.ID().String() {
+			t.Errorf("type-name detail = %q, want the identity %q", got, node.ID())
+		}
+		if !strings.Contains(issue.Message(), "composed nesting depth") {
+			t.Errorf("message does not name the bound it reports: %q", issue.Message())
 		}
 	}
 	if !found {

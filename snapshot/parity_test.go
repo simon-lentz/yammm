@@ -32,7 +32,10 @@ type visibility int
 
 const (
 	// fromShape means the defect is in the header, the types table, or the
-	// top-level key sequence — everything, including UpdateMetadata, can see it.
+	// top-level key sequence — every surface holding the whole document can see
+	// it: Load, Verify, Info, HeaderOnly and UpdateMetadata. HeaderOnlyRead and
+	// ScanDir are excluded by construction, not by omission: they read through a
+	// reader capped at MaxHeaderSize and never hold the body.
 	fromShape visibility = iota
 	// fromBody means the defect needs the instances or diagnostics section
 	// decoded, so UpdateMetadata cannot see it and is not asked to.
@@ -127,6 +130,21 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 			}
 			return out
 		}},
+		{"missing only the final brace", fromShape, func(t *testing.T, d []byte) []byte {
+			t.Helper()
+			return d[:len(d)-1]
+		}},
+		{"truncated mid-body", fromShape, func(t *testing.T, d []byte) []byte {
+			t.Helper()
+			// json.Decoder.More reports false at the object's closing brace and
+			// at end of input alike, so a truncation is exactly what a
+			// key-sequence scan misses unless it reads the closing token.
+			return d[:len(d)-24]
+		}},
+		{"trailing bytes after the object", fromShape, func(t *testing.T, d []byte) []byte {
+			t.Helper()
+			return append(append([]byte{}, d...), []byte(`{"second":1}`)...)
+		}},
 		{"a group row out of range", fromBody, func(t *testing.T, d []byte) []byte {
 			t.Helper()
 			out := bytes.Replace(d, []byte(`{"type":0,`), []byte(`{"type":99,`), 1)
@@ -152,6 +170,10 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 			if tc.seen == fromShape {
 				verdicts["UpdateMetadata"] = refusedBy(t, func() diag.Result {
 					_, r := snapshot.UpdateMetadata(ctx, edited, nil)
+					return r
+				})
+				verdicts["HeaderOnly"] = refusedBy(t, func() diag.Result {
+					_, r := snapshot.HeaderOnly(ctx, edited)
 					return r
 				})
 			}
@@ -188,6 +210,9 @@ func TestParity_EverySurfaceAcceptsAWellFormedDocument(t *testing.T) {
 	}
 	if out, res := snapshot.UpdateMetadata(ctx, clean, map[string]string{"k": "v"}); res.HasErrors() || len(out) == 0 {
 		t.Errorf("UpdateMetadata refused a well-formed document: %v", res)
+	}
+	if h, res := snapshot.HeaderOnly(ctx, clean); res.HasErrors() || h == nil {
+		t.Errorf("HeaderOnly refused a well-formed document: %v", res)
 	}
 }
 
