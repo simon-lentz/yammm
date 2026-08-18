@@ -20,7 +20,7 @@ func TestAdapter_ShapesUnaffectedByEdition(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := shape.Types["Entity"]; !ok {
+	if _, ok := shape.Types[typeID(t, s, "Entity")]; !ok {
 		t.Error("shapes should be unaffected by edition")
 	}
 }
@@ -70,8 +70,8 @@ func TestAdapter_LabelOptionConsistency(t *testing.T) {
 			if err := result.Err(); err != nil {
 				t.Fatal(err)
 			}
-			if ns, ok := shape.Types["Entity"]; !ok || ns.Label != tc.wantLabel {
-				t.Errorf("shape label = %q; want %q", shape.Types["Entity"].Label, tc.wantLabel)
+			if ns, ok := shape.Types[typeID(t, s, "Entity")]; !ok || ns.Label != tc.wantLabel {
+				t.Errorf("shape label = %q; want %q", shape.Types[typeID(t, s, "Entity")].Label, tc.wantLabel)
 			}
 
 			graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -134,7 +134,7 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 		directLabel := a.Label(ctx, s.Name(), typeName)
 
 		// 2. Shape label.
-		ns, ok := shape.Types[typeName]
+		ns, ok := shape.Types[t2.ID()]
 		if !ok {
 			t.Errorf("type %q missing from shape", typeName)
 			continue

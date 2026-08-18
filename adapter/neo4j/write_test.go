@@ -47,11 +47,11 @@ func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
 		t.Fatal("no Plain query")
 	}
 
-	entityNS := shape.Types["Entity"]
+	entityNS := shape.Types[typeID(t, s, "Entity")]
 	if want := buildBatchNodeMergeQuery(entityNS.Label, entityNS.PrimaryKeys, ImmutableKeys); entityQ.Statement != want {
 		t.Errorf("Entity statement = %q; want immutable split %q", entityQ.Statement, want)
 	}
-	plainNS := shape.Types["Plain"]
+	plainNS := shape.Types[typeID(t, s, "Plain")]
 	if want := buildBatchNodeMergeQuery(plainNS.Label, plainNS.PrimaryKeys, MutableKeys); plainQ.Statement != want {
 		t.Errorf("Plain statement = %q; want mutable %q", plainQ.Statement, want)
 	}
@@ -97,7 +97,7 @@ func TestBatchNodeQueries_SingleType(t *testing.T) {
 	}
 
 	q := queries[0]
-	ns := shape.Types["Entity"]
+	ns := shape.Types[typeID(t, s, "Entity")]
 	if want := buildBatchNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
 		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
 	}
@@ -603,7 +603,7 @@ func TestBatchNodeQueries_MissingShape(t *testing.T) {
 	})
 
 	// Pass an empty shape map — no shape for "Entity".
-	emptyShapes := &GraphShape{Types: map[string]NodeShape{}}
+	emptyShapes := &GraphShape{Types: map[schema.TypeID]NodeShape{}}
 	_, err := a.BatchNodeQueries(context.Background(), graphResult, emptyShapes)
 	if err == nil {
 		t.Error("expected error for missing shape")
@@ -623,7 +623,7 @@ func TestBatchEdgeQueries_MissingShape(t *testing.T) {
 		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
-	emptyShapes := &GraphShape{Types: map[string]NodeShape{}}
+	emptyShapes := &GraphShape{Types: map[schema.TypeID]NodeShape{}}
 	_, err := a.BatchEdgeQueries(context.Background(), graphResult, emptyShapes)
 	if err == nil {
 		t.Error("expected error for missing shape")
@@ -866,7 +866,7 @@ func TestShapeForSchema_ImmutableKeysNonNilWhenEmpty(t *testing.T) {
 	t.Parallel()
 	_, s, _, shape := setupWrite(t, "writeonce.yammm")
 	_ = s
-	plain := shape.Types["Plain"]
+	plain := shape.Types[typeID(t, s, "Plain")]
 	if plain.ImmutableKeys == nil {
 		t.Error("Plain has no @writeOnce properties, but its ImmutableKeys is nil — indistinguishable from a shape that never computed them")
 	}
@@ -886,10 +886,10 @@ func TestBatchNodeQueries_HandBuiltShapeStillHonorsWriteOnce(t *testing.T) {
 	})
 
 	// A shape as a pre-upgrade caller would have built it: no ImmutableKeys.
-	stale := &GraphShape{Types: map[string]NodeShape{}}
-	for name, ns := range shape.Types {
+	stale := &GraphShape{Types: map[schema.TypeID]NodeShape{}}
+	for id, ns := range shape.Types {
 		ns.ImmutableKeys = nil
-		stale.Types[name] = ns
+		stale.Types[id] = ns
 	}
 
 	queries, err := a.BatchNodeQueries(context.Background(), graphResult, stale)
@@ -930,7 +930,7 @@ func TestBatchNodeQueries_RowCarriesTheKeyTheTemplateReads(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ns := shape.Types["Plain"]
+	ns := shape.Types[typeID(t, s, "Plain")]
 	var checked int
 	for _, q := range queries {
 		if !strings.Contains(q.Statement, ns.Label) {
@@ -975,7 +975,7 @@ func TestBatchNodeQueries_CoercesMergeKey(t *testing.T) {
 
 	var checked int
 	for _, q := range queries {
-		if !strings.Contains(q.Statement, shape.Types["Doc"].Label) {
+		if !strings.Contains(q.Statement, shape.Types[typeID(t, s, "Doc")].Label) {
 			continue
 		}
 		for _, row := range q.Params["rows"].([]map[string]any) {

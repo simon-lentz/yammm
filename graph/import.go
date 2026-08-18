@@ -120,7 +120,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			}
 		}
 
-		// Diagnostic is zero-value for loaded snapshots (HasDiagnostic() == false).
+		// Diagnostic is zero-value for loaded snapshots.
 		g.duplicates = append(g.duplicates, newDuplicate(instClone, conflictClone, parentClone, dup.Relation, dup.Diagnostic))
 	}
 

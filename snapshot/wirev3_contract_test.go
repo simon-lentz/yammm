@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -328,10 +329,10 @@ func TestWireV3_AbsentSectionIsMalformed(t *testing.T) {
 		null       bool
 		wantReason string
 	}{
-		{"instances absent", "instances", false, "instances key not found in document"},
-		{"instances null", "instances", true, "instances section is null"},
-		{"diagnostics absent", "diagnostics", false, "diagnostics key not found in document"},
-		{"diagnostics null", "diagnostics", true, "diagnostics section is null"},
+		{"instances absent", "instances", false, `top-level key 2 is "diagnostics", expected "instances"`},
+		{"instances null", "instances", true, `top-level key "instances" is null`},
+		{"diagnostics absent", "diagnostics", false, `document carries 3 top-level keys, expected 4; "diagnostics" is missing`},
+		{"diagnostics null", "diagnostics", true, `top-level key "diagnostics" is null`},
 	}
 
 	for _, tc := range cases {
@@ -405,5 +406,170 @@ func TestWireV3_EmptySectionsAreNotAbsence(t *testing.T) {
 	}
 	if info, ires := snapshot.Info(ctx, data); ires.HasErrors() || info == nil {
 		t.Errorf("Info refused a document whose sections are present and empty: %v", ires)
+	}
+}
+
+// The reader's half of contracts the writer already meets.
+//
+// graph.UnresolvedEdge documents a closed reason set and says a reference that
+// never had a target carries no key and no properties. graph.Instance's
+// provenance path is discarded when it will not parse. The writer honours both;
+// until these tests the reader accepted documents that broke either, and the
+// next Marshal silently discarded what it had loaded.
+
+// TestWireV3_UnresolvedReasonBindsItsPayload pins the reason set and the rule
+// that "absent" and "empty" carry no target key and no properties.
+func TestWireV3_UnresolvedReasonBindsItsPayload(t *testing.T) {
+	ctx := context.Background()
+	s := testSchema(t)
+
+	// A Person with no EMPLOYER edge records one "absent" unresolved edge.
+	data, res := snapshot.Marshal(ctx, buildSnapshot(t, s,
+		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"})))
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+	if !bytes.Contains(data, []byte(`"reason":"absent"`)) {
+		t.Fatalf("fixture is vacuous: no absent unresolved record:\n%s", data)
+	}
+
+	cases := []struct {
+		name string
+		from string
+		to   string
+	}{
+		{"an unknown reason", `"reason":"absent"`, `"reason":"invented"`},
+		{"absent carrying a target key", `"target_key":null`, `"target_key":["X"]`},
+		{"absent carrying properties", `"reason":"absent"`, `"reason":"absent","properties":{"since":2020}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			edited := bytes.Replace(data, []byte(tc.from), []byte(tc.to), 1)
+			if bytes.Equal(edited, data) {
+				t.Fatalf("fixture shape changed; %s not found in:\n%s", tc.from, data)
+			}
+			if _, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck()); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+				t.Errorf("Load accepted it without %s: %v", diag.E_SNAPSHOT_MALFORMED, res)
+			}
+			if res := snapshot.Verify(ctx, edited, s, snapshot.WithSkipIntegrityCheck()); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+				t.Errorf("Verify accepted it without %s: %v", diag.E_SNAPSHOT_MALFORMED, res)
+			}
+		})
+	}
+}
+
+// TestWireV3_EmptyProvenancePathWarns pins the one path the materializer
+// discards without saying so. path.Parse rejects "", so the empty path falls
+// back to root exactly like any other unparseable path and owes the same
+// warning.
+func TestWireV3_EmptyProvenancePathWarns(t *testing.T) {
+	ctx := context.Background()
+	s := testSchema(t)
+
+	data, res := snapshot.Marshal(ctx, buildSnapshot(t, s,
+		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"})))
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+	edited := bytes.Replace(data, []byte(`"provenance":null`),
+		[]byte(`"provenance":{"source_name":"s","path":""}`), 1)
+	if bytes.Equal(edited, data) {
+		t.Fatalf("fixture shape changed; no provenance field in:\n%s", data)
+	}
+
+	_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	if !hasCode(loadRes, diag.E_SNAPSHOT_PATH_FALLBACK) {
+		t.Errorf("an empty provenance path drew no %s: %v", diag.E_SNAPSHOT_PATH_FALLBACK, loadRes)
+	}
+}
+
+// rootDuplicateDoc marshals a snapshot holding a root primary-key collision,
+// so the duplicate record states no relation and carries no parent
+// coordinates.
+func rootDuplicateDoc(t *testing.T) ([]byte, *schema.Schema) {
+	t.Helper()
+	ctx := context.Background()
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}),
+		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Bob"}))
+	data, res := snapshot.Marshal(ctx, snap)
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+	if !bytes.Contains(data, []byte(`"duplicates":[{`)) {
+		t.Fatalf("fixture is vacuous: no duplicate record:\n%s", data)
+	}
+	return data, s
+}
+
+// TestWireV3_StrayParentCoordinateIsReported drives each half of the
+// root-duplicate guard on its own. The guard is a disjunction, so a test that
+// splices both fields at once leaves each disjunct individually unpinned.
+func TestWireV3_StrayParentCoordinateIsReported(t *testing.T) {
+	ctx := context.Background()
+	data, s := rootDuplicateDoc(t)
+
+	cases := []struct {
+		name  string
+		field string
+	}{
+		{"parent_type alone", `"parent_type":0,`},
+		{"parent_key alone", `"parent_key":["p1"],`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const anchor = `"duplicates":[{`
+			idx := bytes.Index(data, []byte(anchor))
+			if idx < 0 {
+				t.Fatalf("fixture shape changed; %s not found in:\n%s", anchor, data)
+			}
+			cut := idx + len(anchor)
+			edited := append(append([]byte{}, data[:cut]...), append([]byte(tc.field), data[cut:]...)...)
+
+			if _, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck()); !hasMalformedReason(res, "states no relation but carries parent coordinates") {
+				t.Errorf("Load accepted a root duplicate carrying %s: %v", tc.field, res)
+			}
+		})
+	}
+}
+
+// TestWireV3_RejectedRowDoesNotAttributeAWarning pins that a duplicate record
+// whose type row is rejected draws no provenance warning at all. The row a
+// failed lookup returns is 0, so a warning raised past that point would name
+// whatever type occupies the first table row.
+func TestWireV3_RejectedRowDoesNotAttributeAWarning(t *testing.T) {
+	ctx := context.Background()
+	data, s := rootDuplicateDoc(t)
+
+	// The duplicates section is last, so the final provenance field is the
+	// rejected instance's.
+	provIdx := bytes.LastIndex(data, []byte(`"provenance":null`))
+	if provIdx < 0 {
+		t.Fatalf("fixture shape changed; no provenance field in:\n%s", data)
+	}
+	edited := append([]byte{}, data[:provIdx]...)
+	edited = append(edited, []byte(`"provenance":{"source_name":"s","path":"bogus"}`)...)
+	edited = append(edited, data[provIdx+len(`"provenance":null`):]...)
+
+	dupIdx := bytes.Index(edited, []byte(`"duplicates":[{"type":`))
+	if dupIdx < 0 {
+		t.Fatalf("fixture shape changed; no duplicate type row in:\n%s", edited)
+	}
+	cut := dupIdx + len(`"duplicates":[{"type":`)
+	end := bytes.IndexByte(edited[cut:], ',')
+	if end < 0 {
+		t.Fatalf("fixture shape changed; no terminator after the duplicate type row")
+	}
+	broken := append([]byte{}, edited[:cut]...)
+	broken = append(broken, []byte("99")...)
+	broken = append(broken, edited[cut+end:]...)
+
+	_, res := snapshot.Load(ctx, broken, s, snapshot.WithSkipIntegrityCheck())
+	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+		t.Fatalf("fixture is vacuous: the out-of-range row was accepted: %v", res)
+	}
+	if hasCode(res, diag.E_SNAPSHOT_PATH_FALLBACK) {
+		t.Errorf("a rejected type row still drew a provenance warning, which can only name row 0's type: %v", res)
 	}
 }

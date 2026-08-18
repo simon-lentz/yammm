@@ -799,12 +799,7 @@ func (g *Graph) Snapshot() *Snapshot {
 		}
 		duplicates[i] = newDuplicate(clonedInstance, clonedConflict, clonedParent, d.Relation, d.Diagnostic)
 	}
-	slices.SortFunc(duplicates, func(a, b *Duplicate) int {
-		if c := cmp.Compare(a.Instance.TypeID().String(), b.Instance.TypeID().String()); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Instance.PrimaryKey().String(), b.Instance.PrimaryKey().String())
-	})
+	slices.SortFunc(duplicates, compareDuplicates)
 
 	// Rebuild unresolved edges with cloned source references.
 	// Defensive: clone on-demand if source is not already in cloneMap.
@@ -830,21 +825,7 @@ func (g *Graph) Snapshot() *Snapshot {
 			))
 		}
 	}
-	slices.SortFunc(unresolved, func(a, b *UnresolvedEdge) int {
-		if c := cmp.Compare(a.Source.TypeID().String(), b.Source.TypeID().String()); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(a.Source.PrimaryKey().String(), b.Source.PrimaryKey().String()); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(a.Relation, b.Relation); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(a.TargetType.String(), b.TargetType.String()); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.TargetKey, b.TargetKey)
-	})
+	slices.SortFunc(unresolved, compareUnresolved)
 
 	return newSnapshot(g.schema, types, instances, instanceIndex, edges, duplicates, unresolved, g.collector.Result())
 }

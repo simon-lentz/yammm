@@ -40,11 +40,17 @@ type NodeShape struct {
 	keyConstraints map[string]schema.Constraint
 }
 
-// GraphShape maps yammm type names to their Neo4j node representations.
+// GraphShape maps yammm type identities to their Neo4j node representations.
+//
+// Keyed by [schema.TypeID] rather than by rendered name: a name is a
+// rendering, and a transitively imported type renders to a bare name that a
+// same-named local type also renders to, so a name-keyed index binds one
+// type's instances to another type's label and keys. [NodeShape.Type] carries
+// the rendered name for display.
 //
 // Construct via [Adapter.ShapeForSchema]; do not create directly.
 type GraphShape struct {
-	Types map[string]NodeShape
+	Types map[schema.TypeID]NodeShape
 }
 
 // ShapeForSchema converts a yammm schema into a [GraphShape] describing
@@ -59,7 +65,7 @@ type GraphShape struct {
 func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphShape, diag.Result) {
 	collector := diag.NewCollector(0)
 	shape := &GraphShape{
-		Types: make(map[string]NodeShape),
+		Types: make(map[schema.TypeID]NodeShape),
 	}
 
 	for t, label := range a.emittableTypes(ctx, s, collector) {
@@ -108,7 +114,7 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphS
 			}
 		}
 
-		shape.Types[name] = NodeShape{
+		shape.Types[t.ID()] = NodeShape{
 			Type:           name,
 			Label:          label,
 			PrimaryKeys:    primary,

@@ -59,3 +59,15 @@ func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, ins
 	}
 	return g.Snapshot()
 }
+
+// typeID resolves a type name against the schema. GraphShape is keyed by
+// identity, so a test that names a type in its fixture resolves it here and
+// fails loudly when the fixture and the schema disagree.
+func typeID(t *testing.T, s *schema.Schema, name string) schema.TypeID {
+	t.Helper()
+	ty, ok := s.Type(name)
+	if !ok {
+		t.Fatalf("schema has no type %q", name)
+	}
+	return ty.ID()
+}

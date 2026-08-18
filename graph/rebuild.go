@@ -3,6 +3,7 @@ package graph
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
@@ -379,7 +380,25 @@ func compareEdges(a, b *Edge) int {
 	if c := cmpString(a.target.typeID.String(), b.target.typeID.String()); c != 0 {
 		return c
 	}
-	return cmpString(a.target.primaryKey.String(), b.target.primaryKey.String())
+	if c := cmpString(a.target.primaryKey.String(), b.target.primaryKey.String()); c != 0 {
+		return c
+	}
+	return cmpString(propsKey(a.properties), propsKey(b.properties))
+}
+
+// propsKey renders properties in a canonical, order-independent form so a
+// comparator can break a tie on them. Two parallel edges differing only in
+// their properties are distinct records, and an ordering that cannot separate
+// them leaves their positions to whatever order the input arrived in.
+func propsKey(p immutable.Properties) string {
+	if p.Len() == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for name, v := range p.SortedRange() {
+		fmt.Fprintf(&b, "%s=%v;", name, v.Unwrap())
+	}
+	return b.String()
 }
 
 func cmpString(a, b string) int {
@@ -390,4 +409,60 @@ func cmpString(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+// compareUnresolved orders unresolved records totally. Graph.pending is a map,
+// so the slice these are collected into arrives in map-iteration order; an
+// ordering that leaves any two distinct records equal hands their positions to
+// that order, and Marshal's documented determinism fails across process runs.
+// Reproduced before this comparator was completed: sixty tied pairs spread
+// across sixty pending buckets produced ten distinct documents in ten runs.
+func compareUnresolved(a, b *UnresolvedEdge) int {
+	if c := cmpString(a.Source.TypeID().String(), b.Source.TypeID().String()); c != 0 {
+		return c
+	}
+	if c := cmpString(a.Source.PrimaryKey().String(), b.Source.PrimaryKey().String()); c != 0 {
+		return c
+	}
+	if c := cmpString(a.Relation, b.Relation); c != 0 {
+		return c
+	}
+	if c := cmpString(a.TargetType.String(), b.TargetType.String()); c != 0 {
+		return c
+	}
+	if c := cmpString(a.TargetKey, b.TargetKey); c != 0 {
+		return c
+	}
+	if c := cmpString(a.Reason, b.Reason); c != 0 {
+		return c
+	}
+	if a.Required != b.Required {
+		if a.Required {
+			return 1
+		}
+		return -1
+	}
+	return cmpString(propsKey(a.properties), propsKey(b.properties))
+}
+
+// compareDuplicates orders duplicate records totally. Two rejections of one
+// key against one conflict differ only in the instance they carry, so the
+// rejected instance's properties are the last discriminator.
+func compareDuplicates(a, b *Duplicate) int {
+	if c := cmpString(a.Instance.TypeID().String(), b.Instance.TypeID().String()); c != 0 {
+		return c
+	}
+	if c := cmpString(a.Instance.PrimaryKey().String(), b.Instance.PrimaryKey().String()); c != 0 {
+		return c
+	}
+	if c := cmpString(a.Relation, b.Relation); c != 0 {
+		return c
+	}
+	if c := cmpString(a.Conflict.TypeID().String(), b.Conflict.TypeID().String()); c != 0 {
+		return c
+	}
+	if c := cmpString(a.Conflict.PrimaryKey().String(), b.Conflict.PrimaryKey().String()); c != 0 {
+		return c
+	}
+	return cmpString(propsKey(a.Instance.Properties()), propsKey(b.Instance.Properties()))
 }

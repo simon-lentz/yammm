@@ -21,6 +21,21 @@ func (e *tableMissError) Error() string {
 	return fmt.Sprintf("type %s at %s position is absent from the types table", e.id, e.position)
 }
 
+// depthExceededError is the writer's half of the composed-nesting bound. It
+// is typed so Marshal reports it under the code and severity the reader uses
+// for the same condition, instead of as an internal failure the caller cannot
+// distinguish from a corrupt writer state.
+type depthExceededError struct {
+	depth int
+	id    schema.TypeID
+	key   string
+}
+
+func (e *depthExceededError) Error() string {
+	return fmt.Sprintf("composed nesting depth %d exceeds limit %d at %s[%s]",
+		e.depth, maxComposedDepth, e.id, e.key)
+}
+
 // typeTable is the types section under construction: every type identity the
 // document denotes, in TypeID order, with the row index each reference uses.
 type typeTable struct {
@@ -150,21 +165,31 @@ func (sd *streamDecoder) resolveTypeTable() {
 	}
 }
 
-// requireRow validates a nullable row reference: nil and out-of-range each
-// draw an Error naming the position, and neither ever binds to row 0.
+// rowAt resolves a nullable row reference without reporting, and holds the
+// one definition of what makes a reference valid. A caller running after
+// validateBody uses it so the same defect is not reported twice.
+func (sd *streamDecoder) rowAt(row *int) (int, bool) {
+	if row == nil || *row < 0 || *row >= len(sd.typeTable) {
+		return 0, false
+	}
+	return *row, true
+}
+
+// requireRow is rowAt with a diagnostic: nil and out-of-range each draw an
+// Error naming the position, and neither ever binds to row 0.
 func (sd *streamDecoder) requireRow(row *int, position string) (int, bool) {
+	if r, ok := sd.rowAt(row); ok {
+		return r, true
+	}
 	if row == nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			position+" carries no types-table row").Build())
 		return 0, false
 	}
-	if *row < 0 || *row >= len(sd.typeTable) {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			fmt.Sprintf("%s references types table row %d, which holds %d rows",
-				position, *row, len(sd.typeTable))).Build())
-		return 0, false
-	}
-	return *row, true
+	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+		fmt.Sprintf("%s references types table row %d, which holds %d rows",
+			position, *row, len(sd.typeTable))).Build())
+	return 0, false
 }
 
 // refAt renders a table row as its identity for diagnostic messages.

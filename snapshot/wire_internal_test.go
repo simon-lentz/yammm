@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
@@ -208,8 +209,27 @@ func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
 		t.Fatalf("Load refused a tree at its own limit: %v", loadRes)
 	}
 
-	// One level deeper is a document no read path accepts.
-	if _, res := Marshal(ctx, build(maxComposedDepth+1)); !res.HasErrors() {
-		t.Error("Marshal wrote a tree nested past the reader's limit")
+	// One level deeper is a document no read path accepts, and the writer must
+	// name the bound the way the reader names it — same code, same severity —
+	// or a caller cannot tell a snapshot too deep to write from a corrupt
+	// writer state.
+	_, deepRes := Marshal(ctx, build(maxComposedDepth+1))
+	if !deepRes.HasErrors() {
+		t.Fatal("Marshal wrote a tree nested past the reader's limit")
+	}
+	var found bool
+	for issue := range deepRes.Issues() {
+		if issue.Code() != diag.E_SNAPSHOT_DEPTH_EXCEEDED {
+			continue
+		}
+		found = true
+		if issue.Severity() != diag.Error {
+			t.Errorf("Marshal reported the depth bound at %s, the reader reports it at %s",
+				issue.Severity(), diag.Error)
+		}
+	}
+	if !found {
+		t.Errorf("Marshal did not report %s for a tree past the bound: %v",
+			diag.E_SNAPSHOT_DEPTH_EXCEEDED, deepRes)
 	}
 }

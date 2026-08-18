@@ -182,10 +182,14 @@ func (sd *streamDecoder) decodeHeader() error {
 }
 
 // decodeSections decodes the instances and diagnostics sections by
-// re-scanning the raw data. The wire contract fixes four top-level keys, so
-// an absent section is malformed rather than empty, and a null section is the
-// same absence dressed as presence.
+// re-scanning the raw data. The document's outermost shape is checked first
+// and in one place, so this function decodes a body whose four keys are known
+// present, ordered, unique and non-null.
 func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error) {
+	if err := checkTopLevelKeys(sd.data); err != nil {
+		return nil, diagWire{}, err
+	}
+
 	dec := json.NewDecoder(bytes.NewReader(sd.data))
 	dec.UseNumber()
 
@@ -194,9 +198,7 @@ func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error)
 	}
 
 	var groups []instanceGroupWire
-	var diags *diagWire
-	instancesFound := false
-	diagsFound := false
+	var diags diagWire
 
 	for dec.More() {
 		tok, err := dec.Token()
@@ -213,12 +215,10 @@ func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error)
 			if err := dec.Decode(&groups); err != nil {
 				return nil, diagWire{}, fmt.Errorf("failed to decode instances: %w", err)
 			}
-			instancesFound = true
 		case "diagnostics":
 			if err := dec.Decode(&diags); err != nil {
 				return nil, diagWire{}, fmt.Errorf("failed to decode diagnostics: %w", err)
 			}
-			diagsFound = true
 		default:
 			var skip json.RawMessage
 			if err := dec.Decode(&skip); err != nil {
@@ -227,20 +227,7 @@ func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error)
 		}
 	}
 
-	if !instancesFound {
-		return nil, diagWire{}, errors.New("instances key not found in document")
-	}
-	if groups == nil {
-		return nil, diagWire{}, errors.New("instances section is null")
-	}
-	if !diagsFound {
-		return nil, diagWire{}, errors.New("diagnostics key not found in document")
-	}
-	if diags == nil {
-		return nil, diagWire{}, errors.New("diagnostics section is null")
-	}
-
-	return groups, *diags, nil
+	return groups, diags, nil
 }
 
 // slotCoord addresses one root instance's relation slot. Only root parents
@@ -391,9 +378,11 @@ func (sd *streamDecoder) composedChildRow(child instWire, relName string, parent
 
 // checkProvenancePath warns when a provenance path will not parse. The
 // materializer falls back to the root path silently, so the read surface is
-// where the loss becomes visible.
+// where the loss becomes visible. The empty path is included deliberately:
+// path.Parse rejects it, so it is discarded like any other unparseable path
+// and must draw the same warning.
 func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
-	if inst.Provenance == nil || inst.Provenance.Path == "" {
+	if inst.Provenance == nil {
 		return
 	}
 	if _, err := path.Parse(inst.Provenance.Path); err == nil {
@@ -429,7 +418,9 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 					di, keyStr, instKey)).Build())
 		}
 
-		sd.checkProvenancePath(dup.Instance, row)
+		if rowOK {
+			sd.checkProvenancePath(dup.Instance, row)
+		}
 
 		if len(dup.Instance.Composed) > 0 {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_COMPOSED_ON_DUPLICATE,
@@ -506,6 +497,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 	}
 
 	for ui, u := range diags.Unresolved {
+		sd.checkUnresolvedReason(ui, u)
 		sourceRow, ok := sd.requireRow(u.SourceType, fmt.Sprintf("unresolved record %d source", ui))
 		if ok {
 			sourceKey := formatWireKey(u.SourceKey)
@@ -519,6 +511,38 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			}
 		}
 		sd.requireRow(u.TargetType, fmt.Sprintf("unresolved record %d target", ui))
+	}
+}
+
+// unresolvedReasons is the closed set graph.UnresolvedEdge documents. The
+// two reasons naming a reference that never had a target carry no target key
+// and no properties, so a record stating one and carrying either describes a
+// state the graph model cannot hold.
+var unresolvedReasons = map[string]bool{"target_missing": true, "absent": true, "empty": true}
+
+// checkUnresolvedReason holds the reader to the contract the writer already
+// meets. Without it a hand-edited record loads a target key and properties
+// into a value graph.UnresolvedEdge documents as always empty, and the next
+// Marshal discards them silently.
+func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) {
+	if !unresolvedReasons[u.Reason] {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("unresolved record %d states reason %q, which is not one of target_missing, absent or empty",
+				ui, u.Reason)).Build())
+		return
+	}
+	if u.Reason == "target_missing" {
+		return
+	}
+	if len(u.TargetKey) > 0 {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("unresolved record %d states reason %q but carries a target key %s",
+				ui, u.Reason, formatWireKey(u.TargetKey))).Build())
+	}
+	if len(u.Properties) > 0 {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("unresolved record %d states reason %q but carries edge properties",
+				ui, u.Reason)).Build())
 	}
 }
 
@@ -569,18 +593,29 @@ func (sd *streamDecoder) runPipeline(ctx context.Context) ([]instanceGroupWire, 
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, diagWire{}, false
 	}
-	idx, err := sd.walkInstances(ctx, groups)
-	if err != nil {
+	if err := sd.validateBody(ctx, groups, diags); err != nil {
 		return nil, diagWire{}, false
 	}
-	sd.validateDiagnostics(diags, idx)
 	sd.verifyIntegrity()
-	sd.validateEdgeRefs(idx)
 
 	if sd.collector.HasErrors() {
 		return nil, diagWire{}, false
 	}
 	return groups, diags, true
+}
+
+// validateBody runs every structural check the format defines over a decoded
+// body. Load, Verify and Info share it: the rules are one definition and only
+// the gating policy differs, so a surface that summarises a document cannot
+// report it clean while a surface that loads one refuses it.
+func (sd *streamDecoder) validateBody(ctx context.Context, groups []instanceGroupWire, diags diagWire) error {
+	idx, err := sd.walkInstances(ctx, groups)
+	if err != nil {
+		return err
+	}
+	sd.validateDiagnostics(diags, idx)
+	sd.validateEdgeRefs(idx)
+	return nil
 }
 
 // loadDocument materializes a validated document. It runs after the
@@ -699,15 +734,15 @@ func (sd *streamDecoder) instanceParts(row int, inst instWire) graph.InstancePar
 }
 
 // countInstances token-counts the instances section for Info, keyed by each
-// group row's identity so two same-named types never merge. An unresolvable
-// row draws the same diagnostic the pipeline raises for it, so Info reports a
-// short count rather than presenting one as complete.
+// group row's identity so two same-named types never merge. It reports
+// nothing: validateBody has already classified the document, and a counting
+// pass that reported would double every diagnostic it raised.
 func (sd *streamDecoder) countInstances(groups []instanceGroupWire) (map[TypeRef]int, int) {
 	counts := make(map[TypeRef]int, len(groups))
 	totalEdges := 0
 
-	for gi, g := range groups {
-		row, ok := sd.requireRow(g.Type, fmt.Sprintf("instances entry %d", gi))
+	for _, g := range groups {
+		row, ok := sd.rowAt(g.Type)
 		if !ok {
 			continue
 		}

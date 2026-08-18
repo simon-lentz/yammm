@@ -1,5 +1,11 @@
 package snapshot
 
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
+
 // FIELD ORDER IN WIRE STRUCTS IS PART OF THE FORMAT CONTRACT.
 //
 // encoding/json serializes struct fields in declaration order. The integrity
@@ -17,10 +23,13 @@ package snapshot
 //
 // TOP-LEVEL KEY ORDER AND BODY-SUFFIX STABILITY CONTRACT.
 //
-// The .ys wire format commits to three structural contracts beyond the
-// per-struct field order above. All three are load-bearing for
-// UpdateMetadata's byte-surgery primitive; relaxing any one silently
-// breaks every existing and future metadata-rewrite call site.
+// The .ys wire format commits to two structural contracts beyond the
+// per-struct field order above, and UpdateMetadata adds a third rule of its
+// own. The two format contracts are load-bearing for UpdateMetadata's
+// byte-surgery primitive: they are properties of the bytes Marshal emits, and
+// relaxing either silently breaks every existing and future metadata-rewrite
+// call site. The third is a behaviour of UpdateMetadata rather than of the
+// format, and relaxing it would announce itself through the version field.
 //
 //  1. Field-order contract (established pre-v0.3.0). The top-level
 //     document has exactly four keys in a fixed order:
@@ -73,6 +82,60 @@ package snapshot
 // test level before reaching the consumers that depend on it.
 // See snapshot/update.go for the UpdateMetadata primitive that consumes
 // these contracts.
+
+// topLevelKeys is the exact key sequence contract 1 fixes. A document that
+// does not present these four keys, in this order, exactly once each, and none
+// of them null, did not come from Marshal.
+var topLevelKeys = [...]string{"yammm_snapshot", "types", "instances", "diagnostics"}
+
+// checkTopLevelKeys is the one definition of the document's outermost shape:
+// presence, order, uniqueness and non-nullness of the four top-level keys.
+// Every surface that reads or rewrites a document runs it, including the ones
+// that never decode the body — it reads tokens and skips values, so a header
+// rewrite can afford it. Enforcing this in one place is what keeps a surface
+// that writes without reading from blessing a document a reader refuses.
+func checkTopLevelKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return fmt.Errorf("expected JSON object: %w", err)
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return fmt.Errorf("expected JSON object, got %v", tok)
+	}
+
+	seen := 0
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("expected top-level key: %w", err)
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return fmt.Errorf("expected a top-level key, got %v", tok)
+		}
+		if seen == len(topLevelKeys) {
+			return fmt.Errorf("document carries a fifth top-level key %q; the format has exactly %d",
+				key, len(topLevelKeys))
+		}
+		if key != topLevelKeys[seen] {
+			return fmt.Errorf("top-level key %d is %q, expected %q", seen, key, topLevelKeys[seen])
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return fmt.Errorf("failed to read the value of %q: %w", key, err)
+		}
+		if string(raw) == "null" {
+			return fmt.Errorf("top-level key %q is null", key)
+		}
+		seen++
+	}
+	if seen != len(topLevelKeys) {
+		return fmt.Errorf("document carries %d top-level keys, expected %d; %q is missing",
+			seen, len(topLevelKeys), topLevelKeys[seen])
+	}
+	return nil
+}
 
 // MinReadableVersion is the lowest .ys wire-format version this package
 // accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead).

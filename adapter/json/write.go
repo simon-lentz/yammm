@@ -131,7 +131,10 @@ func (a *Adapter) buildOutput(result *graph.Snapshot) map[string]any {
 	return output
 }
 
-// lookupType resolves a TypeID to its schema.Type by checking local types and imports.
+// lookupType resolves a TypeID to its schema.Type across the entry schema's
+// whole import closure. Identity, not name: a transitively imported type has
+// no alias to qualify with, so a name-keyed walk of local types and direct
+// imports cannot reach it.
 func lookupType(s *schema.Schema, id schema.TypeID) (*schema.Type, bool) {
 	if s == nil {
 		return nil, false

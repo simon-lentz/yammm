@@ -101,9 +101,9 @@ func (a *Adapter) BatchNodeQueries(
 			return nil, fmt.Errorf("batch node queries: %w", err)
 		}
 		typeName := schema.TagForm(result.Schema(), typeID)
-		nodeShape, ok := shapes.Types[typeName]
+		nodeShape, ok := shapes.Types[typeID]
 		if !ok {
-			return nil, fmt.Errorf("no shape for type %q", typeName)
+			return nil, fmt.Errorf("no shape for type %s", typeID)
 		}
 
 		schemaType, ok := result.Schema().TypeByID(typeID)
@@ -195,13 +195,13 @@ func (a *Adapter) BatchEdgeQueries(
 		sigs = append(sigs, sig)
 	}
 	slices.SortFunc(sigs, func(a, b edgeSignature) int {
-		if v := cmp.Compare(a.sourceType, b.sourceType); v != 0 {
+		if v := cmp.Compare(a.sourceType.String(), b.sourceType.String()); v != 0 {
 			return v
 		}
 		if v := cmp.Compare(a.relType, b.relType); v != 0 {
 			return v
 		}
-		return cmp.Compare(a.targetType, b.targetType)
+		return cmp.Compare(a.targetType.String(), b.targetType.String())
 	})
 
 	var queries []*BatchEdgeQuery
@@ -214,11 +214,11 @@ func (a *Adapter) BatchEdgeQueries(
 
 		srcShape, ok := shapes.Types[sig.sourceType]
 		if !ok {
-			return nil, fmt.Errorf("no shape for source type %q", sig.sourceType)
+			return nil, fmt.Errorf("no shape for source type %s", sig.sourceType)
 		}
 		tgtShape, ok := shapes.Types[sig.targetType]
 		if !ok {
-			return nil, fmt.Errorf("no shape for target type %q", sig.targetType)
+			return nil, fmt.Errorf("no shape for target type %s", sig.targetType)
 		}
 
 		// Resolve the relation so typed edge properties coerce to
@@ -245,11 +245,11 @@ func (a *Adapter) BatchEdgeQueries(
 		for _, edge := range sigEdges {
 			srcKeys, err := extractKeyProps(edge.Source().Properties(), &srcShape)
 			if err != nil {
-				return nil, fmt.Errorf("source %q: %w", sig.sourceType, err)
+				return nil, fmt.Errorf("source %s: %w", sig.sourceType, err)
 			}
 			tgtKeys, err := extractKeyProps(edge.Target().Properties(), &tgtShape)
 			if err != nil {
-				return nil, fmt.Errorf("target %q: %w", sig.targetType, err)
+				return nil, fmt.Errorf("target %s: %w", sig.targetType, err)
 			}
 
 			row := make(map[string]any)
@@ -630,11 +630,15 @@ func chunkSlice[T any](items []T, size int) [][]T {
 	return chunks
 }
 
-// edgeSignature identifies edges that can be batched together.
+// edgeSignature identifies edges that can be batched together. The endpoints
+// are identities, not rendered names, so a group is homogeneous by
+// construction: two same-named types in different schemas never share a
+// signature, and the shape each group resolves is the shape of the type its
+// edges actually hold.
 type edgeSignature struct {
-	sourceType string
+	sourceType schema.TypeID
 	relType    string
-	targetType string
+	targetType schema.TypeID
 }
 
 // groupEdgesBySignature groups edges by their (sourceType, relationType, targetType) signature.
@@ -642,9 +646,9 @@ func groupEdgesBySignature(edges []*graph.Edge) map[edgeSignature][]*graph.Edge 
 	groups := make(map[edgeSignature][]*graph.Edge)
 	for _, edge := range edges {
 		sig := edgeSignature{
-			sourceType: edge.Source().TypeName(),
+			sourceType: edge.Source().TypeID(),
 			relType:    edge.Relation(),
-			targetType: edge.Target().TypeName(),
+			targetType: edge.Target().TypeID(),
 		}
 		groups[sig] = append(groups[sig], edge)
 	}

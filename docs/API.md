@@ -1039,7 +1039,7 @@ A declared fulltext index carries no analyzer or `eventually_consistent` configu
 shapes, result := adapter.ShapeForSchema(ctx, s)
 ```
 
-`ShapeForSchema` returns a `*GraphShape` containing a `Types` map of `NodeShape` values. Each `NodeShape` describes the `Type` (original yammm type name), `Label` (fully qualified Neo4j label), `PrimaryKeys`, and `RequiredFields` for a type.
+`ShapeForSchema` returns a `*GraphShape` whose `Types` map is keyed by `schema.TypeID` and holds `NodeShape` values. Each `NodeShape` describes the `Type` (original yammm type name), `Label` (fully qualified Neo4j label), `PrimaryKeys`, and `RequiredFields` for a type.
 
 ### Write Queries
 

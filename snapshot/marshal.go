@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,7 +25,10 @@ import (
 // per type group during emission, returning Fatal E_CONTEXT_CANCELLED on
 // cancellation; a caller-assembled state the writer cannot serialize
 // returns nil bytes with Fatal E_INTERNAL, and a snapshot built through
-// [graph.Graph] or [Load] never triggers that path. Panics if snap is nil.
+// [graph.Graph] or [Load] never triggers that path. A snapshot nested deeper
+// than the reader accepts returns nil bytes with Error
+// E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises,
+// so the bound reads identically from both sides. Panics if snap is nil.
 func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap == nil {
 		panic("snapshot.Marshal: nil Snapshot")
@@ -213,8 +218,11 @@ func marshalInstance(
 	// The same bound the reader enforces, so Marshal never writes a document
 	// Load and Verify refuse whole.
 	if depth > maxComposedDepth {
-		return instWire{}, fmt.Errorf("composed nesting depth %d exceeds limit %d at %s[%s]",
-			depth, maxComposedDepth, inst.TypeID(), inst.PrimaryKey())
+		return instWire{}, &depthExceededError{
+			depth: depth,
+			id:    inst.TypeID(),
+			key:   inst.PrimaryKey().String(),
+		}
 	}
 	id := inst.TypeID()
 	t, _ := s.TypeByID(id)
@@ -638,6 +646,16 @@ func writeJSONString(b *strings.Builder, s string) {
 // marshalFatalErr creates a diag.Result with a Fatal E_INTERNAL for marshal failures.
 func marshalFatalErr(section string, err error) diag.Result {
 	c := diag.NewCollector(0)
+	// The composed-nesting bound is a property of the snapshot, not of the
+	// writer, and the reader already names it. Reporting it as an internal
+	// failure would leave a caller unable to tell the two apart.
+	if de, ok := errors.AsType[*depthExceededError](err); ok {
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DEPTH_EXCEEDED, de.Error()).
+			WithDetail(diag.DetailKeyDepth, strconv.Itoa(de.depth)).
+			WithDetail(diag.DetailKeyTypeName, de.id.String()).
+			Build())
+		return c.Result()
+	}
 	c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 		fmt.Sprintf("snapshot.Marshal: failed to serialize %s: %v", section, err)).Build())
 	return c.Result()

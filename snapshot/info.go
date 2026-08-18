@@ -84,14 +84,17 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // than the full file.
 //
 // Returns (nil, result) when the document cannot be summarized at all: an
-// unreadable header, an unsupported version, or an undecodable section. A
-// document that decodes but fails a check returns a summary beside
-// Error-severity diagnostics — an integrity mismatch reports
-// IntegrityStatus "mismatch", and an instances entry naming no table row is
-// reported and left out of the counts. Read the result before the summary.
+// unreadable header, an unsupported version, an unrecognized feature, an
+// undecodable section, a structurally malformed body, or a cancelled
+// context. A document that decodes but fails a check returns a
+// summary beside Error-severity diagnostics — an integrity mismatch reports
+// IntegrityStatus "mismatch", and a reference naming no table row is reported
+// and left out of the counts. Read the result before the summary.
 //
-// Info validates no more than it must to count. It resolves no schema, so a
-// document Info summarizes cleanly can still fail [Load] or [Verify].
+// Info runs the same structural validation as [Load] and [Verify] and stops
+// before materialization, so the three surfaces classify every document
+// identically. It resolves no schema, so a document Info summarizes cleanly
+// can still fail Load or Verify on schema resolution — never on structure.
 //
 // Info follows the library's standard (T, diag.Result) return pattern.
 func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
@@ -116,6 +119,9 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 	groups, diags, err := sd.decodeSections()
 	if err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+		return nil, sd.collector.Result()
+	}
+	if err := sd.validateBody(ctx, groups, diags); err != nil {
 		return nil, sd.collector.Result()
 	}
 	counts, totalEdges := sd.countInstances(groups)
