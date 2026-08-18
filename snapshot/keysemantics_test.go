@@ -191,8 +191,8 @@ func TestInfo_ReportsAnUnresolvableInstancesEntry(t *testing.T) {
 
 	rows := len(wireTypeTable(t, data))
 	edited := bytes.Replace(data,
-		[]byte(fmt.Sprintf(`{"type":%d,"items":`, childRow(t, data, "Parent"))),
-		[]byte(fmt.Sprintf(`{"type":%d,"items":`, rows+3)), 1)
+		fmt.Appendf(nil, `{"type":%d,"items":`, childRow(t, data, "Parent")),
+		fmt.Appendf(nil, `{"type":%d,"items":`, rows+3), 1)
 	if bytes.Equal(edited, data) {
 		t.Fatalf("fixture shape changed; no Parent instances entry in:\n%s", data)
 	}
