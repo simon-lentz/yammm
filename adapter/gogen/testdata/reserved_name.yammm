@@ -1,0 +1,6 @@
+schema "geo"
+
+type SerializedEntry {
+	id String primary
+	label String required
+}

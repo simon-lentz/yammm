@@ -1,0 +1,70 @@
+{
+  "name": "\"relmain\"",
+  "span": {
+    "s": 0,
+    "e": 16
+  },
+  "imports": [
+    {
+      "path": "\"./rel_dep\"",
+      "alias": "dep",
+      "span": {
+        "s": 18,
+        "e": 43
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Site",
+      "name_span": {
+        "s": 50,
+        "e": 54
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 61,
+              "e": 67
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 58,
+            "e": 75
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "IN_ZONE",
+          "name_span": {
+            "s": 81,
+            "e": 88
+          },
+          "target": {
+            "qualifier": "dep",
+            "name": "Zone",
+            "span": {
+              "s": 95,
+              "e": 103
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 77,
+            "e": 103
+          }
+        }
+      ],
+      "span": {
+        "s": 45,
+        "e": 105
+      }
+    }
+  ]
+}

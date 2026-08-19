@@ -378,7 +378,7 @@ The `yammm` binary ([`cmd/yammm/`](cmd/yammm/)) provides commands for working wi
 
 ```bash
 yammm validate <schema>                                  # validate a schema, report diagnostics
-yammm fmt <schema> [-w]                                  # canonical formatting (stdout; -w rewrites in place)
+yammm fmt <schema>... [-w|--check]                       # canonical formatting (stdout; -w rewrites, --check lists unformatted)
 yammm check <schema> <data>                              # validate JSON/CSV data against a schema
 yammm load <schema> <data>                               # build an in-memory graph, report diagnostics
 yammm gen --to go <schema>                               # generate Go source from a schema

@@ -1,0 +1,8 @@
+schema "relmain"
+
+import "./rel_dep" as dep
+
+type Site {
+	id String primary
+	--> IN_ZONE (one) dep.Zone
+}

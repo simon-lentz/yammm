@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -151,6 +152,9 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 
 	cfg := defaultLoadConfig()
 	applyLoadOptions(cfg, opts)
+	if err := rejectSyntheticRoot(cfg); err != nil {
+		return fatalResult(err, diag.Result{})
+	}
 
 	// Resolve the path to an absolute, symlink-resolved canonical path
 	absPath, err := makeCanonicalPath(path)
@@ -179,7 +183,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	}
 
 	// Create loader and load the schema
-	ldr := newLoader(cfg, moduleRoot)
+	ldr := newLoader(cfg, moduleRoot, "")
 	defer ldr.Close() // Release rootLoader resources when done
 
 	s, result, err := ldr.loadFile(ctx, absPath, content)
@@ -225,13 +229,16 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 
 	cfg := defaultLoadConfig()
 	applyLoadOptions(cfg, opts)
+	if err := rejectSyntheticRoot(cfg); err != nil {
+		return fatalResult(err, diag.Result{})
+	}
 	cfg.disallowImports = true // Always disallow imports from string, even if user opts try to enable
 
 	// Create a synthetic source ID (NewSourceID returns just SourceID, no error)
 	sourceID := location.NewSourceID("string://" + sourceName)
 
 	// Create loader and load from string
-	ldr := newLoader(cfg, "")
+	ldr := newLoader(cfg, "", "")
 	s, result, err := ldr.loadSource(ctx, sourceID, []byte(sourceCode))
 	if err != nil {
 		return fatalResult(err, result)
@@ -242,16 +249,17 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 // LoadSourcesWithEntry loads a schema from in-memory sources with an explicit entry point.
 //
 // The sources map keys are paths relative to moduleRoot, and values are
-// the file contents. Unlike LoadSources, this function uses the provided
-// entryPath as the entry point instead of selecting by sorted key order.
+// the file contents. The provided entryPath selects the entry point; an empty
+// entryPath falls back to sorted key order.
 //
 // This is useful when the caller knows which file should be the entry point,
 // particularly in LSP scenarios where multiple documents may be open but only
 // one is being analyzed.
 //
 // The entryPath must exist in the sources map (as either an absolute path
-// or relative to moduleRoot). If entryPath is empty, falls back to sorted
-// key order selection like LoadSources.
+// or relative to moduleRoot). Under [WithSyntheticRoot] an absolute key is an
+// error, so the entry must be given in its relative form there. If entryPath is
+// empty, the lexicographically smallest key is selected.
 //
 // ctx must not be nil. Passing nil will panic.
 // A non-OK result with a nil Schema indicates failure. Check result.HasFatal() for I/O or cancellation errors.
@@ -267,18 +275,23 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	cfg := defaultLoadConfig()
 	applyLoadOptions(cfg, opts)
 
+	syntheticRoot, err := normalizeSyntheticRoot(cfg, moduleRoot)
+	if err != nil {
+		return fatalResult(err, diag.Result{})
+	}
+
 	// Canonicalize moduleRoot to absolute path if provided.
 	// This ensures SourceIDFromAbsolutePath will work correctly.
 	if moduleRoot != "" {
-		var err error
-		moduleRoot, err = makeCanonicalPath(moduleRoot)
+		canonical, err := makeCanonicalPath(moduleRoot)
 		if err != nil {
 			return fatalResult(fmt.Errorf("invalid module root %q: %w", moduleRoot, err), diag.Result{})
 		}
+		moduleRoot = canonical
 	}
 
 	// Create loader
-	ldr := newLoader(cfg, moduleRoot)
+	ldr := newLoader(cfg, moduleRoot, syntheticRoot)
 	defer ldr.Close() // Release rootLoader resources when done
 
 	// Pre-register all sources. SourceIDs are derived textually (no symlink
@@ -286,7 +299,7 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	// module root with the same keys — land on identical IDs regardless of
 	// what exists on disk.
 	for path, content := range sources {
-		sourceID, err := inMemorySourceID(moduleRoot, path)
+		sourceID, err := inMemorySourceID(syntheticRoot, moduleRoot, path)
 		if err != nil {
 			return fatalResult(fmt.Errorf("invalid path %q: %w", path, err), diag.Result{})
 		}
@@ -304,7 +317,7 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		// Use the provided entry path
 		selectedEntry = entryPath
 	} else {
-		// Fall back to lexicographic selection (same as LoadSources)
+		// Fall back to lexicographic selection
 		for path := range sources {
 			if selectedEntry == "" || path < selectedEntry {
 				selectedEntry = path
@@ -314,7 +327,7 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 
 	// Derive the entry SourceID exactly like pre-registration did, so the
 	// entry lookup hits the just-registered content.
-	sourceID, err := inMemorySourceID(moduleRoot, selectedEntry)
+	sourceID, err := inMemorySourceID(syntheticRoot, moduleRoot, selectedEntry)
 	if err != nil {
 		return fatalResult(fmt.Errorf("invalid entry path %q: %w", selectedEntry, err), diag.Result{})
 	}
@@ -364,6 +377,7 @@ type importBinding struct {
 type loader struct {
 	cfg             *loadConfig
 	moduleRoot      string
+	syntheticRoot   string      // normalized WithSyntheticRoot value; empty for every other load
 	rootLoader      *rootLoader // sandboxed file access for imports (nil if no moduleRoot)
 	registry        *Registry
 	sourceRegistry  *source.Registry
@@ -393,7 +407,7 @@ func (a *registryAdapter) LookupBySourceID(id location.SourceID) (*Schema, bool)
 }
 
 // newLoader creates a new loader with the given configuration.
-func newLoader(cfg *loadConfig, moduleRoot string) *loader {
+func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot string) *loader {
 	registry := cfg.registry
 	if registry == nil {
 		registry = NewRegistry()
@@ -413,6 +427,7 @@ func newLoader(cfg *loadConfig, moduleRoot string) *loader {
 	return &loader{
 		cfg:             cfg,
 		moduleRoot:      moduleRoot,
+		syntheticRoot:   syntheticRoot,
 		registry:        registry,
 		sourceRegistry:  sourceReg,
 		collector:       diag.NewCollector(cfg.issueLimit),
@@ -425,6 +440,14 @@ func newLoader(cfg *loadConfig, moduleRoot string) *loader {
 		failedCompiles:  make(map[location.SourceID]struct{}),
 		closureSeen:     make(map[*Schema]struct{}),
 	}
+}
+
+// hasImportRoot reports whether the load carries a root that module-style
+// import paths resolve against: a filesystem module root, or a synthetic root
+// standing in for one. Both import guards read this predicate, so they cannot
+// disagree about what counts as having a root.
+func (l *loader) hasImportRoot() bool {
+	return l.moduleRoot != "" || l.syntheticRoot != ""
 }
 
 // ensureRootLoader creates the rootLoader if not already created.
@@ -685,8 +708,8 @@ func (l *loader) rejectDisallowedImports(m *model) bool {
 // declarations and recorded per-alias — every independent failure is
 // reported in one pass — so the error return carries only cancellation.
 func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, m *model) error {
-	if l.moduleRoot == "" && len(m.Imports) > 0 {
-		// Without a module root, we can only resolve relative imports
+	if !l.hasImportRoot() && len(m.Imports) > 0 {
+		// Without a root, we can only resolve relative imports
 		// from file-based sources
 		if !sourceID.IsFilePath() {
 			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
@@ -996,8 +1019,10 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 		return targetPath, nil
 	}
 
-	// Module-style import (just a path like "common/types")
-	if l.moduleRoot == "" {
+	// Module-style import (just a path like "common/types"). A synthetic root
+	// stands in for the module root here; the relative branch above cannot,
+	// because it needs the importing source's canonical path.
+	if !l.hasImportRoot() {
 		return "", errors.New("module-style imports require a module root")
 	}
 
@@ -1035,7 +1060,7 @@ func (l *loader) candidateImportSourceIDs(relativePath string) []location.Source
 	// Mirror readImportFile's in-memory lookup: l.moduleRoot + candidate,
 	// derived textually.
 	for _, candidate := range candidates {
-		if id, err := inMemorySourceID(l.moduleRoot, candidate); err == nil {
+		if id, err := inMemorySourceID(l.syntheticRoot, l.moduleRoot, candidate); err == nil {
 			appendUnique(id)
 		}
 	}
@@ -1111,7 +1136,7 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 	// First check if we have it in in-memory sources (for Sources). The
 	// candidate SourceID derivation matches pre-registration's exactly.
 	for _, candidate := range candidates {
-		testID, err := inMemorySourceID(l.moduleRoot, candidate)
+		testID, err := inMemorySourceID(l.syntheticRoot, l.moduleRoot, candidate)
 		if err != nil {
 			continue
 		}
@@ -1172,11 +1197,17 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 }
 
 // inMemorySourceID derives the SourceID for an in-memory source key or an
-// import candidate resolved against the module root.
+// import candidate resolved against the load's root.
+//
+// A synthetic root (see [WithSyntheticRoot]) takes precedence over the module
+// root and produces a synthetic identity: the normalized key joined to the root
+// with a single "/". This branch runs first because a synthetic root is
+// meaningful with an empty module root, and the module-root branch below would
+// otherwise re-derive a filesystem path from the working directory.
 //
 // Root-relative keys join the (already canonical) module root textually —
 // the joined path is never resolved against the filesystem — so
-// pre-registration in LoadSources/LoadSourcesWithEntry, entry selection,
+// pre-registration in LoadSourcesWithEntry, entry selection,
 // the in-memory lookup in readImportFile, and the sandboxed disk reads in
 // rootLoader.readFile all derive byte-identical SourceIDs for the same
 // root-relative path regardless of disk state (including symlinked
@@ -1189,12 +1220,23 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 // file's directory and the root, and the two must agree for the result to
 // stay inside the sandbox (e.g. a /var/... overlay key against a
 // /private/var/... root would otherwise escape).
-func inMemorySourceID(moduleRoot, path string) (location.SourceID, error) {
+func inMemorySourceID(syntheticRoot, moduleRoot, key string) (location.SourceID, error) {
+	if syntheticRoot != "" {
+		normalized, err := syntheticSourceKey(key)
+		if err != nil {
+			return location.SourceID{}, err
+		}
+		// NewSourceID bypasses validation, which is right here: the root was
+		// validated once at load, and no key can make a validated root look
+		// absolute. The joined string is deliberately not cleaned.
+		return location.NewSourceID(syntheticRoot + "/" + normalized), nil
+	}
+
 	var absPath string
-	if !filepath.IsAbs(path) && moduleRoot != "" {
-		absPath = filepath.Join(moduleRoot, path)
+	if !filepath.IsAbs(key) && moduleRoot != "" {
+		absPath = filepath.Join(moduleRoot, key)
 	} else {
-		abs, err := makeCanonicalPath(path)
+		abs, err := makeCanonicalPath(key)
 		if err != nil {
 			return location.SourceID{}, err
 		}
@@ -1202,9 +1244,80 @@ func inMemorySourceID(moduleRoot, path string) (location.SourceID, error) {
 	}
 	id, err := location.SourceIDFromAbsolutePath(absPath)
 	if err != nil {
-		return location.SourceID{}, fmt.Errorf("derive source ID for %q: %w", path, err)
+		return location.SourceID{}, fmt.Errorf("derive source ID for %q: %w", key, err)
 	}
 	return id, nil
+}
+
+// syntheticSourceKey normalizes an in-memory source key for joining to a
+// synthetic root, so the three sites that derive an identity from one key —
+// pre-registration, candidateImportSourceIDs, and readImportFile — reach the
+// same string. A disagreement between them is a silent hermetic-load miss under
+// WithSourcesOnly, not a compile error.
+//
+// The joined identity is never cleaned: path.Clean collapses "//" to "/", so
+// cleaning "embedded://app/x.yammm" would eat the scheme separator. The key is
+// therefore cleaned here instead. A cleaned key keeps a leading "..", so a
+// source outside the root — a layout sourceKey in adapter/gogen calls legal —
+// yields a ".."-bearing identity that is still stable and still distinct.
+func syntheticSourceKey(key string) (string, error) {
+	slashed := filepath.ToSlash(key)
+	// ValidateSyntheticSourceID is the absoluteness predicate rather than
+	// filepath.IsAbs: it rejects the Unix, UNC, and Windows-volume forms on
+	// every platform, and yammm ships six. The empty key is left to the
+	// cleans-to-"." check below, which names it better.
+	if slashed != "" {
+		if err := location.ValidateSyntheticSourceID(slashed); err != nil {
+			return "", fmt.Errorf("source key %q must be relative to the synthetic root: %w", key, err)
+		}
+	}
+	cleaned := path.Clean(slashed) // "" cleans to "."
+	if cleaned == "." {
+		return "", fmt.Errorf("source key %q resolves to the synthetic root itself", key)
+	}
+	return cleaned, nil
+}
+
+// normalizeSyntheticRoot validates cfg's synthetic root against the load it was
+// given to and returns the value the derivation sites use. It returns "" when
+// the option was not passed.
+//
+// The trailing-slash trim runs before validation so two spellings of one root
+// give one identity, and so a bare "/" reaches ValidateSyntheticSourceID as the
+// empty string rather than as an absolute path. Both companion checks refuse
+// rather than degrade: without WithSourcesOnly an import miss falls back to a
+// sandboxed disk read and mixes a file-backed identity into the same closure,
+// and a non-empty module root names the same concept twice when the load can
+// honor only one.
+func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) {
+	if !cfg.syntheticRootSet {
+		return "", nil
+	}
+	root := strings.TrimRight(cfg.syntheticRoot, "/")
+	if err := location.ValidateSyntheticSourceID(root); err != nil {
+		return "", fmt.Errorf("invalid synthetic root %q: %w", cfg.syntheticRoot, err)
+	}
+	if !cfg.sourcesOnly {
+		return "", fmt.Errorf("synthetic root %q requires WithSourcesOnly: without it an unresolved import "+
+			"reads from disk and mints a file-backed identity into the same closure", cfg.syntheticRoot)
+	}
+	if moduleRoot != "" {
+		return "", fmt.Errorf("synthetic root %q cannot be combined with module root %q: "+
+			"pass an empty module root, which the synthetic root stands in for", cfg.syntheticRoot, moduleRoot)
+	}
+	return root, nil
+}
+
+// rejectSyntheticRoot refuses WithSyntheticRoot on the load functions it cannot
+// serve. Load resolves its entry from disk and always has a module root;
+// LoadString mints its own "string://" identity and disallows imports. On both
+// the option could only ever be a silent no-op, which is the worst of the three
+// outcomes.
+func rejectSyntheticRoot(cfg *loadConfig) error {
+	if !cfg.syntheticRootSet {
+		return nil
+	}
+	return errors.New("WithSyntheticRoot applies to LoadSourcesWithEntry only")
 }
 
 // makeCanonicalPath converts a path to absolute, cleaned, symlink-resolved form.

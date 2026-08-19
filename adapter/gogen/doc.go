@@ -29,8 +29,9 @@
 //   - One EDGE_ struct per declared association (see Associations and the Graph
 //     Aggregate).
 //   - A Graph aggregate (see Associations and the Graph Aggregate).
-//   - The embedded SerializedModel and SchemaHash (see the SerializedModel
-//     section below).
+//   - The embedded SerializedModel, the uniform SerializedSources /
+//     SerializedEntry pair, and SchemaHash (see the SerializedModel section
+//     below).
 //
 // A type's or property's schema doc-comment is carried through verbatim as the Go
 // declaration's doc-comment.
@@ -102,7 +103,23 @@
 // # SerializedModel
 //
 // Every generated file embeds the .yammm source it was generated from, so the
-// schema can be re-loaded at runtime without the original files on disk:
+// schema can be re-loaded at runtime without the original files on disk. Two
+// surfaces carry it, and one of them is uniform.
+//
+// The uniform pair is what a caller that handles more than one generated package
+// should use:
+//
+//   - func SerializedSources() map[string][]byte returns every source in the
+//     closure keyed by module-root-relative path, and const SerializedEntry names
+//     the entry. Both are emitted by every generated package, whatever its source
+//     count, and both derive from SerializedModel rather than embedding a second
+//     copy. The recommended re-load is
+//     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with an empty
+//     module root, [github.com/simon-lentz/yammm/schema.WithSourcesOnly] and
+//     [github.com/simon-lentz/yammm/schema.WithSyntheticRoot], which gives type
+//     identities no working directory, checkout, or container mount point can move.
+//
+// The shape-dependent surface predates it and stays valid:
 //
 //   - A single-source schema embeds var SerializedModel string, re-loadable via
 //     [github.com/simon-lentz/yammm/schema.LoadString].
@@ -111,7 +128,9 @@
 //     entry point, re-loadable via
 //     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with module root "."
 //     (add [github.com/simon-lentz/yammm/schema.WithSourcesOnly] to guarantee the
-//     re-load never touches the filesystem).
+//     re-load never touches the filesystem). Module root "." canonicalizes against
+//     the process working directory, which then lands inside every TypeID the
+//     re-loaded schema carries; the uniform pair above avoids that.
 //
 // Keys are relative to the load's recorded module root
 // ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot] — the WithModuleRoot
@@ -120,11 +139,12 @@
 // match the module-style import statements inside the sources on re-load. const
 // SchemaHash carries the schema's
 // [github.com/simon-lentz/yammm/schema.StructuralHash]. Before returning, [Marshal]
-// re-loads the embedded model and confirms its StructuralHash matches the input's —
-// hermetically, under [github.com/simon-lentz/yammm/schema.WithSourcesOnly], so a
-// mis-keyed source fails generation rather than being silently satisfied by an
-// on-disk file — making the embedded provenance a guaranteed re-loadable model
-// rather than an unverified claim.
+// re-loads both embedded surfaces and confirms each produces the input's
+// StructuralHash — hermetically, under
+// [github.com/simon-lentz/yammm/schema.WithSourcesOnly], so a mis-keyed source
+// fails generation rather than being silently satisfied by an on-disk file —
+// making the embedded provenance a guaranteed re-loadable model rather than an
+// unverified claim.
 //
 // # Output Guarantees
 //
@@ -168,8 +188,8 @@
 //   - the schema is not source-backed (e.g. built via
 //     [github.com/simon-lentz/yammm/schema.NewBuilder] without retained source);
 //   - a Go name collision cannot be resolved by schema-qualification;
-//   - the generated source fails to format, fails to type-check, or its embedded
-//     SerializedModel fails the round-trip hash check (each a generator bug).
+//   - the generated source fails to format, fails to type-check, or either
+//     embedded surface fails its round-trip hash check (each a generator bug).
 //
 // # Thread Safety
 //
@@ -184,11 +204,12 @@
 // [github.com/simon-lentz/yammm/adapter/neo4j] is where they are read.
 //
 // They do survive in the embedded SerializedModel, which holds the schema source
-// verbatim. A schema re-loaded from that constant therefore carries its
-// annotations, and the store DDL derived from the re-loaded schema matches the
-// DDL derived from the original files — the whole point of embedding the source
-// rather than a reduction of it. Adding an annotation to a schema changes that
-// one constant and nothing else in the emitted file.
+// verbatim, and therefore in SerializedSources, which derives from it. A schema
+// re-loaded from either carries its annotations, and the store DDL derived from
+// the re-loaded schema matches the DDL derived from the original files — the whole
+// point of embedding the source rather than a reduction of it. Adding an
+// annotation to a schema changes that one constant and nothing else in the
+// emitted file.
 //
 // They do reach the generator indirectly: a property inherited from several
 // ancestors carries the union of their annotations, so the merged view yields a

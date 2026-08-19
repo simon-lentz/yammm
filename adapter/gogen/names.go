@@ -105,10 +105,20 @@ type nameTable struct {
 // entity may take them (Go has one package block namespace shared by types, consts,
 // and vars). SerializedModelEntry is reserved unconditionally — a stable reserved
 // set is simpler than one that varies with source count, and a schema type named
-// "SerializedModelEntry" is absurd.
+// "SerializedModelEntry" is absurd. SerializedSources and SerializedEntry are
+// emitted on both arms of that dispatch and reserved on the same footing: without
+// them a schema type of either name takes the Go name, format.Source succeeds, and
+// the collision surfaces as a type-check failure.
 //
 //nolint:gochecknoglobals // Intentional: static reserved-name list.
-var reservedNames = []string{"Graph", "SerializedModel", "SerializedModelEntry", "SchemaHash"}
+var reservedNames = []string{
+	"Graph",
+	"SerializedModel",
+	"SerializedModelEntry",
+	"SerializedSources",
+	"SerializedEntry",
+	"SchemaHash",
+}
 
 // buildNameTable walks the closure (entry + transitively imported schemas) and
 // assigns each type and datatype a collision-free exported Go name in ONE shared

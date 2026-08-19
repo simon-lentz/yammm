@@ -200,9 +200,11 @@ func (s *Schema) HasSourceProvider() bool {
 // ModuleRoot returns the canonicalized module root the load resolved
 // module-style imports against: the WithModuleRoot value when given, the
 // entry file's directory for a plain Load, and the canonicalized root
-// argument for LoadSources/LoadSourcesWithEntry (including the "." form).
+// argument for LoadSourcesWithEntry (including the "." form).
 // Returns "" when no module root was in play — LoadString sources, an
-// empty root passed to LoadSources, or a Builder-built schema.
+// empty root passed to LoadSourcesWithEntry, a load under
+// [WithSyntheticRoot] (whose root stands in for the module root but is not
+// one), or a Builder-built schema.
 //
 // The entry schema and every import compiled by the same load record that
 // load's root. An import reused from a shared Registry cache (see

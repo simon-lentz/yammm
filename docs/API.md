@@ -41,6 +41,49 @@ s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, op
 | `WithLogger` | Structured logger for load diagnostics |
 | `WithDisallowImports` | Prevent import declarations from being processed |
 | `WithSourcesOnly` | Restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources) |
+| `WithSyntheticRoot` | Give in-memory sources synthetic identities under a root such as `embedded://app`, so type identities do not move with the working directory (see [Synthetic source identities](#synthetic-source-identities)) |
+
+### Synthetic source identities
+
+`LoadSourcesWithEntry` derives each source's `SourceID` from the module root and
+the key, so the identities — and therefore every `TypeID`, and therefore every
+type row a `.ys` snapshot records — carry a filesystem path. That path moves with
+the working directory, the checkout, and the container mount point.
+`WithSyntheticRoot` replaces it:
+
+```go
+s, result := schema.LoadSourcesWithEntry(ctx,
+    gen.SerializedSources(),  // a generated package's embedded sources
+    gen.SerializedEntry,
+    "",                       // no module root: the synthetic root stands in
+    schema.WithSourcesOnly(),
+    schema.WithSyntheticRoot("embedded://app"),
+)
+```
+
+A source keyed `a/b/x.yammm` then has the identity `embedded://app/a/b/x.yammm`
+on every machine. The root also stands in for the module root, so module-style
+imports resolve under it.
+
+The option refuses rather than degrades. Each of these is an error:
+
+| Condition | Why |
+| --------- | --- |
+| An invalid root (empty, or absolute-looking after the trailing slash is trimmed) | An absolute-looking root collides with file-backed identities |
+| A root without `WithSourcesOnly` | An unresolved import would read from disk and mix a file-backed identity into the same closure |
+| A root together with a non-empty `moduleRoot` argument | The two name one concept and the load can honor only one |
+| The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there |
+| An absolute source key, or one resolving to the root itself | Keys must name a source below the root |
+
+Two limitations are deliberate. Relative imports (`"./x"`, `"../x"`) are not
+supported: they resolve through the importing source's canonical path, which no
+synthetic identity has. And `Schema.ModuleRoot()` stays empty, which makes a
+schema loaded this way an unsupported input to `gogen.Marshal` — keep generators
+on disk loads.
+
+**Adopting a synthetic root re-keys every snapshot already written**, because the
+recorded type identities change. Treat the switch, and any later change to the
+root value, as a state-clearing change.
 
 ### Error Handling Pattern
 
@@ -700,6 +743,25 @@ if !header.SchemaHashMatches(s) {
 
 `SchemaHashMatches` is nil-safe and returns `false` without panicking when the receiver is nil, the schema is nil, the header's `SchemaHash` is empty, the header's `SchemaHashAlgorithm` does not match `schema.StructuralHashVersion`, or `schema.StructuralHash(s)` returns an empty string. Dispatch callers treat `false` as "unknown or incompatible schema, do not proceed" rather than silently continuing.
 
+#### UnknownTypes — the other half of the same cross-check
+
+`HeaderInfo.UnknownTypes(s *schema.Schema) []TypeRef` returns the header's types-table rows that `s`'s import closure does not declare. An empty result means every row binds at `Load`.
+
+```go
+if !header.SchemaHashMatches(s) {
+    return stateStaleSchema  // the schema shape changed under one source path
+}
+if unknown := header.UnknownTypes(s); len(unknown) > 0 {
+    return stateStaleSchema  // the same shape, recorded under different paths
+}
+```
+
+The two are complements, and a dispatch caller wants both. `schema.StructuralHash` hashes names and never source paths, so a snapshot written under one schema layout and read under another **passes** the hash check, classifies as resumable, and then fails at `snapshot.Load` with one `E_SNAPSHOT_UNKNOWN_TYPE` per row. Both checks run on a header-only read, before any body decode.
+
+The returned rows and the closure's own `SourceID().String()` values side by side are the whole diagnosis; log them.
+
+Nil-safety: a nil receiver returns nil, and a nil schema returns every row. `SnapshotInfo` carries the same `Types` rows and deliberately has no such method — a caller holding one has already paid the full decode, which is the cost this method exists to avoid.
+
 ### Atomic Writing
 
 `snapshot.WriteFile` persists bytes to a path using the `tmp+fsync+rename` protocol — the standard crash-safe write primitive every yammm consumer needs when turning `Marshal` output into a durable `.ys` file:
@@ -1345,7 +1407,7 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
 data, err := gogen.Marshal(s, gogen.WithPackageName("model"))
 ```
 
-`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSourcesWithEntry`. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded `SerializedModel` and its round-trip self-check require the source.
+`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSourcesWithEntry`. A schema loaded under `schema.WithSyntheticRoot` is **not** a supported input: `Schema.ModuleRoot()` is empty there, so the emitted keys silently stop matching the disk-loaded ones. Keep generators on disk loads. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded `SerializedModel` and its round-trip self-check require the source.
 
 ### Options
 
@@ -1385,11 +1447,22 @@ A named DataType is rendered faithfully in every position — scalar field, list
 - **Struct per type** (including abstract and part types). Schema doc-comments carry through verbatim.
 - **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — owner-qualified, so they are unique by construction — carrying the association's own properties plus a `Where` block of the target type's primary keys. (An association whose target type has no primary key is rejected: its `Where` block would be empty, leaving the edge unable to identify a target node.)
 - **`Graph` aggregate** — one slice field per concrete type, keyed by the singular snake_case form of the type name.
-- **`SerializedModel`** — the verbatim `.yammm` source(s): a string `var` for a single file, or a `map[string]string` keyed by module-root-relative path (plus a `SerializedModelEntry` const) for a schema with imports. A `SchemaHash` const carries the structural hash. The embedded model is **guaranteed re-loadable**: `Marshal` re-loads it at generation time and confirms the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
+- **`SerializedSources` / `SerializedEntry`** — the uniform embedded-source surface, emitted by every generated package whatever its source count: `func SerializedSources() map[string][]byte` returns the whole closure keyed by module-root-relative path, and `const SerializedEntry` names the entry key. Both derive from `SerializedModel`, so the file holds one copy of the schema and the two surfaces cannot disagree. This is what a consumer with more than one generated package should load.
+- **`SerializedModel`** — the shape-dependent surface that predates it, unchanged: the verbatim `.yammm` source(s) as a string `var` for a single file, or a `map[string]string` keyed by module-root-relative path (plus a `SerializedModelEntry` const) for a schema with imports. A `SchemaHash` const carries the structural hash. Both embedded surfaces are **guaranteed re-loadable**: `Marshal` re-loads each at generation time and confirms the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
 
 ### Imports
 
-gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded `SerializedModel` keys are relative to the load's recorded module root (`Schema.ModuleRoot()` — the `WithModuleRoot` value when given, else the entry's directory), so generated output is byte-reproducible across checkouts and CI runners and the keys match the sources' module-style import statements on re-load. `Marshal` verifies the embedded model re-loads hermetically (`schema.WithSourcesOnly` — no filesystem participation) before returning; re-load the multi-source form the same way: `schema.LoadSourcesWithEntry(ctx, toBytes(SerializedModel), SerializedModelEntry, ".", schema.WithSourcesOnly())`.
+gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded `SerializedModel` keys are relative to the load's recorded module root (`Schema.ModuleRoot()` — the `WithModuleRoot` value when given, else the entry's directory), so generated output is byte-reproducible across checkouts and CI runners and the keys match the sources' module-style import statements on re-load. `Marshal` verifies both embedded surfaces re-load hermetically (`schema.WithSourcesOnly` — no filesystem participation) before returning.
+
+The recommended re-load is the uniform pair under a synthetic root:
+
+```go
+s, result := schema.LoadSourcesWithEntry(ctx,
+    gen.SerializedSources(), gen.SerializedEntry, "",
+    schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://app"))
+```
+
+The older per-shape recipes stay valid — `schema.LoadString(ctx, SerializedModel, "<key>")` for a single source, and `schema.LoadSourcesWithEntry(ctx, toBytes(SerializedModel), SerializedModelEntry, ".", schema.WithSourcesOnly())` for a map. Note what module root `"."` costs: it canonicalizes against the process working directory, and that directory then lands inside every `TypeID` the re-loaded schema carries. See [Synthetic source identities](#synthetic-source-identities).
 
 ### Validation
 

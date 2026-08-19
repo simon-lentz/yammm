@@ -1,0 +1,6 @@
+schema "reldep"
+
+type Zone {
+	code String primary
+	name String required
+}

@@ -34,12 +34,36 @@ type Graph struct {
 //	schema.LoadSourcesWithEntry(ctx, toBytes(SerializedModel), SerializedModelEntry, ".")
 //
 // where toBytes converts each map value to []byte. Add schema.WithSourcesOnly()
-// to guarantee the re-load never reads the filesystem.
+// to guarantee the re-load never reads the filesystem. Module root "."
+// canonicalizes against the process working directory, so that directory lands
+// inside every TypeID the re-loaded schema carries. Prefer
+// SerializedSources/SerializedEntry below, which is one shape for every
+// generated package and takes a synthetic root instead.
 var SerializedModel = map[string]string{
 	"collision_common.yammm": "schema \"common\"\n\ntype Region {\n\tcode String primary\n\tname String required\n}\n",
 	"collision_main.yammm":   "schema \"geo\"\n\nimport \"collision_common.yammm\" as common\n\ntype Region {\n\tid String primary\n}\n\ntype County {\n\tfips String primary\n\t--> IN_REGION (one) common.Region\n}\n",
 }
 
 const SerializedModelEntry = "collision_main.yammm"
+
+// SerializedEntry is the entry-point key into SerializedSources.
+const SerializedEntry = SerializedModelEntry
+
+// SerializedSources returns every source in the import closure, keyed by
+// module-root-relative path. Re-load with:
+//
+//	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
+//		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://your-app"))
+//
+// The synthetic root is what keeps the loaded type identities stable. Passing
+// module root "." instead also re-loads, but "." canonicalizes against the
+// process working directory, which then lands inside every TypeID.
+func SerializedSources() map[string][]byte {
+	m := make(map[string][]byte, len(SerializedModel))
+	for k, v := range SerializedModel {
+		m[k] = []byte(v)
+	}
+	return m
+}
 
 const SchemaHash = "sha256:97db450c2564d017fb520292750097aba55ffc1bf9f8e7efed0744dfa282b8b1"
