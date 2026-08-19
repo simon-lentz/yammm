@@ -17,7 +17,25 @@ type Graph struct {
 }
 
 // SerializedModel is the verbatim .yammm source this file was generated from.
-// Re-load with: schema.LoadString(ctx, SerializedModel, "inheritance.yammm")
+// Re-load with: schema.LoadString(ctx, SerializedModel, "inheritance.yammm"), or through
+// SerializedSources/SerializedEntry below, which is one shape for every
+// generated package.
 var SerializedModel = "schema \"geo\"\n\nabstract type GeoEntity {\n\tid UUID primary\n\tname String required\n}\n\ntype County extends GeoEntity {\n\tfips String required\n}\n"
+
+// SerializedEntry is the entry-point key into SerializedSources.
+const SerializedEntry = "inheritance.yammm"
+
+// SerializedSources returns every source in the import closure, keyed by
+// module-root-relative path. Re-load with:
+//
+//	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
+//		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://your-app"))
+//
+// The synthetic root is what keeps the loaded type identities stable. Passing
+// module root "." instead also re-loads, but "." canonicalizes against the
+// process working directory, which then lands inside every TypeID.
+func SerializedSources() map[string][]byte {
+	return map[string][]byte{SerializedEntry: []byte(SerializedModel)}
+}
 
 const SchemaHash = "sha256:b0feec6b263e221155cc9e54146eb8014befff81ba6259c3562d4c5dc4e25d49"

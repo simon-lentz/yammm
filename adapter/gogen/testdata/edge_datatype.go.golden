@@ -28,7 +28,25 @@ type Graph struct {
 }
 
 // SerializedModel is the verbatim .yammm source this file was generated from.
-// Re-load with: schema.LoadString(ctx, SerializedModel, "edge_datatype.yammm")
+// Re-load with: schema.LoadString(ctx, SerializedModel, "edge_datatype.yammm"), or through
+// SerializedSources/SerializedEntry below, which is one shape for every
+// generated package.
 var SerializedModel = "schema \"geo\"\n\ntype StateCode = String [2, 2]\n\ntype State {\n\tcode StateCode primary\n\tname String required\n}\n\ntype County {\n\tfips String primary\n\tzips List <StateCode>\n\t--> IN_STATE (one) State {\n\t\tsince Integer required\n\t\tcode_tag StateCode\n\t}\n}\n"
+
+// SerializedEntry is the entry-point key into SerializedSources.
+const SerializedEntry = "edge_datatype.yammm"
+
+// SerializedSources returns every source in the import closure, keyed by
+// module-root-relative path. Re-load with:
+//
+//	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
+//		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://your-app"))
+//
+// The synthetic root is what keeps the loaded type identities stable. Passing
+// module root "." instead also re-loads, but "." canonicalizes against the
+// process working directory, which then lands inside every TypeID.
+func SerializedSources() map[string][]byte {
+	return map[string][]byte{SerializedEntry: []byte(SerializedModel)}
+}
 
 const SchemaHash = "sha256:bad077a15a127af5d883f2e26b2ce8f6f3ca3d86dc13adf9807caf42079e5566"

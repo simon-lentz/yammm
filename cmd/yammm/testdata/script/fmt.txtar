@@ -16,6 +16,36 @@ cmp work.yammm formatted_golden.yammm
 # Missing input is an error.
 ! exec yammm fmt nonexistent.yammm
 
+# --check is silent and succeeds on a canonical file.
+exec yammm fmt --check formatted_golden.yammm
+! stdout .
+
+# --check names the unformatted file and fails, gofmt -l style.
+! exec yammm fmt --check unformatted.yammm
+stdout '^unformatted\.yammm$'
+
+# One run over a list reports every offender and no formatted file.
+cp unformatted.yammm other.yammm
+! exec yammm fmt --check unformatted.yammm formatted_golden.yammm other.yammm
+stdout '^unformatted\.yammm$'
+stdout '^other\.yammm$'
+! stdout 'formatted_golden'
+
+# --check with --write is a usage error, and it says why. cobra's own
+# MarkFlagsMutuallyExclusive would exit 2 printing nothing under this root,
+# which is what this assertion rules out.
+! exec yammm fmt --check --write unformatted.yammm
+stderr 'mutually exclusive'
+
+# A parse failure is reported per file, on stderr, which the in-process cobra
+# buffers cannot see.
+! exec yammm fmt --check broken.yammm
+stderr 'broken\.yammm'
+
+-- broken.yammm --
+schema "test"
+type Person {
+
 -- unformatted.yammm --
 schema "test"
 type   Person   {

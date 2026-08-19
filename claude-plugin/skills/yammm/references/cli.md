@@ -9,7 +9,7 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | Command | Description |
 | ------- | ----------- |
 | `yammm validate <schema>` | Validate a schema file |
-| `yammm fmt <schema>` | Format a schema file |
+| `yammm fmt <schema>...` | Format schema files, or check them with `--check` |
 | `yammm check <schema> <data>` | Validate data against a schema |
 | `yammm load <schema> <data>` | Load data into graph and validate |
 | `yammm export <schema> <data>` | Export data to JSON, CSV, or Cypher |
@@ -47,16 +47,29 @@ Compiles a schema file and reports diagnostics. Exit code 0 on success, non-zero
 ### fmt
 
 ```bash
-yammm fmt schema.yammm           # print formatted output to stdout
-yammm fmt -w schema.yammm        # write back to source file
+yammm fmt schema.yammm                 # print formatted output to stdout
+yammm fmt -w schema.yammm              # write back to source file
+yammm fmt --check schema.yammm a.yammm # list unformatted files, exit 1 if any
 ```
 
-Formats a `.yammm` file (consistent indentation, ordering). Use `-w` / `--write` to modify the file in place.
+Formats `.yammm` files (consistent indentation, ordering). Use `-w` / `--write` to
+modify files in place.
+
+`--check` writes nothing. It prints the path of every unformatted file, one per
+line, and exits 1 when the list is not empty — the shape `gofmt -l` uses, so it
+drops into a pre-commit hook without a shell loop. Every path is checked, so one
+run reports every offender. `--check` and `--write` together are a usage error
+(exit 2).
+
+The check normalizes line endings before formatting, so a CRLF file is reported
+as unformatted even when nothing else differs. That is what `-w` already does to
+the same file.
 
 ### Typical development loop
 
 ```bash
 yammm validate schema.yammm      # compile-check
+yammm fmt --check schema.yammm   # gate: is it already canonical?
 yammm fmt -w schema.yammm        # format
 yammm check schema.yammm data.json  # validate data
 ```

@@ -32,6 +32,10 @@
 //	// Compare the header's schema hash against a loaded schema
 //	if !header.SchemaHashMatches(s) { /* stale-schema path */ }
 //
+//	// Catch the same schema shape recorded under different source paths,
+//	// which the hash cannot see
+//	if unknown := header.UnknownTypes(s); len(unknown) > 0 { /* stale-schema path */ }
+//
 //	// Write .ys bytes atomically to disk (tmp+fsync+rename)
 //	if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 //

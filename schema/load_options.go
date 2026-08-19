@@ -13,11 +13,16 @@ type LoadOption func(*loadConfig)
 type loadConfig struct {
 	registry        *Registry
 	moduleRoot      string
+	syntheticRoot   string
 	issueLimit      int
 	sourceRegistry  *source.Registry
 	logger          *slog.Logger
 	disallowImports bool
 	sourcesOnly     bool
+	// syntheticRootSet separates "WithSyntheticRoot not passed" from
+	// "WithSyntheticRoot passed an empty root", which is an error rather than
+	// a no-op.
+	syntheticRootSet bool
 }
 
 // defaultLoadConfig returns a loadConfig with sensible defaults.
@@ -69,8 +74,9 @@ func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 }
 
 // WithModuleRoot sets the root directory for module-style imports.
-// This option is only meaningful for Load() which operates on filesystem paths.
-// For LoadString() and LoadSources(), the module root is inferred or provided directly.
+// This option is only meaningful for Load(), which operates on filesystem paths.
+// LoadString() has no module root, and LoadSourcesWithEntry() takes one as an
+// explicit argument rather than through this option.
 func WithModuleRoot(root string) LoadOption {
 	return func(c *loadConfig) {
 		c.moduleRoot = root
@@ -109,11 +115,51 @@ func withSourceRegistry(reg *source.Registry) LoadOption {
 // satisfied by an on-disk file, and on-disk state cannot change how keys
 // resolve — SourceIDs derive textually from the module root and key, and
 // the module-root sandbox is never opened. Meaningful for
-// LoadSources/LoadSourcesWithEntry; a plain Load resolves its entry from
-// disk by definition (its imports would still be restricted).
+// LoadSourcesWithEntry; a plain Load resolves its entry from disk by
+// definition (its imports would still be restricted). Required by
+// [WithSyntheticRoot], which is unsound without it.
 func WithSourcesOnly() LoadOption {
 	return func(c *loadConfig) {
 		c.sourcesOnly = true
+	}
+}
+
+// WithSyntheticRoot makes in-memory source identities synthetic rather than
+// filesystem-derived: each source key is joined to root, so a type's SchemaPath
+// reads "embedded://app/a/b/x.yammm" instead of a path that moves with the
+// working directory, the checkout, or the container mount point. It is the way
+// to load embedded sources whose identities are persisted — a snapshot records
+// them, and a filesystem-derived one re-keys every record when the process
+// moves. A scheme prefix is the recommended form; the value is validated once
+// with [github.com/simon-lentz/yammm/location.ValidateSyntheticSourceID], and a
+// trailing slash is trimmed, so two spellings of one root give one identity.
+//
+// The root also stands in for the module root, so module-style imports resolve
+// under it. The load is rejected outright, rather than silently degraded, in
+// four cases: an invalid root; a root without [WithSourcesOnly], where an import
+// miss would fall back to disk and mix a file-backed identity into the closure;
+// a root together with a non-empty moduleRoot argument, which names the same
+// concept twice; and the option passed to [Load] or [LoadString], where it can
+// only ever be a no-op.
+//
+// Keys must be relative and must not resolve to the root itself. A key that
+// escapes the root is permitted and yields a ".."-bearing identity, which stays
+// stable and distinct. Relative imports ("./x", "../x") are NOT supported under
+// a synthetic root: they resolve through the importing file's canonical path,
+// which a synthetic identity does not have, so the load reports "relative
+// imports require a file-based source". [Schema.ModuleRoot] stays empty, and a
+// schema loaded this way is not a supported input to
+// [github.com/simon-lentz/yammm/adapter/gogen.Marshal], whose embedded keys
+// silently stop matching the disk-loaded ones.
+//
+// Do not share a [Registry] between a synthetic-root load and a disk load of
+// the same schema: the two mint different SourceIDs for one schema name, and
+// [Registry.Register] reports DuplicateName, which the loader surfaces as
+// E_DUPLICATE_TYPE.
+func WithSyntheticRoot(root string) LoadOption {
+	return func(c *loadConfig) {
+		c.syntheticRoot = root
+		c.syntheticRootSet = true
 	}
 }
 

@@ -275,8 +275,98 @@ func TestMarshal_TypeChecks(t *testing.T) {
 	}
 }
 
+// TestMarshal_UniformSerializedSources pins the shape a consumer that handles
+// more than one generated package depends on: the same two declarations on both
+// arms of the single-versus-multi dispatch, derived from SerializedModel rather
+// than embedding the source twice.
+func TestMarshal_UniformSerializedSources(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		multi bool
+	}{
+		{name: "scalars"},
+		{name: "imports/main", multi: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := gogen.Marshal(loadSchema(t, tc.name))
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			want := []string{
+				"func SerializedSources() map[string][]byte {",
+				"const SerializedEntry = ",
+			}
+			if tc.multi {
+				// The multi-source entry is an alias, so it cannot drift from
+				// SerializedModelEntry.
+				want = append(want, "const SerializedEntry = SerializedModelEntry")
+			} else {
+				want = append(want, "return map[string][]byte{SerializedEntry: []byte(SerializedModel)}")
+			}
+			for _, w := range want {
+				if !bytes.Contains(got, []byte(w)) {
+					t.Errorf("output missing %q", w)
+				}
+			}
+			// The schema source is embedded once, not twice.
+			if n := bytes.Count(got, []byte("var SerializedModel =")); n != 1 {
+				t.Errorf("SerializedModel declared %d times, want 1", n)
+			}
+		})
+	}
+}
+
+// TestMarshal_RelativeImport is the regression anchor for the round-trip
+// self-check's uniform arm. Every other fixture in this corpus imports
+// module-style, so a self-check that could not serve a relative import would
+// leave the whole corpus green and break generation for a shape the DSL
+// supports. A successful Marshal is the proof: both round-trip arms run inside it.
+func TestMarshal_RelativeImport(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, "imports/rel_main")
+	if len(s.ImportsSlice()) != 1 {
+		t.Fatalf("expected imports/rel_main to declare one import, got %d", len(s.ImportsSlice()))
+	}
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, want := range []string{
+		"type Site struct",
+		"type Zone struct",
+		`"rel_dep.yammm":`,
+		`const SerializedModelEntry = "rel_main.yammm"`,
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+}
+
+// TestMarshal_SerializedEntryReserved pins the reservedNames addition: a schema
+// entity named SerializedEntry must be schema-qualified rather than taking the
+// emitted const's Go name, which would type-check-fail the whole file.
+func TestMarshal_SerializedEntryReserved(t *testing.T) {
+	t.Parallel()
+
+	got, err := gogen.Marshal(loadSchema(t, "reserved_name"))
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !bytes.Contains(got, []byte("type GeoSerializedEntry struct")) {
+		t.Errorf("expected the schema type to be qualified away from the reserved name:\n%s", got)
+	}
+	if bytes.Contains(got, []byte("type SerializedEntry struct")) {
+		t.Error("the schema type took the reserved SerializedEntry name")
+	}
+}
+
 func TestMarshal_Golden(t *testing.T) {
-	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "full"}
+	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "imports/rel_main", "reserved_name", "full"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			s := loadSchema(t, name)

@@ -39,10 +39,8 @@
 //	// Load from string (imports disallowed)
 //	s, result := schema.LoadString(ctx, source, "schema.yammm")
 //
-//	// Load from multiple in-memory sources
-//	s, result := schema.LoadSources(ctx, sources, moduleRoot)
-//
-//	// Load with explicit entry point (useful for LSP)
+//	// Load from in-memory sources with an explicit entry point (useful for
+//	// LSP, and for a generated package's embedded sources)
 //	s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot)
 //
 // A non-OK result with a nil Schema indicates failure. Check result.HasFatal()
@@ -55,6 +53,8 @@
 //
 //   - [WithRegistry]: schema registry for cross-schema type resolution
 //   - [WithModuleRoot]: root directory for module-style imports
+//   - [WithSourcesOnly]: resolve imports only against the in-memory sources
+//   - [WithSyntheticRoot]: synthetic identities for in-memory sources
 //   - [WithIssueLimit]: maximum diagnostic issues to collect (default 100)
 //   - [WithDisallowImports]: prevent import processing
 //   - [WithLogger]: structured logger for diagnostics

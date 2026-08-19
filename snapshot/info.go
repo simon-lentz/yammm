@@ -426,6 +426,30 @@ func (h *HeaderInfo) SchemaHashMatches(s *schema.Schema) bool {
 	return h.SchemaHash == hash
 }
 
+// UnknownTypes returns the header's types-table rows that s's import closure
+// does not declare. An empty result means every row binds at [Load].
+//
+// It is the complement of [HeaderInfo.SchemaHashMatches], and dispatch callers
+// want both: the hash catches a changed schema shape under one source path, and
+// this catches the same shape under a changed path. A snapshot written against
+// one schema layout and read against another passes the hash — StructuralHash
+// hashes names and never source paths — then fails at [Load] with one
+// E_SNAPSHOT_UNKNOWN_TYPE per row. Both checks run on a header-only read, before
+// any body decode.
+//
+// Nil-safety: a nil receiver returns nil, and a nil schema returns every row,
+// because a closure that declares nothing declares no row.
+//
+// [SnapshotInfo] carries the same Types rows and deliberately has no such
+// method: a caller holding one has already paid the full decode, which is the
+// cost this method exists to avoid.
+func (h *HeaderInfo) UnknownTypes(s *schema.Schema) []TypeRef {
+	if h == nil {
+		return nil
+	}
+	return unknownTypeRows(h.Types, s)
+}
+
 // CreatedAtTime parses the header's CreatedAt field. See
 // [HeaderInfo.CreatedAtTime] for the empty-versus-malformed rule and the
 // precision the writers commit to.

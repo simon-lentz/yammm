@@ -1,0 +1,52 @@
+{
+  "name": "\"reldep\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "types": [
+    {
+      "name": "Zone",
+      "name_span": {
+        "s": 22,
+        "e": 26
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 35,
+              "e": 41
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 30,
+            "e": 49
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 56,
+              "e": 62
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 51,
+            "e": 71
+          }
+        }
+      ],
+      "span": {
+        "s": 17,
+        "e": 73
+      }
+    }
+  ]
+}

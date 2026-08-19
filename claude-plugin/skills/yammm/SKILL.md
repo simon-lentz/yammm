@@ -111,7 +111,7 @@ Before/after transformation examples: see `examples/` directory.
 
 - [ ] `yammm validate` clean on all modified `.yammm` files -- and **read its stderr**: warnings do not change the exit code
 - [ ] No `W_ANNOTATION_SHADOWED` warnings (a re-declaration silently dropped an inherited `@index` / `@writeOnce`)
-- [ ] `yammm fmt` applied (deterministic formatting)
+- [ ] `yammm fmt` applied (deterministic formatting; `yammm fmt --check` in CI)
 - [ ] `yammm check` passes if instance data is available
 - [ ] Every concrete type has at least one `primary` field (one or more -- composite keys allowed)
 - [ ] Imported types use qualified references (`alias.TypeName`)

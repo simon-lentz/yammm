@@ -20,6 +20,19 @@ func executeCmd(t *testing.T, args ...string) int {
 // captured stderr, for assertions on rendered diagnostics.
 func executeCmdStderr(t *testing.T, args ...string) (int, string) {
 	t.Helper()
+	code, _, errOut := executeCmdOutput(t, args...)
+	return code, errOut
+}
+
+// executeCmdOutput is executeCmdStderr plus the captured stdout, for commands
+// whose contract is what they print rather than what they diagnose.
+//
+// Both buffers see only writes routed through the command's own writers. A
+// command that writes to os.Stderr directly — the convention here — is
+// invisible to this harness; testdata/script/*.txtar is where those messages
+// are asserted (see the TestMain comment in script_test.go).
+func executeCmdOutput(t *testing.T, args ...string) (int, string, string) {
+	t.Helper()
 
 	var outBuf, errBuf bytes.Buffer
 	cmd := newRootCmd("test")
@@ -40,12 +53,12 @@ func executeCmdStderr(t *testing.T, args ...string) (int, string) {
 
 	if err := cmd.Execute(); err != nil {
 		if exitErr, ok := errors.AsType[*cli.ExitError](err); ok {
-			return exitErr.Code, errBuf.String()
+			return exitErr.Code, outBuf.String(), errBuf.String()
 		}
-		return cli.ExitUsage, errBuf.String()
+		return cli.ExitUsage, outBuf.String(), errBuf.String()
 	}
 
-	return cli.ExitOK, errBuf.String()
+	return cli.ExitOK, outBuf.String(), errBuf.String()
 }
 
 // TestExitCodes pins the exact exit-code contract — usage(2) vs
