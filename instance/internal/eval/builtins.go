@@ -8,10 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema/expr"
@@ -1000,10 +998,14 @@ func builtinTypeOf(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expr
 
 // dslTypeName maps an evaluator value onto the DSL type vocabulary that TypeOf
 // reports: "nil", "boolean", "integer", "float", "string", "list", "map",
-// "pattern", "timestamp", or "unknown" for any shape outside it. It recognises
-// the Go scalar types [value.TypeStrata] does but reports them at finer grain —
-// strata group every numeric together and patterns with strings, where the DSL
-// vocabulary separates both.
+// "pattern", or "unknown" for any shape outside it. It recognises the Go scalar
+// types [value.TypeStrata] does but reports them at finer grain — strata group
+// every numeric together and patterns with strings, where the DSL vocabulary
+// separates both.
+//
+// A Timestamp, Date or UUID reports as "string": [CoerceValue] renders all
+// three to text, and invariants evaluate on coerced values, so no time.Time or
+// uuid.UUID reaches here.
 func dslTypeName(v any) string {
 	if v == nil {
 		return "nil"
@@ -1020,12 +1022,6 @@ func dslTypeName(v any) string {
 		return "string"
 	case *regexp.Regexp:
 		return "pattern"
-	case time.Time:
-		return "timestamp"
-	case uuid.UUID:
-		// A UUID is [16]byte, so without this case it reaches the array arm
-		// below and reports as a list.
-		return "uuid"
 	case immutable.Slice:
 		return "list"
 	case immutable.Map[string]:

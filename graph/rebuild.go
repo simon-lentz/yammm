@@ -108,6 +108,14 @@ type UnresolvedParts struct {
 // time. Context cancellation is checked during the streaming decode phase
 // that precedes RebuildSnapshot; see snapshot.Load.
 //
+// Property values are rewritten into the representation their schema
+// constraint stores — a Timestamp, Date or UUID reaches the same text a
+// validated value would. A value the constraint cannot render is kept as it
+// arrived, because this entry point reconstructs a document rather than
+// validating one, and a document written before that rule existed must still
+// load. Primary keys are not rewritten: the wire holds canonical text, so a
+// loaded key is already canonical.
+//
 // Returns a diag.Result with Fatal-severity E_INTERNAL diagnostics if
 // internal consistency checks fail (e.g., edge references to missing
 // instances, or a zero [schema.TypeID] at any parts position — identity is
@@ -121,6 +129,12 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		return nil, collector.Result()
 	}
 
+	// Values arrive in whatever representation the caller assembled them in.
+	// Rewriting them here is what keeps a graph rebuilt from parts equal to
+	// one built through validation, so a snapshot round trip reaches a
+	// fixpoint on the first pass.
+	canon := newCanonicalizer(s)
+
 	// Step 1: Create Instance objects.
 	instances := make(map[schema.TypeID][]*Instance, len(parts.Instances))
 	instanceIndex := make(map[schema.TypeID]map[string]*Instance, len(parts.Instances))
@@ -130,7 +144,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		idx := make(map[string]*Instance, len(instParts))
 
 		for _, ip := range instParts {
-			inst := rebuildInstance(ip)
+			inst := rebuildInstance(canon.instance(ip))
 			insts = append(insts, inst)
 			idx[ip.PrimaryKey.String()] = inst
 		}
@@ -158,7 +172,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 			continue
 		}
 
-		edges = append(edges, newEdge(ep.Relation, source, target, ep.Properties))
+		edges = append(edges, newEdge(ep.Relation, source, target, canon.edge(ep).Properties))
 	}
 
 	// Sort edges for deterministic ordering.
@@ -189,7 +203,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 			parent = lookupInstance(instanceIndex, dp.ParentType, dp.ParentKey.String())
 		}
 
-		dupInst := rebuildInstance(dp.Instance)
+		dupInst := rebuildInstance(canon.instance(dp.Instance))
 		duplicates = append(duplicates, newDuplicate(dupInst, conflict, parent, dp.Relation, diag.Issue{}))
 	}
 
@@ -212,7 +226,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		}
 
 		unresolvedEdges = append(unresolvedEdges,
-			newUnresolvedEdge(source, up.Relation, up.TargetType, targetKey, up.Required, up.Reason, up.Properties))
+			newUnresolvedEdge(source, up.Relation, up.TargetType, targetKey, up.Required, up.Reason, canon.unresolved(up).Properties))
 	}
 
 	if collector.HasErrors() {

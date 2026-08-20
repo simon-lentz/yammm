@@ -137,6 +137,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation |
 | `E_INVALID_ANNOTATION_TARGET` | Annotation attached to an ineligible property |
 | `W_ANNOTATION_SHADOWED` | A re-declaration silently drops an inherited property's annotations (warning) |
+| `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so every value stored through it loses its UTC offset, its fractional second, or both (Warning, v0.13+) |
 
 ### Instance Validation
 
@@ -194,6 +195,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_SNAPSHOT_IO` | Per-file I/O failure during `snapshot.ScanDir` iteration (v0.3+) |
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
 | `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
+| `W_SNAPSHOT_VALUE_NONCONFORMING` | A stored `Timestamp`, `Date` or `UUID` value does not conform to its schema constraint; reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |
 
 ### Adapter
 

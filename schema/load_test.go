@@ -2080,7 +2080,7 @@ func TestWithSourcesOnly_SymlinkedImportDir(t *testing.T) {
 // registry cache hit still yields a complete Sources() on the new load:
 // the cached import's content is copied into the load's source registry,
 // so closure-content consumers (diagnostics rendering, gogen's embedded
-// SerializedModel) see every source even when the read+parse pipeline was
+// embedded source store) see every source even when the read+parse pipeline was
 // short-circuited.
 func TestSharedRegistry_CacheHitSourcesComplete(t *testing.T) {
 	t.Parallel()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,11 +106,9 @@ func TestMarshalSnapshot_FKColumnsEmpty(t *testing.T) {
 	assert.Contains(t, string(empCSV), "Alice")
 }
 
-// valueToString has a string case and no time.Time case, so a Timestamp built
-// from a time.Time falls to fmt.Sprint and renders in Go's default layout
-// rather than RFC 3339. The two representations of one kind therefore write
-// different text for the same instant.
-func TestMarshalSnapshot_TimestampRendersPerRepresentation(t *testing.T) {
+// Both representations of one instant write the same cell, because validation
+// renders the kind to its canonical text before the writer ever sees it.
+func TestMarshalSnapshot_TimestampRendersOneWay(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	a := New()
@@ -126,8 +125,8 @@ func TestMarshalSnapshot_TimestampRendersPerRepresentation(t *testing.T) {
 	require.NoError(t, err)
 	got := string(output["Entity"])
 
-	assert.Contains(t, got, "2020-01-02 03:04:05 +0000 UTC",
-		"a time.Time-valued Timestamp renders through fmt.Sprint")
-	assert.Contains(t, got, "2020-01-02T03:04:05Z",
-		"a string-valued Timestamp renders verbatim")
+	assert.Equal(t, 2, strings.Count(got, "2020-01-02T03:04:05Z"),
+		"both representations of one instant render as the same cell")
+	assert.NotContains(t, got, "2020-01-02 03:04:05 +0000 UTC",
+		"no cell renders through Go's default time layout")
 }

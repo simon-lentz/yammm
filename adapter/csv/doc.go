@@ -25,6 +25,13 @@
 // matching the JSON adapter's behavior. Temporal coercion to driver types
 // happens downstream in write adapters.
 //
+// The write side renders Timestamp, Date and UUID through their constraint, so
+// a cell carries the text the validator stores — including foreign-key columns,
+// whose components render through the TARGET type's primary-key constraints,
+// and list elements, which render through the element constraint. A value the
+// constraint cannot render is written as it arrived: an export returns an error
+// rather than a diag.Result, so one malformed cell must not fail the file.
+//
 // # List Properties
 //
 // List values use the "|" separator. A cell containing "a|b|c" for a

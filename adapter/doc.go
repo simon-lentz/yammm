@@ -69,7 +69,7 @@
 // # Subpackages
 //
 //   - [csv]: CSV/TSV adapter with schema-driven type coercion
-//   - [gogen]: Go source generator (structs, enums, EDGE_ associations, a Graph aggregate, and an embedded SerializedModel) from a schema and its import closure
+//   - [gogen]: Go source generator (structs, enums, EDGE_ associations, a Graph aggregate, and the embedded schema source) from a schema and its import closure
 //   - [jschema]: JSON Schema (draft 2020-12) generator describing the instance data the validator accepts, for editor-assisted authoring
 //   - [json]: JSON adapter with optional location tracking and JSONC support
 //   - [markdown]: Markdown reference generator with a Mermaid class diagram over the import closure

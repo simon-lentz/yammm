@@ -125,8 +125,19 @@
 // All functions in this package are stateless and safe for concurrent use.
 // No global state is maintained.
 //
-// # Stdlib-Only Dependencies
+// # Value Canonicalization
 //
-// This package depends only on stdlib. It has no dependencies on other packages
-// and can be imported by any layer.
+// [Canonical] returns a value in the single stored representation its schema
+// constraint defines. Timestamp, UUID and Date each accept more than one Go
+// representation and store one; every other kind passes through. It is the one
+// implementation behind every call site that stores or writes a value, so a
+// value reaches one spelling whether it arrived through validation, a wire
+// write, a CSV or JSON export, or a snapshot rebuild.
+//
+// # Dependencies
+//
+// Comparison and kind detection depend only on stdlib. [Canonical] additionally
+// imports schema, time and github.com/google/uuid, because a canonical form is
+// defined by a constraint. The edge is one-directional: schema does not import
+// this package, and adding that edge would create a cycle.
 package value

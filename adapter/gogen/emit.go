@@ -319,87 +319,59 @@ func (g *generator) emitEdgeStructs() error {
 }
 
 // emitSerializedModel embeds every source in the closure plus the schema's
-// structural hash. One source -> a string var re-loadable via LoadString; multiple
-// sources -> a map keyed by MODULE-ROOT-RELATIVE source path (via sourceKey against
-// the schema's recorded ModuleRoot) plus SerializedModelEntry, re-loadable via
-// LoadSourcesWithEntry with moduleRoot ".". Relative keys (never absolute SourceID
-// strings) keep the .go output reproducible across checkouts/CI. This MUST stay
-// paired with verifyRoundTrip: the single- vs multi-source dispatch, the keys, and
-// the entry are all derived the same way (every key routes through sourceKey with
-// the same root and g.schema.SourceID()), so a change to the shape here needs the
-// mirror change there.
+// structural hash: an unexported package-level map keyed by
+// MODULE-ROOT-RELATIVE source path (via sourceKey against the schema's recorded
+// ModuleRoot), and the SerializedSources/SerializedEntry pair a caller re-loads
+// through. Relative keys (never absolute SourceID strings) keep the .go output
+// reproducible across checkouts/CI.
 //
-// Both arms additionally emit the uniform SerializedSources/SerializedEntry pair,
-// DERIVED from SerializedModel rather than embedding a second copy, so one caller
-// loads either shape and the two surfaces cannot disagree. The recommended re-load
-// passes WithSourcesOnly and WithSyntheticRoot: module root "." canonicalizes
-// against the process working directory, and that directory lands inside every
-// TypeID the re-loaded schema carries.
+// One shape whatever the source count. The store is unexported because it is
+// the pair's backing rather than a surface of its own, so the identifiers a
+// consumer sees do not vary with how many files a schema happens to span.
+//
+// This MUST stay paired with verifyRoundTrip: the keys and the entry are
+// derived there the same way (every key routes through sourceKey with the same
+// root and g.schema.SourceID()), so a change to the shape here needs the mirror
+// change there.
 func (g *generator) emitSerializedModel() error {
 	srcs := g.schema.Sources()
 	ids := srcs.SourceIDs()
 	entry := g.schema.SourceID()
 	root := g.schema.ModuleRoot()
-	switch len(ids) {
-	case 0:
+	if len(ids) == 0 {
 		return errors.New("gogen: schema is not source-backed")
-	case 1:
-		content, ok := srcs.ContentBySource(ids[0])
-		if !ok {
-			return errors.New("gogen: schema source content unavailable")
-		}
-		key := sourceKey(root, entry, ids[0])
-		g.buf.WriteString("// SerializedModel is the verbatim .yammm source this file was generated from.\n")
-		fmt.Fprintf(g.buf, "// Re-load with: schema.LoadString(ctx, SerializedModel, %s), or through\n", strconv.Quote(key))
-		g.buf.WriteString("// SerializedSources/SerializedEntry below, which is one shape for every\n")
-		g.buf.WriteString("// generated package.\n")
-		fmt.Fprintf(g.buf, "var SerializedModel = %s\n\n", strconv.Quote(string(content)))
-		g.emitUniformSources(key, "[]byte(SerializedModel)")
-	default:
-		g.buf.WriteString("// SerializedModel maps every source in the import closure (by module-root-relative\n")
-		g.buf.WriteString("// path) to its verbatim .yammm content; SerializedModelEntry is the entry-point key.\n")
-		g.buf.WriteString("// Re-load with:\n")
-		g.buf.WriteString("//   schema.LoadSourcesWithEntry(ctx, toBytes(SerializedModel), SerializedModelEntry, \".\")\n")
-		g.buf.WriteString("// where toBytes converts each map value to []byte. Add schema.WithSourcesOnly()\n")
-		g.buf.WriteString("// to guarantee the re-load never reads the filesystem. Module root \".\"\n")
-		g.buf.WriteString("// canonicalizes against the process working directory, so that directory lands\n")
-		g.buf.WriteString("// inside every TypeID the re-loaded schema carries. Prefer\n")
-		g.buf.WriteString("// SerializedSources/SerializedEntry below, which is one shape for every\n")
-		g.buf.WriteString("// generated package and takes a synthetic root instead.\n")
-		g.buf.WriteString("var SerializedModel = map[string]string{\n")
-		for _, id := range ids { // SourceIDs() is sorted/deterministic
-			content, ok := srcs.ContentBySource(id)
-			if !ok {
-				return fmt.Errorf("gogen: source %s content unavailable", id)
-			}
-			fmt.Fprintf(g.buf, "%s: %s,\n", strconv.Quote(sourceKey(root, entry, id)), strconv.Quote(string(content)))
-		}
-		g.buf.WriteString("}\n\n")
-		fmt.Fprintf(g.buf, "const SerializedModelEntry = %s\n\n", strconv.Quote(sourceKey(root, entry, entry)))
-		g.emitUniformSources("", "")
 	}
+
+	g.buf.WriteString("// serializedSources holds every source in the import closure, keyed by\n")
+	g.buf.WriteString("// module-root-relative path, as verbatim .yammm text. Read it through\n")
+	g.buf.WriteString("// SerializedSources below.\n")
+	g.buf.WriteString("var serializedSources = map[string]string{\n")
+	for _, id := range ids { // SourceIDs() is sorted/deterministic
+		content, ok := srcs.ContentBySource(id)
+		if !ok {
+			return fmt.Errorf("gogen: source %s content unavailable", id)
+		}
+		fmt.Fprintf(g.buf, "%s: %s,\n", strconv.Quote(sourceKey(root, entry, id)), strconv.Quote(string(content)))
+	}
+	g.buf.WriteString("}\n\n")
+
+	g.emitUniformSources(sourceKey(root, entry, entry))
+
 	fmt.Fprintf(g.buf, "const SchemaHash = %q\n", schema.StructuralHash(g.schema))
 	return nil
 }
 
-// emitUniformSources writes the SerializedSources/SerializedEntry pair both arms
-// share. entryKey and value are the single-source arm's inputs — the key
-// sourceKey computed for its LoadString recipe, and the expression converting
-// the string var to bytes; the multi-source arm passes empty strings and gets
-// the map form, whose entry key is already a constant.
+// emitUniformSources writes the SerializedSources/SerializedEntry pair, the one
+// re-load surface a generated package exposes. entryKey is the sourceKey of the
+// entry schema.
 //
-// Both forms derive from SerializedModel, so the generated file holds one copy
-// of the schema and the two surfaces cannot drift. The returned map is fresh per
-// call rather than a package-level value a caller could mutate; no generated
+// The returned map is built fresh per call rather than handing back the
+// package-level store, which a caller could otherwise mutate; no generated
 // package has a hot path. Only builtin types appear, because generated output
 // must stay stdlib-free (typeCheck resolves nothing but "time").
-func (g *generator) emitUniformSources(entryKey, value string) {
+func (g *generator) emitUniformSources(entryKey string) {
 	g.buf.WriteString("// SerializedEntry is the entry-point key into SerializedSources.\n")
-	if entryKey == "" {
-		g.buf.WriteString("const SerializedEntry = SerializedModelEntry\n\n")
-	} else {
-		fmt.Fprintf(g.buf, "const SerializedEntry = %s\n\n", strconv.Quote(entryKey))
-	}
+	fmt.Fprintf(g.buf, "const SerializedEntry = %s\n\n", strconv.Quote(entryKey))
 
 	g.buf.WriteString("// SerializedSources returns every source in the import closure, keyed by\n")
 	g.buf.WriteString("// module-root-relative path. Re-load with:\n")
@@ -411,21 +383,17 @@ func (g *generator) emitUniformSources(entryKey, value string) {
 	g.buf.WriteString("// module root \".\" instead also re-loads, but \".\" canonicalizes against the\n")
 	g.buf.WriteString("// process working directory, which then lands inside every TypeID.\n")
 	g.buf.WriteString("func SerializedSources() map[string][]byte {\n")
-	if value == "" {
-		g.buf.WriteString("m := make(map[string][]byte, len(SerializedModel))\n")
-		g.buf.WriteString("for k, v := range SerializedModel {\n")
-		g.buf.WriteString("m[k] = []byte(v)\n")
-		g.buf.WriteString("}\n")
-		g.buf.WriteString("return m\n")
-	} else {
-		fmt.Fprintf(g.buf, "return map[string][]byte{SerializedEntry: %s}\n", value)
-	}
+	g.buf.WriteString("m := make(map[string][]byte, len(serializedSources))\n")
+	g.buf.WriteString("for k, v := range serializedSources {\n")
+	g.buf.WriteString("m[k] = []byte(v)\n")
+	g.buf.WriteString("}\n")
+	g.buf.WriteString("return m\n")
 	g.buf.WriteString("}\n\n")
 }
 
 // sourceKey returns id's path relative to moduleRoot (the schema's recorded
 // ModuleRoot — the root the load actually resolved module-style imports
-// against), forward-slashed — so embedded SerializedModel keys are
+// against), forward-slashed — so the embedded source keys are
 // machine-independent AND match the import statements inside the sources:
 // a module-style `import "a/b/x"` re-resolves to the key "a/b/x.yammm" on
 // re-load, hitting the pre-registered source with no filesystem fallback.

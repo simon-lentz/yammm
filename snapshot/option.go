@@ -70,6 +70,7 @@ type LoadOption func(*loadConfig)
 
 type loadConfig struct {
 	skipIntegrityCheck bool
+	valueConformance   bool
 }
 
 func applyLoadOptions(opts []LoadOption) loadConfig {
@@ -78,6 +79,25 @@ func applyLoadOptions(opts []LoadOption) loadConfig {
 		o(&cfg)
 	}
 	return cfg
+}
+
+// WithValueConformance makes [Load] and [Verify] report a stored value that
+// does not conform to its schema constraint, as a Warning carrying
+// [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_VALUE_NONCONFORMING]. Off by
+// default, so nothing changes and the walk costs nothing when nobody asks.
+//
+// It reports values of the three kinds that have a canonical stored form —
+// Timestamp, Date and UUID — and nothing else. Bounds, enums, patterns and
+// invariants stay unchecked. **This is not re-validation**, and a document it
+// reports nothing for is not thereby valid.
+//
+// Warning severity is deliberate: Load still returns the snapshot together
+// with the findings. Reporting a document is not refusing it, and the values
+// themselves are rendered rather than rejected — [Load] never re-validates.
+func WithValueConformance() LoadOption {
+	return func(c *loadConfig) {
+		c.valueConformance = true
+	}
 }
 
 // WithSkipIntegrityCheck disables integrity hash verification on load

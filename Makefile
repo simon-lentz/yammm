@@ -16,15 +16,40 @@ test-internal:
 # diffed against what was applied. Behind a build tag because it needs Docker,
 # which the pre-commit gate does not.
 #
-# Enterprise by default, started with the evaluation licence accepted, because
-# that is the edition the adapter targets: NOT NULL, TYPE, and NODE KEY
-# constraints and the propertyType column are all Enterprise-only. Override the
-# image to check Community behaviour, where those tests skip:
+# Runs the whole server matrix, one image after another. Enterprise entries start
+# with the evaluation licence accepted, because that is the edition the adapter
+# targets: NOT NULL, TYPE, and NODE KEY constraints and the propertyType column
+# are all Enterprise-only. The Community entry exercises the edition gating,
+# where those tests skip rather than fail.
+#
+# NEO4J_TEST_IMAGES mirrors the matrix in .github/workflows/yammm_test.yml. The
+# two must move together. A green over one image is not evidence that CI passes:
+# the servers differ in more than their constraint vocabulary, and a difference
+# in how each recovers a connection after a rejected query reached a pull request
+# once, green on the default image and red on the oldest one.
+#
+# To run one image only:
 #
 #   YAMMM_NEO4J_TEST_IMAGE=neo4j:2026.05.0-community make test-integration
+ifdef YAMMM_NEO4J_TEST_IMAGE
+NEO4J_TEST_IMAGES := $(YAMMM_NEO4J_TEST_IMAGE)
+else
+NEO4J_TEST_IMAGES ?= neo4j:5.26-enterprise neo4j:2026.05.0-enterprise neo4j:2026.05.0-community
+endif
+
+# Every image runs even after one fails, matching the workflow's fail-fast: false.
+# Knowing that a change breaks the old server and not the new one is the point.
+# -count=1 because the environment variable that selects the image is read at run
+# time: a cached result from another image would be reported as this one's pass.
 .PHONY: test-integration
 test-integration:
-	go test -tags neo4j_integration -timeout 15m ./adapter/neo4j/integration/
+	@failed=""; \
+	for image in $(NEO4J_TEST_IMAGES); do \
+		echo "==> $$image"; \
+		YAMMM_NEO4J_TEST_IMAGE=$$image go test -count=1 -tags neo4j_integration \
+			-timeout 20m ./adapter/neo4j/integration/ || failed="$$failed $$image"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "integration tests failed on:$$failed"; exit 1; fi
 
 # --- LSP Binary ---
 

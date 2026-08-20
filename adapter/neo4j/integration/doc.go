@@ -32,6 +32,34 @@
 // is not reachable the tests skip rather than fail, so the tag is the only
 // thing standing between a developer and running them.
 //
+// `make test-integration` runs the whole server matrix, one image after
+// another, and is what the release gate means. A single image proves less than
+// it appears to: the servers differ in more than their constraint vocabulary,
+// and the section below is one difference that a run against the default image
+// cannot see.
+//
+// # Provoking a server error
+//
+// A test that deliberately sends something the server rejects must take its own
+// connection pool, through isolatedDriver rather than driver.
+//
+// A rejected query leaves its connection in the Bolt "failed" state, which needs
+// a RESET before that connection serves another query. Every test shares one
+// driver and therefore one pool, so the connection goes to whatever runs next.
+// Whether that next query recovers is a property of the server version: on
+// 2026.05 it does, and on 5.26 it fails with "invalid state 4, expected: [0]",
+// where 4 is the driver's failed state and 0 is ready.
+//
+// The failure lands on the innocent query, which makes it read as a defect in
+// whatever ran second. It reached a pull request once, green on the default
+// image and red on the oldest one.
+//
+// Two shapes of rejection exist and only one poisons the connection. A query the
+// server runs and rejects on a data rule — a constraint violation — recovers on
+// every version. A message the server rejects before running it, such as a
+// parameter it cannot decode, is the one that needs the isolated pool. Take the
+// isolated pool for both rather than classify the rejection.
+//
 // # Edition
 //
 // The default image is Enterprise, started with the evaluation licence

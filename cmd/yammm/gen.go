@@ -25,8 +25,8 @@ Targets:
 
   --to go          A single file of typed Go structs for every schema type
                    (including imported types), named Enum/DataType types, EDGE_
-                   association structs, a Graph aggregate, and an embedded
-                   SerializedModel. Output is stdlib-only. Use --initialisms to
+                   association structs, a Graph aggregate, and the embedded
+                   schema source. Output is stdlib-only. Use --initialisms to
                    upper-case extra acronyms (e.g. GUID,JWT) in generated
                    identifiers; they merge with the default golint acronym set.
 
@@ -46,7 +46,7 @@ Targets:
 
 Use --module-root to resolve module-style imports against a root directory other
 than the schema's own (e.g. a repository root); for the go target the embedded
-SerializedModel keys are relative to that root.`,
+source keys are relative to that root.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runGen,
 	}

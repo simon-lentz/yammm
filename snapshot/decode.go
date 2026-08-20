@@ -15,6 +15,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
@@ -327,6 +328,7 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 	}
 
 	sd.checkProvenancePath(inst, row)
+	sd.checkValueConformance(inst, row)
 
 	keyStr := formatWireKey(inst.Key)
 	if depth == 0 {
@@ -391,6 +393,52 @@ func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
 		WithDetail(diag.DetailKeyOriginalPath, inst.Provenance.Path).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 		Build())
+}
+
+// checkValueConformance reports a stored value its own schema constraint
+// cannot render. Off unless the caller asked for it, because Load documents
+// that it does not re-validate instance data and this walk would otherwise be
+// a cost every reader pays for a check nobody requested.
+//
+// It sits here rather than at materialization so Load, Verify and Info all
+// reach it: Verify stops before a Snapshot exists, and a check placed after
+// that point would be silently absent from the surface whose whole job is to
+// answer whether a document is sound.
+//
+// Scope is the three kinds with a canonical stored form. Bounds, enums,
+// patterns and invariants are not checked; silence is not proof of validity,
+// and the option's documentation says so.
+func (sd *streamDecoder) checkValueConformance(inst instWire, row int) {
+	if !sd.loadCfg.valueConformance || sd.schema == nil || len(inst.Properties) == 0 {
+		return
+	}
+	if row < 0 || row >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok {
+		return
+	}
+	for _, name := range slices.Sorted(maps.Keys(inst.Properties)) {
+		raw := inst.Properties[name]
+		if raw == nil {
+			continue
+		}
+		prop, ok := t.Property(name)
+		if !ok {
+			continue
+		}
+		if !value.Canonicalizes(prop.Constraint()) {
+			continue
+		}
+		if _, err := value.Canonical(immutable.NormalizeValue(raw), prop.Constraint()); err != nil {
+			sd.collector.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_NONCONFORMING,
+				fmt.Sprintf("property %q of %s does not conform to its %s constraint: %s",
+					name, formatWireKey(inst.Key), prop.Constraint().Kind(), err)).
+				WithDetails(diag.TypeProp(sd.refAt(row), name)...).
+				Build())
+		}
+	}
 }
 
 // validateDiagnostics validates duplicate and unresolved records against the

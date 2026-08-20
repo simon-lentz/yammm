@@ -18,11 +18,12 @@ type Graph struct {
 	County []*County `json:"county,omitempty"`
 }
 
-// SerializedModel is the verbatim .yammm source this file was generated from.
-// Re-load with: schema.LoadString(ctx, SerializedModel, "scalars.yammm"), or through
-// SerializedSources/SerializedEntry below, which is one shape for every
-// generated package.
-var SerializedModel = "schema \"geo\"\n\n/* County is a US county node. */\ntype County {\n\tfips String primary\n\tname String required\n\t/* population is the resident count at the last census. */\n\tpopulation Integer required\n\tarea_sq_km Float\n\tfounded Date required\n\tupdated_at Timestamp\n}\n"
+// serializedSources holds every source in the import closure, keyed by
+// module-root-relative path, as verbatim .yammm text. Read it through
+// SerializedSources below.
+var serializedSources = map[string]string{
+	"scalars.yammm": "schema \"geo\"\n\n/* County is a US county node. */\ntype County {\n\tfips String primary\n\tname String required\n\t/* population is the resident count at the last census. */\n\tpopulation Integer required\n\tarea_sq_km Float\n\tfounded Date required\n\tupdated_at Timestamp\n}\n",
+}
 
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "scalars.yammm"
@@ -37,7 +38,11 @@ const SerializedEntry = "scalars.yammm"
 // module root "." instead also re-loads, but "." canonicalizes against the
 // process working directory, which then lands inside every TypeID.
 func SerializedSources() map[string][]byte {
-	return map[string][]byte{SerializedEntry: []byte(SerializedModel)}
+	m := make(map[string][]byte, len(serializedSources))
+	for k, v := range serializedSources {
+		m[k] = []byte(v)
+	}
+	return m
 }
 
 const SchemaHash = "sha256:7137ba36b4a54f6d18e78addd43833bf47d4d8f7386fe18828369afe93f357cc"

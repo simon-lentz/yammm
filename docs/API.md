@@ -1428,6 +1428,8 @@ CSV values are strings. The adapter uses schema constraint metadata to coerce va
 - **Boolean**: `strconv.ParseBool` (`"true"`, `"false"`, `"1"`, `"0"`)
 - **Date**: validated as `"2006-01-02"` format, kept as string
 - **Timestamp**: validated as RFC 3339, kept as string
+
+On the write side the adapter renders `Timestamp`, `Date` and `UUID` through their constraint, so a cell carries the same text the validator stores — including foreign-key columns, whose components render through the **target** type's primary-key constraints, and list elements, which render through the element constraint. A value the constraint cannot render is written as it arrived: an export has no diagnostic channel, and one malformed cell must not fail the file.
 - **List**: split by list separator, elements coerced recursively
 
 ### Limitations
@@ -1436,7 +1438,7 @@ CSV is a flat format. Compositions are not supported in parsing and are silently
 
 ## Go Source Generation
 
-The `adapter/gogen` package generates Go source from a schema: one struct per type, named Enum/DataType types, `EDGE_` association structs, a `Graph` aggregate, and an embedded `SerializedModel`. Unlike the data adapters above, gogen has no instance-data path — it is schema-in, bytes-out. Generated output is stdlib-only (it imports at most `time`).
+The `adapter/gogen` package generates Go source from a schema: one struct per type, named Enum/DataType types, `EDGE_` association structs, a `Graph` aggregate, and the embedded schema source. Unlike the data adapters above, gogen has no instance-data path — it is schema-in, bytes-out. Generated output is stdlib-only (it imports at most `time`).
 
 ### Generation
 
@@ -1448,7 +1450,7 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
 data, err := gogen.Marshal(s, gogen.WithPackageName("model"))
 ```
 
-`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSourcesWithEntry`. A schema loaded under `schema.WithSyntheticRoot` is **not** a supported input: `Schema.ModuleRoot()` is empty there, so the emitted keys silently stop matching the disk-loaded ones. Keep generators on disk loads. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded `SerializedModel` and its round-trip self-check require the source.
+`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSourcesWithEntry`. A schema loaded under `schema.WithSyntheticRoot` is **not** a supported input: `Schema.ModuleRoot()` is empty there, so the emitted keys silently stop matching the disk-loaded ones. Keep generators on disk loads. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded source and its round-trip self-check require it.
 
 ### Options
 
@@ -1488,14 +1490,13 @@ A named DataType is rendered faithfully in every position — scalar field, list
 - **Struct per type** (including abstract and part types). Schema doc-comments carry through verbatim.
 - **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — owner-qualified, so they are unique by construction — carrying the association's own properties plus a `Where` block of the target type's primary keys. (An association whose target type has no primary key is rejected: its `Where` block would be empty, leaving the edge unable to identify a target node.)
 - **`Graph` aggregate** — one slice field per concrete type, keyed by the singular snake_case form of the type name.
-- **`SerializedSources` / `SerializedEntry`** — the uniform embedded-source surface, emitted by every generated package whatever its source count: `func SerializedSources() map[string][]byte` returns the whole closure keyed by module-root-relative path, and `const SerializedEntry` names the entry key. Both derive from `SerializedModel`, so the file holds one copy of the schema and the two surfaces cannot disagree. This is what a consumer with more than one generated package should load.
-- **`SerializedModel`** — the shape-dependent surface that predates it, unchanged: the verbatim `.yammm` source(s) as a string `var` for a single file, or a `map[string]string` keyed by module-root-relative path (plus a `SerializedModelEntry` const) for a schema with imports. A `SchemaHash` const carries the structural hash. Both embedded surfaces are **guaranteed re-loadable**: `Marshal` re-loads each at generation time and confirms the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
+- **`SerializedSources` / `SerializedEntry`** — the embedded-source surface, emitted identically by every generated package whatever its source count: `func SerializedSources() map[string][]byte` returns the whole closure keyed by module-root-relative path, and `const SerializedEntry` names the entry key. They read an unexported package-level store, so the identifiers a consumer sees do not vary with how many files a schema spans. A `SchemaHash` const carries the structural hash. The embedded source is **guaranteed re-loadable**: `Marshal` re-loads it at generation time and confirms the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
 
 ### Imports
 
-gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded `SerializedModel` keys are relative to the load's recorded module root (`Schema.ModuleRoot()` — the `WithModuleRoot` value when given, else the entry's directory), so generated output is byte-reproducible across checkouts and CI runners and the keys match the sources' module-style import statements on re-load. `Marshal` verifies both embedded surfaces re-load hermetically (`schema.WithSourcesOnly` — no filesystem participation) before returning.
+gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded source keys are relative to the load's recorded module root (`Schema.ModuleRoot()` — the `WithModuleRoot` value when given, else the entry's directory), so generated output is byte-reproducible across checkouts and CI runners and the keys match the sources' module-style import statements on re-load. `Marshal` verifies the embedded source re-loads hermetically (`schema.WithSourcesOnly` — no filesystem participation) before returning.
 
-The recommended re-load is the uniform pair under a synthetic root:
+Re-load under a synthetic root:
 
 ```go
 s, result := schema.LoadSourcesWithEntry(ctx,
@@ -1503,7 +1504,9 @@ s, result := schema.LoadSourcesWithEntry(ctx,
     schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://app"))
 ```
 
-The older per-shape recipes stay valid — `schema.LoadString(ctx, SerializedModel, "<key>")` for a single source, and `schema.LoadSourcesWithEntry(ctx, toBytes(SerializedModel), SerializedModelEntry, ".", schema.WithSourcesOnly())` for a map. Note what module root `"."` costs: it canonicalizes against the process working directory, and that directory then lands inside every `TypeID` the re-loaded schema carries. See [Synthetic source identities](#synthetic-source-identities).
+Module root `"."` also re-loads, but note what it costs: it canonicalizes against the process working directory, and that directory then lands inside every `TypeID` the re-loaded schema carries. See [Synthetic source identities](#synthetic-source-identities).
+
+**Removed in v0.13.0.** The shape-dependent `SerializedModel` and `SerializedModelEntry` declarations, and their `LoadString` / `LoadSourcesWithEntry`-with-`"."` recipes, are gone. Regenerate; every hand-written call site should already read the pair above, which v0.12.3 added.
 
 ### Validation
 
