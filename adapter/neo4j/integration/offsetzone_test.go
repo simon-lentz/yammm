@@ -25,7 +25,8 @@ import (
 // form.
 //
 // The unrepaired shape is written alongside as the control. Without it the test
-// cannot tell the repair from a server that accepts anything.
+// cannot tell the repair from a server that accepts anything. The control takes
+// its own connection pool: see isolatedDriver.
 func TestCoerce_OffsetBearingTimestampReachesTheServer(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
@@ -36,8 +37,10 @@ func TestCoerce_OffsetBearingTimestampReachesTheServer(t *testing.T) {
 		t.Fatalf("parse %q: %v", text, err)
 	}
 
-	// The control: what Coerce produced before the repair.
-	if _, err := neo4jdriver.ExecuteQuery(ctx, driver(t), "RETURN $v AS v",
+	// The control: what Coerce produced before the repair. It runs on its own
+	// pool, because the server rejects it and a rejected query leaves its
+	// connection needing a RESET — which the assertion below must not inherit.
+	if _, err := neo4jdriver.ExecuteQuery(ctx, isolatedDriver(t), "RETURN $v AS v",
 		map[string]any{"v": want}, neo4jdriver.EagerResultTransformer); err == nil {
 		t.Log("an unnamed-zone instant was accepted; the driver or server changed, " +
 			"so the repair is now belt-and-braces rather than load-bearing")

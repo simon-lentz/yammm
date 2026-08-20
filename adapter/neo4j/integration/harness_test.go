@@ -37,6 +37,7 @@ const adminPassword = "yammm-integration"
 // and torn down after.
 var shared struct {
 	driver  neo4jdriver.Driver
+	uri     string // the container's Bolt URL, for a test that needs its own pool
 	skip    string // non-empty when the suite cannot run
 	cleanup func()
 }
@@ -114,6 +115,30 @@ func start() {
 	}
 
 	shared.driver = driver
+	shared.uri = uri
+}
+
+// isolatedDriver returns a driver with its own connection pool, closed when the
+// test ends.
+//
+// A query that the server rejects leaves its connection in the Bolt "failed"
+// state, which needs a RESET before the connection serves another query. The
+// shared driver hands that connection to whatever runs next: on some server
+// versions the next query recovers, and on others it fails with
+// "invalid state 4, expected: [0]". A test that provokes a server error
+// therefore takes its own pool and throws it away, rather than leaving the
+// recovery to chance and to test order.
+func isolatedDriver(t *testing.T) neo4jdriver.Driver {
+	t.Helper()
+	if shared.skip != "" {
+		t.Skip(shared.skip)
+	}
+	d, err := neo4jdriver.NewDriver(shared.uri, neo4jdriver.BasicAuth("neo4j", adminPassword, ""))
+	if err != nil {
+		t.Fatalf("opening an isolated driver against %s: %v", shared.uri, err)
+	}
+	t.Cleanup(func() { _ = d.Close(context.Background()) })
+	return d
 }
 
 // driver returns the shared driver, skipping the test when the container could
