@@ -113,3 +113,104 @@ func mustParse(t *testing.T, s string) time.Time {
 	}
 	return tt
 }
+
+// TestCoerce_TextDerivedInstantNeverCarriesTheHostZone is the regression pin for
+// the host-dependence v0.13.0 made reachable.
+//
+// time.Parse returns time.Local, not an unnamed zone, when the parsed offset
+// equals the local zone's offset at that instant. Zone() then reports a
+// non-empty abbreviation, so the unnamed-zone rescue does not fire, and the
+// driver sends Location().String() as a time-zone identifier — "Local" on a host
+// with no TZ set, which the server rejects with "Illegal zone identifier".
+//
+// It sets time.Local rather than reading it. A test that derives its fixture
+// from the host's own zone cannot reproduce the case on a UTC host, because
+// UTC-offset text parses to time.UTC and never to time.Local — so it would pass
+// vacuously on every CI runner, which is where a regression would land. The
+// substitute zone carries a name no tz database holds, which is what the driver
+// would send and the server would refuse.
+//
+// Not parallel: it writes a package-level variable of the standard library.
+func TestCoerce_TextDerivedInstantNeverCarriesTheHostZone(t *testing.T) {
+	restore := time.Local
+	t.Cleanup(func() { time.Local = restore })
+	time.Local = time.FixedZone("XYZ", -4*60*60)
+
+	// Text at exactly the substitute zone's offset — the input time.Parse
+	// resolves to time.Local.
+	local := time.Date(2026, 8, 19, 12, 0, 0, 0, time.Local)
+	text := local.Format(time.RFC3339Nano)
+
+	parsed, err := time.Parse(time.RFC3339, text)
+	if err != nil {
+		t.Fatalf("parse %q: %v", text, err)
+	}
+	if parsed.Location() != time.Local {
+		t.Fatalf("time.Parse(%q) did not resolve to time.Local; the fixture no longer reproduces the case", text)
+	}
+	if name, _ := parsed.Zone(); name == "" {
+		t.Fatalf("time.Parse(%q) produced an unnamed zone; the unnamed rescue would cover it and this test proves nothing", text)
+	}
+
+	got := coerceTime(t, schema.NewTimestampConstraint(), text)
+	if got.Location() == time.Local {
+		t.Errorf("coerced value still carries the host's location %q", got.Location())
+	}
+	if zone, _ := got.Zone(); zone != driverOffsetZoneName {
+		t.Errorf("zone name = %q, want %q — the driver would send it as a time-zone identifier",
+			zone, driverOffsetZoneName)
+	}
+	if !got.Equal(local) {
+		t.Errorf("coerced %s, want the same instant as %s", got, local)
+	}
+}
+
+// TestCoerce_IsHostIndependent is the property the fix exists for, stated
+// directly: one text coerces to one driver payload, wherever it runs.
+func TestCoerce_IsHostIndependent(t *testing.T) {
+	t.Parallel()
+	c := schema.NewTimestampConstraint()
+
+	for _, text := range []string{
+		"2026-08-19T12:00:00Z",
+		"2026-08-19T12:00:00+02:00",
+		"2026-08-19T12:00:00-05:00",
+		time.Date(2026, 8, 19, 12, 0, 0, 0, time.Local).Format(time.RFC3339Nano),
+	} {
+		got := coerceTime(t, c, text)
+		zone, offset := got.Zone()
+
+		// Either UTC, or the driver's offset sentinel. Never a host-supplied
+		// zone identifier, and never an empty one.
+		switch zone {
+		case "UTC", driverOffsetZoneName:
+		default:
+			t.Errorf("%q coerced to zone %q; only UTC and %q are host-independent",
+				text, zone, driverOffsetZoneName)
+		}
+
+		// Whatever the zone, the offset must be the one the text stated.
+		want, err := time.Parse(time.RFC3339, text)
+		if err != nil {
+			t.Fatalf("parse %q: %v", text, err)
+		}
+		if _, wantOffset := want.Zone(); offset != wantOffset {
+			t.Errorf("%q coerced to offset %d, want %d", text, offset, wantOffset)
+		}
+	}
+}
+
+// TestCoerce_CallerSuppliedLocationIsNotSecondGuessed holds the boundary. The
+// text arm rescues a location time.Parse invented; a location the caller chose
+// is theirs, and an IANA name carries more than an offset does.
+func TestCoerce_CallerSuppliedLocationIsNotSecondGuessed(t *testing.T) {
+	t.Parallel()
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Skipf("no tzdata: %v", err)
+	}
+	got := coerceTime(t, schema.NewTimestampConstraint(), time.Date(2026, 8, 19, 12, 0, 0, 0, berlin))
+	if got.Location().String() != "Europe/Berlin" {
+		t.Errorf("a caller-supplied IANA location became %q", got.Location())
+	}
+}

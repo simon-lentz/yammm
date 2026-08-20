@@ -119,15 +119,15 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 				// A Timestamp["layout"] constraint: the declared Go layout is
 				// exclusive, matching schema validation (checkTimestamp).
 				if t, err := time.Parse(format, v); err == nil {
-					return driverZone(t), nil
+					return parsedZone(t), nil
 				}
 				return raw, fmt.Errorf("coerce %s: cannot parse %q against format %q", kind, v, format)
 			}
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
-				return driverZone(t), nil
+				return parsedZone(t), nil
 			}
 			if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
-				return driverZone(t), nil
+				return parsedZone(t), nil
 			}
 			return raw, fmt.Errorf("coerce %s: cannot parse %q as an RFC3339 timestamp", kind, v)
 		default:
@@ -363,4 +363,28 @@ func driverZone(t time.Time) time.Time {
 		return t
 	}
 	return t.In(time.FixedZone(driverOffsetZoneName, offset))
+}
+
+// parsedZone is [driverZone] for an instant that came from parsed text.
+//
+// Text carries an offset, never a zone identity, so any location beyond that
+// offset was supplied by the host rather than by the value. time.Parse supplies
+// one: when the parsed offset equals the local zone's offset at that instant it
+// returns time.Local rather than an unnamed zone. Zone() then reports the local
+// abbreviation, which is non-empty, so [driverZone] leaves it alone and the
+// driver sends Location().String() as a time-zone identifier — "Local" on a host
+// with no TZ set, which the server rejects with "Illegal zone identifier".
+//
+// Expressing a text-derived instant in its own offset makes the coerced value
+// depend on the text alone. Without this the same string coerces to a different
+// driver payload on different machines, and on some of them the write fails.
+//
+// A location the CALLER supplied is not second-guessed; that is [driverZone]'s
+// case and it stays there.
+func parsedZone(t time.Time) time.Time {
+	if t.Location() == time.Local {
+		_, offset := t.Zone()
+		return t.In(time.FixedZone(driverOffsetZoneName, offset))
+	}
+	return driverZone(t)
 }

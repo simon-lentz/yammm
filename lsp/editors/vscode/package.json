@@ -2,7 +2,7 @@
   "name": "yammm",
   "displayName": "YAMMM",
   "description": "Language support for YAMMM schema files",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "publisher": "simon-lentz",
   "license": "MIT",
   "icon": "icon.png",
