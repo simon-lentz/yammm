@@ -22,11 +22,12 @@ type Graph struct {
 	Event []*Event `json:"event,omitempty"`
 }
 
-// SerializedModel is the verbatim .yammm source this file was generated from.
-// Re-load with: schema.LoadString(ctx, SerializedModel, "edge_where_collision.yammm"), or through
-// SerializedSources/SerializedEntry below, which is one shape for every
-// generated package.
-var SerializedModel = "schema \"geo\"\n\ntype Place {\n\tid String primary\n}\n\ntype Event {\n\tid String primary\n\t--> HELD_AT (one) Place {\n\t\twhere String required\n\t}\n}\n"
+// serializedSources holds every source in the import closure, keyed by
+// module-root-relative path, as verbatim .yammm text. Read it through
+// SerializedSources below.
+var serializedSources = map[string]string{
+	"edge_where_collision.yammm": "schema \"geo\"\n\ntype Place {\n\tid String primary\n}\n\ntype Event {\n\tid String primary\n\t--> HELD_AT (one) Place {\n\t\twhere String required\n\t}\n}\n",
+}
 
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "edge_where_collision.yammm"
@@ -41,7 +42,11 @@ const SerializedEntry = "edge_where_collision.yammm"
 // module root "." instead also re-loads, but "." canonicalizes against the
 // process working directory, which then lands inside every TypeID.
 func SerializedSources() map[string][]byte {
-	return map[string][]byte{SerializedEntry: []byte(SerializedModel)}
+	m := make(map[string][]byte, len(serializedSources))
+	for k, v := range serializedSources {
+		m[k] = []byte(v)
+	}
+	return m
 }
 
 const SchemaHash = "sha256:e52e8db1c3f3c49ccbd1b1df12b28908a9aa1c2d770f3cf9b0f48bda33e365af"

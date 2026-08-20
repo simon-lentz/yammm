@@ -81,7 +81,7 @@ func goPackageName(name string) string {
 // nameTable holds the resolved, collision-free Go names for every entity that
 // becomes a top-level declaration: types, datatypes, and inline enums. They share
 // ONE Go package-block namespace (with the Graph aggregate and the
-// SerializedModel/SchemaHash/SerializedModelEntry consts), so the table tracks a
+// SerializedSources/SerializedEntry/SchemaHash declarations), so the table tracks a
 // single `taken` set seeded with those reserved names. Types are keyed by their
 // stable TypeID; datatypes by pointer (DataType has no exported identity, and the
 // same *schema.DataType the closure walk sees is exactly what ResolveDataType
@@ -103,12 +103,18 @@ type nameTable struct {
 
 // reservedNames are the package-level identifiers gogen always emits; no schema
 // entity may take them (Go has one package block namespace shared by types, consts,
-// and vars). SerializedModelEntry is reserved unconditionally — a stable reserved
-// set is simpler than one that varies with source count, and a schema type named
-// "SerializedModelEntry" is absurd. SerializedSources and SerializedEntry are
-// emitted on both arms of that dispatch and reserved on the same footing: without
-// them a schema type of either name takes the Go name, format.Source succeeds, and
-// the collision surfaces as a type-check failure.
+// and vars). Without the reservation a schema type of the same name takes the Go
+// name, format.Source succeeds, and the collision surfaces as a type-check failure.
+//
+// SerializedModel and SerializedModelEntry stay reserved although nothing emits
+// them any more. Freeing a name is not a no-op: a schema declaring a type of
+// that name derives a schema-qualified Go name today and would derive the bare
+// one after, which moves an emitted identifier — the one thing the
+// generated-output contract's Breaking tier names. Keeping them costs nothing;
+// a schema type called "SerializedModelEntry" is absurd either way.
+//
+// The unexported store the accessor reads is not listed: name derivation only
+// ever emits exported CamelCase, so a lowercase identifier cannot be taken.
 //
 //nolint:gochecknoglobals // Intentional: static reserved-name list.
 var reservedNames = []string{

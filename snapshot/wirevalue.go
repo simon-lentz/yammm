@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -127,8 +128,9 @@ func wireEdgeProps(props immutable.Properties, rel *schema.Relation) map[string]
 }
 
 // wireValue rewrites one cloned value under its resolved constraint kind.
-// Only float-bearing paths change; every other kind, an unresolved alias, and
-// any unexpected shape pass through untouched.
+// Float-bearing paths emit with a float indicator, and Timestamp, Date and
+// UUID render to their canonical text; every other kind, an unresolved alias,
+// and any unexpected shape pass through untouched.
 func wireValue(v any, c schema.Constraint) any {
 	if v == nil || c == nil {
 		return v
@@ -163,12 +165,25 @@ func wireValue(v any, c schema.Constraint) any {
 			elems[i] = wireValue(e, elem)
 		}
 		return elems
+	case schema.KindTimestamp, schema.KindDate, schema.KindUUID:
+		return wireCanonical(v, resolved)
 	case schema.KindString, schema.KindInteger, schema.KindBoolean,
-		schema.KindTimestamp, schema.KindDate, schema.KindUUID,
 		schema.KindEnum, schema.KindPattern, schema.KindAlias:
 		return v
 	}
 	return v
+}
+
+// wireCanonical renders a temporal or UUID value in the one form the kind
+// stores, catching a value that reached the graph without validation. A shape
+// the constraint cannot render passes through — Load never re-validates, and a
+// document written before this rule existed must stay writable.
+func wireCanonical(v any, c schema.Constraint) any {
+	canonical, err := value.Canonical(v, c)
+	if err != nil {
+		return v
+	}
+	return canonical
 }
 
 // twoPow63 and twoPow64 are the rounding ceilings of int64 and uint64 in

@@ -20,7 +20,7 @@ exec yammm gen --to go --initialisms JWT session.yammm
 stdout 'JWTToken'
 
 # --module-root resolves module-style imports against a root other than the
-# schema's own directory, and embedded SerializedModel keys are root-relative.
+# schema's own directory, and embedded source keys are root-relative.
 exec yammm gen --to go --module-root registry registry/a/b/entry.yammm
 stdout 'type Contract struct'
 stdout 'type Vendor struct'

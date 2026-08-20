@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
@@ -1486,28 +1487,45 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		assert.Equal(t, "2026-01-01T00:00:00Z", props["val"])
 	})
 
-	// Timestamp canonicalizes at neither end, so a snapshot holding one built
-	// from a time.Time is not equal to itself after a round trip.
+	// The graph holds the canonical string whichever representation the
+	// caller submitted, so the round trip reaches a fixpoint on the first pass.
 	t.Run("timestamp_from_time_returns_a_string", func(t *testing.T) {
 		t.Parallel()
 		s, v := fidelitySchema(t, "Timestamp")
 		props := fidelityRoundTrip(t, s, v, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 		assert.Equal(t, "2026-01-01T00:00:00Z", props["val"],
-			"a time.Time-valued Timestamp loads back as a string")
+			"a time.Time-valued Timestamp stores its canonical text")
 	})
 
-	// checkTimestamp returns early for a time.Time and never reaches the
-	// format check, so the value is written in text its own layout rejects.
-	t.Run("timestamp_custom_format_from_time_ignores_the_layout", func(t *testing.T) {
+	// A declared layout applies to both representations, so the persisted text
+	// satisfies the format the schema declared.
+	t.Run("timestamp_custom_format_applies_to_both_representations", func(t *testing.T) {
 		t.Parallel()
 		s, v := fidelitySchema(t, `Timestamp["2006-01-02 15:04:05"]`)
 		props := fidelityRoundTrip(t, s, v, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
-		assert.Equal(t, "2026-01-01T00:00:00Z", props["val"],
-			"the declared layout is not applied to a time.Time")
+		assert.Equal(t, "2026-01-01 00:00:00", props["val"],
+			"the declared layout is applied to a time.Time")
 
 		props = fidelityRoundTrip(t, s, v, "2026-01-01 00:00:00")
 		assert.Equal(t, "2026-01-01 00:00:00", props["val"],
 			"a string under the same constraint round-trips through its layout")
+	})
+
+	t.Run("date_from_time_returns_a_string", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "Date")
+		props := fidelityRoundTrip(t, s, v, time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC))
+		assert.Equal(t, "2026-03-15", props["val"],
+			"a time.Time-valued Date stores its calendar day")
+	})
+
+	t.Run("uuid_from_uuid_returns_a_string", func(t *testing.T) {
+		t.Parallel()
+		s, v := fidelitySchema(t, "UUID")
+		const id = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
+		props := fidelityRoundTrip(t, s, v, uuid.MustParse(id))
+		assert.Equal(t, id, props["val"],
+			"a uuid.UUID-valued UUID stores its canonical lowercase text")
 	})
 
 	t.Run("pattern", func(t *testing.T) {

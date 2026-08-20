@@ -27,27 +27,16 @@ type Graph struct {
 	CommonRegion []*CommonRegion `json:"common_region,omitempty"`
 }
 
-// SerializedModel maps every source in the import closure (by module-root-relative
-// path) to its verbatim .yammm content; SerializedModelEntry is the entry-point key.
-// Re-load with:
-//
-//	schema.LoadSourcesWithEntry(ctx, toBytes(SerializedModel), SerializedModelEntry, ".")
-//
-// where toBytes converts each map value to []byte. Add schema.WithSourcesOnly()
-// to guarantee the re-load never reads the filesystem. Module root "."
-// canonicalizes against the process working directory, so that directory lands
-// inside every TypeID the re-loaded schema carries. Prefer
-// SerializedSources/SerializedEntry below, which is one shape for every
-// generated package and takes a synthetic root instead.
-var SerializedModel = map[string]string{
+// serializedSources holds every source in the import closure, keyed by
+// module-root-relative path, as verbatim .yammm text. Read it through
+// SerializedSources below.
+var serializedSources = map[string]string{
 	"collision_common.yammm": "schema \"common\"\n\ntype Region {\n\tcode String primary\n\tname String required\n}\n",
 	"collision_main.yammm":   "schema \"geo\"\n\nimport \"collision_common.yammm\" as common\n\ntype Region {\n\tid String primary\n}\n\ntype County {\n\tfips String primary\n\t--> IN_REGION (one) common.Region\n}\n",
 }
 
-const SerializedModelEntry = "collision_main.yammm"
-
 // SerializedEntry is the entry-point key into SerializedSources.
-const SerializedEntry = SerializedModelEntry
+const SerializedEntry = "collision_main.yammm"
 
 // SerializedSources returns every source in the import closure, keyed by
 // module-root-relative path. Re-load with:
@@ -59,8 +48,8 @@ const SerializedEntry = SerializedModelEntry
 // module root "." instead also re-loads, but "." canonicalizes against the
 // process working directory, which then lands inside every TypeID.
 func SerializedSources() map[string][]byte {
-	m := make(map[string][]byte, len(SerializedModel))
-	for k, v := range SerializedModel {
+	m := make(map[string][]byte, len(serializedSources))
+	for k, v := range serializedSources {
 		m[k] = []byte(v)
 	}
 	return m

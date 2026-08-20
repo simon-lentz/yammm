@@ -109,39 +109,44 @@ func TestLen_CountsSelfMapEntries(t *testing.T) {
 	}
 }
 
-// TypeOf names a timestamp rather than reporting "unknown". The name comes
-// from the value, so only the time.Time form is distinguishable — a Timestamp
-// carrying a string is indistinguishable from a String property.
-func TestTypeOf_NamesATimestamp(t *testing.T) {
-	ok, detail := invariantHolds(t, "\tts Timestamp\n", `ts -> TypeOf == "timestamp"`,
-		map[string]any{"ts": time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)})
-	if !ok {
-		t.Errorf("TypeOf on a time.Time-valued Timestamp: %s", detail)
+// TypeOf reports "string" for a Timestamp whichever way the caller wrote it.
+// Coercion renders the kind to text before an invariant ever sees it, so
+// "timestamp" is a name nothing can produce and it left the vocabulary.
+func TestTypeOf_NamesATimestampAsAString(t *testing.T) {
+	for name, val := range map[string]any{
+		"go native": time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC),
+		"string":    "2020-01-02T03:04:05Z",
+	} {
+		if ok, detail := invariantHolds(t, "\tts Timestamp\n", `ts -> TypeOf == "string"`,
+			map[string]any{"ts": val}); !ok {
+			t.Errorf("TypeOf on a %s Timestamp: %s", name, detail)
+		}
 	}
 
-	ok, detail = invariantHolds(t, "\tts Timestamp\n", `ts -> TypeOf == "string"`,
-		map[string]any{"ts": "2020-01-02T03:04:05Z"})
-	if !ok {
-		t.Errorf("TypeOf on a string-valued Timestamp: %s", detail)
+	// The vocabulary entry is gone, not merely unreachable for this input.
+	if ok, _ := invariantHolds(t, "\tts Timestamp\n", `ts -> TypeOf == "timestamp"`,
+		map[string]any{"ts": time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)}); ok {
+		t.Error(`TypeOf still yields "timestamp"`)
 	}
 }
 
-// TypeOf names a UUID rather than reporting it as a list. uuid.UUID is
-// [16]byte, so the array arm of the classifier claimed it until this case
-// preceded it.
-func TestTypeOf_NamesAUUID(t *testing.T) {
-	ok, detail := invariantHolds(t, "\tu UUID\n", `u -> TypeOf == "uuid"`,
-		map[string]any{"u": uuid.MustParse("0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b")})
-	if !ok {
-		t.Errorf("TypeOf on a uuid.UUID-valued UUID property: %s", detail)
+// TypeOf reports "string" for a UUID whichever way the caller wrote it. Before
+// canonicalization a uuid.UUID reached the evaluator as [16]byte and needed its
+// own vocabulary entry to avoid reporting as a list.
+func TestTypeOf_NamesAUUIDAsAString(t *testing.T) {
+	for name, val := range map[string]any{
+		"go native": uuid.MustParse("0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"),
+		"string":    "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b",
+	} {
+		if ok, detail := invariantHolds(t, "\tu UUID\n", `u -> TypeOf == "string"`,
+			map[string]any{"u": val}); !ok {
+			t.Errorf("TypeOf on a %s UUID property: %s", name, detail)
+		}
 	}
 
-	// The D-8 limit: the name comes from the value, so a string-valued UUID
-	// property is indistinguishable from a String.
-	ok, detail = invariantHolds(t, "\tu UUID\n", `u -> TypeOf == "string"`,
-		map[string]any{"u": "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"})
-	if !ok {
-		t.Errorf("TypeOf on a string-valued UUID property: %s", detail)
+	if ok, _ := invariantHolds(t, "\tu UUID\n", `u -> TypeOf == "uuid"`,
+		map[string]any{"u": uuid.MustParse("0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b")}); ok {
+		t.Error(`TypeOf still yields "uuid"`)
 	}
 }
 
@@ -170,47 +175,91 @@ func TestIndexing_LargeIndexDoesNotWrap(t *testing.T) {
 	}
 }
 
-// Comparing a Timestamp property compares whatever Go value the caller
-// submitted, because CoerceValue treats the kind as already canonical. A
-// string orders as a string; a time.Time reaches no strata and every operator
-// over it draws E_EVAL_ERROR.
-func TestComparison_TimestampOrdersOnlyItsStringForm(t *testing.T) {
+// Comparison over a Timestamp works for both representations, because
+// coercion renders the kind to text before an invariant sees it. A time.Time
+// reached no strata and drew E_EVAL_ERROR on every operator until it did.
+func TestComparison_TimestampOrdersBothRepresentations(t *testing.T) {
 	const decl = "\tts Timestamp\n"
 
-	ok, detail := invariantHolds(t, decl, `ts > "2020-01-01T00:00:00Z"`,
-		map[string]any{"ts": "2020-06-01T00:00:00Z"})
-	if !ok {
-		t.Errorf("comparing a string-valued Timestamp: %s", detail)
+	for name, val := range map[string]any{
+		"string":    "2020-06-01T00:00:00Z",
+		"go native": time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		ok, detail := invariantHolds(t, decl, `ts > "2020-01-01T00:00:00Z"`,
+			map[string]any{"ts": val})
+		if !ok {
+			t.Errorf("comparing a %s Timestamp: %s", name, detail)
+		}
+		if strings.Contains(detail, "unsupported type comparison") {
+			t.Errorf("comparing a %s Timestamp still draws the strata error: %s", name, detail)
+		}
 	}
 
-	ok, detail = invariantHolds(t, decl, `ts > "2020-01-01T00:00:00Z"`,
-		map[string]any{"ts": time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC)})
-	if ok {
-		t.Error("comparing a time.Time-valued Timestamp succeeded")
-	}
-	if !strings.Contains(detail, "unsupported type comparison") {
-		t.Errorf("comparison over a time.Time reported %q, want the unsupported-comparison error", detail)
+	// The control: comparison still decides rather than always holding.
+	if ok, _ := invariantHolds(t, decl, `ts > "2020-12-01T00:00:00Z"`,
+		map[string]any{"ts": time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC)}); ok {
+		t.Error("a Timestamp compared greater than a later instant")
 	}
 }
 
-// `in` is the one operator that swallows the comparison error rather than
-// reporting it: an incomparable element is treated as not equal, so a
-// time.Time-valued Timestamp is silently absent from a list holding it.
-func TestIn_SwallowsTheTimestampComparisonError(t *testing.T) {
+// Comparison over a UUID is the twin of the Timestamp case, and the sharper
+// one: uuid.UUID is [16]byte, so it reached the strata classifier as an array
+// and every ordered comparison over it was an evaluation error.
+func TestComparison_UUIDOrdersBothRepresentations(t *testing.T) {
+	const decl = "\tu UUID\n"
+	const low = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
+	const high = "fa35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
+
+	for name, val := range map[string]any{
+		"string":    high,
+		"go native": uuid.MustParse(high),
+	} {
+		ok, detail := invariantHolds(t, decl, `u > "`+low+`"`, map[string]any{"u": val})
+		if !ok {
+			t.Errorf("comparing a %s UUID: %s", name, detail)
+		}
+		if strings.Contains(detail, "unsupported type comparison") {
+			t.Errorf("comparing a %s UUID still draws the strata error: %s", name, detail)
+		}
+	}
+}
+
+// `in` matches a Timestamp in either representation. It is the one operator
+// that swallows a comparison error rather than reporting it, so before
+// canonicalization a time.Time was silently absent from a list holding it —
+// a wrong answer with no diagnostic.
+func TestIn_MatchesATimestampInEitherRepresentation(t *testing.T) {
 	const decl = "\tts Timestamp\n"
 
-	ok, detail := invariantHolds(t, decl, `ts in ["2020-06-01T00:00:00Z"]`,
-		map[string]any{"ts": "2020-06-01T00:00:00Z"})
-	if !ok {
-		t.Errorf("a string-valued Timestamp in a list holding it: %s", detail)
+	for name, val := range map[string]any{
+		"string":    "2020-06-01T00:00:00Z",
+		"go native": time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		if ok, detail := invariantHolds(t, decl, `ts in ["2020-06-01T00:00:00Z"]`,
+			map[string]any{"ts": val}); !ok {
+			t.Errorf("a %s Timestamp in a list holding it: %s", name, detail)
+		}
 	}
 
-	ok, detail = invariantHolds(t, decl, `ts in ["2020-06-01T00:00:00Z"]`,
-		map[string]any{"ts": time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC)})
-	if ok {
-		t.Error("a time.Time-valued Timestamp matched a list entry")
+	// The control: `in` still reports absence.
+	if ok, _ := invariantHolds(t, decl, `ts in ["2020-07-01T00:00:00Z"]`,
+		map[string]any{"ts": time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC)}); ok {
+		t.Error("a Timestamp matched a list that does not hold it")
 	}
-	if strings.Contains(detail, "unsupported type comparison") {
-		t.Errorf("`in` surfaced the comparison error rather than swallowing it: %s", detail)
+}
+
+// The UUID twin of the `in` case.
+func TestIn_MatchesAUUIDInEitherRepresentation(t *testing.T) {
+	const decl = "\tu UUID\n"
+	const id = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
+
+	for name, val := range map[string]any{
+		"string":    id,
+		"go native": uuid.MustParse(id),
+	} {
+		if ok, detail := invariantHolds(t, decl, `u in ["`+id+`"]`,
+			map[string]any{"u": val}); !ok {
+			t.Errorf("a %s UUID in a list holding it: %s", name, detail)
+		}
 	}
 }

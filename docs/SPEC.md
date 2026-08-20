@@ -783,7 +783,11 @@ TimestampT = "Timestamp" [ "[" format "]" ] .
 format     = STRING .
 ```
 
-The format string follows Go's time formatting conventions. When omitted, RFC3339 (`"2006-01-02T15:04:05Z07:00"`) is used.
+The format string follows Go's time formatting conventions. When omitted, RFC 3339 with fractional seconds (`"2006-01-02T15:04:05.999999999Z07:00"`) is used.
+
+**Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string** rendered through the declared format when one is given and through RFC 3339 with nanoseconds otherwise. A string is parsed and re-rendered, so one instant reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting.
+
+**A declared format that cannot represent an instant loses what it omits.** A layout carrying no zone, no fractional second, or neither drops that part of every value stored under it, and a reader parsing the text back gets a different instant. Declaring such a layout draws `W_TIMESTAMP_LOSSY_FORMAT` at schema load; the declaration is accepted, because a wall-clock layout is a legitimate domain choice.
 
 Examples:
 
@@ -801,6 +805,8 @@ Represents a date value (without time component):
 DateT = "Date" .
 ```
 
+A `Date` property accepts a Go `time.Time` or a `"YYYY-MM-DD"` string, and **stores the string**. A `time.Time` is truncated to its calendar day **in its own location**: an instant at 00:30 `+02:00` is the 19th, and the same instant written 22:30 `Z` is the 18th. The location the caller built the value in decides.
+
 Example:
 
 ```yammm-snippet
@@ -815,6 +821,8 @@ Represents a universally unique identifier:
 ```text
 UUIDT = "UUID" .
 ```
+
+A `UUID` property accepts a Go `uuid.UUID` or a string, and **stores the canonical lowercase hyphenated text**. Every spelling the parser accepts — uppercase, brace-wrapped, `urn:uuid:`-prefixed, or bare 32 hex digits — stores as the same text, so one identifier is one value and one primary key.
 
 Example:
 
@@ -1291,7 +1299,7 @@ Parentheses group as usual.
 
 Ordered comparisons (`<`, `<=`, `>`, `>=`) follow a **total order across type strata** — `nil` < booleans < numbers < strings < lists — so a mixed-type ordered comparison is defined, not false: `1 < "a"` is true, `nil < 0` is true, and `false < true` is true. Within the numeric stratum, integers and floats compare exactly. Floats order `-Inf` < finite < `+Inf` < `NaN`, and `NaN` equals `NaN`, so `Sort`, `Unique`, and `Contains` treat non-finite values consistently. An ordered comparison on an unsupported shape (a map) is an evaluation error.
 
-Timestamp comparison is string comparison: RFC 3339 values with mixed UTC offsets do not order by instant. `Date` values (`YYYY-MM-DD`) order correctly by construction.
+Timestamp comparison is string comparison: RFC 3339 values with mixed UTC offsets do not order by instant. `Date` values (`YYYY-MM-DD`) order correctly by construction. `UUID` values order over their canonical lowercase text.
 
 #### Logical Operators
 
@@ -1505,7 +1513,7 @@ Results on an empty collection are a mixed family:
 
 | Function | Description |
 | -------- | ----------- |
-| `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, `"pattern"`, `"timestamp"`, or `"uuid"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type: a `Timestamp`, `Date` or `UUID` property holding a string yields `"string"`. Only a Go-native value yields the last two — a `time.Time` yields `"timestamp"` and a `uuid.UUID` yields `"uuid"` — so data arriving as JSON never produces either |
+| `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"pattern"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type, so a `Timestamp`, `Date` or `UUID` property yields `"string"` — validation stores all three as text, whichever Go representation the caller submitted |
 | `IsNil` | Check if nil: `value -> IsNil` |
 | `Default` | Return default if nil: `value -> Default(fallback)` |
 | `Coalesce` | Return first non-nil: `a -> Coalesce(b, c)` |

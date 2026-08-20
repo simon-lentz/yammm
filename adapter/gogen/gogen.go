@@ -81,7 +81,7 @@ func mergedInitialisms(extra []string) map[string]bool {
 // inheritance linearized) AND source-backed — i.e. loaded via schema.Load,
 // schema.LoadString, or schema.LoadSourcesWithEntry. A schema built
 // programmatically via schema.Builder without retained source content has a nil
-// Sources(); Marshal returns an error for it, because the embedded SerializedModel
+// Sources(); Marshal returns an error for it, because the embedded source
 // and its round-trip self-check require the source.
 func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	cfg := config{}
@@ -116,74 +116,43 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	return data, nil
 }
 
-// verifyRoundTrip re-loads the embedded SerializedModel and confirms it produces a
-// schema with the same StructuralHash, making the embedded provenance a guaranteed
-// re-loadable model rather than an unverified claim. It re-loads EXACTLY what
-// emitSerializedModel embeds — the SAME module-root-relative keys (via sourceKey
-// against the schema's recorded ModuleRoot): single source via LoadString;
-// multi-source via LoadSourcesWithEntry with the relative entry key, moduleRoot "."
-// (a bare `import "x.yammm"` is module-style and requires a module root; the keys
-// are root-relative, so registration and import resolution join them against the
-// same canonicalized "." regardless of what cwd is), and WithSourcesOnly — the
-// re-load is HERMETIC by construction: an import that misses the embedded map
-// fails the load rather than being silently satisfied by a same-named file on
-// disk. StructuralHash is path-independent, so the re-load's SourceIDs do not
-// affect the comparison — but the canonicalized "." is what lands in every TypeID
-// of a schema re-loaded that way, which is why the emitted recipes recommend
-// WithSyntheticRoot instead. A failure is a generator bug surfaced as an error.
+// verifyRoundTrip re-loads the embedded sources and confirms they produce a
+// schema with the same StructuralHash, making the embedded provenance a
+// guaranteed re-loadable model rather than an unverified claim.
 //
-// The uniform SerializedSources/SerializedEntry shape is then checked on top, for
-// both source counts, because it is emitted on both arms. That check carries no
-// synthetic root: relative imports need the importing source's canonical path,
-// which no synthetic identity has, so a synthetic root here would fail generation
-// for a schema shape the DSL supports. Coverage of the recommended root lives in
-// this package's tests instead.
+// It re-loads EXACTLY what emitSerializedModel embeds — the SAME
+// module-root-relative keys, via sourceKey against the schema's recorded
+// ModuleRoot — through LoadSourcesWithEntry with moduleRoot "." and
+// WithSourcesOnly. Module root "." because a bare `import "x.yammm"` is
+// module-style and requires one; the keys are root-relative, so registration
+// and import resolution join them against the same canonicalized "." whatever
+// cwd is. WithSourcesOnly makes the re-load HERMETIC by construction: an
+// import that misses the embedded map fails the load rather than being
+// silently satisfied by a same-named file on disk.
+//
+// StructuralHash is path-independent, so the re-load's SourceIDs do not affect
+// the comparison — but the canonicalized "." is what lands in every TypeID of a
+// schema re-loaded that way, which is why the emitted recipe recommends
+// WithSyntheticRoot instead. The check carries no synthetic root itself:
+// relative imports need the importing source's canonical path, which no
+// synthetic identity has, so a synthetic root here would fail generation for a
+// schema shape the DSL supports. Coverage of the recommended root lives in this
+// package's tests instead.
+//
+// A failure is a generator bug surfaced as an error.
 func verifyRoundTrip(s *schema.Schema) error {
 	srcs := s.Sources()
 	ids := srcs.SourceIDs()
-	entry := s.SourceID()
-	root := s.ModuleRoot()
-	want := schema.StructuralHash(s)
-	ctx := context.Background()
-	switch len(ids) {
-	case 0:
+	if len(ids) == 0 {
 		return errors.New("gogen: schema is not source-backed; Marshal requires a schema loaded via Load/LoadString/LoadSourcesWithEntry")
-	case 1:
-		content, ok := srcs.ContentBySource(ids[0])
-		if !ok {
-			return errors.New("gogen: schema source content unavailable")
-		}
-		got, res := schema.LoadString(ctx, string(content), sourceKey(root, entry, ids[0]))
-		if res.HasErrors() {
-			return fmt.Errorf("gogen: embedded SerializedModel does not re-load: %w", res.Err())
-		}
-		if h := schema.StructuralHash(got); h != want {
-			return fmt.Errorf("gogen: SerializedModel round-trip hash mismatch (got %s, want %s)", h, want)
-		}
-	default:
-		m := make(map[string][]byte, len(ids))
-		for _, id := range ids {
-			content, ok := srcs.ContentBySource(id)
-			if !ok {
-				return fmt.Errorf("gogen: source %s content unavailable", id)
-			}
-			m[sourceKey(root, entry, id)] = content
-		}
-		got, res := schema.LoadSourcesWithEntry(ctx, m, sourceKey(root, entry, entry), ".", schema.WithSourcesOnly())
-		if res.HasErrors() {
-			return fmt.Errorf("gogen: embedded SerializedModel does not re-load: %w", res.Err())
-		}
-		if h := schema.StructuralHash(got); h != want {
-			return fmt.Errorf("gogen: SerializedModel round-trip hash mismatch (got %s, want %s)", h, want)
-		}
 	}
-	return verifyUniformRoundTrip(ctx, srcs, ids, entry, root, want)
+	return verifyUniformRoundTrip(context.Background(), srcs, ids, s.SourceID(), s.ModuleRoot(), schema.StructuralHash(s))
 }
 
 // verifyUniformRoundTrip re-loads the emitted SerializedSources map under its
-// emitted SerializedEntry, so the uniform shape is not the one emitted surface
-// with no self-check. It mirrors the multi-source arm exactly — module root ".",
-// hermetic — because that is what the emitted accessor's own keys join against.
+// emitted SerializedEntry, so the one emitted re-load surface is not a surface
+// with no self-check. Module root "." and hermetic, because that is what the
+// emitted accessor's own keys join against.
 func verifyUniformRoundTrip(ctx context.Context, srcs *schema.Sources, ids []location.SourceID, entry location.SourceID, root, want string) error {
 	m := make(map[string][]byte, len(ids))
 	for _, id := range ids {

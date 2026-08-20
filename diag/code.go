@@ -232,6 +232,17 @@ var (
 	// write-shape / index-shape regression without blocking the load. One
 	// warning is emitted per shadowed ancestor.
 	W_ANNOTATION_SHADOWED = NewCode("W_ANNOTATION_SHADOWED", CategorySchema)
+
+	// W_TIMESTAMP_LOSSY_FORMAT indicates that a Timestamp["layout"] declares a
+	// Go layout that cannot reproduce an instant. Values of the kind are
+	// stored as text rendered through the declared layout, so a layout
+	// carrying no zone, no fractional second, or neither drops that part of
+	// every value written under it — and a reader parsing the text back gets a
+	// different instant. Warning severity: a wall-clock layout is a legitimate
+	// domain choice, so the declaration is accepted and the author is told
+	// once, at the point of declaration, rather than silently. The warning
+	// anchors on the format literal.
+	W_TIMESTAMP_LOSSY_FORMAT = NewCode("W_TIMESTAMP_LOSSY_FORMAT", CategorySchema)
 )
 
 // Syntax codes.
@@ -459,6 +470,15 @@ var (
 	// the Code, so the prefix is a naming convention rather than a
 	// type-enforced property.
 	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK", CategorySnapshot)
+
+	// W_SNAPSHOT_VALUE_NONCONFORMING indicates that a stored property value
+	// does not conform to the schema constraint its property declares.
+	// Reported only when the caller passes snapshot.WithValueConformance, and
+	// only for the kinds that have a canonical stored form — Timestamp, Date
+	// and UUID. It is not re-validation: bounds, enums, patterns and
+	// invariants are not checked, so silence is not a proof of validity.
+	// Warning severity, so Load still returns the snapshot.
+	W_SNAPSHOT_VALUE_NONCONFORMING = NewCode("W_SNAPSHOT_VALUE_NONCONFORMING", CategorySnapshot)
 )
 
 // AllCodes returns all registered diagnostic codes in registration order.

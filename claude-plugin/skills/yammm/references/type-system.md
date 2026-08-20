@@ -96,7 +96,8 @@ Date-time value with optional format specification.
 
 - Default format is RFC3339: `"2006-01-02T15:04:05Z07:00"`
 - Format string follows Go time formatting conventions
-- Runtime checker accepts both string values and `time.Time` values directly
+- Accepts a string or a `time.Time`; **stores the string**, rendered through the declared format when there is one and through RFC 3339 with nanoseconds otherwise
+- A declared format that cannot represent an instant (no zone, no fraction, or neither) loses what it omits and draws `W_TIMESTAMP_LOSSY_FORMAT` at schema load
 
 ```yammm-snippet
 created_at Timestamp
@@ -109,13 +110,15 @@ Date value without a time component. No parameters.
 
 **Syntax:** `Date`
 
+- Accepts a `"YYYY-MM-DD"` string or a `time.Time`; **stores the string**. A `time.Time` truncates to its calendar day **in its own location**, so 00:30 `+02:00` is the 19th and the same instant at 22:30 `Z` is the 18th
+
 ### UUID
 
 Universally unique identifier. No parameters.
 
 **Syntax:** `UUID`
 
-- Runtime checker accepts both string values and `uuid.UUID` values directly
+- Accepts a string or a `uuid.UUID`; **stores the canonical lowercase hyphenated text**, so uppercase, brace-wrapped, `urn:uuid:` and bare-hex spellings all reach one value and one primary key
 
 ### Vector
 

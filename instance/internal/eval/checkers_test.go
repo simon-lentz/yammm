@@ -499,13 +499,28 @@ func TestCheckCoerce_Timestamp(t *testing.T) {
 			err := eval.CheckValue(tt.val, tt.constraint)
 			if tt.wantErr {
 				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
+				return
 			}
+			require.NoError(t, err)
 
+			// Coercion renders the value through the constraint's own layout,
+			// so the stored text satisfies the format the schema declared and
+			// names the same instant the caller submitted.
 			coerced, coerceErr := eval.CoerceValue(tt.val, tt.constraint)
 			require.NoError(t, coerceErr)
-			assert.Equal(t, tt.val, coerced, "canonical kind must pass through unchanged")
+			text, isString := coerced.(string)
+			require.True(t, isString, "Timestamp coerces to a string, got %T", coerced)
+
+			layout := time.RFC3339Nano
+			if tc, isTS := tt.constraint.(schema.TimestampConstraint); isTS && tc.Format() != "" {
+				layout = tc.Format()
+			}
+			back, parseErr := time.Parse(layout, text)
+			require.NoError(t, parseErr, "coerced text must satisfy the constraint's layout")
+			if orig, isTime := tt.val.(time.Time); isTime {
+				assert.True(t, back.Equal(orig),
+					"canonical text names a different instant: %s vs %s", back, orig)
+			}
 		})
 	}
 }
@@ -560,15 +575,38 @@ func TestCheckCoerce_UUID(t *testing.T) {
 			err := eval.CheckValue(tt.val, constraint)
 			if tt.wantErr {
 				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
+				return
 			}
+			require.NoError(t, err)
 
+			// Every accepted spelling coerces to the one canonical lowercase
+			// form, which is what stops two spellings of one UUID producing
+			// two primary keys.
 			coerced, coerceErr := eval.CoerceValue(tt.val, constraint)
 			require.NoError(t, coerceErr)
-			assert.Equal(t, tt.val, coerced, "canonical kind must pass through unchanged")
+			assert.Equal(t, canonicalUUIDText(t, tt.val), coerced)
 		})
 	}
+}
+
+// canonicalUUIDText renders val the way uuid.UUID itself does, independently of
+// the coercer under test.
+func canonicalUUIDText(t *testing.T, val any) string {
+	t.Helper()
+	var u uuid.UUID
+	switch v := val.(type) {
+	case uuid.UUID:
+		u = v
+	case string:
+		var err error
+		u, err = uuid.Parse(v)
+		require.NoError(t, err)
+	default:
+		t.Fatalf("not a UUID input: %T", val)
+	}
+	text, err := u.MarshalText()
+	require.NoError(t, err)
+	return string(text)
 }
 
 func TestCheckValue_Enum(t *testing.T) {
@@ -1083,7 +1121,11 @@ func TestCoerceValue_List(t *testing.T) {
 // (String, Boolean, Timestamp, Date, UUID, Enum, Pattern) must return the value
 // unchanged with no error. A future kind added to the explicit canonical group is
 // thereby forced to be a genuine passthrough, not merely listed.
-func TestCoerceValue_CanonicalPassthrough(t *testing.T) {
+// TestCoerceValue_CanonicalFormsAreStable covers both halves of the coercer's
+// string-valued arm: the kinds that pass a string through untouched, and the
+// three that render one — whose already-canonical input must come back
+// identical, or coercion would not be idempotent.
+func TestCoerceValue_CanonicalFormsAreStable(t *testing.T) {
 	t.Parallel()
 	checker := eval.NewChecker(value.Registry{})
 
@@ -1094,18 +1136,18 @@ func TestCoerceValue_CanonicalPassthrough(t *testing.T) {
 	}{
 		{"String", schema.NewStringConstraint(), "x"},
 		{"Boolean", schema.NewBooleanConstraint(), true},
-		{"Timestamp", schema.NewTimestampConstraint(), "2020-01-01T00:00:00Z"},
-		{"Date", schema.NewDateConstraint(), "2020-01-01"},
-		{"UUID", schema.NewUUIDConstraint(), "u"},
 		{"Enum", schema.NewEnumConstraint([]string{"a"}), "a"},
 		{"Pattern", schema.NewPatternConstraint(nil), "p"},
+		{"Timestamp", schema.NewTimestampConstraint(), "2020-01-01T00:00:00Z"},
+		{"Date", schema.NewDateConstraint(), "2020-01-01"},
+		{"UUID", schema.NewUUIDConstraint(), "550e8400-e29b-41d4-a716-446655440000"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got, err := checker.CoerceValue(tc.val, tc.c)
 			require.NoError(t, err)
-			assert.Equal(t, tc.val, got, "canonical kind must pass through unchanged")
+			assert.Equal(t, tc.val, got, "a canonical value must coerce to itself")
 		})
 	}
 }

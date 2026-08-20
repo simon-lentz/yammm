@@ -169,7 +169,7 @@ These spellings are checked against the loader when this document is tested:
 ```yammm-snippet
 ! "first tag is alpha" tags[0] == "alpha"
 ! "every instance has properties" $self -> Len > 0
-! "a uuid reports as one" id -> TypeOf == "uuid"
+! "a uuid reports as a string" id -> TypeOf == "string"
 ```
 
 The else-less ternary is rejected at load time, not at evaluation:
@@ -283,7 +283,7 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 
 | Function | Signature | Description |
 | -------- | --------- | ----------- |
-| `TypeOf` | `val -> TypeOf` | DSL type name as string: `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, `"pattern"`, `"timestamp"`, or `"uuid"` (`"unknown"` for anything else). The name comes from the value, not the declared property type: a `Timestamp`, `Date` or `UUID` holding a string yields `"string"` |
+| `TypeOf` | `val -> TypeOf` | DSL type name as string: `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"pattern"` (`"unknown"` for anything else). The name comes from the value, not the declared property type; validation stores `Timestamp`, `Date` and `UUID` as text, so all three yield `"string"` |
 | `IsNil` | `val -> IsNil` | True if value is nil |
 
 ---

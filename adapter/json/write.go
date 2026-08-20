@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -155,7 +156,7 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 
 	// 1. Add properties in sorted order for deterministic output
 	for name, val := range inst.Properties().SortedRange() {
-		obj[name] = unwrapValue(val)
+		obj[name] = unwrapValue(val, propertyConstraint(schemaType, name))
 	}
 
 	// 2. Add FK references for associations using the snapshot edge index.
@@ -179,10 +180,14 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 			// Determine field name and cardinality from schema
 			fieldName := relName // fallback
 			isMany := len(edges) > 1
+			// The components belong to the association's TARGET type, so
+			// their constraints are one hop away rather than on this type.
+			var keyConstraints []schema.Constraint
 			if hasType {
 				if rel, ok := schemaType.Relation(relName); ok {
 					fieldName = rel.FieldName()
 					isMany = rel.IsMany()
+					keyConstraints = targetKeyConstraints(s, rel)
 				}
 			}
 
@@ -190,12 +195,12 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 				// Many cardinality: array of FK arrays
 				fks := make([]any, len(edges))
 				for i, e := range edges {
-					fks[i] = e.Target().PrimaryKey().Clone()
+					fks[i] = canonicalKey(e.Target().PrimaryKey(), keyConstraints)
 				}
 				obj[fieldName] = fks
 			} else if len(edges) > 0 {
 				// One cardinality: FK as array of key components
-				obj[fieldName] = edges[0].Target().PrimaryKey().Clone()
+				obj[fieldName] = canonicalKey(edges[0].Target().PrimaryKey(), keyConstraints)
 			}
 		}
 	}
@@ -231,8 +236,11 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 	return obj
 }
 
-// unwrapValue recursively converts an immutable.Value to a JSON-compatible any.
-func unwrapValue(v immutable.Value) any {
+// unwrapValue recursively converts an immutable.Value to a JSON-compatible any,
+// rendering each scalar in the form its constraint stores. A collection
+// descends with its element constraint, so a List<Timestamp> canonicalizes at
+// its elements and not only at its outer level.
+func unwrapValue(v immutable.Value, c schema.Constraint) any {
 	if v.IsNil() {
 		return nil
 	}
@@ -241,18 +249,97 @@ func unwrapValue(v immutable.Value) any {
 	if m, ok := v.Map(); ok {
 		result := make(map[string]any, m.Len())
 		for k, val := range m.Range() {
-			result[k] = unwrapValue(val)
+			result[k] = unwrapValue(val, nil)
 		}
 		return result
 	}
 	if s, ok := v.Slice(); ok {
+		elem := elementConstraint(c)
 		result := make([]any, s.Len())
 		for i, val := range s.Iter2() {
-			result[i] = unwrapValue(val)
+			result[i] = unwrapValue(val, elem)
 		}
 		return result
 	}
 
-	// Primitives: return directly
-	return v.Unwrap()
+	// Primitives: rendered through the constraint.
+	return canonicalOrRaw(v.Unwrap(), c)
+}
+
+// canonicalKey renders a foreign key's components in the form the target
+// type's primary key stores, so the FK agrees with the target instance's own
+// key rather than being the one surface that does not.
+func canonicalKey(key immutable.Key, keyConstraints []schema.Constraint) []any {
+	parts := key.Clone()
+	for i, p := range parts {
+		parts[i] = canonicalOrRaw(p, constraintAt(keyConstraints, i))
+	}
+	return parts
+}
+
+// targetKeyConstraints returns an association target's primary-key constraints
+// in component order. Nil when the target does not resolve, which renders the
+// components as they arrived.
+func targetKeyConstraints(s *schema.Schema, rel *schema.Relation) []schema.Constraint {
+	if s == nil || rel == nil {
+		return nil
+	}
+	target, ok := lookupType(s, rel.TargetID())
+	if !ok {
+		return nil
+	}
+	pks := target.PrimaryKeysSlice()
+	out := make([]schema.Constraint, len(pks))
+	for i, p := range pks {
+		out[i] = p.Constraint()
+	}
+	return out
+}
+
+// constraintAt matches a key component to its constraint positionally. A
+// length mismatch yields nil rather than binding a component to the wrong
+// constraint.
+func constraintAt(cs []schema.Constraint, i int) schema.Constraint {
+	if i >= len(cs) {
+		return nil
+	}
+	return cs[i]
+}
+
+// propertyConstraint returns a declared property's constraint, or nil for a
+// name the type does not declare or a type that did not resolve.
+func propertyConstraint(t *schema.Type, name string) schema.Constraint {
+	if t == nil {
+		return nil
+	}
+	p, ok := t.Property(name)
+	if !ok {
+		return nil
+	}
+	return p.Constraint()
+}
+
+// elementConstraint returns a list constraint's element constraint, or nil for
+// any other constraint.
+func elementConstraint(c schema.Constraint) schema.Constraint {
+	if c == nil {
+		return nil
+	}
+	lc, ok := schema.ResolveAlias(c).(schema.ListConstraint)
+	if !ok {
+		return nil
+	}
+	return lc.Element()
+}
+
+// canonicalOrRaw renders raw in the form its constraint stores, and returns it
+// untouched when the constraint cannot render it. MarshalObject returns an
+// error rather than a diag.Result, so failing here would fail a whole export
+// over one malformed value.
+func canonicalOrRaw(raw any, c schema.Constraint) any {
+	canonical, err := instance.CanonicalValue(raw, c)
+	if err != nil {
+		return raw
+	}
+	return canonical
 }

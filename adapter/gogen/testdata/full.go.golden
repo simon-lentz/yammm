@@ -58,11 +58,12 @@ type Graph struct {
 	County []*County `json:"county,omitempty"`
 }
 
-// SerializedModel is the verbatim .yammm source this file was generated from.
-// Re-load with: schema.LoadString(ctx, SerializedModel, "full.yammm"), or through
-// SerializedSources/SerializedEntry below, which is one shape for every
-// generated package.
-var SerializedModel = "schema \"full\"\n\ntype FipsCode = String [5, 5]\ntype Tier = Enum [\"gold\", \"silver\"]\n\nabstract type Auditable {\n\tcreated_at Timestamp required\n\tupdated_at Timestamp\n}\n\npart type Detail {\n\tnote String\n}\n\ntype State {\n\tcode String primary\n\tname String required\n}\n\ntype County extends Auditable {\n\tfips FipsCode primary\n\ttier Tier required\n\tstatus Enum [\"active\", \"merged\"] required\n\tpopulation Integer required\n\tcentroid Vector [2]\n\taliases List <FipsCode>\n\t--> IN_STATE (one) State {\n\t\tsince Integer required\n\t}\n\t*-> HAS_DETAIL (many) Detail\n}\n"
+// serializedSources holds every source in the import closure, keyed by
+// module-root-relative path, as verbatim .yammm text. Read it through
+// SerializedSources below.
+var serializedSources = map[string]string{
+	"full.yammm": "schema \"full\"\n\ntype FipsCode = String [5, 5]\ntype Tier = Enum [\"gold\", \"silver\"]\n\nabstract type Auditable {\n\tcreated_at Timestamp required\n\tupdated_at Timestamp\n}\n\npart type Detail {\n\tnote String\n}\n\ntype State {\n\tcode String primary\n\tname String required\n}\n\ntype County extends Auditable {\n\tfips FipsCode primary\n\ttier Tier required\n\tstatus Enum [\"active\", \"merged\"] required\n\tpopulation Integer required\n\tcentroid Vector [2]\n\taliases List <FipsCode>\n\t--> IN_STATE (one) State {\n\t\tsince Integer required\n\t}\n\t*-> HAS_DETAIL (many) Detail\n}\n",
+}
 
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "full.yammm"
@@ -77,7 +78,11 @@ const SerializedEntry = "full.yammm"
 // module root "." instead also re-loads, but "." canonicalizes against the
 // process working directory, which then lands inside every TypeID.
 func SerializedSources() map[string][]byte {
-	return map[string][]byte{SerializedEntry: []byte(SerializedModel)}
+	m := make(map[string][]byte, len(serializedSources))
+	for k, v := range serializedSources {
+		m[k] = []byte(v)
+	}
+	return m
 }
 
 const SchemaHash = "sha256:02066b2758597693190743205cdd0d2534b27bd31d8413d50de1a9b3d41abf04"

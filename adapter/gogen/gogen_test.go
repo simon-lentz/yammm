@@ -10,6 +10,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,7 +27,7 @@ func checkGolden(t *testing.T, name string, got []byte) {
 	yammmtest.Golden(t, name+".go", got)
 }
 
-func TestSerializedModel(t *testing.T) {
+func TestMarshal_EmbedsTheSourceStore(t *testing.T) {
 	s := loadSchema(t, "scalars")
 	// Marshal succeeding already proves the round-trip self-check passed
 	// (verifyRoundTrip runs inside Marshal); these assertions pin the shape.
@@ -34,8 +35,8 @@ func TestSerializedModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(got, []byte("var SerializedModel =")) {
-		t.Error("missing SerializedModel")
+	if !bytes.Contains(got, []byte("var serializedSources = map[string]string{")) {
+		t.Error("missing the embedded source store")
 	}
 	if !bytes.Contains(got, []byte(schema.StructuralHash(s))) {
 		t.Error("SchemaHash does not match schema.StructuralHash")
@@ -44,7 +45,7 @@ func TestSerializedModel(t *testing.T) {
 
 // TestMarshal_NotSourceBacked pins the precondition: a Builder-built schema retains
 // no source content (nil Sources()), so Marshal must reject it gracefully rather than
-// emit a SerializedModel it cannot honor — and never panic on the nil Sources().
+// emit an embedded source store it cannot honor — and never panic on the nil Sources().
 func TestMarshal_NotSourceBacked(t *testing.T) {
 	s, res := schema.NewBuilder().
 		WithName("geo").
@@ -64,7 +65,7 @@ func TestMarshal_NotSourceBacked(t *testing.T) {
 
 // TestMarshal_Imports exercises a real imported (multi-source) schema end-to-end:
 // closure flatten, cross-schema reference + naming, the faithful cross-schema
-// Where-block PK, and the module-root-relative multi-source SerializedModel. A
+// Where-block PK, and the module-root-relative multi-source embedded store. A
 // successful Marshal also proves the multi-source round-trip self-check passed.
 func TestMarshal_Imports(t *testing.T) {
 	s := loadSchema(t, "imports/main")
@@ -80,10 +81,10 @@ func TestMarshal_Imports(t *testing.T) {
 		"type County struct",
 		"type EDGE_County_in_region_Region struct",
 		"Code RegionCode", // faithful cross-schema Where-block PK (not Code string)
-		"var SerializedModel = map[string]string{",
+		"var serializedSources = map[string]string{",
 		`"common.yammm":`,
 		`"main.yammm":`,
-		`const SerializedModelEntry = "main.yammm"`,
+		`const SerializedEntry = "main.yammm"`,
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q", want)
@@ -185,7 +186,7 @@ func TestMarshal_CrossSchemaCollision(t *testing.T) {
 // TestMarshal_DiamondImport pins the closure dedup-by-SourceID: the entry imports left
 // and right, both of which import the same base schema. The shared base type must be
 // emitted EXACTLY ONCE (a double-walk would duplicate the declaration and fail the
-// writer's go/types pass), and SerializedModel must carry all four sources.
+// writer's go/types pass), and the embedded store must carry all four sources.
 func TestMarshal_DiamondImport(t *testing.T) {
 	s := loadSchema(t, "imports/diamond_main")
 	got, err := gogen.Marshal(s)
@@ -199,7 +200,7 @@ func TestMarshal_DiamondImport(t *testing.T) {
 		`"diamond_base.yammm":`,
 		`"diamond_left.yammm":`,
 		`"diamond_right.yammm":`,
-		`const SerializedModelEntry = "diamond_main.yammm"`,
+		`const SerializedEntry = "diamond_main.yammm"`,
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q", want)
@@ -276,18 +277,17 @@ func TestMarshal_TypeChecks(t *testing.T) {
 }
 
 // TestMarshal_UniformSerializedSources pins the shape a consumer that handles
-// more than one generated package depends on: the same two declarations on both
-// arms of the single-versus-multi dispatch, derived from SerializedModel rather
-// than embedding the source twice.
+// more than one generated package depends on: one re-load surface, emitted
+// identically whatever the source count, over one unexported store.
 func TestMarshal_UniformSerializedSources(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name  string
-		multi bool
+		name     string
+		entryKey string
 	}{
-		{name: "scalars"},
-		{name: "imports/main", multi: true},
+		{name: "scalars", entryKey: "scalars.yammm"},
+		{name: "imports/main", entryKey: "main.yammm"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -295,25 +295,25 @@ func TestMarshal_UniformSerializedSources(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Marshal: %v", err)
 			}
-			want := []string{
+			for _, w := range []string{
+				"var serializedSources = map[string]string{",
+				"const SerializedEntry = " + strconv.Quote(tc.entryKey),
 				"func SerializedSources() map[string][]byte {",
-				"const SerializedEntry = ",
-			}
-			if tc.multi {
-				// The multi-source entry is an alias, so it cannot drift from
-				// SerializedModelEntry.
-				want = append(want, "const SerializedEntry = SerializedModelEntry")
-			} else {
-				want = append(want, "return map[string][]byte{SerializedEntry: []byte(SerializedModel)}")
-			}
-			for _, w := range want {
+				"m := make(map[string][]byte, len(serializedSources))",
+			} {
 				if !bytes.Contains(got, []byte(w)) {
 					t.Errorf("output missing %q", w)
 				}
 			}
-			// The schema source is embedded once, not twice.
-			if n := bytes.Count(got, []byte("var SerializedModel =")); n != 1 {
-				t.Errorf("SerializedModel declared %d times, want 1", n)
+			// The schema source is embedded once, in one store.
+			if n := bytes.Count(got, []byte("var serializedSources =")); n != 1 {
+				t.Errorf("the source store is declared %d times, want 1", n)
+			}
+			// The retired two-shape emission leaves nothing behind.
+			for _, gone := range []string{"SerializedModel", "SerializedModelEntry"} {
+				if bytes.Contains(got, []byte(gone)) {
+					t.Errorf("retired identifier %s still emitted", gone)
+				}
 			}
 		})
 	}
@@ -339,7 +339,7 @@ func TestMarshal_RelativeImport(t *testing.T) {
 		"type Site struct",
 		"type Zone struct",
 		`"rel_dep.yammm":`,
-		`const SerializedModelEntry = "rel_main.yammm"`,
+		`const SerializedEntry = "rel_main.yammm"`,
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q", want)
@@ -379,7 +379,7 @@ func TestMarshal_Golden(t *testing.T) {
 	}
 }
 
-// TestMarshal_ModuleRoot pins the module-root-aware SerializedModel keys for a
+// TestMarshal_ModuleRoot pins the module-root-aware embedded-source keys for a
 // registry-style layout: the module root is an ANCESTOR of the entry's directory
 // (root/a/b/entry.yammm importing root/lib/dep.yammm by module-style path), so
 // entry-directory-relative keys would be "../"-shaped and would not match the
@@ -395,7 +395,7 @@ func TestMarshal_ModuleRoot(t *testing.T) {
 		"type Vendor struct",
 		`"a/b/entry.yammm":`,
 		`"lib/dep.yammm":`,
-		`const SerializedModelEntry = "a/b/entry.yammm"`,
+		`const SerializedEntry = "a/b/entry.yammm"`,
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q", want)

@@ -1,6 +1,6 @@
 // Package gogen generates Go source from a yammm schema: one struct per type,
-// named Enum/DataType types, EDGE_ association structs, a Graph aggregate, and an
-// embedded SerializedModel. Output is stdlib-only — it imports at most "time". Call
+// named Enum/DataType types, EDGE_ association structs, a Graph aggregate, and the
+// embedded schema source. Output is stdlib-only — it imports at most "time". Call
 // [Marshal] with a loaded, resolved schema; it returns formatted, type-checked
 // bytes.
 //
@@ -29,8 +29,8 @@
 //   - One EDGE_ struct per declared association (see Associations and the Graph
 //     Aggregate).
 //   - A Graph aggregate (see Associations and the Graph Aggregate).
-//   - The embedded SerializedModel, the uniform SerializedSources /
-//     SerializedEntry pair, and SchemaHash (see the SerializedModel section
+//   - The embedded schema source, reachable through the SerializedSources /
+//     SerializedEntry pair, and SchemaHash (see the Embedded Source section
 //     below).
 //
 // A type's or property's schema doc-comment is carried through verbatim as the Go
@@ -100,37 +100,22 @@
 // Go name — is a hard error, mirroring the label-collision handling in
 // adapter/neo4j.
 //
-// # SerializedModel
+// # Embedded Source
 //
 // Every generated file embeds the .yammm source it was generated from, so the
-// schema can be re-loaded at runtime without the original files on disk. Two
-// surfaces carry it, and one of them is uniform.
-//
-// The uniform pair is what a caller that handles more than one generated package
-// should use:
+// schema can be re-loaded at runtime without the original files on disk. One
+// surface carries it, emitted identically whatever the source count:
 //
 //   - func SerializedSources() map[string][]byte returns every source in the
 //     closure keyed by module-root-relative path, and const SerializedEntry names
-//     the entry. Both are emitted by every generated package, whatever its source
-//     count, and both derive from SerializedModel rather than embedding a second
-//     copy. The recommended re-load is
+//     the entry. The recommended re-load is
 //     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with an empty
 //     module root, [github.com/simon-lentz/yammm/schema.WithSourcesOnly] and
 //     [github.com/simon-lentz/yammm/schema.WithSyntheticRoot], which gives type
 //     identities no working directory, checkout, or container mount point can move.
 //
-// The shape-dependent surface predates it and stays valid:
-//
-//   - A single-source schema embeds var SerializedModel string, re-loadable via
-//     [github.com/simon-lentz/yammm/schema.LoadString].
-//   - A multi-source (imported) schema embeds var SerializedModel map[string]string
-//     keyed by module-root-relative path, plus const SerializedModelEntry naming the
-//     entry point, re-loadable via
-//     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with module root "."
-//     (add [github.com/simon-lentz/yammm/schema.WithSourcesOnly] to guarantee the
-//     re-load never touches the filesystem). Module root "." canonicalizes against
-//     the process working directory, which then lands inside every TypeID the
-//     re-loaded schema carries; the uniform pair above avoids that.
+// The backing store is an unexported package-level map, so the identifiers a
+// consumer sees do not vary with how many files a schema happens to span.
 //
 // Keys are relative to the load's recorded module root
 // ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot] — the WithModuleRoot
@@ -167,8 +152,8 @@
 // [github.com/simon-lentz/yammm/schema.LoadString], or
 // [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry]. A schema assembled
 // programmatically through [github.com/simon-lentz/yammm/schema.NewBuilder] without
-// retained source content has no source for the SerializedModel and its round-trip
-// check, so [Marshal] returns an error for it.
+// retained source content has nothing to embed and nothing for the round-trip
+// check to re-load, so [Marshal] returns an error for it.
 //
 // # Configuration
 //
@@ -203,13 +188,12 @@
 // write-once behaviour — that a Go type does not express, and
 // [github.com/simon-lentz/yammm/adapter/neo4j] is where they are read.
 //
-// They do survive in the embedded SerializedModel, which holds the schema source
-// verbatim, and therefore in SerializedSources, which derives from it. A schema
-// re-loaded from either carries its annotations, and the store DDL derived from
-// the re-loaded schema matches the DDL derived from the original files — the whole
-// point of embedding the source rather than a reduction of it. Adding an
-// annotation to a schema changes that one constant and nothing else in the
-// emitted file.
+// They do survive in the embedded source, which is held verbatim and reachable
+// through SerializedSources. A schema re-loaded from it carries its annotations,
+// and the store DDL derived from the re-loaded schema matches the DDL derived
+// from the original files — the whole point of embedding the source rather than
+// a reduction of it. Adding an annotation to a schema changes the embedded text
+// and nothing else in the emitted file.
 //
 // They do reach the generator indirectly: a property inherited from several
 // ancestors carries the union of their annotations, so the merged view yields a

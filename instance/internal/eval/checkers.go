@@ -128,7 +128,8 @@ func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 //   - Integer → int64
 //   - Float → float64
 //   - Boolean → bool (unchanged)
-//   - String types (String, Timestamp, Date, UUID, Enum, Pattern) → string (unchanged)
+//   - String, Enum, Pattern → string (unchanged)
+//   - Timestamp, Date, UUID → string, rendered through the constraint
 //   - Vector → []float64
 //
 // Returns the coerced value and nil error on success.
@@ -172,8 +173,13 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 			return nil, fmt.Errorf("unresolved alias constraint: %s", alias.DataTypeName())
 		}
 		return ch.CoerceValue(val, resolved)
-	case schema.KindString, schema.KindBoolean, schema.KindTimestamp,
-		schema.KindDate, schema.KindUUID, schema.KindEnum, schema.KindPattern:
+	case schema.KindTimestamp, schema.KindDate, schema.KindUUID:
+		// These three accept two Go representations and store one string. The
+		// rule lives in [value.Canonical] so the wire, both writers and the
+		// snapshot rebuild render a value the same way this does.
+		//nolint:wrapcheck // the canonicalizer's errors name the value and the layout; a wrapper here adds nothing
+		return value.Canonical(val, c)
+	case schema.KindString, schema.KindBoolean, schema.KindEnum, schema.KindPattern:
 		// Already canonical: no coercion needed.
 		return val, nil
 	default:
@@ -443,13 +449,23 @@ func checkTimestamp(val any, c schema.Constraint) error {
 	return nil
 }
 
-// checkDate validates that val is a valid date string (YYYY-MM-DD).
+// checkDate validates that val is a valid date.
+// Accepts time.Time (always valid) or string (parsed as YYYY-MM-DD).
+//
+// The time.Time arm has to be here rather than only in the coercer: CheckValue
+// runs first, so rejecting the type here would make the coercer's Date arm
+// unreachable and the generated time.Time field unusable.
 func checkDate(val any) error {
+	// Accept time.Time directly - always valid
+	if _, ok := val.(time.Time); ok {
+		return nil
+	}
+
 	s, ok := val.(string)
 	if !ok {
-		return typeMismatch("expected date string, got %T", val)
+		return typeMismatch("expected date string or time.Time, got %T", val)
 	}
-	if _, err := time.Parse("2006-01-02", s); err != nil {
+	if _, err := time.Parse(time.DateOnly, s); err != nil {
 		return constraintFail("invalid date format: %s (expected YYYY-MM-DD)", s)
 	}
 	return nil

@@ -12,6 +12,7 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -167,7 +168,7 @@ func (a *Adapter) writeSnapshotTypeTo(
 
 		// Build FK lookup from snapshot edge index.
 		lookup := snapshotFKLookup(inst, snap)
-		row := a.instanceToRow(inst.Properties(), lookup, columns, schemaType, &cfg)
+		row := a.instanceToRow(inst.Properties(), lookup, columns, schemaType, snap.Schema(), &cfg)
 		if err := writer.Write(row); err != nil {
 			return fmt.Errorf("csv write row: %w", err)
 		}
@@ -225,6 +226,7 @@ func (a *Adapter) instanceToRow(
 	fkFn fkLookup,
 	columns []string,
 	schemaType *schema.Type,
+	s *schema.Schema,
 	cfg *writeConfig,
 ) []string {
 	row := make([]string, len(columns))
@@ -233,13 +235,13 @@ func (a *Adapter) instanceToRow(
 		// Check if this column is a property.
 		val, ok := props.Get(col)
 		if ok {
-			row[i] = a.valueToString(val, cfg)
+			row[i] = a.valueToString(val, propertyConstraint(schemaType, col), cfg)
 			continue
 		}
 
 		// Check if this column is an FK relation field name.
 		if schemaType != nil && fkFn != nil {
-			fkVal := a.formatFKColumn(fkFn, col, schemaType)
+			fkVal := a.formatFKColumn(fkFn, col, schemaType, s)
 			if fkVal != "" {
 				row[i] = fkVal
 				continue
@@ -258,6 +260,7 @@ func (a *Adapter) formatFKColumn(
 	fkFn fkLookup,
 	fieldName string,
 	schemaType *schema.Type,
+	s *schema.Schema,
 ) string {
 	for rel := range schemaType.Associations() {
 		if rel.FieldName() != fieldName {
@@ -269,10 +272,16 @@ func (a *Adapter) formatFKColumn(
 			return ""
 		}
 
+		// The components belong to the association's TARGET type, so their
+		// constraints are one hop away rather than on the row's own type.
+		// Without the hop this column is the one surface in the export that
+		// does not render canonically.
+		keyConstraints := targetKeyConstraints(s, rel)
+
 		// Format each key.
 		parts := make([]string, len(keys))
 		for i, key := range keys {
-			parts[i] = formatKey(key, a.config.listSep)
+			parts[i] = formatKey(key, keyConstraints, a.config.listSep)
 		}
 
 		// Single target: return the formatted key directly.
@@ -287,32 +296,107 @@ func (a *Adapter) formatFKColumn(
 
 // formatKey renders a single immutable.Key as a string.
 // Single-component keys use the bare value; composite keys join with the separator.
-func formatKey(key immutable.Key, sep string) string {
+// keyConstraints carries the target type's primary-key constraints in component
+// order, so a rendered component matches the text the target instance's own
+// column carries.
+func formatKey(key immutable.Key, keyConstraints []schema.Constraint, sep string) string {
 	if key.Len() == 1 {
 		if v := key.Get(0).Unwrap(); v != nil {
-			return fmt.Sprint(v)
+			return fmt.Sprint(canonicalOrRaw(v, constraintAt(keyConstraints, 0)))
 		}
 		return ""
 	}
 	parts := make([]string, key.Len())
 	for i := range key.Len() {
-		parts[i] = fmt.Sprint(key.Get(i).Unwrap())
+		parts[i] = fmt.Sprint(canonicalOrRaw(key.Get(i).Unwrap(), constraintAt(keyConstraints, i)))
 	}
 	return strings.Join(parts, sep)
 }
 
-// valueToString renders an immutable.Value as a CSV cell string.
+// targetKeyConstraints returns an association target's primary-key constraints
+// in component order. Nil when the target does not resolve, which renders the
+// components as they arrived.
+func targetKeyConstraints(s *schema.Schema, rel *schema.Relation) []schema.Constraint {
+	if s == nil || rel == nil {
+		return nil
+	}
+	target, ok := s.TypeByID(rel.TargetID())
+	if !ok {
+		return nil
+	}
+	pks := target.PrimaryKeysSlice()
+	out := make([]schema.Constraint, len(pks))
+	for i, p := range pks {
+		out[i] = p.Constraint()
+	}
+	return out
+}
+
+// constraintAt matches a key component to its constraint positionally. A
+// length mismatch yields nil rather than binding a component to the wrong
+// constraint.
+func constraintAt(cs []schema.Constraint, i int) schema.Constraint {
+	if i >= len(cs) {
+		return nil
+	}
+	return cs[i]
+}
+
+// propertyConstraint returns a declared property's constraint, or nil for a
+// column the type does not declare.
+func propertyConstraint(t *schema.Type, name string) schema.Constraint {
+	if t == nil {
+		return nil
+	}
+	p, ok := t.Property(name)
+	if !ok {
+		return nil
+	}
+	return p.Constraint()
+}
+
+// canonicalOrRaw renders raw in the form its constraint stores, and returns it
+// untouched when the constraint cannot render it. An export has no diagnostic
+// channel, so one malformed cell must not fail the whole file.
+func canonicalOrRaw(raw any, c schema.Constraint) any {
+	canonical, err := instance.CanonicalValue(raw, c)
+	if err != nil {
+		return raw
+	}
+	return canonical
+}
+
+// elementConstraint returns a list constraint's element constraint, or nil for
+// any other constraint.
+func elementConstraint(c schema.Constraint) schema.Constraint {
+	if c == nil {
+		return nil
+	}
+	lc, ok := schema.ResolveAlias(c).(schema.ListConstraint)
+	if !ok {
+		return nil
+	}
+	return lc.Element()
+}
+
+// valueToString renders an immutable.Value as a CSV cell string, in the form
+// its constraint stores.
 func (a *Adapter) valueToString(
 	val immutable.Value,
+	c schema.Constraint,
 	cfg *writeConfig,
 ) string {
 	if val.IsNil() {
 		return cfg.nullString
 	}
 
-	raw := val.Unwrap()
+	// A collection renders elementwise, so the element constraint does the
+	// work rather than the whole value.
+	if s, ok := val.Slice(); ok {
+		return a.sliceToString(s, elementConstraint(c), cfg)
+	}
 
-	switch v := raw.(type) {
+	switch v := canonicalOrRaw(val.Unwrap(), c).(type) {
 	case string:
 		return v
 	case int64:
@@ -324,22 +408,20 @@ func (a *Adapter) valueToString(
 	case nil:
 		return cfg.nullString
 	default:
-		// Slices: join with list separator.
-		if s, ok := val.Slice(); ok {
-			return a.sliceToString(s, cfg)
-		}
 		return fmt.Sprint(v)
 	}
 }
 
-// sliceToString renders an immutable.Slice as a list-separated string.
-func (a *Adapter) sliceToString(s immutable.Slice, cfg *writeConfig) string {
+// sliceToString renders an immutable.Slice as a list-separated string. Each
+// element renders under elem, so a List<Timestamp> canonicalizes at its
+// elements and not only at its outer level.
+func (a *Adapter) sliceToString(s immutable.Slice, elem schema.Constraint, cfg *writeConfig) string {
 	parts := make([]string, s.Len())
 	for i, v := range s.Iter2() {
 		if v.IsNil() {
 			parts[i] = cfg.nullString
 		} else {
-			parts[i] = fmt.Sprint(v.Unwrap())
+			parts[i] = fmt.Sprint(canonicalOrRaw(v.Unwrap(), elem))
 		}
 	}
 	return strings.Join(parts, a.config.listSep)

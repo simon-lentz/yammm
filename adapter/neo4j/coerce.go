@@ -113,21 +113,21 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 		}
 		switch v := raw.(type) {
 		case time.Time:
-			return v, nil // already Neo4j ZONED DATETIME native
+			return driverZone(v), nil // already Neo4j ZONED DATETIME native
 		case string:
 			if format != "" {
 				// A Timestamp["layout"] constraint: the declared Go layout is
 				// exclusive, matching schema validation (checkTimestamp).
 				if t, err := time.Parse(format, v); err == nil {
-					return t, nil
+					return driverZone(t), nil
 				}
 				return raw, fmt.Errorf("coerce %s: cannot parse %q against format %q", kind, v, format)
 			}
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
-				return t, nil
+				return driverZone(t), nil
 			}
 			if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
-				return t, nil
+				return driverZone(t), nil
 			}
 			return raw, fmt.Errorf("coerce %s: cannot parse %q as an RFC3339 timestamp", kind, v)
 		default:
@@ -333,4 +333,34 @@ func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
 		pt[paramKey(prefix, p.Name())] = p.Constraint()
 	}
 	return pt
+}
+
+// driverOffsetZoneName is the zone abbreviation the Neo4j driver treats as
+// "this instant carries an offset, not a zone identifier". It is the driver's
+// own sentinel, not this package's invention: the driver documents it on its
+// OffsetTimeOf constructor, and its read path hydrates every offset-bearing
+// ZONED DATETIME into a location built with exactly this name.
+const driverOffsetZoneName = "Offset"
+
+// driverZone re-renders an instant whose location carries no name into the
+// offset form the driver can send.
+//
+// The driver selects its wire encoding by the zone ABBREVIATION: it sends an
+// offset only when Zone() reports driverOffsetZoneName, and otherwise sends
+// Location().String() as a time-zone identifier. time.Parse of an RFC 3339
+// string with a numeric offset produces an unnamed location, so the identifier
+// is empty and the server rejects the write with "Illegal epoch adjustment".
+//
+// A named location is left alone: an IANA name is a zone identifier the server
+// resolves, and it carries more than the offset does.
+//
+// The instant is unchanged — only the location it is expressed in moves — and
+// the result is the same shape the driver produces when reading such a value
+// back, so a write and a subsequent read agree.
+func driverZone(t time.Time) time.Time {
+	name, offset := t.Zone()
+	if name != "" {
+		return t
+	}
+	return t.In(time.FixedZone(driverOffsetZoneName, offset))
 }

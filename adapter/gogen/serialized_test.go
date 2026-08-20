@@ -33,11 +33,10 @@ func loadFixture(t *testing.T, name, moduleRoot string) *schema.Schema {
 	return s
 }
 
-// TestSerializedEntry_SingleSourceMatchesSourceKey pins the one half of the
-// uniform pair that is computed rather than inherited. The multi-source arm
-// aliases SerializedModelEntry and the map conversion is mechanical, so this key
-// is the only place the derivation can be wrong — and a wrong entry key is a
-// hermetic-load miss at the consumer, not a generation failure.
+// TestSerializedEntry_SingleSourceMatchesSourceKey pins the half of the re-load
+// pair that is computed rather than mechanical. The map conversion cannot be
+// wrong, so this key is the only place the derivation can be — and a wrong entry
+// key is a hermetic-load miss at the consumer, not a generation failure.
 func TestSerializedEntry_SingleSourceMatchesSourceKey(t *testing.T) {
 	t.Parallel()
 

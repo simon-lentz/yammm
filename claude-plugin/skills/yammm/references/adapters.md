@@ -259,7 +259,7 @@ schema, err := adapter.InferSchema(constraints, relationships, "inventory")
 import "github.com/simon-lentz/yammm/adapter/gogen"
 ```
 
-Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, `EDGE_` association structs, a Graph aggregate, and an embedded `SerializedModel` that re-loads hermetically (`schema.WithSourcesOnly`, no filesystem participation). Generated output is stdlib-only (imports at most `time`) and byte-reproducible across checkouts. Unlike the data adapters it has no instance-data path and returns a plain `error` rather than a `diag.Result`.
+Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, `EDGE_` association structs, a Graph aggregate, and the embedded schema source, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (`schema.WithSourcesOnly`, no filesystem participation). Generated output is stdlib-only (imports at most `time`) and byte-reproducible across checkouts. Unlike the data adapters it has no instance-data path and returns a plain `error` rather than a `diag.Result`.
 
 Schemas with imports are flattened into one self-contained package; cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` becomes `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error.
 
