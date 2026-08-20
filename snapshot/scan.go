@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"iter"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 )
@@ -45,6 +47,10 @@ type ScanEntry struct {
 	// is raised for the latter, because a scan that succeeds today must not
 	// start failing over a size nobody asked for.
 	FileSize int64
+	// ModTime is the file's modification time, or the zero Time when unknown.
+	// It comes from the same stat as FileSize and carries the same contract:
+	// populated whenever the file was opened, zero otherwise, no diagnostic.
+	ModTime time.Time
 }
 
 // ScanDir iterates over every .ys file in dir, yielding one
@@ -97,7 +103,17 @@ type ScanEntry struct {
 //	    if entry.Result.HasErrors() { log.Warn(...); continue }
 //	    use(entry.Header)
 //	}
+//
+// [ScanDirWith] is the same iteration under [ScanOption] values.
 func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error] {
+	return ScanDirWith(ctx, dir)
+}
+
+// ScanDirWith is [ScanDir] with options. Given none it is [ScanDir] exactly:
+// same order, same filtering, same two-category error surface.
+// [WithScanFilter] narrows the set before any file is opened.
+func ScanDirWith(ctx context.Context, dir string, opts ...ScanOption) iter.Seq2[ScanEntry, error] {
+	cfg := applyScanOptions(opts)
 	return func(yield func(ScanEntry, error) bool) {
 		// Check cancellation at entry so an already-cancelled ctx doesn't
 		// pay the os.ReadDir cost.
@@ -121,7 +137,9 @@ func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error] {
 			if !strings.HasSuffix(name, ".ys") {
 				continue
 			}
-			if !isRegular(dirent, filepath.Join(dir, name)) {
+			path := filepath.Join(dir, name)
+			st := &statOnce{path: path}
+			if !isRegular(dirent, st) {
 				continue
 			}
 			// Belt-and-braces: a file named *.ys.tmp already fails the
@@ -130,12 +148,34 @@ func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error] {
 			if strings.HasSuffix(name, TmpSuffix) {
 				continue
 			}
-			entry := scanFile(ctx, name, filepath.Join(dir, name))
+			// Last: isRegular's FIFO guard must precede caller code.
+			if cfg.keep != nil && !cfg.keep(ScanCandidate{Name: name, Path: path, stat: st.get}) {
+				continue
+			}
+			entry := scanFile(ctx, name, path, cfg.open)
 			if !yield(entry, nil) {
 				return
 			}
 		}
 	}
+}
+
+// statOnce resolves path at most once and gives every caller the same answer,
+// success or failure. The symlink check and a filter's [ScanCandidate.Info]
+// share one, so following a link is paid for by whichever asks first.
+type statOnce struct {
+	path string
+	info fs.FileInfo
+	err  error
+	done bool
+}
+
+func (s *statOnce) get() (fs.FileInfo, error) {
+	if !s.done {
+		s.info, s.err = os.Stat(s.path)
+		s.done = true
+	}
+	return s.info, s.err
 }
 
 // isRegular reports whether the walk should descend to opening this entry.
@@ -149,7 +189,7 @@ func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error] {
 // A stat failure — a broken symlink, most likely — falls through to the open,
 // which reports it as the documented per-file E_SNAPSHOT_IO entry rather than
 // vanishing from the walk.
-func isRegular(dirent os.DirEntry, path string) bool {
+func isRegular(dirent os.DirEntry, st *statOnce) bool {
 	mode := dirent.Type()
 	if mode.IsRegular() {
 		return true
@@ -157,7 +197,7 @@ func isRegular(dirent os.DirEntry, path string) bool {
 	if mode&os.ModeSymlink == 0 {
 		return false
 	}
-	info, err := os.Stat(path)
+	info, err := st.get()
 	if err != nil {
 		return true
 	}
@@ -173,8 +213,8 @@ func isRegular(dirent os.DirEntry, path string) bool {
 // answers for the file that was actually opened, where the directory read's
 // lstat answers for the symlink, and there is no window between the two reads
 // for the file to change underneath.
-func scanFile(ctx context.Context, name, path string) ScanEntry {
-	f, err := os.Open(path)
+func scanFile(ctx context.Context, name, path string, open func(string) (*os.File, error)) ScanEntry {
+	f, err := open(path)
 	if err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(
@@ -188,15 +228,17 @@ func scanFile(ctx context.Context, name, path string) ScanEntry {
 	defer f.Close()
 
 	var size int64
+	var modTime time.Time
 	if info, statErr := f.Stat(); statErr == nil {
 		size = info.Size()
+		modTime = info.ModTime()
 	}
 
 	header, res := HeaderOnlyRead(ctx, f)
 	if header != nil {
 		header.FileSize = size
 	}
-	return ScanEntry{Name: name, Path: path, Header: header, Result: res, FileSize: size}
+	return ScanEntry{Name: name, Path: path, Header: header, Result: res, FileSize: size, ModTime: modTime}
 }
 
 // ScanDirSlice is a convenience wrapper that materializes the full
@@ -212,10 +254,20 @@ func scanFile(ctx context.Context, name, path string) ScanEntry {
 // want fail-fast-on-cancel check result.HasFatal() before using the
 // slice; callers that want partial results read the slice directly
 // and treat the outer Result as advisory.
+//
+// [ScanDirSliceWith] is the same wrapper under [ScanOption] values.
 func ScanDirSlice(ctx context.Context, dir string) ([]ScanEntry, diag.Result) {
+	return ScanDirSliceWith(ctx, dir)
+}
+
+// ScanDirSliceWith is [ScanDirSlice] with options, and materializes
+// [ScanDirWith] the way [ScanDirSlice] materializes [ScanDir]. A file a filter
+// rejects is absent from the slice and contributes nothing to the outer
+// Result; a rejection is not an error.
+func ScanDirSliceWith(ctx context.Context, dir string, opts ...ScanOption) ([]ScanEntry, diag.Result) {
 	var out []ScanEntry
 	var collector *diag.Collector
-	for entry, err := range ScanDir(ctx, dir) {
+	for entry, err := range ScanDirWith(ctx, dir, opts...) {
 		if err != nil {
 			collector = diag.NewCollector(0)
 			code := diag.E_SNAPSHOT_IO

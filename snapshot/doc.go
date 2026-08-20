@@ -110,6 +110,8 @@
 // basename ends with [TmpSuffix] are skipped so crash-residual
 // staging files are not confused for complete snapshots.
 // [ScanDirSlice] is the materializing convenience wrapper.
+// [ScanDirWith] and [ScanDirSliceWith] are the same two under [ScanOption]
+// values, where [WithScanFilter] rejects a file before it is opened.
 //
 // [UpdateMetadata] rewrites the header of an existing .ys document
 // with a new metadata map, reusing the body bytes verbatim and
@@ -151,6 +153,12 @@
 // [Load] and [Verify] accept [LoadOption] values:
 //
 //   - [WithSkipIntegrityCheck]: skip SHA-256 integrity verification (useful for debugging)
+//
+// # Scan Options
+//
+// [ScanDirWith] and [ScanDirSliceWith] accept [ScanOption] values:
+//
+//   - [WithScanFilter]: reject a file before it is opened
 //
 // # Error Handling
 //
