@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/simon-lentz/yammm/internal/value"
 )
@@ -1699,4 +1700,38 @@ func TestIsWholeNumber_BoundaryConditions(t *testing.T) {
 			t.Errorf("GetInt64FromFloat(-2^63) = %d, want %d", v, math.MinInt64)
 		}
 	})
+}
+
+// A time.Time is a struct, so it lands in no strata and every comparison over
+// it errors. Timestamp is the DSL's only two-representation kind: the same
+// property holds a comparable string or an incomparable time.Time depending on
+// what the caller submitted.
+func TestTypeStrata_TimeIsInvalid(t *testing.T) {
+	ts := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	if got := value.TypeStrata(ts); got != value.InvalidStrata {
+		t.Errorf("TypeStrata(time.Time) = %d, want InvalidStrata (%d)", got, value.InvalidStrata)
+	}
+	if got := value.TypeStrata(ts.Format(time.RFC3339)); got != value.StringStrata {
+		t.Errorf("TypeStrata(RFC 3339 string) = %d, want StringStrata (%d)", got, value.StringStrata)
+	}
+}
+
+func TestOrder_TimeErrorsWhileItsStringFormDoesNot(t *testing.T) {
+	early := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	late := time.Date(2021, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	if _, err := value.Order(early, late); err == nil {
+		t.Error("Order(time.Time, time.Time) returned no error")
+	}
+	if _, err := value.Order(early, late.Format(time.RFC3339)); err == nil {
+		t.Error("Order(time.Time, string) returned no error")
+	}
+
+	got, err := value.Order(early.Format(time.RFC3339), late.Format(time.RFC3339))
+	if err != nil {
+		t.Fatalf("Order over two RFC 3339 strings: %v", err)
+	}
+	if got != -1 {
+		t.Errorf("Order(earlier, later) = %d, want -1", got)
+	}
 }

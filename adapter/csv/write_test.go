@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,4 +103,31 @@ func TestMarshalSnapshot_FKColumnsEmpty(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, string(empCSV), "emp1")
 	assert.Contains(t, string(empCSV), "Alice")
+}
+
+// valueToString has a string case and no time.Time case, so a Timestamp built
+// from a time.Time falls to fmt.Sprint and renders in Go's default layout
+// rather than RFC 3339. The two representations of one kind therefore write
+// different text for the same instant.
+func TestMarshalSnapshot_TimestampRendersPerRepresentation(t *testing.T) {
+	t.Parallel()
+	s := loadTestSchema(t, "basic.yammm")
+	a := New()
+	when := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	snap := buildSnapshot(t, s, map[string][]map[string]any{
+		"Entity": {
+			{"id": "e1", "name": "Alice", "updated_at": when},
+			{"id": "e2", "name": "Bob", "updated_at": when.Format(time.RFC3339)},
+		},
+	})
+
+	output, err := a.MarshalSnapshot(context.Background(), snap)
+	require.NoError(t, err)
+	got := string(output["Entity"])
+
+	assert.Contains(t, got, "2020-01-02 03:04:05 +0000 UTC",
+		"a time.Time-valued Timestamp renders through fmt.Sprint")
+	assert.Contains(t, got, "2020-01-02T03:04:05Z",
+		"a string-valued Timestamp renders verbatim")
 }

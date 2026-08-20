@@ -169,3 +169,48 @@ func TestIndexing_LargeIndexDoesNotWrap(t *testing.T) {
 		t.Errorf("in-range index stopped resolving: %s", detail)
 	}
 }
+
+// Comparing a Timestamp property compares whatever Go value the caller
+// submitted, because CoerceValue treats the kind as already canonical. A
+// string orders as a string; a time.Time reaches no strata and every operator
+// over it draws E_EVAL_ERROR.
+func TestComparison_TimestampOrdersOnlyItsStringForm(t *testing.T) {
+	const decl = "\tts Timestamp\n"
+
+	ok, detail := invariantHolds(t, decl, `ts > "2020-01-01T00:00:00Z"`,
+		map[string]any{"ts": "2020-06-01T00:00:00Z"})
+	if !ok {
+		t.Errorf("comparing a string-valued Timestamp: %s", detail)
+	}
+
+	ok, detail = invariantHolds(t, decl, `ts > "2020-01-01T00:00:00Z"`,
+		map[string]any{"ts": time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if ok {
+		t.Error("comparing a time.Time-valued Timestamp succeeded")
+	}
+	if !strings.Contains(detail, "unsupported type comparison") {
+		t.Errorf("comparison over a time.Time reported %q, want the unsupported-comparison error", detail)
+	}
+}
+
+// `in` is the one operator that swallows the comparison error rather than
+// reporting it: an incomparable element is treated as not equal, so a
+// time.Time-valued Timestamp is silently absent from a list holding it.
+func TestIn_SwallowsTheTimestampComparisonError(t *testing.T) {
+	const decl = "\tts Timestamp\n"
+
+	ok, detail := invariantHolds(t, decl, `ts in ["2020-06-01T00:00:00Z"]`,
+		map[string]any{"ts": "2020-06-01T00:00:00Z"})
+	if !ok {
+		t.Errorf("a string-valued Timestamp in a list holding it: %s", detail)
+	}
+
+	ok, detail = invariantHolds(t, decl, `ts in ["2020-06-01T00:00:00Z"]`,
+		map[string]any{"ts": time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if ok {
+		t.Error("a time.Time-valued Timestamp matched a list entry")
+	}
+	if strings.Contains(detail, "unsupported type comparison") {
+		t.Errorf("`in` surfaced the comparison error rather than swallowing it: %s", detail)
+	}
+}

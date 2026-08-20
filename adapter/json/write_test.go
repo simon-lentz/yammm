@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -550,4 +551,44 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 	}
 	w.n += len(p)
 	return len(p), nil
+}
+
+// testSchemaWithTimestamp is the smallest schema carrying a Timestamp property.
+func testSchemaWithTimestamp(t *testing.T) *schema.Schema {
+	t.Helper()
+	s, result := schema.NewBuilder().
+		WithName("stamped").
+		WithSourceID(location.MustNewSourceID("test://stamped.yammm")).
+		AddType("Event").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithProperty("observed_at", schema.TimestampConstraint{}).
+		Done().
+		Build()
+	return mustBuild(t, s, result)
+}
+
+// unwrapValue hands the raw value to encoding/json, so a time.Time-valued
+// Timestamp marshals through time.Time.MarshalJSON as strict RFC 3339 while a
+// string-valued one marshals verbatim. The JSON writer therefore agrees with
+// itself across the two representations where adapter/csv does not.
+func TestMarshalObject_TimestampRendersPerRepresentation(t *testing.T) {
+	s := testSchemaWithTimestamp(t)
+	when := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	g := graph.New(s)
+	mustAdd(
+		t, g,
+		mustValidInstance(t, s, "Event", []any{"a"},
+			map[string]any{"id": "a", "observed_at": when}),
+		mustValidInstance(t, s, "Event", []any{"b"},
+			map[string]any{"id": "b", "observed_at": when.Format(time.RFC3339)}),
+	)
+
+	data, err := newAdapter(t).MarshalObject(context.Background(), g.Snapshot())
+	require.NoError(t, err)
+
+	got := string(data)
+	assert.Contains(t, got, `"2020-01-02T03:04:05Z"`)
+	assert.NotContains(t, got, "+0000 UTC",
+		"the JSON writer must not render a time.Time through fmt.Sprint")
 }

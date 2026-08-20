@@ -2,11 +2,15 @@ package docs_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // The Go snippets in API.md are prose: nothing compiles them, so a signature
@@ -160,5 +164,41 @@ func TestDocumentedIntrospectionQueries(t *testing.T) {
 	if strings.Contains(indexQuery, "owningConstraint IS NULL") {
 		t.Errorf("IntrospectIndexesQuery() filters out constraint-backing indexes, "+
 			"which the documented diff behavior depends on receiving: %s", indexQuery)
+	}
+}
+
+// TestDocumentedScanFilterShape compiles API.md's "Pre-open filtering" example.
+// The snippet is prose that no other gate reads, so a signature change to
+// WithScanFilter, ScanCandidate or ScanDirWith would leave it stating a call
+// that no longer exists.
+func TestDocumentedScanFilterShape(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.ys"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	recent := snapshot.WithScanFilter(func(c snapshot.ScanCandidate) bool {
+		info, err := c.Info()
+		return err == nil && !info.ModTime().Before(cutoff)
+	})
+
+	var seen int
+	for entry, err := range snapshot.ScanDirWith(t.Context(), dir, recent) {
+		if err != nil {
+			t.Fatalf("ScanDirWith: %v", err)
+		}
+		seen++
+		if entry.ModTime.IsZero() {
+			t.Error("the documented entry carries no ModTime")
+		}
+	}
+	if seen != 1 {
+		t.Errorf("the documented filter admitted %d entries, want 1", seen)
+	}
+
+	entries, result := snapshot.ScanDirSliceWith(t.Context(), dir, recent)
+	if result.HasErrors() || len(entries) != 1 {
+		t.Errorf("ScanDirSliceWith: %d entries, result %v", len(entries), result.Err())
 	}
 }

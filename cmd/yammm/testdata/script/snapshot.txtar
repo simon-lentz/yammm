@@ -98,6 +98,7 @@ stdout 'Summary: 2 ok'
 exec yammm snapshot info --dir snaps --format json
 stdout '"name"'
 stdout '"header"'
+stdout '"mod_time": "[0-9]{4}-[0-9]{2}-[0-9]{2}T'
 
 cp corrupt.txt snaps/corrupt.ys
 exec yammm snapshot info --dir snaps

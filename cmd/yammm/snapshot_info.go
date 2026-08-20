@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -196,9 +197,12 @@ type dirEntryDTO struct {
 	Path string `json:"path"`
 	// FileSize repeats the header's when the header parsed, and carries the
 	// size alone when it did not — a corrupt file still occupies disk.
-	FileSize int64                `json:"file_size"`
-	Header   *snapshot.HeaderInfo `json:"header"`
-	Issues   []dirIssueDTO        `json:"issues,omitempty"`
+	FileSize int64 `json:"file_size"`
+	// ModTime is RFC 3339 in UTC, empty when the file could not be stat'd —
+	// empty rather than a zero time, which sorts first and corrupts orderings.
+	ModTime string               `json:"mod_time"`
+	Header  *snapshot.HeaderInfo `json:"header"`
+	Issues  []dirIssueDTO        `json:"issues,omitempty"`
 }
 
 type dirIssueDTO struct {
@@ -240,6 +244,9 @@ func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {
 		Path:     entry.Path,
 		FileSize: entry.FileSize,
 		Header:   entry.Header,
+	}
+	if !entry.ModTime.IsZero() {
+		dto.ModTime = entry.ModTime.UTC().Format(time.RFC3339Nano)
 	}
 	for iss := range entry.Result.Issues() {
 		dto.Issues = append(dto.Issues, dirIssueDTO{

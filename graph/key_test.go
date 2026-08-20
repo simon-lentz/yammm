@@ -2,8 +2,13 @@ package graph_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestFormatKey(t *testing.T) {
@@ -194,6 +199,73 @@ func TestFormatComposedKey(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("graph.FormatComposedKey() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// timestampKeySchema carries a Timestamp primary key, which the DSL permits
+// alongside String, UUID and Date.
+func timestampKeySchema(t *testing.T) *schema.Schema {
+	t.Helper()
+	s, result := schema.NewBuilder().
+		WithName("stamped").
+		WithSourceID(location.MustNewSourceID("test://stamped.yammm")).
+		AddType("Event").
+		WithPrimaryKey("observed_at", schema.TimestampConstraint{}).
+		Done().
+		Build()
+	if result.HasErrors() {
+		t.Fatalf("building the timestamp-key schema: %s", result.String())
+	}
+	return s
+}
+
+// Graph identity is Key.String(), so the two representations of one instant
+// collide only where they render the same text. A canonical spelling and the
+// time.Time parsed from it are one instance; a non-canonical spelling and its
+// time.Time are two, which is a key that moves with the caller's choice of
+// representation.
+func TestGraph_TimestampKeyIdentityFollowsTheRendering(t *testing.T) {
+	tests := []struct {
+		spelling      string
+		wantDuplicate bool
+	}{
+		{"2020-01-02T03:04:05Z", true},
+		{"2020-01-02T03:04:05+00:00", false},
+		{"2020-01-02T03:04:05.500Z", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.spelling, func(t *testing.T) {
+			s := timestampKeySchema(t)
+			eventType, ok := s.Type("Event")
+			if !ok {
+				t.Fatal("Event not found in the timestamp-key schema")
+			}
+			parsed, err := time.Parse(time.RFC3339, tt.spelling)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.spelling, err)
+			}
+
+			g := graph.New(s)
+			first := instance.NewValidInstance("Event", eventType.ID(),
+				immutable.WrapKey([]any{tt.spelling}),
+				immutable.WrapProperties(map[string]any{"observed_at": tt.spelling}),
+				nil, nil, nil)
+			if r := g.Add(t.Context(), first); !r.OK() {
+				t.Fatalf("adding the string-keyed instance: %s", r.String())
+			}
+
+			second := instance.NewValidInstance("Event", eventType.ID(),
+				immutable.WrapKey([]any{parsed}),
+				immutable.WrapProperties(map[string]any{"observed_at": parsed}),
+				nil, nil, nil)
+			result := g.Add(t.Context(), second)
+
+			if gotDuplicate := !result.OK(); gotDuplicate != tt.wantDuplicate {
+				t.Errorf("adding the time.Time-keyed instance: duplicate=%v, want %v (%s)",
+					gotDuplicate, tt.wantDuplicate, result.String())
 			}
 		})
 	}

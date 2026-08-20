@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestKey_WrapKey(t *testing.T) {
@@ -530,5 +531,48 @@ func TestKey_String_MatchesJSONMarshal(t *testing.T) {
 		if got := k.String(); got != string(expected) {
 			t.Errorf("input %v: Key.String() = %q, json.Marshal(Clone()) = %q", input, got, string(expected))
 		}
+	}
+}
+
+// A key component renders through json.Marshal, which hands a time.Time to
+// time.Time.MarshalJSON. The two representations of one instant therefore agree
+// only where the string is already in Go's canonical spelling: a zero offset
+// renders "Z", and fractional seconds drop their trailing zeros.
+func TestKey_String_TimeAgreesWithItsStringFormOnlyWhenCanonical(t *testing.T) {
+	tests := []struct {
+		spelling string
+		agrees   bool
+	}{
+		{"2020-01-02T03:04:05Z", true},
+		{"2020-01-02T03:04:05+02:00", true},
+		{"2020-01-02T03:04:05+00:00", false},
+		{"2020-01-02T03:04:05.500Z", false},
+		{"2020-01-02T03:04:05.000Z", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.spelling, func(t *testing.T) {
+			parsed, err := time.Parse(time.RFC3339, tt.spelling)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.spelling, err)
+			}
+			fromString := WrapKey([]any{tt.spelling}).String()
+			fromTime := WrapKey([]any{parsed}).String()
+			if agreed := fromString == fromTime; agreed != tt.agrees {
+				t.Errorf("string key %s, time.Time key %s: agreed=%v, want %v",
+					fromString, fromTime, agreed, tt.agrees)
+			}
+		})
+	}
+}
+
+// The rendering a time.Time component takes is exactly RFC3339Nano, which is
+// what makes it predictable rather than merely observed.
+func TestKey_String_TimeRendersAsRFC3339Nano(t *testing.T) {
+	ts := time.Date(2020, 1, 2, 3, 4, 5, 500000000, time.UTC)
+	got := WrapKey([]any{ts}).String()
+	want := `["` + ts.Format(time.RFC3339Nano) + `"]`
+	if got != want {
+		t.Errorf("Key.String() = %s, want %s", got, want)
 	}
 }

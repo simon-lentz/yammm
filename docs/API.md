@@ -791,6 +791,7 @@ type ScanEntry struct {
     Header   *snapshot.HeaderInfo // nil when Result has error-severity issues
     Result   diag.Result          // OK on the happy path; carries errors per-file
     FileSize int64                // size on disk, or zero if the file could not be opened
+    ModTime  time.Time            // modification time, or the zero Time if unknown
 }
 
 // Lazy iterator — headers are parsed on demand; callers can break early
@@ -799,6 +800,21 @@ func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error]
 
 // Materializing convenience wrapper.
 func ScanDirSlice(ctx context.Context, dir string) ([]ScanEntry, diag.Result)
+
+// The same two, under options. Given none they are the two above exactly.
+func ScanDirWith(ctx context.Context, dir string, opts ...ScanOption) iter.Seq2[ScanEntry, error]
+func ScanDirSliceWith(ctx context.Context, dir string, opts ...ScanOption) ([]ScanEntry, diag.Result)
+
+// Reject a file before it is opened.
+func WithScanFilter(keep func(ScanCandidate) bool) ScanOption
+
+type ScanCandidate struct {
+    Name string // basename, e.g., "CA.ys"
+    Path string // full path, filepath.Join(dir, Name)
+}
+
+// Info describes the file the open would read; the stat follows a symlink.
+func (c ScanCandidate) Info() (fs.FileInfo, error)
 ```
 
 Typical call pattern:
@@ -820,7 +836,7 @@ Both `HeaderInfo` and `SnapshotInfo` carry `CreatedAtTime() (time.Time, bool)`, 
 
 yammm writes UTC at second precision, so a time given to `WithCreatedAt` does not round-trip its sub-second part. The parser accepts more than yammm writes, deliberately — `UpdateMetadata` preserves a foreign header byte-for-byte, and fractional seconds and non-UTC offsets both parse under this layout and keep their offset.
 
-`FileSize` is populated whenever the file was opened, **including when its header then failed to parse** — a corrupt file still occupies disk, and a caller accounting for space needs the size before it branches on `Header`. When the header did parse, `Header.FileSize` repeats it. Neither case needs a compensating `os.Stat` per entry.
+`FileSize` and `ModTime` are populated whenever the file was opened, **including when its header then failed to parse** — a corrupt file still occupies disk and still has a modification time, and a caller accounting for either needs it before it branches on `Header`. When the header did parse, `Header.FileSize` repeats the size; there is no `Header.ModTime`, because a modification time is filesystem metadata about the container rather than a property of the document, and neither `HeaderOnly` nor `HeaderOnlyRead` could answer it. Both come from a stat of the **opened handle**, so for a symlinked `.ys` they describe the target rather than the link. A stat failure leaves both zero and raises no diagnostic. Neither case needs a compensating `os.Stat` per entry.
 
 **Error surface, in two categories:**
 
@@ -833,12 +849,37 @@ yammm writes UTC at second precision, so a time given to `WithCreatedAt` does no
 - Files whose basename ends with `snapshot.TmpSuffix` are skipped — the atomic-write staging files that `WriteFile` may leave behind on crash. Both primitives key off the shared exported constant; the single source of truth keeps them from drifting.
 - Symlinks are followed: one is included when its target is a regular file and skipped when it is not. A broken symlink is included and yields a per-file Fatal `E_SNAPSHOT_IO` entry with the underlying `os.Open` error surfaced as a detail.
 - Entries are yielded in the order returned by `os.ReadDir`, which sorts by filename.
+- A `WithScanFilter` predicate, when one is configured, runs **last** — after every rule above — and rejects the file before it is opened.
+
+**Pre-open filtering.**
+
+`ScanDirWith` and `ScanDirSliceWith` accept `WithScanFilter`, which admits only the files its predicate returns true for and decides **before the file is opened**: a rejected file yields no `ScanEntry`, costs no open, and parses no header. A rejection is not an error — nothing is reported for it.
+
+The predicate is consulted for exactly the entries the unfiltered scan would yield, and for no others. Running last is what makes that true, and it is also what keeps the non-regular-file guard ahead of caller code: `os.Open` on a FIFO blocks until a writer appears, so a name-only predicate must never be able to admit one.
+
+`ScanCandidate.Info()` describes the file the open would read. The stat **follows a symlink**, so it answers for the target — the same file `FileSize` and `ModTime` will describe — where the directory read's own `DirEntry.Info()` would answer for the link. One candidate costs at most one stat however often `Info` is called, and none at all when no predicate asks. A broken symlink still reaches the predicate, and `Info` returns the stat error rather than a zero `FileInfo`; a predicate that ignores that error and dereferences the result will panic.
+
+Two properties are worth stating plainly. The predicate cannot end iteration and is not handed a context — it runs between the scan's own cancellation checks, so a predicate that blocks makes the scan unresponsive until it returns, and one that panics unwinds the range. And `Info` observes the file *before* the open while `ScanEntry.ModTime` and `FileSize` observe it *after*: a file rewritten in between reports values the predicate did not see.
+
+Cost per file, against an unfiltered scan: a rejected file saves the open, the fstat and the header read; an admitted one pays one extra stat, or none when the entry is a symlink, whose stat the regular-file check has already paid for.
+
+```go
+// Skip .ys files older than the retention window without opening them.
+cutoff := time.Now().Add(-7 * 24 * time.Hour)
+recent := snapshot.WithScanFilter(func(c snapshot.ScanCandidate) bool {
+    info, err := c.Info()
+    return err == nil && !info.ModTime().Before(cutoff)
+})
+for entry, err := range snapshot.ScanDirWith(ctx, dir, recent) {
+    // ...
+}
+```
 
 **`ScanDirSlice` semantics:**
 
-`ScanDirSlice` materializes the full iteration into a slice plus an outer `diag.Result`. The outer Result surfaces operation-level errors only (dir does not exist → Fatal `E_SNAPSHOT_IO`; context cancellation → Fatal `E_CONTEXT_CANCELLED`); per-file errors remain on each `ScanEntry.Result`. Context cancellation returns *partial* results — the returned slice contains entries processed before cancellation, and callers who want fail-fast-on-cancel check `result.HasFatal()` before consuming the slice.
+`ScanDirSlice` materializes the full iteration into a slice plus an outer `diag.Result`. The outer Result surfaces operation-level errors only (dir does not exist → Fatal `E_SNAPSHOT_IO`; context cancellation → Fatal `E_CONTEXT_CANCELLED`); per-file errors remain on each `ScanEntry.Result`. Context cancellation returns *partial* results — the returned slice contains entries processed before cancellation, and callers who want fail-fast-on-cancel check `result.HasFatal()` before consuming the slice. `ScanDirSliceWith` is the same wrapper under the same `ScanOption` values the iterator takes — a filter's rejections are simply absent from the slice and contribute nothing to the outer Result.
 
-**CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, file_size, header, issues}` JSON array. The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
+**CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, file_size, mod_time, header, issues}` JSON array (`mod_time` is RFC 3339 in UTC, empty when the file could not be stat'd). The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
 
 ### Metadata Updates
 
