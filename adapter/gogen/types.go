@@ -7,12 +7,11 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// goBaseType maps a constraint to its primitive Go type. It is the single
-// ConstraintKind dispatch site in the generator and is guarded so a newly-added
-// kind fails the build rather than silently emitting a wrong or empty type.
-// Enum maps to its string underlying; named Enum/DataType types are applied by
+// goBaseType maps a constraint to its Go type: the primitive for most kinds,
+// and for a Date or custom-layout Timestamp the generated type
+// registerTemporalTypes assigned. Named Enum/DataType types are applied by
 // the field emitter, not here.
-func goBaseType(c schema.Constraint) (string, error) {
+func (g *generator) goBaseType(c schema.Constraint) (string, error) {
 	c = schema.ResolveAlias(c)
 	//exhaustive:enforce
 	switch c.Kind() {
@@ -24,8 +23,21 @@ func goBaseType(c schema.Constraint) (string, error) {
 		return "float64", nil
 	case schema.KindBoolean:
 		return "bool", nil
-	case schema.KindTimestamp, schema.KindDate:
-		return "time.Time", nil
+	case schema.KindTimestamp:
+		tc, ok := c.(schema.TimestampConstraint)
+		if !ok || tc.Format() == "" {
+			return "time.Time", nil
+		}
+		name, ok := g.temporal.layouts[tc.Format()]
+		if !ok {
+			return "", fmt.Errorf("gogen: timestamp layout %q reached emission without a registered type", tc.Format())
+		}
+		return name, nil
+	case schema.KindDate:
+		if g.temporal.date == "" {
+			return "", errors.New("gogen: a Date position reached emission without the Date type registered")
+		}
+		return g.temporal.date, nil
 	case schema.KindVector:
 		return "[]float64", nil
 	case schema.KindList:
@@ -33,15 +45,14 @@ func goBaseType(c schema.Constraint) (string, error) {
 		if !ok {
 			return "", errors.New("gogen: List kind without ListConstraint")
 		}
-		elem, err := goBaseType(lc.Element())
+		elem, err := g.goBaseType(lc.Element())
 		if err != nil {
 			return "", err
 		}
 		return "[]" + elem, nil
 	case schema.KindAlias:
-		// Listed for the exhaustiveness guard. Reachable only for an unresolved or
-		// cyclic alias (ResolveAlias returns the alias unchanged in those cases);
-		// a completed schema never reaches here.
+		// Reachable only for an unresolved or cyclic alias, which ResolveAlias
+		// returns unchanged; a completed schema never gets here.
 		return "", errors.New("gogen: unresolved alias constraint")
 	default:
 		return "", fmt.Errorf("gogen: unhandled constraint kind %v", c.Kind())

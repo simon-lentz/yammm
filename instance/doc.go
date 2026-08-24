@@ -68,6 +68,15 @@
 //   - [WithStrictPropertyNames]: reject properties not defined in the schema
 //   - [WithAllowUnknownFields]: allow extra properties without diagnostics
 //
+// # Value Functions
+//
+// [CheckValue] and [CanonicalValue] are the validator's two per-value rules —
+// does this value conform, and what is its stored form — exported for a
+// boundary this library does not own: a hand-built export, a direct-Cypher
+// parameter map, a pre-filter in front of a write the validator never sees.
+// Both accept nil and use built-in type detection only; a Validator's custom
+// value registry is not consulted.
+//
 // # Thread Safety
 //
 // [Validator] is stateless and safe for concurrent use. Multiple goroutines

@@ -22,9 +22,9 @@ type EDGE_County_in_region_CommonRegion struct {
 }
 
 type Graph struct {
-	GeoRegion    []*GeoRegion    `json:"geo_region,omitempty"`
-	County       []*County       `json:"county,omitempty"`
-	CommonRegion []*CommonRegion `json:"common_region,omitempty"`
+	GeoRegion    []*GeoRegion    `json:"Region,omitempty"`
+	County       []*County       `json:"County,omitempty"`
+	CommonRegion []*CommonRegion `json:"common.Region,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

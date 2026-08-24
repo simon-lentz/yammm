@@ -26,7 +26,7 @@ type County struct {
 }
 
 type Graph struct {
-	County []*County `json:"county,omitempty"`
+	County []*County `json:"County,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

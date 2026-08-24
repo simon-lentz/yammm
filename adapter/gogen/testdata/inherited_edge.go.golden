@@ -23,8 +23,8 @@ type EDGE_Member_belongs_to_Org struct {
 }
 
 type Graph struct {
-	Org    []*Org    `json:"org,omitempty"`
-	Person []*Person `json:"person,omitempty"`
+	Org    []*Org    `json:"Org,omitempty"`
+	Person []*Person `json:"Person,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

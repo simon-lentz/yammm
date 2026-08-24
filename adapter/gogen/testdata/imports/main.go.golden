@@ -20,8 +20,8 @@ type EDGE_County_in_region_Region struct {
 }
 
 type Graph struct {
-	County []*County `json:"county,omitempty"`
-	Region []*Region `json:"region,omitempty"`
+	County []*County `json:"County,omitempty"`
+	Region []*Region `json:"common.Region,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

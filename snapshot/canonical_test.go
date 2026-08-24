@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/instance/instancetest"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -440,4 +441,21 @@ func TestVerify_HonorsValueConformance(t *testing.T) {
 	if !result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
 		t.Errorf("Verify did not report under the option: %s", result)
 	}
+}
+
+// TestMarshal_TemporalGoldenBytes pins the wire bytes of every canonical
+// spelling the validator produces for Timestamp, UUID and Date — node
+// property, declared-layout property, alias, list element, edge property
+// and composed child — so a change to a stored form is a reviewed golden
+// diff rather than a silent move of every persisted key.
+func TestMarshal_TemporalGoldenBytes(t *testing.T) {
+	t.Parallel()
+	s := loadTemporalSchema(t)
+	snap := buildTemporalSnapshot(t, s, true)
+
+	data, result := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
+	if err := result.Err(); err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	yammmtest.Golden(t, "marshal_temporal_representative.ys", data)
 }

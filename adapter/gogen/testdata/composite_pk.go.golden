@@ -20,8 +20,8 @@ type EDGE_Sensor_located_in_Region struct {
 }
 
 type Graph struct {
-	Region []*Region `json:"region,omitempty"`
-	Sensor []*Sensor `json:"sensor,omitempty"`
+	Region []*Region `json:"Region,omitempty"`
+	Sensor []*Sensor `json:"Sensor,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

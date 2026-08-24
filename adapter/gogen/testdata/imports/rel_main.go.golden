@@ -18,8 +18,8 @@ type EDGE_Site_in_zone_Zone struct {
 }
 
 type Graph struct {
-	Site []*Site `json:"site,omitempty"`
-	Zone []*Zone `json:"zone,omitempty"`
+	Site []*Site `json:"Site,omitempty"`
+	Zone []*Zone `json:"dep.Zone,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

@@ -2,12 +2,14 @@ package neo4j
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // TestConstraintsForSchema_Golden pins the complete default-option statement
@@ -441,6 +443,144 @@ func assertNotContains(t *testing.T, stmts []string, substring string) {
 		if strings.Contains(stmt, substring) {
 			t.Errorf("unexpected statement containing %q: %s", substring, stmt)
 			return
+		}
+	}
+}
+
+// enterpriseKindCounts returns how many constraints of each kind the default
+// (Enterprise) configuration emits for s, which is what Community must report
+// as omitted for the kinds it cannot hold.
+func enterpriseKindCounts(t *testing.T, s *schema.Schema) map[ConstraintKind]int {
+	t.Helper()
+	constraints, result := New().ConstraintsStructured(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatalf("Enterprise ConstraintsStructured: %v", err)
+	}
+	counts := map[ConstraintKind]int{}
+	for _, c := range constraints {
+		counts[c.Kind]++
+	}
+	return counts
+}
+
+// editionOmissionMessage returns the one W_NEO4J_EDITION_CONSTRAINT_OMITTED
+// message in result, failing when there is not exactly one.
+func editionOmissionMessage(t *testing.T, result diag.Result) string {
+	t.Helper()
+	if got := countCode(result, W_NEO4J_EDITION_CONSTRAINT_OMITTED); got != 1 {
+		t.Fatalf("expected exactly 1 %s, got %d: %s", W_NEO4J_EDITION_CONSTRAINT_OMITTED, got, result)
+	}
+	for issue := range result.Issues() {
+		if issue.Code() == W_NEO4J_EDITION_CONSTRAINT_OMITTED {
+			if issue.Severity() != diag.Warning {
+				t.Errorf("%s severity = %v, want %v", issue.Code(), issue.Severity(), diag.Warning)
+			}
+			return issue.Message()
+		}
+	}
+	return ""
+}
+
+// TestConstraints_EditionOmission_WarnsOncePerCallWithCounts pins that
+// Community reports what it dropped: once per call, with the count of each
+// omitted kind, so an operator reading the script knows which guarantees
+// the schema declares and the database will not hold.
+func TestConstraints_EditionOmission_WarnsOncePerCallWithCounts(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "multiple_types.yammm")
+	want := enterpriseKindCounts(t, s)
+	if want[ConstraintNotNull] == 0 || want[ConstraintType] == 0 {
+		t.Fatalf("fixture must drop both kinds under Community, Enterprise counts %v", want)
+	}
+
+	_, result := New(WithEdition(Community)).ConstraintsStructured(context.Background(), s)
+	if result.HasErrors() {
+		t.Fatalf("omission must not fail the call: %v", result)
+	}
+	if !result.HasWarnings() {
+		t.Error("result carries no warning; the omission is invisible to severity-gated callers")
+	}
+	msg := editionOmissionMessage(t, result)
+	dropped := want[ConstraintNotNull] + want[ConstraintType]
+	total := dropped + want[ConstraintUnique] + want[ConstraintNodeKey]
+	for _, part := range []string{
+		fmt.Sprintf("%d of %d", dropped, total),
+		fmt.Sprintf("%d NOT NULL", want[ConstraintNotNull]),
+		fmt.Sprintf("%d PROPERTY_TYPE", want[ConstraintType]),
+	} {
+		if !strings.Contains(msg, part) {
+			t.Errorf("message %q does not carry %q", msg, part)
+		}
+	}
+}
+
+// TestConstraints_EditionOmission_OrderIsFixed pins that the kinds are listed
+// in one order on every run, so two operators reading two runs see one
+// message rather than a map-order shuffle.
+func TestConstraints_EditionOmission_OrderIsFixed(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "multiple_types.yammm")
+	a := New(WithEdition(Community))
+
+	// Sixty-four calls: a two-key map iterates in the wrong order about one
+	// time in eight, so one comparison would miss a map-ordered rendering.
+	var first string
+	for i := range 64 {
+		_, result := a.ConstraintsStructured(context.Background(), s)
+		msg := editionOmissionMessage(t, result)
+		if i == 0 {
+			first = msg
+		}
+		if msg != first {
+			t.Fatalf("call %d rendered a different message:\n%s\n%s", i, first, msg)
+		}
+		if strings.Index(msg, "NOT NULL") > strings.Index(msg, "PROPERTY_TYPE") {
+			t.Fatalf("kinds are not in declaration order: %s", msg)
+		}
+	}
+}
+
+// TestConstraints_EditionOmission_OnlyWhenSomethingIsDropped pins the two
+// silent cases: Enterprise drops nothing, and a Community schema with no
+// emittable type has nothing to drop. The second is the only Community call
+// that drops nothing, since every concrete type carries a primary key whose
+// NOT NULL Community cannot hold.
+func TestConstraints_EditionOmission_OnlyWhenSomethingIsDropped(t *testing.T) {
+	t.Parallel()
+	t.Run("enterprise", func(t *testing.T) {
+		t.Parallel()
+		_, result := New().ConstraintsStructured(context.Background(), loadSchema(t, "multiple_types.yammm"))
+		if result.HasCode(W_NEO4J_EDITION_CONSTRAINT_OMITTED) {
+			t.Errorf("Enterprise reported an omission: %s", result)
+		}
+	})
+	t.Run("community with nothing emittable", func(t *testing.T) {
+		t.Parallel()
+		s, res := schema.LoadString(context.Background(),
+			"schema \"empty\"\n\nabstract type Base {\n\tid String primary\n}\n", "empty.yammm")
+		if res.HasErrors() {
+			t.Fatalf("load: %v", res.Err())
+		}
+		constraints, result := New(WithEdition(Community)).ConstraintsStructured(context.Background(), s)
+		if len(constraints) != 0 {
+			t.Fatalf("fixture emitted %d constraints, want none", len(constraints))
+		}
+		if result.HasCode(W_NEO4J_EDITION_CONSTRAINT_OMITTED) {
+			t.Errorf("a call that dropped nothing reported an omission: %s", result)
+		}
+	})
+}
+
+// TestConstraints_EditionOmission_CoexistsWithNodeKeyWarning pins that the
+// two Community warnings are independent facts reported independently.
+func TestConstraints_EditionOmission_CoexistsWithNodeKeyWarning(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "multiple_types.yammm")
+	_, result := New(WithNodeKeyConstraints(true), WithEdition(Community)).
+		ConstraintsStructured(context.Background(), s)
+	for _, code := range []diag.Code{W_NEO4J_NODE_KEY_UNSUPPORTED, W_NEO4J_EDITION_CONSTRAINT_OMITTED} {
+		if got := countCode(result, code); got != 1 {
+			t.Errorf("expected exactly 1 %s, got %d", code, got)
 		}
 	}
 }

@@ -1,0 +1,70 @@
+{
+  "name": "\"tcleft\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "imports": [
+    {
+      "path": "\"tc_leftbase.yammm\"",
+      "alias": "base",
+      "span": {
+        "s": 17,
+        "e": 51
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Left",
+      "name_span": {
+        "s": 58,
+        "e": 62
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 69,
+              "e": 75
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 66,
+            "e": 83
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "TO_NODE",
+          "name_span": {
+            "s": 89,
+            "e": 96
+          },
+          "target": {
+            "qualifier": "base",
+            "name": "Node",
+            "span": {
+              "s": 103,
+              "e": 112
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 85,
+            "e": 112
+          }
+        }
+      ],
+      "span": {
+        "s": 53,
+        "e": 114
+      }
+    }
+  ]
+}

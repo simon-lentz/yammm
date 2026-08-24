@@ -28,9 +28,9 @@ type EDGE_Comment_created_by_User struct {
 }
 
 type Graph struct {
-	User    []*User    `json:"user,omitempty"`
-	Post    []*Post    `json:"post,omitempty"`
-	Comment []*Comment `json:"comment,omitempty"`
+	User    []*User    `json:"User,omitempty"`
+	Post    []*Post    `json:"Post,omitempty"`
+	Comment []*Comment `json:"Comment,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

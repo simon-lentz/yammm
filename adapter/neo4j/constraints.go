@@ -104,11 +104,15 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) (
 	// filtered identically.
 	if kinds := a.declarableConstraintKinds(); len(kinds) < len(allConstraintKinds) {
 		filtered := make([]Constraint, 0, len(constraints))
+		omitted := make(map[ConstraintKind]int, len(allConstraintKinds))
 		for _, c := range constraints {
 			if slices.Contains(kinds, c.Kind) {
 				filtered = append(filtered, c)
+				continue
 			}
+			omitted[c.Kind]++
 		}
+		warnEditionOmitted(collector, omitted, len(constraints))
 		constraints = filtered
 	}
 
@@ -181,6 +185,52 @@ func (a *Adapter) warnNodeKeyDegraded(collector *diag.Collector) {
 				"as unique but not as NOT NULL. Target Enterprise to emit NODE KEY.").
 		Build()
 	collector.Collect(issue)
+}
+
+// warnEditionOmitted reports, once per call, how many constraints of each
+// kind the edition filter dropped out of total. Kinds are listed in
+// allConstraintKinds order so two runs render one message. Nothing is
+// reported when nothing was dropped.
+func warnEditionOmitted(collector *diag.Collector, omitted map[ConstraintKind]int, total int) {
+	var parts []string
+	dropped := 0
+	for _, k := range allConstraintKinds {
+		if n := omitted[k]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, constraintKindClause(k)))
+			dropped += n
+		}
+	}
+	if dropped == 0 {
+		return
+	}
+	issue := diag.NewIssue(diag.Warning, W_NEO4J_EDITION_CONSTRAINT_OMITTED,
+		fmt.Sprintf("the target Neo4j edition cannot hold %d of %d constraints; omitting %s",
+			dropped, total, strings.Join(parts, ", "))).
+		WithDetail(diag.DetailKeyFormat, "neo4j").
+		WithDetail(diag.DetailKeyDetail,
+			"Community edition supports UNIQUE constraints only: required properties are not "+
+				"enforced as NOT NULL and property types are not enforced by the server. "+
+				"Target Enterprise to emit them.").
+		Build()
+	collector.Collect(issue)
+}
+
+// constraintKindClause renders a kind in the DDL vocabulary the options and
+// docs use, rather than the SHOW CONSTRAINTS type name String returns.
+func constraintKindClause(k ConstraintKind) string {
+	//exhaustive:enforce
+	switch k {
+	case ConstraintUnique:
+		return "UNIQUE"
+	case ConstraintNotNull:
+		return "NOT NULL"
+	case ConstraintType:
+		return "PROPERTY_TYPE"
+	case ConstraintNodeKey:
+		return "NODE KEY"
+	default:
+		return k.String()
+	}
 }
 
 // primaryKeyConstraints generates UNIQUE or NODE KEY constraints for primary keys.

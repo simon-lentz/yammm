@@ -7,7 +7,7 @@ type Session struct {
 }
 
 type Graph struct {
-	Session []*Session `json:"session,omitempty"`
+	Session []*Session `json:"Session,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

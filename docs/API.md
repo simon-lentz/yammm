@@ -383,6 +383,29 @@ Build errors include the bound type's name, the offending property/relation, and
 
 The shape portion of `ValidateOne` — property/relation names, cardinality, composition target-type matching — is guaranteed to pass on the output of a successful `Build`. Value-level validation (constraint checks, PK coercion, reference integrity) still runs at `ValidateOne` time.
 
+### Value Functions
+
+The validator's per-value rules, exported for a caller that admits or renders schema-typed values at a boundary this library does not own — a hand-built export, a direct-Cypher parameter map, a pre-filter in front of a write the validator never sees. Values that reach a graph through `Validator` have already passed both.
+
+```go
+// CheckValue reports whether val conforms to c by the rule the validator applies
+// to every property value: Go kind, bounds, enum membership, pattern, list length
+// and element rule, with an alias resolved to its DataType. A nil value and a nil
+// constraint are both valid — presence is the caller's rule. Built-in type
+// detection only: a Validator's custom value registry is not consulted.
+func CheckValue(val any, c schema.Constraint) error
+
+// CanonicalValue returns val in the single stored representation c defines: a
+// Timestamp through its declared format (RFC 3339 with nanoseconds otherwise), a
+// UUID in canonical lowercase form, a Date as "2006-01-02" in the value's own
+// location. Every other kind, an unresolved alias and a nil value pass through.
+// On error the returned value is val unchanged, so a caller that heals what it
+// can may ignore the error.
+func CanonicalValue(val any, c schema.Constraint) (any, error)
+```
+
+`CheckValue`'s error is the checker's message and is meant for reading, not matching, with one exception: a panic inside a check is recovered into an `*InternalError` that matches `errors.Is(err, instance.ErrInternalFailure)`, exactly as it does inside the validator. `CanonicalValue` is the rule `adapter/json` and `adapter/csv` render through, and the approved facade over it for the adapter layer.
+
 ## Graph Construction
 
 The `graph` package builds an in-memory graph from validated instances.
@@ -1109,7 +1132,7 @@ adapter := neo4j.New(opts...)
 
 ### Edition Gating
 
-Enterprise edition supports all constraint types (UNIQUE, NOT NULL, NODE KEY, PROPERTY_TYPE). Community edition supports UNIQUE constraints only. NOT NULL and PROPERTY_TYPE are silently omitted there — they have no Community equivalent to fall back to.
+Enterprise edition supports all constraint types (UNIQUE, NOT NULL, NODE KEY, PROPERTY_TYPE). Community edition supports UNIQUE constraints only. NOT NULL and PROPERTY_TYPE are omitted there — they have no Community equivalent to fall back to — and `W_NEO4J_EDITION_CONSTRAINT_OMITTED` (Warning) reports the omission once per call with a count per kind, so the guarantees the schema declares and the database will not hold are named in the result rather than silently absent from the script (v0.14.0).
 
 NODE KEY is the exception: it *encodes* UNIQUE + NOT NULL rather than expressing a guarantee of its own, so under Community it degrades to its UNIQUE half instead of being dropped, and `W_NEO4J_NODE_KEY_UNSUPPORTED` (Warning) reports the substitution. Community output is therefore identical whether or not `WithNodeKeyConstraints(true)` is set. Dropping it whole would take the primary key's NOT NULL with it — that NOT NULL is skipped whenever a NODE KEY is meant to cover it — leaving the primary key wholly unenforced, which is what this behavior fixes (v0.9.1).
 
@@ -1249,13 +1272,24 @@ func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, erro
 // "rows") for a nested param map — keys are dot-joined to match CoerceParams.
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes
 
+// CoerceRelProps returns a copy of an edge's property map with each property the
+// relation declares coerced to its driver-native type, through the same rule the
+// adapter's own write path applies. The input is never mutated; a nil relation
+// returns an unchanged copy. Edge properties are scalar by language rule. Keys are
+// processed in sorted order, so the error names the first failing property on
+// every run. For the rel_props map inside a $rows row of a hand-built relationship
+// MERGE, which sits one level below what CoerceParams walks.
+func CoerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any, error)
+
 ```
 
 Coercion rules: `Float` ← any Go integer width (`int`, `int8`…`int64`, `uint`…`uint64`) or `float32` → `float64` (a `float64` passes through); `Timestamp` ← a string parsed against the constraint's custom Go layout when it declares one (`Timestamp["…"]`) or RFC3339 / RFC3339Nano otherwise → `time.Time` (a `time.Time` passes through); `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date` (a `dbtype.Date` passes through); every other scalar kind passes through unchanged. `List<T>` values are coerced element-wise into the concrete typed slice (`List<Float>` of `int64`s → `[]float64`, `List<Date>` of strings → `[]dbtype.Date`, and so on); a `List<Timestamp["…"]>` honors the element's custom layout too.
 
-**Zone handling, for `Timestamp`.** A value parsed from text is expressed in the offset the text stated, so the coerced value depends on the text alone and not on where the process runs. Text carries an offset and never a zone identity: `time.Parse` supplies `time.Local` when the parsed offset matches the host's, and the driver would send that location's name as a time-zone identifier — one no tz database holds, on a host with no `TZ` set. **A location the caller supplied is untouched**: a `time.Time` in an IANA zone keeps its name, which the server resolves and which carries more than an offset does.
+**Zone handling, for `Timestamp`.** The driver sends an instant either as an offset or as a time-zone identifier the server must resolve, so `Coerce` expresses every instant in a location the driver can send. Two rules, in order: `time.Local` is always re-expressed in its offset — a value built by `time.Now` carries the host's location, whose name is `"Local"` on a host with no `TZ` set and which no server resolves; and any other location is kept only when the host's tz database resolves its name (an IANA name such as `Europe/Berlin`, or a legacy name such as `EST`), otherwise it too is re-expressed in its offset. A value parsed from text is unnamed and lands in the offset form by the same rule, so the coerced value depends on the text alone and not on where the process runs. The instant never moves. A consumer binary that must keep IANA names on a host without a tz database imports `time/tzdata`.
 
-The three transforming kinds (`Float`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value always passes through; an unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+The four transforming kinds (`Float`, `Integer`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value always passes through; an unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+
+The rendering counterpart — the string form the library stores for a `Timestamp`, `Date` or `UUID` — is `instance.CanonicalValue`, under [Value Functions](#value-functions).
 
 **When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion — those coerce their own merge keys and endpoint keys as well as their properties. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one; it derives the element types lists need. When a hand-built merge key does not sit where the properties sit, coerce it explicitly — a `Date` primary key reaching the driver as a string matches no node whose property is a `DATE`, and every re-run inserts a duplicate.
 
@@ -1440,7 +1474,7 @@ CSV is a flat format. Compositions are not supported in parsing and are silently
 
 ## Go Source Generation
 
-The `adapter/gogen` package generates Go source from a schema: one struct per type, named Enum/DataType types, `EDGE_` association structs, a `Graph` aggregate, and the embedded schema source. Unlike the data adapters above, gogen has no instance-data path — it is schema-in, bytes-out. Generated output is stdlib-only (it imports at most `time`).
+The `adapter/gogen` package generates Go source from a schema: one struct per type, named Enum/DataType types, generated temporal types, `EDGE_` association structs, a `Graph` aggregate, and the embedded schema source. Unlike the data adapters above, gogen has no instance-data path — it is schema-in, bytes-out. Generated output is stdlib-only (it imports at most `time` and `encoding/json`).
 
 ### Generation
 
@@ -1471,27 +1505,31 @@ data, err := gogen.Marshal(s, gogen.WithPackageName("model"))
 | `Integer` | `int64` | — |
 | `Float` | `float64` | — |
 | `Boolean` | `bool` | — |
-| `Timestamp` / `Date` | `time.Time` | — |
+| `Timestamp` | `time.Time` | — |
+| `Timestamp["<layout>"]` | `Timestamp<layout>` | **yes** — one `struct{ time.Time }` per distinct layout, with a JSON codec in that layout |
+| `Date` | `Date` | **yes** — `type Date struct{ time.Time }`, with a JSON codec in `"2006-01-02"` |
 | `Vector` | `[]float64` | — |
 | `List<T>` | `[]<elem>` | element via the same mapper |
 | `Enum` (inline) | `string` underlying | **yes** — `type <Type><Field> string` + value consts |
-| DataType (`type X = …`) | the underlying's Go type | **yes** — `type X <underlying>` (an Enum DataType also emits value consts) |
+| DataType (`type X = …`) | the underlying's Go type | **yes** — `type X <underlying>` (an Enum DataType also emits value consts); a DataType over `Date` or `Timestamp` is `type X struct{ time.Time }` with the codec its layout needs |
 
-A named DataType is rendered faithfully in every position — scalar field, list element (`List<FipsCode>` → `[]FipsCode`), edge property, and edge `Where`-block primary key — never degraded to its primitive.
+The library stores a `Date` as `"2006-01-02"` and a custom-layout `Timestamp` through its declared layout, and the JSON adapter writes those strings; a bare `time.Time` cannot decode either. The generated `Date` and per-layout types embed `time.Time`, so every `time.Time` method is promoted (an existing `.Format(…)` caller compiles unchanged), a value is built as `Date{Time: t}`, and their `MarshalJSON`/`UnmarshalJSON` exchange the stored form. A per-layout type is named from its layout alone — `"Timestamp"` plus the layout's letters and digits, `Timestamp20060102150405` for `"2006-01-02 15:04:05"` — so an unrelated schema edit cannot move it; a schema type of that name keeps it and the generated type takes a numbered suffix. A default-layout `Timestamp` stays `time.Time`, whose own codec already exchanges RFC 3339 with nanoseconds, the stored form.
+
+A named DataType is rendered faithfully in every position — scalar field, list element (`List<FipsCode>` → `[]FipsCode`), edge property, and edge `Where`-block primary key — never degraded to its primitive. The generated temporal types are rendered in the same positions: `List<Date>` → `[]Date`, a `Date` primary key → `Date` in the `Where` block.
 
 ### Field and Relation Rules
 
-- **Optional scalar** → pointer + `,omitempty` (`*string`, `*int64`, `*time.Time`); driven by `Property.IsOptional`.
+- **Optional scalar** → pointer + `,omitempty` (`*string`, `*int64`, `*time.Time`, `*Date`); driven by `Property.IsOptional`.
 - **Optional `List`/`Vector`** → the slice stays nilable (no extra pointer) + `,omitempty`.
 - **Relation** → reference type always: `*<T>` (single) or `[]*<T>` (many). `,omitempty` is driven by `Relation.IsOptional`, so required relations (`(one)`, `(one:many)`) emit no `omitempty`.
-- **JSON tags** preserve the original yammm name in snake_case; Go field names are the mapped CamelCase identifiers.
+- **JSON tags** preserve the yammm property or relation field name verbatim; Go field names are the mapped CamelCase identifiers.
 - **Inheritance is flattened** — each struct carries its own and inherited properties and relations as direct fields (own-first ordering); no Go embedding.
 
 ### Structural Output
 
 - **Struct per type** (including abstract and part types). Schema doc-comments carry through verbatim.
 - **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — owner-qualified, so they are unique by construction — carrying the association's own properties plus a `Where` block of the target type's primary keys. (An association whose target type has no primary key is rejected: its `Where` block would be empty, leaving the edge unable to identify a target node.)
-- **`Graph` aggregate** — one slice field per concrete type, keyed by the singular snake_case form of the type name.
+- **`Graph` aggregate** — one slice field per concrete type, tagged `,omitempty` and keyed by the `schema.TagForm` name the JSON adapter keys its object by: the bare type name for the entry schema's own types, `alias.Name` for a directly imported one, so `adapter/json` output decodes into it. A transitively imported type renders bare too; two of them sharing a name fall back to their unique Go type names as keys.
 - **`SerializedSources` / `SerializedEntry`** — the embedded-source surface, emitted identically by every generated package whatever its source count: `func SerializedSources() map[string][]byte` returns the whole closure keyed by module-root-relative path, and `const SerializedEntry` names the entry key. They read an unexported package-level store, so the identifiers a consumer sees do not vary with how many files a schema spans. A `SchemaHash` const carries the structural hash. The embedded source is **guaranteed re-loadable**: `Marshal` re-loads it at generation time and confirms the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
 
 ### Imports
@@ -1512,7 +1550,7 @@ Module root `"."` also re-loads, but note what it costs: it canonicalizes agains
 
 ### Validation
 
-Generated source is run through `go/format` and then type-checked with `go/types` before return, so duplicate declarations, unused imports, and undefined references surface as generation errors rather than broken Go. The type-check uses a hermetic stub importer for `time`, so `Marshal` needs no Go toolchain, GOROOT, or build cache at runtime.
+Generated source is run through `go/format` and then type-checked with `go/types` before return, so duplicate declarations, unused imports, and undefined references surface as generation errors rather than broken Go. The type-check uses a hermetic stub importer for `time` and `encoding/json`, declaring exactly what generated code calls, so `Marshal` needs no Go toolchain, GOROOT, or build cache at runtime.
 
 ### CLI
 

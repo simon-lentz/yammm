@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
@@ -28,7 +29,11 @@ import (
 //     constraint's custom Go layout when it declares one (Timestamp["…"]) and
 //     against RFC3339 / RFC3339Nano otherwise; a time.Time passes through. A
 //     string that does not parse, or any non-string non-time.Time value, is a
-//     coercion failure and returns an error.
+//     coercion failure and returns an error. The instant is always expressed in
+//     a location the driver can send: a location whose name the host's tz
+//     database resolves is kept, and time.Local, an unnamed location, or a name
+//     the host cannot resolve is re-expressed in its offset. A consumer that
+//     must keep IANA names on a host without a tz database imports time/tzdata.
 //   - Date: a "2006-01-02" string OR a time.Time -> dbtype.Date (Neo4j DATE); a
 //     dbtype.Date passes through. A string that does not parse, or any other
 //     non-temporal value, is a coercion failure and returns an error. Mapping a
@@ -119,15 +124,15 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 				// A Timestamp["layout"] constraint: the declared Go layout is
 				// exclusive, matching schema validation (checkTimestamp).
 				if t, err := time.Parse(format, v); err == nil {
-					return parsedZone(t), nil
+					return driverZone(t), nil
 				}
 				return raw, fmt.Errorf("coerce %s: cannot parse %q against format %q", kind, v, format)
 			}
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
-				return parsedZone(t), nil
+				return driverZone(t), nil
 			}
 			if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
-				return parsedZone(t), nil
+				return driverZone(t), nil
 			}
 			return raw, fmt.Errorf("coerce %s: cannot parse %q as an RFC3339 timestamp", kind, v)
 		default:
@@ -342,49 +347,73 @@ func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
 // ZONED DATETIME into a location built with exactly this name.
 const driverOffsetZoneName = "Offset"
 
-// driverZone re-renders an instant whose location carries no name into the
-// offset form the driver can send.
+// localZoneName is the name Go gives time.Local. time.LoadLocation resolves it
+// to time.Local on every host, so a location carrying the name must be refused
+// before the resolvability check, which would otherwise keep it.
+const localZoneName = "Local"
+
+// resolvableZones memoizes time.LoadLocation by location name, true when the
+// host's tz database holds the name. It is a cache of a host fact fixed for
+// the process lifetime, not adapter state: LoadLocation opens a zoneinfo file
+// on every call, and a batch write hands every row's instants through Coerce.
+//
+//nolint:gochecknoglobals // a process-wide memo of a fact that cannot change at runtime
+var resolvableZones sync.Map // name -> bool
+
+// zoneNameResolves reports whether the host's tz database holds name, caching
+// negative results too — names come only from caller-built locations, so the
+// set is bounded by the caller's own zones.
+func zoneNameResolves(name string) bool {
+	if v, ok := resolvableZones.Load(name); ok {
+		if resolves, isBool := v.(bool); isBool {
+			return resolves
+		}
+	}
+	_, err := time.LoadLocation(name)
+	ok := err == nil
+	resolvableZones.Store(name, ok)
+	return ok
+}
+
+// driverZone re-renders an instant into a location the driver can send.
 //
 // The driver selects its wire encoding by the zone ABBREVIATION: it sends an
 // offset only when Zone() reports driverOffsetZoneName, and otherwise sends
-// Location().String() as a time-zone identifier. time.Parse of an RFC 3339
-// string with a numeric offset produces an unnamed location, so the identifier
-// is empty and the server rejects the write with "Illegal epoch adjustment".
-//
-// A named location is left alone: an IANA name is a zone identifier the server
-// resolves, and it carries more than the offset does.
+// Location().String() as a time-zone identifier the server must resolve. Two
+// rules, in order: time.Local is always re-expressed in its offset — tested by
+// identity, never by name, because time.LoadLocation("Local") resolves and
+// the name is "UTC" on a host whose TZ is UTC; any other location is kept only
+// when the host's tz database resolves its name, and is otherwise re-expressed
+// in its offset. An unnamed location (what time.Parse produces for a numeric
+// offset) and the literal name "Local" resolve under LoadLocation too, so both
+// are refused before the check.
 //
 // The instant is unchanged — only the location it is expressed in moves — and
-// the result is the same shape the driver produces when reading such a value
-// back, so a write and a subsequent read agree.
+// the offset form is the same shape the driver produces when reading such a
+// value back, so a write and a subsequent read agree.
 func driverZone(t time.Time) time.Time {
-	name, offset := t.Zone()
-	if name != "" {
+	loc := t.Location()
+	if loc == time.Local {
+		return offsetForm(t)
+	}
+	if loc == time.UTC {
 		return t
 	}
-	return t.In(time.FixedZone(driverOffsetZoneName, offset))
+	switch name := loc.String(); name {
+	case driverOffsetZoneName:
+		return t
+	case "", localZoneName:
+		return offsetForm(t)
+	default:
+		if zoneNameResolves(name) {
+			return t
+		}
+		return offsetForm(t)
+	}
 }
 
-// parsedZone is [driverZone] for an instant that came from parsed text.
-//
-// Text carries an offset, never a zone identity, so any location beyond that
-// offset was supplied by the host rather than by the value. time.Parse supplies
-// one: when the parsed offset equals the local zone's offset at that instant it
-// returns time.Local rather than an unnamed zone. Zone() then reports the local
-// abbreviation, which is non-empty, so [driverZone] leaves it alone and the
-// driver sends Location().String() as a time-zone identifier — "Local" on a host
-// with no TZ set, which the server rejects with "Illegal zone identifier".
-//
-// Expressing a text-derived instant in its own offset makes the coerced value
-// depend on the text alone. Without this the same string coerces to a different
-// driver payload on different machines, and on some of them the write fails.
-//
-// A location the CALLER supplied is not second-guessed; that is [driverZone]'s
-// case and it stays there.
-func parsedZone(t time.Time) time.Time {
-	if t.Location() == time.Local {
-		_, offset := t.Zone()
-		return t.In(time.FixedZone(driverOffsetZoneName, offset))
-	}
-	return driverZone(t)
+// offsetForm expresses t in the driver's offset sentinel location.
+func offsetForm(t time.Time) time.Time {
+	_, offset := t.Zone()
+	return t.In(time.FixedZone(driverOffsetZoneName, offset))
 }

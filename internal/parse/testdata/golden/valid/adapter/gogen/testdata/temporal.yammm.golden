@@ -1,0 +1,329 @@
+{
+  "name": "\"temporal\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "datatypes": [
+    {
+      "name": "Day",
+      "constraint": {
+        "kind": "Date",
+        "span": {
+          "s": 32,
+          "e": 36
+        }
+      },
+      "span": {
+        "s": 19,
+        "e": 36
+      }
+    },
+    {
+      "name": "Stamp",
+      "constraint": {
+        "kind": "Timestamp",
+        "span": {
+          "s": 50,
+          "e": 59
+        }
+      },
+      "span": {
+        "s": 37,
+        "e": 59
+      }
+    },
+    {
+      "name": "Wall",
+      "constraint": {
+        "kind": "Timestamp",
+        "args": [
+          "\"2006-01-02 15:04:05\""
+        ],
+        "span": {
+          "s": 73,
+          "e": 105
+        }
+      },
+      "span": {
+        "s": 60,
+        "e": 105
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Reading",
+      "name_span": {
+        "s": 117,
+        "e": 124
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "at",
+          "constraint": {
+            "kind": "Timestamp",
+            "args": [
+              "\"2006-01-02 15:04:05\""
+            ],
+            "span": {
+              "s": 131,
+              "e": 163
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 128,
+            "e": 172
+          }
+        },
+        {
+          "name": "on",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 177,
+              "e": 181
+            }
+          },
+          "span": {
+            "s": 174,
+            "e": 181
+          }
+        }
+      ],
+      "span": {
+        "s": 107,
+        "e": 183
+      }
+    },
+    {
+      "name": "Sensor",
+      "name_span": {
+        "s": 190,
+        "e": 196
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 215,
+              "e": 221
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 200,
+            "e": 229
+          }
+        },
+        {
+          "name": "installed",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 246,
+              "e": 250
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 231,
+            "e": 259
+          }
+        },
+        {
+          "name": "decommissioned",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 276,
+              "e": 280
+            }
+          },
+          "span": {
+            "s": 261,
+            "e": 280
+          }
+        },
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 297,
+              "e": 306
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 282,
+            "e": 315
+          }
+        },
+        {
+          "name": "seen_wall",
+          "constraint": {
+            "kind": "Timestamp",
+            "args": [
+              "\"2006-01-02 15:04:05\""
+            ],
+            "span": {
+              "s": 332,
+              "e": 364
+            }
+          },
+          "span": {
+            "s": 317,
+            "e": 364
+          }
+        },
+        {
+          "name": "seen_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "args": [
+              "\"2006-01-02T15:04:05.000000000Z07:00\""
+            ],
+            "span": {
+              "s": 381,
+              "e": 429
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 366,
+            "e": 438
+          }
+        },
+        {
+          "name": "day",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Day"
+            ],
+            "span": {
+              "s": 455,
+              "e": 458
+            }
+          },
+          "span": {
+            "s": 440,
+            "e": 458
+          }
+        },
+        {
+          "name": "stamp",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Stamp"
+            ],
+            "span": {
+              "s": 475,
+              "e": 480
+            }
+          },
+          "span": {
+            "s": 460,
+            "e": 480
+          }
+        },
+        {
+          "name": "wall",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Wall"
+            ],
+            "span": {
+              "s": 497,
+              "e": 501
+            }
+          },
+          "span": {
+            "s": 482,
+            "e": 501
+          }
+        },
+        {
+          "name": "days",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Date",
+              "span": {
+                "s": 523,
+                "e": 527
+              }
+            },
+            "span": {
+              "s": 518,
+              "e": 528
+            }
+          },
+          "span": {
+            "s": 503,
+            "e": 528
+          }
+        },
+        {
+          "name": "walls",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Timestamp",
+              "args": [
+                "\"2006-01-02 15:04:05\""
+              ],
+              "span": {
+                "s": 550,
+                "e": 582
+              }
+            },
+            "span": {
+              "s": 545,
+              "e": 583
+            }
+          },
+          "span": {
+            "s": 530,
+            "e": 583
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "HAS_READING",
+          "name_span": {
+            "s": 589,
+            "e": 600
+          },
+          "target": {
+            "name": "Reading",
+            "span": {
+              "s": 608,
+              "e": 615
+            }
+          },
+          "optional": true,
+          "many": true,
+          "reverse_optional": true,
+          "span": {
+            "s": 585,
+            "e": 615
+          }
+        }
+      ],
+      "span": {
+        "s": 185,
+        "e": 617
+      }
+    }
+  ]
+}

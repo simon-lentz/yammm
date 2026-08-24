@@ -19,7 +19,7 @@ type Located struct {
 }
 
 type Graph struct {
-	City []*City `json:"city,omitempty"`
+	City []*City `json:"City,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

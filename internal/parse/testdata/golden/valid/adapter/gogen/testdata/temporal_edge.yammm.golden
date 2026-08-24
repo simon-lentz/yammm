@@ -1,0 +1,107 @@
+{
+  "name": "\"temporaledge\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "types": [
+    {
+      "name": "Day",
+      "name_span": {
+        "s": 28,
+        "e": 31
+      },
+      "props": [
+        {
+          "name": "on",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 38,
+              "e": 42
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 35,
+            "e": 50
+          }
+        }
+      ],
+      "span": {
+        "s": 23,
+        "e": 52
+      }
+    },
+    {
+      "name": "Log",
+      "name_span": {
+        "s": 59,
+        "e": 62
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 69,
+              "e": 75
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 66,
+            "e": 83
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "ON",
+          "name_span": {
+            "s": 89,
+            "e": 91
+          },
+          "target": {
+            "name": "Day",
+            "span": {
+              "s": 98,
+              "e": 101
+            }
+          },
+          "reverse_optional": true,
+          "props": [
+            {
+              "name": "at",
+              "constraint": {
+                "kind": "Timestamp",
+                "args": [
+                  "\"2006-01-02 15:04:05\""
+                ],
+                "span": {
+                  "s": 109,
+                  "e": 141
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 106,
+                "e": 150
+              }
+            }
+          ],
+          "span": {
+            "s": 85,
+            "e": 153
+          }
+        }
+      ],
+      "span": {
+        "s": 54,
+        "e": 155
+      }
+    }
+  ]
+}
