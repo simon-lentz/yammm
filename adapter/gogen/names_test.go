@@ -77,3 +77,41 @@ func TestBuildNameTable_ReservedNameQualified(t *testing.T) {
 		t.Errorf("type Graph must be qualified away from the reserved aggregate name, got %q (ok=%v)", name, ok)
 	}
 }
+
+// TestLayoutTypeBase pins the per-layout type name: every letter and digit
+// of the layout, nothing else, behind a fixed prefix — so the name depends
+// on the layout alone and an unrelated schema edit cannot move it.
+func TestLayoutTypeBase(t *testing.T) {
+	cases := map[string]string{
+		"2006-01-02 15:04:05":        "Timestamp20060102150405",
+		"2006-01-02T15:04:05Z07:00":  "Timestamp20060102T150405Z0700",
+		"Jan _2, 2006":               "TimestampJan22006",
+		"--":                         "Timestamp",
+		"02 Jänner 2006":             "Timestamp02Jänner2006",
+		"2006-01-02T15:04:05.000000": "Timestamp20060102T150405000000",
+	}
+	for in, want := range cases {
+		if got := layoutTypeBase(in); got != want {
+			t.Errorf("layoutTypeBase(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestBuildNameTable_DateReserved pins that the emitted Date type's name is
+// taken before any schema entity is assigned. Date is a DSL keyword, so no
+// schema can claim it; the reservation is what keeps the invariant true
+// should that ever change.
+func TestBuildNameTable_DateReserved(t *testing.T) {
+	s, res := schema.LoadString(context.Background(),
+		"schema \"geo\"\n\ntype County {\n\tid String primary\n}", "d.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	nt, err := buildNameTable(s, defaultInitialisms)
+	if err != nil {
+		t.Fatalf("buildNameTable: %v", err)
+	}
+	if !nt.taken[dateGoName] {
+		t.Errorf("%q is not reserved in the name table", dateGoName)
+	}
+}

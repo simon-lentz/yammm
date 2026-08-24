@@ -260,19 +260,138 @@ func TestMarshal_Initialisms(t *testing.T) {
 // Marshal's hermetic timeImporter stub by confirming the output type-checks against the
 // actual time, not only the stub's opaque Time.
 func TestMarshal_TypeChecks(t *testing.T) {
-	s := loadSchema(t, "full")
+	for _, name := range []string{"full", "temporal", "temporal_edge"} {
+		t.Run(name, func(t *testing.T) {
+			s := loadSchema(t, name)
+			got, err := gogen.Marshal(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, "gen.go", got, parser.AllErrors)
+			if err != nil {
+				t.Fatalf("generated source does not parse: %v\n%s", err, got)
+			}
+			conf := types.Config{Importer: importer.Default()}
+			if _, err := conf.Check(f.Name.Name, fset, []*ast.File{f}, nil); err != nil {
+				t.Fatalf("generated source does not type-check: %v\n%s", err, got)
+			}
+		})
+	}
+}
+
+// TestMarshal_TemporalTypes pins the shape a Date or custom-layout Timestamp
+// takes in every position: a generated struct embedding time.Time with a
+// JSON codec that speaks the stored string form, so a value adapter/json
+// wrote decodes into the generated field.
+func TestMarshal_TemporalTypes(t *testing.T) {
+	got, err := gogen.Marshal(loadSchema(t, "temporal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"import (\n\t\"encoding/json\"\n\t\"time\"\n)",
+		"type Date struct{ time.Time }",
+		"func (v Date) MarshalJSON() ([]byte, error)",
+		"func (v *Date) UnmarshalJSON(b []byte) error",
+		"type Timestamp20060102150405 struct{ time.Time }",
+		"type Timestamp20060102T150405000000000Z0700 struct{ time.Time }",
+		"type Day struct{ time.Time }",
+		"func (v Day) MarshalJSON() ([]byte, error)",
+		"type Wall struct{ time.Time }",
+		"func (v Wall) MarshalJSON() ([]byte, error)",
+		"type Stamp struct{ time.Time }",
+		"Installed      Date ",
+		"Decommissioned *Date ",
+		"CreatedAt      time.Time ",
+		"SeenWall       *Timestamp20060102150405 ",
+		"SeenAt         Timestamp20060102T150405000000000Z0700 ",
+		"Days           []Date ",
+		"Walls          []Timestamp20060102150405 ",
+		"At Timestamp20060102150405 ",
+		"On *Date ",
+		"func marshalTemporal(t time.Time, layout string) ([]byte, error)",
+		"func unmarshalTemporal(b []byte, layout string, dst *time.Time) error",
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+	if bytes.Contains(got, []byte("func (v Stamp) MarshalJSON")) {
+		t.Error("a DataType over the default Timestamp layout must not carry its own codec; time.Time's is the stored form")
+	}
+	if n := bytes.Count(got, []byte("type Timestamp20060102150405 struct")); n != 1 {
+		t.Errorf("one layout must yield one type, got %d declarations", n)
+	}
+}
+
+// TestMarshal_TemporalEdge pins the two positions emitField does not reach
+// through an owning type: a Date primary key in a Where block, and a
+// custom-layout Timestamp on an edge property.
+func TestMarshal_TemporalEdge(t *testing.T) {
+	got, err := gogen.Marshal(loadSchema(t, "temporal_edge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"type EDGE_Log_on_Day struct {\n\tAt    Timestamp20060102150405 `json:\"at\"`\n\tWhere struct {\n\t\tOn Date `json:\"on\"`\n\t} `json:\"where\"`\n}",
+		"type Date struct{ time.Time }",
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestMarshal_GraphKeysAreTagForm pins the Graph aggregate's json keys as the
+// names adapter/json writes: bare for the entry schema's types, alias-qualified
+// for a direct import, and the unique Go name where two transitive imports
+// would otherwise render one bare name.
+func TestMarshal_GraphKeysAreTagForm(t *testing.T) {
+	cases := map[string][]string{
+		"imports/main":                   {"`json:\"County,omitempty\"`", "`json:\"common.Region,omitempty\"`"},
+		"imports/tagform_collision_main": {"`json:\"LeftbaseNode,omitempty\"`", "`json:\"RightbaseNode,omitempty\"`", "`json:\"Main,omitempty\"`"},
+		"graph_collision":                {"`json:\"ABCDef,omitempty\"`", "`json:\"AbcDef,omitempty\"`"},
+	}
+	for name, wants := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := gogen.Marshal(loadSchema(t, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range wants {
+				if !bytes.Contains(got, []byte(want)) {
+					t.Errorf("output missing %s:\n%s", want, got)
+				}
+			}
+			if bytes.Contains(got, []byte("`json:\"county,omitempty\"`")) {
+				t.Error("Graph still keyed by the lower_snake Go name")
+			}
+		})
+	}
+}
+
+// TestMarshal_PerLayoutNameYieldsToSchemaType pins the precedence between a
+// schema-declared name and a synthesized per-layout name: the schema keeps
+// the bare identifier and the synthesized type takes the numbered one.
+func TestMarshal_PerLayoutNameYieldsToSchemaType(t *testing.T) {
+	s, res := schema.LoadString(context.Background(),
+		"schema \"clash\"\n\ntype Timestamp20060102150405 {\n\tid String primary\n\tat Timestamp[\"2006-01-02 15:04:05\"]\n}", "clash.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
 	got, err := gogen.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "gen.go", got, parser.AllErrors)
-	if err != nil {
-		t.Fatalf("generated source does not parse: %v\n%s", err, got)
-	}
-	conf := types.Config{Importer: importer.Default()}
-	if _, err := conf.Check(f.Name.Name, fset, []*ast.File{f}, nil); err != nil {
-		t.Fatalf("generated source does not type-check: %v\n%s", err, got)
+	for _, want := range []string{
+		"type Timestamp20060102150405 struct {\n",
+		"type Timestamp200601021504052 struct{ time.Time }",
+		"At *Timestamp200601021504052 ",
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -366,7 +485,7 @@ func TestMarshal_SerializedEntryReserved(t *testing.T) {
 }
 
 func TestMarshal_Golden(t *testing.T) {
-	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "imports/rel_main", "reserved_name", "full"}
+	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "imports/rel_main", "imports/tagform_collision_main", "reserved_name", "full", "temporal", "temporal_edge"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			s := loadSchema(t, name)

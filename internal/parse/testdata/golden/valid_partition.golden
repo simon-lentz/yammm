@@ -22,6 +22,11 @@ adapter/gogen/testdata/imports/inherit_main.yammm
 adapter/gogen/testdata/imports/main.yammm
 adapter/gogen/testdata/imports/rel_dep.yammm
 adapter/gogen/testdata/imports/rel_main.yammm
+adapter/gogen/testdata/imports/tagform_collision_main.yammm
+adapter/gogen/testdata/imports/tc_left.yammm
+adapter/gogen/testdata/imports/tc_leftbase.yammm
+adapter/gogen/testdata/imports/tc_right.yammm
+adapter/gogen/testdata/imports/tc_rightbase.yammm
 adapter/gogen/testdata/inheritance.yammm
 adapter/gogen/testdata/inherited_edge.yammm
 adapter/gogen/testdata/initialisms.yammm
@@ -33,6 +38,8 @@ adapter/gogen/testdata/relations.yammm
 adapter/gogen/testdata/reserved_name.yammm
 adapter/gogen/testdata/scalars.yammm
 adapter/gogen/testdata/shared_edge.yammm
+adapter/gogen/testdata/temporal.yammm
+adapter/gogen/testdata/temporal_edge.yammm
 adapter/jschema/testdata/composite_pk.yammm
 adapter/jschema/testdata/docs.yammm
 adapter/jschema/testdata/edge_props.yammm

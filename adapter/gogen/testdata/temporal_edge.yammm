@@ -1,0 +1,12 @@
+schema "temporaledge"
+
+type Day {
+	on Date primary
+}
+
+type Log {
+	id String primary
+	--> ON (one) Day {
+		at Timestamp["2006-01-02 15:04:05"] required
+	}
+}

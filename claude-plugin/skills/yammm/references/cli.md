@@ -201,7 +201,7 @@ yammm gen --to md schema.yammm
 yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 ```
 
-`--to go` generates Go source via the `adapter/gogen` adapter: one struct per type, named Enum/DataType types, `EDGE_` association structs, a Graph aggregate, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
+`--to go` generates Go source via the `adapter/gogen` adapter: one struct per type, named Enum/DataType types, generated `Date` and per-layout `Timestamp` types, `EDGE_` association structs, a Graph aggregate, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
 
 `--to jsonschema` generates a JSON Schema draft 2020-12 document via the `adapter/jschema` adapter, describing the instance-data JSON object form `yammm check` accepts — wire it into an editor (e.g. a `# yaml-language-server: $schema=…` header or a VS Code `json.schemas` mapping) for completion, hover documentation, and validation while authoring data files. Same closure flattening; output is deterministic and self-checked before being written.
 

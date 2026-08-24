@@ -139,8 +139,10 @@ func WithNamedConstraints(enabled bool) Option {
 }
 
 // WithEdition sets the target Neo4j edition. Constraint types that require
-// Enterprise edition are omitted when Community is selected — silently, since
-// they have no Community equivalent to fall back to. NODE KEY is the exception:
+// Enterprise edition are omitted when Community is selected — they have no
+// Community equivalent to fall back to — and
+// [W_NEO4J_EDITION_CONSTRAINT_OMITTED] reports the omission once per call with
+// a count per kind. NODE KEY is the exception:
 // it stands in for UNIQUE + NOT NULL rather than expressing something of its
 // own, so under Community it degrades to its UNIQUE half instead of vanishing,
 // and [W_NEO4J_NODE_KEY_UNSUPPORTED] reports that it did. See

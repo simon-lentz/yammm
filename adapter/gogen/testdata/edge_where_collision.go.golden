@@ -18,8 +18,8 @@ type EDGE_Event_held_at_Place struct {
 }
 
 type Graph struct {
-	Place []*Place `json:"place,omitempty"`
-	Event []*Event `json:"event,omitempty"`
+	Place []*Place `json:"Place,omitempty"`
+	Event []*Event `json:"Event,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

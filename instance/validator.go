@@ -747,14 +747,8 @@ func provenancePathForProperty(prov *location.Provenance, propName string) strin
 }
 
 // checkValueWithRecovery calls the Checker's CheckValue with panic recovery.
-func (v *Validator) checkValueWithRecovery(val any, c schema.Constraint) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = wrapPanicValue(r, KindConstraintPanic)
-		}
-	}()
-	//nolint:wrapcheck // error is intentionally unwrapped; caller handles CheckError vs InternalError
-	return v.checker.CheckValue(val, c)
+func (v *Validator) checkValueWithRecovery(val any, c schema.Constraint) error {
+	return checkValueRecovering(v.checker, val, c)
 }
 
 // coerceValueWithRecovery calls the Checker's CoerceValue with panic recovery.

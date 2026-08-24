@@ -1,0 +1,70 @@
+{
+  "name": "\"tcright\"",
+  "span": {
+    "s": 0,
+    "e": 16
+  },
+  "imports": [
+    {
+      "path": "\"tc_rightbase.yammm\"",
+      "alias": "base",
+      "span": {
+        "s": 18,
+        "e": 53
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Right",
+      "name_span": {
+        "s": 60,
+        "e": 65
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 72,
+              "e": 78
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 69,
+            "e": 86
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "TO_NODE",
+          "name_span": {
+            "s": 92,
+            "e": 99
+          },
+          "target": {
+            "qualifier": "base",
+            "name": "Node",
+            "span": {
+              "s": 106,
+              "e": 115
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 88,
+            "e": 115
+          }
+        }
+      ],
+      "span": {
+        "s": 55,
+        "e": 117
+      }
+    }
+  ]
+}

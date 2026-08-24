@@ -1,0 +1,37 @@
+{
+  "name": "\"leftbase\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "types": [
+    {
+      "name": "Node",
+      "name_span": {
+        "s": 24,
+        "e": 28
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 35,
+              "e": 41
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 32,
+            "e": 49
+          }
+        }
+      ],
+      "span": {
+        "s": 19,
+        "e": 51
+      }
+    }
+  ]
+}

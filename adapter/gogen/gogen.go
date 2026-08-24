@@ -180,7 +180,9 @@ type generator struct {
 	names        *nameTable
 	initialisms  map[string]bool // effective acronym set (default golint + injected)
 	buf          *bytes.Buffer
-	needsTime    bool                        // set when any emitted field is a time.Time
+	temporal     temporalTypes               // the Date and per-layout Timestamp types, assigned by registerTemporalTypes
+	needsTime    bool                        // set when any emitted declaration names time.Time
+	needsJSON    bool                        // set when any emitted declaration calls encoding/json
 	edges        []edgeRec                   // one per DECLARED association (each emitted as one EDGE_ struct)
 	edgeNames    map[*schema.Relation]string // association -> owner-qualified EDGE_ Go name (shared via relation ptr)
 	dtFieldNames map[*schema.Property]string // DataType-typed field (type or edge prop) -> its DataType Go name
@@ -202,6 +204,7 @@ type edgeRec struct {
 // type-checks. A format or type-check failure is a generator bug, surfaced as an
 // error rather than emitted as broken Go.
 func (g *generator) generate() ([]byte, error) {
+	g.registerTemporalTypes()
 	if err := g.registerDataTypeFields(); err != nil {
 		return nil, err
 	}
@@ -227,7 +230,10 @@ func (g *generator) generate() ([]byte, error) {
 	var out bytes.Buffer
 	out.WriteString(generatedHeader)
 	fmt.Fprintf(&out, "package %s\n\n", g.pkg)
-	if g.needsTime {
+	switch {
+	case g.needsJSON:
+		out.WriteString("import (\n\t\"encoding/json\"\n\t\"time\"\n)\n\n")
+	case g.needsTime:
 		out.WriteString("import \"time\"\n\n")
 	}
 	out.Write(g.buf.Bytes())
@@ -242,43 +248,75 @@ func (g *generator) generate() ([]byte, error) {
 	return formatted, nil
 }
 
-// typeCheck parses and type-checks src with go/types. It catches the semantic
-// failures format.Source cannot: duplicate type/field declarations, unused
-// imports, and undefined references. The generated code imports at most "time"
-// (used only as the time.Time field type), so a hermetic stub importer resolves
-// it — no Go toolchain, GOROOT, or build cache is needed at runtime. This matters
-// because Marshal runs inside the distributed yammm CLI binary, which may execute
-// where importer.Default() (gc export data) or the source importer (GOROOT/src)
-// would have nothing to read.
+// typeCheck parses and type-checks src with go/types, catching what
+// format.Source cannot: duplicate declarations, unused imports, undefined
+// references. The stub importer keeps it toolchain-free, because Marshal runs
+// inside the distributed CLI binary where no GOROOT or export data exists.
 func typeCheck(src []byte) error {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "gen.go", src, parser.AllErrors)
 	if err != nil {
 		return fmt.Errorf("parsing generated source: %w", err)
 	}
-	conf := types.Config{Importer: timeImporter{}}
+	conf := types.Config{Importer: stubImporter{}}
 	if _, err := conf.Check(f.Name.Name, fset, []*ast.File{f}, nil); err != nil {
 		return fmt.Errorf("checking generated source: %w", err)
 	}
 	return nil
 }
 
-// timeImporter is a hermetic types.Importer for the single import gogen can emit:
-// "time". The generated code uses time only as the time.Time field type (never a
-// method or function), so a synthetic package exposing an opaque Time type fully
-// satisfies type-checking. Resolving any other path is a generator bug, surfaced
-// explicitly. Being toolchain-free, it lets Marshal type-check identically in any
-// environment (CI container, scratch image) and still flags unused imports,
-// duplicate declarations, and undefined references.
-type timeImporter struct{}
+// stubImporter is a hermetic types.Importer for the two imports gogen can
+// emit, declaring only what generated code references; any other path is a
+// generator bug. The stub Time carries no JSON methods, so the shadowing a
+// generated codec performs is checked by tests against the real importer.
+type stubImporter struct{}
 
-func (timeImporter) Import(path string) (*types.Package, error) {
-	if path != "time" {
-		return nil, fmt.Errorf("gogen: generated code imported %q; the generator emits only \"time\"", path)
+func (stubImporter) Import(path string) (*types.Package, error) {
+	switch path {
+	case "time":
+		return stubTimePackage(), nil
+	case "encoding/json":
+		return stubJSONPackage(), nil
+	default:
+		return nil, fmt.Errorf("gogen: generated code imported %q; the generator emits only \"time\" and \"encoding/json\"", path)
 	}
+}
+
+// stubTimePackage declares time.Time with Format(layout string) string and
+// time.Parse(layout, value string) (Time, error).
+func stubTimePackage() *types.Package {
 	pkg := types.NewPackage("time", "time")
-	named := types.NewNamed(types.NewTypeName(token.NoPos, pkg, "Time", nil), types.NewStruct(nil, nil), nil)
-	pkg.Scope().Insert(named.Obj())
+	str := types.Typ[types.String]
+	timeT := types.NewNamed(types.NewTypeName(token.NoPos, pkg, "Time", nil), types.NewStruct(nil, nil), nil)
+	timeT.AddMethod(types.NewFunc(token.NoPos, pkg, "Format", types.NewSignatureType(
+		types.NewVar(token.NoPos, pkg, "t", timeT), nil, nil,
+		types.NewTuple(types.NewVar(token.NoPos, pkg, "layout", str)),
+		types.NewTuple(types.NewVar(token.NoPos, pkg, "", str)), false,
+	)))
+	pkg.Scope().Insert(timeT.Obj())
+	pkg.Scope().Insert(types.NewFunc(token.NoPos, pkg, "Parse", types.NewSignatureType(nil, nil, nil,
+		types.NewTuple(types.NewVar(token.NoPos, pkg, "layout", str), types.NewVar(token.NoPos, pkg, "value", str)),
+		types.NewTuple(types.NewVar(token.NoPos, pkg, "", timeT), types.NewVar(token.NoPos, pkg, "", universeError())), false)))
 	pkg.MarkComplete()
-	return pkg, nil
+	return pkg
+}
+
+// stubJSONPackage declares json.Marshal(v any) ([]byte, error) and
+// json.Unmarshal(data []byte, v any) error.
+func stubJSONPackage() *types.Package {
+	pkg := types.NewPackage("encoding/json", "json")
+	bytesT := types.NewSlice(types.Typ[types.Byte])
+	anyT := types.Universe.Lookup("any").Type()
+	pkg.Scope().Insert(types.NewFunc(token.NoPos, pkg, "Marshal", types.NewSignatureType(nil, nil, nil,
+		types.NewTuple(types.NewVar(token.NoPos, pkg, "v", anyT)),
+		types.NewTuple(types.NewVar(token.NoPos, pkg, "", bytesT), types.NewVar(token.NoPos, pkg, "", universeError())), false)))
+	pkg.Scope().Insert(types.NewFunc(token.NoPos, pkg, "Unmarshal", types.NewSignatureType(nil, nil, nil,
+		types.NewTuple(types.NewVar(token.NoPos, pkg, "data", bytesT), types.NewVar(token.NoPos, pkg, "v", anyT)),
+		types.NewTuple(types.NewVar(token.NoPos, pkg, "", universeError())), false)))
+	pkg.MarkComplete()
+	return pkg
+}
+
+func universeError() types.Type {
+	return types.Universe.Lookup("error").Type()
 }

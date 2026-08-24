@@ -538,6 +538,22 @@ func repairIntegralFloat(f float64) (int64, bool) {
 	return int64(f), true
 }
 
+// CoerceRelProps returns a copy of props with each property rel declares
+// coerced to the driver-native type its constraint requires, through the same
+// [Coerce] rule the adapter's own write path applies to edge properties. props
+// is never mutated and the result shares no top-level storage with it; a nil
+// rel, or one with no declared properties, returns a copy with every value
+// unchanged, and a nil map returns nil. Keys are processed in sorted order, so
+// when several fail the error names the lexicographically-first failing
+// property on every run.
+//
+// Call this for an edge property map that sits below the one nesting level
+// [CoerceParams] walks — the rel_props map inside a $rows row of a hand-built
+// relationship MERGE — where [ParamTypesForType] cannot reach.
+func CoerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any, error) {
+	return coerceRelProps(maps.Clone(props), rel)
+}
+
 // coerceRelProps coerces a relationship property map against the relation's
 // declared property constraints, so typed edge properties (e.g. a Timestamp or
 // Float on an association) reach the driver as native types. Each value routes
@@ -553,7 +569,7 @@ func repairIntegralFloat(f float64) (int64, bool) {
 // with no declared properties, returns props untouched. Properties are processed
 // in sorted key order, so a coercion error names the lexicographically-first
 // failing property on every run (matching [CoerceParams] and [propsToParamMap]).
-// Mutates and returns props, which callers pass as a fresh clone.
+// Mutates and returns props; [CoerceRelProps] is the copying entry point.
 func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any, error) {
 	if rel == nil || !rel.HasProperties() {
 		return props, nil

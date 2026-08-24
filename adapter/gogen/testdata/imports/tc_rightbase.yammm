@@ -1,0 +1,5 @@
+schema "rightbase"
+
+type Node {
+	id String primary
+}

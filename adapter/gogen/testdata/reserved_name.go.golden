@@ -7,7 +7,7 @@ type GeoSerializedEntry struct {
 }
 
 type Graph struct {
-	GeoSerializedEntry []*GeoSerializedEntry `json:"geo_serialized_entry,omitempty"`
+	GeoSerializedEntry []*GeoSerializedEntry `json:"SerializedEntry,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

@@ -46,10 +46,10 @@ type EDGE_Right_to_shared_Shared struct {
 }
 
 type Graph struct {
-	Top    []*Top    `json:"top,omitempty"`
-	Left   []*Left   `json:"left,omitempty"`
-	Right  []*Right  `json:"right,omitempty"`
-	Shared []*Shared `json:"shared,omitempty"`
+	Top    []*Top    `json:"Top,omitempty"`
+	Left   []*Left   `json:"left.Left,omitempty"`
+	Right  []*Right  `json:"right.Right,omitempty"`
+	Shared []*Shared `json:"Shared,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

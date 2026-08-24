@@ -1,0 +1,99 @@
+{
+  "name": "\"tcmain\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "imports": [
+    {
+      "path": "\"tc_left.yammm\"",
+      "alias": "left",
+      "span": {
+        "s": 17,
+        "e": 47
+      }
+    },
+    {
+      "path": "\"tc_right.yammm\"",
+      "alias": "right",
+      "span": {
+        "s": 48,
+        "e": 80
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Main",
+      "name_span": {
+        "s": 87,
+        "e": 91
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 98,
+              "e": 104
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 95,
+            "e": 112
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "TO_LEFT",
+          "name_span": {
+            "s": 118,
+            "e": 125
+          },
+          "target": {
+            "qualifier": "left",
+            "name": "Left",
+            "span": {
+              "s": 133,
+              "e": 142
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 114,
+            "e": 142
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "TO_RIGHT",
+          "name_span": {
+            "s": 148,
+            "e": 156
+          },
+          "target": {
+            "qualifier": "right",
+            "name": "Right",
+            "span": {
+              "s": 163,
+              "e": 174
+            }
+          },
+          "reverse_optional": true,
+          "span": {
+            "s": 144,
+            "e": 174
+          }
+        }
+      ],
+      "span": {
+        "s": 82,
+        "e": 176
+      }
+    }
+  ]
+}

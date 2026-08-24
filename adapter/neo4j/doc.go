@@ -282,9 +282,11 @@
 //
 // [WithEdition] controls which constraint types are emitted. Enterprise
 // edition supports all constraint types (UNIQUE, NOT NULL, NODE KEY,
-// PROPERTY_TYPE). Community edition supports UNIQUE constraints only;
-// NOT NULL and PROPERTY_TYPE are silently omitted, having no Community
-// equivalent.
+// PROPERTY_TYPE). Community edition supports UNIQUE constraints only; NOT
+// NULL and PROPERTY_TYPE are omitted, having no Community equivalent, and
+// [W_NEO4J_EDITION_CONSTRAINT_OMITTED] reports once per call how many of each
+// were dropped, so the guarantees the database will not hold are named
+// rather than silently absent from the script.
 //
 // NODE KEY is not omitted but DEGRADED. It is an encoding of UNIQUE + NOT NULL
 // rather than a guarantee of its own, so dropping it whole would discard the
@@ -317,7 +319,10 @@
 //
 // An [Adapter] is safe for concurrent use after construction.
 // Configuration is immutable after [New] returns. All methods use only
-// local allocations and read-only access to the frozen config.
+// local allocations and read-only access to the frozen config. The one
+// package-level mutable value is a concurrency-safe memo of which zone names
+// the host's tz database resolves, consulted by [Coerce]; it caches a host
+// fact fixed for the process lifetime and holds no adapter state.
 //
 // # Dependencies
 //

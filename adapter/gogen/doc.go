@@ -1,8 +1,8 @@
 // Package gogen generates Go source from a yammm schema: one struct per type,
-// named Enum/DataType types, EDGE_ association structs, a Graph aggregate, and the
-// embedded schema source. Output is stdlib-only — it imports at most "time". Call
-// [Marshal] with a loaded, resolved schema; it returns formatted, type-checked
-// bytes.
+// named Enum/DataType types, generated temporal types, EDGE_ association
+// structs, a Graph aggregate, and the embedded schema source. Output is
+// stdlib-only — it imports at most "time" and "encoding/json". Call [Marshal]
+// with a loaded, resolved schema; it returns formatted, type-checked bytes.
 //
 // # Schema-In, Bytes-Out
 //
@@ -22,6 +22,10 @@
 //     when the DataType resolves to an Enum.
 //   - A per-owner named type for every inline-enum property
 //     (type <Owner><Field> string), plus its value constants.
+//   - A Date type when any Date position exists, and one type per distinct
+//     custom Timestamp layout, each a struct embedding time.Time with a JSON
+//     codec that exchanges the value in the string form the library stores
+//     (see Type Mapping).
 //   - One struct per type in the closure. Concrete, abstract, and part types are all
 //     emitted — part types because compositions reference them, abstract types
 //     because they document the schema even though inheritance is flattened into
@@ -44,9 +48,25 @@
 //	Integer                       →  int64
 //	Float                         →  float64
 //	Boolean                       →  bool
-//	Date, Timestamp               →  time.Time
+//	Timestamp                     →  time.Time
+//	Timestamp["<layout>"]         →  Timestamp<layout>  (generated, one per layout)
+//	Date                          →  Date               (generated)
 //	Vector                        →  []float64
 //	List<T>                       →  []T
+//
+// The library stores a Date as "2006-01-02" and a custom-layout Timestamp
+// through its declared layout, and adapter/json writes those strings, which a
+// bare time.Time cannot decode. The generated Date and per-layout types are
+// structs embedding time.Time — so every time.Time method is promoted and a
+// value is built as Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that
+// speak the stored form. A per-layout type is named from its layout alone,
+// "Timestamp" plus the layout's letters and digits (Timestamp20060102150405
+// for "2006-01-02 15:04:05"), so the name cannot move when an unrelated part
+// of the schema changes; a schema type of that name keeps it and the generated
+// type takes a numbered suffix. A default-layout Timestamp stays time.Time,
+// whose own codec already exchanges RFC 3339 with nanoseconds, the form the
+// library stores. A DataType resolving to any temporal kind is emitted as
+// struct{ time.Time } too, with the codec its layout needs.
 //
 // Named types are rendered faithfully rather than collapsed to their primitive: a
 // field typed by a named DataType keeps that Go type, a List of a named DataType
@@ -54,7 +74,7 @@
 // becomes that property's own <Owner><Field> string type. An optional non-slice
 // field becomes a pointer (*T); slices and vectors stay nil-able as-is, since a nil
 // slice already encodes absence. Every field carries a json tag preserving the wire
-// name, with ,omitempty added when the field is optional.
+// name verbatim, with ,omitempty added when the field is optional.
 //
 // # Associations and the Graph Aggregate
 //
@@ -79,12 +99,17 @@
 // struct.
 //
 // The Graph aggregate is the top-level envelope: one slice field per concrete type
-// in the closure (abstract and part types are excluded), each keyed by its
-// lower_snake JSON name.
+// in the closure (abstract and part types are excluded), each keyed by the
+// [github.com/simon-lentz/yammm/schema.TagForm] name adapter/json keys its
+// object by — the bare type name for the entry schema's own types and the
+// alias-qualified name for a directly imported one — so a document that
+// adapter writes decodes into the aggregate. A transitively imported type
+// renders bare too; when two of them share a name the field falls back to its
+// unique Go type name as the key.
 //
 //	type Graph struct {
-//		Person  []*Person  `json:"person"`
-//		Company []*Company `json:"company"`
+//		Person []*Person `json:"Person,omitempty"`
+//		Region []*Region `json:"common.Region,omitempty"`
 //	}
 //
 // # Imports and Cross-Schema Schemas
@@ -134,9 +159,10 @@
 // # Output Guarantees
 //
 // Generated source is gofmt-formatted and then type-checked with go/types before
-// [Marshal] returns. Type-checking is hermetic: because the output imports at most
-// "time" (and only as the time.Time field type), a synthetic importer satisfies it
-// with no Go toolchain, GOROOT, or build cache — so [Marshal] behaves identically
+// [Marshal] returns. Type-checking is hermetic: the output imports at most "time"
+// and "encoding/json" and calls only time.Time.Format, time.Parse, json.Marshal
+// and json.Unmarshal, so a synthetic importer declaring exactly those satisfies
+// it with no Go toolchain, GOROOT, or build cache — [Marshal] behaves identically
 // inside the distributed yammm CLI binary, a CI container, or a scratch image, while
 // still catching duplicate declarations, unused imports, and undefined references. A
 // format or type-check failure is treated as a generator bug and surfaced as an
@@ -208,5 +234,5 @@
 // the canonical identifier-casing transform the library uses elsewhere (e.g. JSON
 // field names) — and, unlike the data adapters, it imports neither instance/graph
 // nor diag. The generated output depends only on the standard library, importing at
-// most "time".
+// most "time" and "encoding/json".
 package gogen

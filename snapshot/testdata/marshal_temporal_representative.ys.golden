@@ -1,0 +1,96 @@
+{
+	"yammm_snapshot": {
+		"version": 3,
+		"schema_name": "temporaltest",
+		"schema_source": "string://temporaltest.yammm",
+		"schema_hash": "sha256:36f4db63d450bdc270b2fdbba9d17be1ca548a5110fe666bf765a7cf41e034b6",
+		"schema_hash_algorithm": 1,
+		"integrity_hash": "sha256:b5338210b4ca5264cf5875faea3df9d3edaf0ff158fb594f1aefc393c8bf9580",
+		"features": []
+	},
+	"types": [
+		{
+			"schema_path": "string://temporaltest.yammm",
+			"name": "Reading"
+		},
+		{
+			"schema_path": "string://temporaltest.yammm",
+			"name": "Sensor"
+		},
+		{
+			"schema_path": "string://temporaltest.yammm",
+			"name": "Station"
+		}
+	],
+	"instances": [
+		{
+			"type": 1,
+			"items": [
+				{
+					"key": [
+						"s1"
+					],
+					"properties": {
+						"aliased": "2026-08-19T12:00:00.5Z",
+						"created_at": "2026-08-19T12:00:00.5Z",
+						"id": "s1",
+						"installed": "2026-08-19",
+						"logged_at": "2026-08-19 12:00:00",
+						"run_id": "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b",
+						"samples": [
+							"2026-08-19T12:00:00.5Z",
+							"2026-08-19T13:00:00Z"
+						]
+					},
+					"edges": {
+						"FEED": [
+							{
+								"target_type": 2,
+								"target_key": [
+									"st1"
+								],
+								"properties": {
+									"seen_at": "2026-08-19T14:00:00Z"
+								}
+							}
+						]
+					},
+					"composed": {
+						"READINGS": [
+							{
+								"key": [
+									"r1"
+								],
+								"type": 0,
+								"properties": {
+									"name": "r1",
+									"taken_at": "2026-08-19T14:00:00Z"
+								},
+								"provenance": null
+							}
+						]
+					},
+					"provenance": null
+				}
+			]
+		},
+		{
+			"type": 2,
+			"items": [
+				{
+					"key": [
+						"st1"
+					],
+					"properties": {
+						"id": "st1"
+					},
+					"provenance": null
+				}
+			]
+		}
+	],
+	"diagnostics": {
+		"duplicates": [],
+		"unresolved": []
+	}
+}

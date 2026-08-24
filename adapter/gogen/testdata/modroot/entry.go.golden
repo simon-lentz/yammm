@@ -18,8 +18,8 @@ type EDGE_Contract_supplied_by_Vendor struct {
 }
 
 type Graph struct {
-	Contract []*Contract `json:"contract,omitempty"`
-	Vendor   []*Vendor   `json:"vendor,omitempty"`
+	Contract []*Contract `json:"Contract,omitempty"`
+	Vendor   []*Vendor   `json:"dep.Vendor,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

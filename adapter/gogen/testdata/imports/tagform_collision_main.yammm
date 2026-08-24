@@ -1,0 +1,10 @@
+schema "tcmain"
+
+import "tc_left.yammm" as left
+import "tc_right.yammm" as right
+
+type Main {
+	id String primary
+	--> TO_LEFT  (one) left.Left
+	--> TO_RIGHT (one) right.Right
+}

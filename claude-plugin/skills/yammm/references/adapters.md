@@ -120,7 +120,7 @@ adapter := neo4jAdapter.New(
 **Edition differences:**
 
 - `Enterprise`: Supports UNIQUE, NOT NULL, property type, and NODE KEY constraints
-- `Community`: UNIQUE constraints only
+- `Community`: UNIQUE constraints only; the NOT NULL and PROPERTY_TYPE constraints it cannot hold are reported once per call as `W_NEO4J_EDITION_CONSTRAINT_OMITTED` with a count per kind
 
 ### Constraint Generation
 
@@ -186,9 +186,10 @@ Values passing through `BatchNodeQueries` are coerced to driver-native types aut
 v, err := neo4jAdapter.Coerce(constraint, raw)   // one value against one constraint
 types := neo4jAdapter.ParamTypesForType(t, "")   // property-name -> constraint map for a type
 params, err := neo4jAdapter.CoerceParams(params, types)  // whole parameter map
+relProps, err := neo4jAdapter.CoerceRelProps(props, rel)  // one edge's property map, returned as a copy
 ```
 
-This repairs JSON round-trip artifacts (whole-number floats decoded as `int64`, `Date`/`Timestamp` strings) so values satisfy Neo4j `IS ::` type constraints.
+This repairs JSON round-trip artifacts (whole-number floats decoded as `int64`, `Date`/`Timestamp` strings) so values satisfy Neo4j `IS ::` type constraints. `CoerceRelProps` reaches the `rel_props` map inside a `$rows` row of a hand-built relationship MERGE, one nesting level below what `CoerceParams` walks. A `time.Time` is sent in a location the driver can encode: `time.Local` and any zone name the host cannot resolve become an offset; a resolvable IANA name is kept.
 
 ### Label Management
 
@@ -259,7 +260,7 @@ schema, err := adapter.InferSchema(constraints, relationships, "inventory")
 import "github.com/simon-lentz/yammm/adapter/gogen"
 ```
 
-Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, `EDGE_` association structs, a Graph aggregate, and the embedded schema source, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (`schema.WithSourcesOnly`, no filesystem participation). Generated output is stdlib-only (imports at most `time`) and byte-reproducible across checkouts. Unlike the data adapters it has no instance-data path and returns a plain `error` rather than a `diag.Result`.
+Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, a generated `Date` type and one type per custom `Timestamp` layout (each embedding `time.Time` with a JSON codec in the stored string form), `EDGE_` association structs, a Graph aggregate keyed as the JSON adapter keys its output, and the embedded schema source, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (`schema.WithSourcesOnly`, no filesystem participation). Generated output is stdlib-only (imports at most `time` and `encoding/json`) and byte-reproducible across checkouts. Unlike the data adapters it has no instance-data path and returns a plain `error` rather than a `diag.Result`.
 
 Schemas with imports are flattened into one self-contained package; cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` becomes `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error.
 

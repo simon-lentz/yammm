@@ -41,13 +41,24 @@ func (g *generator) emitTypes() error {
 // inherited by N concrete types yields N named enum types (keyed by owning type over
 // AllPropertiesSlice) — the inline-enum analog of property flattening.
 func (g *generator) emitNamedTypes() error {
+	g.emitTemporalTypes()
 	for _, sc := range g.schema.Closure() {
 		for _, dt := range sc.DataTypesSlice() {
 			name, ok := g.names.goDataType(dt)
 			if !ok {
 				return fmt.Errorf("gogen: no Go name for datatype %q", dt.Name())
 			}
-			base, err := goBaseType(dt.Constraint())
+			// A temporal DataType is its own carrier: a defined type over the
+			// Date struct would inherit no method, so it embeds time.Time itself.
+			if layout := temporalLayout(dt.Constraint()); layout != "" {
+				g.emitTemporalDecl(name, layout)
+				continue
+			}
+			if isDefaultTimestamp(dt.Constraint()) {
+				g.emitDefaultTimestampDecl(name)
+				continue
+			}
+			base, err := g.goBaseType(dt.Constraint())
 			if err != nil {
 				return fmt.Errorf("gogen: datatype %q: %w", dt.Name(), err)
 			}
@@ -232,10 +243,9 @@ func (g *generator) emitAssociation(rel *schema.Relation, used map[string]int) e
 }
 
 // emitGraph writes the Graph aggregate: one slice field per CONCRETE type across the
-// closure (not abstract, not part), the Go field named through the table and its JSON
-// key in lower_snake. A two-pass emit lets the lossy snake-cast fall back to the
-// unique Go type name on collision (ABCDef and AbcDef both -> abc_def), so Graph keys
-// stay unique by construction.
+// closure, keyed by the schema.TagForm name adapter/json keys its object by. Two
+// same-named transitive imports render one TagForm name, so a two-pass emit falls
+// back to the unique Go type name on that collision and keys stay unique.
 func (g *generator) emitGraph() error {
 	type field struct{ goName, key string }
 	var fields []field
@@ -248,7 +258,7 @@ func (g *generator) emitGraph() error {
 		if !ok {
 			return fmt.Errorf("gogen: no Go name for type %q", t.Name())
 		}
-		key := goSnakeKey(name)
+		key := schema.TagForm(g.schema, t.ID())
 		keyCount[key]++
 		fields = append(fields, field{goName: name, key: key})
 	}
@@ -256,7 +266,7 @@ func (g *generator) emitGraph() error {
 	for _, f := range fields {
 		key := f.key
 		if keyCount[f.key] > 1 {
-			key = f.goName // lossy snake-cast collided; the unique Go name keeps keys unique
+			key = f.goName // the TagForm rendering collided; the unique Go name keeps keys unique
 		}
 		fmt.Fprintf(g.buf, "%s []*%s %s\n", f.goName, f.goName, jsonTag(key, true))
 	}
@@ -507,7 +517,7 @@ func (g *generator) goFieldType(owner *schema.Type, p *schema.Property) (string,
 		}
 		typ = t
 	default:
-		base, err := goBaseType(c)
+		base, err := g.goBaseType(c)
 		if err != nil {
 			return "", err
 		}
@@ -541,7 +551,7 @@ func (g *generator) goListType(p *schema.Property, lc schema.ListConstraint) (st
 			return "[]" + name, nil
 		}
 	}
-	return goBaseType(lc)
+	return g.goBaseType(lc)
 }
 
 // isAlias reports whether a constraint is a DataType reference (AliasConstraint).

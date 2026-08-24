@@ -200,17 +200,105 @@ func TestCoerce_IsHostIndependent(t *testing.T) {
 	}
 }
 
-// TestCoerce_CallerSuppliedLocationIsNotSecondGuessed holds the boundary. The
-// text arm rescues a location time.Parse invented; a location the caller chose
-// is theirs, and an IANA name carries more than an offset does.
-func TestCoerce_CallerSuppliedLocationIsNotSecondGuessed(t *testing.T) {
+// TestCoerce_ResolvableCallerLocationIsKept holds the boundary: a caller's
+// location is kept when the host's tz database resolves its name — an IANA
+// name carries more than an offset does — and only then.
+// TestCoerce_UnresolvableZoneNameIsSentAsOffset is the other side.
+func TestCoerce_ResolvableCallerLocationIsKept(t *testing.T) {
 	t.Parallel()
+	c := schema.NewTimestampConstraint()
+
 	berlin, err := time.LoadLocation("Europe/Berlin")
 	if err != nil {
 		t.Skipf("no tzdata: %v", err)
 	}
-	got := coerceTime(t, schema.NewTimestampConstraint(), time.Date(2026, 8, 19, 12, 0, 0, 0, berlin))
+	got := coerceTime(t, c, time.Date(2026, 8, 19, 12, 0, 0, 0, berlin))
 	if got.Location().String() != "Europe/Berlin" {
 		t.Errorf("a caller-supplied IANA location became %q", got.Location())
+	}
+
+	// A legacy name the database still holds is a zone identifier too.
+	est := coerceTime(t, c, time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("EST", -5*60*60)))
+	if est.Location().String() != "EST" {
+		t.Errorf("a resolvable legacy name became %q", est.Location())
+	}
+
+	// The driver's own offset sentinel is already the shape it sends.
+	in := time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone(driverOffsetZoneName, 2*60*60))
+	got = coerceTime(t, c, in)
+	if zone, offset := got.Zone(); zone != driverOffsetZoneName || offset != 2*60*60 {
+		t.Errorf("the offset sentinel moved to %q/%d", zone, offset)
+	}
+}
+
+// withLocal substitutes time.Local for the test's duration. Go reads TZ once,
+// at the first use of time.Local, so a fixture must assign the variable
+// rather than set the environment; the caller must not run in parallel.
+func withLocal(t *testing.T, loc *time.Location) {
+	t.Helper()
+	restore := time.Local
+	t.Cleanup(func() { time.Local = restore })
+	time.Local = loc
+}
+
+// TestCoerce_HostLocalTimeValueIsSentAsOffset covers the time.Time arm, which
+// the text-arm tests above never reach: a value built in time.Local — what
+// time.Now produces — must never carry the host's location to the driver,
+// whatever name that location resolves to on this host.
+//
+// Not parallel: it writes a package-level variable of the standard library.
+func TestCoerce_HostLocalTimeValueIsSentAsOffset(t *testing.T) {
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Skipf("no tzdata: %v", err)
+	}
+	cases := map[string]*time.Location{
+		"a name no database holds":     time.FixedZone("XYZ", -4*60*60),
+		"the literal name Local":       time.FixedZone("Local", -4*60*60),
+		"UTC, which always resolves":   time.UTC,
+		"an IANA name, which resolves": berlin,
+	}
+	for name, loc := range cases {
+		t.Run(name, func(t *testing.T) {
+			withLocal(t, loc)
+			in := time.Date(2026, 8, 19, 12, 0, 0, 0, time.Local)
+			_, wantOffset := in.Zone()
+
+			got := coerceTime(t, schema.NewTimestampConstraint(), in)
+			if got.Location() == time.Local {
+				t.Errorf("coerced value still carries time.Local (%q)", got.Location())
+			}
+			if zone, offset := got.Zone(); zone != driverOffsetZoneName || offset != wantOffset {
+				t.Errorf("zone = %q/%d, want %q/%d", zone, offset, driverOffsetZoneName, wantOffset)
+			}
+			if !got.Equal(in) {
+				t.Errorf("coerced %s, want the same instant as %s", got, in)
+			}
+		})
+	}
+}
+
+// TestCoerce_UnresolvableZoneNameIsSentAsOffset pins the rule for a caller
+// location whose name the host cannot resolve: the driver would send the
+// name as a time-zone identifier and the server would refuse it, so the
+// instant is re-expressed in its offset. "Local" is included because
+// time.LoadLocation resolves that name to time.Local, which would keep it.
+func TestCoerce_UnresolvableZoneNameIsSentAsOffset(t *testing.T) {
+	t.Parallel()
+	for name, loc := range map[string]*time.Location{
+		"unknown region": time.FixedZone("Mars/Olympus", 3600),
+		"named Local":    time.FixedZone("Local", 3600),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			in := time.Date(2026, 8, 19, 12, 0, 0, 0, loc)
+			got := coerceTime(t, schema.NewTimestampConstraint(), in)
+			if zone, offset := got.Zone(); zone != driverOffsetZoneName || offset != 3600 {
+				t.Errorf("zone = %q/%d, want %q/3600", zone, offset, driverOffsetZoneName)
+			}
+			if !got.Equal(in) {
+				t.Errorf("coerced %s, want the same instant as %s", got, in)
+			}
+		})
 	}
 }

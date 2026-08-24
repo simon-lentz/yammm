@@ -1,0 +1,25 @@
+schema "temporal"
+
+type Day   = Date
+type Stamp = Timestamp
+type Wall  = Timestamp["2006-01-02 15:04:05"]
+
+part type Reading {
+	at Timestamp["2006-01-02 15:04:05"] required
+	on Date
+}
+
+type Sensor {
+	id             String primary
+	installed      Date required
+	decommissioned Date
+	created_at     Timestamp required
+	seen_wall      Timestamp["2006-01-02 15:04:05"]
+	seen_at        Timestamp["2006-01-02T15:04:05.000000000Z07:00"] required
+	day            Day
+	stamp          Stamp
+	wall           Wall
+	days           List<Date>
+	walls          List<Timestamp["2006-01-02 15:04:05"]>
+	*-> HAS_READING (many) Reading
+}

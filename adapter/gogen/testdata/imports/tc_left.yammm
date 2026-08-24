@@ -1,0 +1,8 @@
+schema "tcleft"
+
+import "tc_leftbase.yammm" as base
+
+type Left {
+	id String primary
+	--> TO_NODE (one) base.Node
+}

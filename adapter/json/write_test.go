@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -151,6 +152,26 @@ func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
 		WithRelation("HTTPProxy", schema.LocalTypeRef("Proxy", location.Span{}), true, false). // CamelCase
+		Done().
+		Build()
+	return mustBuild(t, s, result)
+}
+
+// testSchemaTemporal carries every kind that canonicalizes — Timestamp
+// (default and declared layout), UUID and Date — plus a List<Date>, so the
+// writer's rendering of each stored form has a fixture.
+func testSchemaTemporal(t *testing.T) *schema.Schema {
+	t.Helper()
+	s, result := schema.NewBuilder().
+		WithName("temporal").
+		WithSourceID(location.MustNewSourceID("test://temporal.yammm")).
+		AddType("Event").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("occurred_at", schema.NewTimestampConstraint()).
+		WithProperty("logged_at", schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")).
+		WithProperty("run_id", schema.NewUUIDConstraint()).
+		WithProperty("installed", schema.NewDateConstraint()).
+		WithProperty("service_days", schema.NewListConstraint(schema.NewDateConstraint())).
 		Done().
 		Build()
 	return mustBuild(t, s, result)
@@ -384,6 +405,38 @@ func TestMarshalObject_Golden(t *testing.T) {
 					mustValidInstance(t, s, "Proxy", []any{"px1"}, map[string]any{"id": "px1", "url": "http://proxy.example.com"}),
 					mustValidInstanceWithEdge(t, s, "Service", []any{"svc1"},
 						map[string]any{"id": "svc1", "name": "API Gateway"}, "HTTPProxy", [][]any{{"px1"}}),
+				)
+			},
+		},
+		{
+			name:   "temporal_kinds",
+			schema: testSchemaTemporal,
+			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+				t.Helper()
+				// Bypass-built from native Go values, so the golden pins the
+				// writer's own rendering arm rather than the validator's.
+				plusTwo := time.FixedZone("", 2*60*60)
+				mustAdd(
+					t, g,
+					mustValidInstance(t, s, "Event", []any{"e1"}, map[string]any{
+						"id":          "e1",
+						"occurred_at": time.Date(2026, 8, 19, 12, 0, 0, 500_000_000, time.UTC),
+						"logged_at":   time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
+						"run_id":      uuid.MustParse("0A35EF0F-9D40-4B6B-A0A1-0D1A5A0E1F2B"),
+						"installed":   time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC),
+						"service_days": []any{
+							time.Date(2026, 8, 19, 0, 0, 0, 0, time.UTC),
+							"2026-08-20",
+						},
+					}),
+					// A Timestamp keeps its offset; a Date is the calendar day in the
+					// value's own location, so 00:30 +02:00 is the 19th, not the 18th.
+					mustValidInstance(t, s, "Event", []any{"e2"}, map[string]any{
+						"id":          "e2",
+						"occurred_at": time.Date(2026, 8, 19, 14, 0, 0, 0, plusTwo),
+						"logged_at":   time.Date(2026, 8, 19, 12, 0, 0, 0, plusTwo),
+						"installed":   time.Date(2026, 8, 19, 0, 30, 0, 0, plusTwo),
+					}),
 				)
 			},
 		},

@@ -1,0 +1,8 @@
+schema "tcright"
+
+import "tc_rightbase.yammm" as base
+
+type Right {
+	id String primary
+	--> TO_NODE (one) base.Node
+}

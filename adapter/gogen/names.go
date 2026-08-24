@@ -113,6 +113,11 @@ type nameTable struct {
 // generated-output contract's Breaking tier names. Keeping them costs nothing;
 // a schema type called "SerializedModelEntry" is absurd either way.
 //
+// Date is a DSL keyword no schema entity can claim; reserving it keeps that
+// true by construction. Per-layout Timestamp names are reserved later by
+// registerTemporalTypes, after the schema's own names, so a schema type
+// keeps the bare identifier and the synthesized one takes the suffix.
+//
 // The unexported store the accessor reads is not listed: name derivation only
 // ever emits exported CamelCase, so a lowercase identifier cannot be taken.
 //
@@ -124,6 +129,7 @@ var reservedNames = []string{
 	"SerializedSources",
 	"SerializedEntry",
 	"SchemaHash",
+	dateGoName,
 }
 
 // buildNameTable walks the closure (entry + transitively imported schemas) and
@@ -213,15 +219,6 @@ func (nt *nameTable) goType(id schema.TypeID) (string, bool) {
 func (nt *nameTable) goDataType(dt *schema.DataType) (string, bool) {
 	n, ok := nt.dataTypes[dt]
 	return n, ok
-}
-
-// goSnakeKey returns the lower_snake JSON key for a Graph field, derived from the
-// (already collision-resolved, unique) Go type name via the canonical internal/ident
-// transform — the same one Relation.FieldName uses to turn a schema identifier into a
-// JSON field name. This keeps the Graph envelope's keys snake_case, consistent with
-// property and relation-field keys.
-func goSnakeKey(goName string) string {
-	return ident.ToLowerSnake(goName)
 }
 
 // reserve returns the first free name in "<base>", "<base>2", … and records it in

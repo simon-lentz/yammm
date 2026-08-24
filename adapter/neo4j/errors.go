@@ -45,6 +45,15 @@ var (
 	// substitution is visible. A warning, not an error: the fallback is correct
 	// output, so failing the call would withhold a usable answer.
 	W_NEO4J_NODE_KEY_UNSUPPORTED = diag.NewCode("W_NEO4J_NODE_KEY_UNSUPPORTED", diag.CategoryAdapter)
+
+	// W_NEO4J_EDITION_CONSTRAINT_OMITTED indicates [WithEdition]([Community])
+	// dropped constraints the schema declares because the edition cannot hold
+	// their kind — NOT NULL and PROPERTY_TYPE have no Community equivalent.
+	// Reported once per call with a count per omitted kind, so the script's
+	// reader knows which declared guarantees the database will not enforce. A
+	// warning, not an error: the UNIQUE constraints that survive are correct
+	// output for the edition.
+	W_NEO4J_EDITION_CONSTRAINT_OMITTED = diag.NewCode("W_NEO4J_EDITION_CONSTRAINT_OMITTED", diag.CategoryAdapter)
 )
 
 // Sentinel errors for validation failures.
