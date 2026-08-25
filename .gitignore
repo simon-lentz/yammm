@@ -1,6 +1,7 @@
 # LLMs
 .claude/
 .codex/
+AGENTS.md
 
 # Binaries for programs and plugins
 *.exe
