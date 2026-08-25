@@ -52,7 +52,7 @@ type Order extends Auditable {
     currency String[3, 3] required
     notes String[_, 1000]
 
-    --> PLACED_BY (one) Customer / ORDERS (many)
+    --> PLACED_BY (one) Customer
     *-> ITEMS (one:many) LineItem
 
     ! "has_items" ITEMS -> Len > 0
@@ -62,7 +62,7 @@ type Order extends Auditable {
 }
 ```
 
-**Patterns demonstrated:** Type aliases for domain types (`Money`, `SKU`, `Email`). Abstract audit fields. Part type for line items with per-item invariants. Composition with `(one:many)` requiring at least one. Reverse clause on association. Collection invariants using `All`, `Map`, `Sum`.
+**Patterns demonstrated:** Type aliases for domain types (`Money`, `SKU`, `Email`). Abstract audit fields. Part type for line items with per-item invariants. Composition with `(one:many)` requiring at least one. Collection invariants using `All`, `Map`, `Sum`.
 
 ---
 
@@ -91,7 +91,7 @@ type Department extends Named {
     budget Float[0.0, _]
     is_active Boolean required
 
-    --> PARENT (_) Department / CHILDREN (many)
+    --> PARENT (_) Department
 
     ! "code_uppercase" code == code -> Upper
 }
@@ -113,13 +113,13 @@ type Employee extends Named, Temporal {
         end_date Date
     }
     --> HAS_ROLE (one) Role
-    --> REPORTS_TO (_) Employee / DIRECT_REPORTS (many)
+    --> REPORTS_TO (_) Employee
 
     ! "active_has_dates" !is_active || effective_from != nil
 }
 ```
 
-**Patterns demonstrated:** Multiple abstract type inheritance (`Named`, `Temporal`). Self-referential associations (`PARENT -> Department`, `REPORTS_TO -> Employee`). Edge properties on `WORKS_IN`. Optional parent relationship (`(_)` multiplicity). Reverse clauses for navigable hierarchies. Conditional invariant linking active status to dates.
+**Patterns demonstrated:** Multiple abstract type inheritance (`Named`, `Temporal`). Self-referential associations (`PARENT -> Department`, `REPORTS_TO -> Employee`). Edge properties on `WORKS_IN`. Optional parent relationship (`(_)` multiplicity). Conditional invariant linking active status to dates.
 
 ---
 
@@ -178,7 +178,7 @@ type Article extends core.Publishable {
     reading_time_minutes Integer[1, 120]
     keywords List<String[1, 50]>[_, 10]
 
-    --> WRITTEN_BY (one) core.Author / ARTICLES (many)
+    --> WRITTEN_BY (one) core.Author
     --> TAGGED_WITH (many) core.Tag
     *-> SECTIONS (one:many) Section
 

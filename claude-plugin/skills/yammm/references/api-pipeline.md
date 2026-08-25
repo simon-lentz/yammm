@@ -334,7 +334,7 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 
 Two packages provide shared vocabulary for consumer test suites:
 
-- **`instance/instancetest`** — `VI(typeName, opts...)` builds a `*ValidInstance` fixture directly (no validation pass), defaulting every field a scenario does not name; options include `PK(parts...)`, `Props(m)`, `Edges(m)`, `Composed(m)`, `Provenance(p)`, `TypeID(id)`.
+- **`internal/instancetest`** — `VI(typeName, opts...)` builds a `*ValidInstance` fixture directly (no validation pass), defaulting every field a scenario does not name; options include `PK(parts...)`, `Props(m)`, `Edges(m)`, `Composed(m)`, `Provenance(p)`, `TypeID(id)`.
 - **`snapshot/snapshottest`** — `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances; `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence; `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling; `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison.
 
 ---

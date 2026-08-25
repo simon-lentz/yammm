@@ -55,7 +55,8 @@ type importNode struct {
 }
 
 // anyNameNode is a word in a position that admits either case and refuses
-// every reserved spelling: an import alias, a relation name, a reverse name.
+// every reserved spelling: an import alias, a relation name, or the name of
+// a removed reverse clause (recognized only to report its removal).
 type anyNameNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
@@ -128,6 +129,9 @@ type compNode struct {
 	Reverse *reverseNode `parser:"@@?"`
 }
 
+// reverseNode recognizes the reverse clause the language removed in
+// v0.15.0, so the parser reports the removal at the clause's own span
+// instead of a bare syntax error.
 type reverseNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position

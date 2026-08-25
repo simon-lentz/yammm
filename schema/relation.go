@@ -34,21 +34,18 @@ func (k RelationKind) String() string {
 // Relation represents a relationship between types.
 // Relations are immutable after schema completion.
 type Relation struct {
-	kind            RelationKind
-	name            string        // DSL name (e.g., "OWNER")
-	fieldName       string        // lower_snake(name), cached at completion
-	target          TypeRef       // syntactic reference
-	targetID        TypeID        // resolved identity
-	span            location.Span // source location
-	doc             string        // documentation comment
-	optional        bool          // forward multiplicity: optional?
-	many            bool          // forward multiplicity: many?
-	backref         string        // reverse relationship name
-	reverseOptional bool          // reverse multiplicity: optional?
-	reverseMany     bool          // reverse multiplicity: many?
-	owner           string        // declaring type name
-	properties      []*Property   // edge properties (associations only)
-	sealed          bool          // true after completion; prevents further mutation
+	kind       RelationKind
+	name       string        // DSL name (e.g., "OWNER")
+	fieldName  string        // lower_snake(name), cached at completion
+	target     TypeRef       // syntactic reference
+	targetID   TypeID        // resolved identity
+	span       location.Span // source location
+	doc        string        // documentation comment
+	optional   bool          // forward multiplicity: optional?
+	many       bool          // forward multiplicity: many?
+	owner      string        // declaring type name
+	properties []*Property   // edge properties (associations only)
+	sealed     bool          // true after completion; prevents further mutation
 }
 
 // newRelation creates a new Relation. This is primarily for internal use;
@@ -62,26 +59,21 @@ func newRelation(
 	span location.Span,
 	doc string,
 	optional, many bool,
-	backref string,
-	reverseOptional, reverseMany bool,
 	owner string,
 	properties []*Property,
 ) *Relation {
 	return &Relation{
-		kind:            kind,
-		name:            name,
-		fieldName:       fieldName,
-		target:          target,
-		targetID:        targetID,
-		span:            span,
-		doc:             doc,
-		optional:        optional,
-		many:            many,
-		backref:         backref,
-		reverseOptional: reverseOptional,
-		reverseMany:     reverseMany,
-		owner:           owner,
-		properties:      properties,
+		kind:       kind,
+		name:       name,
+		fieldName:  fieldName,
+		target:     target,
+		targetID:   targetID,
+		span:       span,
+		doc:        doc,
+		optional:   optional,
+		many:       many,
+		owner:      owner,
+		properties: properties,
 	}
 }
 
@@ -153,17 +145,6 @@ func (r *Relation) IsMany() bool {
 	return r.many
 }
 
-// Backref returns the reverse relationship name, if any.
-func (r *Relation) Backref() string {
-	return r.backref
-}
-
-// ReverseMultiplicity returns the reverse direction multiplicity.
-// Returns (optional, many).
-func (r *Relation) ReverseMultiplicity() (optional, many bool) {
-	return r.reverseOptional, r.reverseMany
-}
-
 // Owner returns the name of the type that declares this relation.
 func (r *Relation) Owner() string {
 	return r.owner
@@ -218,7 +199,7 @@ func (r *Relation) HasProperties() bool {
 
 // Equal reports whether two relations are structurally equal.
 // Compares: name, kind, target TypeID (or syntactic target if unresolved),
-// multiplicities, backref, reverse multiplicity, edge properties.
+// multiplicities, edge properties.
 // NOT compared: span, docs (declaration site-specific).
 // Edge properties are compared by name set (order-independent).
 // Enables deduplication of identical relations from distinct ancestors.
@@ -246,12 +227,6 @@ func (r *Relation) Equal(other *Relation) bool {
 		}
 	}
 	if r.optional != other.optional || r.many != other.many {
-		return false
-	}
-	if r.backref != other.backref {
-		return false
-	}
-	if r.reverseOptional != other.reverseOptional || r.reverseMany != other.reverseMany {
 		return false
 	}
 	if len(r.properties) != len(other.properties) {

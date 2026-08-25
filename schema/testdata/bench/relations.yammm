@@ -6,7 +6,7 @@ type Warehouse {
 	id String primary
 	name String required
 
-	--> supplies (many) Depot / supplied_by (one)
+	--> supplies (many) Depot
 	*-> bays (many) Bay
 }
 

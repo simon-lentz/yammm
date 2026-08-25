@@ -425,19 +425,28 @@ type Derived extends Base {
 }`)
 }
 
-func TestAnnotation_Validation_PartTypeValidatedIdentically(t *testing.T) {
+func TestAnnotation_Validation_PartTypeAnnotations(t *testing.T) {
 	t.Parallel()
-	// A part type's annotations validate exactly like a concrete type's:
-	// @index/@vector/@writeOnce are accepted, and @writeOnce on the part's
-	// declared primary is still rejected.
+	// A part type's index annotations validate exactly like a concrete
+	// type's; @writeOnce is rejected on ANY part property, because a part is
+	// replaced whole on every parent write and create-once semantics cannot
+	// hold there.
 	loadOK(t, `schema "main"
 part type Wheel {
 	serial String primary
 	size Integer @index
-	first_seen Timestamp @writeOnce
 }`)
 
 	res := loadStringErr(t, `schema "main"
+part type Wheel {
+	serial String primary
+	size Integer
+	first_seen Timestamp @writeOnce
+}`)
+	wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1})
+
+	// On a part's declared primary the part rejection wins; still one issue.
+	res = loadStringErr(t, `schema "main"
 part type Wheel {
 	serial String primary @writeOnce
 	size Integer

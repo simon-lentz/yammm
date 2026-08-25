@@ -209,14 +209,10 @@ func (g *generator) emitComposition(rel *schema.Relation, used map[string]int) e
 		return fmt.Errorf("gogen: composition %q target %q has no Go name", rel.Name(), rel.TargetID().String())
 	}
 	field := goField(rel.FieldName(), used, g.initialisms)
-	star := "*"
-	if rel.IsMany() {
-		star = "[]*"
-	}
-	// omitempty reflects requiredness (rel.IsOptional); the pointer/slice (star) is
-	// always kept regardless of multiplicity, because a required-one composition cycle
-	// rendered as a value type would be an illegal recursive Go type.
-	fmt.Fprintf(g.buf, "%s %s%s %s\n", field, star, childName, jsonTag(rel.FieldName(), rel.IsOptional()))
+	// Every composition is a slice, (one) included: the adapter/json parser
+	// and writer exchange an array for every multiplicity, and a slice also
+	// keeps a required-one composition cycle legal as a Go type.
+	fmt.Fprintf(g.buf, "%s []*%s %s\n", field, childName, jsonTag(rel.FieldName(), rel.IsOptional()))
 	return nil
 }
 
@@ -283,36 +279,17 @@ func (g *generator) emitEdgeStructs() error {
 	for _, e := range g.edges {
 		fmt.Fprintf(g.buf, "type %s struct {\n", g.edgeNames[e.rel])
 
-		used := map[string]int{}      // edge struct's field namespace
-		jsonKeys := map[string]bool{} // edge struct's JSON wire keys (property names, verbatim)
-		for _, p := range e.rel.PropertiesSlice() {
-			if err := g.emitField(nil, p, used); err != nil { // nil owner: edge props are scalar
-				return err
-			}
-			jsonKeys[p.Name()] = true
-		}
+		used := map[string]int{} // edge struct's field namespace
 
-		// Where block: target PK fields rendered faithfully — a PK whose type is a
-		// named DataType emits the named type, not its primitive (its Go name was
-		// recorded by registerDataTypeFields in the target's declaring schema). PKs are
-		// required and limited to String/UUID/Date/Timestamp (or DataTypes thereof), so
-		// goFieldType yields the named DataType or the primitive — never a pointer,
-		// list, or inline enum.
-		//
-		// The block's wire key is "where" unless an edge property already claims it (a
-		// property literally named "where"): two fields sharing a JSON key make
-		// encoding/json drop BOTH at marshal time, and go/types does not flag duplicate
-		// struct tags. On a clash the key falls back to the block's unique Go field name
-		// (always upper-case-leading, so it cannot re-collide with a property's
-		// lower-case-leading wire key) — mirroring emitGraph's lossy-collision strategy.
-		// The edge property's own "where" key is canonical and never altered.
-		whereField := goField("Where", used, g.initialisms)
-		whereKey := "where"
-		if jsonKeys[whereKey] {
-			whereKey = whereField
-		}
-		fmt.Fprintf(g.buf, "%s struct {\n", whereField)
-		whereUsed := map[string]int{}
+		// Foreign-key fields first, flattened beside the edge properties —
+		// the shape adapter/json's parser and writer exchange. Emitting the
+		// _target_ fields before the properties keeps the contract keys'
+		// clean Go names stable: a later property edit takes the collision
+		// suffix, never the FK field. The wire keys stay distinct by the
+		// underscore rule, so the old nested-Where clash fallback is gone
+		// with the nested struct. A PK whose type is a named DataType emits
+		// the named type, not its primitive (its Go name was recorded by
+		// registerDataTypeFields in the target's declaring schema).
 		for _, pk := range e.target.PrimaryKeysSlice() {
 			typ, err := g.goFieldType(e.target, pk)
 			if err != nil {
@@ -321,9 +298,14 @@ func (g *generator) emitEdgeStructs() error {
 			if strings.Contains(typ, "time.Time") {
 				g.needsTime = true
 			}
-			fmt.Fprintf(g.buf, "%s %s %s\n", goField(pk.Name(), whereUsed, g.initialisms), typ, jsonTag(pk.Name(), false))
+			fmt.Fprintf(g.buf, "%s %s %s\n", goField("Target"+goExportedIdent(pk.Name(), g.initialisms), used, g.initialisms), typ, jsonTag("_target_"+pk.Name(), false))
 		}
-		fmt.Fprintf(g.buf, "} %s\n}\n\n", jsonTag(whereKey, false))
+		for _, p := range e.rel.PropertiesSlice() {
+			if err := g.emitField(nil, p, used); err != nil { // nil owner: edge props are scalar
+				return err
+			}
+		}
+		g.buf.WriteString("}\n\n")
 	}
 	return nil
 }

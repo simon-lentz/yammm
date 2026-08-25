@@ -140,7 +140,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 228,
             "e": 253

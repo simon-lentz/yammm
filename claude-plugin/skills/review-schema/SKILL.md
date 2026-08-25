@@ -125,7 +125,6 @@ The loader rejects a structurally wrong annotation, so these are the checks it c
 - **Overly broad Enum**: >15 values may indicate a `Pattern` or separate type is better.
 - **Deep composition nesting**: >2 levels of `*->` is unusual. Flag for review.
 - **Duplicated field patterns**: Multiple types repeating the same fields suggest extracting an `abstract type`.
-- **Missing reverse clause**: Relationships that semantically imply a named reverse benefit from `/ reverse_name`.
 - **Unbounded List without invariant**: `List<T>` with no length bounds and no `Len` invariant may accept arbitrarily large payloads.
 - **Associations targeting part types**: Associations (`-->`) cannot target `part type`. Only compositions (`*->`) can.
 

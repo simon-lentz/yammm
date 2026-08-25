@@ -63,6 +63,11 @@ func TestRoundTrip_Temporal(t *testing.T) {
 		"has_reading": []any{
 			map[string]any{"at": "2026-08-21 10:00:00", "on": "2026-08-21"},
 		},
+		"in_casing": []any{map[string]any{"serial": "c1"}},
+		"feeds": map[string]any{
+			"_target_id": "s1",
+			"since":      "2026-08-21 11:00:00",
+		},
 	}}
 	sensor, res := v.ValidateOne(ctx, "Sensor", raw)
 	if !res.OK() {
@@ -99,6 +104,7 @@ func TestRoundTrip_Temporal(t *testing.T) {
 		"wall":           {sn.Wall.Time, utc(2026, 8, 21, 9, 30, 0, 0)},
 		"reading.at":     {sn.HasReading[0].At.Time, utc(2026, 8, 21, 10, 0, 0, 0)},
 		"reading.on":     {sn.HasReading[0].On.Time, utc(2026, 8, 21, 0, 0, 0, 0)},
+		"feeds.since":    {sn.Feeds.Since.Time, utc(2026, 8, 21, 11, 0, 0, 0)},
 	} {
 		if !tc.got.Equal(tc.want) {
 			t.Errorf("%s decoded as %s, want %s", name, tc.got, tc.want)
@@ -106,6 +112,14 @@ func TestRoundTrip_Temporal(t *testing.T) {
 	}
 	if len(sn.Days) != 2 || len(sn.Walls) != 1 {
 		t.Errorf("lists decoded as %d days and %d walls, want 2 and 1", len(sn.Days), len(sn.Walls))
+	}
+	// A (one) composition is an array too, and the association's flattened
+	// _target_ field carries the key.
+	if len(sn.InCasing) != 1 || sn.InCasing[0].Serial != "c1" {
+		t.Errorf("in_casing decoded as %+v, want one casing c1", sn.InCasing)
+	}
+	if sn.Feeds == nil || sn.Feeds.TargetID != "s1" {
+		t.Errorf("feeds decoded as %+v, want _target_id s1", sn.Feeds)
 	}
 
 	again, err := json.Marshal(got)

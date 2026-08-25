@@ -137,13 +137,19 @@ yammm snapshot verify schema.yammm output.ys
 
 Validates a persisted snapshot against its schema. Checks integrity hash, schema compatibility, dangling references, and structural correctness.
 
+| Flag | Description |
+| ---- | ----------- |
+| `--skip-integrity-check` | Skip integrity hash verification (hand-edited files) |
+| `--value-conformance` | Report stored `Timestamp`/`Date`/`UUID` values that do not conform to their constraints |
+| `--revalidate` | Run every instance back through the validator; findings reported as warnings (v0.15+) |
+
 ### snapshot info
 
 ```bash
 yammm snapshot info output.ys
 ```
 
-Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, and custom metadata.
+Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
 ### snapshot update-metadata
 
@@ -342,8 +348,11 @@ Two consequences worth knowing:
   `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before
   `_` (unbounded) has no effect") is the common one; `yammm snapshot verify`,
   `yammm export`, and `yammm snapshot save --into` additionally surface the
-  snapshot decoder's `E_SNAPSHOT_PATH_FALLBACK` and
-  `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` on otherwise unchanged `.ys` files.
+  snapshot decoder's `E_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
+  files. From v0.15.0, `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on
+  these body-reading commands — the document is refused, not warned about;
+  only header-only reads (`yammm snapshot info --header-only`, `--dir`) keep
+  it a Warning.
 
 This is what makes `W_ANNOTATION_SHADOWED` reachable — the only signal that a
 subtype's property re-declaration dropped an inherited `@writeOnce` or `@index`

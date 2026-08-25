@@ -15,6 +15,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
@@ -42,6 +43,10 @@ type streamDecoder struct {
 	// schema is the provided schema (nil for Info and HeaderOnlyRead).
 	schema *schema.Schema
 
+	// revalidator is non-nil only when WithRevalidation was passed and a
+	// schema is present; walkInstance then runs every root back through it.
+	revalidator *instance.Validator
+
 	// bodyOffset is the byte offset of the body suffix UpdateMetadata
 	// reuses verbatim; -1 until decodeHeader captures it.
 	bodyOffset int64
@@ -50,12 +55,22 @@ type streamDecoder struct {
 // newStreamDecoder creates a new streamDecoder from raw .ys bytes.
 func newStreamDecoder(data []byte, s *schema.Schema, cfg loadConfig) *streamDecoder {
 	return &streamDecoder{
-		data:       data,
-		collector:  diag.NewCollector(0),
-		loadCfg:    cfg,
-		schema:     s,
-		bodyOffset: -1,
+		data:        data,
+		collector:   diag.NewCollector(0),
+		loadCfg:     cfg,
+		schema:      s,
+		revalidator: newRevalidator(s, cfg),
+		bodyOffset:  -1,
 	}
+}
+
+// newRevalidator builds the validator the revalidation walk runs, or nil
+// when nobody asked or no schema is present to validate against.
+func newRevalidator(s *schema.Schema, cfg loadConfig) *instance.Validator {
+	if !cfg.revalidate || s == nil {
+		return nil
+	}
+	return instance.NewValidator(s)
 }
 
 // newStreamDecoderFromReader creates a streamDecoder backed by an io.Reader,
@@ -134,11 +149,18 @@ func (sd *streamDecoder) decodeHeader() error {
 			Build())
 	}
 
-	// Validate schema hash algorithm.
+	// Validate schema hash algorithm. A body-reading surface refuses the
+	// document: where a body would be trusted, an uncheckable schema
+	// identity is a refusal. A header-only read stays non-fatal, so
+	// dispatch still receives a HeaderInfo whose SchemaHashMatches reports
+	// false — the stale-schema classification consumers route on.
 	if sd.header.SchemaHashAlgorithm != schema.StructuralHashVersion {
-		sd.collector.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM,
-			fmt.Sprintf("unrecognized schema hash algorithm version %d; schema hash verification skipped",
-				sd.header.SchemaHashAlgorithm)).
+		sev, msg := diag.Error, "unrecognized schema hash algorithm version %d; the document cannot be checked against a schema"
+		if sd.loadCfg.headerOnly {
+			sev, msg = diag.Warning, "unrecognized schema hash algorithm version %d; schema hash verification skipped"
+		}
+		sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM,
+			fmt.Sprintf(msg, sd.header.SchemaHashAlgorithm)).
 			WithDetail(diag.DetailKeyHashAlgorithm, strconv.Itoa(sd.header.SchemaHashAlgorithm)).
 			Build())
 	}
@@ -296,7 +318,7 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 			idx.exists[row] = make(map[string]bool, len(g.Items))
 		}
 		for _, item := range g.Items {
-			sd.walkInstance(row, item, 0, nil, idx)
+			sd.walkInstance(ctx, row, item, 0, nil, idx)
 		}
 	}
 	return idx, nil
@@ -304,7 +326,7 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 
 // walkInstance validates one instance at its table row and registers its
 // structural facts. slot is non-nil only for a root's direct composed child.
-func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *slotCoord, idx *docIndex) {
+func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWire, depth int, slot *slotCoord, idx *docIndex) {
 	if depth > maxComposedDepth {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DEPTH_EXCEEDED,
 			fmt.Sprintf("composed nesting depth %d exceeds limit %d", depth, maxComposedDepth)).
@@ -371,9 +393,156 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 			if depth == 0 {
 				childSlot = &slotCoord{parentRow: row, parentKey: keyStr, relation: relName}
 			}
-			sd.walkInstance(childRow, child, depth+1, childSlot, idx)
+			sd.walkInstance(ctx, childRow, child, depth+1, childSlot, idx)
 		}
 	}
+
+	if depth == 0 {
+		sd.revalidateRoot(ctx, row, inst)
+	}
+}
+
+// revalidateRoot reconstructs one root's raw form — properties, edges as
+// _target_-keyed objects, composed children as nested arrays — and runs it
+// through the real validator, reporting each finding at the option's
+// severity. The reconstruction inverts what the writer did to the
+// validator's output, so clean data reports nothing.
+func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instWire) {
+	if sd.revalidator == nil {
+		return
+	}
+	if row < 0 || row >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok {
+		return
+	}
+	keyStr := formatWireKey(inst.Key)
+	props := sd.rebuildRawProperties(t, keyStr, inst)
+	_, res := sd.revalidator.ValidateOne(ctx, sd.tableTags[row], instance.RawInstance{Properties: props})
+	for issue := range res.Issues() {
+		if issue.Code() == diag.E_CONTEXT_CANCELLED {
+			sd.collector.Collect(issue)
+			continue
+		}
+		sd.collector.Collect(retagIssue(issue, sd.loadCfg.revalidateSeverity, sd.refAt(row), keyStr))
+	}
+}
+
+// rebuildRawProperties inverts the wire encoding back to the validator's
+// input shape for one instance: edges become _target_<pk>-keyed objects with
+// edge properties beside ((one) an object, (many) an array), composed
+// children become nested arrays of the same form, keyed by the relation's
+// JSON field name. A relation name the type does not declare, a target-key
+// arity mismatch, or extra targets on a (one) are reported at the option's
+// severity — never silently dropped, because a document holding one is
+// exactly what re-validation exists to find.
+func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, inst instWire) map[string]any {
+	// Normalized like instanceParts' materialization: the decoder reads
+	// numbers as json.Number, which the validator does not accept.
+	props := make(map[string]any, len(inst.Properties)+len(inst.Edges)+len(inst.Composed))
+	maps.Copy(props, normalizeMap(inst.Properties))
+	sev := sd.loadCfg.revalidateSeverity
+	ref := schema.TagForm(sd.schema, t.ID())
+
+	for _, relName := range slices.Sorted(maps.Keys(inst.Edges)) {
+		rel, found := t.Relation(relName)
+		if !found || rel.Kind() != schema.RelationAssociation {
+			sd.collector.Collect(diag.NewIssue(sev, diag.E_GRAPH_UNKNOWN_RELATION,
+				fmt.Sprintf("revalidation of %s[%s]: document carries edges under %q, which the type does not declare as an association",
+					ref, keyStr, relName)).
+				WithDetail(diag.DetailKeyTypeName, ref).
+				WithDetail(diag.DetailKeyRelationName, relName).
+				Build())
+			continue
+		}
+		targetType, ok := sd.schema.TypeByID(rel.TargetID())
+		if !ok {
+			continue
+		}
+		pks := targetType.PrimaryKeysSlice()
+		targets := inst.Edges[relName]
+		arr := make([]any, 0, len(targets))
+		for ei, e := range targets {
+			if len(e.TargetKey) != len(pks) {
+				sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("revalidation of %s[%s]: edge %d under %q carries %d key components for a %d-part target key",
+						ref, keyStr, ei, relName, len(e.TargetKey), len(pks))).
+					WithDetail(diag.DetailKeyTypeName, ref).
+					WithDetail(diag.DetailKeyRelationName, relName).
+					Build())
+				continue
+			}
+			obj := make(map[string]any, len(pks)+len(e.Properties))
+			for i, comp := range normalizeSlice(e.TargetKey) {
+				obj["_target_"+pks[i].Name()] = comp
+			}
+			maps.Copy(obj, normalizeMap(e.Properties))
+			arr = append(arr, obj)
+		}
+		if rel.IsMany() {
+			props[rel.FieldName()] = arr
+			continue
+		}
+		if len(arr) > 1 {
+			sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_MALFORMED,
+				fmt.Sprintf("revalidation of %s[%s]: (one) association %q carries %d targets",
+					ref, keyStr, relName, len(arr))).
+				WithDetail(diag.DetailKeyTypeName, ref).
+				WithDetail(diag.DetailKeyRelationName, relName).
+				Build())
+		}
+		if len(arr) > 0 {
+			props[rel.FieldName()] = arr[0]
+		}
+	}
+
+	for _, relName := range slices.Sorted(maps.Keys(inst.Composed)) {
+		rel, found := t.Relation(relName)
+		if !found || rel.Kind() != schema.RelationComposition {
+			sd.collector.Collect(diag.NewIssue(sev, diag.E_GRAPH_UNKNOWN_RELATION,
+				fmt.Sprintf("revalidation of %s[%s]: document carries composed children under %q, which the type does not declare as a composition",
+					ref, keyStr, relName)).
+				WithDetail(diag.DetailKeyTypeName, ref).
+				WithDetail(diag.DetailKeyRelationName, relName).
+				Build())
+			continue
+		}
+		childType, ok := sd.schema.TypeByID(rel.TargetID())
+		if !ok {
+			continue
+		}
+		children := inst.Composed[relName]
+		arr := make([]any, 0, len(children))
+		for _, child := range children {
+			arr = append(arr, sd.rebuildRawProperties(childType, formatWireKey(child.Key), child))
+		}
+		props[rel.FieldName()] = arr
+	}
+
+	return props
+}
+
+// retagIssue rebuilds a validator issue at the revalidation severity,
+// prefixed with the loaded instance it came from. diag.Issue is immutable
+// after Build, so a rebuild is the only way to move the severity; details,
+// hint, span, path and related locations all travel.
+func retagIssue(issue diag.Issue, sev diag.Severity, typeRef, keyStr string) diag.Issue {
+	b := diag.NewIssue(sev, issue.Code(),
+		fmt.Sprintf("revalidation of %s[%s]: %s", typeRef, keyStr, issue.Message())).
+		WithDetails(issue.Details()...).
+		WithRelated(issue.Related()...)
+	if issue.HasSpan() {
+		b = b.WithSpan(issue.Span())
+	}
+	if issue.Hint() != "" {
+		b = b.WithHint(issue.Hint())
+	}
+	if issue.SourceName() != "" || issue.Path() != "" {
+		b = b.WithPath(issue.SourceName(), issue.Path())
+	}
+	return b.Build()
 }
 
 // checkProvenancePath warns when a provenance path will not parse. The
@@ -576,6 +745,20 @@ var unresolvedReasons = map[string]bool{"target_missing": true, "absent": true, 
 // into a value graph.UnresolvedEdge documents as always empty, and the next
 // Marshal discards them silently.
 func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) {
+	// Gated on the revalidation option: the record is well-formed data
+	// (Snapshot.Unresolved), so without the option no reader pays a new
+	// diagnostic for it.
+	if sd.loadCfg.revalidate && u.Required {
+		sourceRef := "?"
+		if row, ok := sd.rowAt(u.SourceType); ok {
+			sourceRef = sd.refAt(row)
+		}
+		sd.collector.Collect(diag.NewIssue(sd.loadCfg.revalidateSeverity, diag.W_SNAPSHOT_UNRESOLVED_REQUIRED,
+			fmt.Sprintf("required association %q of %s[%s] is unresolved (%s)",
+				u.Relation, sourceRef, formatWireKey(u.SourceKey), u.Reason)).
+			WithDetail(diag.DetailKeyRelationName, u.Relation).
+			Build())
+	}
 	if !unresolvedReasons[u.Reason] {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("unresolved record %d states reason %q, which is not one of target_missing, absent or empty",
@@ -738,12 +921,20 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 		unresParts = append(unresParts, up)
 	}
 
+	// The header's claim rides the parts verbatim; an absent field is a
+	// pre-v0.15.0 document and reads as both false.
+	var att graph.Attestation
+	if a := sd.header.Attestation; a != nil {
+		att = graph.Attestation{Values: a.Values, Associations: a.Associations}
+	}
+
 	return graph.SnapshotParts{
-		Types:      types,
-		Instances:  instParts,
-		Edges:      edgeParts,
-		Duplicates: dupParts,
-		Unresolved: unresParts,
+		Types:       types,
+		Instances:   instParts,
+		Edges:       edgeParts,
+		Duplicates:  dupParts,
+		Unresolved:  unresParts,
+		Attestation: att,
 	}
 }
 

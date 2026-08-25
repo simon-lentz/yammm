@@ -166,6 +166,10 @@ var (
 	// E_INVALID_INVARIANT indicates an invariant expression is invalid.
 	E_INVALID_INVARIANT = NewCode("E_INVALID_INVARIANT", CategorySchema)
 
+	// E_REVERSE_CLAUSE_REMOVED indicates a schema still carries the
+	// reverse clause ("/ name (mult)") the language removed in v0.15.0.
+	E_REVERSE_CLAUSE_REMOVED = NewCode("E_REVERSE_CLAUSE_REMOVED", CategorySchema)
+
 	// E_INVALID_NAME indicates an identifier has an invalid format.
 	E_INVALID_NAME = NewCode("E_INVALID_NAME", CategorySchema)
 
@@ -364,6 +368,25 @@ var (
 
 	// E_GRAPH_MISSING_PK indicates a primary key is missing in graph operations.
 	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK", CategoryGraph)
+
+	// E_GRAPH_CARDINALITY indicates an association carrying more targets
+	// than its declared multiplicity allows.
+	E_GRAPH_CARDINALITY = NewCode("E_GRAPH_CARDINALITY", CategoryGraph)
+
+	// E_GRAPH_UNKNOWN_RELATION indicates instance data under a relation
+	// name the type does not declare. The graph layer reports it at Error
+	// severity on Add/AddComposed; snapshot revalidation reports the same
+	// defect in a loaded document at the option's severity.
+	E_GRAPH_UNKNOWN_RELATION = NewCode("E_GRAPH_UNKNOWN_RELATION", CategoryGraph)
+
+	// E_GRAPH_ABSTRACT_TYPE indicates an instance of an abstract type
+	// reached the graph; the validator rejects it, so only a bypass
+	// constructor can produce one.
+	E_GRAPH_ABSTRACT_TYPE = NewCode("E_GRAPH_ABSTRACT_TYPE", CategoryGraph)
+
+	// E_GRAPH_INVALID_PK indicates an instance primary key that is empty
+	// or disagrees with the instance's own key properties.
+	E_GRAPH_INVALID_PK = NewCode("E_GRAPH_INVALID_PK", CategoryGraph)
 )
 
 // Snapshot persistence codes.
@@ -414,9 +437,10 @@ var (
 	// document content. The file may be corrupted, truncated, or modified.
 	E_SNAPSHOT_INTEGRITY_MISMATCH = NewCode("E_SNAPSHOT_INTEGRITY_MISMATCH", CategorySnapshot)
 
-	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM (Warning) indicates the schema hash
-	// algorithm version in the .ys header is not recognized. Schema hash verification
-	// is skipped; load proceeds without the schema compatibility check.
+	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM indicates a schema hash
+	// algorithm version this library does not implement. Error on the
+	// body-reading surfaces (Load, Verify, Info, UpdateMetadata); Warning
+	// on the header-only surfaces, which stay classifiable for dispatch.
 	E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM = NewCode("E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM", CategorySnapshot)
 
 	// E_SNAPSHOT_PATH_FALLBACK (Warning) indicates a provenance path string could
@@ -464,11 +488,11 @@ var (
 	//
 	// Uses the W_ prefix, inaugurating the convention for
 	// Warning-severity codes added from v0.3.0 onward; existing
-	// Warning-severity codes (E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM,
-	// E_SNAPSHOT_PATH_FALLBACK) retain their E_ identifiers for
-	// backwards compatibility — severity is carried on the Issue, not
-	// the Code, so the prefix is a naming convention rather than a
-	// type-enforced property.
+	// Warning-severity codes (E_SNAPSHOT_PATH_FALLBACK, and
+	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM on a header-only read)
+	// retain their E_ identifiers for backwards compatibility — severity
+	// is carried on the Issue, not the Code, so the prefix is a naming
+	// convention rather than a type-enforced property.
 	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK", CategorySnapshot)
 
 	// W_SNAPSHOT_VALUE_NONCONFORMING indicates that a stored property value
@@ -479,6 +503,15 @@ var (
 	// invariants are not checked, so silence is not a proof of validity.
 	// Warning severity, so Load still returns the snapshot.
 	W_SNAPSHOT_VALUE_NONCONFORMING = NewCode("W_SNAPSHOT_VALUE_NONCONFORMING", CategorySnapshot)
+
+	// W_SNAPSHOT_UNRESOLVED_REQUIRED indicates a loaded document carries an
+	// unresolved record for a Required association. Reported only when the
+	// caller passes snapshot.WithRevalidation, at that option's severity —
+	// the walk that finds the record runs on every Load and Verify, but a
+	// document holding the record is well-formed, so without the option the
+	// record stays data (the snapshot's unresolved records) rather than a
+	// diagnostic.
+	W_SNAPSHOT_UNRESOLVED_REQUIRED = NewCode("W_SNAPSHOT_UNRESOLVED_REQUIRED", CategorySnapshot)
 )
 
 // AllCodes returns all registered diagnostic codes in registration order.

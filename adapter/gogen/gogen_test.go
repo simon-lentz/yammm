@@ -104,7 +104,7 @@ func TestMarshal_Imports(t *testing.T) {
 // edge can address its target by the full composite key. Where blocks are emitted after
 // the node structs, so slicing from the EDGE_ struct excludes Region's own country/code
 // fields — the assertion can only be satisfied by the Where block itself.
-func TestMarshal_CompositePKWhereBlock(t *testing.T) {
+func TestMarshal_CompositePKTargetFields(t *testing.T) {
 	s := loadSchema(t, "composite_pk")
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -119,9 +119,9 @@ func TestMarshal_CompositePKWhereBlock(t *testing.T) {
 	if end := strings.Index(edge, "\n}\n"); end >= 0 {
 		edge = edge[:end]
 	}
-	for _, want := range []string{`json:"country"`, `json:"code"`} {
+	for _, want := range []string{`json:"_target_country"`, `json:"_target_code"`} {
 		if !strings.Contains(edge, want) {
-			t.Errorf("composite-PK EDGE_ Where block missing %q:\n%s", want, edge)
+			t.Errorf("composite-PK EDGE_ struct missing flattened %q:\n%s", want, edge)
 		}
 	}
 }
@@ -215,6 +215,10 @@ func TestMarshal_DiamondImport(t *testing.T) {
 // name (the lossy-collision strategy emitGraph uses), while the edge property's own
 // "where" key stays canonical.
 func TestMarshal_EdgeWhereKeyCollision(t *testing.T) {
+	// The nested Where block and its clash fallback are gone: _target_
+	// fields flatten beside the properties, and the underscore rule keeps
+	// the namespaces apart, so a property named "where" keeps its wire key
+	// with no collision handling at all.
 	s := loadSchema(t, "edge_where_collision")
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -223,8 +227,11 @@ func TestMarshal_EdgeWhereKeyCollision(t *testing.T) {
 	if n := bytes.Count(got, []byte("`json:\"where\"`")); n != 1 {
 		t.Errorf("want exactly one `json:\"where\"` (the edge property); got %d:\n%s", n, got)
 	}
-	if !bytes.Contains(got, []byte("`json:\"Where2\"`")) {
-		t.Errorf("Where block did not fall back to a unique wire key on collision:\n%s", got)
+	if bytes.Contains(got, []byte("`json:\"Where2\"`")) {
+		t.Errorf("the deleted clash fallback re-appeared:\n%s", got)
+	}
+	if !bytes.Contains(got, []byte("`json:\"_target_")) {
+		t.Errorf("EDGE_ struct carries no flattened _target_ field:\n%s", got)
 	}
 }
 
@@ -334,7 +341,7 @@ func TestMarshal_TemporalEdge(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"type EDGE_Log_on_Day struct {\n\tAt    Timestamp20060102150405 `json:\"at\"`\n\tWhere struct {\n\t\tOn Date `json:\"on\"`\n\t} `json:\"where\"`\n}",
+		"type EDGE_Log_on_Day struct {\n\tTargetOn Date                    `json:\"_target_on\"`\n\tAt       Timestamp20060102150405 `json:\"at\"`\n}",
 		"type Date struct{ time.Time }",
 	} {
 		if !bytes.Contains(got, []byte(want)) {

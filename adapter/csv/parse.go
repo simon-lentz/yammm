@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
@@ -186,7 +187,11 @@ func (a *Adapter) readHeader(reader *csv.Reader) (columns []string, startRow int
 	return nil, 1, nil // no header; columns will be generated from indices
 }
 
-// recordToProps converts a CSV record to a property map with type coercion.
+// recordToProps converts a CSV record to a property map with type
+// coercion. Dotted edge columns (<field>._target_<pk>, <field>.<prop>)
+// classify before the null mapping — an empty cell there means an absent
+// group, never a null property — and assemble into the _target_ objects
+// the validator accepts.
 func (a *Adapter) recordToProps(
 	record []string,
 	columns []string,
@@ -197,12 +202,50 @@ func (a *Adapter) recordToProps(
 ) map[string]any {
 	props := make(map[string]any, len(record))
 
+	var assocByField map[string]*schema.Relation
+	var groups map[string]map[string]string // field -> suffix -> raw cell
+	if schemaType != nil {
+		assocByField = make(map[string]*schema.Relation)
+		for rel := range schemaType.Associations() {
+			assocByField[rel.FieldName()] = rel
+		}
+	}
+
 	for i, val := range record {
 		var colName string
 		if i < len(columns) && columns != nil {
 			colName = columns[i]
 		} else {
 			colName = strconv.Itoa(i)
+		}
+
+		// Edge columns first: their empty cell is the absent-group marker.
+		if schemaType != nil {
+			if field, suffix, dotted := strings.Cut(colName, "."); dotted {
+				rel, isAssoc := assocByField[field]
+				if !isAssoc {
+					collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+						fmt.Sprintf("row %d: dotted column %q does not match an association field of %q", row, colName, typeName)).
+						WithDetail(diag.DetailKeyTypeName, typeName).Build())
+					continue
+				}
+				if !strings.HasPrefix(suffix, "_target_") {
+					if _, ok := rel.Property(suffix); !ok {
+						collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+							fmt.Sprintf("row %d: column %q names neither a _target_ component nor an edge property of %q", row, colName, rel.Name())).
+							WithDetail(diag.DetailKeyTypeName, typeName).Build())
+						continue
+					}
+				}
+				if groups == nil {
+					groups = make(map[string]map[string]string)
+				}
+				if groups[field] == nil {
+					groups[field] = make(map[string]string)
+				}
+				groups[field][suffix] = val
+				continue
+			}
 		}
 
 		// Null check.
@@ -232,5 +275,94 @@ func (a *Adapter) recordToProps(
 		props[colName] = val
 	}
 
+	for field, cells := range groups {
+		a.assembleEdgeGroup(field, cells, assocByField[field], row, typeName, collector, props)
+	}
+
 	return props
+}
+
+// assembleEdgeGroup zips one relation's edge cells into the validator's
+// shape: each cell splits into one segment per target on the escaped list
+// separator, segment counts must agree, and an all-empty group means the
+// edge is absent. An empty segment means the optional edge property is
+// absent on that target. Edge properties are scalars by language rule,
+// which is why zipping is well-founded.
+func (a *Adapter) assembleEdgeGroup(
+	field string,
+	cells map[string]string,
+	rel *schema.Relation,
+	row int,
+	typeName string,
+	collector *diag.Collector,
+	props map[string]any,
+) {
+	n := -1
+	segsBySuffix := make(map[string][]string, len(cells))
+	for suffix, cell := range cells {
+		if cell == "" {
+			continue
+		}
+		segs := splitListElems(cell, a.config.listSep)
+		if n == -1 {
+			n = len(segs)
+		} else if len(segs) != n {
+			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+				fmt.Sprintf("row %d: association %q columns disagree on target count (%d vs %d)", row, field, n, len(segs))).
+				WithDetail(diag.DetailKeyTypeName, typeName).Build())
+			return
+		}
+		segsBySuffix[suffix] = segs
+	}
+	if n == -1 {
+		return // every cell empty: the edge is absent
+	}
+
+	var targetType *schema.Type
+	if a.config.schema != nil {
+		targetType, _ = a.config.schema.TypeByID(rel.TargetID())
+	}
+
+	targets := make([]any, n)
+	for t := range n {
+		obj := make(map[string]any, len(segsBySuffix))
+		for suffix, segs := range segsBySuffix {
+			seg := segs[t]
+			if seg == "" {
+				continue // absent on this target
+			}
+			var c schema.Constraint
+			if pkName, isFK := strings.CutPrefix(suffix, "_target_"); isFK {
+				if targetType != nil {
+					if pk, ok := targetType.Property(pkName); ok {
+						c = pk.Constraint()
+					}
+				}
+			} else if p, ok := rel.Property(suffix); ok {
+				c = p.Constraint()
+			}
+			if c == nil {
+				// No constraint reachable (no WithSchema, or an unknown
+				// component): the string survives and the validator rules.
+				obj[suffix] = seg
+				continue
+			}
+			coerced, err := a.coerceStringValue(seg, c)
+			if err != nil {
+				collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+					fmt.Sprintf("row %d, column %q.%s: %s", row, field, suffix, err)).
+					WithDetail(diag.DetailKeyTypeName, typeName).Build())
+				obj[suffix] = seg
+				continue
+			}
+			obj[suffix] = coerced
+		}
+		targets[t] = obj
+	}
+
+	if !rel.IsMany() && n == 1 {
+		props[field] = targets[0]
+		return
+	}
+	props[field] = targets
 }

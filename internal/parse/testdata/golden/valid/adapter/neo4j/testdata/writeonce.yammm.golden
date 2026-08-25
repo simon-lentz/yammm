@@ -130,7 +130,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 207,
             "e": 230
@@ -233,24 +232,15 @@
             }
           },
           "required": true,
-          "anns": [
-            {
-              "name": "writeOnce",
-              "span": {
-                "s": 408,
-                "e": 418
-              }
-            }
-          ],
           "span": {
             "s": 381,
-            "e": 418
+            "e": 407
           }
         }
       ],
       "span": {
         "s": 299,
-        "e": 420
+        "e": 409
       }
     }
   ]

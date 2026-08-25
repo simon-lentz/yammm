@@ -30,7 +30,7 @@ type Document extends Auditable {
         weight Float required
         created_at Timestamp
     }
-    --> LINKS (many) Document / linked_by (one)
+    --> LINKS (many) Document
 
     ! "title_not_empty" title != ""
     ! "valid_status" status != "archived" || content != ""

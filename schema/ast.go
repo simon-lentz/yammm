@@ -84,17 +84,14 @@ type propertyDecl struct {
 // may embed additional edge properties; compositions do not.
 // Note: Where clause is not supported in v2 (use edge properties instead).
 type relationDecl struct {
-	Kind            RelationKind
-	Name            string
-	Target          *astTypeRef
-	Optional        bool
-	Many            bool
-	Backref         string
-	ReverseOptional bool
-	ReverseMany     bool
-	Properties      []*propertyDecl // Edge properties (associations only)
-	Documentation   string
-	Span            location.Span
+	Kind          RelationKind
+	Name          string
+	Target        *astTypeRef
+	Optional      bool
+	Many          bool
+	Properties    []*propertyDecl // Edge properties (associations only)
+	Documentation string
+	Span          location.Span
 }
 
 // invariantDecl wraps the parsed expression for an invariant attached to a

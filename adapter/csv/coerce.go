@@ -58,6 +58,14 @@ func (a *Adapter) coerceStringValue(raw string, c schema.Constraint) (any, error
 		return raw, nil
 
 	case schema.KindTimestamp:
+		// Mirror the validator's rule exactly: a declared layout is the
+		// only accepted form; RFC 3339 applies to the default layout alone.
+		if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
+			if _, err := time.Parse(tc.Format(), raw); err != nil {
+				return nil, fmt.Errorf("cannot parse %q as Timestamp (expected layout %s): %w", raw, tc.Format(), err)
+			}
+			return raw, nil
+		}
 		if _, err := time.Parse(time.RFC3339, raw); err != nil {
 			if _, err2 := time.Parse(time.RFC3339Nano, raw); err2 != nil {
 				return nil, fmt.Errorf("cannot parse %q as Timestamp (expected RFC 3339): %w", raw, err)
@@ -93,7 +101,7 @@ func (a *Adapter) parseListValue(raw string, lc schema.ListConstraint) ([]any, e
 		return []any{}, nil
 	}
 
-	parts := strings.Split(raw, a.config.listSep)
+	parts := splitListElems(raw, a.config.listSep)
 	elem := schema.ResolveAlias(lc.Element())
 
 	result := make([]any, len(parts))
@@ -114,7 +122,7 @@ func (a *Adapter) parseVectorValue(raw string) ([]any, error) {
 		return []any{}, nil
 	}
 
-	parts := strings.Split(raw, a.config.listSep)
+	parts := splitListElems(raw, a.config.listSep)
 	result := make([]any, len(parts))
 	for i, part := range parts {
 		v, err := strconv.ParseFloat(strings.TrimSpace(part), 64)

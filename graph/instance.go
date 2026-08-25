@@ -39,6 +39,11 @@ type Instance struct {
 	// provenance holds source location metadata for the instance.
 	// nil if no provenance was provided by the adapter.
 	provenance *location.Provenance
+
+	// validated records whether this instance entered through a
+	// validator-built ValidInstance. Rebuilt instances are always false:
+	// the wire carries a claim, not a proof.
+	validated bool
 }
 
 // TypeName returns the canonical instance tag form for this instance's type.
@@ -114,6 +119,17 @@ func (i *Instance) Provenance() *location.Provenance {
 	return i.provenance
 }
 
+// Validated reports whether this instance entered the graph through a
+// validator-built ValidInstance (see [Graph.Add]). Instances rebuilt from
+// a loaded snapshot report false; [Snapshot.Attestation] carries the
+// writing library's claim for those.
+func (i *Instance) Validated() bool {
+	if i == nil {
+		return false
+	}
+	return i.validated
+}
+
 // Composed returns composed children for the given relation name.
 //
 // Returns nil if the relation does not exist or has no children.
@@ -169,6 +185,7 @@ func newInstance(
 	primaryKey immutable.Key,
 	properties immutable.Properties,
 	provenance *location.Provenance,
+	validated bool,
 ) *Instance {
 	return &Instance{
 		typeName:   typeName,
@@ -176,6 +193,7 @@ func newInstance(
 		primaryKey: primaryKey,
 		properties: properties,
 		provenance: provenance,
+		validated:  validated,
 	}
 }
 
@@ -200,7 +218,8 @@ func (i *Instance) addComposed(relationName string, child *Instance) {
 // If these types ever expose mutation methods, this function must be updated to
 // deep-copy them.
 //
-// Fields shared directly: typeName, typeID, primaryKey, properties, provenance
+// Fields shared directly: typeName, typeID, primaryKey, properties,
+// provenance, validated
 // Fields deep-copied: composed map and its child instance trees
 func cloneInstance(orig *Instance, cloneMap map[*Instance]*Instance) *Instance {
 	if orig == nil {
@@ -219,6 +238,7 @@ func cloneInstance(orig *Instance, cloneMap map[*Instance]*Instance) *Instance {
 		primaryKey: orig.primaryKey,
 		properties: orig.properties,
 		provenance: orig.provenance, // Safe to share: Provenance is immutable
+		validated:  orig.validated,
 	}
 
 	// Register clone before recursing to handle any reference cycles

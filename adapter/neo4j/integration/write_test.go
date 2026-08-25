@@ -8,6 +8,9 @@ import (
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	n4j "github.com/simon-lentz/yammm/adapter/neo4j"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // execWithParams runs a parameterised statement, which the write tests need and
@@ -171,5 +174,116 @@ func TestBatchMerge_KeyNamedUpdateProps(t *testing.T) {
 
 	if n := countNodes(t, ctx, label); n != 1 {
 		t.Errorf("there are %d nodes, want 1 — a key named update_props collided with the row's property map", n)
+	}
+}
+
+// A parent write must replace its composed subtree on a real server: the
+// quantified-path delete and the phased creates are Cypher only a server can
+// vouch for. Two levels deep, so both the root-keyed and the composed-key
+// parent matches execute.
+func TestBatchNodeQueries_ComposedSubtreeReplace(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	cleanup := func() {
+		run(t, ctx, "MATCH (n) WHERE any(l IN labels(n) WHERE l STARTS WITH 'cw__') DETACH DELETE n")
+	}
+	t.Cleanup(cleanup)
+	cleanup()
+
+	const src = `schema "cw"
+
+type Order {
+	order_id String primary
+
+	*-> SECTIONS (_:many) Section
+}
+
+part type Section {
+	section_id String primary
+
+	*-> NOTES (_:many) Note
+}
+
+part type Note {
+	body String required
+}
+`
+	s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+		"cw.yammm": []byte(src),
+	}, "cw.yammm", ".", schema.WithSourcesOnly())
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	a := newAdapter(t, ctx)
+	shape, sres := a.ShapeForSchema(ctx, s)
+	if sres.HasErrors() {
+		t.Fatalf("shape: %s", sres)
+	}
+	v := instance.NewValidator(s)
+
+	writeOrder := func(sections []any) {
+		t.Helper()
+		valid, vres := v.ValidateOne(ctx, "Order", instance.RawInstance{Properties: map[string]any{
+			"order_id": "o1",
+			"sections": sections,
+		}})
+		if !vres.OK() {
+			t.Fatalf("validate: %s", vres)
+		}
+		g := graph.New(s)
+		if ares := g.Add(ctx, valid); ares.Err() != nil {
+			t.Fatalf("graph.Add: %v", ares.Err())
+		}
+		queries, err := a.BatchNodeQueries(ctx, g.Snapshot(), shape)
+		if err != nil {
+			t.Fatalf("BatchNodeQueries: %v", err)
+		}
+		for _, q := range queries {
+			execWithParams(t, ctx, q.Statement, q.Params)
+		}
+	}
+	counts := func() (orders, sections, notes, secRels, noteRels int64) {
+		t.Helper()
+		orders = countNodes(t, ctx, "cw__Order")
+		sections = countNodes(t, ctx, "cw__Section")
+		notes = countNodes(t, ctx, "cw__Note")
+		rec := single(t, ctx, "MATCH (:cw__Order)-[r:SECTIONS]->(:cw__Section) RETURN count(r) AS n")
+		secRels, _ = rec["n"].(int64)
+		rec = single(t, ctx, "MATCH (:cw__Section)-[r:NOTES]->(:cw__Note) RETURN count(r) AS n")
+		noteRels, _ = rec["n"].(int64)
+		return orders, sections, notes, secRels, noteRels
+	}
+
+	writeOrder([]any{
+		map[string]any{
+			"section_id": "s1",
+			"notes": []any{
+				map[string]any{"body": "n1"},
+				map[string]any{"body": "n2"},
+			},
+		},
+		map[string]any{
+			"section_id": "s2",
+			"notes": []any{
+				map[string]any{"body": "n3"},
+			},
+		},
+	})
+	if o, sc, n, sr, nr := counts(); o != 1 || sc != 2 || n != 3 || sr != 2 || nr != 3 {
+		t.Fatalf("after the first write: orders=%d sections=%d notes=%d SECTIONS=%d NOTES=%d; want 1/2/3/2/3", o, sc, n, sr, nr)
+	}
+
+	// Re-write with one child and one grandchild removed: the subtree is
+	// REPLACED, so the dropped section and its notes are gone, not stale.
+	writeOrder([]any{
+		map[string]any{
+			"section_id": "s1",
+			"notes": []any{
+				map[string]any{"body": "n1"},
+			},
+		},
+	})
+	if o, sc, n, sr, nr := counts(); o != 1 || sc != 1 || n != 1 || sr != 1 || nr != 1 {
+		t.Errorf("after the reduced re-write: orders=%d sections=%d notes=%d SECTIONS=%d NOTES=%d; want 1/1/1/1/1", o, sc, n, sr, nr)
 	}
 }

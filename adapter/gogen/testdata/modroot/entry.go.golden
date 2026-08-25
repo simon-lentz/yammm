@@ -12,9 +12,7 @@ type Vendor struct {
 }
 
 type EDGE_Contract_supplied_by_Vendor struct {
-	Where struct {
-		VendorID string `json:"vendor_id"`
-	} `json:"where"`
+	TargetVendorID string `json:"_target_vendor_id"`
 }
 
 type Graph struct {
@@ -50,4 +48,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:7e406327d2278a7fbcd73d3b677fc213f0390a3a75a27a9473ae3150b932b023"
+const SchemaHash = "sha256:0609caf9681abcafa4a95614cd59e9f0390e270ed31f9c4575ef55b27182b140"

@@ -109,7 +109,6 @@
               "e": 168
             }
           },
-          "reverse_optional": true,
           "props": [
             {
               "name": "since",
@@ -179,7 +178,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 236,
             "e": 261

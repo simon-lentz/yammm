@@ -130,7 +130,6 @@
               "e": 203
             }
           },
-          "reverse_optional": true,
           "span": {
             "s": 177,
             "e": 203
@@ -152,7 +151,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 205,
             "e": 234
@@ -225,7 +223,6 @@
               "e": 334
             }
           },
-          "reverse_optional": true,
           "span": {
             "s": 315,
             "e": 334

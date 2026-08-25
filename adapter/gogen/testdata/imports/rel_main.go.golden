@@ -12,9 +12,7 @@ type Zone struct {
 }
 
 type EDGE_Site_in_zone_Zone struct {
-	Where struct {
-		Code string `json:"code"`
-	} `json:"where"`
+	TargetCode string `json:"_target_code"`
 }
 
 type Graph struct {
@@ -50,4 +48,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:f3a9d383afd4da2592769d541cd178d32d06a5910f9ee5788a0e51e716f9e06f"
+const SchemaHash = "sha256:19bb4fa027a74b822ee28fb802e323af93b8bcbc9f17715951a4f394ca129ad5"

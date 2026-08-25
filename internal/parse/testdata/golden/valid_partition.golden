@@ -72,6 +72,7 @@ adapter/neo4j/integration/testdata/roundtrip.yammm
 adapter/neo4j/testdata/abstract_types.yammm
 adapter/neo4j/testdata/aliases.yammm
 adapter/neo4j/testdata/basic.yammm
+adapter/neo4j/testdata/composed_nested.yammm
 adapter/neo4j/testdata/composite_pk.yammm
 adapter/neo4j/testdata/edge_mixed.yammm
 adapter/neo4j/testdata/edge_typed_props.yammm
@@ -152,4 +153,5 @@ schema/testdata/bench/scalars.yammm
 schema/testdata/bench/wide.yammm
 
 ## excluded (fails production parse by design; covered by its owning package tests)
+format/testdata/golden/removed_reverse.yammm	E_REVERSE_CLAUSE_REMOVED
 format/testdata/golden/semantically_invalid.yammm	E_INVALID_CONSTRAINT

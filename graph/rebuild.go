@@ -24,6 +24,11 @@ type SnapshotParts struct {
 	Edges      []EdgeParts
 	Duplicates []DuplicateParts
 	Unresolved []UnresolvedParts
+
+	// Attestation carries the loaded header's validity claim verbatim.
+	// RebuildSnapshot stores it without derivation: a rebuilt instance
+	// cannot prove validity, only the writing library's claim survives.
+	Attestation Attestation
 }
 
 // InstanceParts holds the data for a single instance. Composed children
@@ -243,7 +248,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		return cmpString(a.String(), b.String())
 	})
 
-	snap := newSnapshot(s, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK())
+	snap := newSnapshot(s, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK(), parts.Attestation)
 	return snap, diag.OK()
 }
 
@@ -317,9 +322,11 @@ func validatePartsIdentity(parts SnapshotParts, collector *diag.Collector) {
 	}
 }
 
-// rebuildInstance creates an Instance from InstanceParts, recursing into composed children.
+// rebuildInstance creates an Instance from InstanceParts, recursing into
+// composed children. Rebuilt instances never report Validated: the wire
+// carries the header attestation as a claim, not a per-instance proof.
 func rebuildInstance(ip InstanceParts) *Instance {
-	inst := newInstance(ip.TypeName, ip.TypeID, ip.PrimaryKey, ip.Properties, ip.Provenance)
+	inst := newInstance(ip.TypeName, ip.TypeID, ip.PrimaryKey, ip.Properties, ip.Provenance, false)
 
 	for relName, children := range ip.Composed {
 		for _, childParts := range children {

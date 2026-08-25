@@ -36,9 +36,9 @@
 //   - [github.com/simon-lentz/yammm/format]: Canonical .yammm formatting
 //   - [github.com/simon-lentz/yammm/lsp]: Language Server Protocol server
 //
-// Test helpers ([github.com/simon-lentz/yammm/instance/instancetest],
-// [github.com/simon-lentz/yammm/snapshot/snapshottest]) accompany the packages
-// they are named for.
+// Test helpers ([github.com/simon-lentz/yammm/snapshot/snapshottest],
+// and internal/instancetest for in-module suites) build fixtures for the
+// layer they are named for.
 //
 // Adapters depend on library packages; library packages never depend on adapters.
 //

@@ -4,7 +4,7 @@ type Address {
 	name  String required
 	age   Integer[0, _]
 	score Float[-90.0, 90.0]
-	--> REL (one) Target / owned_by (one)
+	--> REL (one) Target
 }
 
 type Email = Pattern["^.+@.+$"]

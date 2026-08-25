@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -62,6 +63,10 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 	TotalEdges      int
 	DuplicateCount  int
 	UnresolvedCount int
+
+	// Attestation is the header's validity claim, or nil for a document
+	// written before v0.15.0. See [github.com/simon-lentz/yammm/graph.Attestation].
+	Attestation *graph.Attestation
 
 	// File metadata.
 	FileSize        int64  // len(data)
@@ -147,6 +152,7 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
 		Types:               sd.typeRefs(),
+		Attestation:         sd.headerAttestation(),
 		InstanceCounts:      counts,
 		TotalInstances:      totalInstances,
 		TotalEdges:          totalEdges,
@@ -181,6 +187,10 @@ type HeaderInfo struct {
 	// Types array (adjacent to the header in the wire format; read in
 	// the same streaming pass by decodeHeader).
 	Types []TypeRef
+
+	// Attestation is the header's validity claim, or nil for a document
+	// written before v0.15.0. See [github.com/simon-lentz/yammm/graph.Attestation].
+	Attestation *graph.Attestation
 
 	// FileSize is the document's size in bytes, or zero when unknown. Three
 	// cases: [HeaderOnly] reports len(data); [ScanDir] reports the file's size
@@ -237,7 +247,7 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 		return nil, c.Result()
 	}
 
-	sd := newStreamDecoder(data, nil, loadConfig{})
+	sd := newStreamDecoder(data, nil, loadConfig{headerOnly: true})
 
 	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
@@ -259,6 +269,7 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
 		Types:               sd.typeRefs(),
+		Attestation:         sd.headerAttestation(),
 		FileSize:            int64(len(data)),
 	}
 
@@ -339,7 +350,7 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 	}
 
 	lr := newLimitReader(r, MaxHeaderSize)
-	sd := newStreamDecoderFromReader(lr, nil, loadConfig{})
+	sd := newStreamDecoderFromReader(lr, nil, loadConfig{headerOnly: true})
 
 	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
@@ -365,10 +376,21 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 		CreatedAt:           sd.header.CreatedAt,
 		Metadata:            sd.header.Metadata,
 		Types:               sd.typeRefs(),
+		Attestation:         sd.headerAttestation(),
 		// FileSize intentionally left 0: not known from an io.Reader.
 	}
 
 	return info, sd.collector.Result()
+}
+
+// headerAttestation converts the decoded header's claim for the Info
+// surfaces. Nil means the document was written before v0.15.0.
+func (sd *streamDecoder) headerAttestation() *graph.Attestation {
+	a := sd.header.Attestation
+	if a == nil {
+		return nil
+	}
+	return &graph.Attestation{Values: a.Values, Associations: a.Associations}
 }
 
 // CreatedAtTime parses the header's CreatedAt field.

@@ -61,10 +61,8 @@ type Log struct {
 }
 
 type EDGE_Log_on_Day struct {
-	At    Timestamp20060102150405 `json:"at"`
-	Where struct {
-		On Date `json:"on"`
-	} `json:"where"`
+	TargetOn Date                    `json:"_target_on"`
+	At       Timestamp20060102150405 `json:"at"`
 }
 
 type Graph struct {
@@ -99,4 +97,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:906f8c5db2e5d77dda9a25d90f97e8c92712ee109b4de6f3ed9ec13420c558d9"
+const SchemaHash = "sha256:651fa722965ecfbbde645375778f3b932bfdcb0ab63aa7d90ffd5407dd8cec56"

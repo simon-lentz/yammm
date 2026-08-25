@@ -135,6 +135,27 @@
 // snapshot in which two type identities render one type name, rather than
 // writing two types under one label.
 //
+// # Composition Ownership
+//
+// [Adapter.BatchNodeQueries] returns a phased slice, ordered by
+// [NodeQueryKind]: every node merge precedes every composition replace,
+// which precedes every composition create (parent-first by depth). The
+// ordering is a documented guarantee — executing the slice in order is
+// correct.
+//
+// A parent write replaces its composed subtree. The replace phase deletes
+// every part reachable from each written root through the schema's
+// composition closure — whether or not the snapshot carries children, so a
+// zero-child write still removes stale ones — and the create phase rebuilds
+// the tree from the snapshot's instances. Parts are created fresh after the
+// delete (SET c = ..., never SET c +=), so a stale property cannot survive
+// on a part the way it can on a merged root node.
+//
+// Part nodes carry their identity in the _composed_key property (see
+// [graph.FormatComposedKey]); for a keyless (many) part the key is
+// positional and NOT a stable identity across writes — safe under replace
+// semantics, which never match an existing part node by key.
+//
 // # Write-Once Derivation
 //
 // [ImmutableKeysFor] returns a type's @writeOnce-annotated properties (own and

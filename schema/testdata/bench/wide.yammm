@@ -27,7 +27,7 @@ type Organisation extends Identified {
 	headcount Integer[0, _]
 	retired_at Timestamp
 
-	--> operates (many) Facility / operated_by (one)
+	--> operates (many) Facility
 	--> partners (_:many) Organisation
 
 	@@index(country, currency)

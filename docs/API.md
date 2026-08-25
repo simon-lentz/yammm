@@ -488,7 +488,7 @@ finRes, err := ba.Finalize(ctx)
 
 New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK`, and `Finalize`'s check covers the union — a required association imported from the seed and still unresolved fails the batch with `E_UNRESOLVED_REQUIRED`. `Count()` reflects only records added through the assembler (seeded instances are not counted), and construction diagnostics are not carried over from the seed (`.ys`-loaded snapshots carry none by design; `Duplicates` and `Unresolved` are the persistent structural records, and both import). The seed snapshot must originate from the same schema — taken from a `Graph` bound to it, or loaded via `snapshot.Load` against it, which verifies structural compatibility. Every other contract — lifecycle, finalize barrier, validator-access modes, `FinalizeResult` — is identical to `NewBatchAssembler`.
 
-**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `instance/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict, parent and relation coordinates), provenance-presence-aware, and exact for every numeric property, dynamic type included: schema-aware float emission keeps `KindFloat` values `float64` across a marshal/load round trip, so an `int64`/`float64` mismatch is a real defect, not a wire artifact. One deliberate exception: a `float32` compares equal to the `float64` its 32-bit shortest wire form parses to, because `Load` materializes dynamic numerics as `int64` and `float64` only and the wire carries value fidelity, not width.
+**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `internal/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict, parent and relation coordinates), provenance-presence-aware, and exact for every numeric property, dynamic type included: schema-aware float emission keeps `KindFloat` values `float64` across a marshal/load round trip, so an `int64`/`float64` mismatch is a real defect, not a wire artifact. One deliberate exception: a `float32` compares equal to the `float64` its 32-bit shortest wire form parses to, because `Load` materializes dynamic numerics as `int64` and `float64` only and the wire carries value fidelity, not width.
 
 ### Seeding from a Snapshot
 
@@ -523,6 +523,8 @@ The `SnapshotParts` struct holds fully-resolved instances, edges, duplicates, an
 
 `DuplicateParts` states the conflict's address (`ConflictType`, `ConflictKey`) beside the rejected instance's own identity, plus `ParentType` / `ParentKey` / `Relation` for a composed-child duplicate: a root conflict resolves through the instance index, a composed conflict through the parent's relation slot, and an empty stated key addresses the slot's sole occupant. `RebuildSnapshot` rejects a zero `schema.TypeID` at any parts position with a Fatal `E_INTERNAL` naming the position and key — identity is total at this boundary.
 
+`SnapshotParts.Attestation` carries the loaded header's validity claim verbatim; a zero value reads as both false. Rebuilt instances always report `Validated() == false` — the claim rides the snapshot, not its instances.
+
 Most users should construct snapshots via `Graph.Add` + `Graph.Snapshot`. `RebuildSnapshot` exists for the `snapshot.Load` deserialization path and testing.
 
 ### Snapshot Methods
@@ -541,6 +543,7 @@ The `Snapshot` type provides read-only access to graph state:
 | `Duplicates()` | Duplicate primary key records (sorted) |
 | `Unresolved()` | Unresolved edge records (sorted) |
 | `Diagnostics()` | Construction diagnostics (call `OK()` / `HasErrors()` on the returned `diag.Result`) |
+| `Attestation()` | The validity claim the snapshot carries: `Values` (every root and composed child validator-built, at least one instance) and `Associations` (no `Required` unresolved record). A loaded snapshot carries the header's claim verbatim |
 
 ### Thread Safety
 
@@ -682,6 +685,8 @@ if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 | Option | Description |
 | ------ | ----------- |
 | `WithSkipIntegrityCheck` | Disable integrity hash verification (for debugging hand-edited files) |
+| `WithValueConformance` | Report a stored `Timestamp`/`Date`/`UUID` value that does not conform to its constraint (`W_SNAPSHOT_VALUE_NONCONFORMING`, Warning); not re-validation |
+| `WithRevalidation` | Run every instance — composed children, edges, invariants included — back through `instance.Validator`, reporting each finding at the given severity; `Error` refuses the load. A `Required` unresolved record draws `W_SNAPSHOT_UNRESOLVED_REQUIRED` |
 
 ### Snapshot Info
 
@@ -708,6 +713,9 @@ type SnapshotInfo struct {
     TotalEdges      int
     DuplicateCount  int
     UnresolvedCount int
+
+    // The header's validity claim, nil for a pre-v0.15.0 document.
+    Attestation *graph.Attestation
 
     // File metadata.
     FileSize        int64  // len(data)
@@ -738,6 +746,9 @@ type HeaderInfo struct {
 
     // Types table (adjacent to the header; read in the same streaming pass).
     Types []TypeRef
+
+    // The header's validity claim, nil for a pre-v0.15.0 document.
+    Attestation *graph.Attestation
 
     // File metadata. HeaderOnly reports len(data); ScanDir reports the
     // file's size on disk; a bare HeaderOnlyRead reports zero, because a
@@ -1094,6 +1105,8 @@ n, err := adapter.WriteObject(ctx, w, snap, writeOpts...)
 
 The object output is keyed by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — `MarshalObject` and `WriteObject` return an error naming both identities instead of merging the pair under one key.
 
+The writers emit exactly what the parse methods and `instance.Validator` accept (v0.15.0): an association renders as a `_target_<pk>`-keyed object with its edge properties beside the key fields — one object for `(one)`, an array of objects for `(many)` — with key components and edge-property values rendered through their constraints' canonical forms. A composition renders as an array of child objects for every multiplicity. Unresolved edges are not written; the round-trip identity is scoped to fully resolved graphs.
+
 ### Write Options
 
 | Option | Description |
@@ -1189,6 +1202,8 @@ shapes, result := adapter.ShapeForSchema(ctx, s)
 
 `ShapeForSchema` returns a `*GraphShape` whose `Types` map is keyed by `schema.TypeID` and holds `NodeShape` values. Each `NodeShape` describes the `Type` (original yammm type name), `Label` (fully qualified Neo4j label), `PrimaryKeys`, and `RequiredFields` for a type.
 
+The walk covers the whole import closure (`Schema.Closure()`): every member schema's types — imported and transitively imported ones included — get a shape, labelled under the declaring schema's name (v0.15.0). A label collision across closure members is refused with `E_NEO4J_LABEL_COLLISION`.
+
 ### Write Queries
 
 `BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes. Both refuse a snapshot in which two types render the same type name — they would share one node shape and one label — returning an error that names both identities and the rendered name.
@@ -1200,6 +1215,10 @@ edgeQueries, err := adapter.BatchEdgeQueries(ctx, snap, shapes, writeOpts...)
 ```
 
 Both return query structs (`BatchNodeQuery`, `BatchEdgeQuery`) with `Statement` and `Params` fields, ready for driver execution.
+
+`BatchNodeQueries` returns a phased, ordered slice; each query carries a `Kind` (`NodeMerge`, `CompositionReplace`, `CompositionCreate`). Every node merge precedes every composition replace, which precedes every composition create (parent-first by depth) — executing the slice in order is correct, and the ordering is a documented guarantee (v0.15.0).
+
+Composed children are written under ownership semantics: a parent write replaces its composed subtree. The replace phase deletes every part reachable from each written root through the schema's composition closure — whether or not the snapshot carries children — and the create phase rebuilds the tree fresh (`SET c = …`, never `+=`). Part nodes carry their identity in the `_composed_key` property (`graph.FormatComposedKey`); for a keyless `(many)` part the key is positional and not a stable identity across writes, which replace semantics make safe. Part DDL pairs with this: `UNIQUE` + `NOT NULL` on `_composed_key`, and no `UNIQUE`/`NODE KEY` on a part's declared primary key.
 
 `BuildBatchRelationshipMergeQuery` returns the UNWIND-batched relationship MERGE template those edge queries use internally. It is exported for a consumer resolving edges the adapter write path cannot see — one whose edges cross datasets, for instance — that wants the template without the surrounding param-and-chunk plumbing. It is a pure function: no execution, no driver dependency, no side effects.
 
@@ -1423,8 +1442,10 @@ adapter := csv.New(opts...)
 | Option | Description |
 | ------ | ----------- |
 | `WithTypeColumn` | Column name for type tagging (multi-type CSV) |
+| `WithListSeparator` | Separator for list elements and `(many)` relation groups (default `|`); read by both the parse and write sides |
+| `WithSchema` | The schema, so foreign-key cells coerce through the **target** type's primary-key constraints on parse |
 
-The delimiter is `,`, the first row is the header, and list values join on `|`.
+The delimiter is `,`, the first row is the header, and list values join on the list separator. A separator or backslash inside an element is backslash-escaped on write and unescaped on parse, so a `|`-bearing element survives the round trip.
 
 ### Parsing
 
@@ -1468,9 +1489,13 @@ CSV values are strings. The adapter uses schema constraint metadata to coerce va
 On the write side the adapter renders `Timestamp`, `Date` and `UUID` through their constraint, so a cell carries the same text the validator stores — including foreign-key columns, whose components render through the **target** type's primary-key constraints, and list elements, which render through the element constraint. A value the constraint cannot render is written as it arrived: an export has no diagnostic channel, and one malformed cell must not fail the file.
 - **List**: split by list separator, elements coerced recursively
 
+### Relation Columns
+
+An association renders as dotted columns (v0.15.0): one `<field>._target_<pk>` column per target key component and one `<field>.<prop>` column per declared edge property — the same `_target_` shape the JSON adapter and `instance.Validator` exchange. A `(many)` association zips its group across the list separator: segment `i` of every column in the group describes target `i`, and the segment counts must agree (`E_CSV_COERCE` names the relation on a mismatch). An all-empty group means the association is absent; an empty segment means that optional edge property is absent on that target. Edge properties are scalars by language rule (`E_LIST_ON_EDGE`), which is what makes zipping well-founded.
+
 ### Limitations
 
-CSV is a flat format. Compositions are not supported in parsing and are silently omitted during serialization. Foreign key columns are included in headers but require `instance.ValidInstance` values (not `graph.Instance`) to populate edge data.
+CSV is a flat format. Compositions are not supported in parsing and are silently omitted during serialization; the JSON adapter carries them.
 
 ## Go Source Generation
 
@@ -1515,7 +1540,7 @@ data, err := gogen.Marshal(s, gogen.WithPackageName("model"))
 
 The library stores a `Date` as `"2006-01-02"` and a custom-layout `Timestamp` through its declared layout, and the JSON adapter writes those strings; a bare `time.Time` cannot decode either. The generated `Date` and per-layout types embed `time.Time`, so every `time.Time` method is promoted (an existing `.Format(…)` caller compiles unchanged), a value is built as `Date{Time: t}`, and their `MarshalJSON`/`UnmarshalJSON` exchange the stored form. A per-layout type is named from its layout alone — `"Timestamp"` plus the layout's letters and digits, `Timestamp20060102150405` for `"2006-01-02 15:04:05"` — so an unrelated schema edit cannot move it; a schema type of that name keeps it and the generated type takes a numbered suffix. A default-layout `Timestamp` stays `time.Time`, whose own codec already exchanges RFC 3339 with nanoseconds, the stored form.
 
-A named DataType is rendered faithfully in every position — scalar field, list element (`List<FipsCode>` → `[]FipsCode`), edge property, and edge `Where`-block primary key — never degraded to its primitive. The generated temporal types are rendered in the same positions: `List<Date>` → `[]Date`, a `Date` primary key → `Date` in the `Where` block.
+A named DataType is rendered faithfully in every position — scalar field, list element (`List<FipsCode>` → `[]FipsCode`), edge property, and `_target_` primary-key field — never degraded to its primitive. The generated temporal types are rendered in the same positions: `List<Date>` → `[]Date`, a `Date` primary key → `Date` in its `_target_` field.
 
 ### Field and Relation Rules
 
@@ -1528,7 +1553,7 @@ A named DataType is rendered faithfully in every position — scalar field, list
 ### Structural Output
 
 - **Struct per type** (including abstract and part types). Schema doc-comments carry through verbatim.
-- **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — owner-qualified, so they are unique by construction — carrying the association's own properties plus a `Where` block of the target type's primary keys. (An association whose target type has no primary key is rejected: its `Where` block would be empty, leaving the edge unable to identify a target node.)
+- **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — owner-qualified, so they are unique by construction — carrying the target type's primary keys as `_target_<pk>` fields with the association's own properties beside them, the shape `adapter/json` exchanges. (An association whose target type has no primary key is rejected: the edge would have no `_target_` fields to identify a target node.)
 - **`Graph` aggregate** — one slice field per concrete type, tagged `,omitempty` and keyed by the `schema.TagForm` name the JSON adapter keys its object by: the bare type name for the entry schema's own types, `alias.Name` for a directly imported one, so `adapter/json` output decodes into it. A transitively imported type renders bare too; two of them sharing a name fall back to their unique Go type names as keys.
 - **`SerializedSources` / `SerializedEntry`** — the embedded-source surface, emitted identically by every generated package whatever its source count: `func SerializedSources() map[string][]byte` returns the whole closure keyed by module-root-relative path, and `const SerializedEntry` names the entry key. They read an unexported package-level store, so the identifiers a consumer sees do not vary with how many files a schema spans. A `SchemaHash` const carries the structural hash. The embedded source is **guaranteed re-loadable**: `Marshal` re-loads it at generation time and confirms the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
 

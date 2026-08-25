@@ -104,7 +104,9 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 			if !ok {
 				t.Fatalf("no links field on h1; got keys %v\n%s", inst, data)
 			}
-			// One edge under a (many) relation must still be an array of keys.
+			// One edge under a (many) relation must still be an array — of
+			// _target_ objects, whose field names only a resolved type can
+			// supply.
 			outer, ok := links.([]any)
 			if !ok {
 				t.Fatalf("links = %T, want []any", links)
@@ -112,8 +114,12 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 			if len(outer) == 0 {
 				t.Fatal("links is empty")
 			}
-			if _, nested := outer[0].([]any); !nested {
-				t.Errorf("a (many) relation holding one edge emitted a scalar FK: %v — the type did not resolve", links)
+			target, ok := outer[0].(map[string]any)
+			if !ok {
+				t.Fatalf("links[0] = %T, want a _target_ object — the type did not resolve", outer[0])
+			}
+			if target["_target_id"] != "h2" {
+				t.Errorf("links[0] = %v, want _target_id h2", target)
 			}
 		}
 	}

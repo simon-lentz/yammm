@@ -31,6 +31,9 @@ func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
 
 	byType := map[string]*BatchNodeQuery{}
 	for _, q := range queries {
+		if q.Kind != NodeMerge {
+			continue
+		}
 		switch {
 		case strings.Contains(q.Statement, "wo_test__Entity"):
 			byType["Entity"] = q
@@ -897,7 +900,7 @@ func TestBatchNodeQueries_HandBuiltShapeStillHonorsWriteOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, q := range queries {
-		if !strings.Contains(q.Statement, "wo_test__Entity") {
+		if q.Kind != NodeMerge || !strings.Contains(q.Statement, "wo_test__Entity") {
 			continue
 		}
 		if !strings.Contains(q.Statement, "ON CREATE SET") {

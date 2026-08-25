@@ -1176,112 +1176,6 @@ type Embedding {
 	}
 }
 
-func TestParse_AssociationReverse(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name            string
-		source          string
-		wantOK          bool
-		wantReverseName string
-	}{
-		{
-			name: "association with reverse name",
-			source: `schema "test"
-type Parent {}
-type Child {
-	--> parent Parent / children
-}`,
-			wantOK:          true,
-			wantReverseName: "children",
-		},
-		{
-			name: "association with reverse multiplicity",
-			source: `schema "test"
-type Parent {}
-type Child {
-	--> parent (one) Parent / children (many)
-}`,
-			wantOK:          true,
-			wantReverseName: "children",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			model, result := parseSchema(t, tt.source)
-			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
-				require.NotNil(t, model)
-
-				// Find the association relation
-				var rel *schema.TestRelationDecl
-				for _, typ := range model.Types {
-					for _, r := range typ.Relations {
-						if r.Kind == schema.RelationAssociation {
-							rel = r
-							break
-						}
-					}
-				}
-				require.NotNil(t, rel, "should have an association relation")
-				assert.Equal(t, tt.wantReverseName, rel.Backref)
-			} else {
-				assert.False(t, result.OK(), "expected errors")
-			}
-		})
-	}
-}
-
-func TestParse_CompositionReverse(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name            string
-		source          string
-		wantOK          bool
-		wantReverseName string
-	}{
-		{
-			name: "composition with reverse name",
-			source: `schema "test"
-part type Child {}
-type Parent {
-	*-> child Child / parent
-}`,
-			wantOK:          true,
-			wantReverseName: "parent",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			model, result := parseSchema(t, tt.source)
-			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
-				require.NotNil(t, model)
-
-				// Find the composition relation
-				var rel *schema.TestRelationDecl
-				for _, typ := range model.Types {
-					for _, r := range typ.Relations {
-						if r.Kind == schema.RelationComposition {
-							rel = r
-							break
-						}
-					}
-				}
-				require.NotNil(t, rel, "should have a composition relation")
-				assert.Equal(t, tt.wantReverseName, rel.Backref)
-			} else {
-				assert.False(t, result.OK(), "expected errors")
-			}
-		})
-	}
-}
-
 func TestParse_ImportPathVariations(t *testing.T) {
 	t.Parallel()
 
@@ -2022,137 +1916,6 @@ type Person {
 	}
 }
 
-func TestParse_CompositionReverseMultiplicity(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name            string
-		source          string
-		wantOK          bool
-		wantReverseMany bool
-	}{
-		{
-			name: "composition with reverse many",
-			source: `schema "test"
-part type Child {}
-type Parent {
-	*-> child Child / parent (many)
-}`,
-			wantOK:          true,
-			wantReverseMany: true,
-		},
-		{
-			name: "composition with reverse one",
-			source: `schema "test"
-part type Child {}
-type Parent {
-	*-> children (many) Child / parent (one)
-}`,
-			wantOK:          true,
-			wantReverseMany: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			model, result := parseSchema(t, tt.source)
-			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
-				require.NotNil(t, model)
-
-				// Find the composition relation
-				var rel *schema.TestRelationDecl
-				for _, typ := range model.Types {
-					for _, r := range typ.Relations {
-						if r.Kind == schema.RelationComposition {
-							rel = r
-							break
-						}
-					}
-				}
-				require.NotNil(t, rel, "should have a composition relation")
-				assert.Equal(t, tt.wantReverseMany, rel.ReverseMany)
-			} else {
-				assert.False(t, result.OK(), "expected errors")
-			}
-		})
-	}
-}
-
-func TestParse_AssociationReverseMultiplicity(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name                string
-		source              string
-		wantOK              bool
-		wantReverseOptional bool
-		wantReverseMany     bool
-	}{
-		{
-			name: "association reverse one:one",
-			source: `schema "test"
-type Parent {}
-type Child {
-	--> parent (one) Parent / children (one:one)
-}`,
-			wantOK:              true,
-			wantReverseOptional: false,
-			wantReverseMany:     false,
-		},
-		{
-			name: "association reverse one:many",
-			source: `schema "test"
-type Parent {}
-type Child {
-	--> parent (one) Parent / children (one:many)
-}`,
-			wantOK:              true,
-			wantReverseOptional: false,
-			wantReverseMany:     true,
-		},
-		{
-			name: "association reverse _:many",
-			source: `schema "test"
-type Parent {}
-type Child {
-	--> parent Parent / children (_:many)
-}`,
-			wantOK:              true,
-			wantReverseOptional: true,
-			wantReverseMany:     true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			model, result := parseSchema(t, tt.source)
-			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
-				require.NotNil(t, model)
-
-				// Find the association relation
-				var rel *schema.TestRelationDecl
-				for _, typ := range model.Types {
-					for _, r := range typ.Relations {
-						if r.Kind == schema.RelationAssociation {
-							rel = r
-							break
-						}
-					}
-				}
-				require.NotNil(t, rel, "should have an association relation")
-				assert.Equal(t, tt.wantReverseOptional, rel.ReverseOptional, "ReverseOptional mismatch")
-				assert.Equal(t, tt.wantReverseMany, rel.ReverseMany, "ReverseMany mismatch")
-			} else {
-				assert.False(t, result.OK(), "expected errors")
-			}
-		})
-	}
-}
-
 func TestParse_InvariantScenarios(t *testing.T) {
 	t.Parallel()
 
@@ -2616,9 +2379,9 @@ type User extends Entity {
 	age Age
 	status Status required
 	/* User's primary address */
-	*-> address Address / user
+	*-> address Address
 	/* Friends association */
-	--> friends (many) User / friends {
+	--> friends (many) User {
 		since Date
 	}
 	! "Valid age" age >= 0
@@ -2628,7 +2391,7 @@ type User extends Entity {
 /* Organization type */
 type Organization extends Entity {
 	name String[1, 200] required
-	--> members (many) User / organization {
+	--> members (many) User {
 		role String
 		joinedAt Timestamp
 	}
@@ -2985,56 +2748,6 @@ type Foo {
 	require.Len(t, model.Imports, 2)
 	assert.Equal(t, "types", model.Imports[0].Alias)
 	assert.Equal(t, "parts", model.Imports[1].Alias)
-}
-
-func TestParse_AssociationWithSimpleBackref(t *testing.T) {
-	t.Parallel()
-
-	source := `schema "test"
-type Parent {}
-type Child {
-	--> parent Parent / children
-}`
-
-	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
-	require.NotNil(t, model)
-
-	// Find the Child type
-	for _, typ := range model.Types {
-		if typ.Name == "Child" {
-			require.Len(t, typ.Relations, 1)
-			rel := typ.Relations[0]
-			assert.Equal(t, "parent", rel.Name)
-			assert.Equal(t, "children", rel.Backref)
-		}
-	}
-}
-
-func TestParse_CompositionWithBackref(t *testing.T) {
-	t.Parallel()
-
-	source := `schema "test"
-part type Child {}
-type Parent {
-	*-> children (many) Child / owner (one)
-}`
-
-	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
-	require.NotNil(t, model)
-
-	// Find the Parent type
-	for _, typ := range model.Types {
-		if typ.Name == "Parent" {
-			require.Len(t, typ.Relations, 1)
-			rel := typ.Relations[0]
-			assert.Equal(t, "children", rel.Name)
-			assert.True(t, rel.Many)
-			assert.Equal(t, "owner", rel.Backref)
-			assert.False(t, rel.ReverseMany)
-		}
-	}
 }
 
 func TestParse_InvariantWithChainedMethod(t *testing.T) {
@@ -3501,4 +3214,26 @@ type Source {
 	_, result := parseSchema(t, source)
 	// This is valid syntax - exercises the using clause path
 	_ = result
+}
+
+// TestParse_ReverseClauseRemoved pins the removal at the schema load
+// surface: a schema carrying the clause fails to load with the named code,
+// never a bare syntax error.
+func TestParse_ReverseClauseRemoved(t *testing.T) {
+	t.Parallel()
+
+	const source = `schema "test"
+
+type Parent {
+	id String primary
+	--> CHILD (one) Child / parent (many)
+}
+
+type Child {
+	id String primary
+}`
+	_, result := schema.LoadString(t.Context(), source, "test.yammm")
+	require.True(t, result.HasErrors(), "a schema carrying the reverse clause must fail to load")
+	assert.True(t, result.HasCode(diag.E_REVERSE_CLAUSE_REMOVED),
+		"want E_REVERSE_CLAUSE_REMOVED, got: %s", result.String())
 }

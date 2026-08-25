@@ -59,10 +59,12 @@ func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opt
 		opt(cfg)
 	}
 
-	output := a.buildOutput(result)
+	output, err := a.buildOutput(result)
+	if err != nil {
+		return nil, err
+	}
 
 	var data []byte
-	var err error
 	if cfg.indent != "" {
 		data, err = json.MarshalIndent(output, "", cfg.indent)
 	} else {
@@ -111,7 +113,7 @@ func renderedNameCollision(snap *graph.Snapshot) error {
 }
 
 // buildOutput constructs the JSON-serializable output map from a graph snapshot.
-func (a *Adapter) buildOutput(result *graph.Snapshot) map[string]any {
+func (a *Adapter) buildOutput(result *graph.Snapshot) (map[string]any, error) {
 	output := make(map[string]any)
 	s := result.Schema()
 
@@ -122,14 +124,17 @@ func (a *Adapter) buildOutput(result *graph.Snapshot) map[string]any {
 		serialized := make([]map[string]any, 0, len(instances))
 
 		for _, inst := range instances {
-			obj := serializeInstance(inst, result, s)
+			obj, err := serializeInstance(inst, result, s)
+			if err != nil {
+				return nil, err
+			}
 			serialized = append(serialized, obj)
 		}
 
 		output[typeName] = serialized
 	}
 
-	return output
+	return output, nil
 }
 
 // lookupType resolves a TypeID to its schema.Type across the entry schema's
@@ -145,10 +150,12 @@ func lookupType(s *schema.Schema, id schema.TypeID) (*schema.Type, bool) {
 	return s.TypeByID(id)
 }
 
-// serializeInstance converts a graph.Instance to a JSON-serializable map.
-// Uses schema to determine cardinality (scalar vs array) and field names.
+// serializeInstance converts a graph.Instance to a JSON-serializable map,
+// in the shapes the adapter's own parser accepts: an association target is
+// a _target_-keyed object with its edge properties beside the components,
+// and a composition is an array for every multiplicity.
 // Edge lookup uses snap.EdgesFrom for O(1) per-instance access.
-func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schema) map[string]any {
+func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schema) (map[string]any, error) {
 	obj := make(map[string]any)
 
 	// Lookup the type for schema-based serialization
@@ -159,7 +166,7 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 		obj[name] = unwrapValue(val, propertyConstraint(schemaType, name))
 	}
 
-	// 2. Add FK references for associations using the snapshot edge index.
+	// 2. Add association targets using the snapshot edge index.
 	// EdgesFrom returns edges already sorted by (relation, targetType, targetKey).
 	allEdges := snap.EdgesFrom(inst)
 	if len(allEdges) > 0 {
@@ -177,63 +184,98 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 		for _, relName := range relOrder {
 			edges := byRel[relName]
 
-			// Determine field name and cardinality from schema
 			fieldName := relName // fallback
-			isMany := len(edges) > 1
-			// The components belong to the association's TARGET type, so
-			// their constraints are one hop away rather than on this type.
-			var keyConstraints []schema.Constraint
+			var rel *schema.Relation
 			if hasType {
-				if rel, ok := schemaType.Relation(relName); ok {
-					fieldName = rel.FieldName()
-					isMany = rel.IsMany()
-					keyConstraints = targetKeyConstraints(s, rel)
+				if r, ok := schemaType.Relation(relName); ok {
+					rel = r
+					fieldName = r.FieldName()
 				}
 			}
 
-			if isMany {
-				// Many cardinality: array of FK arrays
-				fks := make([]any, len(edges))
-				for i, e := range edges {
-					fks[i] = canonicalKey(e.Target().PrimaryKey(), keyConstraints)
+			objs := make([]any, len(edges))
+			for i, e := range edges {
+				target, err := edgeTargetObject(s, rel, e)
+				if err != nil {
+					return nil, err
 				}
-				obj[fieldName] = fks
-			} else if len(edges) > 0 {
-				// One cardinality: FK as array of key components
-				obj[fieldName] = canonicalKey(edges[0].Target().PrimaryKey(), keyConstraints)
+				objs[i] = target
+			}
+
+			// A resolvable (one) relation carrying one edge emits the single
+			// object the parser expects. Everything else — (many), an
+			// unresolvable relation name, or a (one) carrying several edges
+			// (a bypass-built graph) — emits the array, the shape that does
+			// not invent a multiplicity the schema cannot confirm.
+			if rel != nil && !rel.IsMany() && len(objs) == 1 {
+				obj[fieldName] = objs[0]
+			} else {
+				obj[fieldName] = objs
 			}
 		}
 	}
 
-	// 3. Add composed children in sorted order.
+	// 3. Add composed children in sorted order, always as an array — the
+	// parser requires one for every composition, (one) included.
 	// ComposedRelations returns sorted relation names; Composed returns a defensive copy.
 	for _, relName := range inst.ComposedRelations() {
 		children := inst.Composed(relName)
 
-		// Determine field name and cardinality from schema
 		fieldName := relName // fallback
-		isMany := len(children) > 1
 		if hasType {
 			if rel, ok := schemaType.Relation(relName); ok {
 				fieldName = rel.FieldName()
-				isMany = rel.IsMany()
 			}
 		}
 
-		if isMany {
-			// Many cardinality: array of objects
-			arr := make([]map[string]any, len(children))
-			for i, child := range children {
-				arr[i] = serializeInstance(child, snap, s)
+		arr := make([]map[string]any, len(children))
+		for i, child := range children {
+			m, err := serializeInstance(child, snap, s)
+			if err != nil {
+				return nil, err
 			}
-			obj[fieldName] = arr
-		} else if len(children) > 0 {
-			// One cardinality: inline object
-			obj[fieldName] = serializeInstance(children[0], snap, s)
+			arr[i] = m
 		}
+		obj[fieldName] = arr
 	}
 
-	return obj
+	return obj, nil
+}
+
+// edgeTargetObject renders one resolved edge as the object the parser
+// accepts: _target_<pk> components in the target's canonical stored form,
+// with the edge properties beside them. The target type supplies the field
+// names, so an unresolvable target is an error rather than a shape this
+// adapter's own parser rejects.
+func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (map[string]any, error) {
+	target, ok := lookupType(s, e.Target().TypeID())
+	if !ok {
+		return nil, fmt.Errorf("json adapter: cannot render edge %q: target type %s does not resolve, so its _target_ field names are unknowable",
+			e.Relation(), e.Target().TypeID())
+	}
+	pks := target.PrimaryKeysSlice()
+	key := e.Target().PrimaryKey()
+	if key.Len() != len(pks) {
+		return nil, fmt.Errorf("json adapter: edge %q target key has %d components; type %s declares %d",
+			e.Relation(), key.Len(), e.Target().TypeID(), len(pks))
+	}
+
+	out := make(map[string]any, len(pks))
+	for i, pk := range pks {
+		// "_target_" is the parser's reserved prefix; no declared property
+		// can begin with an underscore, so the namespaces cannot collide.
+		out["_target_"+pk.Name()] = canonicalOrRaw(key.Get(i).Unwrap(), pk.Constraint())
+	}
+	for name, val := range e.Properties().SortedRange() {
+		var c schema.Constraint
+		if rel != nil {
+			if p, ok := rel.Property(name); ok {
+				c = p.Constraint()
+			}
+		}
+		out[name] = unwrapValue(val, c)
+	}
+	return out, nil
 }
 
 // unwrapValue recursively converts an immutable.Value to a JSON-compatible any,
@@ -264,46 +306,6 @@ func unwrapValue(v immutable.Value, c schema.Constraint) any {
 
 	// Primitives: rendered through the constraint.
 	return canonicalOrRaw(v.Unwrap(), c)
-}
-
-// canonicalKey renders a foreign key's components in the form the target
-// type's primary key stores, so the FK agrees with the target instance's own
-// key rather than being the one surface that does not.
-func canonicalKey(key immutable.Key, keyConstraints []schema.Constraint) []any {
-	parts := key.Clone()
-	for i, p := range parts {
-		parts[i] = canonicalOrRaw(p, constraintAt(keyConstraints, i))
-	}
-	return parts
-}
-
-// targetKeyConstraints returns an association target's primary-key constraints
-// in component order. Nil when the target does not resolve, which renders the
-// components as they arrived.
-func targetKeyConstraints(s *schema.Schema, rel *schema.Relation) []schema.Constraint {
-	if s == nil || rel == nil {
-		return nil
-	}
-	target, ok := lookupType(s, rel.TargetID())
-	if !ok {
-		return nil
-	}
-	pks := target.PrimaryKeysSlice()
-	out := make([]schema.Constraint, len(pks))
-	for i, p := range pks {
-		out[i] = p.Constraint()
-	}
-	return out
-}
-
-// constraintAt matches a key component to its constraint positionally. A
-// length mismatch yields nil rather than binding a component to the wrong
-// constraint.
-func constraintAt(cs []schema.Constraint, i int) schema.Constraint {
-	if i >= len(cs) {
-		return nil
-	}
-	return cs[i]
 }
 
 // propertyConstraint returns a declared property's constraint, or nil for a

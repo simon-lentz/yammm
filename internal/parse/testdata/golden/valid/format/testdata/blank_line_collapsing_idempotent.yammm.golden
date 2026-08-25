@@ -97,7 +97,6 @@
               "e": 196
             }
           },
-          "reverse_optional": true,
           "props": [
             {
               "name": "weight",

@@ -22,27 +22,19 @@ type Shared struct {
 }
 
 type EDGE_Top_to_left_Left struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type EDGE_Top_to_right_Right struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type EDGE_Left_to_shared_Shared struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type EDGE_Right_to_shared_Shared struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type Graph struct {
@@ -82,4 +74,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:5ac766bf0172eb5a11cbde3a3001996de0f6285c76048f1ebc453565e7314098"
+const SchemaHash = "sha256:3c3b216b69ba07decf647d38778e56a9db295c6d4dbe966c6b0450a346d8c163"

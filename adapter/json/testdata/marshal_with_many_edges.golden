@@ -12,12 +12,12 @@
   "Person": [
     {
       "employers": [
-        [
-          "c1"
-        ],
-        [
-          "c2"
-        ]
+        {
+          "_target_id": "c1"
+        },
+        {
+          "_target_id": "c2"
+        }
       ],
       "id": "p1",
       "name": "Alice"

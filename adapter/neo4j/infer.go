@@ -60,8 +60,14 @@ func (a *Adapter) InferSchema(
 		// primary key, scaffolding a schema that fails to load on E_NO_PRIMARY_KEY.
 		switch canonicalRemoteConstraintType(rc.Type) {
 		case "UNIQUENESS":
-			for _, prop := range rc.Properties {
-				it.markPrimaryKey(prop)
+			// A lone UNIQUE on the composed-key pseudo-property is the DDL
+			// this adapter writes for a part type, never a declared key.
+			if len(rc.Properties) == 1 && rc.Properties[0] == composedKeyProp {
+				it.isPart = true
+			} else {
+				for _, prop := range rc.Properties {
+					it.markPrimaryKey(prop)
+				}
 			}
 		case "NODE_KEY":
 			for _, prop := range rc.Properties {
@@ -163,6 +169,7 @@ func reverseNeo4jType(propertyType string) (yammmType string, exact bool) {
 
 type inferredType struct {
 	name       string
+	isPart     bool
 	properties []*inferredProperty
 	relations  []*inferredRelation
 	propIndex  map[string]*inferredProperty
@@ -269,7 +276,14 @@ func generateDSL(schemaName string, types map[string]*inferredType) string {
 	for _, typeName := range typeNames {
 		it := types[typeName]
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "type %s {\n", typeName)
+		head := "type"
+		if it.isPart {
+			head = "part type"
+		}
+		fmt.Fprintf(&b, "%s %s {\n", head, typeName)
+		if it.isPart {
+			fmt.Fprintf(&b, "    // TODO: declare the owning composition (*-> NAME (_:many) %s) on a parent type; node DDL does not record it.\n", typeName)
+		}
 
 		// Sort properties: primary keys first, then alphabetically.
 		props := slices.Clone(it.properties)
@@ -284,6 +298,11 @@ func generateDSL(schemaName string, types map[string]*inferredType) string {
 		})
 
 		for _, p := range props {
+			// The composed-key pseudo-property is write-surface bookkeeping,
+			// not a declarable property (no declared name can start with _).
+			if p.name == composedKeyProp {
+				continue
+			}
 			modifiers := ""
 			if p.primaryKey {
 				modifiers += " primary"

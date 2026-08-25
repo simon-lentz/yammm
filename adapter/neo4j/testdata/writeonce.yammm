@@ -20,5 +20,5 @@ type Plain {
 part type Note {
     note_id String    primary
     body    String    required
-    added   Timestamp required @writeOnce
+    added   Timestamp required
 }

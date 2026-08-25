@@ -10,7 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/instance/instancetest"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -144,10 +144,10 @@ func TestMarshalObject_CanonicalizesForeignKeyComponents(t *testing.T) {
 	if !strings.Contains(got, `"at":"`+canonicalLayout+`"`) {
 		t.Fatalf("Station's own key property did not render through its layout\ngot: %s", got)
 	}
-	if !strings.Contains(got, `"feed":["`+canonicalLayout+`"]`) {
+	if !strings.Contains(got, `"feed":{"_target_at":"`+canonicalLayout+`"}`) {
 		t.Errorf("the foreign key did not render through the target's layout\ngot: %s", got)
 	}
-	if strings.Contains(got, `"feed":["`+canonicalRFC3339+`"]`) {
+	if strings.Contains(got, `"_target_at":"`+canonicalRFC3339+`"`) {
 		t.Errorf("the foreign key rendered as RFC 3339 rather than the target's layout\ngot: %s", got)
 	}
 	if strings.Contains(got, canonicalGoPrint) {

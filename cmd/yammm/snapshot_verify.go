@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -26,6 +27,8 @@ Warnings are rendered to stderr.`,
 	}
 
 	cmd.Flags().Bool("skip-integrity-check", false, "skip integrity hash verification (for hand-edited files)")
+	cmd.Flags().Bool("value-conformance", false, "report stored Timestamp/Date/UUID values that do not conform to their constraints")
+	cmd.Flags().Bool("revalidate", false, "run every instance back through the validator and report findings as warnings")
 
 	return cmd
 }
@@ -34,6 +37,8 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	formatStr, _ := cmd.Flags().GetString("format")
 	noColor, _ := cmd.Flags().GetBool("no-color")
 	skipIntegrity, _ := cmd.Flags().GetBool("skip-integrity-check")
+	valueConformance, _ := cmd.Flags().GetBool("value-conformance")
+	revalidate, _ := cmd.Flags().GetBool("revalidate")
 
 	outputFormat, err := cli.ParseOutputFormat(formatStr)
 	if err != nil {
@@ -67,6 +72,12 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	var opts []snapshot.LoadOption
 	if skipIntegrity {
 		opts = append(opts, snapshot.WithSkipIntegrityCheck())
+	}
+	if valueConformance {
+		opts = append(opts, snapshot.WithValueConformance())
+	}
+	if revalidate {
+		opts = append(opts, snapshot.WithRevalidation(diag.Warning))
 	}
 
 	// Verify.

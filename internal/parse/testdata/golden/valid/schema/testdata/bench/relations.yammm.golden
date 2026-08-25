@@ -60,49 +60,43 @@
           },
           "optional": true,
           "many": true,
-          "backref": "supplied_by",
-          "backref_span": {
-            "s": 221,
-            "e": 232
-          },
           "span": {
             "s": 193,
-            "e": 238
+            "e": 218
           }
         },
         {
           "kind": "comp",
           "name": "bays",
           "name_span": {
-            "s": 244,
-            "e": 248
+            "s": 224,
+            "e": 228
           },
           "target": {
             "name": "Bay",
             "span": {
-              "s": 256,
-              "e": 259
+              "s": 236,
+              "e": 239
             }
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
-            "s": 240,
-            "e": 259
+            "s": 220,
+            "e": 239
           }
         }
       ],
       "span": {
         "s": 133,
-        "e": 261
+        "e": 241
       }
     },
     {
       "name": "Depot",
       "name_span": {
-        "s": 268,
-        "e": 273
+        "s": 248,
+        "e": 253
       },
       "props": [
         {
@@ -110,14 +104,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 280,
-              "e": 286
+              "s": 260,
+              "e": 266
             }
           },
           "primary": true,
           "span": {
-            "s": 277,
-            "e": 294
+            "s": 257,
+            "e": 274
           }
         },
         {
@@ -125,14 +119,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 301,
-              "e": 307
+              "s": 281,
+              "e": 287
             }
           },
           "required": true,
           "span": {
-            "s": 296,
-            "e": 316
+            "s": 276,
+            "e": 296
           }
         },
         {
@@ -144,14 +138,14 @@
               "2"
             ],
             "span": {
-              "s": 325,
-              "e": 337
+              "s": 305,
+              "e": 317
             }
           },
           "required": true,
           "span": {
-            "s": 318,
-            "e": 346
+            "s": 298,
+            "e": 326
           }
         }
       ],
@@ -160,75 +154,72 @@
           "kind": "assoc",
           "name": "nearest",
           "name_span": {
-            "s": 353,
-            "e": 360
+            "s": 333,
+            "e": 340
           },
           "target": {
             "name": "Warehouse",
             "span": {
-              "s": 367,
-              "e": 376
+              "s": 347,
+              "e": 356
             }
           },
-          "reverse_optional": true,
           "span": {
-            "s": 349,
-            "e": 376
+            "s": 329,
+            "e": 356
           }
         },
         {
           "kind": "assoc",
           "name": "peers",
           "name_span": {
-            "s": 382,
-            "e": 387
+            "s": 362,
+            "e": 367
           },
           "target": {
             "name": "Depot",
             "span": {
-              "s": 397,
-              "e": 402
+              "s": 377,
+              "e": 382
             }
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
-            "s": 378,
-            "e": 402
+            "s": 358,
+            "e": 382
           }
         },
         {
           "kind": "assoc",
           "name": "carries",
           "name_span": {
-            "s": 408,
-            "e": 415
+            "s": 388,
+            "e": 395
           },
           "target": {
             "name": "Item",
             "span": {
-              "s": 423,
-              "e": 427
+              "s": 403,
+              "e": 407
             }
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "props": [
             {
               "name": "quantity",
               "constraint": {
                 "kind": "Integer",
                 "span": {
-                  "s": 441,
-                  "e": 448
+                  "s": 421,
+                  "e": 428
                 }
               },
               "required": true,
               "span": {
-                "s": 432,
-                "e": 457
+                "s": 412,
+                "e": 437
               }
             },
             {
@@ -236,13 +227,13 @@
               "constraint": {
                 "kind": "Integer",
                 "span": {
-                  "s": 469,
-                  "e": 476
+                  "s": 449,
+                  "e": 456
                 }
               },
               "span": {
-                "s": 460,
-                "e": 476
+                "s": 440,
+                "e": 456
               }
             },
             {
@@ -250,53 +241,52 @@
               "constraint": {
                 "kind": "Timestamp",
                 "span": {
-                  "s": 488,
-                  "e": 497
+                  "s": 468,
+                  "e": 477
                 }
               },
               "span": {
-                "s": 479,
-                "e": 497
+                "s": 459,
+                "e": 477
               }
             }
           ],
           "span": {
-            "s": 404,
-            "e": 500
+            "s": 384,
+            "e": 480
           }
         },
         {
           "kind": "comp",
           "name": "docks",
           "name_span": {
-            "s": 506,
-            "e": 511
+            "s": 486,
+            "e": 491
           },
           "target": {
             "name": "Dock",
             "span": {
-              "s": 516,
-              "e": 520
+              "s": 496,
+              "e": 500
             }
           },
           "optional": true,
-          "reverse_optional": true,
           "span": {
-            "s": 502,
-            "e": 520
+            "s": 482,
+            "e": 500
           }
         }
       ],
       "span": {
-        "s": 263,
-        "e": 522
+        "s": 243,
+        "e": 502
       }
     },
     {
       "name": "Bay",
       "name_span": {
-        "s": 534,
-        "e": 537
+        "s": 514,
+        "e": 517
       },
       "part": true,
       "props": [
@@ -305,14 +295,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 544,
-              "e": 550
+              "s": 524,
+              "e": 530
             }
           },
           "primary": true,
           "span": {
-            "s": 541,
-            "e": 558
+            "s": 521,
+            "e": 538
           }
         },
         {
@@ -320,27 +310,27 @@
           "constraint": {
             "kind": "Integer",
             "span": {
-              "s": 569,
-              "e": 576
+              "s": 549,
+              "e": 556
             }
           },
           "required": true,
           "span": {
-            "s": 560,
-            "e": 585
+            "s": 540,
+            "e": 565
           }
         }
       ],
       "span": {
-        "s": 524,
-        "e": 587
+        "s": 504,
+        "e": 567
       }
     },
     {
       "name": "Dock",
       "name_span": {
-        "s": 599,
-        "e": 603
+        "s": 579,
+        "e": 583
       },
       "part": true,
       "props": [
@@ -349,14 +339,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 610,
-              "e": 616
+              "s": 590,
+              "e": 596
             }
           },
           "primary": true,
           "span": {
-            "s": 607,
-            "e": 624
+            "s": 587,
+            "e": 604
           }
         },
         {
@@ -364,26 +354,26 @@
           "constraint": {
             "kind": "Float",
             "span": {
-              "s": 632,
-              "e": 637
+              "s": 612,
+              "e": 617
             }
           },
           "span": {
-            "s": 626,
-            "e": 637
+            "s": 606,
+            "e": 617
           }
         }
       ],
       "span": {
-        "s": 589,
-        "e": 639
+        "s": 569,
+        "e": 619
       }
     },
     {
       "name": "Item",
       "name_span": {
-        "s": 646,
-        "e": 650
+        "s": 626,
+        "e": 630
       },
       "props": [
         {
@@ -391,14 +381,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 658,
-              "e": 664
+              "s": 638,
+              "e": 644
             }
           },
           "primary": true,
           "span": {
-            "s": 654,
-            "e": 672
+            "s": 634,
+            "e": 652
           }
         },
         {
@@ -410,14 +400,14 @@
               "200"
             ],
             "span": {
-              "s": 680,
-              "e": 694
+              "s": 660,
+              "e": 674
             }
           },
           "required": true,
           "span": {
-            "s": 674,
-            "e": 703
+            "s": 654,
+            "e": 683
           }
         },
         {
@@ -429,13 +419,13 @@
               "_"
             ],
             "span": {
-              "s": 712,
-              "e": 725
+              "s": 692,
+              "e": 705
             }
           },
           "span": {
-            "s": 705,
-            "e": 725
+            "s": 685,
+            "e": 705
           }
         }
       ],
@@ -444,47 +434,45 @@
           "kind": "assoc",
           "name": "replaces",
           "name_span": {
-            "s": 732,
-            "e": 740
+            "s": 712,
+            "e": 720
           },
           "target": {
             "name": "Item",
             "span": {
-              "s": 751,
-              "e": 755
+              "s": 731,
+              "e": 735
             }
           },
-          "reverse_optional": true,
           "span": {
-            "s": 728,
-            "e": 755
+            "s": 708,
+            "e": 735
           }
         },
         {
           "kind": "assoc",
           "name": "variants",
           "name_span": {
-            "s": 761,
-            "e": 769
+            "s": 741,
+            "e": 749
           },
           "target": {
             "name": "Item",
             "span": {
-              "s": 781,
-              "e": 785
+              "s": 761,
+              "e": 765
             }
           },
           "many": true,
-          "reverse_optional": true,
           "span": {
-            "s": 757,
-            "e": 785
+            "s": 737,
+            "e": 765
           }
         }
       ],
       "span": {
-        "s": 641,
-        "e": 787
+        "s": 621,
+        "e": 767
       }
     }
   ]

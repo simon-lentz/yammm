@@ -9,6 +9,10 @@ part type Reading {
 	on Date
 }
 
+part type Casing {
+	serial String primary
+}
+
 type Sensor {
 	id             String primary
 	installed      Date required
@@ -22,4 +26,8 @@ type Sensor {
 	days           List<Date>
 	walls          List<Timestamp["2006-01-02 15:04:05"]>
 	*-> HAS_READING (many) Reading
+	*-> IN_CASING (one) Casing
+	--> FEEDS (one) Sensor {
+		since Timestamp["2006-01-02 15:04:05"]
+	}
 }

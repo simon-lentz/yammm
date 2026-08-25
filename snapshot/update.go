@@ -235,6 +235,9 @@ func UpdateMetadata(
 		Features:      features,
 		CreatedAt:     createdAt,
 		Metadata:      meta,
+		// Verbatim, nil included: fabricating a claim on a pre-v0.15.0
+		// document would attest to a body nothing here read.
+		Attestation: sd.header.Attestation,
 	}
 
 	bodySuffix := data[bodyOffset:]

@@ -329,7 +329,7 @@ func (b *builder) addAssociation(nt *TypeDecl, a *assocNode) {
 		Span:     b.spanOf(a.Pos, a.EndPos),
 	}
 	rel.Optional, rel.Many = multiplicityOf(a.Mult)
-	b.applyReverse(rel, a.Reverse)
+	b.rejectReverse(a.Reverse)
 	if a.Body != nil {
 		for i := range a.Body.Props {
 			rel.Properties = append(rel.Properties, b.edgeProp(&a.Body.Props[i]))
@@ -348,22 +348,20 @@ func (b *builder) addComposition(nt *TypeDecl, c *compNode) {
 		Span:     b.spanOf(c.Pos, c.EndPos),
 	}
 	rel.Optional, rel.Many = multiplicityOf(c.Mult)
-	b.applyReverse(rel, c.Reverse)
+	b.rejectReverse(c.Reverse)
 	nt.Relations = append(nt.Relations, rel)
 }
 
-// applyReverse fills the backward direction. With no reverse written, the edge
-// is reachable optionally and singly from the far side; a written multiplicity
-// the grammar refused takes that same default, and the syntax diagnostic on the
-// leftover text is what tells the author it was refused.
-func (b *builder) applyReverse(rel *Relation, rev *reverseNode) {
+// rejectReverse names the removed reverse clause at its own span. The
+// grammar keeps the recognizer for exactly this diagnostic: without it, a
+// schema carrying the clause draws a bare unexpected-token error.
+func (b *builder) rejectReverse(rev *reverseNode) {
 	if rev == nil {
-		rel.ReverseOptional, rel.ReverseMany = true, false
 		return
 	}
-	rel.Backref = rev.Name.value()
-	rel.BackrefSpan = b.spanOf(rev.Name.Pos, rev.Name.EndPos)
-	rel.ReverseOptional, rel.ReverseMany = multiplicityOf(rev.Mult)
+	b.reportf(diag.E_REVERSE_CLAUSE_REMOVED, b.spanOf(rev.Name.Pos, rev.Name.EndPos),
+		"the reverse clause was removed in v0.15.0; delete %q and its multiplicity (see docs/VERSIONING.md)",
+		"/ "+rev.Name.value())
 }
 
 func (b *builder) edgeProp(p *relPropNode) *Property {

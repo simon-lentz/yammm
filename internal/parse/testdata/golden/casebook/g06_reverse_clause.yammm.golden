@@ -44,7 +44,6 @@
             }
           },
           "optional": true,
-          "reverse_optional": true,
           "span": {
             "s": 50,
             "e": 60

@@ -26,7 +26,6 @@
               "e": 45
             }
           },
-          "reverse_optional": true,
           "props": [
             {
               "name": "weight",

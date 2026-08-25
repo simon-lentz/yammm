@@ -20,9 +20,12 @@ import (
 // used when the data was originally validated. Load verifies compatibility
 // using [schema.StructuralHash].
 //
-// Load does not re-validate instance data. The persisted snapshot is
-// assumed to contain valid data. However, Load performs structural
-// validation of the .ys format itself.
+// Load does not re-validate instance data by default: it returns what was
+// written, and the document's validity is the writer's claim (see the
+// package's Validity Contract). [WithRevalidation] runs every instance back
+// through the real validator; [WithValueConformance] is the narrower
+// canonical-form check. Load always performs structural validation of the
+// .ys format itself.
 //
 // Dynamic numeric values materialize as int64 or float64: the wire carries no
 // width, so a float32 stored at write time returns as float64 carrying the

@@ -72,7 +72,6 @@
             }
           },
           "optional": true,
-          "reverse_optional": true,
           "props": [
             {
               "name": "observed_at",

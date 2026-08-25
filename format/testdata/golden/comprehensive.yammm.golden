@@ -79,7 +79,7 @@ type Publisher extends Auditable {
 	source_fetched_at  Timestamp required
 
 	--> LOCATED_IN (_:one) geo.Region
-	--> PUBLISHES  (many) catalog.Book / published_by (one)
+	--> PUBLISHES  (many) catalog.Book
 
 	! "name_not_empty" name_norm != ""
 	! "active_or_reason" is_active || deactivated_reason != nil

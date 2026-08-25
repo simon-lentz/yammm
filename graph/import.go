@@ -45,6 +45,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	// pointers → graph instance pointers for steps 2-4.
 	cloneMap := make(map[*Instance]*Instance)
 
+	imported := 0
 	for _, typeID := range snap.Types() {
 		if g.instances[typeID] == nil {
 			g.instances[typeID] = make(map[string]*Instance)
@@ -52,7 +53,16 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 		for _, inst := range snap.InstancesOf(typeID) {
 			cloned := cloneInstance(inst, cloneMap)
 			g.instances[typeID][cloned.PrimaryKey().String()] = cloned
+			imported++
 		}
+	}
+
+	// The loaded claim joins the Values accumulator only when instances
+	// were imported: importing zero instances imports no unproven data.
+	// Associations needs no graph state — step 3 reinstalls the pending
+	// records the derivation in Snapshot reads.
+	if imported > 0 {
+		g.attestValues = g.attestValues && snap.Attestation().Values
 	}
 
 	// Step 2: Install resolved edges.

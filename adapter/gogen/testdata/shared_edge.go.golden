@@ -16,15 +16,11 @@ type Comment struct {
 }
 
 type EDGE_Post_created_by_User struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type EDGE_Comment_created_by_User struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type Graph struct {
@@ -60,4 +56,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:a75f82c7bed951ffdeb6ab2ca849fb70d28e15db1cb22483d45acf22077334d4"
+const SchemaHash = "sha256:f4be5a12b8b5d750ce5f9131678b261a1416f6275c8e31bd9b78ab84bf9072db"

@@ -78,10 +78,9 @@ const (
 	RelationComposition
 )
 
-// Relation is one association or composition. Optional and Many describe the
-// forward direction; the Reverse pair describes the backward one and defaults
-// to optional-and-single when the source names no reverse. Properties holds
-// edge properties, which only an association can carry.
+// Relation is one association or composition. Optional and Many describe
+// the forward direction. Properties holds edge properties, which only an
+// association can carry.
 type Relation struct {
 	Kind     RelationKind
 	Name     string
@@ -90,11 +89,6 @@ type Relation struct {
 
 	Optional bool
 	Many     bool
-
-	Backref         string
-	BackrefSpan     location.Span
-	ReverseOptional bool
-	ReverseMany     bool
 
 	Properties []*Property
 	Doc        string

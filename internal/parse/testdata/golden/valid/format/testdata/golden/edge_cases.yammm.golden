@@ -208,7 +208,6 @@
               "e": 519
             }
           },
-          "reverse_optional": true,
           "span": {
             "s": 485,
             "e": 519
@@ -230,7 +229,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 524,
             "e": 552
@@ -253,7 +251,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "props": [
             {
               "name": "weight",
@@ -306,14 +303,9 @@
           },
           "optional": true,
           "many": true,
-          "backref": "linked_by",
-          "backref_span": {
-            "s": 694,
-            "e": 703
-          },
           "span": {
             "s": 666,
-            "e": 709
+            "e": 691
           }
         }
       ],
@@ -322,30 +314,30 @@
           "msg": "\"title_not_empty\"",
           "expr": "(!= (p \"title\") \"\")",
           "expr_span": {
-            "s": 735,
-            "e": 746
+            "s": 717,
+            "e": 728
           },
           "span": {
-            "s": 715,
-            "e": 746
+            "s": 697,
+            "e": 728
           }
         },
         {
           "msg": "\"valid_status\"",
           "expr": "(|| (!= (p \"status\") \"archived\") (!= (p \"content\") \"\"))",
           "expr_span": {
-            "s": 768,
-            "e": 805
+            "s": 750,
+            "e": 787
           },
           "span": {
-            "s": 751,
-            "e": 805
+            "s": 733,
+            "e": 787
           }
         }
       ],
       "span": {
         "s": 334,
-        "e": 807
+        "e": 789
       }
     }
   ]

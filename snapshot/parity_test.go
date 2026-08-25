@@ -230,7 +230,7 @@ const tiedUnresolvedSchema = `schema "tied"
 
 type Person {
 	id String primary
-	--> EMPLOYERS (many) Company / staff (many) { since Timestamp }
+	--> EMPLOYERS (many) Company { since Timestamp }
 }
 
 type Company {

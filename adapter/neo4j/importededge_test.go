@@ -27,19 +27,11 @@ type Basin {
 }
 `
 
-// TestBatchEdgeQueries_RefusesAnImportedSourceType pins what the writer does
-// with an edge whose source type the entry schema imports: it refuses, naming
-// the type, rather than emitting a relationship under a shape it never
-// resolved.
-//
-// The refusal is a recorded gap, not a design: ShapeForSchema walks the entry
-// schema's own types, so an imported type has no shape to resolve. Graph mode
-// therefore cannot write edges out of imported sources at all. What the index
-// re-key changed is the refusal, not the gap — it is now stated as an identity,
-// so it names the type that has no shape instead of a rendered form that
-// happened to miss a name-keyed map. Closing the gap makes this test red, which
-// is the point — it is the marker for the work.
-func TestBatchEdgeQueries_RefusesAnImportedSourceType(t *testing.T) {
+// TestBatchEdgeQueries_ImportedSourceTypeWritesUnderClosureShape pins that an
+// edge whose source type the entry schema imports resolves its shape through
+// the closure walk, by identity: the statement merges on the imported type's
+// own label even though the rendered name is in no schema's local table.
+func TestBatchEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -90,12 +82,21 @@ func TestBatchEdgeQueries_RefusesAnImportedSourceType(t *testing.T) {
 		t.Fatalf("shape: %s", shapeRes)
 	}
 
-	_, err := a.BatchEdgeQueries(ctx, built, shapes)
-	if err == nil {
-		t.Fatal("BatchEdgeQueries wrote an edge whose source shape it never resolved")
+	if _, ok := shapes.Types[id]; !ok {
+		t.Fatal("the closure walk did not produce a shape for the imported source type")
 	}
-	if !strings.Contains(err.Error(), id.String()) {
-		t.Errorf("refusal does not name the unresolved identity %s: %v", id, err)
+
+	queries, err := a.BatchEdgeQueries(ctx, built, shapes)
+	if err != nil {
+		t.Fatalf("BatchEdgeQueries: %v", err)
+	}
+	if len(queries) != 1 {
+		t.Fatalf("got %d edge queries; want 1", len(queries))
+	}
+	for _, want := range []string{"base__Basin", "NEAR"} {
+		if !strings.Contains(queries[0].Statement, want) {
+			t.Errorf("edge statement %q does not contain %q", queries[0].Statement, want)
+		}
 	}
 }
 
@@ -124,13 +125,12 @@ type Hub {
 }
 `
 
-// TestBatchNodeQueries_RefusesATransitivelyImportedTypeSharingALocalName pins
-// the reason GraphShape is keyed by identity. A name-keyed index binds the deep
-// Hub's instances to the entry Hub's shape — a different label, different merge
-// keys, different required fields — and writes them under it without a word.
-// Identity has no such coincidence: the deep Hub has no shape, and the writer
-// says so.
-func TestBatchNodeQueries_RefusesATransitivelyImportedTypeSharingALocalName(t *testing.T) {
+// TestBatchNodeQueries_TransitivelyImportedTypeWritesUnderItsOwnLabel pins the
+// reason GraphShape is keyed by identity. The deep Hub renders the same bare
+// name as the entry schema's own Hub — a different label, different merge keys,
+// different required fields — but its instances merge under the deep schema's
+// closure-provided label, never under the entry Hub's shape.
+func TestBatchNodeQueries_TransitivelyImportedTypeWritesUnderItsOwnLabel(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -185,9 +185,23 @@ func TestBatchNodeQueries_RefusesATransitivelyImportedTypeSharingALocalName(t *t
 		t.Fatal("fixture is vacuous: the entry schema's Hub has no shape to be mistaken for")
 	}
 
-	if _, err := a.BatchNodeQueries(ctx, built, shapes); err == nil {
-		t.Error("BatchNodeQueries wrote the deep Hub under the entry Hub's shape")
-	} else if !strings.Contains(err.Error(), deep.ID().String()) {
-		t.Errorf("refusal does not name the unresolved identity %s: %v", deep.ID(), err)
+	queries, err := a.BatchNodeQueries(ctx, built, shapes)
+	if err != nil {
+		t.Fatalf("BatchNodeQueries: %v", err)
+	}
+	var merges []*neo4j.BatchNodeQuery
+	for _, q := range queries {
+		if q.Kind == neo4j.NodeMerge {
+			merges = append(merges, q)
+		}
+	}
+	if len(merges) != 1 {
+		t.Fatalf("got %d merge queries; want 1", len(merges))
+	}
+	if !strings.Contains(merges[0].Statement, "deep__Hub") {
+		t.Errorf("merge statement %q does not write under the deep Hub's own label", merges[0].Statement)
+	}
+	if strings.Contains(merges[0].Statement, "entry__Hub") {
+		t.Errorf("merge statement %q writes under the entry Hub's label", merges[0].Statement)
 	}
 }

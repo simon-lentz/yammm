@@ -89,8 +89,11 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 		metadata = cfg.metadata
 	}
 
+	att := snap.Attestation()
+
 	return assembleDocument(
 		schemaHash, s.Name(), schemaSource, createdAt, features, metadata,
+		&attestationWire{Values: att.Values, Associations: att.Associations},
 		typesJSON, instancesJSON, diagJSON,
 		cfg.indent, currentVersion,
 	)
@@ -391,12 +394,14 @@ func marshalProvenance(inst *graph.Instance) *provenanceWire {
 func assembleDocument(
 	schemaHash, schemaName, schemaSource, createdAt string,
 	features []string, metadata map[string]string,
+	attestation *attestationWire,
 	typesJSON, instancesJSON, diagJSON []byte,
 	indent string, version int,
 ) ([]byte, diag.Result) {
 	// Step 3-5: Build canonical-form document (integrity_hash = "").
 	canonBytes := buildDocument(
 		schemaHash, schemaName, schemaSource, createdAt, features, metadata,
+		attestation,
 		"", // integrity_hash placeholder
 		typesJSON, instancesJSON, diagJSON,
 		indent, version,
@@ -408,6 +413,7 @@ func assembleDocument(
 	// Step 7: Re-assemble with computed hash.
 	finalBytes := buildDocument(
 		schemaHash, schemaName, schemaSource, createdAt, features, metadata,
+		attestation,
 		integrityHash,
 		typesJSON, instancesJSON, diagJSON,
 		indent, version,
@@ -420,6 +426,7 @@ func assembleDocument(
 func buildDocument(
 	schemaHash, schemaName, schemaSource, createdAt string,
 	features []string, metadata map[string]string,
+	attestation *attestationWire,
 	integrityHash string,
 	typesJSON, instancesJSON, diagJSON []byte,
 	indent string, version int,
@@ -432,6 +439,7 @@ func buildDocument(
 		Features:      features,
 		CreatedAt:     createdAt,
 		Metadata:      metadata,
+		Attestation:   attestation,
 	}
 
 	// Build the header JSON with version and schema_hash_algorithm as
@@ -503,6 +511,15 @@ func buildHeaderCompact(hdr marshalHeaderWire, version, hashAlgo int) []byte {
 		b.Write(metaJSON)
 	}
 
+	// attestation (omitempty on read; Marshal always sets it, and
+	// UpdateMetadata preserves an input's absence rather than inventing
+	// a claim)
+	if hdr.Attestation != nil {
+		b.WriteString(`,"attestation":`)
+		attJSON, _ := json.Marshal(hdr.Attestation)
+		b.Write(attJSON)
+	}
+
 	b.WriteByte('}')
 	return []byte(b.String())
 }
@@ -570,6 +587,15 @@ func buildHeaderIndented(hdr marshalHeaderWire, indent string, version, hashAlgo
 		b.WriteString(`"metadata": `)
 		metaJSON, _ := json.MarshalIndent(hdr.Metadata, pfx, indent)
 		b.Write(metaJSON)
+	}
+
+	// attestation (omitempty; see the compact builder for the rule)
+	if hdr.Attestation != nil {
+		b.WriteString(",\n")
+		b.WriteString(pfx)
+		b.WriteString(`"attestation": `)
+		attJSON, _ := json.MarshalIndent(hdr.Attestation, pfx, indent)
+		b.Write(attJSON)
 	}
 
 	b.WriteString("\n")

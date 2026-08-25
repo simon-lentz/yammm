@@ -163,7 +163,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 400,
             "e": 426
@@ -185,7 +184,6 @@
             }
           },
           "optional": true,
-          "reverse_optional": true,
           "span": {
             "s": 428,
             "e": 450
@@ -205,38 +203,30 @@
               "e": 475
             }
           },
-          "backref": "KNOWN_BY",
-          "backref_span": {
-            "s": 478,
-            "e": 486
-          },
-          "reverse_optional": true,
-          "reverse_many": true,
           "span": {
             "s": 452,
-            "e": 493
+            "e": 475
           }
         },
         {
           "kind": "comp",
           "name": "OWNS",
           "name_span": {
-            "s": 499,
-            "e": 503
+            "s": 481,
+            "e": 485
           },
           "target": {
             "name": "Pet",
             "span": {
-              "s": 513,
-              "e": 516
+              "s": 495,
+              "e": 498
             }
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
-            "s": 495,
-            "e": 516
+            "s": 477,
+            "e": 498
           }
         }
       ],
@@ -245,25 +235,25 @@
           "msg": "\"name_not_empty\"",
           "expr": "(!= (p \"name\") \"\")",
           "expr_span": {
-            "s": 538,
-            "e": 548
+            "s": 520,
+            "e": 530
           },
           "span": {
-            "s": 519,
-            "e": 548
+            "s": 501,
+            "e": 530
           }
         }
       ],
       "span": {
         "s": 271,
-        "e": 550
+        "e": 532
       }
     },
     {
       "name": "Pet",
       "name_span": {
-        "s": 562,
-        "e": 565
+        "s": 544,
+        "e": 547
       },
       "part": true,
       "props": [
@@ -272,20 +262,20 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 574,
-              "e": 580
+              "s": 556,
+              "e": 562
             }
           },
           "required": true,
           "span": {
-            "s": 569,
-            "e": 589
+            "s": 551,
+            "e": 571
           }
         }
       ],
       "span": {
-        "s": 552,
-        "e": 591
+        "s": 534,
+        "e": 573
       }
     }
   ]

@@ -152,8 +152,8 @@
       "name": "storage.modifier.yammm"
     },
     "association": {
-      "comment": "Association declaration with optional multiplicity and optional reverse clause (/ ReverseName (mult)). Target type supports qualified references (namespace.Type).",
-      "match": "^\\s*(-->)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+(?:([a-zA-Z_][a-zA-Z0-9_]*)(\\.))? ?([A-Z][a-zA-Z0-9_]*)(?:\\s+(/)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?)?",
+      "comment": "Association declaration with optional multiplicity. Target type supports qualified references (namespace.Type).",
+      "match": "^\\s*(-->)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+(?:([a-zA-Z_][a-zA-Z0-9_]*)(\\.))? ?([A-Z][a-zA-Z0-9_]*)",
       "captures": {
         "1": { "name": "entity.name.function.relation.yammm" },
         "2": { "name": "entity.name.function.relation.yammm" },
@@ -162,17 +162,12 @@
         "5": { "name": "punctuation.definition.parameters.end.yammm" },
         "6": { "name": "entity.name.namespace.yammm" },
         "7": { "name": "punctuation.accessor.yammm" },
-        "8": { "name": "entity.name.type.yammm" },
-        "9": { "name": "punctuation.separator.reverse.yammm" },
-        "10": { "name": "variable.other.reverse.yammm" },
-        "11": { "name": "punctuation.definition.parameters.begin.yammm" },
-        "12": { "name": "constant.language.multiplicity.yammm" },
-        "13": { "name": "punctuation.definition.parameters.end.yammm" }
+        "8": { "name": "entity.name.type.yammm" }
       }
     },
     "composition": {
-      "comment": "Composition declaration with optional multiplicity and optional reverse clause (/ ReverseName (mult)). Target type supports qualified references (namespace.Type).",
-      "match": "^\\s*(\\*->)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+(?:([a-zA-Z_][a-zA-Z0-9_]*)(\\.))? ?([A-Z][a-zA-Z0-9_]*)(?:\\s+(/)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?)?",
+      "comment": "Composition declaration with optional multiplicity. Target type supports qualified references (namespace.Type).",
+      "match": "^\\s*(\\*->)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(\\()\\s*(_(?::(?:one|many))?|one(?::(?:one|many))?|many)\\s*(\\)))?\\s+(?:([a-zA-Z_][a-zA-Z0-9_]*)(\\.))? ?([A-Z][a-zA-Z0-9_]*)",
       "captures": {
         "1": { "name": "entity.name.function.relation.yammm" },
         "2": { "name": "entity.name.function.relation.yammm" },
@@ -181,12 +176,7 @@
         "5": { "name": "punctuation.definition.parameters.end.yammm" },
         "6": { "name": "entity.name.namespace.yammm" },
         "7": { "name": "punctuation.accessor.yammm" },
-        "8": { "name": "entity.name.type.yammm" },
-        "9": { "name": "punctuation.separator.reverse.yammm" },
-        "10": { "name": "variable.other.reverse.yammm" },
-        "11": { "name": "punctuation.definition.parameters.begin.yammm" },
-        "12": { "name": "constant.language.multiplicity.yammm" },
-        "13": { "name": "punctuation.definition.parameters.end.yammm" }
+        "8": { "name": "entity.name.type.yammm" }
       }
     },
     "invariant": {

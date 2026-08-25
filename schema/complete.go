@@ -596,9 +596,6 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 			rd.Documentation,
 			rd.Optional,
 			rd.Many,
-			rd.Backref,
-			rd.ReverseOptional,
-			rd.ReverseMany,
 			ownerType,
 			props,
 		)

@@ -16,9 +16,7 @@ type CommonRegion struct {
 }
 
 type EDGE_County_in_region_CommonRegion struct {
-	Where struct {
-		Code string `json:"code"`
-	} `json:"where"`
+	TargetCode string `json:"_target_code"`
 }
 
 type Graph struct {
@@ -55,4 +53,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:97db450c2564d017fb520292750097aba55ffc1bf9f8e7efed0744dfa282b8b1"
+const SchemaHash = "sha256:345b36b9c9ef76b3139599ab9fda27379744d6909eaee54bcda55813e7439dc5"
