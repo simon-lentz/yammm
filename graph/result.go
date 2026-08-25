@@ -7,6 +7,24 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
+// Attestation is the writing library's claim about a snapshot's contents.
+//
+// Values reports that the snapshot holds at least one instance and that
+// every root and composed child entered through the validator — an empty
+// snapshot attests false, so a vacuous truth cannot be re-marshalled as
+// an attestation. Rejected duplicates' payloads are outside the claim.
+// Associations reports that no unresolved record is Required.
+//
+// On a built snapshot both dimensions are computed. On a loaded snapshot
+// they carry the header's claim verbatim — protected against tampering by
+// the integrity hash and against nothing else, because [RebuildSnapshot]
+// accepts caller-assembled parts. The snapshot package's re-validation
+// load option is the reader's remedy when a claim is not enough.
+type Attestation struct {
+	Values       bool
+	Associations bool
+}
+
 // Snapshot is an immutable snapshot of the graph at a point in time.
 //
 // Snapshot provides read-only access to all instances, edges, duplicates,
@@ -58,6 +76,9 @@ type Snapshot struct {
 
 	// diagnostics contains all issues from graph construction.
 	diagnostics diag.Result
+
+	// attestation is the validity claim this snapshot carries.
+	attestation Attestation
 }
 
 // Schema returns the schema used for validation.
@@ -196,8 +217,10 @@ func (r *Snapshot) EdgesFrom(inst *Instance) []*Edge {
 //
 // For snapshots loaded from persisted .ys files, Diagnostics returns diag.OK()
 // because construction diagnostics are transient and not persisted. Consumers
-// should check [Snapshot.Duplicates] and [Snapshot.Unresolved] for structural
-// issues that are preserved across serialization.
+// should check [Snapshot.Duplicates] and [Snapshot.Unresolved] for the
+// structural records that survive serialization, [Snapshot.Attestation] for
+// the writer's validity claim, and the snapshot package's WithRevalidation
+// option to re-check a loaded document's instance data.
 //
 // Use [diag.Result.OK] to check if the graph construction succeeded.
 func (r *Snapshot) Diagnostics() diag.Result {
@@ -205,6 +228,15 @@ func (r *Snapshot) Diagnostics() diag.Result {
 		return diag.OK()
 	}
 	return r.diagnostics
+}
+
+// Attestation returns the validity claim this snapshot carries. See
+// [Attestation] for what each dimension means and what it does not prove.
+func (r *Snapshot) Attestation() Attestation {
+	if r == nil {
+		return Attestation{}
+	}
+	return r.attestation
 }
 
 // Duplicates returns duplicate primary key records in sorted order.
@@ -249,6 +281,7 @@ func newSnapshot(
 	duplicates []*Duplicate,
 	unresolved []*UnresolvedEdge,
 	diagnostics diag.Result,
+	attestation Attestation,
 ) *Snapshot {
 	snap := &Snapshot{
 		schema:        s,
@@ -259,6 +292,7 @@ func newSnapshot(
 		duplicates:    duplicates,
 		unresolved:    unresolved,
 		diagnostics:   diagnostics,
+		attestation:   attestation,
 	}
 	if len(edges) > 0 {
 		snap.edgeIndex = make(map[*Instance][]*Edge)

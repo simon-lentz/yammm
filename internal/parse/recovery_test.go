@@ -681,7 +681,6 @@ func assertNodeSpansWithinSource(t *testing.T, src string, f *File) {
 		for _, rel := range ty.Relations {
 			check("relation", rel.Span)
 			check("relation name", rel.NameSpan)
-			check("relation backref", rel.BackrefSpan)
 			checkRef("relation target", rel.Target)
 			for _, p := range rel.Properties {
 				checkProperty("edge property", p)

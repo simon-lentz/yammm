@@ -147,16 +147,13 @@ func (p *schemaParser) edgeProperty(prop *parse.Property) *propertyDecl {
 
 func (p *schemaParser) relationDecl(rel *parse.Relation) *relationDecl {
 	out := &relationDecl{
-		Kind:            relationKind(rel.Kind),
-		Name:            rel.Name,
-		Target:          typeRef(rel.Target),
-		Optional:        rel.Optional,
-		Many:            rel.Many,
-		Backref:         rel.Backref,
-		ReverseOptional: rel.ReverseOptional,
-		ReverseMany:     rel.ReverseMany,
-		Documentation:   rel.Doc,
-		Span:            rel.Span,
+		Kind:          relationKind(rel.Kind),
+		Name:          rel.Name,
+		Target:        typeRef(rel.Target),
+		Optional:      rel.Optional,
+		Many:          rel.Many,
+		Documentation: rel.Doc,
+		Span:          rel.Span,
 	}
 	for _, prop := range rel.Properties {
 		out.Properties = append(out.Properties, p.edgeProperty(prop))

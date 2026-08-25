@@ -28,7 +28,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 25,
             "e": 50
@@ -49,7 +48,6 @@
             }
           },
           "optional": true,
-          "reverse_optional": true,
           "span": {
             "s": 52,
             "e": 77
@@ -70,7 +68,6 @@
             }
           },
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 79,
             "e": 109

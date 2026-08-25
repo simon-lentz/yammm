@@ -471,7 +471,14 @@ func validateVectorProperty(c *completer, _ *Type, prop *Property, a *Annotation
 // primary-key property (sole or composite member) — every merge match key is
 // immutable on match by construction, so the marker would be redundant and
 // confusing there.
-func validateWriteOnceProperty(c *completer, _ *Type, prop *Property, a *Annotation) {
+func validateWriteOnceProperty(c *completer, t *Type, prop *Property, a *Annotation) {
+	if t != nil && t.IsPart() {
+		// A part is replaced whole on every parent write, so create-once
+		// semantics cannot hold there.
+		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
+			"@writeOnce cannot annotate property %q of part type %q; a part is replaced on every parent write", prop.Name(), t.Name())
+		return
+	}
 	if a.argCount() > 0 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION, "@writeOnce takes no arguments")
 		return

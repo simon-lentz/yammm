@@ -3,10 +3,14 @@
 		"version": 3,
 		"schema_name": "test",
 		"schema_source": "test://test.yammm",
-		"schema_hash": "sha256:d10215e44a4c1b383b89b9f644c79d6e4f1192c46ae1fc52cbbd49ad37c9280e",
-		"schema_hash_algorithm": 1,
-		"integrity_hash": "sha256:9f0ab7b206756d7d998581f8827af6c4606d937ac8b0dbb4e153e50c35ef6ce7",
-		"features": []
+		"schema_hash": "sha256:f1ee7dafd57d67309a7f95976524adc826d60c4b56d480e218d349f18244f956",
+		"schema_hash_algorithm": 2,
+		"integrity_hash": "sha256:32802d03412287c82e91cc3d8c4a5bd787786699c9ca2f7af4b5e2bda399c72b",
+		"features": [],
+		"attestation": {
+			"values": false,
+			"associations": false
+		}
 	},
 	"types": [
 		{

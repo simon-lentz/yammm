@@ -218,7 +218,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 411,
             "e": 440

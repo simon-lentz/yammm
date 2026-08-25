@@ -130,12 +130,8 @@ func renderedNameCollision(snap *graph.Snapshot) error {
 	return nil
 }
 
-// fkLookup resolves the foreign key targets for a given relation.
-// Returns the target keys for the relation, or nil if none exist.
-type fkLookup func(rel *schema.Relation) []immutable.Key
-
 // writeSnapshotTypeTo writes graph.Instance values from a snapshot as CSV rows.
-// It uses snap.EdgesFrom for FK resolution instead of ValidInstance edge data.
+// It uses snap.EdgesFrom for edge resolution instead of ValidInstance edge data.
 func (a *Adapter) writeSnapshotTypeTo(
 	ctx context.Context,
 	w io.Writer,
@@ -149,7 +145,10 @@ func (a *Adapter) writeSnapshotTypeTo(
 		opt(&cfg)
 	}
 
-	columns := buildColumnList(schemaType)
+	columns, err := buildColumnList(schemaType, snap.Schema())
+	if err != nil {
+		return err
+	}
 
 	writer := csv.NewWriter(w)
 	writer.Comma = a.config.delimiter
@@ -166,9 +165,7 @@ func (a *Adapter) writeSnapshotTypeTo(
 			return fmt.Errorf("csv write: %w", err)
 		}
 
-		// Build FK lookup from snapshot edge index.
-		lookup := snapshotFKLookup(inst, snap)
-		row := a.instanceToRow(inst.Properties(), lookup, columns, schemaType, snap.Schema(), &cfg)
+		row := a.instanceToRow(inst.Properties(), snapshotEdges(inst, snap), columns, schemaType, snap.Schema(), &cfg)
 		if err := writer.Write(row); err != nil {
 			return fmt.Errorf("csv write row: %w", err)
 		}
@@ -181,25 +178,29 @@ func (a *Adapter) writeSnapshotTypeTo(
 	return nil
 }
 
-// snapshotFKLookup returns an fkLookup that resolves FKs from snapshot edge data.
-// Edges are grouped by relation name on first access for efficiency.
-func snapshotFKLookup(inst *graph.Instance, snap *graph.Snapshot) fkLookup {
-	// Build the relation-to-keys map eagerly; EdgesFrom is O(1) per instance.
+// snapshotEdges groups an instance's outgoing edges by relation name.
+// EdgesFrom is O(1) per instance and returns sorted edges, so each group
+// keeps the (targetType, targetKey) order.
+func snapshotEdges(inst *graph.Instance, snap *graph.Snapshot) map[string][]*graph.Edge {
 	allEdges := snap.EdgesFrom(inst)
-	byRel := make(map[string][]immutable.Key, len(allEdges))
+	byRel := make(map[string][]*graph.Edge, len(allEdges))
 	for _, e := range allEdges {
-		byRel[e.Relation()] = append(byRel[e.Relation()], e.Target().PrimaryKey())
+		byRel[e.Relation()] = append(byRel[e.Relation()], e)
 	}
-	return func(rel *schema.Relation) []immutable.Key {
-		return byRel[rel.Name()]
-	}
+	return byRel
 }
 
-// buildColumnList determines the CSV column order from schema metadata.
-// Properties are sorted alphabetically, then FK relation field names are appended.
-func buildColumnList(schemaType *schema.Type) []string {
+// buildColumnList determines the CSV column order from schema metadata:
+// properties sorted alphabetically, then per association (sorted by field
+// name) one column per FK component — <field>._target_<pk> — and one per
+// edge property, <field>.<prop>. No declared name can contain a dot or a
+// leading underscore, so the dotted grammar is unambiguous. The target
+// type supplies the component names; an unresolvable target is an error,
+// because the writer would otherwise emit columns its own parser cannot
+// name.
+func buildColumnList(schemaType *schema.Type, s *schema.Schema) ([]string, error) {
 	if schemaType == nil {
-		return nil
+		return nil, nil
 	}
 
 	// Collect property names.
@@ -209,43 +210,59 @@ func buildColumnList(schemaType *schema.Type) []string {
 	}
 	slices.Sort(propNames)
 
-	// Collect FK relation field names (associations only).
-	var fkNames []string
-	for rel := range schemaType.Associations() {
-		fkNames = append(fkNames, rel.FieldName())
+	rels := slices.SortedFunc(schemaType.Associations(), func(a, b *schema.Relation) int {
+		return strings.Compare(a.FieldName(), b.FieldName())
+	})
+	var edgeCols []string
+	for _, rel := range rels {
+		target, ok := s.TypeByID(rel.TargetID())
+		if !ok {
+			return nil, fmt.Errorf("csv adapter: association %q: target type %s does not resolve, so its _target_ column names are unknowable",
+				rel.Name(), rel.TargetID())
+		}
+		for _, pk := range target.PrimaryKeysSlice() {
+			edgeCols = append(edgeCols, rel.FieldName()+"._target_"+pk.Name())
+		}
+		props := rel.PropertiesSlice()
+		slices.SortFunc(props, func(a, b *schema.Property) int {
+			return strings.Compare(a.Name(), b.Name())
+		})
+		for _, p := range props {
+			edgeCols = append(edgeCols, rel.FieldName()+"."+p.Name())
+		}
 	}
-	slices.Sort(fkNames)
 
-	return append(propNames, fkNames...)
+	return append(propNames, edgeCols...), nil
 }
 
-// instanceToRow converts properties and FK data to a CSV row aligned with columns.
-// Properties are accessed through props; FK columns are resolved via the fkFn closure.
+// instanceToRow converts properties and edge data to a CSV row aligned
+// with columns. Edge columns zip across the relation's targets on the list
+// separator; an absent edge leaves every column of its group empty, which
+// the parser reads as absent, never null.
 func (a *Adapter) instanceToRow(
 	props immutable.Properties,
-	fkFn fkLookup,
+	edgesByRel map[string][]*graph.Edge,
 	columns []string,
 	schemaType *schema.Type,
 	s *schema.Schema,
 	cfg *writeConfig,
 ) []string {
-	row := make([]string, len(columns))
+	cells := make(map[string]string)
+	if schemaType != nil {
+		for rel := range schemaType.Associations() {
+			a.relationCells(rel, s, edgesByRel[rel.Name()], cells)
+		}
+	}
 
+	row := make([]string, len(columns))
 	for i, col := range columns {
-		// Check if this column is a property.
-		val, ok := props.Get(col)
-		if ok {
+		if val, ok := props.Get(col); ok {
 			row[i] = a.valueToString(val, propertyConstraint(schemaType, col), cfg)
 			continue
 		}
-
-		// Check if this column is an FK relation field name.
-		if schemaType != nil && fkFn != nil {
-			fkVal := a.formatFKColumn(fkFn, col, schemaType, s)
-			if fkVal != "" {
-				row[i] = fkVal
-				continue
-			}
+		if cell, ok := cells[col]; ok {
+			row[i] = cell
+			continue
 		}
 
 		// Column not found: null.
@@ -255,91 +272,66 @@ func (a *Adapter) instanceToRow(
 	return row
 }
 
-// formatFKColumn formats the FK value for a column that matches an association field name.
-func (a *Adapter) formatFKColumn(
-	fkFn fkLookup,
-	fieldName string,
-	schemaType *schema.Type,
-	s *schema.Schema,
-) string {
-	for rel := range schemaType.Associations() {
-		if rel.FieldName() != fieldName {
-			continue
-		}
-
-		keys := fkFn(rel)
-		if len(keys) == 0 {
-			return ""
-		}
-
-		// The components belong to the association's TARGET type, so their
-		// constraints are one hop away rather than on the row's own type.
-		// Without the hop this column is the one surface in the export that
-		// does not render canonically.
-		keyConstraints := targetKeyConstraints(s, rel)
-
-		// Format each key.
-		parts := make([]string, len(keys))
-		for i, key := range keys {
-			parts[i] = formatKey(key, keyConstraints, a.config.listSep)
-		}
-
-		// Single target: return the formatted key directly.
-		if len(parts) == 1 {
-			return parts[0]
-		}
-		// Multiple targets (one-to-many): join with list separator.
-		return strings.Join(parts, a.config.listSep)
-	}
-	return ""
-}
-
-// formatKey renders a single immutable.Key as a string.
-// Single-component keys use the bare value; composite keys join with the separator.
-// keyConstraints carries the target type's primary-key constraints in component
-// order, so a rendered component matches the text the target instance's own
-// column carries.
-func formatKey(key immutable.Key, keyConstraints []schema.Constraint, sep string) string {
-	if key.Len() == 1 {
-		if v := key.Get(0).Unwrap(); v != nil {
-			return fmt.Sprint(canonicalOrRaw(v, constraintAt(keyConstraints, 0)))
-		}
-		return ""
-	}
-	parts := make([]string, key.Len())
-	for i := range key.Len() {
-		parts[i] = fmt.Sprint(canonicalOrRaw(key.Get(i).Unwrap(), constraintAt(keyConstraints, i)))
-	}
-	return strings.Join(parts, sep)
-}
-
-// targetKeyConstraints returns an association target's primary-key constraints
-// in component order. Nil when the target does not resolve, which renders the
-// components as they arrived.
-func targetKeyConstraints(s *schema.Schema, rel *schema.Relation) []schema.Constraint {
-	if s == nil || rel == nil {
-		return nil
-	}
+// relationCells renders one association's edge columns into cells: per FK
+// component and per edge property, one segment per target, escaped and
+// joined on the list separator. No edges means every cell stays "", the
+// absent-group marker.
+func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []*graph.Edge, cells map[string]string) {
 	target, ok := s.TypeByID(rel.TargetID())
 	if !ok {
-		return nil
+		// buildColumnList already refused this shape; nothing to render.
+		return
 	}
-	pks := target.PrimaryKeysSlice()
-	out := make([]schema.Constraint, len(pks))
-	for i, p := range pks {
-		out[i] = p.Constraint()
+	field := rel.FieldName()
+
+	for i, pk := range target.PrimaryKeysSlice() {
+		col := field + "._target_" + pk.Name()
+		if len(edges) == 0 {
+			cells[col] = ""
+			continue
+		}
+		segs := make([]string, len(edges))
+		for j, e := range edges {
+			key := e.Target().PrimaryKey()
+			if i < key.Len() {
+				segs[j] = escapeListElem(scalarCell(canonicalOrRaw(key.Get(i).Unwrap(), pk.Constraint())), a.config.listSep)
+			}
+		}
+		cells[col] = strings.Join(segs, a.config.listSep)
 	}
-	return out
+
+	for _, p := range rel.PropertiesSlice() {
+		col := field + "." + p.Name()
+		if len(edges) == 0 {
+			cells[col] = ""
+			continue
+		}
+		segs := make([]string, len(edges))
+		for j, e := range edges {
+			if v, ok := e.Properties().Get(p.Name()); ok && !v.IsNil() {
+				segs[j] = escapeListElem(scalarCell(canonicalOrRaw(v.Unwrap(), p.Constraint())), a.config.listSep)
+			}
+		}
+		cells[col] = strings.Join(segs, a.config.listSep)
+	}
 }
 
-// constraintAt matches a key component to its constraint positionally. A
-// length mismatch yields nil rather than binding a component to the wrong
-// constraint.
-func constraintAt(cs []schema.Constraint, i int) schema.Constraint {
-	if i >= len(cs) {
-		return nil
+// scalarCell renders one scalar value as cell text.
+func scalarCell(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case int64:
+		return strconv.FormatInt(t, 10)
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(t)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(t)
 	}
-	return cs[i]
 }
 
 // propertyConstraint returns a declared property's constraint, or nil for a
@@ -396,32 +388,23 @@ func (a *Adapter) valueToString(
 		return a.sliceToString(s, elementConstraint(c), cfg)
 	}
 
-	switch v := canonicalOrRaw(val.Unwrap(), c).(type) {
-	case string:
-		return v
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	case bool:
-		return strconv.FormatBool(v)
-	case nil:
-		return cfg.nullString
-	default:
-		return fmt.Sprint(v)
+	if v := canonicalOrRaw(val.Unwrap(), c); v != nil {
+		return scalarCell(v)
 	}
+	return cfg.nullString
 }
 
 // sliceToString renders an immutable.Slice as a list-separated string. Each
 // element renders under elem, so a List<Timestamp> canonicalizes at its
-// elements and not only at its outer level.
+// elements and not only at its outer level. Elements escape through the
+// shared helper, so a value containing the separator survives the split.
 func (a *Adapter) sliceToString(s immutable.Slice, elem schema.Constraint, cfg *writeConfig) string {
 	parts := make([]string, s.Len())
 	for i, v := range s.Iter2() {
 		if v.IsNil() {
 			parts[i] = cfg.nullString
 		} else {
-			parts[i] = fmt.Sprint(canonicalOrRaw(v.Unwrap(), elem))
+			parts[i] = escapeListElem(fmt.Sprint(canonicalOrRaw(v.Unwrap(), elem)), a.config.listSep)
 		}
 	}
 	return strings.Join(parts, a.config.listSep)

@@ -21,10 +21,16 @@ type ValidInstance struct {
 	edges      map[string]*ValidEdgeData
 	composed   map[string]immutable.Value
 	provenance *location.Provenance
+
+	// validated is set only by newValidatedInstance, which the validator
+	// alone calls. A bypass-built instance always reports false.
+	validated bool
 }
 
-// NewValidInstance creates a new ValidInstance.
-// This is an internal constructor; use [Validator] to create instances.
+// NewValidInstance asserts the caller's claim that the data is valid. It
+// performs no validation, and the result reports
+// [ValidInstance.Validated] == false. Use [Validator] to produce a
+// validated instance.
 func NewValidInstance(
 	typeName string,
 	typeID schema.TypeID,
@@ -43,6 +49,28 @@ func NewValidInstance(
 		composed:   composed,
 		provenance: provenance,
 	}
+}
+
+// newValidatedInstance is the validator's constructor: identical to
+// [NewValidInstance], plus the validated bit only this package can set.
+func newValidatedInstance(
+	typeName string,
+	typeID schema.TypeID,
+	pk immutable.Key,
+	props immutable.Properties,
+	edges map[string]*ValidEdgeData,
+	composed map[string]immutable.Value,
+	provenance *location.Provenance,
+) *ValidInstance {
+	v := NewValidInstance(typeName, typeID, pk, props, edges, composed, provenance)
+	v.validated = true
+	return v
+}
+
+// Validated reports whether this instance was produced by [Validator].
+// No exported constructor can set it: false means asserted, not proven.
+func (v *ValidInstance) Validated() bool {
+	return v.validated
 }
 
 // TypeName returns the name of the validated type.
@@ -119,7 +147,8 @@ type ValidEdgeData struct {
 	targets []ValidEdgeTarget
 }
 
-// NewValidEdgeData creates a new ValidEdgeData.
+// NewValidEdgeData asserts the caller's claim that the targets are valid.
+// It performs no validation; use [Validator] for validated edge data.
 func NewValidEdgeData(targets []ValidEdgeTarget) *ValidEdgeData {
 	return &ValidEdgeData{targets: targets}
 }
@@ -168,7 +197,9 @@ type ValidEdgeTarget struct {
 	properties immutable.Properties
 }
 
-// NewValidEdgeTarget creates a new ValidEdgeTarget.
+// NewValidEdgeTarget asserts the caller's claim that the key and
+// properties are valid. It performs no validation; use [Validator] for
+// validated edge targets.
 func NewValidEdgeTarget(targetKey immutable.Key, props immutable.Properties) ValidEdgeTarget {
 	return ValidEdgeTarget{
 		targetKey:  targetKey,

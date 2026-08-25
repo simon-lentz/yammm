@@ -120,6 +120,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_INVALID_COMPOSITION_TARGET` | Composition targets an invalid type |
 | `E_INVALID_CONSTRAINT` | Constraint definition is invalid |
 | `E_INVALID_INVARIANT` | Invariant expression is invalid |
+| `E_REVERSE_CLAUSE_REMOVED` | Schema carries the reverse clause removed in v0.15.0 (v0.15+) |
 | `E_INVALID_NAME` | Identifier has invalid format |
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
@@ -173,6 +174,10 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_GRAPH_PARENT_NOT_FOUND` | Parent node not found for composed child |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
 | `E_GRAPH_MISSING_PK` | Primary key missing in graph operations |
+| `E_GRAPH_CARDINALITY` | Association carries more targets than its `(one)` multiplicity allows (v0.15+) |
+| `E_GRAPH_UNKNOWN_RELATION` | Instance data under a relation name the type does not declare (v0.15+) |
+| `E_GRAPH_ABSTRACT_TYPE` | Instance of an abstract type rejected by the graph (v0.15+) |
+| `E_GRAPH_INVALID_PK` | Instance primary key empty or disagreeing with its own key properties (v0.15+) |
 
 ### Snapshot
 
@@ -190,12 +195,13 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
 | `E_SNAPSHOT_DEPTH_EXCEEDED` | Composed nesting exceeds depth limit (32) |
 | `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content |
-| `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized (Warning) |
+| `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Error on body-reading surfaces, Warning on header-only reads (v0.15+) |
 | `E_SNAPSHOT_PATH_FALLBACK` | Provenance path could not be parsed (Warning) |
 | `E_SNAPSHOT_IO` | Per-file I/O failure during `snapshot.ScanDir` iteration (v0.3+) |
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
 | `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
 | `W_SNAPSHOT_VALUE_NONCONFORMING` | A stored `Timestamp`, `Date` or `UUID` value does not conform to its schema constraint; reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |
+| `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record for a `Required` association; reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
 
 ### Adapter
 

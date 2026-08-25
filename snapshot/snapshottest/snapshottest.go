@@ -82,10 +82,11 @@ func AssertDeterministic(tb testing.TB, snap *graph.Snapshot, opts ...snapshot.O
 // snapshot's public accessors. Properties come from Clone() so go-cmp can
 // walk plain maps rather than immutable wrappers.
 type snapProjection struct {
-	Types      []string
-	Instances  map[string][]instProjection
-	Duplicates []dupProjection
-	Unresolved []unresProjection
+	Types       []string
+	Instances   map[string][]instProjection
+	Duplicates  []dupProjection
+	Unresolved  []unresProjection
+	Attestation graph.Attestation
 }
 
 type instProjection struct {
@@ -159,8 +160,9 @@ func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 func project(s *graph.Snapshot) snapProjection {
 	ids := s.Types()
 	p := snapProjection{
-		Types:     make([]string, 0, len(ids)),
-		Instances: make(map[string][]instProjection, len(ids)),
+		Types:       make([]string, 0, len(ids)),
+		Instances:   make(map[string][]instProjection, len(ids)),
+		Attestation: s.Attestation(),
 	}
 	for _, typeID := range ids {
 		key := typeID.String()

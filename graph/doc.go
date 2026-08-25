@@ -80,8 +80,9 @@
 // state; new Add calls resolve against the imported instances.
 // [NewBatchAssemblerFromSnapshot] is its assembler-level counterpart.
 //
-// [RebuildSnapshot] constructs a [Snapshot] from pre-validated parts
-// (types, instances, edges, duplicates, unresolved records). This is the
+// [RebuildSnapshot] constructs a [Snapshot] from asserted parts (types,
+// instances, edges, duplicates, unresolved records) without validation;
+// rebuilt instances report Validated() == false. This is the
 // deserialization entry point used by the snapshot package.
 //
 // # Key Types

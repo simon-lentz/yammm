@@ -154,6 +154,7 @@ func TestTokenStream_GoldenFixtures(t *testing.T) {
 		"edge_cases",
 		"comprehensive",
 		"annotations",
+		"removed_reverse",
 	}
 
 	for _, name := range fixtures {
@@ -186,6 +187,7 @@ func TestTokenStream_GoldenIdempotentAll(t *testing.T) {
 		"edge_cases.yammm.golden",
 		"comprehensive.yammm.golden",
 		"annotations.yammm.golden",
+		"removed_reverse.yammm.golden",
 	}
 
 	for _, name := range goldenFiles {

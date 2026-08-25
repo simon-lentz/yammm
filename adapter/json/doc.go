@@ -14,8 +14,13 @@
 //
 // Instances include:
 //   - All validated properties
-//   - Foreign key references for resolved associations (as inline key arrays)
-//   - Composed children (nested inline)
+//   - Association targets as _target_-keyed objects carrying their edge
+//     properties — the same shape [Adapter.ParseObject] accepts
+//   - Composed children as arrays, (one) compositions included
+//
+// The output of a fully resolved snapshot round-trips: ParseObject plus the
+// validator accept every shape this writer emits. Unresolved edges are not
+// written; persist them in the .ys format when they must survive.
 //
 // Use [WithIndent] for pretty-printed output. Both entry points refuse a
 // snapshot in which two type identities render the same output name (two

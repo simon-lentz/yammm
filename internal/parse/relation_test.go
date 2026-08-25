@@ -74,7 +74,7 @@ func TestRelation_MultiplicitySpellingsOutsideTheTableAreRejected(t *testing.T) 
 // empty body, and no body at all.
 func TestRelation_AssociationShapes(t *testing.T) {
 	src := relSource(`/* Owns wheels. */
-	--> wheels (many) Wheel / car (one) {
+	--> wheels (many) Wheel {
 		/* When fitted. */
 		fitted Timestamp required
 		note String
@@ -100,10 +100,6 @@ func TestRelation_AssociationShapes(t *testing.T) {
 	if !full.Optional || !full.Many {
 		t.Errorf("forward = optional %v many %v, want true true", full.Optional, full.Many)
 	}
-	if full.Backref != "car" || full.ReverseOptional || full.ReverseMany {
-		t.Errorf("reverse = %q optional %v many %v, want car false false",
-			full.Backref, full.ReverseOptional, full.ReverseMany)
-	}
 	if len(full.Properties) != 2 {
 		t.Fatalf("got %d edge properties, want 2", len(full.Properties))
 	}
@@ -115,8 +111,8 @@ func TestRelation_AssociationShapes(t *testing.T) {
 	}
 
 	bare := rels[1]
-	if bare.Name != "spare" || bare.Backref != "" || !bare.ReverseOptional || bare.ReverseMany {
-		t.Errorf("bare relation = %+v, want an optional single reverse by default", bare)
+	if bare.Name != "spare" {
+		t.Errorf("bare relation = %+v, want spare", bare)
 	}
 	if len(bare.Properties) != 0 {
 		t.Errorf("bare relation carries %d edge properties, want 0", len(bare.Properties))
@@ -129,7 +125,7 @@ func TestRelation_AssociationShapes(t *testing.T) {
 // TestRelation_CompositionTakesNoBody pins the one structural difference
 // between the two forms.
 func TestRelation_CompositionTakesNoBody(t *testing.T) {
-	file, issues := Parse([]byte(relSource("*-> WHEELS (many) Wheel / car")), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(relSource("*-> WHEELS (many) Wheel")), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -137,15 +133,12 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 	if len(rels) != 1 || rels[0].Kind != RelationComposition || rels[0].Name != "WHEELS" {
 		t.Fatalf("relations = %+v, want one composition named WHEELS", rels)
 	}
-	if rels[0].Backref != "car" {
-		t.Errorf("backref = %q, want car", rels[0].Backref)
-	}
 	// The composition arm of multiplicityOf has no other reader. (one) is the
 	// spelling to assert: (many) is (true, true), which a hardcoded pair also
 	// satisfies, so it cannot tell a real read of c.Mult from a constant.
 	// An asymmetric spelling, so swapping the two fields is detectable: every
 	// symmetric pair survives a swap, and (many) is one.
-	asym, issues := Parse([]byte(relSource("*-> PARTS (one:many) Wheel / owner")), location.NewSourceID("s.yammm"))
+	asym, issues := Parse([]byte(relSource("*-> PARTS (one:many) Wheel")), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -230,22 +223,25 @@ func TestRelation_NamesAcceptEitherCase(t *testing.T) {
 	}
 }
 
-// TestRelation_ReverseSeparatorIsNotARegex pins the lexical hazard the reverse
-// name introduces: the separator is a slash, and a slash pair on one line is a
-// regex literal. A relation line holding a second slash must still lex as two
-// separators, not as a regex.
+// TestRelation_ReverseSeparatorIsNotARegex pins the lexical hazard the
+// removed clause's recognizer keeps: its separator is a slash, and a slash
+// pair on one line is a regex literal. A clause per line must still lex as
+// a separator — evidenced by the named removal diagnostic, never a regex
+// or bare syntax error.
 func TestRelation_ReverseSeparatorIsNotARegex(t *testing.T) {
 	src := relSource("--> wheels Wheel / car\n\t--> spares Wheel / owner")
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-	if len(issues) != 0 {
-		t.Fatalf("unexpected issues: %v", issues)
+	if len(issues) != 2 {
+		t.Fatalf("got %d issues, want one removal diagnostic per clause: %v", len(issues), issues)
+	}
+	for i, iss := range issues {
+		if iss.Code() != diag.E_REVERSE_CLAUSE_REMOVED {
+			t.Errorf("issue %d = %s, want %s", i, iss.Code(), diag.E_REVERSE_CLAUSE_REMOVED)
+		}
 	}
 	rels := file.Types[0].Relations
 	if len(rels) != 2 {
-		t.Fatalf("got %d relations, want 2", len(rels))
-	}
-	if rels[0].Backref != "car" || rels[1].Backref != "owner" {
-		t.Errorf("backrefs = %q, %q, want car, owner", rels[0].Backref, rels[1].Backref)
+		t.Fatalf("got %d relations, want 2 — the relations survive their removed clauses", len(rels))
 	}
 
 	// Two reverse separators on ONE line is where the regex rule wins and
@@ -297,56 +293,54 @@ func TestRelation_BrokenRelationCostsOnlyItself(t *testing.T) {
 
 // TestRelation_SpansCoverTheWholeDeclaration pins the extents a consumer reads.
 func TestRelation_SpansCoverTheWholeDeclaration(t *testing.T) {
-	src := relSource("--> wheels (many) Wheel / car")
+	src := relSource("--> wheels (many) Wheel")
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
 	rel := file.Types[0].Relations[0]
-	if got := src[rel.Span.Start.Byte:rel.Span.End.Byte]; got != "--> wheels (many) Wheel / car" {
+	if got := src[rel.Span.Start.Byte:rel.Span.End.Byte]; got != "--> wheels (many) Wheel" {
 		t.Errorf("relation span covers %q", got)
 	}
 	if got := src[rel.NameSpan.Start.Byte:rel.NameSpan.End.Byte]; got != "wheels" {
 		t.Errorf("name span covers %q, want wheels", got)
 	}
-	if got := src[rel.BackrefSpan.Start.Byte:rel.BackrefSpan.End.Byte]; got != "car" {
-		t.Errorf("backref span covers %q, want car", got)
-	}
 }
 
-// TestRelation_ReverseMultiplicityIsRecordedAsWritten pins every reverse shape,
-// including the one a refused multiplicity produces. Dropping the relation there
-// was tried and withdrawn: it took the relation's own semantic checks with it,
-// and the syntax diagnostic on the leftover text already says it was refused.
-func TestRelation_ReverseMultiplicityIsRecordedAsWritten(t *testing.T) {
+// TestRelation_ReverseClauseIsRejected pins the removal: every clause
+// shape draws E_REVERSE_CLAUSE_REMOVED at the backref name's span, and the
+// relation survives — its own semantic checks must still run.
+func TestRelation_ReverseClauseIsRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name, member string
-		wantOptional bool
-		wantMany     bool
-		wantBackref  string
+		wantRemoved  bool
 	}{
-		{"none written defaults to optional single", "--> r Wheel /back", true, false, "back"},
-		{"one:many is recorded as written", "--> r Wheel /back (one:many)", false, true, "back"},
-		{"one:one is recorded as written", "--> r Wheel /back (one:one)", false, false, "back"},
-		{"a refused multiplicity keeps the relation", "--> r Wheel /back (many:one)", true, false, "back"},
-		{"a refused multiplicity keeps a composition", "*-> c Wheel /back (many:one)", true, false, "back"},
-		{"no reverse at all", "--> r Wheel", true, false, ""},
+		{"bare name", "--> r Wheel /back", true},
+		{"name with multiplicity", "--> r Wheel /back (one:many)", true},
+		{"refused multiplicity still names the removal", "--> r Wheel /back (many:one)", true},
+		{"composition clause", "*-> c Wheel /back (one)", true},
+		{"no clause at all", "--> r Wheel", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			file, _ := Parse([]byte(relSource(tc.member)), location.NewSourceID("s.yammm"))
-			if len(file.Types) == 0 {
-				t.Fatal("no type recorded")
+			src := relSource(tc.member)
+			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			if len(file.Types) == 0 || len(file.Types[0].Relations) != 1 {
+				t.Fatal("the relation must survive its removed clause")
 			}
-			if got := len(file.Types[0].Relations); got != 1 {
-				t.Fatalf("relations = %d, want 1 — the relation must survive its own bad reverse", got)
+			var removed bool
+			for _, iss := range issues {
+				if iss.Code() == diag.E_REVERSE_CLAUSE_REMOVED {
+					removed = true
+					if got := src[iss.Span().Start.Byte:iss.Span().End.Byte]; got != "back" {
+						t.Errorf("diagnostic span covers %q, want the backref name", got)
+					}
+				}
 			}
-			rel := file.Types[0].Relations[0]
-			if rel.ReverseOptional != tc.wantOptional || rel.ReverseMany != tc.wantMany {
-				t.Errorf("reverse optional=%v many=%v, want %v %v",
-					rel.ReverseOptional, rel.ReverseMany, tc.wantOptional, tc.wantMany)
+			if removed != tc.wantRemoved {
+				t.Errorf("removal diagnostic present = %v, want %v: %v", removed, tc.wantRemoved, issues)
 			}
-			if rel.Backref != tc.wantBackref {
-				t.Errorf("backref = %q, want %q", rel.Backref, tc.wantBackref)
+			if !tc.wantRemoved && len(issues) != 0 {
+				t.Errorf("clause-free member drew %v", issues)
 			}
 		})
 	}

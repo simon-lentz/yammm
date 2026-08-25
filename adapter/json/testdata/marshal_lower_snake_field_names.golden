@@ -7,9 +7,9 @@
   ],
   "Service": [
     {
-      "http_proxy": [
-        "px1"
-      ],
+      "http_proxy": {
+        "_target_id": "px1"
+      },
       "id": "svc1",
       "name": "API Gateway"
     }

@@ -71,7 +71,6 @@
               "e": 101
             }
           },
-          "reverse_optional": true,
           "props": [
             {
               "name": "at",

@@ -544,7 +544,6 @@
               "e": 1392
             }
           },
-          "reverse_optional": true,
           "span": {
             "s": 1366,
             "e": 1392
@@ -566,7 +565,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 1397,
             "e": 1430
@@ -588,7 +586,6 @@
           },
           "optional": true,
           "many": true,
-          "reverse_optional": true,
           "span": {
             "s": 1448,
             "e": 1478
@@ -800,7 +797,6 @@
             }
           },
           "optional": true,
-          "reverse_optional": true,
           "span": {
             "s": 1952,
             "e": 1985
@@ -823,14 +819,9 @@
           },
           "optional": true,
           "many": true,
-          "backref": "published_by",
-          "backref_span": {
-            "s": 2026,
-            "e": 2038
-          },
           "span": {
             "s": 1990,
-            "e": 2044
+            "e": 2023
           }
         }
       ],
@@ -839,30 +830,30 @@
           "msg": "\"name_not_empty\"",
           "expr": "(!= (p \"name_norm\") \"\")",
           "expr_span": {
-            "s": 2069,
-            "e": 2084
+            "s": 2048,
+            "e": 2063
           },
           "span": {
-            "s": 2050,
-            "e": 2084
+            "s": 2029,
+            "e": 2063
           }
         },
         {
           "msg": "\"active_or_reason\"",
           "expr": "(|| (p \"is_active\") (!= (p \"deactivated_reason\") nil))",
           "expr_span": {
-            "s": 2110,
-            "e": 2148
+            "s": 2089,
+            "e": 2127
           },
           "span": {
-            "s": 2089,
-            "e": 2148
+            "s": 2068,
+            "e": 2127
           }
         }
       ],
       "span": {
         "s": 1614,
-        "e": 2150
+        "e": 2129
       }
     }
   ]

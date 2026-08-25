@@ -71,7 +71,6 @@
               "e": 105
             }
           },
-          "reverse_optional": true,
           "props": [
             {
               "name": "where",

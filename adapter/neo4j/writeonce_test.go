@@ -3,6 +3,9 @@ package neo4j
 import (
 	"slices"
 	"testing"
+
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestImmutableKeysFor_OwnAndInherited(t *testing.T) {
@@ -31,17 +34,31 @@ func TestImmutableKeysFor_NoAnnotations(t *testing.T) {
 	}
 }
 
-func TestImmutableKeysFor_PartType(t *testing.T) {
+// TestWriteOnce_RejectedOnPartType pins the schema-layer guard that keeps
+// ImmutableKeysFor unreachable for parts: @writeOnce on a part-type property
+// fails the load, because a part is replaced on every parent write.
+func TestWriteOnce_RejectedOnPartType(t *testing.T) {
 	t.Parallel()
-	s := loadSchema(t, "writeonce.yammm")
-	st, ok := s.Type("Note")
-	if !ok {
-		t.Fatal("part type Note not found")
+	const src = `schema "wo_part"
+
+type Root {
+	id String primary
+	*-> NOTES (_:many) Note
+}
+
+part type Note {
+	body  String    required
+	added Timestamp @writeOnce
+}
+`
+	_, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"entry.yammm": []byte(src),
+	}, "entry.yammm", ".", schema.WithSourcesOnly())
+	if !res.HasErrors() {
+		t.Fatal("@writeOnce on a part-type property must fail the load")
 	}
-	got := ImmutableKeysFor(st)
-	want := []string{"added"}
-	if !slices.Equal(got, want) {
-		t.Errorf("ImmutableKeysFor(Note) = %v; want %v", got, want)
+	if !res.HasCode(diag.E_INVALID_ANNOTATION_TARGET) {
+		t.Errorf("want E_INVALID_ANNOTATION_TARGET, got: %v", res)
 	}
 }
 

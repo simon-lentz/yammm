@@ -17,12 +17,12 @@ func TestRelation_SetTargetID(t *testing.T) {
 		"REL",
 		"rel",
 		schema.NewTypeRef("", "Target", location.Span{}),
-		schema.TypeID{}, // Initially zero
+		schema.TypeID{},
+		// Initially zero
 		location.Span{},
 		"",
-		false, false,
-		"",
-		false, false,
+		false,
+		false,
 		"Owner",
 		nil,
 	)
@@ -40,14 +40,30 @@ func TestRelation_Equal_WithTargetID(t *testing.T) {
 	targetID2 := schema.NewTypeID(location.NewSourceID("test://b"), "Target")
 
 	r1 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.NewTypeRef("", "Target", location.Span{}), targetID1,
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.NewTypeRef("", "Target", location.Span{}),
+		targetID1,
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 	r2 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.NewTypeRef("", "Target", location.Span{}), targetID2,
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.NewTypeRef("", "Target", location.Span{}),
+		targetID2,
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.False(t, r1.Equal(r2), "relations with different targetID should not be equal")
@@ -60,14 +76,30 @@ func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
 	// Two relations with zero targetIDs are equal if all other fields match
 	// Known limitation: zero targetIDs makes relations appear equal
 	r1 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.NewTypeRef("", "Target", location.Span{}), schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.NewTypeRef("", "Target", location.Span{}),
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 	r2 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.NewTypeRef("", "Target", location.Span{}), schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.NewTypeRef("", "Target", location.Span{}),
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	// With zero targetIDs, they appear equal
@@ -83,9 +115,8 @@ func TestRelation_Seal_PreventsSetTargetID(t *testing.T) {
 		schema.TypeID{},
 		location.Span{},
 		"",
-		false, false,
-		"",
-		false, false,
+		false,
+		false,
 		"Owner",
 		nil,
 	)
@@ -118,9 +149,8 @@ func TestRelation_SetTargetID_WorksBeforeSeal(t *testing.T) {
 		schema.TypeID{},
 		location.Span{},
 		"",
-		false, false,
-		"",
-		false, false,
+		false,
+		false,
 		"Owner",
 		nil,
 	)
@@ -155,11 +185,10 @@ func TestNewRelation(t *testing.T) {
 		targetID,
 		span,
 		"Employment relationship",
-		true,  // optional
-		false, // not many
-		"EMPLOYEES",
-		false, // reverse optional
-		true,  // reverse many
+		true,
+		// optional
+		false,
+		// reverse many
 		"Employee",
 		props,
 	)
@@ -174,7 +203,6 @@ func TestNewRelation(t *testing.T) {
 	assert.Equal(t, "Employment relationship", r.Documentation())
 	assert.True(t, r.IsOptional())
 	assert.False(t, r.IsMany())
-	assert.Equal(t, "EMPLOYEES", r.Backref())
 	assert.Equal(t, "Employee", r.Owner())
 	assert.Len(t, r.PropertiesSlice(), 1)
 }
@@ -199,14 +227,30 @@ func TestRelationKind_String(t *testing.T) {
 
 func TestRelation_Kind(t *testing.T) {
 	assoc := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 	comp := schema.TestNewRelation(
-		schema.RelationComposition, "PART", "part",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationComposition,
+		"PART",
+		"part",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.Equal(t, schema.RelationAssociation, assoc.Kind())
@@ -215,9 +259,17 @@ func TestRelation_Kind(t *testing.T) {
 
 func TestRelation_Name(t *testing.T) {
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "BELONGS_TO", "belongs_to",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"BELONGS_TO",
+		"belongs_to",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.Equal(t, "BELONGS_TO", r.Name())
@@ -225,9 +277,17 @@ func TestRelation_Name(t *testing.T) {
 
 func TestRelation_FieldName(t *testing.T) {
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "WORKS_AT", "works_at",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"WORKS_AT",
+		"works_at",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.Equal(t, "works_at", r.FieldName())
@@ -237,9 +297,17 @@ func TestRelation_Target(t *testing.T) {
 	target := schema.NewTypeRef("users", "Person", location.Span{})
 
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		target, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		target,
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.Equal(t, target, r.Target())
@@ -255,9 +323,17 @@ func TestRelation_Span(t *testing.T) {
 	}
 
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		span, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		span,
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	result := r.Span()
@@ -268,9 +344,17 @@ func TestRelation_Span(t *testing.T) {
 
 func TestRelation_Documentation(t *testing.T) {
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "Describes the relationship", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"Describes the relationship",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.Equal(t, "Describes the relationship", r.Documentation())
@@ -278,14 +362,30 @@ func TestRelation_Documentation(t *testing.T) {
 
 func TestRelation_IsOptional(t *testing.T) {
 	optional := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", true, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		true,
+		false,
+		"Owner",
+		nil,
 	)
 	required := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.True(t, optional.IsOptional())
@@ -294,75 +394,49 @@ func TestRelation_IsOptional(t *testing.T) {
 
 func TestRelation_IsMany(t *testing.T) {
 	many := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, true, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		true,
+		"Owner",
+		nil,
 	)
 	one := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.True(t, many.IsMany())
 	assert.False(t, one.IsMany())
 }
 
-func TestRelation_Backref(t *testing.T) {
-	r := schema.TestNewRelation(
-		schema.RelationAssociation, "MANAGES", "manages",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "MANAGED_BY", false, false, "Manager", nil,
-	)
-
-	assert.Equal(t, "MANAGED_BY", r.Backref())
-}
-
-func TestRelation_Backref_Empty(t *testing.T) {
-	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
-	)
-
-	assert.Empty(t, r.Backref())
-}
-
-func TestRelation_ReverseMultiplicity(t *testing.T) {
-	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "REVERSE",
-		true, // reverse optional
-		true, // reverse many
-		"Owner", nil,
-	)
-
-	opt, many := r.ReverseMultiplicity()
-	assert.True(t, opt)
-	assert.True(t, many)
-}
-
-func TestRelation_ReverseMultiplicity_OneToOne(t *testing.T) {
-	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "REVERSE",
-		false, // reverse not optional
-		false, // reverse not many
-		"Owner", nil,
-	)
-
-	opt, many := r.ReverseMultiplicity()
-	assert.False(t, opt)
-	assert.False(t, many)
-}
-
 func TestRelation_Owner(t *testing.T) {
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "OWNS", "owns",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Company", nil,
+		schema.RelationAssociation,
+		"OWNS",
+		"owns",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Company",
+		nil,
 	)
 
 	assert.Equal(t, "Company", r.Owner())
@@ -375,9 +449,17 @@ func TestRelation_Properties_Iterator(t *testing.T) {
 	}
 
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", props,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		props,
 	)
 
 	count := 0
@@ -390,9 +472,17 @@ func TestRelation_Properties_Iterator(t *testing.T) {
 
 func TestRelation_Properties_Empty(t *testing.T) {
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	count := 0
@@ -408,9 +498,17 @@ func TestRelation_PropertiesSlice(t *testing.T) {
 	}
 
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", props,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		props,
 	)
 
 	result := r.PropertiesSlice()
@@ -424,9 +522,17 @@ func TestRelation_PropertiesSlice_DefensiveCopy(t *testing.T) {
 	}
 
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", props,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		props,
 	)
 
 	slice1 := r.PropertiesSlice()
@@ -444,9 +550,17 @@ func TestRelation_Property_Found(t *testing.T) {
 	}
 
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", props,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		props,
 	)
 
 	p, ok := r.Property("since")
@@ -461,9 +575,17 @@ func TestRelation_Property_Found(t *testing.T) {
 
 func TestRelation_Property_NotFound(t *testing.T) {
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	p, ok := r.Property("nonexistent")
@@ -473,14 +595,30 @@ func TestRelation_Property_NotFound(t *testing.T) {
 
 func TestRelation_IsAssociation(t *testing.T) {
 	assoc := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 	comp := schema.TestNewRelation(
-		schema.RelationComposition, "PART", "part",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationComposition,
+		"PART",
+		"part",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.True(t, assoc.IsAssociation())
@@ -489,14 +627,30 @@ func TestRelation_IsAssociation(t *testing.T) {
 
 func TestRelation_IsComposition(t *testing.T) {
 	assoc := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 	comp := schema.TestNewRelation(
-		schema.RelationComposition, "PART", "part",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationComposition,
+		"PART",
+		"part",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.False(t, assoc.IsComposition())
@@ -505,17 +659,32 @@ func TestRelation_IsComposition(t *testing.T) {
 
 func TestRelation_HasProperties(t *testing.T) {
 	withProps := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner",
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
 		[]*schema.Property{
 			schema.TestNewProperty("since", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
 		},
 	)
 	withoutProps := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.True(t, withProps.HasProperties())
@@ -524,14 +693,30 @@ func TestRelation_HasProperties(t *testing.T) {
 
 func TestRelation_Equal_DifferentName(t *testing.T) {
 	r1 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL_A", "rel_a",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL_A",
+		"rel_a",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 	r2 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL_B", "rel_b",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL_B",
+		"rel_b",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.False(t, r1.Equal(r2))
@@ -539,14 +724,30 @@ func TestRelation_Equal_DifferentName(t *testing.T) {
 
 func TestRelation_Equal_DifferentKind(t *testing.T) {
 	r1 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 	r2 := schema.TestNewRelation(
-		schema.RelationComposition, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationComposition,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.False(t, r1.Equal(r2))
@@ -554,44 +755,30 @@ func TestRelation_Equal_DifferentKind(t *testing.T) {
 
 func TestRelation_Equal_DifferentMultiplicity(t *testing.T) {
 	r1 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", true, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		true,
+		false,
+		"Owner",
+		nil,
 	)
 	r2 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, true, "", false, false, "Owner", nil,
-	)
-
-	assert.False(t, r1.Equal(r2))
-}
-
-func TestRelation_Equal_DifferentBackref(t *testing.T) {
-	r1 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "BACK_A", false, false, "Owner", nil,
-	)
-	r2 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "BACK_B", false, false, "Owner", nil,
-	)
-
-	assert.False(t, r1.Equal(r2))
-}
-
-func TestRelation_Equal_DifferentReverseMultiplicity(t *testing.T) {
-	r1 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "BACK", true, false, "Owner", nil,
-	)
-	r2 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "BACK", false, true, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		true,
+		"Owner",
+		nil,
 	)
 
 	assert.False(t, r1.Equal(r2))
@@ -599,17 +786,32 @@ func TestRelation_Equal_DifferentReverseMultiplicity(t *testing.T) {
 
 func TestRelation_Equal_DifferentPropertyCount(t *testing.T) {
 	r1 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner",
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
 		[]*schema.Property{
 			schema.TestNewProperty("p1", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
 		},
 	)
 	r2 := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	assert.False(t, r1.Equal(r2))
@@ -617,9 +819,17 @@ func TestRelation_Equal_DifferentPropertyCount(t *testing.T) {
 
 func TestRelation_Equal_Nil(t *testing.T) {
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 	var nilRel *schema.Relation
 
@@ -636,9 +846,17 @@ func TestRelation_Equal_BothNil(t *testing.T) {
 
 func TestRelation_IsSealed(t *testing.T) {
 	r := schema.TestNewRelation(
-		schema.RelationAssociation, "REL", "rel",
-		schema.TypeRef{}, schema.TypeID{},
-		location.Span{}, "", false, false, "", false, false, "Owner", nil,
+		schema.RelationAssociation,
+		"REL",
+		"rel",
+		schema.TypeRef{},
+		schema.TypeID{},
+		location.Span{},
+		"",
+		false,
+		false,
+		"Owner",
+		nil,
 	)
 
 	// New relation should not be sealed

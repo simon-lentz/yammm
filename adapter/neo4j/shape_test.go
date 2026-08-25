@@ -4,6 +4,9 @@ import (
 	"context"
 	"slices"
 	"testing"
+
+	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestShapeForSchema_Basic(t *testing.T) {
@@ -70,6 +73,51 @@ func TestShapeForSchema_SkipsAbstract(t *testing.T) {
 	}
 	if _, ok := shape.Types[typeID(t, s, "Widget")]; !ok {
 		t.Error("concrete type Widget should be in Types")
+	}
+}
+
+// TestShapeForSchema_ImportedPartThroughClosure pins the closure walk: a part
+// type declared by an imported schema gets a shape under the DECLARING
+// schema's label, so the composition phases can render it.
+func TestShapeForSchema_ImportedPartThroughClosure(t *testing.T) {
+	t.Parallel()
+	const entry = `schema "entry"
+
+import "base.yammm" as base
+
+type Wrapper {
+	id String primary
+	*-> HOLDS (_:many) base.Item
+}
+`
+	const baseSrc = `schema "base"
+
+part type Item {
+	label String required
+}
+`
+	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"entry.yammm": []byte(entry),
+		"base.yammm":  []byte(baseSrc),
+	}, "entry.yammm", ".", schema.WithSourcesOnly())
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	item, ok := s.ResolveType(schema.NewTypeRef("base", "Item", location.Span{}))
+	if !ok {
+		t.Fatal("base.Item did not resolve through the entry schema")
+	}
+
+	shape, result := New().ShapeForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatalf("ShapeForSchema failed: %v", err)
+	}
+	ns, ok := shape.Types[item.ID()]
+	if !ok {
+		t.Fatal("imported part type base.Item has no shape")
+	}
+	if ns.Label != "base__Item" {
+		t.Errorf("imported part label = %q; want %q (the declaring schema's name)", ns.Label, "base__Item")
 	}
 }
 

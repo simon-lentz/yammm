@@ -7,9 +7,9 @@
   ],
   "Person": [
     {
-      "employer": [
-        "c1"
-      ],
+      "employer": {
+        "_target_id": "c1"
+      },
       "id": "p1",
       "name": "Alice"
     }

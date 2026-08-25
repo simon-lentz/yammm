@@ -11,10 +11,8 @@ type Event struct {
 }
 
 type EDGE_Event_held_at_Place struct {
-	Where  string `json:"where"`
-	Where2 struct {
-		ID string `json:"id"`
-	} `json:"Where2"`
+	TargetID string `json:"_target_id"`
+	Where    string `json:"where"`
 }
 
 type Graph struct {
@@ -49,4 +47,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:e52e8db1c3f3c49ccbd1b1df12b28908a9aa1c2d770f3cf9b0f48bda33e365af"
+const SchemaHash = "sha256:1e9c159f37a2c2b9a762efb597634310a74fa857260b73ee2fe55854f60c962a"

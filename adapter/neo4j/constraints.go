@@ -124,11 +124,21 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) (
 }
 
 // constraintsForType generates all constraints for a single type.
+//
+// A part type keys its node on the composed path, never on its declared
+// primary key: sibling-scoped uniqueness is not a Neo4j constraint, so a
+// UNIQUE there would reject legal data. The declared key's NOT NULL and
+// TYPE constraints still emit through the ordinary walks below.
 func (a *Adapter) constraintsForType(_ context.Context, t *schema.Type, label string, collector *diag.Collector) []Constraint {
 	var constraints []Constraint
 
-	// 1. PRIMARY KEY constraints (UNIQUE or NODE KEY).
-	constraints = append(constraints, a.primaryKeyConstraints(t, label, collector)...)
+	// 1. PRIMARY KEY constraints (UNIQUE or NODE KEY); the composed-key
+	// pair for a part.
+	if t.IsPart() {
+		constraints = append(constraints, a.composedKeyConstraints(label)...)
+	} else {
+		constraints = append(constraints, a.primaryKeyConstraints(t, label, collector)...)
+	}
 
 	// 2. NOT NULL constraints for required properties.
 	constraints = append(constraints, a.notNullConstraints(t, label, collector)...)
@@ -294,6 +304,32 @@ func (a *Adapter) primaryKeyConstraints(t *schema.Type, label string, collector 
 	}}
 }
 
+// composedKeyConstraints emits the part-label identity pair: UNIQUE and
+// NOT NULL on the composed key the write path assigns to every part node.
+func (a *Adapter) composedKeyConstraints(label string) []Constraint {
+	props := []string{composedKeyProp}
+	unique := a.buildStatement(label, props, ConstraintUnique,
+		fmt.Sprintf("REQUIRE n.%s IS UNIQUE", composedKeyProp))
+	notNull := a.buildStatement(label, props, ConstraintNotNull,
+		fmt.Sprintf("REQUIRE n.%s IS NOT NULL", composedKeyProp))
+	return []Constraint{
+		{
+			Name:       a.optionalName(label, props, ConstraintUnique),
+			Kind:       ConstraintUnique,
+			Label:      label,
+			Properties: props,
+			Statement:  unique,
+		},
+		{
+			Name:       a.optionalName(label, props, ConstraintNotNull),
+			Kind:       ConstraintNotNull,
+			Label:      label,
+			Properties: props,
+			Statement:  notNull,
+		},
+	}
+}
+
 // notNullConstraints generates NOT NULL constraints for required properties.
 func (a *Adapter) notNullConstraints(t *schema.Type, label string, collector *diag.Collector) []Constraint {
 	var constraints []Constraint
@@ -301,8 +337,10 @@ func (a *Adapter) notNullConstraints(t *schema.Type, label string, collector *di
 
 	// Build set of PK property names for NODE KEY dedup. Gated on the same
 	// predicate that chooses the kind: skipping a primary key's NOT NULL is only
-	// safe where a NODE KEY is actually emitted to cover it.
-	useNodeKey := a.useNodeKeyConstraints()
+	// safe where a NODE KEY is actually emitted to cover it — and never for a
+	// part, whose declared key gets no NODE KEY, so skipping would strip the
+	// one guarantee the key still has.
+	useNodeKey := a.useNodeKeyConstraints() && !t.IsPart()
 	pkNames := make(map[string]struct{})
 	if useNodeKey {
 		for _, pk := range t.PrimaryKeysSlice() {

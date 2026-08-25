@@ -401,7 +401,7 @@ type Recipe {
 ### One-to-Many via Association
 
 ```yammm-snippet
---> WRITTEN_BY (one) Author / BOOKS (many)
+--> WRITTEN_BY (one) Author
 ```
 
 ### Owned Children via Composition

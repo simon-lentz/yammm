@@ -17,9 +17,7 @@ type Person struct {
 }
 
 type EDGE_Member_belongs_to_Org struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type Graph struct {
@@ -54,4 +52,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:bfec3283ffe16f5cbf3947cfc8689184be0cdd8f49c5d6a5380baa9f33c2bcf8"
+const SchemaHash = "sha256:f0974a8eb39175b59184dbdfca54cb1712198782bf3312dabdf8f2c82010a74e"

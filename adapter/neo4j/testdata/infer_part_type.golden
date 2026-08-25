@@ -1,0 +1,16 @@
+schema "test"
+
+// Inferred from Neo4j database.
+// TODO: Replace String types with UUID, Pattern, or Enum where appropriate.
+// TODO: Review inferred relationship field names.
+// TODO: Add invariants if needed.
+
+part type LineItem {
+    // TODO: declare the owning composition (*-> NAME (_:many) LineItem) on a parent type; node DDL does not record it.
+    description String required // TODO: verify type (could be UUID, Pattern, or Enum)
+    quantity Integer
+}
+
+type Order {
+    order_id String primary // TODO: verify type (could be UUID, Pattern, or Enum)
+}

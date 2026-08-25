@@ -3,10 +3,14 @@
 		"version": 3,
 		"schema_name": "wiretest",
 		"schema_source": "string://wiretest.yammm",
-		"schema_hash": "sha256:38660474f3c3ee8d878a24c3033153024156fb9254e71964a6ce7691f14a9810",
-		"schema_hash_algorithm": 1,
-		"integrity_hash": "sha256:626328244dc444a0661931f6f89c96ba8000b4d28e179bb3e0e16a1f0cfbaa46",
-		"features": []
+		"schema_hash": "sha256:d6343de8d1a8e0cedcf28d06d58885ace0e239f48e7865569485b5068327b36c",
+		"schema_hash_algorithm": 2,
+		"integrity_hash": "sha256:4a6f90f6f8da2d86986ef459cfa86b2cdb8ad39ef3313e60460c38aeaee2f7d6",
+		"features": [],
+		"attestation": {
+			"values": false,
+			"associations": true
+		}
 	},
 	"types": [
 		{

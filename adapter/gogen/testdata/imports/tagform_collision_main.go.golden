@@ -26,27 +26,19 @@ type RightbaseNode struct {
 }
 
 type EDGE_Main_to_left_Left struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type EDGE_Main_to_right_Right struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type EDGE_Left_to_node_LeftbaseNode struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type EDGE_Right_to_node_RightbaseNode struct {
-	Where struct {
-		ID string `json:"id"`
-	} `json:"where"`
+	TargetID string `json:"_target_id"`
 }
 
 type Graph struct {
@@ -88,4 +80,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:8afa0b5cb512b842f25f2fcf17ad9e512547514aaf938c3a12dcefb8bc229457"
+const SchemaHash = "sha256:0699583751e41398734a022457736988c65194eab02702339ec99c2eeab6f834"

@@ -14,9 +14,7 @@ type Region struct {
 }
 
 type EDGE_County_in_region_Region struct {
-	Where struct {
-		Code RegionCode `json:"code"`
-	} `json:"where"`
+	TargetCode RegionCode `json:"_target_code"`
 }
 
 type Graph struct {
@@ -52,4 +50,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:ef4e7c0f928f0bc679afdfa131bd2f869cd5ae99e06c20378fb1ecec76a3bb38"
+const SchemaHash = "sha256:be04f17e0979df47ce9c8843adc0ee5716ef513eea4517891fe636ead69a88a4"

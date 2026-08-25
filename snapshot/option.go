@@ -3,6 +3,8 @@ package snapshot
 import (
 	"maps"
 	"time"
+
+	"github.com/simon-lentz/yammm/diag"
 )
 
 // Option configures snapshot serialization behavior.
@@ -71,6 +73,14 @@ type LoadOption func(*loadConfig)
 type loadConfig struct {
 	skipIntegrityCheck bool
 	valueConformance   bool
+
+	// headerOnly marks the surfaces that read a header without trusting a
+	// body. They keep the hash-algorithm mismatch non-fatal, so dispatch
+	// can classify a stale document instead of receiving nil.
+	headerOnly bool
+
+	revalidate         bool
+	revalidateSeverity diag.Severity
 }
 
 func applyLoadOptions(opts []LoadOption) loadConfig {
@@ -89,7 +99,8 @@ func applyLoadOptions(opts []LoadOption) loadConfig {
 // It reports values of the three kinds that have a canonical stored form —
 // Timestamp, Date and UUID — and nothing else. Bounds, enums, patterns and
 // invariants stay unchecked. **This is not re-validation**, and a document it
-// reports nothing for is not thereby valid.
+// reports nothing for is not thereby valid; [WithRevalidation] is the full
+// check.
 //
 // Warning severity is deliberate: Load still returns the snapshot together
 // with the findings. Reporting a document is not refusing it, and the values
@@ -97,6 +108,33 @@ func applyLoadOptions(opts []LoadOption) loadConfig {
 func WithValueConformance() LoadOption {
 	return func(c *loadConfig) {
 		c.valueConformance = true
+	}
+}
+
+// WithRevalidation makes [Load] and [Verify] run every root instance — its
+// composed children, association edges and invariants included — back
+// through the real validator ([github.com/simon-lentz/yammm/instance.Validator])
+// and report each finding at the given severity, typically
+// [github.com/simon-lentz/yammm/diag.Warning] or
+// [github.com/simon-lentz/yammm/diag.Error]. At Error severity a document
+// that fails re-validation refuses to load.
+//
+// This is the full check [WithValueConformance] is not: bounds, enums,
+// patterns, invariants, edge shapes and compositions are all evaluated. A
+// loaded document can fail it, because the graph accepts what
+// [github.com/simon-lentz/yammm/graph.RebuildSnapshot] and the bypass
+// constructors assert without validation.
+//
+// An unresolved record for a Required association is reported as
+// [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED]. An
+// edge or composed child stored under a relation name its type does not
+// declare is reported rather than silently skipped — such a document is
+// exactly what the option exists to find. Off by default: without the
+// option, Load returns what was written.
+func WithRevalidation(severity diag.Severity) LoadOption {
+	return func(c *loadConfig) {
+		c.revalidate = true
+		c.revalidateSeverity = severity
 	}
 }
 

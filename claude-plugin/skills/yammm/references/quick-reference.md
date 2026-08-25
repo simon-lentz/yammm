@@ -64,7 +64,6 @@ Primary key types: `String`, `UUID`, `Date`, `Timestamp` only. Aliases that reso
 ```text
 --> REL_NAME (multiplicity) TargetType              // association
 --> REL_NAME (multiplicity) TargetType { props }    // with edge properties
---> REL_NAME (many) Target / reverse_name (one)     // reverse clause
 *-> REL_NAME (multiplicity) PartType                 // composition
 ```
 

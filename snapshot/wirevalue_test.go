@@ -8,7 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/instance/instancetest"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"

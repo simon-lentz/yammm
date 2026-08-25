@@ -66,23 +66,18 @@ type projType struct {
 	Span       projSpan      `json:"span"`
 }
 
-// projRel is one association or composition. Optional and Many describe the
-// forward direction, the Reverse pair the backward one. Omitted multiplicity
-// is optional-and-single, so Optional is true far more often than false.
+// projRel is one association or composition. Omitted multiplicity is
+// optional-and-single, so Optional is true far more often than false.
 type projRel struct {
-	Kind            string      `json:"kind"` // "assoc" | "comp"
-	Name            string      `json:"name"`
-	NameSpan        projSpan    `json:"name_span"`
-	Doc             string      `json:"doc,omitempty"`
-	Target          projTypeRef `json:"target"`
-	Optional        bool        `json:"optional,omitempty"`
-	Many            bool        `json:"many,omitempty"`
-	Backref         string      `json:"backref,omitempty"`
-	BackrefSpan     projSpan    `json:"backref_span,omitzero"`
-	ReverseOptional bool        `json:"reverse_optional,omitempty"`
-	ReverseMany     bool        `json:"reverse_many,omitempty"`
-	Props           []projProp  `json:"props,omitempty"` // edge properties; a composition can carry none
-	Span            projSpan    `json:"span"`
+	Kind     string      `json:"kind"` // "assoc" | "comp"
+	Name     string      `json:"name"`
+	NameSpan projSpan    `json:"name_span"`
+	Doc      string      `json:"doc,omitempty"`
+	Target   projTypeRef `json:"target"`
+	Optional bool        `json:"optional,omitempty"`
+	Many     bool        `json:"many,omitempty"`
+	Props    []projProp  `json:"props,omitempty"` // edge properties; a composition can carry none
+	Span     projSpan    `json:"span"`
 }
 
 type projTypeRef struct {
@@ -226,17 +221,13 @@ func (p projector) rel(r *Relation) projRel {
 		kind = "comp"
 	}
 	nr := projRel{
-		Kind:            kind,
-		Name:            r.Name,
-		NameSpan:        p.span(r.NameSpan),
-		Doc:             r.Doc,
-		Optional:        r.Optional,
-		Many:            r.Many,
-		Backref:         r.Backref,
-		BackrefSpan:     p.span(r.BackrefSpan),
-		ReverseOptional: r.ReverseOptional,
-		ReverseMany:     r.ReverseMany,
-		Span:            p.span(r.Span),
+		Kind:     kind,
+		Name:     r.Name,
+		NameSpan: p.span(r.NameSpan),
+		Doc:      r.Doc,
+		Optional: r.Optional,
+		Many:     r.Many,
+		Span:     p.span(r.Span),
 	}
 	if r.Target != nil {
 		nr.Target = p.typeRef(r.Target)

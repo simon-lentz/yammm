@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -54,21 +55,56 @@ type GraphShape struct {
 }
 
 // ShapeForSchema converts a yammm schema into a [GraphShape] describing
-// the Neo4j node structure for each non-abstract type.
+// the Neo4j node structure for each non-abstract type across the WHOLE
+// import closure — each member's types are labelled under that member's
+// own schema name, so an association or composition reaching an imported
+// type finds its shape without a hand-built merge.
 //
 // This is the metadata needed to ensure write-time label and key consistency.
 // Consumers use [NodeShape.Label] for MERGE patterns and [NodeShape.PrimaryKeys]
 // for MERGE key properties.
 //
 // If validation errors are found, returns (nil, result) where result contains
-// [E_NEO4J_INVALID_IDENTIFIER] issues.
+// [E_NEO4J_INVALID_IDENTIFIER] or [E_NEO4J_LABEL_COLLISION] issues — two
+// closure members sharing a schema name render colliding labels, and a
+// TypeID-keyed map would silently hold two shapes under one label.
 func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphShape, diag.Result) {
 	collector := diag.NewCollector(0)
 	shape := &GraphShape{
 		Types: make(map[schema.TypeID]NodeShape),
 	}
 
-	for t, label := range a.emittableTypes(ctx, s, collector) {
+	// Defense-in-depth, like [Adapter.DetectLabelCollisions]: the source
+	// registry rejects a duplicated schema name (E_DUPLICATE_TYPE), and
+	// [SanitizeIdentifier] is the identity on front-door names, so no
+	// loader-built closure can reach this refusal. It guards construction
+	// paths that bypass the loader.
+	seenLabels := make(map[string]schema.TypeID)
+	for _, member := range s.Closure() {
+		for t, label := range a.emittableTypes(ctx, member, collector) {
+			if first, dup := seenLabels[label]; dup {
+				collector.Collect(diag.NewIssue(diag.Error, E_NEO4J_LABEL_COLLISION,
+					fmt.Sprintf("type %s and type %s both render label %q across the import closure", first, t.ID(), label)).
+					WithDetail(diag.DetailKeyFormat, "neo4j").
+					WithDetail(detailKeyLabel, label).
+					Build())
+				continue
+			}
+			seenLabels[label] = t.ID()
+			a.recordShape(shape, t, label)
+		}
+	}
+
+	result := collector.Result()
+	if !result.OK() {
+		return nil, result
+	}
+	return shape, result
+}
+
+// recordShape computes and stores one type's NodeShape.
+func (a *Adapter) recordShape(shape *GraphShape, t *schema.Type, label string) {
+	{
 		// Trimmed to match the label, which is built from the same form. The
 		// map is keyed by identity, so this is the display name alone.
 		name := strings.TrimSpace(t.Name())
@@ -125,10 +161,4 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphS
 			keyConstraints: keyConstraints,
 		}
 	}
-
-	result := collector.Result()
-	if !result.OK() {
-		return nil, result
-	}
-	return shape, result
 }

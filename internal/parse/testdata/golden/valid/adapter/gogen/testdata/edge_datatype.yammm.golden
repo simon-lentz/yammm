@@ -133,7 +133,6 @@
               "e": 191
             }
           },
-          "reverse_optional": true,
           "props": [
             {
               "name": "since",

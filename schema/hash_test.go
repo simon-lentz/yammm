@@ -54,9 +54,17 @@ func makeProp(name string, c schema.Constraint, optional, pk bool) *schema.Prope
 func makeAssoc(name, targetName string, optional, many bool, edgeProps []*schema.Property) *schema.Relation { //nolint:unparam // test helper - name varies across test files
 	targetID := schema.NewTypeID(location.SourceID{}, targetName)
 	return schema.TestNewRelation(
-		schema.RelationAssociation, name, strings.ToLower(name),
-		schema.LocalTypeRef(targetName, zeroSpan), targetID,
-		zeroSpan, "", optional, many, "", false, false, "", edgeProps,
+		schema.RelationAssociation,
+		name,
+		strings.ToLower(name),
+		schema.LocalTypeRef(targetName, zeroSpan),
+		targetID,
+		zeroSpan,
+		"",
+		optional,
+		many,
+		"",
+		edgeProps,
 	)
 }
 
@@ -64,9 +72,17 @@ func makeAssoc(name, targetName string, optional, many bool, edgeProps []*schema
 func makeComp(name, targetName string, optional, many bool) *schema.Relation {
 	targetID := schema.NewTypeID(location.SourceID{}, targetName)
 	return schema.TestNewRelation(
-		schema.RelationComposition, name, strings.ToLower(name),
-		schema.LocalTypeRef(targetName, zeroSpan), targetID,
-		zeroSpan, "", optional, many, "", false, false, "", nil,
+		schema.RelationComposition,
+		name,
+		strings.ToLower(name),
+		schema.LocalTypeRef(targetName, zeroSpan),
+		targetID,
+		zeroSpan,
+		"",
+		optional,
+		many,
+		"",
+		nil,
 	)
 }
 
@@ -88,7 +104,7 @@ func buildTypeWithProps(name string, props []*schema.Property) *schema.Type {
 }
 
 func TestStructuralHashVersion(t *testing.T) {
-	assert.Equal(t, 1, schema.StructuralHashVersion)
+	assert.Equal(t, 2, schema.StructuralHashVersion)
 }
 
 func TestStructuralHash_NilPanics(t *testing.T) {

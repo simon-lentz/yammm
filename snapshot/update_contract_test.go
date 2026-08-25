@@ -17,7 +17,7 @@ import (
 // the header validation it is written for.
 func headerDoc(s *schema.Schema, version int, featuresJSON string) []byte {
 	return fmt.Appendf(nil,
-		`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":%s},"types":[{"schema_path":"test://test.yammm","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
+		`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":2,"integrity_hash":"","features":%s},"types":[{"schema_path":"test://test.yammm","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
 		version, schema.StructuralHash(s), featuresJSON)
 }
 
@@ -111,14 +111,29 @@ func TestUpdateMetadata_RefusesUnrecognizedFeature(t *testing.T) {
 // TestUpdateMetadata_HashAlgorithmWarningStillPasses guards the boundary of the
 // collector check: the hash-algorithm mismatch is a Warning and must keep
 // passing, or the check would refuse documents every read path accepts.
-func TestUpdateMetadata_HashAlgorithmWarningStillPasses(t *testing.T) {
+func TestUpdateMetadata_RefusesUnknownHashAlgorithm(t *testing.T) {
+	// Inverted at v0.15.0: UpdateMetadata re-signs a body it does not read,
+	// so a document whose schema identity cannot be checked is refused
+	// rather than relabelled. Header-only reads stay non-fatal instead.
 	ctx := context.Background()
 	s := testSchema(t)
 	data := fmt.Appendf(nil,
 		`{"yammm_snapshot":{"version":3,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":99,"integrity_hash":"","features":[]},"types":[{"schema_path":"test://test.yammm","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
 		schema.StructuralHash(s))
 
-	if _, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"}); res.HasErrors() {
-		t.Errorf("an unrecognized hash algorithm is a Warning and must not refuse the fast path: %v", res)
+	out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	if !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) || !res.HasErrors() {
+		t.Errorf("an unrecognized hash algorithm must refuse the relabel with an Error: %v", res)
+	}
+	if out != nil {
+		t.Error("a refused relabel returned output bytes")
+	}
+
+	header, hres := snapshot.HeaderOnly(ctx, data)
+	if hres.HasErrors() {
+		t.Errorf("a header-only read must stay classifiable: %v", hres)
+	}
+	if header == nil || header.SchemaHashMatches(s) {
+		t.Error("a header under an unknown algorithm must not match any schema")
 	}
 }

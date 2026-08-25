@@ -135,6 +135,17 @@ func TestInferSchema_Golden(t *testing.T) {
 			schemaName: "test",
 		},
 		{
+			name: "part_type",
+			constraints: []RemoteConstraint{
+				{Name: "c1", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"test__Order"}, Properties: []string{"order_id"}},
+				{Name: "c2", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"test__LineItem"}, Properties: []string{"_composed_key"}},
+				{Name: "c3", Type: "NODE_PROPERTY_EXISTENCE", EntityType: "NODE", LabelsOrTypes: []string{"test__LineItem"}, Properties: []string{"_composed_key"}},
+				{Name: "c4", Type: "NODE_PROPERTY_EXISTENCE", EntityType: "NODE", LabelsOrTypes: []string{"test__LineItem"}, Properties: []string{"description"}},
+				{Name: "c5", Type: "NODE_PROPERTY_TYPE", EntityType: "NODE", LabelsOrTypes: []string{"test__LineItem"}, Properties: []string{"quantity"}, PropertyType: "INTEGER"},
+			},
+			schemaName: "test",
+		},
+		{
 			name: "custom_separator",
 			opts: []Option{WithLabelSeparator("---")},
 			constraints: []RemoteConstraint{

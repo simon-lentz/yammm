@@ -542,6 +542,55 @@ The release carries what the consumer's reading of v0.13.0 found and asked for. 
 - **Documentation: `instance.CanonicalValue` is documented in `docs/API.md` and the package doc**, beside `CheckValue`; v0.13.0 enumerated it here and nowhere else.
 - **Tests: goldens pin the wire bytes of the three canonical kinds.** `snapshot/testdata/marshal_temporal_representative.ys.golden` pins the validator's output for `Timestamp`, `UUID` and `Date` in every wire position, and `adapter/json/testdata/marshal_temporal_kinds.golden` pins the writer's rendering, including the own-location rule for a `Date`. v0.13.0 moved all three forms with no byte pin.
 
+## v0.15.0 under this policy
+
+Minor tier: the fidelity release — v1.0 condition 5 discharged by fix. One DSL break, two Go-API removals, wire additions with no version bump, output-shape changes in every writer, one severity flip, and a set of behaviour tightenings; every item is a fidelity fix — the writers, the graph layer, the hash and the persisted format now hold what the schema states.
+
+### Breaking in the DSL
+
+- **The reverse clause is removed.** `--> NAME (mult) Target / reverse_name (mult)` no longer parses as metadata; the grammar still recognizes the shape, and a schema carrying one draws `E_REVERSE_CLAUSE_REMOVED` (CategorySchema) naming this release. `yammm fmt` still formats such a file — formatting is not a validity gate; every load path rejects it.
+
+### Breaking in the Go API
+
+- **`Relation.Backref` and `Relation.ReverseMultiplicity` are removed**, with the reverse fields they read; `newRelation` loses the three parameters internally.
+- **`instance/instancetest` moves to `internal/instancetest`.** The bypass-fixture builder was public API by location only; every importer is an in-module test. External consumers construct valid instances through `instance.Validator`.
+
+### Wire additions (no version bump; still `version: 3`)
+
+- **The header carries an always-written `attestation` field** (`values`, `associations`): whether every root and composed child was validator-built and every `Required` association resolved. An absent field is a pre-v0.15.0 document and reads as both false. `UpdateMetadata` copies it verbatim and never fabricates one. The claim is protected by the integrity hash against tampering and nothing else — `graph.RebuildSnapshot` is exported, so the attestation is the writer's word, not a proof.
+- **`schema_hash_algorithm` becomes 2** (see the hash entry below), and **a mismatched algorithm is now an Error on the body-reading surfaces** (`Load`, `Verify`, `Info`, `UpdateMetadata`) — this supersedes the v0.12.0 entry's promise that `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is a Warning. The header-only surfaces (`HeaderOnly`, `HeaderOnlyRead`, `ScanDir`) keep it non-fatal, so hash-based dispatch can still classify a stale document instead of receiving nil.
+
+### StructuralHash algorithm 2
+
+- **`schema.StructuralHash` hashes what decides validity**: type invariants (order-insensitively, by sorted expression serialization), `isAbstract`, and `isPart` join the input; the domain tag moves to `yammm-schema-v2` and `StructuralHashVersion` to 2. Every stored hash changes; a consumer pinned to hash-based staleness classification sees every pre-v0.15.0 document as `schema_hash`-stale at the pin move. Relation and supertype targets stay identified by name, not schema path, so `embedded://` and disk loads of one schema still agree.
+- **`schema/testdata/hash_vectors.json` is recomputed** for algorithm 2 — the published cross-language reference vectors move with the algorithm.
+- **The gogen `SchemaHash` constant moves for every schema** (regenerate with `go generate`).
+
+### Output changes
+
+- **`adapter/json` writers emit what their parsers accept**: an association is a `_target_<pk>`-keyed object with edge properties beside — one object for `(one)`, an array for `(many)` — and a composition is an array of child objects for every multiplicity. Key components and edge-property values render canonically through their constraints. Previously a `(one)` association wrote a bare key array and edge properties were dropped.
+- **`adapter/csv` gains relation columns**: `<field>._target_<pk>` and `<field>.<prop>` dotted columns, `(many)` groups zipped on the list separator with backslash escaping (separator and backslash), `csv.WithListSeparator` and `csv.WithSchema` options, and layout-`Timestamp` cells coerced through the declared layout. A CSV round trip through the validator is now the identity for association-bearing types.
+- **`adapter/neo4j` writes composed children** under ownership semantics: `BatchNodeQueries` returns a phased slice (`BatchNodeQuery.Kind`: `NodeMerge`, `CompositionReplace`, `CompositionCreate`); a parent write replaces its composed subtree via a label-anchored quantified-path delete, then rebuilds it parent-first. Part nodes carry identity in `_composed_key` (`graph.FormatComposedKey`; positional — not stable across writes — for keyless `(many)` parts). Part DDL moves to `UNIQUE` + `NOT NULL` on `_composed_key` with no `UNIQUE`/`NODE KEY` on a part's declared primary key: **a provisioned database sees the part-PK `UNIQUE` drop and the `_composed_key` create in the diff — a migration step, not a bug.** On Community the `_composed_key` `NOT NULL` is counted by `W_NEO4J_EDITION_CONSTRAINT_OMITTED` like every other NOT NULL. `ShapeForSchema` walks the whole import closure, so imported types get shapes under their declaring schema's label; `InferSchema` scaffolds `part type` from a lone `_composed_key` uniqueness constraint.
+
+### Generated-output surface
+
+- **gogen `EDGE_` structs flatten**: the nested `Where` block is gone; `_target_<pk>` fields sit first, edge properties beside them — the JSON adapter's shape. The `where`-key clash fallback is deleted with the block.
+- **gogen `(one)` compositions become `[]*Child`**, matching the array the parser accepts for every multiplicity.
+
+### Behaviour tightenings
+
+- **The graph layer enforces what the schema states**: `(one)` association cardinality (`E_GRAPH_CARDINALITY`), composed-child type identity on every attach path, undeclared relation names rejected for associations and compositions (`E_GRAPH_UNKNOWN_RELATION`), abstract types rejected (`E_GRAPH_ABSTRACT_TYPE`), and instance keys checked against present primary-key properties (`E_GRAPH_INVALID_PK`); an inline `(one)` composition overflow on a root records a `Duplicate` that survives the wire.
+- **`@writeOnce` is rejected on a part-type property** (`E_INVALID_ANNOTATION_TARGET`): a part is replaced whole on every parent write, so create-once semantics cannot hold.
+- **`ValidInstance` carries an unforgeable `validated` bit**: only `instance.Validator` sets it; every bypass constructor documents itself as asserting a claim and reports `Validated() == false`.
+
+### Additive
+
+- `snapshot.WithRevalidation(severity)` — opt-in re-validation of every loaded instance through the real validator on `Load`/`Verify`; `W_SNAPSHOT_UNRESOLVED_REQUIRED` for `Required` unresolved records; `snapshot verify --revalidate` and the previously unplumbed `--value-conformance` CLI flags.
+- `graph.Snapshot.Attestation` / `graph.Attestation`; `SnapshotParts.Attestation`; `HeaderInfo.Attestation` and `SnapshotInfo.Attestation`; `snapshot info` renders the claim.
+- `instance.ValidInstance.Validated`; `graph.Instance.Validated`.
+- `csv.WithListSeparator`, `csv.WithSchema`; `neo4j.BatchNodeQuery.Kind` / `NodeQueryKind`.
+- New diagnostic codes: `E_GRAPH_CARDINALITY`, `E_GRAPH_UNKNOWN_RELATION`, `E_GRAPH_ABSTRACT_TYPE`, `E_GRAPH_INVALID_PK`, `E_REVERSE_CLAUSE_REMOVED`, `W_SNAPSHOT_UNRESOLVED_REQUIRED`.
+
 ## Revision history
 
 - **2026-04-17** — Initial document, added as part of v0.3.0 release prep.

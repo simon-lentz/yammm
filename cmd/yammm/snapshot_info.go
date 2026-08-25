@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -139,6 +140,8 @@ func printSnapshotInfo(w interface{ Write([]byte) (int, error) }, info *snapshot
 		fmt.Fprintf(w, "  Metadata:   none\n")
 	}
 
+	printAttestation(w, info.Attestation)
+
 	fmt.Fprintf(w, "\nTypes: %d\n", len(info.Types))
 	for _, typeName := range info.Types {
 		fmt.Fprintf(w, "  %s: %d instances\n", typeName, info.InstanceCounts[typeName])
@@ -183,10 +186,22 @@ func printHeaderInfo(w interface{ Write([]byte) (int, error) }, header *snapshot
 		fmt.Fprintf(w, "  Metadata:   none\n")
 	}
 
+	printAttestation(w, header.Attestation)
+
 	fmt.Fprintf(w, "\nTypes: %d\n", len(header.Types))
 	for _, typeName := range header.Types {
 		fmt.Fprintf(w, "  %s\n", typeName)
 	}
+}
+
+// printAttestation renders the header's validity claim, or names its
+// absence: a pre-v0.15.0 writer states no claim at all.
+func printAttestation(w interface{ Write([]byte) (int, error) }, att *graph.Attestation) {
+	if att == nil {
+		fmt.Fprintf(w, "  Attested:   not stated (pre-v0.15.0 writer)\n")
+		return
+	}
+	fmt.Fprintf(w, "  Attested:   values=%t associations=%t\n", att.Values, att.Associations)
 }
 
 // dirEntryDTO mirrors ScanEntry for JSON output. The shape exposes the

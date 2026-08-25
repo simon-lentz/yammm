@@ -89,6 +89,10 @@ type Reading struct {
 	On *Date                   `json:"on,omitempty"`
 }
 
+type Casing struct {
+	Serial string `json:"serial"`
+}
+
 type Sensor struct {
 	ID             string                                 `json:"id"`
 	Installed      Date                                   `json:"installed"`
@@ -102,6 +106,13 @@ type Sensor struct {
 	Days           []Date                                 `json:"days,omitempty"`
 	Walls          []Timestamp20060102150405              `json:"walls,omitempty"`
 	HasReading     []*Reading                             `json:"has_reading,omitempty"`
+	InCasing       []*Casing                              `json:"in_casing"`
+	Feeds          *EDGE_Sensor_feeds_Sensor              `json:"feeds"`
+}
+
+type EDGE_Sensor_feeds_Sensor struct {
+	TargetID string                   `json:"_target_id"`
+	Since    *Timestamp20060102150405 `json:"since,omitempty"`
 }
 
 type Graph struct {
@@ -112,7 +123,7 @@ type Graph struct {
 // module-root-relative path, as verbatim .yammm text. Read it through
 // SerializedSources below.
 var serializedSources = map[string]string{
-	"temporal.yammm": "schema \"temporal\"\n\ntype Day   = Date\ntype Stamp = Timestamp\ntype Wall  = Timestamp[\"2006-01-02 15:04:05\"]\n\npart type Reading {\n\tat Timestamp[\"2006-01-02 15:04:05\"] required\n\ton Date\n}\n\ntype Sensor {\n\tid             String primary\n\tinstalled      Date required\n\tdecommissioned Date\n\tcreated_at     Timestamp required\n\tseen_wall      Timestamp[\"2006-01-02 15:04:05\"]\n\tseen_at        Timestamp[\"2006-01-02T15:04:05.000000000Z07:00\"] required\n\tday            Day\n\tstamp          Stamp\n\twall           Wall\n\tdays           List<Date>\n\twalls          List<Timestamp[\"2006-01-02 15:04:05\"]>\n\t*-> HAS_READING (many) Reading\n}\n",
+	"temporal.yammm": "schema \"temporal\"\n\ntype Day   = Date\ntype Stamp = Timestamp\ntype Wall  = Timestamp[\"2006-01-02 15:04:05\"]\n\npart type Reading {\n\tat Timestamp[\"2006-01-02 15:04:05\"] required\n\ton Date\n}\n\npart type Casing {\n\tserial String primary\n}\n\ntype Sensor {\n\tid             String primary\n\tinstalled      Date required\n\tdecommissioned Date\n\tcreated_at     Timestamp required\n\tseen_wall      Timestamp[\"2006-01-02 15:04:05\"]\n\tseen_at        Timestamp[\"2006-01-02T15:04:05.000000000Z07:00\"] required\n\tday            Day\n\tstamp          Stamp\n\twall           Wall\n\tdays           List<Date>\n\twalls          List<Timestamp[\"2006-01-02 15:04:05\"]>\n\t*-> HAS_READING (many) Reading\n\t*-> IN_CASING (one) Casing\n\t--> FEEDS (one) Sensor {\n\t\tsince Timestamp[\"2006-01-02 15:04:05\"]\n\t}\n}\n",
 }
 
 // SerializedEntry is the entry-point key into SerializedSources.
@@ -135,4 +146,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:4946f0eb551f3dd057f2ed824df02616de0b33b720957dce8ea33a6b797ec160"
+const SchemaHash = "sha256:fe38c153362bcf63b37d77072992d66accf4a389e36e2b20a50d2023f869950d"

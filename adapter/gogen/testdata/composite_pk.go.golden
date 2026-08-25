@@ -13,10 +13,8 @@ type Sensor struct {
 }
 
 type EDGE_Sensor_located_in_Region struct {
-	Where struct {
-		Country string `json:"country"`
-		Code    string `json:"code"`
-	} `json:"where"`
+	TargetCountry string `json:"_target_country"`
+	TargetCode    string `json:"_target_code"`
 }
 
 type Graph struct {
@@ -51,4 +49,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:ca582973e886de1202a4b521eb4439bb9b128d099e5b2725ee48f9215d6881e5"
+const SchemaHash = "sha256:5cc4537b5730ba02c4f2c60569fcbee3bc41007e21a52f7545f4cce057fd63d5"

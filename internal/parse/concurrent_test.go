@@ -150,11 +150,6 @@ func TestRender_Discriminates(t *testing.T) {
 			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r (many) B\n}\n",
 		},
 		{
-			"relation backref",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B /alpha\n}\n",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B /gamma\n}\n",
-		},
-		{
 			"relation target",
 			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B\n}\n",
 			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r C\n}\n",
@@ -236,7 +231,7 @@ func TestRender_CarriesEveryNodeField(t *testing.T) {
 		"\tid String primary\n" +
 		"\tn Integer required\n" +
 		"\t@index\n" +
-		"\t--> r (many) B /back { since Timestamp }\n" +
+		"\t--> r (many) B { since Timestamp }\n" +
 		"}\n"
 
 	file, issues := Parse([]byte(src), location.NewSourceID("c.yammm"))
@@ -252,7 +247,7 @@ func TestRender_CarriesEveryNodeField(t *testing.T) {
 		{"part flag", "A/falsetrue"},
 		{"extends target", "^.Base"},
 		{"primary and required flags", "n/falsetrue"},
-		{"relation name and multiplicity", "/r/truetrue/back"},
+		{"relation name and multiplicity", "/r/truetrue"},
 		{"relation target", ">.B"},
 		{"edge property", "since/falsefalse"},
 		{"annotation detached line", "@index/false/8"},
@@ -343,11 +338,10 @@ func (fp fingerprint) property(p *Property) {
 }
 
 func (fp fingerprint) relation(r *Relation) {
-	fmt.Fprintf(fp.out, "%d/%s/%v%v/%s/%v%v",
-		r.Kind, r.Name, r.Optional, r.Many, r.Backref, r.ReverseOptional, r.ReverseMany)
+	fmt.Fprintf(fp.out, "%d/%s/%v%v",
+		r.Kind, r.Name, r.Optional, r.Many)
 	fp.span(r.Span)
 	fp.span(r.NameSpan)
-	fp.span(r.BackrefSpan)
 	if r.Target != nil {
 		fmt.Fprintf(fp.out, ">%s.%s", r.Target.Qualifier, r.Target.Name)
 		fp.span(r.Target.Span)

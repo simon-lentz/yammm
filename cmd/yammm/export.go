@@ -244,8 +244,13 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 		w = f
 	}
 
-	// Write node queries
+	// Write node queries, a phase marker at each Kind boundary.
+	lastKind := adaptern4j.NodeQueryKind(-1)
 	for _, nq := range nodeQueries {
+		if nq.Kind != lastKind {
+			fmt.Fprintf(w, "// -- %s --\n", nq.Kind)
+			lastKind = nq.Kind
+		}
 		fmt.Fprintln(w, nq.Statement)
 		fmt.Fprintln(w)
 	}

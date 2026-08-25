@@ -16,12 +16,45 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// BatchNodeQuery represents an UNWIND-based batch node upsert.
+// NodeQueryKind names a [BatchNodeQuery]'s phase. The write surface is
+// phased: every NodeMerge precedes every CompositionReplace, which
+// precedes every CompositionCreate (parent-first by depth) — a documented
+// ordering guarantee, so executing the slice in order replaces each
+// parent's subtree without orphans.
+type NodeQueryKind int
+
+const (
+	// NodeMerge upserts root nodes; the zero value, so a hand-built query
+	// reads as the shape this surface always had.
+	NodeMerge NodeQueryKind = iota
+	// CompositionReplace deletes a root's whole composed subtree.
+	CompositionReplace
+	// CompositionCreate creates one (parent, relation, part) group's
+	// children.
+	CompositionCreate
+)
+
+// String names the phase for logs and the CLI's phase comments.
+func (k NodeQueryKind) String() string {
+	switch k {
+	case NodeMerge:
+		return "node-merge"
+	case CompositionReplace:
+		return "composition-replace"
+	case CompositionCreate:
+		return "composition-create"
+	default:
+		return fmt.Sprintf("NodeQueryKind(%d)", int(k))
+	}
+}
+
+// BatchNodeQuery represents an UNWIND-based batch node write.
 //
 // Construct via [Adapter.BatchNodeQueries]; do not create directly.
 type BatchNodeQuery struct {
-	Statement string         // Cypher UNWIND $rows AS row MERGE ... SET statement
+	Statement string         // Cypher UNWIND $rows AS row statement
 	Params    map[string]any // Contains "rows" key with []map[string]any value
+	Kind      NodeQueryKind  // The phase this query belongs to
 }
 
 // BatchEdgeQuery represents an UNWIND-based batch relationship merge.
@@ -76,10 +109,13 @@ func WithEdgeChunkSize(size int) WriteOption {
 // keys gets the ON CREATE / ON MATCH split, while an unannotated type in the
 // same snapshot stays mutable.
 //
-// Returns one [BatchNodeQuery] per type per chunk. Types with more instances
-// than the chunk size produce multiple queries. When two types in the
-// snapshot render the same type name, returns an error naming both
-// identities — they would share one node shape and one label.
+// Returns a phased, ordered slice: every [NodeMerge] query, then every
+// [CompositionReplace], then every [CompositionCreate] parent-first by
+// depth — execute in order and each parent's composed subtree is replaced
+// whole (see [NodeQueryKind]). Types with more instances than the chunk
+// size produce multiple queries per phase. When two types in the snapshot
+// render the same type name, returns an error naming both identities —
+// they would share one node shape and one label.
 func (a *Adapter) BatchNodeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -150,9 +186,16 @@ func (a *Adapter) BatchNodeQueries(
 			queries = append(queries, &BatchNodeQuery{
 				Statement: stmt,
 				Params:    map[string]any{"rows": chunk},
+				Kind:      NodeMerge,
 			})
 		}
 	}
+
+	composed, err := composedQueries(result, shapes, &cfg)
+	if err != nil {
+		return nil, err
+	}
+	queries = append(queries, composed...)
 
 	return queries, nil
 }
@@ -295,16 +338,47 @@ func (a *Adapter) BatchEdgeQueries(
 // renderedNameCollision reports an error when two type identities in the
 // snapshot render one type name. The rendering is lossy where the snapshot
 // is not, so the writer refuses rather than silently merging the pair.
+//
+// The walk covers composed children, because the composition phases render
+// part labels of their own. The adapter/json and adapter/csv copies do not
+// walk: JSON keys composed children under relation field names inside the
+// parent, and CSV drops them, so a part-type tag collision cannot reach
+// either output.
 func renderedNameCollision(snap *graph.Snapshot) error {
 	s := snap.Schema()
 	seen := make(map[string]schema.TypeID)
-	for _, id := range snap.Types() {
+	note := func(id schema.TypeID) error {
 		name := schema.TagForm(s, id)
-		if first, ok := seen[name]; ok {
+		if first, ok := seen[name]; ok && first != id {
 			return fmt.Errorf("neo4j adapter: type %s and type %s both render type name %q, so they would share one node shape and label",
 				first, id, name)
 		}
 		seen[name] = id
+		return nil
+	}
+	var walkComposed func(inst *graph.Instance) error
+	walkComposed = func(inst *graph.Instance) error {
+		for _, relName := range inst.ComposedRelations() {
+			for _, child := range inst.Composed(relName) {
+				if err := note(child.TypeID()); err != nil {
+					return err
+				}
+				if err := walkComposed(child); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	for _, id := range snap.Types() {
+		if err := note(id); err != nil {
+			return err
+		}
+	}
+	for inst := range snap.AllInstances() {
+		if err := walkComposed(inst); err != nil {
+			return err
+		}
 	}
 	return nil
 }

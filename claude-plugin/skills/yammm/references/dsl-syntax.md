@@ -171,14 +171,6 @@ Associations can carry their own properties:
 
 Edge properties cannot use `Vector` or `List` types.
 
-### Reverse Clause
-
-Declares the inverse relationship name:
-
-```yammm-snippet
---> OWNS (many) Asset / owned_by (one)
-```
-
 ### Compositions (`*->`)
 
 Embeds part-type children within their parent:

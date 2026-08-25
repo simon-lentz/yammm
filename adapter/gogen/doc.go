@@ -79,14 +79,14 @@
 // # Associations and the Graph Aggregate
 //
 // Each declared association is emitted as one struct named
-// EDGE_<Owner>_<edge>_<Target>, carrying the association's own edge properties plus
-// a Where block holding the target type's primary-key fields (wire key "where"):
+// EDGE_<Owner>_<edge>_<Target>, carrying the target type's primary-key
+// fields under the parser's reserved _target_ keys, with the association's
+// own edge properties beside them — the shape adapter/json's parser and
+// writer exchange:
 //
 //	type EDGE_Person_employer_Company struct {
-//		Since time.Time `json:"since"`   // an edge property
-//		Where struct {
-//			ID string `json:"id"`        // the target Company's primary key
-//		} `json:"where"`
+//		TargetID string    `json:"_target_id"` // the target Company's primary key
+//		Since    time.Time `json:"since"`      // an edge property
 //	}
 //
 // The owning type references it as a field — *EDGE_… for a to-one association,
@@ -94,8 +94,9 @@
 // emitted once, by its declaring type, with every subtype's field pointing at that
 // same struct. A completed schema guarantees every association targets a concrete
 // type (E_INVALID_ASSOCIATION_TARGET) that carries a primary key
-// (E_NO_PRIMARY_KEY), so a Where block always has at least one field. Compositions,
-// by contrast, are inlined as ownership fields (*Child or []*Child) on the owning
+// (E_NO_PRIMARY_KEY), so the _target_ fields always exist. Compositions, by
+// contrast, are inlined as ownership slices ([]*Child for every
+// multiplicity — the parser exchanges an array for (one) too) on the owning
 // struct.
 //
 // The Graph aggregate is the top-level envelope: one slice field per concrete type

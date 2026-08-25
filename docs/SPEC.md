@@ -951,7 +951,6 @@ Associations represent references between independent entities:
 
 ```text
 Association = [ DOC_COMMENT ] "-->" Name [ Multiplicity ] TypeRef
-              [ "/" Name [ Multiplicity ] ]
               [ "{" { RelProperty } "}" ] .
 Name        = UC_WORD | LC_WORD .
 ```
@@ -980,8 +979,7 @@ referenced node.
 Compositions represent ownership where child entities are embedded within their parent:
 
 ```text
-Composition = [ DOC_COMMENT ] "*->" Name [ Multiplicity ] TypeRef
-              [ "/" Name [ Multiplicity ] ] .
+Composition = [ DOC_COMMENT ] "*->" Name [ Multiplicity ] TypeRef .
 ```
 
 The target must be a concrete `part` type (not abstract).
@@ -999,6 +997,8 @@ type Car {
 ```
 
 Composition data is embedded inline in instance documents rather than using reference objects.
+
+A part instance is identified through its parent composition, not by a global key. Exporters that must give each part node an identity of its own (the Neo4j adapter's `_composed_key` property) derive it from the parent's key, the composition name, and the child's key — or, for a keyless `(many)` part, its array position. A positional identity is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
 
 ### Multiplicity
 
@@ -1030,18 +1030,6 @@ Examples:
 --> OWNERS (many) Person      // optional, multiple owners
 --> OWNERS (one:many) Person  // required, at least one owner
 ```
-
-### Reverse Relationships
-
-The optional reverse clause declares the inverse relationship name:
-
-```yammm-snippet
-type Person {
-    --> WORKS_AT Company / EMPLOYEES
-}
-```
-
-The reverse name and multiplicity are parsed and stored as metadata. They may be used for future functionality such as bidirectional navigation or automatic inverse relationship generation.
 
 ### Association Data in Instances
 
@@ -1702,7 +1690,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
 - `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match
-- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` (Warning) — the schema hash algorithm in the snapshot header is not recognized; schema hash verification is skipped and the load proceeds without the compatibility check
+- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the schema hash algorithm in the snapshot header is not recognized. An Error on the body-reading surfaces (`Load`, `Verify`, `Info`, `UpdateMetadata`): the document is refused rather than half-trusted. A Warning on header-only reads, which stay classifiable for dispatch
 - `E_SNAPSHOT_PATH_FALLBACK` (Warning) — a provenance path string could not be parsed into a canonical path and fell back to the root path; the original string is preserved for round-trip fidelity
 
 **Adapter** — format-specific errors:
@@ -1763,9 +1751,8 @@ AnnotationArgs = "(" AnnotationArg { "," AnnotationArg } [ "," ] ")" .
 AnnotationArg  = PropertyName | UC_WORD | STRING | INTEGER | FLOAT | BOOLEAN | REGEXP .
 
 Association = [ DOC_COMMENT ] "-->" Name [ Multiplicity ] TypeRef
-              [ "/" Name [ Multiplicity ] ] [ "{" { RelProperty } "}" ] .
-Composition = [ DOC_COMMENT ] "*->" Name [ Multiplicity ] TypeRef
-              [ "/" Name [ Multiplicity ] ] .
+              [ "{" { RelProperty } "}" ] .
+Composition = [ DOC_COMMENT ] "*->" Name [ Multiplicity ] TypeRef .
 Name       = UC_WORD | LC_WORD .
 Multiplicity = "(" MultiplicitySpec ")" .
 

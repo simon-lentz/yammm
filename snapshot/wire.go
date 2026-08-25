@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // FIELD ORDER IN WIRE STRUCTS IS PART OF THE FORMAT CONTRACT.
@@ -182,8 +184,12 @@ func skipValue(dec *json.Decoder, key string) error {
 const MinReadableVersion = 3
 
 const (
-	currentVersion         = 3
-	currentHashAlgoVersion = 1
+	currentVersion = 3
+
+	// currentHashAlgoVersion follows the schema constant structurally: the
+	// writer's label and the reader's comparison were two bare literals
+	// once, and bumping one alone makes every fresh document self-reject.
+	currentHashAlgoVersion = schema.StructuralHashVersion
 )
 
 // headerWire is used for decoding .ys headers. All fields are present
@@ -199,6 +205,7 @@ type headerWire struct {
 	Features            []string          `json:"features"`
 	CreatedAt           string            `json:"created_at,omitempty"`
 	Metadata            map[string]string `json:"metadata,omitempty"`
+	Attestation         *attestationWire  `json:"attestation,omitempty"`
 }
 
 // marshalHeaderWire is used for encoding .ys headers. Version and
@@ -212,6 +219,16 @@ type marshalHeaderWire struct {
 	Features      []string          `json:"features"`
 	CreatedAt     string            `json:"created_at,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
+	Attestation   *attestationWire  `json:"attestation,omitempty"`
+}
+
+// attestationWire is the header's validity claim. Marshal always writes
+// it; the pointer and omitempty state the read side — a pre-v0.15.0
+// document carries no field, and UpdateMetadata preserves that absence
+// rather than fabricating a claim.
+type attestationWire struct {
+	Values       bool `json:"values"`
+	Associations bool `json:"associations"`
 }
 
 // provenanceWire is the wire representation of instance provenance.

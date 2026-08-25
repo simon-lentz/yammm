@@ -9,6 +9,33 @@
 // integrity hash for corruption detection, and a features array for forward
 // compatibility.
 //
+// # Validity Contract
+//
+// Validation happens at [github.com/simon-lentz/yammm/instance.Validator] —
+// the one door that sets the unforgeable
+// [github.com/simon-lentz/yammm/instance.ValidInstance.Validated] bit. The
+// exported bypass constructors assert a caller's claim and leave it false.
+//
+// The .ys header carries the writing library's attestation: whether every
+// root and composed child was validator-built, and whether every Required
+// association resolved. The integrity hash protects that claim against
+// tampering — and against nothing else. [graph.RebuildSnapshot] is exported,
+// so any process can assemble and sign a document whose header claims what
+// its instances never earned; the unforgeable point is the instance layer,
+// and the attestation is the writer's word, not a proof.
+//
+// [Load] returns what was written. A .ys can hold a graph that fails the
+// graph layer's Add-time relation guards, values outside their constraints,
+// and invariant violations; [WithRevalidation] is the option that reports
+// all of it — the real validator, run per root at load time.
+// [WithValueConformance] is the narrower canonical-form check. Duplicates
+// and unresolved records ride the document as data
+// ([graph.Snapshot.Duplicates], [graph.Snapshot.Unresolved]); a rejected
+// duplicate's payload is outside the attestation.
+//
+// [schema.StructuralHash] is the schema identity the header pins: an
+// identity over the rules that decide what instance data is valid.
+//
 // # Usage
 //
 //	// Serialize
@@ -153,6 +180,8 @@
 // [Load] and [Verify] accept [LoadOption] values:
 //
 //   - [WithSkipIntegrityCheck]: skip SHA-256 integrity verification (useful for debugging)
+//   - [WithValueConformance]: report stored Timestamp/Date/UUID values that do not conform to their constraints (Warning)
+//   - [WithRevalidation]: run every instance back through the real validator, reported at the given severity
 //
 // # Scan Options
 //
@@ -199,5 +228,8 @@
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, schema, diag, location, location/path, immutable
+//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable
+//
+// The instance edge exists for [WithRevalidation]: re-validation runs the
+// real validator, so the option's fidelity is the validator's own.
 package snapshot

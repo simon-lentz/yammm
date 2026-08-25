@@ -1,0 +1,15 @@
+/* The reverse clause was removed in v0.15.0. The formatter still formats a
+   file carrying one: E_REVERSE_CLAUSE_REMOVED is a schema-category
+   diagnostic, and the token-stream formatter fails closed on syntax
+   errors only. The load path is where the removal is enforced. */
+schema "legacy"
+
+type Car {
+	vin String primary
+
+	--> WHEELS (many) Wheel / car (one)
+}
+
+type Wheel {
+	id String primary
+}
