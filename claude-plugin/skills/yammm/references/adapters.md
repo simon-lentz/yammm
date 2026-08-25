@@ -25,18 +25,9 @@ Input is preprocessed as JSONC: comments and trailing commas are tolerated.
 ```go
 // Parse a JSON object keyed by type name: {"User": [...], "Product": [...]}
 parsed, result := adapter.ParseObject(ctx, sourceID, data)
-
-// Parse a JSON array of typed objects (each has $type field)
-parsed, result := adapter.ParseArray(ctx, sourceID, data)
-
-// Parse a JSON array where all objects are the same type
-raws, result := adapter.ParseTypedArray(ctx, sourceID, "User", data)
-
-// Parse a single JSON object
-raw, result := adapter.ParseOne(ctx, sourceID, "User", data)
 ```
 
-All parse methods return `RawInstance` values ready for `instance.Validator.Validate()`.
+`ParseObject` is the whole parse surface; `ParseArray`, `ParseTypedArray` and `ParseOne` were removed in v0.12.0. It returns `RawInstance` values ready for `instance.Validator.Validate()`.
 
 ### Writing
 

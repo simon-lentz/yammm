@@ -142,9 +142,9 @@
 //
 // [UpdateMetadata] rewrites the header of an existing .ys document
 // with a new metadata map, reusing the body bytes verbatim and
-// recomputing only the SHA-256 integrity hash. On a 20 MB input the
-// fast path is ~50× faster than the equivalent Load + Marshal round
-// trip on M2-class hardware; the lower-bound CI gate is 3×. Depends
+// recomputing only the SHA-256 integrity hash. The fast path is
+// several times faster than the equivalent Load + Marshal round trip;
+// [TestUpdateMetadataRatioFloor] enforces a floor of 3×. Depends
 // on the field-order and body-suffix stability contracts documented
 // in wire.go; future Marshal-side shape changes must respect those
 // contracts or update this primitive in lockstep.

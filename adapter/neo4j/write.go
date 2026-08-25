@@ -207,6 +207,11 @@ func (a *Adapter) BatchNodeQueries(
 // the snapshot render the same type name, returns an error naming both
 // identities — the writer refuses a rendering it cannot make unambiguous, rather than
 // writing two types under one label.
+//
+// shapes must cover the whole import closure, not just the entry schema: every
+// edge's source and target type is looked up in it, and a missing entry returns
+// "no shape for source type ..." with no further explanation. Build it with
+// [Adapter.ShapeForSchema], which walks the closure.
 func (a *Adapter) BatchEdgeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,

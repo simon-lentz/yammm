@@ -10,8 +10,9 @@ import (
 // Timestamp, UUID and Date each accept more than one Go representation and
 // store one: a Timestamp renders through its declared format when it has one
 // and through RFC 3339 with fractional seconds otherwise, a UUID through its
-// canonical lowercase form, and a Date through "2006-01-02" in the value's own
-// location. Every other kind, an unresolved alias and a nil value pass through
+// canonical lowercase form, a Date through "2006-01-02" in the value's own
+// location, and a List by canonicalizing each element through the element
+// constraint. Every other kind, an unresolved alias and a nil value pass through
 // untouched.
 //
 // This is the rule the validator applies, exported for a caller that renders

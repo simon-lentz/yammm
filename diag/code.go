@@ -335,8 +335,9 @@ var (
 	E_INVALID_TYPE_TAG = NewCode("E_INVALID_TYPE_TAG", CategoryInstance)
 
 	// E_CASE_FOLD_COLLISION indicates multiple input fields collide after case-folding.
-	// This occurs when non-strict mode is enabled and the input contains multiple
-	// field names that differ only in case (e.g., "Name" and "name").
+	// This occurs when non-strict mode is enabled and two or more field names fold
+	// to one schema property that none of them matches exactly (schema "NAME",
+	// input "Name" and "name"). An exact match is claimed first and never collides.
 	E_CASE_FOLD_COLLISION = NewCode("E_CASE_FOLD_COLLISION", CategoryInstance)
 )
 
