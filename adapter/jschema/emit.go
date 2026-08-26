@@ -313,11 +313,30 @@ func dataTypeDef(d *schema.DataType) (val, error) {
 	return frag, nil
 }
 
-// withDescription appends a "description" member to an object fragment. All
-// call sites pass freshly built objects (constraint-mapper fragments and
-// refTo results are always objects), so the append cannot alias another
+// withDescription attaches desc as the fragment's "description", MERGING with
+// one the constraint mapper already produced rather than appending a second.
+//
+// A `Timestamp["<layout>"]` carries the source layout as a description, so a
+// documented property of that type rendered two "description" keys. Every
+// last-one-wins reader — including this package's own selfCheck, which decodes
+// into map[string]any — then dropped the layout the section promises.
+//
+// The separator matches compositionFrag and associationFrag: generated text
+// first, doc-comment appended after a single space.
+//
+// All call sites pass freshly built objects, so the append cannot alias another
 // value's member slice.
 func withDescription(v val, desc string) val {
+	for i, member := range v.obj {
+		if member.K != "description" {
+			continue
+		}
+		if existing, ok := member.V.stringValue(); ok && existing != "" {
+			desc = existing + " " + desc
+		}
+		v.obj[i] = kv{K: "description", V: scalar(desc)}
+		return v
+	}
 	v.obj = append(v.obj, kv{K: "description", V: scalar(desc)})
 	return v
 }

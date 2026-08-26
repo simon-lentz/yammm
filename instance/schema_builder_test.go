@@ -315,8 +315,6 @@ func TestSchemaBuilder_EdgeTo_ArityMismatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "arity mismatch")
 }
 
-// ---------- EdgeToWith ----------
-
 // ---------- Cardinality ----------
 
 func TestSchemaBuilder_Cardinality_OneWithTwoEdgeTo(t *testing.T) {

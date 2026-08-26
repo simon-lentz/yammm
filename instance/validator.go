@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -422,22 +423,6 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 		return nil, collector.Result()
 	}
 
-	// Evaluate invariants
-	if err := v.evaluateInvariants(ctx, typ, validatedProps, collector, raw.Provenance); err != nil {
-		if internalErr, ok := errors.AsType[*InternalError](err); ok {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).
-				WithDetail(diag.DetailKeyStackTrace, internalErr.Stack).Build())
-		} else {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-		}
-		return nil, collector.Result()
-	}
-
-	// If invariant checks failed, return diagnostic result
-	if collector.HasErrors() {
-		return nil, collector.Result()
-	}
-
 	// Extract primary key
 	pkComponents := v.extractPrimaryKey(typ, validatedProps, collector, raw.Provenance)
 	if collector.HasErrors() {
@@ -458,6 +443,25 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 	composed := v.validateCompositions(ctx, typ, raw.Properties, collector, raw.Provenance)
 	if err := ctx.Err(); err != nil {
 		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		return nil, collector.Result()
+	}
+	if collector.HasErrors() {
+		return nil, collector.Result()
+	}
+
+	// Evaluate invariants LAST, over properties AND relations.
+	//
+	// This runs after edges and compositions because an invariant may name a
+	// relation: buildStaticScope admits relation field names, so such an
+	// invariant loads clean, and evaluating before the relations were computed
+	// left every one of them reading nil.
+	if err := v.evaluateInvariants(ctx, typ, v.invariantScope(typ, validatedProps, edges, composed), collector, raw.Provenance); err != nil {
+		if internalErr, ok := errors.AsType[*InternalError](err); ok {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).
+				WithDetail(diag.DetailKeyStackTrace, internalErr.Stack).Build())
+		} else {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+		}
 		return nil, collector.Result()
 	}
 	if collector.HasErrors() {
@@ -620,8 +624,131 @@ func (v *Validator) checkUnknownFields(typ *schema.Type, props map[string]any, m
 			ErrUnknownField,
 			fmt.Sprintf("unknown field %q", inputName),
 		).WithDetails(diag.TypeField(typ.Name(), inputName)...)
+		if shadowed, ok := v.exactMatchShadowing(typ, inputName, mapping); ok {
+			issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").
+				WithDetail(diag.DetailKeyPropertyName, shadowed)
+		}
 		withProvenance(issue, prov, provenancePathForProperty(prov, inputName))
 		collector.Collect(issue.Build())
+	}
+}
+
+// exactMatchShadowing reports the schema property inputName case-folds onto
+// when that property was already claimed by an exact match, which is why the
+// fold was skipped and the field reported unknown. Without it the operator sees
+// a bare "unknown field" for a name the schema plainly recognises.
+//
+// Reports false under strict property names, where no fold is attempted at all.
+func (v *Validator) exactMatchShadowing(typ *schema.Type, inputName string, mapping map[string]string) (string, bool) {
+	if v.cfg.strictPropertyNames {
+		return "", false
+	}
+	schemaName, found := typ.CanonicalPropertyMap()[strings.ToLower(inputName)]
+	if !found {
+		return "", false
+	}
+	if claimant, claimed := mapping[schemaName]; claimed && claimant != inputName {
+		return schemaName, true
+	}
+	return "", false
+}
+
+// invariantScope returns the name→value map an invariant is evaluated against:
+// the validated properties, plus one entry per relation keyed by FieldName.
+//
+// Relations belong here because buildStaticScope admits their field names, so
+// an invariant may reference one. The two relation kinds carry different
+// amounts of information, and the difference is not incidental:
+//
+//   - A COMPOSITION's children are part of this instance, so the entry is the
+//     validated child data itself. `ITEMS -> Len`, and a lambda over a child's
+//     own properties, both read real values.
+//   - An ASSOCIATION's target is a REFERENCE. The instance holds the foreign
+//     key, never the target's row, so the entry is the list of target keys.
+//     Presence and cardinality are answerable; the target's properties are not
+//     in this instance to answer with.
+//
+// A relation with no value is absent from the map, so it evaluates to nil and
+// the `!= nil` idiom means what it says.
+func (v *Validator) invariantScope(
+	typ *schema.Type,
+	props map[string]any,
+	edges map[string]*ValidEdgeData,
+	composed map[string]immutable.Value,
+) map[string]any {
+	if len(edges) == 0 && len(composed) == 0 {
+		return props
+	}
+
+	scope := make(map[string]any, len(props)+len(edges)+len(composed))
+	maps.Copy(scope, props)
+
+	for rel := range typ.AllAssociations() {
+		edge, ok := edges[rel.Name()]
+		if !ok {
+			continue
+		}
+		targets := edge.Targets()
+		keys := make([]any, 0, len(targets))
+		for _, t := range targets {
+			keys = append(keys, keyValue(t.TargetKey()))
+		}
+		scope[rel.FieldName()] = relationValue(rel, keys)
+	}
+
+	for rel := range typ.AllCompositions() {
+		value, ok := composed[rel.Name()]
+		if !ok {
+			continue
+		}
+		scope[rel.FieldName()] = composedScopeValue(value.Unwrap())
+	}
+
+	return scope
+}
+
+// relationValue renders a relation's entries for the invariant scope: a
+// single-valued relation yields its one entry, so `works_at != nil` reads as a
+// presence test rather than a one-element list.
+func relationValue(rel *schema.Relation, entries []any) any {
+	if rel.IsMany() {
+		return entries
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	return entries[0]
+}
+
+// keyValue renders a target key for the invariant scope: a single-component key
+// as its component, so `works_at == "c1"` compares against the value the caller
+// wrote, and a composite key as the component list.
+func keyValue(k immutable.Key) any {
+	parts := k.Clone()
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return parts
+}
+
+// composedScopeValue renders composed children as property maps. A child is
+// stored as a *ValidInstance, which an expression cannot read a member from,
+// so a lambda over a composition would otherwise fail on the first `$i.field`.
+//
+// Nested compositions are NOT reached: a child's own composed children are not
+// among its properties, so `$i.subitems` evaluates to nil.
+func composedScopeValue(v any) any {
+	switch child := v.(type) {
+	case *ValidInstance:
+		return child.Properties().Clone()
+	case immutable.Slice:
+		out := make([]any, 0, child.Len())
+		for elem := range child.Iter() {
+			out = append(out, composedScopeValue(elem.Unwrap()))
+		}
+		return out
+	default:
+		return v
 	}
 }
 

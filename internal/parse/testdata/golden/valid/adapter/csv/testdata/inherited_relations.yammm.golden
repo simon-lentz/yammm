@@ -1,0 +1,170 @@
+{
+  "name": "\"csv_inherit_test\"",
+  "span": {
+    "s": 0,
+    "e": 25
+  },
+  "types": [
+    {
+      "name": "Company",
+      "name_span": {
+        "s": 32,
+        "e": 39
+      },
+      "props": [
+        {
+          "name": "company_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 57,
+              "e": 63
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 46,
+            "e": 71
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 81,
+              "e": 87
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 76,
+            "e": 96
+          }
+        }
+      ],
+      "span": {
+        "s": 27,
+        "e": 98
+      }
+    },
+    {
+      "name": "Worker",
+      "name_span": {
+        "s": 114,
+        "e": 120
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "worker_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 137,
+              "e": 143
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 127,
+            "e": 151
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 161,
+              "e": 167
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 156,
+            "e": 176
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "WORKS_AT",
+          "name_span": {
+            "s": 185,
+            "e": 193
+          },
+          "target": {
+            "name": "Company",
+            "span": {
+              "s": 202,
+              "e": 209
+            }
+          },
+          "optional": true,
+          "props": [
+            {
+              "name": "since",
+              "constraint": {
+                "kind": "String",
+                "span": {
+                  "s": 226,
+                  "e": 232
+                }
+              },
+              "span": {
+                "s": 220,
+                "e": 232
+              }
+            }
+          ],
+          "span": {
+            "s": 181,
+            "e": 238
+          }
+        }
+      ],
+      "span": {
+        "s": 100,
+        "e": 240
+      }
+    },
+    {
+      "name": "Employee",
+      "name_span": {
+        "s": 247,
+        "e": 255
+      },
+      "extends": [
+        {
+          "name": "Worker",
+          "span": {
+            "s": 264,
+            "e": 270
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "grade",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 283,
+              "e": 289
+            }
+          },
+          "span": {
+            "s": 277,
+            "e": 289
+          }
+        }
+      ],
+      "span": {
+        "s": 242,
+        "e": 291
+      }
+    }
+  ]
+}

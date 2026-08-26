@@ -62,6 +62,20 @@ func scalar(x any) val {
 	return val{kind: kindRaw, raw: json.RawMessage(strings.TrimSuffix(sb.String(), "\n"))}
 }
 
+// stringValue decodes a raw scalar back to its Go string, reporting false for
+// any other shape. It exists so a member can be merged with one already
+// present rather than appended beside it.
+func (v val) stringValue() (string, bool) {
+	if v.kind != kindRaw {
+		return "", false
+	}
+	var s string
+	if err := json.Unmarshal(v.raw, &s); err != nil {
+		return "", false
+	}
+	return s, true
+}
+
 // raw wraps a pre-rendered JSON fragment verbatim. The fragment must be a
 // single-line value: it participates in compact-width measurement as-is.
 func raw(j json.RawMessage) val { return val{kind: kindRaw, raw: j} }

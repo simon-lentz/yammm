@@ -2,6 +2,7 @@ package docs_test
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,8 +299,19 @@ func TestDocumentedAdapterParseSurface(t *testing.T) {
 	_ = (*jsonadapter.Adapter).WriteObject
 	_ = (*csvadapter.Adapter).ParseTyped
 	_ = (*csvadapter.Adapter).ParseWithTypeColumn
-	_ = (*csvadapter.Adapter).MarshalSnapshot
-	_ = (*csvadapter.Adapter).WriteSnapshot
+
+	// Pinned as typed values, not bare method values. A bare `_ = (*T).M`
+	// compiles under ANY signature, so it could not see adapter/csv's write
+	// surface lose its vestigial variadic — the Serialization fence shows these
+	// calls, and nothing compiled it. The json and neo4j writers keep their
+	// write options, which is why only csv is pinned this way.
+	var (
+		marshalSnapshot func(*csvadapter.Adapter, context.Context, *graph.Snapshot) (map[string][]byte, error)
+		writeSnapshot   func(*csvadapter.Adapter, context.Context, func(string) (io.Writer, error), *graph.Snapshot) error
+	)
+	marshalSnapshot = (*csvadapter.Adapter).MarshalSnapshot
+	writeSnapshot = (*csvadapter.Adapter).WriteSnapshot
+	_, _ = marshalSnapshot, writeSnapshot
 }
 
 // TestDocumentedFormatSurface pins the format package facts the Formatting

@@ -273,7 +273,7 @@ func (c *completer) completeTypes() {
 		t.setAllCompositions(allComps)
 
 		// Merge invariants from ancestors
-		allInvs := c.mergeInvariants(t, supers)
+		allInvs := c.mergeInvariants(t)
 		t.setAllInvariants(allInvs)
 
 		// Merge type-level annotations from ancestors
@@ -1078,22 +1078,29 @@ func (c *completer) flushShadowedAnnotations() {
 	}
 }
 
-// mergeInvariants merges own invariants with inherited invariants.
-// Own invariants come first, then inherited (left-to-right supertype order).
-// Deduplication by name: keep-first (child can override parent's invariant by name).
-func (c *completer) mergeInvariants(t *Type, supers []ResolvedTypeRef) []*Invariant {
+// mergeInvariants merges own invariants with inherited ones, keep-first by
+// name, so a child overrides an ancestor's invariant of the same name.
+//
+// It reads the DIRECT supertypes' already-merged views, the rule
+// [completer.resolveInheritedAnnotations] documents at length: a direct
+// supertype's view already encodes ITS override, so a grandparent's invariant
+// cannot reappear past a parent that replaced it. Walking the linearized
+// ancestor list instead admitted the grandparent as an independent peer, and
+// because that list is ancestors-first it won the keep-first race — every type
+// below the overriding one silently evaluated the ancestor's rule.
+//
+// Properties escape the same shape only by accident: mergeProperties has a
+// narrowing-replacement arm that reinstates the nearer declaration. No such
+// relation exists over invariant expressions, so there is nothing here to
+// rescue a wrong pick.
+func (c *completer) mergeInvariants(t *Type) []*Invariant {
 	result := t.InvariantsSlice()
 	seen := make(map[string]bool)
 	for _, inv := range result {
 		seen[inv.Name()] = true
 	}
 
-	for _, superRef := range supers {
-		superType := c.resolveTypeID(superRef.ID())
-		if superType == nil {
-			continue
-		}
-
+	for _, superType := range c.directSuperTypes(t) {
 		for inv := range superType.AllInvariants() {
 			if seen[inv.Name()] {
 				continue

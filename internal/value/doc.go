@@ -25,14 +25,25 @@
 //   - string and *regexp.Regexp (regexp compared via String())
 //   - slices of supported types (lexicographic comparison)
 //
-// IMPORTANT: Only predeclared scalar types are supported. Named scalar types
-// (e.g., type MyInt int) return InvalidStrata and will cause Order to error.
-// This is intentional for consistency across all value extraction functions.
-// All slices are supported structurally (via reflect), but their elements must be
-// supported types.
+// This package is the single authority on what a value IS. A predeclared type
+// is answered by a type switch; anything else falls back to its underlying
+// kind, so a pointer takes the strata and the extracted value of what it points
+// at, and a named scalar (type MyInt int) takes those of its base. The fallback
+// runs only when the type switch misses, so canonical input pays nothing for it.
 //
-// Maps, structs, and other complex types are intentionally unsupported. Callers
-// should normalize to supported primitives before ordering.
+// The named-type rule is not a convenience. adapter/gogen emits
+// `type <Name> <base>` for every DataType and inline enum, so rejecting named
+// types meant this library's own generator produced values its own validator
+// and evaluator refused.
+//
+// An [immutable.Slice] is a slice for every purpose here. It is the shape
+// Value.Unwrap returns for a List- or Vector-typed property, and it is a struct,
+// so neither a type switch over predeclared types nor a reflect.Slice test
+// names it; [TypeStrata] and [Order] both carry an explicit case.
+//
+// All slices are supported structurally, but their elements must be supported
+// types. Maps and other structs are unsupported: callers normalize to supported
+// primitives before ordering.
 //
 // # Kind Detection
 //

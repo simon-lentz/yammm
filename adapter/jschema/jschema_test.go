@@ -82,6 +82,9 @@ func TestMarshal_Golden(t *testing.T) {
 		"patterns",
 		"timestamp_formats",
 		"docs",
+		// Documented Timestamp["layout"] at all three call sites that can
+		// carry a description already, plus an undocumented control.
+		"documented_layouts",
 	}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {

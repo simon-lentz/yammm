@@ -1,0 +1,180 @@
+{
+  "name": "\"fleet_docs\"",
+  "span": {
+    "s": 0,
+    "e": 19
+  },
+  "datatypes": [
+    {
+      "name": "Stamp",
+      "doc": "Stamp is a wall-clock reading with no zone.",
+      "constraint": {
+        "kind": "Timestamp",
+        "args": [
+          "\"2006-01-02 15:04:05\""
+        ],
+        "span": {
+          "s": 84,
+          "e": 117
+        }
+      },
+      "span": {
+        "s": 21,
+        "e": 117
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Station",
+      "name_span": {
+        "s": 124,
+        "e": 131
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 138,
+              "e": 144
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 135,
+            "e": 152
+          }
+        }
+      ],
+      "span": {
+        "s": 119,
+        "e": 154
+      }
+    },
+    {
+      "name": "Reading",
+      "name_span": {
+        "s": 161,
+        "e": 168
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 175,
+              "e": 181
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 172,
+            "e": 189
+          }
+        },
+        {
+          "name": "logged_at",
+          "doc": "logged_at is when the operator filed the reading.",
+          "constraint": {
+            "kind": "Timestamp",
+            "args": [
+              "\"2006-01-02 15:04:05\""
+            ],
+            "span": {
+              "s": 258,
+              "e": 291
+            }
+          },
+          "span": {
+            "s": 191,
+            "e": 291
+          }
+        },
+        {
+          "name": "filed_as",
+          "doc": "filed_as carries the documented DataType alias.",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Stamp"
+            ],
+            "span": {
+              "s": 357,
+              "e": 362
+            }
+          },
+          "span": {
+            "s": 293,
+            "e": 362
+          }
+        },
+        {
+          "name": "undocumented",
+          "constraint": {
+            "kind": "Timestamp",
+            "args": [
+              "\"2006-01-02 15:04:05\""
+            ],
+            "span": {
+              "s": 377,
+              "e": 410
+            }
+          },
+          "span": {
+            "s": 364,
+            "e": 410
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "AT_STATION",
+          "name_span": {
+            "s": 417,
+            "e": 427
+          },
+          "target": {
+            "name": "Station",
+            "span": {
+              "s": 436,
+              "e": 443
+            }
+          },
+          "optional": true,
+          "props": [
+            {
+              "name": "observed_at",
+              "doc": "observed_at is when the sensor sampled.",
+              "constraint": {
+                "kind": "Timestamp",
+                "args": [
+                  "\"2006-01-02 15:04:05\""
+                ],
+                "span": {
+                  "s": 508,
+                  "e": 541
+                }
+              },
+              "span": {
+                "s": 448,
+                "e": 541
+              }
+            }
+          ],
+          "span": {
+            "s": 413,
+            "e": 544
+          }
+        }
+      ],
+      "span": {
+        "s": 156,
+        "e": 546
+      }
+    }
+  ]
+}

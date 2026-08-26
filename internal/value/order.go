@@ -2,13 +2,37 @@ package value
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/simon-lentz/yammm/immutable"
 )
+
+// sliceAccessor returns a SliceStrata value's length and an element reader,
+// accepting both a Go slice and an [immutable.Slice], which reflect cannot
+// index. Elements unwrap one level, so a nested collection stays wrapped for
+// the recursive [Order] call rather than being deep-copied.
+func sliceAccessor(v any) (int, func(int) any) {
+	if s, ok := v.(immutable.Slice); ok {
+		return s.Len(), func(i int) any {
+			elem, ok := s.GetOK(i)
+			if !ok {
+				return nil
+			}
+			return elem.Unwrap()
+		}
+	}
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Pointer {
+		rv = rv.Elem()
+	}
+	return rv.Len(), func(i int) any { return rv.Index(i).Interface() }
+}
 
 // toStringComparable converts strings and regexps to comparable string values.
 func toStringComparable(v any) (string, error) {
@@ -20,9 +44,11 @@ func toStringComparable(v any) (string, error) {
 			return "", errors.New("value: nil regexp")
 		}
 		return s.String(), nil
-	default:
-		return "", fmt.Errorf("value: expected string or regexp values, got %T", v)
 	}
+	if rv, ok := underlying(v); ok && rv.Kind() == reflect.String {
+		return rv.String(), nil
+	}
+	return "", fmt.Errorf("value: expected string or regexp values, got %T", v)
 }
 
 // TypeOrder orders types canonically and returns 1 if left has a type greater than right, 0 if
@@ -93,8 +119,8 @@ func Order(left, right any) (int, error) {
 	case NilStrata:
 		return 0, nil // the other value must also be nil
 	case BoolStrata:
-		lb, lbok := left.(bool)
-		rb, rbok := right.(bool)
+		lb, lbok := GetBool(left)
+		rb, rbok := GetBool(right)
 		if !lbok || !rbok {
 			return 0, fmt.Errorf("value: expected boolean values (left %T, right %T)", left, right)
 		}
@@ -165,14 +191,12 @@ func Order(left, right any) (int, error) {
 		return strings.Compare(ls, rs), nil
 
 	case SliceStrata:
-		leftVo := reflect.ValueOf(left)
-		leftLen := leftVo.Len()
-		rightVo := reflect.ValueOf(right)
-		rightLen := rightVo.Len()
+		leftLen, leftAt := sliceAccessor(left)
+		rightLen, rightAt := sliceAccessor(right)
 		minLen := min(leftLen, rightLen)
 		for i := range minLen {
-			leftVal := leftVo.Index(i).Interface()
-			rightVal := rightVo.Index(i).Interface()
+			leftVal := leftAt(i)
+			rightVal := rightAt(i)
 			which, err := Order(leftVal, rightVal)
 			if err != nil {
 				return 0, err
@@ -248,8 +272,46 @@ func GetInt64(val any) (int64, bool) {
 			return 0, false
 		}
 		return int64(x), true
+	case json.Number:
+		n, err := x.Int64()
+		return n, err == nil
 	}
-	return 0, false
+	rv, ok := underlying(val)
+	if !ok {
+		return 0, false
+	}
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int(), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		n := rv.Uint()
+		if n > uint64(math.MaxInt64) {
+			return 0, false
+		}
+		return int64(n), true
+	default:
+		// Floats stay rejected here: the caller distinguishes an integer
+		// from a float by which getter answers.
+		return 0, false
+	}
+}
+
+// underlying dereferences val to a non-pointer reflect.Value. It reports false
+// for nil and for a nil pointer, so a caller's fast-path type switch keeps
+// answering for every predeclared type and only a pointer or named type
+// reaches reflect.
+func underlying(val any) (reflect.Value, bool) {
+	if val == nil {
+		return reflect.Value{}, false
+	}
+	rv := reflect.ValueOf(val)
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return reflect.Value{}, false
+		}
+		rv = rv.Elem()
+	}
+	return rv, rv.IsValid()
 }
 
 // GetFloat64 extracts a float64 from any float type.
@@ -261,8 +323,45 @@ func GetFloat64(val any) (float64, bool) {
 		return float64(x), true
 	case float64:
 		return x, true
+	case json.Number:
+		f, err := x.Float64()
+		return f, err == nil
 	}
-	return 0, false
+	rv, ok := underlying(val)
+	if !ok {
+		return 0, false
+	}
+	switch rv.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return rv.Float(), true
+	default:
+		return 0, false
+	}
+}
+
+// GetBool extracts a bool, accepting a pointer or a named type over bool so it
+// agrees with the BoolStrata category TypeStrata assigns them.
+func GetBool(val any) (bool, bool) {
+	if b, ok := val.(bool); ok {
+		return b, true
+	}
+	if rv, ok := underlying(val); ok && rv.Kind() == reflect.Bool {
+		return rv.Bool(), true
+	}
+	return false, false
+}
+
+// GetString extracts a string, accepting a pointer or a named type over string.
+// It rejects *regexp.Regexp, which toStringComparable accepts for ordering but
+// which is not a value any string-kinded constraint holds.
+func GetString(val any) (string, bool) {
+	if s, ok := val.(string); ok {
+		return s, true
+	}
+	if rv, ok := underlying(val); ok && rv.Kind() == reflect.String {
+		return rv.String(), true
+	}
+	return "", false
 }
 
 // IsWholeNumber reports whether f is a finite float64 that represents
@@ -318,7 +417,16 @@ func GetUint64(val any) (uint64, bool) {
 	case uintptr:
 		return uint64(x), true
 	}
-	return 0, false
+	rv, ok := underlying(val)
+	if !ok {
+		return 0, false
+	}
+	switch rv.Kind() {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return rv.Uint(), true
+	default:
+		return 0, false
+	}
 }
 
 // Int64Compare compares two int64 values and returns -1, 0, or +1.

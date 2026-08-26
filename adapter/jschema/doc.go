@@ -51,7 +51,8 @@
 // Schema doc-comments flow through: a type's documentation becomes its def's
 // description, a property's (or edge property's, or DataType's) becomes its
 // fragment's description, and a relation's is appended to the generated
-// relation description. This is what editors surface on hover.
+// relation description, the JSON Schema keyword for human-readable
+// documentation.
 //
 // # Constraint Mapping
 //
