@@ -3,6 +3,7 @@
 
 ## clean (projection frozen under golden/valid/)
 adapter/csv/testdata/basic.yammm
+adapter/csv/testdata/inherited_relations.yammm
 adapter/csv/testdata/with_relations.yammm
 adapter/gogen/testdata/composite_pk.yammm
 adapter/gogen/testdata/edge_datatype.yammm
@@ -42,6 +43,7 @@ adapter/gogen/testdata/temporal.yammm
 adapter/gogen/testdata/temporal_edge.yammm
 adapter/jschema/testdata/composite_pk.yammm
 adapter/jschema/testdata/docs.yammm
+adapter/jschema/testdata/documented_layouts.yammm
 adapter/jschema/testdata/edge_props.yammm
 adapter/jschema/testdata/imports/base.yammm
 adapter/jschema/testdata/imports/collision_common.yammm

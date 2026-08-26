@@ -1,0 +1,18 @@
+schema "csv_inherit_test"
+
+type Company {
+    company_id String primary
+    name String required
+}
+
+abstract type Worker {
+    worker_id String primary
+    name String required
+    --> WORKS_AT (_:one) Company {
+        since String
+    }
+}
+
+type Employee extends Worker {
+    grade String
+}

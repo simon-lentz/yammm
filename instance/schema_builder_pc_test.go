@@ -97,65 +97,6 @@ func TestCapturePC_SucceedsFromABuilderMethod(t *testing.T) {
 	}
 }
 
-// TestEdgeStateFor_ShapeMismatch_NamesFirstUse covers the ONE symbolization site
-// that is not [buildError.Error] — edgeStateFor formats the first use's locator
-// into a detail string when a later call pins a different shape.
-//
-// It is exercised directly because the branch is UNREACHABLE through the public
-// API: addEdge rejects EdgeTo on a relation that declares edge properties and
-// EdgeToWith on one that does not, and HasProperties is fixed per relation, so
-// only one shape can ever reach edgeStateFor for a given relation.
-// TestSchemaBuilder_Cardinality_OneMixingEdgeShapes records that observation
-// from the outside. The branch is kept as defence for a future third
-// edge-producing entry point; without this test the deferral inside it would
-// ship unverified.
-func TestEdgeStateFor_ShapeMismatch_NamesFirstUse(t *testing.T) {
-	t.Parallel()
-	s := pcTestSchema(t)
-	b, err := BuilderFor(s, "Person")
-	if err != nil {
-		t.Fatalf("BuilderFor: %v", err)
-	}
-
-	rel, ok := b.resolveRelation("knows")
-	if !ok {
-		t.Fatal("fixture must declare a 'knows' relation")
-	}
-
-	// Captured with runtime.Callers directly, not capturePC: capturePC's skip of
-	// 3 is calibrated for user → builder method → capturePC, so calling it from a
-	// test resolves to testing.go rather than here. edgeStateFor takes whatever
-	// PC it is handed, so a PC pointing at this file is what makes the locator
-	// assertion below mean something.
-	var pcs [1]uintptr
-	if runtime.Callers(1, pcs[:]) == 0 {
-		t.Fatal("runtime.Callers returned no frames")
-	}
-	firstPC := pcs[0]
-
-	if b.edgeStateFor(rel, shapeTo, firstPC) == nil {
-		t.Fatal("first call must pin the shape and return state")
-	}
-	if b.edgeStateFor(rel, shapeToWith, firstPC) != nil {
-		t.Error("mismatched shape must return nil")
-	}
-
-	if len(b.errors) != 1 {
-		t.Fatalf("recorded %d errors, want 1", len(b.errors))
-	}
-	detail := b.errors[0].detail
-	if !strings.Contains(detail, "cannot mix EdgeTo and EdgeToWith") {
-		t.Errorf("detail = %q, want the mix message", detail)
-	}
-	if want := symbolizePC(firstPC); !strings.Contains(detail, want) {
-		t.Errorf("detail = %q, want it to name the first use at %q — the locator must "+
-			"survive being stored as a PC and symbolized here", detail, want)
-	}
-	if !strings.Contains(detail, "schema_builder_pc_test.go:") {
-		t.Errorf("detail = %q, want a locator in this file", detail)
-	}
-}
-
 // TestSchemaBuilder_SuccessPath_IsAllocationFree is the ratchet for this change.
 // The whole point of storing a PC is that a successful builder call allocates
 // nothing for a locator it will never render; re-introducing eager symbolization

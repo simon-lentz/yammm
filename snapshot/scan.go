@@ -221,6 +221,7 @@ func scanFile(ctx context.Context, name, path string, open func(string) (*os.Fil
 			diag.NewIssue(diag.Fatal, diag.E_SNAPSHOT_IO,
 				fmt.Sprintf("open %q: %v", path, err)).
 				WithDetail("path", path).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
 				Build(),
 		)
 		return ScanEntry{Name: name, Path: path, Result: c.Result()}
@@ -274,7 +275,13 @@ func ScanDirSliceWith(ctx context.Context, dir string, opts ...ScanOption) ([]Sc
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				code = diag.E_CONTEXT_CANCELLED
 			}
-			collector.Collect(diag.NewIssue(diag.Fatal, code, err.Error()).Build())
+			// The os error goes in a detail, not only the message: three
+			// documents promise an operator can recover the concrete cause
+			// structurally, and that promise covers the dir-level failure as
+			// well as the per-file one.
+			collector.Collect(diag.NewIssue(diag.Fatal, code, err.Error()).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build())
 			break
 		}
 		out = append(out, entry)

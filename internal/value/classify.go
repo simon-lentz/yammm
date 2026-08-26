@@ -132,7 +132,32 @@ func ClassifyWithRegistry(registry Registry, val any) (Kind, any) {
 		return classifySlice(val)
 	}
 
+	if kind, base, ok := classifyNamedBase(rv); ok {
+		return kind, base
+	}
+
 	return UnspecifiedKind, val
+}
+
+// classifyNamedBase classifies a named type over a predeclared base, which the
+// concrete type switch cannot match, and returns the BASE value rather than the
+// named one. A caller that classified and then extracted the named value would
+// get a Kind it cannot read — the shape adapter/gogen's emitted carriers hit.
+func classifyNamedBase(rv reflect.Value) (Kind, any, bool) {
+	switch rv.Kind() {
+	case reflect.Bool:
+		return BoolKind, rv.Bool(), true
+	case reflect.String:
+		return StringKind, rv.String(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return IntKind, rv.Int(), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return IntKind, rv.Uint(), true
+	case reflect.Float32, reflect.Float64:
+		return FloatKind, rv.Float(), true
+	default:
+		return UnspecifiedKind, nil, false
+	}
 }
 
 // jsonNumberType is used to detect []json.Number slices

@@ -175,6 +175,19 @@ func (v *Validator) validateEdgeData(
 	return NewValidEdgeData([]ValidEdgeTarget{*target})
 }
 
+// coercionIssue builds the diagnostic a failed coercion owes, classifying it the
+// way the node-property path does: a recovered panic is Fatal E_INTERNAL
+// carrying its stack, anything else an ordinary E_TYPE_MISMATCH. Both edge slots
+// share it because both previously assigned the raw value and reported nothing,
+// so a recovered panic reached the validated instance as data.
+func coercionIssue(err error, message string) *diag.IssueBuilder {
+	if internalErr, ok := errors.AsType[*InternalError](err); ok {
+		return diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).
+			WithDetail(diag.DetailKeyStackTrace, internalErr.Stack)
+	}
+	return diag.NewIssue(diag.Error, ErrTypeMismatch, message+": coercion error: "+err.Error())
+}
+
 // validateEdgeTarget validates a single edge target object.
 // Uses per-target collector isolation to ensure each target is evaluated independently.
 func (v *Validator) validateEdgeTarget(
@@ -298,7 +311,11 @@ func (v *Validator) validateEdgeTarget(
 		// Coerce and collect valid component.
 		coercedVal, err := v.coerceValueWithRecovery(val, pk.Constraint())
 		if err != nil {
-			coercedVal = val
+			issue := coercionIssue(err, fmt.Sprintf("FK field %q", fkFieldName)).
+				WithDetails(diag.RelationField(rel.Name(), fkFieldName)...)
+			withProvenance(issue, prov, targetPath.Key(fkFieldName).String())
+			targetCollector.Collect(issue.Build())
+			continue
 		}
 		pkComponents = append(pkComponents, coercedVal)
 	}
@@ -429,6 +446,14 @@ func (v *Validator) validateEdgeTarget(
 			continue
 		}
 
+		// An explicit null is the absent case, exactly as it is for a node
+		// property: leaving the key out here lets the required check below
+		// report it, and drops an optional one. Storing nil instead would
+		// satisfy the required check by key presence alone.
+		if fieldVal == nil {
+			continue
+		}
+
 		// Validate edge property type
 		if err := v.checkValueWithRecovery(fieldVal, prop.Constraint()); err != nil {
 			code := ErrTypeMismatch
@@ -447,11 +472,14 @@ func (v *Validator) validateEdgeTarget(
 		}
 
 		// Coerce edge property to canonical form (e.g., int -> int64).
-		// CoerceValue should not fail after CheckValue passes, but use
-		// original value as defensive fallback.
 		coercedVal, err := v.coerceValueWithRecovery(fieldVal, prop.Constraint())
 		if err != nil {
-			coercedVal = fieldVal
+			issue := coercionIssue(err, fmt.Sprintf("edge property %q", prop.Name())).
+				WithDetail(diag.DetailKeyRelationName, rel.Name()).
+				WithDetail(diag.DetailKeyPropertyName, prop.Name())
+			withProvenance(issue, prov, targetPath.Key(fieldName).String())
+			targetCollector.Collect(issue.Build())
+			continue
 		}
 		edgeProps[prop.Name()] = coercedVal
 	}

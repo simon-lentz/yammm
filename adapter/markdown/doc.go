@@ -58,8 +58,8 @@
 // reuse the DSL vocabulary — NAME plus parenthesized multiplicity (one,
 // many, one:many, _) — rather than Mermaid cardinality notation, so the
 // whole document speaks one vocabulary. Mermaid namespaces are deliberately
-// not used (some Markdown renderers, GitHub included, do not support them
-// in class diagrams); qualified type names render as sanitized class ids
+// not used (some Markdown renderers do not support them in class
+// diagrams); qualified type names render as sanitized class ids
 // with a display label instead.
 //
 // Relations render in the type sections as DSL-notation bullets with the

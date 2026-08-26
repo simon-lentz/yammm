@@ -205,7 +205,7 @@ func (a *Adapter) recordToProps(
 	var groups map[string]map[string]string // field -> suffix -> raw cell
 	if schemaType != nil {
 		assocByField = make(map[string]*schema.Relation)
-		for rel := range schemaType.Associations() {
+		for rel := range schemaType.AllAssociations() {
 			assocByField[rel.FieldName()] = rel
 		}
 	}

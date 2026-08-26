@@ -526,7 +526,7 @@ Inheritance rules:
 **Linearization order:** Ancestors are flattened **ancestors-first**: each supertype's own ancestors are appended before the supertype itself, left to right across the `extends` clause, with keep-first deduplication. For `D extends C`, `C extends B`, `B extends A` the order is `[A, B, C]`; for `D extends B, C` with both extending `A` it is `[A, B, C]`.
 
 1. Own declarations (from the type body) come first
-2. Inherited members follow in that ancestors-first order, so the most distant ancestor is read before the nearest
+2. Inherited **properties, relations and annotations** follow in that ancestors-first order, so the most distant ancestor is read before the nearest. **Invariants do not** — see Invariant merging below, where a subtype reads each direct supertype's already-merged set so a nearer declaration wins
 3. When the same ancestor is reachable via multiple paths (diamond inheritance), the first occurrence is kept and duplicates are skipped
 
 **Property conflict resolution:**
@@ -540,7 +540,7 @@ Inheritance rules:
 
 `E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. Each subtype that inherits a conflicting combination re-detects and reports it independently.
 
-**Invariant merging:** Own invariants come first, then inherited invariants in linearization order. If a child declares an invariant with the same name as an inherited one, the child's version takes precedence.
+**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. Deduplication is by name, keep-first, so a subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it.
 
 ### Constraint Narrowing
 
@@ -613,6 +613,23 @@ type Person {
 ```
 
 Properties without modifiers are **optional** and may be omitted from instance data.
+
+**An explicit `null` is the absent case.** For a property — on a type or on an
+association's edge — instance data carrying `null` is treated exactly as if the
+key were not there: a required property draws `E_MISSING_REQUIRED`, and an
+optional one is dropped rather than stored. The two other slots that accept a
+`null` keep their own rules, because neither is a property: a foreign-key
+component is a structural key position and reports `E_TYPE_MISMATCH`, and a
+composition value must be an array and reports `E_EDGE_SHAPE_MISMATCH`.
+
+**A `null` inside a collection is not the absent case.** No element position is
+optional, so the element constraint applies to it and `["a", null]` is rejected
+for a `List<String>`. This is what distinguishes a whole-value `null` — which
+drops an optional property — from a `null` element inside one.
+
+**The empty string is a value.** `""` satisfies `required` and is accepted as a
+primary key, yielding the key `[""]`. A bare `String` declares no lower bound;
+`String[1, _]` is what excludes the empty string.
 
 #### Primary Key Types
 
@@ -1404,6 +1421,44 @@ $item.price        // lambda parameter property
 ```
 
 Property references are checked **statically**: a reference to a property not declared on the type is rejected at schema load (`E_UNKNOWN_PROPERTY`). At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
+
+**Relations are in scope**, under the relation's field name, and the DSL name
+resolves to the same entry case-insensitively. What a relation evaluates to
+depends on where its data lives:
+
+- A **composition**'s children are part of the instance, so the relation
+  evaluates to those children — a list for a `many` composition, the single
+  child otherwise — and each child's own properties are readable. `ITEMS -> Len`,
+  `ITEMS -> All |$i| { $i.qty > 0 }` and `ITEMS[0].qty` all read real values.
+- An **association**'s target is a reference. The instance holds the foreign
+  key, not the target's row, so the relation evaluates to the target key — a
+  list for a `many` association, the single key otherwise. Presence, cardinality
+  and key comparison are answerable; the target type's properties are not in
+  this instance to answer with, and reaching for one is an evaluation error.
+
+A relation with no value evaluates to `nil`, so the null-guard idioms apply to a
+relation exactly as they do to a property.
+
+```yammm-schema
+schema "orders"
+
+type Customer { id String primary }
+
+part type Line {
+    sku String primary
+    qty Integer required
+}
+
+type Order {
+    id String primary
+    --> PLACED_BY (one) Customer
+    *-> LINES (one:many) Line
+
+    ! "has_a_customer" PLACED_BY != nil
+    ! "has_lines" LINES -> Len > 0
+    ! "positive_quantities" LINES -> All |$l| { $l.qty > 0 }
+}
+```
 
 ### Variables and Scope
 

@@ -1,6 +1,7 @@
 package value_test
 
 import (
+	"encoding/json"
 	"math"
 	"math/rand"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 )
 
@@ -63,7 +65,7 @@ func TestTypeStrata(t *testing.T) {
 	assertEqual(t, value.InvalidStrata, value.TypeStrata(make(chan int)))
 }
 
-// Named types for testing TypeStrata rejection
+// Named types over a predeclared base.
 type (
 	namedBool    bool
 	namedInt     int
@@ -75,63 +77,180 @@ type (
 	namedString  string
 )
 
-// TestTypeStrata_NamedTypesInvalid verifies that named types (type aliases with
-// underlying predeclared types) return InvalidStrata. This ensures consistency
-// with GetInt64/GetFloat64/toStringComparable which use type switches and would
-// fail on named types.
-func TestTypeStrata_NamedTypesInvalid(t *testing.T) {
+// A named type takes the strata of its underlying kind. adapter/gogen emits
+// `type <Name> <base>` for every DataType and inline enum, so rejecting them
+// meant the generator produced values this package could not order.
+//
+// Mutation: deleting strataOfKind's call site in TypeStrata turns this red;
+// widening it to accept reflect.Struct turns TestTypeStrata_Basic red on the
+// struct{}{} case.
+func TestTypeStrata_NamedTypesTakeTheirUnderlyingKind(t *testing.T) {
 	tests := []struct {
 		name  string
 		input any
+		want  int
 	}{
-		// Named bool
-		{"namedBool", namedBool(true)},
-
-		// Named signed integers
-		{"namedInt", namedInt(42)},
-		{"namedInt64", namedInt64(42)},
-
-		// Named unsigned integers
-		{"namedUint", namedUint(42)},
-		{"namedUint64", namedUint64(42)},
-
-		// Named floats
-		{"namedFloat32", namedFloat32(3.14)},
-		{"namedFloat64", namedFloat64(3.14)},
-
-		// Named string
-		{"namedString", namedString("hello")},
+		{"namedBool", namedBool(true), value.BoolStrata},
+		{"namedInt", namedInt(42), value.NumericStrata},
+		{"namedInt64", namedInt64(42), value.NumericStrata},
+		{"namedUint", namedUint(42), value.NumericStrata},
+		{"namedUint64", namedUint64(42), value.NumericStrata},
+		{"namedFloat32", namedFloat32(3.14), value.NumericStrata},
+		{"namedFloat64", namedFloat64(3.14), value.NumericStrata},
+		{"namedString", namedString("hello"), value.StringStrata},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := value.TypeStrata(tt.input)
-			if got != value.InvalidStrata {
-				t.Errorf("TypeStrata(%T) = %d, want InvalidStrata (%d)", tt.input, got, value.InvalidStrata)
+			if got := value.TypeStrata(tt.input); got != tt.want {
+				t.Errorf("TypeStrata(%T) = %d, want %d", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestOrder_NamedTypesError verifies that Order correctly errors on
-// named types (since TypeStrata now returns InvalidStrata for them).
-func TestOrder_NamedTypesError(t *testing.T) {
+// A pointer takes the strata of what it points at, and a nil pointer is nil.
+func TestTypeStrata_PointersFollowTheirTarget(t *testing.T) {
+	i, f, s, b := int64(1), 1.5, "x", true
+	var nilPtr *int64
+
+	for _, tt := range []struct {
+		name  string
+		input any
+		want  int
+	}{
+		{"*int64", &i, value.NumericStrata},
+		{"*float64", &f, value.NumericStrata},
+		{"*string", &s, value.StringStrata},
+		{"*bool", &b, value.BoolStrata},
+		{"nil *int64", nilPtr, value.NilStrata},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := value.TypeStrata(tt.input); got != tt.want {
+				t.Errorf("TypeStrata(%T) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// An immutable.Slice is what Value.Unwrap returns for a List- or Vector-typed
+// property, and it is a struct, so no reflect kind names it. Without the
+// explicit case every invariant comparing a list was an evaluation error.
+//
+// Mutation: making TypeStrata's immutable.Slice case return InvalidStrata
+// turns this red, and turns the elementwise test below red with the evaluation
+// error this whole change removes.
+func TestTypeStrata_ImmutableSliceIsASlice(t *testing.T) {
+	wrapped := immutable.Wrap([]any{"a", "b"})
+	slice, ok := wrapped.Slice()
+	if !ok {
+		t.Fatalf("Wrap([]any) did not produce a Slice, got %T", wrapped.Unwrap())
+	}
+	if got := value.TypeStrata(slice); got != value.SliceStrata {
+		t.Errorf("TypeStrata(immutable.Slice) = %d, want SliceStrata (%d)", got, value.SliceStrata)
+	}
+}
+
+// A json.Number is numeric everywhere in this package. ClassifyWithRegistry
+// has always called it Int/Float; before TypeStrata agreed, a lexical number
+// took the String strata and compared against int64 by strata RANK — answering
+// "greater" with no error rather than comparing the two numbers.
+//
+// Mutation: deleting TypeStrata's json.Number case makes the Order case below
+// return 1 instead of 0, silently; deleting the GetInt64 case makes it error.
+func TestOrder_JSONNumberIsNumeric(t *testing.T) {
+	if got := value.TypeStrata(json.Number("5")); got != value.NumericStrata {
+		t.Errorf("TypeStrata(json.Number) = %d, want NumericStrata (%d)", got, value.NumericStrata)
+	}
+	for _, tt := range []struct {
+		name  string
+		left  any
+		right any
+		want  int
+	}{
+		{"equal to int64", json.Number("5"), int64(5), 0},
+		{"less than int64", json.Number("4"), int64(5), -1},
+		{"fractional against float64", json.Number("2.5"), 2.5, 0},
+		{"int64 on the left", int64(9), json.Number("5"), 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := value.Order(tt.left, tt.right)
+			if err != nil {
+				t.Fatalf("Order: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("Order = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// Order compares a named type by its base value rather than erroring.
+//
+// Mutation: reverting GetInt64/GetFloat64/toStringComparable/toBool to a bare
+// type switch turns this red while TypeStrata still reports a valid strata,
+// which is the half-fixed state that would make Order's slice arm panic.
+func TestOrder_NamedTypesCompareAsTheirBase(t *testing.T) {
 	tests := []struct {
 		name  string
 		left  any
 		right any
+		want  int
 	}{
-		{"namedFloat vs float64", namedFloat64(1.2), float64(1.0)},
-		{"namedInt vs int", namedInt(42), int(10)},
-		{"namedString vs string", namedString("hello"), "world"},
-		{"namedBool vs bool", namedBool(true), false},
+		{"namedFloat greater than float64", namedFloat64(1.2), float64(1.0), 1},
+		{"namedInt greater than int", namedInt(42), int(10), 1},
+		{"namedString less than string", namedString("hello"), "world", -1},
+		{"namedBool greater than bool", namedBool(true), false, 1},
+		{"namedInt64 equal to int64", namedInt64(7), int64(7), 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := value.Order(tt.left, tt.right)
-			if err == nil {
-				t.Errorf("Order(%T, %T) should have returned an error for named type", tt.left, tt.right)
+			got, err := value.Order(tt.left, tt.right)
+			if err != nil {
+				t.Fatalf("Order(%T, %T): %v", tt.left, tt.right, err)
+			}
+			if got != tt.want {
+				t.Errorf("Order(%v, %v) = %d, want %d", tt.left, tt.right, got, tt.want)
+			}
+		})
+	}
+}
+
+// Order compares an immutable.Slice against a plain slice element by element,
+// and against a Go slice on the other side.
+//
+// Mutation: reverting Order's SliceStrata arm to reflect.ValueOf(left).Len()
+// makes this PANIC rather than fail, which is why the arm and the TypeStrata
+// case must land together.
+func TestOrder_ImmutableSliceComparesElementwise(t *testing.T) {
+	sliceOf := func(elems ...any) any {
+		s, ok := immutable.Wrap(elems).Slice()
+		if !ok {
+			t.Fatalf("Wrap did not produce a Slice")
+		}
+		return s
+	}
+
+	for _, tt := range []struct {
+		name  string
+		left  any
+		right any
+		want  int
+	}{
+		{"equal", sliceOf("a", "b"), sliceOf("a", "b"), 0},
+		{"first element decides", sliceOf("a", "z"), sliceOf("b", "a"), -1},
+		{"shorter is smaller", sliceOf("a"), sliceOf("a", "b"), -1},
+		{"against a Go slice", sliceOf("a", "b"), []any{"a", "b"}, 0},
+		{"Go slice on the left", []any{"a", "c"}, sliceOf("a", "b"), 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := value.Order(tt.left, tt.right)
+			if err != nil {
+				t.Fatalf("Order: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("Order = %d, want %d", got, tt.want)
 			}
 		})
 	}

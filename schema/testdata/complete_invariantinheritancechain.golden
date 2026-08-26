@@ -1,0 +1,90 @@
+{
+  "DataTypes": [],
+  "Imports": [],
+  "Name": "test",
+  "Types": [
+    {
+      "Abstract": true,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        },
+        {
+          "Constraint": "Integer",
+          "Name": "n",
+          "Optional": false,
+          "PrimaryKey": false
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": [
+        "a_rule"
+      ],
+      "Name": "A",
+      "Part": false,
+      "SuperTypes": null
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        },
+        {
+          "Constraint": "Integer",
+          "Name": "n",
+          "Optional": false,
+          "PrimaryKey": false
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": [
+        "b_rule",
+        "a_rule"
+      ],
+      "Name": "B",
+      "Part": false,
+      "SuperTypes": [
+        "A"
+      ]
+    },
+    {
+      "Abstract": false,
+      "AllProperties": [
+        {
+          "Constraint": "String",
+          "Name": "id",
+          "Optional": false,
+          "PrimaryKey": true
+        },
+        {
+          "Constraint": "Integer",
+          "Name": "n",
+          "Optional": false,
+          "PrimaryKey": false
+        }
+      ],
+      "Associations": [],
+      "Compositions": [],
+      "Invariants": [
+        "c_rule",
+        "b_rule",
+        "a_rule"
+      ],
+      "Name": "C",
+      "Part": false,
+      "SuperTypes": [
+        "A",
+        "B"
+      ]
+    }
+  ]
+}

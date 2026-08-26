@@ -16,9 +16,11 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// WriteOption configures per-call CSV serialization behavior.
-type WriteOption func(*writeConfig)
-
+// writeConfig holds the per-call serialization settings. No option constructs
+// one: WithWriteHeader and WithWriteNullString were removed in v0.12.0, so
+// defaultWriteConfig is the only producer and both fields are effectively
+// constant. The struct stays because the write path threads it through
+// instanceToRow, valueToString and sliceToString.
 type writeConfig struct {
 	includeHeader bool
 	nullString    string
@@ -41,7 +43,6 @@ func defaultWriteConfig() writeConfig {
 func (a *Adapter) MarshalSnapshot(
 	ctx context.Context,
 	result *graph.Snapshot,
-	opts ...WriteOption,
 ) (map[string][]byte, error) {
 	if result == nil {
 		return nil, ErrNilSnapshot
@@ -62,7 +63,7 @@ func (a *Adapter) MarshalSnapshot(
 		instances := result.InstancesOf(typeID)
 
 		var buf bytes.Buffer
-		if err := a.writeSnapshotTypeTo(ctx, &buf, instances, result, schemaType, opts...); err != nil {
+		if err := a.writeSnapshotTypeTo(ctx, &buf, instances, result, schemaType); err != nil {
 			return nil, fmt.Errorf("type %q: %w", typeName, err)
 		}
 		output[typeName] = buf.Bytes()
@@ -82,7 +83,6 @@ func (a *Adapter) WriteSnapshot(
 	ctx context.Context,
 	writerFor func(typeName string) (io.Writer, error),
 	result *graph.Snapshot,
-	opts ...WriteOption,
 ) error {
 	if result == nil {
 		return ErrNilSnapshot
@@ -105,7 +105,7 @@ func (a *Adapter) WriteSnapshot(
 		schemaType, _ := result.Schema().TypeByID(typeID)
 		instances := result.InstancesOf(typeID)
 
-		if err := a.writeSnapshotTypeTo(ctx, w, instances, result, schemaType, opts...); err != nil {
+		if err := a.writeSnapshotTypeTo(ctx, w, instances, result, schemaType); err != nil {
 			return fmt.Errorf("type %q: %w", typeName, err)
 		}
 	}
@@ -138,12 +138,8 @@ func (a *Adapter) writeSnapshotTypeTo(
 	instances []*graph.Instance,
 	snap *graph.Snapshot,
 	schemaType *schema.Type,
-	opts ...WriteOption,
 ) error {
 	cfg := defaultWriteConfig()
-	for _, opt := range opts {
-		opt(&cfg)
-	}
 
 	columns, err := buildColumnList(schemaType, snap.Schema())
 	if err != nil {
@@ -210,7 +206,7 @@ func buildColumnList(schemaType *schema.Type, s *schema.Schema) ([]string, error
 	}
 	slices.Sort(propNames)
 
-	rels := slices.SortedFunc(schemaType.Associations(), func(a, b *schema.Relation) int {
+	rels := slices.SortedFunc(schemaType.AllAssociations(), func(a, b *schema.Relation) int {
 		return strings.Compare(a.FieldName(), b.FieldName())
 	})
 	var edgeCols []string
@@ -249,7 +245,7 @@ func (a *Adapter) instanceToRow(
 ) []string {
 	cells := make(map[string]string)
 	if schemaType != nil {
-		for rel := range schemaType.Associations() {
+		for rel := range schemaType.AllAssociations() {
 			a.relationCells(rel, s, edgesByRel[rel.Name()], cells)
 		}
 	}

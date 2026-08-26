@@ -16,10 +16,6 @@ const (
 	kindUnknownRelation
 	kindEdgeShape
 	kindCardinality
-	kindWrongComposedType
-	kindMissingEdgeProp
-	kindUnknownEdgeProp
-	kindChildError
 )
 
 // buildError is one accumulated shape-level failure on a SchemaBuilder.
@@ -30,7 +26,6 @@ type buildError struct {
 	typ    string // bound type name (b.typeName); always populated
 	target string // property name, relation name, or composition name
 	detail string // free-form expected-vs-got detail; may be empty
-	child  error  // non-nil iff kind == kindChildError
 
 	// callerPC is the raw program counter of the user's call site, resolved to
 	// "file:line" by [symbolizePC] only when this error is rendered. Zero when
@@ -72,36 +67,6 @@ func (e *buildError) Error() string {
 			b.WriteString(": ")
 			b.WriteString(e.detail)
 		}
-	case kindWrongComposedType:
-		b.WriteString("composition ")
-		b.WriteString(strconv.Quote(e.target))
-		if e.detail != "" {
-			b.WriteString(": ")
-			b.WriteString(e.detail)
-		}
-	case kindMissingEdgeProp:
-		b.WriteString("relation ")
-		b.WriteString(strconv.Quote(e.target))
-		b.WriteString(": missing required edge property")
-		if e.detail != "" {
-			b.WriteString(" ")
-			b.WriteString(strconv.Quote(e.detail))
-		}
-	case kindUnknownEdgeProp:
-		b.WriteString("relation ")
-		b.WriteString(strconv.Quote(e.target))
-		b.WriteString(": unknown edge property")
-		if e.detail != "" {
-			b.WriteString(" ")
-			b.WriteString(e.detail)
-		}
-	case kindChildError:
-		b.WriteString("composition ")
-		b.WriteString(strconv.Quote(e.target))
-		if e.child != nil {
-			b.WriteString(": ")
-			b.WriteString(e.child.Error())
-		}
 	default:
 		b.WriteString("build error")
 		if e.target != "" {
@@ -115,13 +80,6 @@ func (e *buildError) Error() string {
 		}
 	}
 	return b.String()
-}
-
-// Unwrap exposes the wrapped child error for composition-child failures so
-// errors.Is and errors.As walk into the parent→child chain transparently.
-// Returns nil for non-child kinds.
-func (e *buildError) Unwrap() error {
-	return e.child
 }
 
 // capturePC returns the program counter of the call site one level above the

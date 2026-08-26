@@ -72,8 +72,11 @@ func projectSchema(s *schema.Schema) map[string]any {
 		for ref := range typ.SuperTypes() {
 			supers = append(supers, ref.Ref().Name())
 		}
+		// AllInvariantsSlice, not InvariantsSlice: every sibling field here
+		// projects the MERGED view, and projecting own-only invariants beside
+		// them left inheritance invisible to the whole golden suite.
 		var invariants []string
-		for _, inv := range typ.InvariantsSlice() {
+		for _, inv := range typ.AllInvariantsSlice() {
 			invariants = append(invariants, inv.Name())
 		}
 		types = append(types, map[string]any{
@@ -1072,6 +1075,41 @@ func TestComplete_Invariant_Single(t *testing.T) {
 				Invariants: []*schema.TestInvariantDecl{
 					{Name: "valid_age", Expr: nil}, // nil expression is valid for testing
 				},
+			},
+		},
+	}
+
+	completeGolden(t, model)
+}
+
+// TestComplete_InvariantInheritanceChain pins the merged invariant set down a
+// three-level chain. Until the projection read AllInvariantsSlice, no golden in
+// this suite showed an inherited invariant at all — and no fixture declared one
+// to show, so the blind spot was in the corpus as much as in the projection.
+//
+// The expected order is child-first by distance: C's own, then B's, then A's.
+func TestComplete_InvariantInheritanceChain(t *testing.T) {
+	model := &schema.TestModel{
+		Name: "test",
+		Types: []*schema.TestTypeDecl{
+			{
+				Name:       "A",
+				IsAbstract: true,
+				Properties: []*schema.TestPropertyDecl{
+					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "n", Constraint: schema.NewIntegerConstraint()},
+				},
+				Invariants: []*schema.TestInvariantDecl{{Name: "a_rule", Expr: nil}},
+			},
+			{
+				Name:       "B",
+				Inherits:   []*schema.TestASTTypeRef{{Name: "A"}},
+				Invariants: []*schema.TestInvariantDecl{{Name: "b_rule", Expr: nil}},
+			},
+			{
+				Name:       "C",
+				Inherits:   []*schema.TestASTTypeRef{{Name: "B"}},
+				Invariants: []*schema.TestInvariantDecl{{Name: "c_rule", Expr: nil}},
 			},
 		},
 	}

@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"strconv"
-	"strings"
 
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -61,13 +59,12 @@ import (
 // in-tree pin and TestSchemaBuilder_SuccessPath_IsAllocationFree for the
 // zero-allocation ratchet.
 type SchemaBuilder struct {
-	schema       *schema.Schema
-	typeName     string // user-provided (may be qualified)
-	typ          *schema.Type
-	properties   map[string]any
-	edges        map[string]*edgeState
-	compositions map[string]*compositionState
-	errors       []*buildError
+	schema     *schema.Schema
+	typeName   string // user-provided (may be qualified)
+	typ        *schema.Type
+	properties map[string]any
+	edges      map[string]*edgeState
+	errors     []*buildError
 
 	// relByFieldName is a lazy-built secondary index that maps FieldName()
 	// (lower_snake form, e.g. "in_district") to its relation. Built on first
@@ -77,39 +74,15 @@ type SchemaBuilder struct {
 	relByFieldName map[string]*schema.Relation
 }
 
-// edgeShape pins the call-shape of edge-producing invocations on a single
-// relation. First call selects; subsequent mismatched calls surface as a
-// shape error.
-type edgeShape uint8
-
-const (
-	shapeUnset edgeShape = iota
-	shapeTo
-	shapeToWith
-)
-
-func (s edgeShape) String() string {
-	switch s {
-	case shapeTo:
-		return "EdgeTo"
-	case shapeToWith:
-		return "EdgeToWith"
-	default:
-		return "unset"
-	}
-}
-
 type edgeState struct {
-	rel           *schema.Relation
-	shape         edgeShape
-	shapeCallerPC uintptr // PC of the call that pinned the shape; see capturePC
-	targets       []map[string]any
-}
+	rel     *schema.Relation
+	targets []map[string]any
 
-type compositionState struct {
-	rel       *schema.Relation
-	children  []*SchemaBuilder
-	callerPCs []uintptr // parallel to children; caller PC per accepted child
+	// excessCallerPC is the PC of the call that gave this relation a second
+	// target. A cardinality mismatch is detected in Build, after every call has
+	// returned, so there is no "current" call site to attribute it to; the
+	// first excess call is the one the caller has to delete.
+	excessCallerPC uintptr
 }
 
 // BuilderFor constructs a schema-aware builder for instances of the given
@@ -132,12 +105,11 @@ func BuilderFor(s *schema.Schema, typeName string) (*SchemaBuilder, error) {
 		return nil, fmt.Errorf("instance.BuilderFor: cannot build abstract type %q", typeName)
 	}
 	return &SchemaBuilder{
-		schema:       s,
-		typeName:     typeName,
-		typ:          typ,
-		properties:   make(map[string]any),
-		edges:        make(map[string]*edgeState),
-		compositions: make(map[string]*compositionState),
+		schema:     s,
+		typeName:   typeName,
+		typ:        typ,
+		properties: make(map[string]any),
+		edges:      make(map[string]*edgeState),
 	}, nil
 }
 
@@ -189,14 +161,12 @@ func (b *SchemaBuilder) Property(name string, value any) *SchemaBuilder {
 // construct such instances from raw data instead.
 func (b *SchemaBuilder) EdgeTo(name string, targetKey ...any) *SchemaBuilder {
 	callerPC := capturePC()
-	b.addEdge(name, targetKey, nil, shapeTo, callerPC)
+	b.addEdge(name, targetKey, callerPC)
 	return b
 }
 
-// addEdge is the shared implementation for EdgeTo and EdgeToWith. shape
-// identifies which public entry produced the call; the two shapes cannot mix
-// on the same relation.
-func (b *SchemaBuilder) addEdge(name string, targetKey []any, props map[string]any, shape edgeShape, callerPC uintptr) {
+// addEdge is EdgeTo's implementation.
+func (b *SchemaBuilder) addEdge(name string, targetKey []any, callerPC uintptr) {
 	rel, ok := b.resolveRelation(name)
 	if !ok {
 		b.recordErr(&buildError{
@@ -217,51 +187,37 @@ func (b *SchemaBuilder) addEdge(name string, targetKey []any, props map[string]a
 		})
 		return
 	}
-	switch shape {
-	case shapeTo:
-		if rel.HasProperties() {
-			b.recordErr(&buildError{
-				kind:     kindEdgeShape,
-				typ:      b.typeName,
-				target:   rel.Name(),
-				detail:   "declares edge properties, which the builder does not support; construct the instance from raw data",
-				callerPC: callerPC,
-			})
-			return
-		}
-	case shapeToWith:
-		if !rel.HasProperties() {
-			b.recordErr(&buildError{
-				kind:     kindEdgeShape,
-				typ:      b.typeName,
-				target:   rel.Name(),
-				detail:   "has no edge properties; use EdgeTo",
-				callerPC: callerPC,
-			})
-			return
-		}
+	if rel.HasProperties() {
+		b.recordErr(&buildError{
+			kind:     kindEdgeShape,
+			typ:      b.typeName,
+			target:   rel.Name(),
+			detail:   "declares edge properties, which the builder does not support; construct the instance from raw data",
+			callerPC: callerPC,
+		})
+		return
 	}
 	if len(targetKey) == 0 {
 		b.recordErr(&buildError{
 			kind:     kindEdgeShape,
 			typ:      b.typeName,
 			target:   rel.Name(),
-			detail:   fmt.Sprintf("%s requires at least one target-key component", shape),
+			detail:   "EdgeTo requires at least one target-key component",
 			callerPC: callerPC,
 		})
 		return
 	}
 
-	target, err := b.buildEdgeTarget(rel, targetKey, props, callerPC)
+	target, err := b.buildEdgeTarget(rel, targetKey, callerPC)
 	if err != nil {
 		// err is already shaped as *buildError; recordErr just appends.
 		b.errors = append(b.errors, err)
 		return
 	}
 
-	st := b.edgeStateFor(rel, shape, callerPC)
-	if st == nil {
-		return // shape mismatch already recorded
+	st := b.edgeStateFor(rel)
+	if len(st.targets) == 1 {
+		st.excessCallerPC = callerPC
 	}
 	st.targets = append(st.targets, target)
 }
@@ -273,7 +229,6 @@ func (b *SchemaBuilder) addEdge(name string, targetKey []any, props map[string]a
 func (b *SchemaBuilder) buildEdgeTarget(
 	rel *schema.Relation,
 	targetKey []any,
-	props map[string]any,
 	callerPC uintptr,
 ) (map[string]any, *buildError) {
 	targetType, found := resolveRelationTarget(b.schema, rel)
@@ -306,58 +261,20 @@ func (b *SchemaBuilder) buildEdgeTarget(
 		}
 	}
 
-	obj := make(map[string]any, len(pks)+len(props))
+	obj := make(map[string]any, len(pks))
 	for i, pk := range pks {
 		obj[fkPrefix+pk.Name()] = targetKey[i]
 	}
 
-	for pname, pval := range props {
-		ep, ok := rel.Property(pname)
-		if !ok {
-			b.recordErr(&buildError{
-				kind:     kindUnknownEdgeProp,
-				typ:      b.typeName,
-				target:   rel.Name(),
-				detail:   describeUnknownEdgeProp(pname, rel),
-				callerPC: callerPC,
-			})
-			continue
-		}
-		obj[ep.Name()] = pval
-	}
 	return obj, nil
 }
 
-// describeUnknownEdgeProp formats the "unknown edge property X; declared: [a, b]"
-// detail surfaced on kindUnknownEdgeProp.
-func describeUnknownEdgeProp(name string, rel *schema.Relation) string {
-	names := make([]string, 0, len(rel.PropertiesSlice()))
-	for _, p := range rel.PropertiesSlice() {
-		names = append(names, p.Name())
-	}
-	return fmt.Sprintf("%s; declared: [%s]", strconv.Quote(name), strings.Join(names, ", "))
-}
-
-// edgeStateFor returns the state for rel, creating it on first call. shape
-// is pinned on the first edge call; subsequent calls with a different shape
-// record a shape-mismatch error and return nil (the caller then skips the
-// append).
-func (b *SchemaBuilder) edgeStateFor(rel *schema.Relation, shape edgeShape, callerPC uintptr) *edgeState {
+// edgeStateFor returns the state for rel, creating it on first call.
+func (b *SchemaBuilder) edgeStateFor(rel *schema.Relation) *edgeState {
 	st, ok := b.edges[rel.Name()]
 	if !ok {
-		st = &edgeState{rel: rel, shape: shape, shapeCallerPC: callerPC}
+		st = &edgeState{rel: rel}
 		b.edges[rel.Name()] = st
-		return st
-	}
-	if st.shape != shape {
-		b.recordErr(&buildError{
-			kind:     kindEdgeShape,
-			typ:      b.typeName,
-			target:   rel.Name(),
-			detail:   fmt.Sprintf("cannot mix %s and %s on the same relation (first use: %s at %s)", st.shape, shape, st.shape, symbolizePC(st.shapeCallerPC)),
-			callerPC: callerPC,
-		})
-		return nil
 	}
 	return st
 }
@@ -379,13 +296,13 @@ func (b *SchemaBuilder) edgeStateFor(rel *schema.Relation, shape edgeShape, call
 //   - the offending call's target (property or relation name)
 //   - the bound type's name (for disambiguation across builders)
 //   - the caller's file:line (captured via runtime.Callers at the offending
-//     Property / EdgeTo / EdgeToWith / Composed call)
+//     Property or EdgeTo call)
 func (b *SchemaBuilder) Build() (RawInstance, error) {
 	if err := b.firstErrorWithCount(); err != nil {
 		return RawInstance{}, err
 	}
 
-	out := make(map[string]any, len(b.properties)+len(b.edges)+len(b.compositions))
+	out := make(map[string]any, len(b.properties)+len(b.edges))
 	maps.Copy(out, b.properties)
 
 	// Edges — iteration order on maps is nondeterministic; outputs go into
@@ -394,17 +311,13 @@ func (b *SchemaBuilder) Build() (RawInstance, error) {
 	for _, st := range b.edges {
 		if !st.rel.IsMany() && len(st.targets) > 1 {
 			b.recordErr(&buildError{
-				kind:   kindCardinality,
-				typ:    b.typeName,
-				target: st.rel.Name(),
-				detail: fmt.Sprintf("%q is single-valued, got %d targets", st.rel.Name(), len(st.targets)),
+				kind:     kindCardinality,
+				typ:      b.typeName,
+				target:   st.rel.Name(),
+				detail:   fmt.Sprintf("%q is single-valued, got %d targets", st.rel.Name(), len(st.targets)),
+				callerPC: st.excessCallerPC,
 			})
 			continue
-		}
-		if st.shape == shapeToWith {
-			for _, target := range st.targets {
-				b.checkRequiredEdgeProps(st.rel, target)
-			}
 		}
 		if st.rel.IsMany() {
 			arr := make([]any, len(st.targets))
@@ -417,67 +330,10 @@ func (b *SchemaBuilder) Build() (RawInstance, error) {
 		}
 	}
 
-	// Compositions — always emit []any per validate_composition.go's
-	// "Compositions always expect an array" contract.
-	for _, st := range b.compositions {
-		if !st.rel.IsMany() && len(st.children) > 1 {
-			b.recordErr(&buildError{
-				kind:   kindCardinality,
-				typ:    b.typeName,
-				target: st.rel.Name(),
-				detail: fmt.Sprintf("%q is single-valued, got %d children", st.rel.Name(), len(st.children)),
-			})
-			continue
-		}
-		if len(st.children) == 0 {
-			continue
-		}
-		children := make([]any, 0, len(st.children))
-		childFailed := false
-		for i, c := range st.children {
-			childRaw, childErr := c.Build()
-			if childErr != nil {
-				b.recordErr(&buildError{
-					kind:     kindChildError,
-					typ:      b.typeName,
-					target:   st.rel.Name(),
-					callerPC: st.callerPCs[i],
-					child:    childErr,
-				})
-				childFailed = true
-				continue
-			}
-			children = append(children, childRaw.Properties)
-		}
-		if childFailed {
-			continue
-		}
-		out[st.rel.FieldName()] = children
-	}
-
 	if err := b.firstErrorWithCount(); err != nil {
 		return RawInstance{}, err
 	}
 	return RawInstance{Properties: out}, nil
-}
-
-// checkRequiredEdgeProps verifies that every required edge property on rel
-// is present in the given edge-target map. Missing required props surface
-// as kindMissingEdgeProp errors on b.
-func (b *SchemaBuilder) checkRequiredEdgeProps(rel *schema.Relation, target map[string]any) {
-	for ep := range rel.Properties() {
-		if !ep.IsRequired() {
-			continue
-		}
-		if _, ok := target[ep.Name()]; !ok {
-			b.recordErr(&buildError{
-				kind:   kindMissingEdgeProp,
-				typ:    b.typeName,
-				target: rel.Name(),
-				detail: ep.Name(),
-			})
-		}
-	}
 }
 
 // recordErr appends one shape-level error to the builder's accumulated list.

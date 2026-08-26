@@ -768,11 +768,11 @@ func TestCheckerFor(t *testing.T) {
 	assert.NotEmpty(t, msg)
 }
 
-// NOTE: The Registry enables custom type KIND DETECTION via ClassifyWithRegistry,
-// but named scalar types (e.g., `type MyInt int64`) remain unsupported for value
-// extraction (GetInt64/GetFloat64 don't convert them). This is by design.
+// NOTE: named scalar types work without a Registry at all — internal/value
+// falls back to the underlying kind for both classification and extraction.
+// The Registry remains for a carrier whose base kind reflect cannot name.
 //
-// These tests verify the registry wiring is correct, not that named scalars work.
+// These tests verify the registry wiring is correct AND that named scalars work.
 
 func TestChecker_NewChecker_WithRegistry(t *testing.T) {
 	// Verify NewChecker accepts a Registry and the Checker is usable
@@ -897,13 +897,15 @@ func TestChecker_CoerceValue_RegistryAwareInteger(t *testing.T) {
 	checker := eval.NewChecker(reg)
 	intConstraint := schema.NewIntegerConstraint()
 
-	// Note: CheckValue still fails because value.GetInt64 doesn't handle custom types.
-	// The registry-aware coercion fix in Issue 9 only affects CoerceValue.
-	t.Run("custom_int_check_fails_without_getint64_support", func(t *testing.T) {
-		// This documents the current limitation - CheckValue doesn't use reflection
-		// fallback for value extraction, only for classification
+	// CheckValue and CoerceValue agree on a named type. They did not: the
+	// checker gates the coercer, so the coercer's named-type arm was
+	// unreachable through Validator and adapter/gogen's own emitted carriers
+	// failed the validation they were generated from.
+	//
+	// Mutation: reverting GetInt64's reflect fallback turns this red.
+	t.Run("custom_int_check_accepts_the_named_type", func(t *testing.T) {
 		err := checker.CheckValue(myCustomInt(42), intConstraint)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	// CoerceValue now uses registry-aware reflection fallback
@@ -934,10 +936,10 @@ func TestChecker_CoerceValue_RegistryAwareFloat(t *testing.T) {
 	checker := eval.NewChecker(reg)
 	floatConstraint := schema.NewFloatConstraint()
 
-	// Note: CheckValue still fails because value.GetFloat64 doesn't handle custom types.
-	t.Run("custom_float_check_fails_without_getfloat64_support", func(t *testing.T) {
+	// Mutation: reverting GetFloat64's reflect fallback turns this red.
+	t.Run("custom_float_check_accepts_the_named_type", func(t *testing.T) {
 		err := checker.CheckValue(myCustomFloat(3.14), floatConstraint)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	// CoerceValue now uses registry-aware reflection fallback
@@ -985,6 +987,14 @@ func TestCheckValue_List(t *testing.T) {
 		{"valid string list", []any{"a", "b"}, stringList, false},
 		{"empty list unbounded", []any{}, stringList, false},
 		{"nil value passthrough", nil, stringList, false},
+		// A nil ELEMENT is not the nil VALUE above. CheckValue short-circuits
+		// nil for the optional-property slot; no element position is optional,
+		// so the element constraint applies and the null is rejected.
+		//
+		// Mutation: removing checkList's nil guard turns these three green.
+		{"nil element among strings", []any{"a", nil}, stringList, true},
+		{"nil as the only element", []any{nil}, stringList, true},
+		{"nil element within bounds", []any{"a", nil}, boundedList, true},
 		{"not a slice", "hello", stringList, true},
 		{"wrong element type", []any{123}, stringList, true},
 		{"mixed types", []any{"a", 123}, stringList, true},
@@ -1066,6 +1076,21 @@ func TestCoerceValue_List(t *testing.T) {
 		assert.Equal(t, int64(1), slice[0])
 		assert.Equal(t, int64(2), slice[1])
 		assert.Equal(t, int64(3), slice[2])
+	})
+
+	// The check side rejects a null element, so the coercer only meets one when
+	// a caller coerces without checking. It refuses rather than writing a nil
+	// into the coerced list, which is the invariant a validated List carries.
+	//
+	// Mutation: removing coerceList's nil guard turns this green and the
+	// returned slice holds a nil at index 1.
+	t.Run("nil element is refused", func(t *testing.T) {
+		t.Parallel()
+		constraint := schema.NewListConstraint(schema.NewStringConstraint())
+		result, err := checker.CoerceValue([]any{"a", nil}, constraint)
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "element [1]")
 	})
 
 	t.Run("coerce float elements", func(t *testing.T) {

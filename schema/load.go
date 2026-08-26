@@ -1029,26 +1029,40 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 	return importPath, nil
 }
 
+// importCandidates returns the file names an import path may resolve to.
+//
+// An import written without the extension resolves ONLY to "<path>.yammm". The
+// bare path was a second candidate, so `import "./parts"` would compile a file
+// literally named "parts" of any content type — against the extension rule
+// docs/SPEC.md states. One function serves both derivation sites because they
+// must agree: readImportFile does the read, candidateImportSourceIDs derives
+// the identities the cross-Load short-circuit looks up, and a short-circuit that
+// admitted a candidate the reader refuses would bind an import without ever
+// reaching the tightened read.
+func importCandidates(relativePath string) []string {
+	if strings.HasSuffix(relativePath, ".yammm") {
+		return []string{relativePath}
+	}
+	return []string{relativePath + ".yammm"}
+}
+
 // candidateImportSourceIDs returns the SourceIDs readImportFile could produce
 // for the given relative path, without performing any file I/O. Used by the
 // cross-Load short-circuit in loadImport to detect already-registered imports
 // before paying the read cost.
 //
-// The returned list mirrors readImportFile's candidate order (with-.yammm
-// first, then without) across the two code paths readImportFile exercises:
-// the in-memory source-content lookup uses l.moduleRoot verbatim, while
-// rootLoader.readFile uses the canonicalized rootPath. Both forms are
-// emitted so a Registry populated by either path will hit on the short-
-// circuit. Paths that fail canonicalization are silently dropped; they
-// would fail again in readImportFile with a uniform diagnostic.
+// It derives its candidates from [importCandidates], the same function
+// readImportFile reads through, and emits an identity for each of the two code
+// paths readImportFile exercises: the in-memory source-content lookup uses
+// l.moduleRoot verbatim, while rootLoader.readFile uses the canonicalized
+// rootPath. Both forms are emitted so a Registry populated by either path hits
+// on the short-circuit. Paths that fail canonicalization are silently dropped;
+// they would fail again in readImportFile with a uniform diagnostic.
 func (l *loader) candidateImportSourceIDs(relativePath string) []location.SourceID {
-	candidates := []string{relativePath}
-	if !strings.HasSuffix(relativePath, ".yammm") {
-		candidates = []string{relativePath + ".yammm", relativePath}
-	}
+	candidates := importCandidates(relativePath)
 
-	ids := make([]location.SourceID, 0, 4)
-	seen := make(map[location.SourceID]struct{}, 4)
+	ids := make([]location.SourceID, 0, 2*len(candidates))
+	seen := make(map[location.SourceID]struct{}, 2*len(candidates))
 	appendUnique := func(id location.SourceID) {
 		if _, dup := seen[id]; dup {
 			return
@@ -1127,11 +1141,7 @@ func (l *loader) registerCachedClosureSources(s *Schema) {
 // readImportFile reads an import file using sandboxed access via rootLoader.
 // Falls back to in-memory sources if available.
 func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, location.SourceID, error) {
-	// Try with .yammm extension first, then without
-	candidates := []string{relativePath}
-	if !strings.HasSuffix(relativePath, ".yammm") {
-		candidates = []string{relativePath + ".yammm", relativePath}
-	}
+	candidates := importCandidates(relativePath)
 
 	// First check if we have it in in-memory sources (for Sources). The
 	// candidate SourceID derivation matches pre-registration's exactly.

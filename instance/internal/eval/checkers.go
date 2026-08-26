@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -179,8 +180,19 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 		// snapshot rebuild render a value the same way this does.
 		//nolint:wrapcheck // the canonicalizer's errors name the value and the layout; a wrapper here adds nothing
 		return value.Canonical(val, c)
-	case schema.KindString, schema.KindBoolean, schema.KindEnum, schema.KindPattern:
-		// Already canonical: no coercion needed.
+	case schema.KindString, schema.KindEnum, schema.KindPattern:
+		// A named type over string reaches here from a caller holding
+		// adapter/gogen's output. Store the base value: accepting the carrier
+		// and then persisting it would put a type the wire and the writers
+		// never see into the validated instance.
+		if s, ok := value.GetString(val); ok {
+			return s, nil
+		}
+		return val, nil
+	case schema.KindBoolean:
+		if b, ok := value.GetBool(val); ok {
+			return b, nil
+		}
 		return val, nil
 	default:
 		// Defensive: schema.Constraint is sealed, so every kind is handled above.
@@ -304,7 +316,7 @@ func (ch *Checker) coerceVector(val any) (any, error) {
 // checkString validates that val is a string with optional length bounds.
 // Per SPEC, string length is counted in runes (characters), not bytes.
 func checkString(val any, c schema.Constraint) error {
-	s, ok := val.(string)
+	s, ok := value.GetString(val)
 	if !ok {
 		return typeMismatch("expected string, got %T", val)
 	}
@@ -411,7 +423,7 @@ func (ch *Checker) checkFloat(val any, c schema.Constraint) error {
 
 // checkBoolean validates that val is a boolean.
 func checkBoolean(val any) error {
-	if _, ok := val.(bool); ok {
+	if _, ok := value.GetBool(val); ok {
 		return nil
 	}
 	return typeMismatch("expected boolean, got %T", val)
@@ -479,7 +491,7 @@ func checkUUID(val any) error {
 		return nil
 	}
 
-	s, ok := val.(string)
+	s, ok := value.GetString(val)
 	if !ok {
 		return typeMismatch("expected UUID string or uuid.UUID, got %T", val)
 	}
@@ -491,7 +503,7 @@ func checkUUID(val any) error {
 
 // checkEnum validates that val is one of the allowed enum values.
 func checkEnum(val any, c schema.Constraint) error {
-	s, ok := val.(string)
+	s, ok := value.GetString(val)
 	if !ok {
 		return typeMismatch("expected string for enum, got %T", val)
 	}
@@ -510,7 +522,7 @@ func checkEnum(val any, c schema.Constraint) error {
 
 // checkPattern validates that val matches all constraint patterns.
 func checkPattern(val any, c schema.Constraint) error {
-	s, ok := val.(string)
+	s, ok := value.GetString(val)
 	if !ok {
 		return typeMismatch("expected string for pattern, got %T", val)
 	}
@@ -565,6 +577,13 @@ func (ch *Checker) checkVector(val any, c schema.Constraint) error {
 	return nil
 }
 
+// elementKindName renders an element constraint's kind for a diagnostic,
+// resolving an alias so the reader sees the underlying kind rather than the
+// DataType name.
+func elementKindName(c schema.Constraint) string {
+	return strings.ToLower(schema.ResolveAlias(c).Kind().String())
+}
+
 // checkList validates that val is a slice with elements matching the element constraint.
 func (ch *Checker) checkList(val any, c schema.Constraint) error {
 	slice, ok := toSlice(val)
@@ -589,6 +608,13 @@ func (ch *Checker) checkList(val any, c schema.Constraint) error {
 	// Check each element
 	elemConstraint := lc.Element()
 	for i, elem := range slice {
+		// CheckValue short-circuits nil for the optional-property slot. No
+		// element position is optional, so the element constraint applies here
+		// and a null element is rejected — checkVector rejects one inline for
+		// the same reason.
+		if elem == nil {
+			return typeMismatch("element [%d]: expected %s, got null", i, elementKindName(elemConstraint))
+		}
 		if err := ch.CheckValue(elem, elemConstraint); err != nil {
 			if ce, ok := errors.AsType[*CheckError](err); ok {
 				return &CheckError{
@@ -618,6 +644,12 @@ func (ch *Checker) coerceList(val any, c schema.Constraint) (any, error) {
 	elemConstraint := lc.Element()
 	result := make([]any, len(slice))
 	for i, elem := range slice {
+		// The check side rejects a null element, so reaching one here means a
+		// caller coerced without checking. Refusing keeps the invariant that a
+		// coerced list holds no nil.
+		if elem == nil {
+			return nil, fmt.Errorf("element [%d]: expected %s, got null", i, elementKindName(elemConstraint))
+		}
 		coerced, err := ch.CoerceValue(elem, elemConstraint)
 		if err != nil {
 			return nil, fmt.Errorf("element [%d]: %w", i, err)

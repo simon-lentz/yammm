@@ -1,0 +1,22 @@
+schema "fleet_docs"
+
+/* Stamp is a wall-clock reading with no zone. */
+type Stamp = Timestamp ["2006-01-02 15:04:05"]
+
+type Station {
+	id String primary
+}
+
+type Reading {
+	id String primary
+	/* logged_at is when the operator filed the reading. */
+	logged_at Timestamp ["2006-01-02 15:04:05"]
+	/* filed_as carries the documented DataType alias. */
+	filed_as Stamp
+	undocumented Timestamp ["2006-01-02 15:04:05"]
+
+	--> AT_STATION (_:one) Station {
+		/* observed_at is when the sensor sampled. */
+		observed_at Timestamp ["2006-01-02 15:04:05"]
+	}
+}
