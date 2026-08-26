@@ -16,8 +16,9 @@ import (
 // [time.RFC3339Nano] otherwise, a UUID through [uuid.UUID.String], and a Date
 // through [time.DateOnly] in the value's own location. A string form is parsed
 // and re-rendered, so one value reaches one spelling whichever way a caller
-// wrote it. Every other kind, an unresolved alias and a nil value pass through
-// untouched.
+// wrote it. A List canonicalizes at its element, so a List over one of those
+// three kinds is rebuilt as a fresh []any. Every other kind, an unresolved
+// alias and a nil value pass through untouched.
 //
 // The returned value is always usable: on error it is val unchanged, so a
 // caller that heals what it can and passes through what it cannot may ignore

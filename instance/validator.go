@@ -490,8 +490,10 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 // When normalization occurs (non-strict mode, case-insensitive match) and a logger is
 // configured, emits a debug log entry
 //
-// When multiple input fields case-fold to the same schema property (e.g., both "Name"
-// and "name"), an E_CASE_FOLD_COLLISION error is emitted and neither is mapped.
+// When two or more input fields case-fold to the same schema property and none
+// of them matches it exactly (schema "NAME", input "Name" and "name"), an
+// E_CASE_FOLD_COLLISION error is emitted and neither is mapped. An exact match
+// is claimed in the first pass and is never a collision.
 //
 // Complexity: O(N+M) where N is input property count and M is schema property count,
 // using CanonicalPropertyMap() for O(1) case-insensitive lookups.

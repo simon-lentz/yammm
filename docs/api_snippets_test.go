@@ -8,7 +8,13 @@ import (
 	"testing"
 	"time"
 
+	csvadapter "github.com/simon-lentz/yammm/adapter/csv"
+	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/adapter/neo4j"
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/format"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -201,4 +207,112 @@ func TestDocumentedScanFilterShape(t *testing.T) {
 	if result.HasErrors() || len(entries) != 1 {
 		t.Errorf("ScanDirSliceWith: %d entries, result %v", len(entries), result.Err())
 	}
+}
+
+// The pins below were chosen by the 2026-08-25 documentation audit: each one
+// compiles a call shape API.md or SPEC.md states, so a signature change that
+// would leave the prose silently wrong breaks the build instead.
+
+// TestDocumentedSchemaIdentity pins the two Schema Identity facts a reader acts
+// on: the algorithm version, and the digest's shape. The version went from 1 to
+// 2 in v0.15.0 and API.md still said 1 until this audit.
+func TestDocumentedSchemaIdentity(t *testing.T) {
+	t.Parallel()
+	if schema.StructuralHashVersion != 2 {
+		t.Errorf("StructuralHashVersion is %d; the documented value is 2", schema.StructuralHashVersion)
+	}
+	h := schema.StructuralHash(loadProbeSchema(t, t.Context()))
+	hex, ok := strings.CutPrefix(h, "sha256:")
+	if !ok || len(hex) != 64 {
+		t.Errorf("StructuralHash returned %q; the documented shape is sha256:<64 hex>", h)
+	}
+}
+
+// TestDocumentedBuilderExample runs API.md's headline builder chain verbatim.
+// The documented example omitted a primary key and could never have built; the
+// assertion is that the corrected one does.
+func TestDocumentedBuilderExample(t *testing.T) {
+	t.Parallel()
+	s, result := schema.NewBuilder().
+		WithName("MySchema").
+		WithSourceID(location.MustNewSourceID("test://my-schema.yammm")).
+		AddType("Person").
+		WithPrimaryKey("name", schema.NewStringConstraint()).
+		WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
+		Done().
+		AddType("Car").
+		WithPrimaryKey("vin", schema.NewStringConstraint()).
+		WithRelation("OWNER", schema.NewTypeRef("", "Person", location.Span{}), false, false).
+		Done().
+		Build()
+	if err := result.Err(); err != nil || s == nil {
+		t.Fatalf("the documented builder example does not build: %v", err)
+	}
+}
+
+// TestDocumentedRendererCallShapes pins the whole diag rendering surface.
+// API.md documented FormatIssue and FormatIssues, removed in v0.12.0, and never
+// mentioned FormatResultJSON, which is the only structured renderer.
+func TestDocumentedRendererCallShapes(t *testing.T) {
+	t.Parallel()
+	r := diag.NewRenderer(
+		diag.WithExcerpts(true),
+		diag.WithColors(false),
+		diag.WithDistinguishFatal(true),
+		diag.WithModuleRoot("/project"),
+	)
+	res := diag.OK()
+	_ = r.FormatResult(res)
+	_ = r.FormatResultJSON(res)
+
+	// The four Result methods whose truncation semantics API.md now states.
+	_, _, _ = res.Len(), res.DroppedCount(), res.TruncationNote()
+	_ = res.HasCode(diag.E_SYNTAX)
+
+	// ContextualError's field types, as declared inside package diag.
+	_ = diag.ContextualError{Result: diag.OK(), Tag: "t"}
+}
+
+// TestDocumentedKeyFunctions pins the graph key surface. FormatComposedKey's
+// first parameter is the parent's key components, not a formatted key — the
+// distinction API.md's table erased.
+func TestDocumentedKeyFunctions(t *testing.T) {
+	t.Parallel()
+	parent := graph.FormatKey("vin-123")
+	if parent != `["vin-123"]` {
+		t.Errorf("FormatKey returned %q; the documented canonical form is [\"vin-123\"]", parent)
+	}
+	composed, err := graph.FormatComposedKey([]any{"vin-123"}, "WHEELS", []any{"front-left"})
+	if err != nil || composed == "" {
+		t.Fatalf("FormatComposedKey: %v", err)
+	}
+}
+
+// TestDocumentedAdapterParseSurface pins the parse and write shapes of the two
+// adapters whose documented surface had drifted: adapter/json documented three
+// removed methods, adapter/csv one.
+func TestDocumentedAdapterParseSurface(t *testing.T) {
+	t.Parallel()
+	_ = (*jsonadapter.Adapter).ParseObject
+	_ = (*jsonadapter.Adapter).MarshalObject
+	_ = (*jsonadapter.Adapter).WriteObject
+	_ = (*csvadapter.Adapter).ParseTyped
+	_ = (*csvadapter.Adapter).ParseWithTypeColumn
+	_ = (*csvadapter.Adapter).MarshalSnapshot
+	_ = (*csvadapter.Adapter).WriteSnapshot
+}
+
+// TestDocumentedFormatSurface pins the format package facts the Formatting
+// section states: the entry point's arity and the wrap threshold's value.
+func TestDocumentedFormatSurface(t *testing.T) {
+	t.Parallel()
+	if format.LineWidthThreshold != 100 {
+		t.Errorf("LineWidthThreshold is %d; the documented value is 100", format.LineWidthThreshold)
+	}
+	formatted, err := format.TokenStream("schema \"S\"\n")
+	if err != nil || formatted == "" {
+		t.Fatalf("the documented TokenStream shape: %v", err)
+	}
+	_, _, _ = format.WrapLongLines, format.AlignColumns, format.NormalizeIndentation
+	_ = format.DisplayWidth
 }

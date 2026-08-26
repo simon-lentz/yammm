@@ -144,8 +144,9 @@
 // consumer sees do not vary with how many files a schema happens to span.
 //
 // Keys are relative to the load's recorded module root
-// ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot] — the WithModuleRoot
-// value when given, else the entry's directory), never absolute generation-machine
+// ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot], with this package
+// falling back to the entry file's directory when that is empty), never
+// absolute generation-machine
 // paths, so the output is byte-reproducible across checkouts and CI and the keys
 // match the module-style import statements inside the sources on re-load. const
 // SchemaHash carries the schema's

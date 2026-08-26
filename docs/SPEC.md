@@ -23,7 +23,8 @@ The syntax is specified using [Extended Backus-Naur Form (EBNF)](https://en.wiki
 Production  = production_name "=" [ Expression ] "." .
 Expression  = Alternative { "|" Alternative } .
 Alternative = Term { Term } .
-Term        = production_name | token [ "..." token ] | Group | Option | Repetition .
+Term        = [ label "=" ] ( production_name | token [ "..." token ] | Group | Option | Repetition | Description ) .
+Description = "/*" /* informal prose */ "*/" .
 Group       = "(" Expression ")" .
 Option      = "[" Expression "]" .
 Repetition  = "{" Expression "}" .
@@ -38,9 +39,11 @@ Productions are expressions constructed from terms and the following operators, 
 {}  repetition (0 to n times)
 ```
 
-Lower-case production names are used to identify lexical tokens. Non-terminals are in CamelCase. Lexical tokens are enclosed in double quotes `""` or back quotes `` ` ``.
+Three naming conventions are used. **UPPER_SNAKE** names a lexical token produced by the lexer (`UC_WORD`, `LC_WORD`, `STRING`, `INTEGER`, `FLOAT`, `REGEXP`, `VARIABLE`, `DOC_COMMENT`, `EOF`). **CamelCase** names a syntactic non-terminal. **lower case** names a helper non-terminal that expands to a phrase rather than to a single token — `min`, `max`, `minLen`, `maxLen`, `format`, `dimensions` and `exponent`. Literal tokens are enclosed in double quotes `""` or back quotes `` ` ``.
 
-The horizontal ellipsis `...` is used to informally denote various enumerations or code snippets that are not further specified.
+Some productions carry `label=` prefixes, which name the field the reference implementation binds; the Grammar Summary writes the same productions without them. A `/* … */` description is informal prose standing in for a rule not written out, and a `//` comment is commentary, not grammar.
+
+Inside a production, `"a" ... "z"` is a character range — the closed set from `a` to `z`. Outside a production, the horizontal ellipsis `...` informally denotes an enumeration or code snippet that is not further specified.
 
 ## Source Code Representation
 
@@ -50,21 +53,20 @@ Each code point is distinct; upper and lower case letters are different characte
 
 ### Characters
 
-The following terms are used to denote specific Unicode character classes:
+Comments, string literals and regex literals run to the end of a line, which is either code point:
 
 ```text
-newline        = /* the Unicode code point U+000A */ .
-unicode_char   = /* an arbitrary Unicode code point except newline */ .
-unicode_letter = /* a Unicode code point classified as "Letter" */ .
-unicode_digit  = /* a Unicode code point classified as "Number, decimal digit" */ .
+newline    = /* the Unicode code point U+000A or U+000D */ .
+line_char  = /* an arbitrary Unicode code point except newline */ .
 ```
 
 ### Letters and Digits
 
-The underscore character `_` (U+005F) is considered a letter for the purposes of identifier formation.
+**Identifier characters are ASCII only.** An identifier starts with an ASCII letter and continues with ASCII letters, ASCII digits and underscores; the underscore is permitted only after the first character. A non-ASCII letter is not an identifier character at all — `Pérson` is not one identifier.
 
 ```text
-letter        = unicode_letter | "_" .
+upper_letter  = "A" ... "Z" .
+lower_letter  = "a" ... "z" .
 decimal_digit = "0" ... "9" .
 ```
 
@@ -93,7 +95,7 @@ type Person {
 }
 ```
 
-Block comments immediately preceding a schema, type, property, association, composition, or data type declaration become that element's documentation and are preserved in the parsed model.
+Block comments immediately preceding a schema, type, property, association, composition, data type, invariant, or type-level annotation declaration become that element's documentation and are preserved in the parsed model.
 
 A comment cannot start inside a string literal or inside another comment.
 
@@ -105,13 +107,13 @@ Tokens form the vocabulary of the YAMMM language. There are four classes: identi
 
 Identifiers name entities such as types, properties, and relationships. There are two classes of identifiers:
 
-**Upper-case identifiers** start with an ASCII upper-case letter (A-Z) and are used for type names, data type aliases, and relationship names:
+**Upper-case identifiers** start with an ASCII upper-case letter (A-Z). Type names and data type aliases must take this form; relationship names and import aliases may:
 
 ```text
 UC_WORD = ascii_upper { ascii_letter | digit | "_" } .
 ```
 
-**Lower-case identifiers** start with an ASCII lower-case letter (a-z) and are used for property names:
+**Lower-case identifiers** start with an ASCII lower-case letter (a-z). Property names and annotation names must take this form; relationship names and import aliases may:
 
 ```text
 LC_WORD = ascii_lower { ascii_letter | digit | "_" } .
@@ -192,7 +194,7 @@ schema    type    datatype    required    primary    extends
 includes    abstract    one    many    import
 ```
 
-Six spellings cannot be used as property names. The keywords `as`, `part`, and `in` would create parsing ambiguity in import declarations (`as`), type modifiers (`part`), and membership expressions (`in`) respectively. The literals `true`, `false`, and `nil` are also barred: the lexer reads them as literal values, not as identifiers, so the declaration is a syntax error. All six are rejected where the property is declared, not where it is used.
+Six spellings cannot be used as property names. The keywords `as`, `part`, and `in` would create parsing ambiguity in import declarations (`as`), type modifiers (`part`), and membership expressions (`in`) respectively. The literals `true`, `false`, and `nil` are also barred. The rule table is keywordless, so all six lex as ordinary words; what rejects them is a negative lookahead on the property-name production. All six are rejected where the property is declared, not where it is used.
 
 ### Operators and Punctuation
 
@@ -293,7 +295,7 @@ Examples:
 /\d{3}-\d{4}/        // phone number pattern
 ```
 
-> **Two `/` on one source line lex as a regex literal.** The lexer cannot distinguish a second division from a pattern, so `(0.0 / 0.0) == (0.0 / 0.0)` fails to parse — the span between the first and second `/` becomes a regex literal. This is reachable from ordinary arithmetic. The workaround is one `/` per source line — counting the `//` of a line comment, which is itself two: `(x / 2.0) > 0.0 // halve it` fails to parse for the same reason. Put the comment on its own line.
+> **A `/` that does not open a comment starts a regex literal when another `/` follows on the same line.** A `/` immediately followed by `/` or `*` opens a comment and is never a regex, because the comment rules precede the regex rule. Any other `/` begins a pattern that runs to the next `/`, so `(0.0 / 0.0) == (0.0 / 0.0)` fails to parse. This is reachable from ordinary arithmetic. The workaround is one such `/` per source line: `(x / 2.0) > 0.0 // halve it` fails, because the division's `/` opens a regex that swallows the `//`. Put the comment on its own line, where it lexes as a comment.
 
 ### Boolean Literals
 
@@ -328,7 +330,7 @@ A YAMMM file defines a single schema. The schema is the top-level container for 
 Every YAMMM file must begin with a schema declaration:
 
 ```text
-Schema     = SchemaName { ImportDecl } { TypeDecl | DataTypeDecl } .
+Schema     = SchemaName { ImportDecl } { TypeDecl | DataTypeDecl } EOF .
 SchemaName = [ DOC_COMMENT ] "schema" STRING .
 ```
 
@@ -382,14 +384,18 @@ import "./common/types" as common   // explicit alias
 **Alias identifier requirements:** Aliases must be valid identifiers per the grammar—they must start with a letter (A-Z or a-z) and contain only letters, digits, and underscores. When automatic derivation would produce an invalid identifier (starting with a digit or underscore), `n` is prepended automatically. An explicit `as` clause can always be used to override the derived alias:
 
 ```yammm
-// OK: "./3rdparty" derives alias "n3rdparty" (digit-first, so "n" is prepended)
+// "./3rdparty" derives alias "n3rdparty" (digit-first, so "n" is prepended)
 import "./3rdparty"
+```
 
-// OK: explicit alias overrides the derived one
+```yammm
+// An explicit alias overrides the derived one
 import "./3rdparty" as thirdparty
 ```
 
-**Reserved keyword restriction:** Aliases cannot be reserved keywords because the lexer tokenizes them as literal tokens rather than identifiers. Reserved keywords include:
+The two forms are alternatives, not a pair: importing one file twice draws `E_DUPLICATE_IMPORT` however the aliases differ.
+
+**Reserved keyword restriction:** Aliases cannot be reserved keywords. The rule table holds no keywords — every keyword lexes as an ordinary word — so this is a parser rule, applied to an explicit `as` alias and to a derived one alike. Reserved keywords include:
 
 - DSL keywords: `schema`, `import`, `as`, `type`, `datatype`, `required`, `primary`, `extends`, `includes`, `abstract`, `part`, `one`, `many`, `in`
 - Built-in type keywords: `Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`
@@ -400,8 +406,8 @@ import "./3rdparty" as thirdparty
 
 ```yammm-snippet
 type Car {
-    color common.Color required      // qualified reference
-    --> WHEELS (one:many) parts.Wheel
+    color common.Color required      // qualified datatype reference
+    --> WHEELS (one:many) parts.Wheel // qualified type reference
 }
 ```
 
@@ -435,7 +441,7 @@ Types are the fundamental building blocks of a YAMMM schema. A type defines a na
 ```text
 TypeDecl = [ DOC_COMMENT ] [ "abstract" | "part" ] "type" TypeName [ ExtendsClause ] "{" TypeBody "}" .
 TypeName = UC_WORD .
-TypeBody = { Property | Association | Composition | Invariant } .
+TypeBody = { Property | Association | Composition | Invariant | TypeAnnotation } .
 ```
 
 A basic type declaration:
@@ -515,12 +521,12 @@ Inheritance rules:
 
 - Properties, associations, and compositions are inherited from parent types
 - Child types may override inherited properties with compatible narrower constraints
-- Relationship definitions must be unique after inheritance; duplicate name/target pairs are reported as errors. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
+- Relationship definitions must be unique after inheritance. Two relations reaching a type under one field name are an error when their definitions **differ** — a different target, multiplicity, or edge-property set; structurally identical ones are deduplicated keep-first with no diagnostic. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
 
-**Linearization order:** Ancestors are linearized using depth-first, left-to-right traversal with keep-first deduplication. The resulting order determines property and invariant precedence:
+**Linearization order:** Ancestors are flattened **ancestors-first**: each supertype's own ancestors are appended before the supertype itself, left to right across the `extends` clause, with keep-first deduplication. For `D extends C`, `C extends B`, `B extends A` the order is `[A, B, C]`; for `D extends B, C` with both extending `A` it is `[A, B, C]`.
 
 1. Own declarations (from the type body) come first
-2. Inherited members follow in linearization order (left-to-right through the `extends` clause, depth-first through each ancestor chain)
+2. Inherited members follow in that ancestors-first order, so the most distant ancestor is read before the nearest
 3. When the same ancestor is reachable via multiple paths (diamond inheritance), the first occurrence is kept and duplicates are skipped
 
 **Property conflict resolution:**
@@ -529,6 +535,7 @@ Inheritance rules:
 | --------- | ------ |
 | Child re-declares with narrower constraint | Child's version is used |
 | Inherited property narrows an earlier ancestor's | Narrower version replaces wider |
+| Child re-declares with a constraint that is not a valid narrowing | `E_PROPERTY_CONFLICT` is emitted |
 | Two inherited properties are incompatible | `E_PROPERTY_CONFLICT` is emitted |
 
 `E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. Each subtype that inherits a conflicting combination re-detects and reports it independently.
@@ -577,7 +584,7 @@ Properties define the data fields of a type.
 ### Property Declaration
 
 ```text
-Property     = [ DOC_COMMENT ] PropertyName DataTypeRef [ "primary" | "required" ] .
+Property     = [ DOC_COMMENT ] PropertyName DataTypeRef [ "primary" | "required" ] { Annotation } .
 PropertyName = LC_WORD | lc_keyword .
 ```
 
@@ -625,7 +632,7 @@ All other types are rejected:
 | `Integer`, `Float` | Numeric values are typically mutable; no auto-increment |
 | `Boolean` | Cardinality of 2, useless as identity |
 | `Enum` | Small finite set, poor identity |
-| `Pattern` | Constraint type, not a value type |
+| `Pattern` | A validation constraint over a string, not an identity |
 | `Vector` | Collection, not comparable for identity |
 | `List` | Collection, not comparable for identity |
 
@@ -648,7 +655,7 @@ type Person {
 }
 ```
 
-Relationship properties follow the same syntax as type properties but cannot use `Vector` or `List` data types and default to optional unless `required` is specified.
+Relationship properties are narrower than type properties: they cannot use `Vector` or `List` data types, cannot be `primary`, cannot carry annotations, and default to optional unless `required` is specified.
 
 ## Data Types
 
@@ -668,7 +675,7 @@ Represents signed integer values with optional bounds:
 
 ```text
 IntegerT = "Integer" [ "[" min "," max "]" ] .
-min      = "_" | [ "-" ] INTEGER .
+min      = [ "-" ] ( "_" | INTEGER ) .
 max      = "_" | [ "-" ] INTEGER .
 ```
 
@@ -692,7 +699,7 @@ Represents floating-point values with optional bounds:
 
 ```text
 FloatT = "Float" [ "[" min "," max "]" ] .
-min    = "_" | [ "-" ] ( INTEGER | FLOAT ) .
+min    = [ "-" ] ( "_" | INTEGER | FLOAT ) .
 max    = "_" | [ "-" ] ( INTEGER | FLOAT ) .
 ```
 
@@ -747,7 +754,7 @@ Represents a value from a fixed set of string options:
 EnumT = "Enum" "[" STRING "," STRING { "," STRING } [ "," ] "]" .
 ```
 
-At least two options must be provided.
+At least two options must be provided, and they must be distinct and non-empty: an empty or repeated value is dropped before the count is taken, so `Enum["a", "a"]` and `Enum["a", ""]` are both refused.
 
 Examples:
 
@@ -792,9 +799,9 @@ The format string follows Go's time formatting conventions. When omitted, RFC 33
 Examples:
 
 ```yammm-snippet
-createdAt Timestamp                                    // RFC3339
-eventTime Timestamp["2006-01-02T15:04:05Z07:00"]       // explicit RFC3339
-logTime Timestamp["2006-01-02 15:04:05"]               // custom format
+createdAt Timestamp                                    // the default, RFC3339Nano
+eventTime Timestamp["2006-01-02T15:04:05.000Z07:00"]   // explicit, fixed 3-digit fraction
+logTime Timestamp["2006-01-02 15:04:05"]               // custom, and lossy: no zone, no fraction
 ```
 
 #### Date
@@ -837,7 +844,7 @@ Represents a fixed-dimension numeric vector (for embeddings, coordinates, etc.):
 
 ```text
 VectorT = "Vector" "[" dimensions "]" .
-dimensions = INTEGER .
+dimensions = INTEGER . /* 1 to 65536 inclusive */
 ```
 
 Examples:
@@ -847,7 +854,7 @@ embedding Vector[768]       // 768-dimensional vector
 coordinates Vector[3]       // 3D coordinates
 ```
 
-Validation accepts float slices/arrays (`[]float32`/`[]float64`), including named types and pointers. NaN, Inf, and non-float elements are rejected.
+Validation accepts float **slices** (`[]float32`, `[]float64`, and named types over them) and integer elements, which coerce to `float64`. A Go array or a pointer to a slice is refused. `NaN`, `Inf`, and non-numeric elements are rejected.
 
 #### List
 
@@ -928,7 +935,7 @@ Aliases are:
 - Declared with an upper-case identifier
 - Case-preserved: the declared name is canonical (not lowercased internally)
 - Referenced by name in property declarations
-- Able to chain (A -> B -> built-in); cycles are detected and rejected during schema completion
+- Not chainable: an alias target must be a built-in, so `type Money = PositiveInt` is a syntax error
 
 Using aliases:
 
@@ -969,7 +976,7 @@ type Car {
 }
 ```
 
-The target must be a concrete type (not abstract or a `part` type). An association
+The target must be a concrete type (not abstract or a `part` type), and a `part` type cannot declare an association at all — both draw `E_INVALID_ASSOCIATION_TARGET`. An association
 edge is resolved by the target's identity, and neither an abstract type (never
 instantiated) nor a part type (reachable only through composition) can be the
 referenced node.
@@ -996,9 +1003,9 @@ type Car {
 }
 ```
 
-Composition data is embedded inline in instance documents rather than using reference objects.
+Composition data is embedded inline in instance documents rather than using reference objects, and is **always an array**, `(one)` included. Anything else draws `E_EDGE_SHAPE_MISMATCH`. This differs from associations, where `(one)` takes a single object.
 
-A part instance is identified through its parent composition, not by a global key. Exporters that must give each part node an identity of its own (the Neo4j adapter's `_composed_key` property) derive it from the parent's key, the composition name, and the child's key — or, for a keyless `(many)` part, its array position. A positional identity is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
+A part instance is identified through its parent composition, not by a global key. Exporters that must give each part node an identity of its own (the Neo4j adapter's `_composed_key` property) derive it from the parent's key, the composition name, and the child's key — or, for a **keyless** part, its array position. A positional identity is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
 
 ### Multiplicity
 
@@ -1038,7 +1045,7 @@ Association edges in instance data are represented as objects containing:
 - Target primary key(s) using reserved `_target_` prefixed fields
 - Any association properties defined in the relationship
 
-For **single primary key** targets, use `_target_id`:
+For **single primary key** targets, use `_target_<pk_name>` — the target's primary-key property name, not a literal `id`:
 
 ```json
 {
@@ -1124,25 +1131,25 @@ The single/double sigil split is required, not stylistic. Because whitespace —
 | `@vector(similarity)` | property | exactly one keyword: `cosine` or `euclidean` | a `Vector[N]` property | vector (approximate-nearest-neighbour) index |
 | `@fulltext` | property | none | a text property (String, Pattern, Enum); primary keys allowed, sole or composite (see below) | single-property fulltext index |
 | `@@fulltext(p1, p2, …)` | type | one or more property references, ordered, no duplicates | each reference a text property of the type (own or inherited); primary-key members allowed | fulltext index over the referenced properties (order significant) |
-| `@writeOnce` | property | none | any non-primary-key property | marks the property immutable after node creation |
+| `@writeOnce` | property | none | any non-primary-key property of a non-`part` type | marks the property immutable after node creation |
 
 A member of a **composite** primary key may carry `@index`: the composite backing index does not serve single-property lookups on it. A **sole** primary key may not, because its uniqueness constraint already backs an index.
 
 Which of the two applies is decided over the types that actually **emit** the constraint — the annotated type when it is concrete, plus its concrete descendants — not over the type carrying the annotation. An abstract type emits nothing, and its key is only settled once a concrete type assembles it, so a key split across two abstract mixins is composite where it lands even though each mixin declares one member.
 
-`@index` is rejected only when **every** emitter keys on the property alone. When emitters disagree — one keys on it alone while another keys on it compositely and genuinely needs the index — no edit satisfies both, so the annotation is accepted and the redundant index ships on the sole-keyed emitter; `yammm neo4j diff` surfaces it against a live database. Descendants declared in **other schema files** are not visible to this check, so the same model can be accepted when split across files and rejected when written in one; that is a known limit, not a contract.
+`@index` is rejected only when **every** emitter keys on the property alone. When emitters disagree — one keys on it alone while another keys on it compositely and genuinely needs the index — no edit satisfies both, so the annotation is accepted and the redundant index ships on the sole-keyed emitter. No tool reports it: `DiffIndexes` counts a constraint-backed index as a match, deliberately, so that a fully-applied schema does not diff dirty forever. Descendants declared in **other schema files** are not visible to this check, so the same model can be accepted when split across files and rejected when written in one; that is a known limit, not a contract.
 
 `@writeOnce` is rejected on every primary-key member, sole or composite.
 
 `@fulltext` and `@@fulltext` are narrower than the index pair: fulltext applies to **text**, so the eligible kinds are `String`, `Pattern`, and `Enum`. `UUID` is deliberately excluded — it is stored as a string but is an opaque identifier, not tokenized text. **Primary keys are allowed for both fulltext placements, with no redundancy rule**: a uniqueness constraint's backing index is a range index and cannot serve fulltext queries, so a fulltext index over a sole primary key is a distinct, legitimate object — the `@index` sole-key rule deliberately does not transfer.
 
-Annotation eligibility is independent of type category: `abstract`, `part`, and concrete types are validated identically.
+Annotation eligibility is **not** independent of type category. `@writeOnce` is rejected on every property of a `part` type, and the `@index` sole-primary-key rule skips abstract types, so an abstract mixin may carry `@index` on a sole declared primary key where a concrete type may not.
 
 ### Validation
 
 Annotations are validated at load, after inheritance linearization. Violations produce these diagnostics:
 
-- `E_UNKNOWN_ANNOTATION` — the name is not a blessed annotation for its placement.
+- `E_UNKNOWN_ANNOTATION` — the name is not a blessed annotation at either placement. A name blessed at the *other* placement draws `E_INVALID_ANNOTATION` instead.
 - `E_INVALID_ANNOTATION` — a structural violation: wrong placement (e.g. `@@writeOnce`), a property annotation written on a line other than its property's, wrong arity, a literal where a reference or keyword is required, an unknown similarity keyword, or a duplicate.
 - `E_UNKNOWN_ANNOTATION_TARGET` — a `@@index` or `@@fulltext` reference names no property of the type (the same failure class as `E_UNKNOWN_PROPERTY`, on a different construct).
 - `E_INVALID_ANNOTATION_TARGET` — the annotation is attached to an ineligible property (a non-scalar `@index`, a non-`Vector` `@vector`, a non-text `@fulltext`, `@writeOnce` on a primary key, and so on).
@@ -1192,7 +1199,7 @@ type Person {
     age Integer[0, 150]
 
     ! "name must not be empty" name -> Len > 0
-    ! "age must be positive" age >= 0
+    ! "age must be positive" age == nil || age >= 0
 }
 ```
 
@@ -1254,7 +1261,7 @@ Operators are listed from highest to lowest precedence:
 | 12 | Equality `==`, `!=` | Left |
 | 13 | Logical and `&&` | Left |
 | 14 | Logical or/xor `\|\|`, `^` | Left |
-| 15 | Ternary `? { then : else }` | Right |
+| 15 | Ternary `? { then : else }` | Left |
 
 Parentheses group as usual.
 
@@ -1336,9 +1343,9 @@ These operators support two modes:
 Supported datatype keywords for type checking:
 
 - `String` - checks for string values
-- `Integer` (alias: `Int`) - checks for integer values
-- `Float` (alias: `Number`) - checks for floating-point values
-- `Boolean` (alias: `Bool`) - checks for boolean values
+- `Integer` - checks for integer values
+- `Float` - checks for floating-point values
+- `Boolean` - checks for boolean values
 - `UUID` - checks for valid UUID strings
 - `Timestamp` - checks for valid timestamp values
 - `Date` - checks for valid date values
@@ -1449,8 +1456,8 @@ Results on an empty collection are a mixed family:
 | `All`, `AllOrNone` | `true` (vacuous truth) |
 | `Any` | `false` |
 | `First`, `Last` | `nil` |
-| `Sum` | `0` |
-| `Sort`, `Reverse`, `Flatten`, `Unique`, `Compact` | empty list |
+| `Sum`, `Count` | `0` |
+| `Sort`, `Reverse`, `Flatten`, `Unique`, `Compact`, `Map`, `Filter` | empty list |
 | `Min`, `Max` | evaluation error |
 | `Reduce` without an initial value | evaluation error |
 
@@ -1530,14 +1537,12 @@ type Person {
     // Required string length
     ! "name is required" name -> Len > 0 && name -> Len <= 100
 
-    // Age range check
-    ! "age must be valid" age >= 0 && age <= 130
+    // Age range check — guarded, because age is optional
+    ! "age must be valid" age == nil || (age >= 0 && age <= 130)
 
-    // All parts must be priced
-    ! "all parts must have prices" PARTS -> All |$p| { $p.price > 0 }
 
-    // Email format validation
-    ! "email must be valid" email =~ /.+@.+/
+    // Email format validation — guarded, because email is optional
+    ! "email must be valid" email == nil || email =~ /.+@.+/
 
     // Mutually exclusive fields
     ! "cannot have both" !(hasA && hasB)
@@ -1558,7 +1563,7 @@ type Person {
 - The evaluator only works against the in-memory instance graph
 - There is no implicit database lookup or multi-hop relation navigation
 - Evaluation errors (undefined named variables, type errors) surface as error-severity diagnostics; validation continues collecting further issues. A reference to an undeclared property is a load-time error, not an evaluation error, and a declared-but-absent property evaluates to `nil`
-- Panics (e.g., divide-by-zero) are recovered as errors annotated with the operator stack
+- A genuine panic is recovered as a Fatal `E_INTERNAL` carrying a Go stack trace, which stops that instance's validation. Division by zero is not a panic — see Division semantics
 
 ### Evaluation Model
 
@@ -1592,7 +1597,7 @@ YAMMM uses structured diagnostics with stable error codes. The Go programmatic i
 
 | Severity | Description |
 | -------- | ----------- |
-| `Fatal` | Unrecoverable condition or issue limit reached |
+| `Fatal` | Unrecoverable condition |
 | `Error` | Validation failure but processing continues |
 | `Warning` | Non-blocking advisory |
 | `Info` | Informational message |
@@ -1631,6 +1636,8 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, or duplicate errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
+- `W_TIMESTAMP_LOSSY_FORMAT` (Warning) — a `Timestamp["layout"]` declares a layout that cannot reproduce an instant
+- `E_REVERSE_CLAUSE_REMOVED` — the schema carries the reverse clause removed in v0.15.0
 
 **Syntax** — parse errors:
 
@@ -1643,7 +1650,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_INVALID_ALIAS` — import alias is not a valid identifier
 - `E_PATH_ESCAPE` — import path escapes allowed directory
 - `E_IMPORT_NOT_ALLOWED` — imports disabled via `WithDisallowImports`
-- `E_DUPLICATE_IMPORT` — same schema imported multiple times
+- `E_DUPLICATE_IMPORT` — the same schema imported multiple times, or two different schemas sharing one alias
 - `E_IMPORT_ALIAS_COLLISION` — import alias collides with local name
 
 **Instance** — validation errors:
@@ -1665,7 +1672,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
 - `E_COMPOSITION_NOT_FOUND` — referenced composition not found
 - `E_INVALID_TYPE_TAG` — `$type` tag errors
-- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When colliding fields are detected (e.g., both `"Name"` and `"name"` in the input), the collision is reported and neither field is mapped
+- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `NAME`, input `Name` and `name`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
 **Graph** — graph construction errors:
 
@@ -1676,6 +1683,10 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
 - `E_GRAPH_MISSING_PK` — primary key missing in graph operations
+- `E_GRAPH_INVALID_PK` — primary key empty, or disagreeing with the instance's own key properties
+- `E_GRAPH_CARDINALITY` — an association carries more targets than its multiplicity allows
+- `E_GRAPH_UNKNOWN_RELATION` — instance data under a relation name the type does not declare
+- `E_GRAPH_ABSTRACT_TYPE` — an instance of an abstract type reached the graph
 
 **Snapshot** — persistence errors:
 
@@ -1692,10 +1703,23 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match
 - `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the schema hash algorithm in the snapshot header is not recognized. An Error on the body-reading surfaces (`Load`, `Verify`, `Info`, `UpdateMetadata`): the document is refused rather than half-trusted. A Warning on header-only reads, which stay classifiable for dispatch
 - `E_SNAPSHOT_PATH_FALLBACK` (Warning) — a provenance path string could not be parsed into a canonical path and fell back to the root path; the original string is preserved for round-trip fidelity
+- `E_SNAPSHOT_IO` — a directory- or file-level I/O failure during `ScanDir` / `ScanDirSlice`
+- `E_UPDATE_METADATA_BODY_OFFSET` — `UpdateMetadata` could not resolve the byte range of the body it reuses
+- `W_UPDATE_METADATA_FALLBACK` (Warning) — `UpdateMetadataOrReMarshal` fell back from the fast path to `Load` + `Marshal`
+- `W_SNAPSHOT_VALUE_NONCONFORMING` (Warning) — under `WithValueConformance`, a stored `Timestamp`, `Date` or `UUID` does not conform to its declared constraint
+- `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record for a required association
 
-**Adapter** — format-specific errors:
+**Adapter** — format-specific errors. These are registered by the adapter packages, so they appear in `diag.AllCodes()` only once the package is linked:
 
 - `E_ADAPTER_PARSE` — parsing error in adapter input
+- `E_CSV_COERCE` — a CSV cell could not be coerced to its declared type
+- `E_NEO4J_LABEL_COLLISION` — two types render the same Neo4j label
+- `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher
+- `E_NEO4J_UNSUPPORTED_TYPE` — a property kind the adapter cannot express
+- `E_NEO4J_UNKNOWN_PROPERTY` — an annotation names a property the type does not declare
+- `E_NEO4J_INVALID_INDEX_TARGET` — an index annotation targets an ineligible property
+- `W_NEO4J_NODE_KEY_UNSUPPORTED` (Warning) — NODE KEY is unavailable on this edition
+- `W_NEO4J_EDITION_CONSTRAINT_OMITTED` (Warning) — a constraint was omitted because the edition does not support it
 
 ## File Extension and Conventions
 
@@ -1711,19 +1735,28 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 Each compiled schema has a deterministic structural hash (SHA-256) computed over:
 
 - Schema name
-- Type names, properties (with constraints and modifiers), relations (with targets and cardinalities), and inheritance edges
+- Type names, properties (with constraints and modifiers), the primary-key set, relations (with targets and cardinalities), compositions, association edge properties, and inheritance edges
+- Each type's `abstract` and `part` markers
+- Invariant expressions (the invariant's *name* is excluded — it is the failure message)
 - Data type names and constraints
 
-Invariants and annotations are deliberately excluded — invariants affect runtime validation and annotations drive downstream store DDL and write shape, but neither changes structural shape (what instance data is valid). A schema that gains its first annotation therefore hashes identically, so every persisted `.ys` snapshot header hash stays valid. The hash is deterministic: all inputs are sorted lexicographically before hashing.
+**Annotations are the sole exclusion.** They drive downstream store DDL and write shape and never reject data, so they cannot change what instance data is valid. A schema that gains its first annotation hashes identically, and every persisted `.ys` snapshot header hash stays valid. Adding an invariant, an edge property, or flipping a type between concrete and `part` all change the hash.
 
-The hash format is `sha256:<hex>`. A structural hash version (currently `1`) is bumped when the algorithm changes. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
+The hash is deterministic. Most inputs are sorted by name; invariant blobs are sorted by their serialized bytes, and the operands of one expression are hashed in declared order, because operand order is semantic.
+
+The hash format is `sha256:<hex>`. A structural hash version (currently `2`) is bumped when the algorithm changes; version 2 arrived in v0.15.0 with invariants and the `abstract` / `part` markers. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
 
 ## Grammar Summary
 
-This section is the normative statement of YAMMM's syntax, and it is
-maintained by hand. Keep it in step with the parser whenever the grammar
-changes: nothing checks it automatically, and no second grammar exists to
-check it against.
+This section is the normative statement of the language YAMMM **accepts** — a
+production describes what loads, not what the reference parser's own grammar
+admits. The two differ where the parser deliberately accepts a shape so a
+checker can report a better message than a parse error: an arity violation such
+as `Enum["a"]` parses and is then refused with `E_INVALID_CONSTRAINT`, never
+`E_SYNTAX`.
+
+It is maintained by hand. Nothing checks it automatically, and no second grammar
+exists to check it against.
 
 ```text
 Schema     = SchemaName { ImportDecl } { TypeDecl | DataTypeDecl } EOF .
@@ -1770,7 +1803,7 @@ BuiltIn    = "Integer" [ "[" IntBound "," IntBound "]" ]
            | "UUID"
            | "Vector" "[" INTEGER "]"
            | "List" "<" DataTypeRef ">" [ "[" ListBound "," ListBound "]" ] .
-IntBound   = "_" | [ "-" ] INTEGER .
-FloatBound = "_" | [ "-" ] ( INTEGER | FLOAT ) .
+IntBound   = [ "-" ] ( "_" | INTEGER ) .
+FloatBound = [ "-" ] ( "_" | INTEGER | FLOAT ) .
 ListBound  = "_" | INTEGER .
 ```

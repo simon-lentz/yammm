@@ -20,8 +20,7 @@ import (
 // Go values. If schemaType is nil, all values are kept as strings
 // (no coercion).
 //
-// When WithHeader(true) (default), the first row defines column names.
-// When WithHeader(false), columns are named by index ("0", "1", ...).
+// The first row defines column names.
 func (a *Adapter) ParseTyped(
 	ctx context.Context,
 	source location.SourceID, //nolint:revive // reserved for future provenance tracking

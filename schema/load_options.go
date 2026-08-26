@@ -84,8 +84,9 @@ func WithModuleRoot(root string) LoadOption {
 }
 
 // WithIssueLimit sets the maximum number of diagnostic issues to collect.
-// When the limit is reached, loading continues but additional issues are dropped.
-// Set to 0 for unlimited. Default is 100.
+// When the limit is reached, loading continues and the collector retains the
+// most severe issues seen: a more severe arrival evicts the least severe stored
+// issue rather than being dropped itself. Set to 0 for unlimited. Default is 100.
 func WithIssueLimit(limit int) LoadOption {
 	return func(c *loadConfig) {
 		c.issueLimit = limit

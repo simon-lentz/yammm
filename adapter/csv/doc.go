@@ -23,7 +23,7 @@
 //
 //   - Integer properties: [strconv.ParseInt]
 //   - Float properties: [strconv.ParseFloat]
-//   - Boolean properties: [strconv.ParseBool] ("true", "false", "1", "0")
+//   - Boolean properties: [strconv.ParseBool], every spelling it accepts
 //   - Date properties: validated as "2006-01-02" format, kept as string
 //   - Timestamp properties: validated against the declared layout — the
 //     validator's own rule — or RFC 3339 for the default layout; kept as

@@ -161,8 +161,8 @@ func ScanDirWith(ctx context.Context, dir string, opts ...ScanOption) iter.Seq2[
 }
 
 // statOnce resolves path at most once and gives every caller the same answer,
-// success or failure. The symlink check and a filter's [ScanCandidate.Info]
-// share one, so following a link is paid for by whichever asks first.
+// success or failure. Only a symlink makes [isRegular] stat, so a filter that
+// reads [ScanCandidate.Info] on a regular file pays that one stat itself.
 type statOnce struct {
 	path string
 	info fs.FileInfo

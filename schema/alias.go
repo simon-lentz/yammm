@@ -11,8 +11,9 @@ import (
 // underscores.
 var validAliasRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
-// reservedKeywordsMap contains all tokens that cannot be used as import aliases
-// because the lexer tokenizes them as literal keywords rather than identifiers.
+// reservedKeywordsMap contains all words that cannot be used as import aliases.
+// The rule table holds no keywords, so each of these lexes as an ordinary word
+// and the refusal is a parser decision.
 //
 // This map must remain synchronized with the grammar. The Grammar-Alias
 // Synchronization Test in alias_test.go verifies this.
@@ -61,8 +62,8 @@ func reservedKeywords() map[string]bool {
 }
 
 // isReservedKeyword returns true if the alias is a reserved keyword that cannot
-// be used as an import alias. Reserved keywords are tokenized by the lexer as
-// literal tokens rather than identifiers, making them unusable as qualifiers.
+// be used as an import alias. The rule table holds no keywords, so a reserved
+// word lexes as an ordinary identifier; refusing it here is a parser decision.
 func isReservedKeyword(alias string) bool {
 	return reservedKeywordsMap[alias]
 }

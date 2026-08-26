@@ -125,55 +125,15 @@ func BenchmarkLoadMarshalRoundTrip(b *testing.B) {
 	}
 }
 
-// BenchmarkUpdateMetadataRatio emits the per-run speedup via
-// b.ReportMetric("x-speedup") so operators and reviewers see the
-// absolute ratio in standard go test -bench output alongside the
-// absolute timings. Non-gated; the 3× floor gate is
-// TestUpdateMetadataRatioFloor.
-func BenchmarkUpdateMetadataRatio(b *testing.B) {
-	in := loadBenchInputs(b)
-	ctx := context.Background()
-
-	// Single-sample timing for each path. Run both back-to-back so they
-	// experience the same warm cache state.
-	fast := testing.Benchmark(func(b *testing.B) {
-		b.Helper()
-		for b.Loop() {
-			_, res := snapshot.UpdateMetadata(ctx, in.data, in.newMeta)
-			if res.HasErrors() {
-				b.Fatalf("UpdateMetadata: %v", res.Err())
-			}
-		}
-	})
-	slow := testing.Benchmark(func(b *testing.B) {
-		b.Helper()
-		for b.Loop() {
-			loaded, loadRes := snapshot.Load(ctx, in.data, in.schema)
-			if loadRes.HasErrors() {
-				b.Fatalf("Load: %v", loadRes.Err())
-			}
-			_, marshalRes := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(in.newMeta))
-			if marshalRes.HasErrors() {
-				b.Fatalf("Marshal: %v", marshalRes.Err())
-			}
-		}
-	})
-
-	ratio := float64(slow.NsPerOp()) / float64(fast.NsPerOp())
-	b.ReportMetric(ratio, "x-speedup")
-	b.ReportMetric(float64(fast.NsPerOp()), "ns/op-fast")
-	b.ReportMetric(float64(slow.NsPerOp()), "ns/op-slow")
-}
-
 // TestUpdateMetadataRatioFloor asserts UpdateMetadata is at least 3×
 // faster than Load + Marshal on a 20 MB input. Median of 5 samples per
 // path; runtime.GC between samples to damp CI-runner noise.
 //
-// Threshold rationale: 3× is the floor below which the
-// primitive stops being interesting. Target on M2-class hardware is
-// ~8-10×, on typical CI runners ~6-8×; a drop below 3× signals a
-// regression that operator-facing documentation (the ~10% cost claim)
-// no longer holds.
+// Threshold rationale: 3× is the floor below which the primitive stops
+// being interesting. The measured ratio varies with hardware and falls
+// as UpdateMetadata gains header checks before the body splice, so the
+// floor is what this test asserts and the sampled numbers are logged
+// rather than pinned.
 //
 // Skipped under `go test -short` since the 20 MB setup is ~2 seconds
 // and the median-of-5 loop dominates short-test runtime. Also skipped

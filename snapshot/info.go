@@ -85,9 +85,10 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // Cost scales with file size because Info decodes the instance sections
 // to populate [SnapshotInfo.InstanceCounts] and [SnapshotInfo.TotalEdges].
 // For dispatch-style workloads that only need header-level fields, use
-// [HeaderOnly] — it returns after parsing the header and skips the
-// instance body, making its cost proportional to the header size rather
-// than the full file.
+// [HeaderOnly] — it returns after parsing the header and skips decoding
+// the instance body, though it still scans the whole document to check
+// its shape. [HeaderOnlyRead] is the streaming sibling whose cost is
+// proportional to the header alone.
 //
 // Returns (nil, result) when the document cannot be summarized at all: an
 // unreadable header, an unsupported version, an unrecognized feature, an
