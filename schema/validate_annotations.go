@@ -152,7 +152,9 @@ var annotationRegistry = map[annotationKey]annotationSpec{
 // resolution against the linearized property set, target eligibility, and
 // duplicate rules. Inherited annotations were validated when their declaring
 // type completed, so only own declarations are checked here (the declaring-site
-// pattern shared with primary-key type validation). Own sets are read raw —
+// pattern shared with primary-key type validation) — except for the rules that
+// depend on the holding type, which [completer.validateInheritedHolderRules]
+// applies to inherited members. Own sets are read raw —
 // Type.Annotations and each own property's annotations — never the linearized
 // AllAnnotations/AllProperties, so an own-body duplicate cannot be masked by
 // inheritance dedup. Validated argument kinds are stamped on success, before
@@ -163,6 +165,45 @@ func (c *completer) validateAnnotations() {
 		for p := range t.Properties() {
 			c.validatePropertyAnnotations(t, p)
 		}
+		c.validateInheritedHolderRules(t)
+	}
+}
+
+// validateInheritedHolderRules applies the annotation rules that depend on the
+// HOLDING type to the properties a type inherits. The own-body walk validates a
+// declaration at its declaring type, which settles every rule that is a
+// property of the property. A rule that is a property of the holder — @writeOnce
+// is rejected on a part type — is visible only from the holder, and an inherited
+// property is a member of the holder without being declared there, so the
+// own-body walk never sees the pair. This walk reads the merged view, where an
+// annotation a subtype shadowed is already absent.
+//
+// The diagnostic anchors at the part type's name, not at the ancestor's
+// declaration: the annotation is legal where it was declared, and the fix is on
+// the part type (re-declare the property without it, or stop extending). The
+// ancestor's annotation is not marked in diagnosedAnnotations for the same
+// reason reportAnnotationDisagreement does not mark — it was not rejected at
+// its declaration, and a shadow warning about it elsewhere stays legitimate.
+func (c *completer) validateInheritedHolderRules(t *Type) {
+	if !t.IsPart() {
+		return
+	}
+	own := make(map[*Property]bool, len(t.properties))
+	for p := range t.Properties() {
+		own[p] = true
+	}
+	for p := range t.AllProperties() {
+		if own[p.Origin()] {
+			continue
+		}
+		a, ok := p.Annotation("writeOnce")
+		if !ok {
+			continue
+		}
+		c.errorfRelated(t.NameSpan(), diag.E_INVALID_ANNOTATION_TARGET,
+			[]location.RelatedInfo{{Span: a.Span(), Message: "@writeOnce declared here"}},
+			"@writeOnce cannot annotate property %q inherited by part type %q; a part is replaced on every parent write",
+			p.Name(), t.Name())
 	}
 }
 

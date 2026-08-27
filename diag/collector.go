@@ -26,7 +26,8 @@ import (
 // issues and [Collector.Result] to get an immutable snapshot.
 type Collector struct {
 	mu           sync.RWMutex
-	issues       []Issue
+	issues       []storedIssue
+	nextArrival  uint64
 	limit        int
 	limitReached bool
 	droppedCount int
@@ -44,6 +45,15 @@ type Collector struct {
 
 	// Cached sorted result (invalidated on Collect)
 	cachedResult *Result
+}
+
+// storedIssue is an issue in the collector's store with the sequence number it
+// arrived under. Eviction overwrites a slot in place, so slice position stops
+// tracking arrival order after the first eviction; the victim among equally
+// severe issues is chosen by arrival, never by position.
+type storedIssue struct {
+	issue   Issue
+	arrival uint64
 }
 
 // NoLimit is the sentinel value indicating unlimited issue collection.
@@ -215,33 +225,38 @@ func (c *Collector) storeLocked(issue Issue) {
 		if !ok {
 			return // Nothing stored is less severe; the incoming issue is the drop.
 		}
-		c.storedCounts.sub(c.issues[idx].Severity())
+		c.storedCounts.sub(c.issues[idx].issue.Severity())
 		c.storedCounts.add(issue.Severity())
 		// Overwrite in place: Result sorts before returning, so slice position
 		// carries no meaning and the retained SET is the whole contract.
-		c.issues[idx] = issue
+		c.issues[idx] = storedIssue{issue: issue, arrival: c.nextArrival}
+		c.nextArrival++
 		return
 	}
 
-	c.issues = append(c.issues, issue)
+	c.issues = append(c.issues, storedIssue{issue: issue, arrival: c.nextArrival})
+	c.nextArrival++
 	c.storedCounts.add(issue.Severity())
 }
 
 // evictionSlotLocked returns the index of the stored issue that must yield to an
 // incoming issue of severity sev, and whether one exists. The victim is the
-// LAST-stored issue of the least severe stored severity, so among equally severe
-// issues the earliest-arrived are the ones retained. Caller must hold c.mu.
+// LATEST-ARRIVED issue of the least severe stored severity, so among equally
+// severe issues the earliest-arrived are the ones retained. Arrival is the
+// stored sequence number, not slice position, because an evicted slot is
+// reused in place. Caller must hold c.mu.
 func (c *Collector) evictionSlotLocked(sev Severity) (int, bool) {
 	victim, ok := c.storedCounts.leastSevere()
 	if !ok || !sev.IsMoreSevereThan(victim) {
 		return 0, false
 	}
-	for i, iss := range slices.Backward(c.issues) {
-		if iss.Severity() == victim {
-			return i, true
+	idx, found := 0, false
+	for i, st := range c.issues {
+		if st.issue.Severity() == victim && (!found || st.arrival > c.issues[idx].arrival) {
+			idx, found = i, true
 		}
 	}
-	return 0, false // Unreachable: storedCounts said one exists.
+	return idx, found // found is always true: storedCounts said one exists.
 }
 
 // Result produces a sorted, immutable snapshot.
@@ -260,7 +275,9 @@ func (c *Collector) Result() Result {
 
 	// Copy issues into a new slice for sorting (don't mutate c.issues)
 	sorted := make([]Issue, len(c.issues))
-	copy(sorted, c.issues)
+	for i, st := range c.issues {
+		sorted[i] = st.issue
+	}
 
 	// Sort by source, position, code
 	slices.SortFunc(sorted, compareIssues)

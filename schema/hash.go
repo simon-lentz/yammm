@@ -18,20 +18,32 @@ import (
 // StructuralHashVersion identifies the version of the structural hashing
 // algorithm. Bump this when the hash algorithm changes in a way that
 // invalidates previous hashes. Version 2 (v0.15.0) added invariants and
-// the abstract/part markers, so the hash covers every rule that decides
-// what instance data is valid.
-const StructuralHashVersion = 2
+// the abstract/part markers. Version 3 (v0.17.0) widened the input from
+// the entry schema's own declarations to its whole import closure, so the
+// hash covers every rule that decides what instance data is valid — an
+// imported type's constraints decide validity for every instance of it the
+// importing schema admits.
+const StructuralHashVersion = 3
 
 // StructuralHash computes a deterministic, content-based identity over the
-// rules that decide what instance data is valid: types, properties,
-// relations, compositions, data types, constraints, invariants, and the
-// abstract and part markers.
+// rules that decide what instance data is valid, across the schema's whole
+// import closure: for every member of [Schema.Closure], its types,
+// properties, relations, compositions, data types, constraints, invariants,
+// and the abstract and part markers.
+//
+// Two schemas that hash the same agree on every rule everywhere in their
+// closures. The converse does not hold: a hash can move on a change to an
+// imported schema this schema never references, because closure membership
+// is part of the identity. Each member is framed under its schema name, the
+// entry schema first and the remaining members ordered by name, so the
+// order imports are declared in does not enter the digest.
 //
 // Annotations are deliberately excluded — they configure downstream store
-// DDL and never reject data. Relation and supertype targets hash by name,
-// never by schema path: a hashed path would make embedded:// and disk
-// loads of one schema text disagree, and consumer dispatch relies on the
-// hash carrying no source path.
+// DDL and never reject data. So are import aliases and paths: relation and
+// supertype targets hash by name, never by schema path, and a member frame
+// carries the schema's declared name, never its source. A hashed path would
+// make embedded:// and disk loads of one schema text disagree, and consumer
+// dispatch relies on the hash carrying no source path.
 //
 // The returned string has the format "sha256:<hex>".
 //
@@ -44,9 +56,31 @@ func StructuralHash(s *Schema) string {
 	h := sha256.New()
 
 	// Domain separator.
-	writeTag(h, "yammm-schema-v2")
+	writeTag(h, "yammm-schema-v3")
 
-	// Schema name.
+	// Closure() returns the entry schema first; the rest are re-ordered by
+	// name so a re-ordered import list hashes the same. The slice is a copy,
+	// so sorting it in place touches no cached state. Ties on name keep
+	// closure order, which is deterministic, so the digest stays so.
+	members := s.Closure()
+	slices.SortStableFunc(members[1:], func(a, b *Schema) int {
+		return compareName(a.Name(), b.Name())
+	})
+
+	writeLen(h, len(members))
+	for _, member := range members {
+		hashSchemaMember(h, member)
+	}
+
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// hashSchemaMember hashes one closure member's own declarations under a
+// frame opened by its name: its local types, then its local data types. The
+// frame is what keeps two different closures from serializing to one byte
+// stream.
+func hashSchemaMember(h io.Writer, s *Schema) {
+	writeTag(h, "schema")
 	writeStr(h, s.Name())
 
 	// Types (lexicographic iteration guaranteed by s.Types()).
@@ -60,8 +94,6 @@ func StructuralHash(s *Schema) string {
 		writeStr(h, dt.Name())
 		hashConstraint(h, dt.Constraint())
 	}
-
-	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
 // hashType hashes a single type's structural shape.

@@ -3,9 +3,9 @@
     "version": 3,
     "schema_name": "test",
     "schema_source": "test://test.yammm",
-    "schema_hash": "sha256:f1ee7dafd57d67309a7f95976524adc826d60c4b56d480e218d349f18244f956",
-    "schema_hash_algorithm": 2,
-    "integrity_hash": "sha256:36d4fc60af22c7b999f9216e6fa392c6eff749d9a8340371f2e06ba9b0095694",
+    "schema_hash": "sha256:7211ffe3d9a211ca4331f9cea4df565eb08a90eac4a3b557378beecec8fbf9b8",
+    "schema_hash_algorithm": 3,
+    "integrity_hash": "sha256:9df7468fc54ef32f121d39f0516edcea8a6063e37bc630041a7109336e85656e",
     "features": [],
     "attestation": {
       "values": false,
