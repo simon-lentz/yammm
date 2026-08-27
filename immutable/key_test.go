@@ -231,7 +231,7 @@ func TestKey_WrapKey_WithClone_PanicsOnUnmarshalableValue(t *testing.T) {
 		}
 	}()
 
-	_ = WrapKey([]any{make(chan int)}, WithClone())
+	_ = WrapKey([]any{make(chan int)}, WithClone(true))
 }
 
 func TestKey_Iter(t *testing.T) {
@@ -298,7 +298,7 @@ func TestKey_CloneNil(t *testing.T) {
 func TestKey_WrapKey_WithClone_Isolation(t *testing.T) {
 	input := []any{"original", 100}
 
-	k := WrapKey(input, WithClone())
+	k := WrapKey(input, WithClone(true))
 
 	// Mutate original
 	input[0] = "mutated"

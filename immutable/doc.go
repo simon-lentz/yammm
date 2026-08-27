@@ -75,7 +75,7 @@
 // freely retain and mutate the original value after construction:
 //
 //	data := map[string]any{"key": "value"}
-//	wrapped := immutable.WrapMap(data, immutable.WithClone())
+//	wrapped := immutable.WrapMap(data, immutable.WithClone(true))
 //	data["key"] = "modified" // safe: wrapped is isolated
 //
 // Use bare Wrap when you control the value's origin (e.g., freshly constructed in the
@@ -122,7 +122,7 @@
 // | Wrap(primitive) | O(1), no allocation | Primitives stored directly |
 // | Wrap(map) | O(n) | Iterates map once to wrap values |
 // | Wrap(slice) | O(n) | Iterates slice once to wrap elements |
-// | Wrap(any, WithClone()) | O(n) deep | Clones maps/slices recursively; structs/pointers stored as-is |
+// | Wrap(any, WithClone(true)) | O(n) deep | Clones maps/slices recursively; structs/pointers stored as-is |
 // | Get(key) / Get(i) | O(1) | Map/slice lookup |
 // | Keys() / Iter() | O(1) start | Iterator creation is cheap |
 // | Clone() | O(n) deep | Full recursive clone for escape hatch |

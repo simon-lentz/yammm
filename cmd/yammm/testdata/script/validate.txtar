@@ -12,6 +12,14 @@ exec yammm validate valid.yammm
 # JSON diagnostics format still fails and renders structured output.
 ! exec yammm validate --format json invalid.yammm
 
+# A module-style import resolves against --module-root, not against the
+# schema's own directory: without the flag the import misses, with it the
+# schema loads clean.
+! exec yammm validate sub/entry.yammm
+stderr 'E_IMPORT_RESOLVE'
+exec yammm validate --module-root . sub/entry.yammm
+! stderr .
+
 -- valid.yammm --
 schema "test"
 
@@ -25,4 +33,19 @@ schema "test"
 
 type Broken {
 	id UnknownType primary
+}
+-- sub/entry.yammm --
+schema "entry"
+
+import "lib/dep" as dep
+
+type Thing {
+	id String primary
+	--> USES (one) dep.Part
+}
+-- lib/dep.yammm --
+schema "dep"
+
+type Part {
+	part_id String primary
 }

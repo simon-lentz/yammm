@@ -581,7 +581,7 @@ func TestMarshal_ModuleRoot_HermeticReload(t *testing.T) {
 	got, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
 		"a/b/entry.yammm": entrySrc,
 		"lib/dep.yammm":   depSrc,
-	}, "a/b/entry.yammm", ".", schema.WithSourcesOnly())
+	}, "a/b/entry.yammm", ".", schema.WithSourcesOnly(true))
 	if res.HasErrors() {
 		t.Fatalf("hermetic re-load: %v", res.Err())
 	}

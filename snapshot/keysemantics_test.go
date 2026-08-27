@@ -157,7 +157,7 @@ func TestLoad_EmptyConflictKeyRefusesUnaddressableSlot(t *testing.T) {
 		edited := spliceConflictBlock(t, data,
 			fmt.Sprintf(`"type":%d,"key":[]`, childRow(t, data, "Child")))
 
-		_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+		_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 		if !hasCode(loadRes, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 			t.Errorf("an empty conflict key addressing a two-child slot loaded without %s: %v",
 				diag.E_SNAPSHOT_DANGLING_REFERENCE, loadRes)
@@ -170,7 +170,7 @@ func TestLoad_EmptyConflictKeyRefusesUnaddressableSlot(t *testing.T) {
 		edited := spliceConflictBlock(t, data,
 			fmt.Sprintf(`"type":%d,"key":[]`, childRow(t, data, "Parent")))
 
-		_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+		_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 		if !hasCode(loadRes, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 			t.Errorf("an empty conflict key naming the wrong type row loaded without %s: %v",
 				diag.E_SNAPSHOT_DANGLING_REFERENCE, loadRes)
@@ -207,7 +207,7 @@ func TestInfo_ReportsAnUnresolvableInstancesEntry(t *testing.T) {
 	}
 
 	// Load refuses the edited document, which is what makes a clean Info a defect.
-	if _, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck()); !loadRes.HasErrors() {
+	if _, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !loadRes.HasErrors() {
 		t.Fatal("precondition: Load must refuse an out-of-range instances row")
 	}
 
@@ -234,8 +234,8 @@ func TestLoadVerify_EmptyConflictKeyAgreeWithTheGraph(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	edited := emptyConflictKeyDoc(t)
 
-	loaded, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
-	verifyRes := snapshot.Verify(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	loaded, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+	verifyRes := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 
 	if loadRes.HasErrors() {
 		t.Errorf("Load refused an empty conflict key the graph model resolves: %v", loadRes)

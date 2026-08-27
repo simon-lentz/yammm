@@ -163,7 +163,7 @@ func TestMap_WrapMap_WithClone_Isolation(t *testing.T) {
 	nested := map[string]any{"key": "original"}
 	outer := map[string]any{"nested": nested}
 
-	m := WrapMap(outer, WithClone())
+	m := WrapMap(outer, WithClone(true))
 
 	// Mutate original after cloning
 	nested["key"] = "mutated"

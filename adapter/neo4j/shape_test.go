@@ -99,7 +99,7 @@ part type Item {
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(entry),
 		"base.yammm":  []byte(baseSrc),
-	}, "entry.yammm", ".", schema.WithSourcesOnly())
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}

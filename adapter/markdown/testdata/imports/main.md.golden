@@ -2,6 +2,8 @@
 
 ## Class Diagram
 
+This diagram uses Mermaid's labelled class form and needs Mermaid 10.1.0 or later.
+
 ```mermaid
 classDiagram
     direction TB

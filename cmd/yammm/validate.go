@@ -12,12 +12,14 @@ import (
 )
 
 func newValidateCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "validate <schema.yammm>",
 		Short: "Validate a schema file and report diagnostics",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runValidate,
 	}
+	registerModuleRootFlag(cmd)
+	return cmd
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
@@ -36,9 +38,13 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return &cli.ExitError{Code: cli.ExitUsage}
 	}
 
-	s, result := schema.Load(cmd.Context(), absPath)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	if err != nil {
+		return err
+	}
+	s, result := schema.Load(cmd.Context(), absPath, loadOpts...)
 
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absPath), result)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absPath), result)
 
 	exitCode := cli.ExitForResult(result)
 	if exitCode != cli.ExitOK {

@@ -35,6 +35,7 @@ func newNeo4jDiffCmd() *cobra.Command {
 	registerConstraintFlags(cmd)
 	cmd.Flags().Bool("indexes", true, "include index drift in the diff and exit code; --indexes=false is constraints-only")
 
+	registerModuleRootFlag(cmd)
 	return cmd
 }
 
@@ -65,8 +66,12 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load schema
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	if err != nil {
+		return err
+	}
+	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
 	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
@@ -82,7 +87,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	adapter := adaptern4j.New(opts...)
 	desired, constraintResult := adapter.ConstraintsStructured(cmd.Context(), s)
 	if constraintResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath),
+		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath),
 			cli.MergeResults(pending, constraintResult))
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
@@ -93,7 +98,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	if indexesEnabled {
 		di, indexResult := adapter.IndexesStructured(cmd.Context(), s)
 		if indexResult.HasErrors() {
-			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath),
+			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath),
 				cli.MergeResults(pending, indexResult))
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
@@ -102,7 +107,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 
 	// Nothing downstream reports through diag, so the load's residuals render
 	// here — before the diff output, and exactly once.
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), pending)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), pending)
 
 	// Connect to database
 	ctx := cmd.Context()

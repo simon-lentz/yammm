@@ -106,22 +106,17 @@ func withSourceRegistry(reg *source.Registry) LoadOption {
 	}
 }
 
-// WithSourcesOnly restricts import resolution to the pre-registered
-// in-memory sources: an import that misses the registered set fails with
-// E_IMPORT_RESOLVE instead of falling back to a filesystem read under the
-// module root. Use it when loading embedded sources (e.g. a generated
-// package's SerializedModel via LoadSourcesWithEntry) to make the load
-// hermetic: source bytes come only from the provided map, a missing or
-// mis-keyed source surfaces as an error rather than being silently
-// satisfied by an on-disk file, and on-disk state cannot change how keys
-// resolve — SourceIDs derive textually from the module root and key, and
-// the module-root sandbox is never opened. Meaningful for
-// LoadSourcesWithEntry; a plain Load resolves its entry from disk by
-// definition (its imports would still be restricted). Required by
-// [WithSyntheticRoot], which is unsound without it.
-func WithSourcesOnly() LoadOption {
+// WithSourcesOnly selects whether import resolution is restricted to the
+// pre-registered in-memory sources. With true, an import that misses the
+// registered set fails with E_IMPORT_RESOLVE, the module-root sandbox is never
+// opened, and SourceIDs derive textually from the module root and key — the
+// hermetic load an embedded SerializedSources needs, and what [WithSyntheticRoot]
+// requires. With false — the default — a miss falls back to the module root on
+// disk. Meaningful for LoadSourcesWithEntry; a plain Load reads its entry from
+// disk by definition.
+func WithSourcesOnly(only bool) LoadOption {
 	return func(c *loadConfig) {
-		c.sourcesOnly = true
+		c.sourcesOnly = only
 	}
 }
 
@@ -164,16 +159,17 @@ func WithSyntheticRoot(root string) LoadOption {
 	}
 }
 
-// WithDisallowImports prevents import declarations from being processed.
-// When enabled, any import statements in the source produce a single
+// WithImportsAllowed selects whether import declarations are processed. With
+// false, any import statement in the source produces a single
 // E_IMPORT_NOT_ALLOWED diagnostic at the first declaration. The rejection
 // does not suppress the source's other diagnostics: analysis continues
 // with the rejected aliases deferred, and the rejected imports are never
-// probed or resolved. Used by LoadString (unconditionally) and by the LSP
-// markdown analysis path (isolated blocks).
-func WithDisallowImports() LoadOption {
+// probed or resolved. The LSP markdown analysis path passes false for
+// isolated blocks. [LoadString] always rejects imports, whatever the caller
+// passes. With true — the default — imports resolve normally.
+func WithImportsAllowed(allowed bool) LoadOption {
 	return func(c *loadConfig) {
-		c.disallowImports = true
+		c.disallowImports = !allowed
 	}
 }
 

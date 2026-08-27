@@ -330,7 +330,7 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 		t.Fatalf("fixture did not carry %s; the edit is a no-op", canonical)
 	}
 
-	loaded, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithSkipIntegrityCheck())
+	loaded, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
 	if err := lres.Err(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestLoad_ValueConformanceReportsAndStillReturns(t *testing.T) {
 	data := nonConformingDocument(t, s)
 
 	loaded, result := snapshot.Load(ctx, data, s,
-		snapshot.WithSkipIntegrityCheck(), snapshot.WithValueConformance())
+		snapshot.WithIntegrityCheck(false), snapshot.WithValueConformance(true))
 	if err := result.Err(); err != nil {
 		t.Fatalf("Load refused a non-conforming document: %v", err)
 	}
@@ -399,9 +399,24 @@ func TestLoad_ValueConformanceIsOffByDefault(t *testing.T) {
 	s := loadTemporalSchema(t)
 	data := nonConformingDocument(t, s)
 
-	_, result := snapshot.Load(ctx, data, s, snapshot.WithSkipIntegrityCheck())
+	_, result := snapshot.Load(ctx, data, s, snapshot.WithIntegrityCheck(false))
 	if result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
 		t.Errorf("a conformance warning without the option: %s", result)
+	}
+}
+
+// TestLoad_ValueConformanceFalseIsOff pins that an explicit false is the
+// default: the option carries a value, and false must not read as presence.
+func TestLoad_ValueConformanceFalseIsOff(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadTemporalSchema(t)
+	data := nonConformingDocument(t, s)
+
+	_, result := snapshot.Load(ctx, data, s,
+		snapshot.WithIntegrityCheck(false), snapshot.WithValueConformance(false))
+	if result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
+		t.Errorf("a conformance warning under WithValueConformance(false): %s", result)
 	}
 }
 
@@ -417,7 +432,7 @@ func TestLoad_ValueConformanceIsSilentOnAConformingDocument(t *testing.T) {
 		t.Fatalf("Marshal: %v", err)
 	}
 
-	_, lres := snapshot.Load(ctx, data, s, snapshot.WithValueConformance())
+	_, lres := snapshot.Load(ctx, data, s, snapshot.WithValueConformance(true))
 	if lres.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
 		t.Errorf("a conforming document drew a conformance warning: %s", lres)
 	}
@@ -433,11 +448,11 @@ func TestVerify_HonorsValueConformance(t *testing.T) {
 	s := loadTemporalSchema(t)
 	data := nonConformingDocument(t, s)
 
-	if result := snapshot.Verify(ctx, data, s, snapshot.WithSkipIntegrityCheck()); result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
+	if result := snapshot.Verify(ctx, data, s, snapshot.WithIntegrityCheck(false)); result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
 		t.Errorf("Verify reported without the option: %s", result)
 	}
 	result := snapshot.Verify(ctx, data, s,
-		snapshot.WithSkipIntegrityCheck(), snapshot.WithValueConformance())
+		snapshot.WithIntegrityCheck(false), snapshot.WithValueConformance(true))
 	if !result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
 		t.Errorf("Verify did not report under the option: %s", result)
 	}

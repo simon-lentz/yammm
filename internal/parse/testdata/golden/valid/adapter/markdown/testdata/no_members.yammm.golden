@@ -1,0 +1,147 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "Entity",
+      "name_span": {
+        "s": 28,
+        "e": 34
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 41,
+              "e": 45
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 38,
+            "e": 53
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 55
+      }
+    },
+    {
+      "name": "Part",
+      "name_span": {
+        "s": 67,
+        "e": 71
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "label",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 81,
+              "e": 87
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 75,
+            "e": 95
+          }
+        }
+      ],
+      "span": {
+        "s": 57,
+        "e": 97
+      }
+    },
+    {
+      "name": "Landmark",
+      "name_span": {
+        "s": 104,
+        "e": 112
+      },
+      "extends": [
+        {
+          "name": "Entity",
+          "span": {
+            "s": 121,
+            "e": 127
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 136,
+              "e": 142
+            }
+          },
+          "span": {
+            "s": 131,
+            "e": 142
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "NEAR",
+          "name_span": {
+            "s": 148,
+            "e": 152
+          },
+          "target": {
+            "name": "Landmark",
+            "span": {
+              "s": 160,
+              "e": 168
+            }
+          },
+          "optional": true,
+          "many": true,
+          "span": {
+            "s": 144,
+            "e": 168
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "PARTS",
+          "name_span": {
+            "s": 174,
+            "e": 179
+          },
+          "target": {
+            "name": "Part",
+            "span": {
+              "s": 187,
+              "e": 191
+            }
+          },
+          "optional": true,
+          "many": true,
+          "span": {
+            "s": 170,
+            "e": 191
+          }
+        }
+      ],
+      "span": {
+        "s": 99,
+        "e": 193
+      }
+    }
+  ]
+}

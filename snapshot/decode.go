@@ -56,7 +56,7 @@ type streamDecoder struct {
 func newStreamDecoder(data []byte, s *schema.Schema, cfg loadConfig) *streamDecoder {
 	return &streamDecoder{
 		data:        data,
-		collector:   diag.NewCollector(0),
+		collector:   diag.NewCollector(cfg.issueLimit),
 		loadCfg:     cfg,
 		schema:      s,
 		revalidator: newRevalidator(s, cfg),
@@ -79,7 +79,7 @@ func newRevalidator(s *schema.Schema, cfg loadConfig) *instance.Validator {
 func newStreamDecoderFromReader(r io.Reader, s *schema.Schema, cfg loadConfig) *streamDecoder {
 	return &streamDecoder{
 		reader:     r,
-		collector:  diag.NewCollector(0),
+		collector:  diag.NewCollector(cfg.issueLimit),
 		loadCfg:    cfg,
 		schema:     s,
 		bodyOffset: -1,

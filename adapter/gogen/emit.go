@@ -369,7 +369,7 @@ func (g *generator) emitUniformSources(entryKey string) {
 	g.buf.WriteString("// module-root-relative path. Re-load with:\n")
 	g.buf.WriteString("//\n")
 	g.buf.WriteString("//\tschema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, \"\",\n")
-	g.buf.WriteString("//\t\tschema.WithSourcesOnly(), schema.WithSyntheticRoot(\"embedded://your-app\"))\n")
+	g.buf.WriteString("//\t\tschema.WithSourcesOnly(true), schema.WithSyntheticRoot(\"embedded://your-app\"))\n")
 	g.buf.WriteString("//\n")
 	g.buf.WriteString("// The synthetic root is what keeps the loaded type identities stable. Passing\n")
 	g.buf.WriteString("// module root \".\" instead also re-loads, but \".\" canonicalizes against the\n")

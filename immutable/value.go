@@ -12,12 +12,14 @@ type wrapConfig struct {
 	clone bool
 }
 
-// WithClone causes the Wrap constructor to deep-clone maps and slices before
-// wrapping. The caller may freely retain and mutate the original value after
-// construction. Use this when the value comes from external sources, is shared,
-// or when ownership cannot be verified.
-func WithClone() Option {
-	return func(c *wrapConfig) { c.clone = true }
+// WithClone selects whether a Wrap constructor deep-clones maps and slices
+// before wrapping. With true, the caller can retain and mutate the original
+// value after construction; use it when the value comes from an external
+// source, is shared, or when ownership cannot be verified. With false — the
+// default — the constructor takes ownership and the caller must not touch the
+// value again.
+func WithClone(clone bool) Option {
+	return func(c *wrapConfig) { c.clone = clone }
 }
 
 func resolveConfig(opts []Option) wrapConfig {

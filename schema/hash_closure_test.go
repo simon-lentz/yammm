@@ -14,7 +14,7 @@ func loadClosure(t *testing.T, sources map[string]string, entry string) *schema.
 	for k, v := range sources {
 		bytesBy[k] = []byte(v)
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), bytesBy, entry, ".", schema.WithSourcesOnly())
+	s, result := schema.LoadSourcesWithEntry(t.Context(), bytesBy, entry, ".", schema.WithSourcesOnly(true))
 	if result.HasErrors() {
 		t.Fatalf("load %s: %v", entry, result.Err())
 	}

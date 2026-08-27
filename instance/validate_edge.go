@@ -511,10 +511,10 @@ func (v *Validator) validateEdgeTarget(
 	}
 
 	// Build ValidEdgeTarget
-	targetKey := immutable.WrapKey(pkComponents, immutable.WithClone())
+	targetKey := immutable.WrapKey(pkComponents, immutable.WithClone(true))
 	var edgeProperties immutable.Properties
 	if len(edgeProps) > 0 {
-		edgeProperties = immutable.WrapProperties(edgeProps, immutable.WithClone())
+		edgeProperties = immutable.WrapProperties(edgeProps, immutable.WithClone(true))
 	}
 
 	target := NewValidEdgeTarget(targetKey, edgeProperties)

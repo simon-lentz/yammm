@@ -53,7 +53,7 @@ part type Note {
 `
 	_, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(src),
-	}, "entry.yammm", ".", schema.WithSourcesOnly())
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if !res.HasErrors() {
 		t.Fatal("@writeOnce on a part-type property must fail the load")
 	}

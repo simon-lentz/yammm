@@ -21,7 +21,7 @@ func loadCrossSchema(t *testing.T, sources map[string]string) *schema.Schema {
 	for k, v := range sources {
 		m[k] = []byte(v)
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), m, "entry.yammm", ".", schema.WithSourcesOnly())
+	s, result := schema.LoadSourcesWithEntry(t.Context(), m, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if result.HasErrors() {
 		t.Fatalf("load: %v", result.Err())
 	}

@@ -37,7 +37,7 @@ func loadUnderSyntheticRoot(t *testing.T, root string) *schema.Schema {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(t.Context(),
 		map[string][]byte{"geo.yammm": []byte(unknownTypesSchema)}, "geo.yammm", "",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot(root))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
 	if res.HasErrors() {
 		t.Fatalf("load under %q: %v", root, res.Err())
 	}

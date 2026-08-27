@@ -28,14 +28,14 @@ func TestLoad_RefusesAnOldHashAlgorithm(t *testing.T) {
 		t.Fatalf("fixture does not carry algorithm %d", schema.StructuralHashVersion)
 	}
 
-	_, res := snapshot.Load(t.Context(), old, s, snapshot.WithSkipIntegrityCheck())
+	_, res := snapshot.Load(t.Context(), old, s, snapshot.WithIntegrityCheck(false))
 	if !res.HasErrors() || !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) {
 		t.Fatalf("Load accepted a previous-algorithm document: %v", res)
 	}
 	if res.HasCode(diag.E_SNAPSHOT_INCOMPATIBLE_SCHEMA) {
 		t.Fatal("a version mismatch must skip the hash comparison, not report it as incompatible")
 	}
-	if res := snapshot.Verify(t.Context(), old, s, snapshot.WithSkipIntegrityCheck()); !res.HasErrors() || !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) {
+	if res := snapshot.Verify(t.Context(), old, s, snapshot.WithIntegrityCheck(false)); !res.HasErrors() || !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) {
 		t.Fatalf("Verify accepted a previous-algorithm document: %v", res)
 	}
 

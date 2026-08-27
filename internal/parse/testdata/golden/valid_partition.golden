@@ -68,6 +68,7 @@ adapter/markdown/testdata/inheritance.yammm
 adapter/markdown/testdata/invariants.yammm
 adapter/markdown/testdata/named.yammm
 adapter/markdown/testdata/no_diagram.yammm
+adapter/markdown/testdata/no_members.yammm
 adapter/markdown/testdata/relations.yammm
 adapter/markdown/testdata/scalars.yammm
 adapter/neo4j/integration/testdata/roundtrip.yammm

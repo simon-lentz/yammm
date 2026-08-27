@@ -26,6 +26,7 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
 	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
 
+	registerModuleRootFlag(cmd)
 	return cmd
 }
 
@@ -51,8 +52,12 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load schema
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	if err != nil {
+		return err
+	}
+	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
 	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
@@ -97,7 +102,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	result := cli.MergeResults(pending, parseResult, validateResult)
 
 	// Render
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
 
 	exitCode := cli.ExitForResult(result)
 	if exitCode != cli.ExitOK {

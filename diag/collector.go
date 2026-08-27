@@ -37,6 +37,10 @@ type Collector struct {
 	// queries stay truthful under truncation.
 	counts SeverityCounts
 
+	// Per-severity, per-code counts over every issue SEEN, kept beside counts
+	// by the same rule and for the same reason.
+	codeCounts codeCounts
+
 	// Severity counts over the STORED issues only. Unlike counts, these shrink
 	// when an issue is evicted, so storeLocked can answer "which severity is
 	// currently the least severe stored?" in O(1) and only scan the slice when an
@@ -157,6 +161,7 @@ func (c *Collector) Merge(res Result) {
 	// OK/HasErrors/ErrorCount truthful even when res was itself truncated and its
 	// dropped issues are no longer enumerable.
 	c.counts.addCounts(res.SeverityCounts())
+	c.codeCounts.addCounts(res.codeCounts)
 
 	// res's own drops can never be recovered, so carry its truncation forward.
 	if res.limitReached {
@@ -195,6 +200,7 @@ func (c *Collector) collectLocked(issue Issue) {
 	// counts untouched would read as success and let a broken schema escape the
 	// all-or-nothing contract. Len() remains the stored count.
 	c.counts.add(issue.Severity())
+	c.codeCounts.add(issue.Severity(), issue.Code())
 
 	c.storeLocked(issue)
 }
@@ -287,7 +293,7 @@ func (c *Collector) Result() Result {
 	// issues are absent from sorted, and recomputing would make Result.OK /
 	// HasErrors blind to a dropped error exactly as the gates would be. In the
 	// non-truncated case the two are identical (every collected issue is stored).
-	result := newResultWithCounts(sorted, c.limit, c.limitReached, c.droppedCount, c.counts)
+	result := newResultWithCounts(sorted, c.limit, c.limitReached, c.droppedCount, c.counts, c.codeCounts.clone())
 	c.cachedResult = &result
 	return result
 }

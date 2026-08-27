@@ -70,7 +70,7 @@ const SerializedEntry = "full.yammm"
 // module-root-relative path. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
-//		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://your-app"))
+//		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))
 //
 // The synthetic root is what keeps the loaded type identities stable. Passing
 // module root "." instead also re-loads, but "." canonicalizes against the

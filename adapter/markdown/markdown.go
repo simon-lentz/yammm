@@ -14,12 +14,22 @@ type Option func(*config)
 
 type config struct {
 	classDiagram bool
+	classMembers bool
 }
 
 // WithClassDiagram toggles the Mermaid class-diagram section (default true).
 func WithClassDiagram(include bool) Option {
 	return func(c *config) {
 		c.classDiagram = include
+	}
+}
+
+// WithClassMembers toggles the member lines inside each diagram class
+// (default true). With false, classes keep their stereotype and edges and
+// list no properties; the per-type tables still carry every property.
+func WithClassMembers(include bool) Option {
+	return func(c *config) {
+		c.classMembers = include
 	}
 }
 
@@ -32,7 +42,7 @@ func WithClassDiagram(include bool) Option {
 // schema does not need source backing: on a Builder-built schema,
 // invariant sections degrade to their message line.
 func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
-	cfg := config{classDiagram: true}
+	cfg := config{classDiagram: true, classMembers: true}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -40,6 +50,7 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	g.classMembers = cfg.classMembers
 	g.emitDocument(cfg)
 	out := g.buf.Bytes()
 	if err := selfCheck(out, g.anchors); err != nil {
@@ -256,6 +267,13 @@ type generator struct {
 	types   map[schema.TypeID]*typeEntry
 	anchors map[string]bool
 	sources *schema.Sources
+
+	// classMembers selects whether writeClass lists a type's properties.
+	classMembers bool
+
+	// labelled records that writeClass emitted a labelled class, which is
+	// what the floor sentence is about.
+	labelled bool
 }
 
 // newGenerator builds the generator for a schema and its import closure.
@@ -270,11 +288,12 @@ type generator struct {
 // links to them.)
 func newGenerator(s *schema.Schema) (*generator, error) {
 	g := &generator{
-		entry:   s,
-		closure: s.Closure(),
-		types:   make(map[schema.TypeID]*typeEntry),
-		anchors: make(map[string]bool),
-		sources: s.Sources(),
+		entry:        s,
+		closure:      s.Closure(),
+		types:        make(map[schema.TypeID]*typeEntry),
+		anchors:      make(map[string]bool),
+		sources:      s.Sources(),
+		classMembers: true,
 	}
 	anchorOwner := make(map[string]string) // anchor -> first claiming display name
 	for i, sch := range g.closure {

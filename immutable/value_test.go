@@ -261,12 +261,41 @@ func TestValue_NestedStructures(t *testing.T) {
 	wantString(t, first, "deep")
 }
 
+// TestValue_Wrap_WithCloneFalse_TransfersOwnership pins that WithClone(false)
+// is the ownership-transfer default, not a third mode. A non-string-keyed map
+// is the one shape wrapValue stores as-is, so it is the shape that can tell
+// the two arms apart: without a clone the wrapped value aliases the caller's
+// map and sees its later mutation.
+func TestValue_Wrap_WithCloneFalse_TransfersOwnership(t *testing.T) {
+	inner := map[int]any{1: "original"}
+	outer := map[string]any{"inner": inner}
+
+	wrapped := Wrap(outer, WithClone(false))
+	inner[1] = "mutated"
+
+	m, ok := wrapped.Map()
+	if !ok {
+		t.Fatal("expected Map()")
+	}
+	innerVal, ok := m.Get("inner")
+	if !ok {
+		t.Fatal("expected inner key")
+	}
+	got, ok := innerVal.Unwrap().(map[int]any)
+	if !ok {
+		t.Fatalf("expected the non-string-keyed map stored as-is, got %T", innerVal.Unwrap())
+	}
+	if got[1] != "mutated" {
+		t.Errorf("WithClone(false) isolated the caller's map: got %v, want %q", got[1], "mutated")
+	}
+}
+
 func TestValue_Wrap_WithClone_Isolation(t *testing.T) {
 	// Test that Wrap with WithClone creates an isolated copy
 	nested := map[string]any{"key": "original"}
 	outer := map[string]any{"nested": nested}
 
-	wrapped := Wrap(outer, WithClone())
+	wrapped := Wrap(outer, WithClone(true))
 
 	// Mutate original after cloning
 	nested["key"] = "mutated"
@@ -371,7 +400,7 @@ func TestDeepClone_NilInNonStringKeyedMap(t *testing.T) {
 	input := map[int]any{1: nil, 2: "value", 3: nil}
 
 	// Wrap with WithClone on non-string-keyed map goes through deepCloneMap
-	wrapped := Wrap(input, WithClone())
+	wrapped := Wrap(input, WithClone(true))
 
 	// The underlying value should be the cloned map with nil values preserved
 	cloned := wrapped.Unwrap()
@@ -410,7 +439,7 @@ func TestDeepClone_NilInNestedNonStringKeyedMap(t *testing.T) {
 	inner := map[int]any{1: nil, 2: "nested"}
 	input := map[string]any{"inner": inner}
 
-	wrapped := Wrap(input, WithClone())
+	wrapped := Wrap(input, WithClone(true))
 	m, ok := wrapped.Map()
 	if !ok {
 		t.Fatal("expected Map")
@@ -443,7 +472,7 @@ func TestDeepClone_NilInSliceWithinNonStringKeyedMap(t *testing.T) {
 	sliceWithNil := []any{nil, "hello", nil}
 	input := map[int]any{1: sliceWithNil}
 
-	wrapped := Wrap(input, WithClone())
+	wrapped := Wrap(input, WithClone(true))
 	cloned := wrapped.Unwrap()
 
 	m, ok := cloned.(map[int]any)
@@ -558,7 +587,7 @@ func TestWrap_NilInStringKeyedMap(t *testing.T) {
 				inputCopy := map[string]any{"a": nil, "b": "value", "c": nil}
 				wrapped = Wrap(inputCopy)
 			} else {
-				wrapped = Wrap(input, WithClone())
+				wrapped = Wrap(input, WithClone(true))
 			}
 
 			m, ok := wrapped.Map()
@@ -792,7 +821,7 @@ func TestWrap_NilInSlice(t *testing.T) {
 				inputCopy := []any{nil, "hello", nil, 42, nil}
 				wrapped = Wrap(inputCopy)
 			} else {
-				wrapped = Wrap(input, WithClone())
+				wrapped = Wrap(input, WithClone(true))
 			}
 
 			s, ok := wrapped.Slice()
@@ -855,7 +884,7 @@ func TestOwnership_WithClone_IsolatesNestedMaps(t *testing.T) {
 	outer := map[string]any{"level1": level1}
 
 	// Clone wrap the structure
-	wrapped := Wrap(outer, WithClone())
+	wrapped := Wrap(outer, WithClone(true))
 
 	// Mutate all levels of the original
 	level3["key"] = "mutated"
@@ -902,7 +931,7 @@ func TestOwnership_WithClone_IsolatesNestedSlices(t *testing.T) {
 	outer := []any{inner, "other"}
 
 	// Clone wrap the structure
-	wrapped := WrapSlice(outer, WithClone())
+	wrapped := WrapSlice(outer, WithClone(true))
 
 	// Mutate original
 	inner[0] = "mutated"
@@ -941,7 +970,7 @@ func TestOwnership_WithClone_IsolatesMixedStructures(t *testing.T) {
 	outer := []any{inner, map[string]any{"other": "data"}}
 
 	// Clone wrap the structure
-	wrapped := WrapSlice(outer, WithClone())
+	wrapped := WrapSlice(outer, WithClone(true))
 
 	// Mutate original structures
 	inner["value"] = "mutated"
@@ -1072,7 +1101,7 @@ func TestOwnership_DeeplyNestedStructure(t *testing.T) {
 	root := map[string]any{"level1": level1}
 
 	// Clone wrap
-	wrapped := WrapMap(root, WithClone())
+	wrapped := WrapMap(root, WithClone(true))
 
 	// Mutate all levels
 	level5["deepValue"] = "mutated"
@@ -1128,7 +1157,7 @@ func TestOwnership_WrapOwnershipDocumentation(t *testing.T) {
 
 	// GOOD: Use WithClone if you need to retain and mutate the original
 	retained := map[string]any{"key": "value"}
-	wrapped := WrapMap(retained, WithClone())
+	wrapped := WrapMap(retained, WithClone(true))
 	retained["key"] = "mutated" // Safe: wrapped is isolated
 
 	keyVal, _ := wrapped.Get("key")

@@ -30,6 +30,7 @@ Warnings are rendered to stderr.`,
 	cmd.Flags().Bool("value-conformance", false, "report stored Timestamp/Date/UUID values that do not conform to their constraints")
 	cmd.Flags().Bool("revalidate", false, "run every instance back through the validator and report findings as warnings")
 
+	registerModuleRootFlag(cmd)
 	return cmd
 }
 
@@ -55,8 +56,12 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load schema.
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	if err != nil {
+		return err
+	}
+	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
 	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
@@ -69,12 +74,9 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build options.
-	var opts []snapshot.LoadOption
-	if skipIntegrity {
-		opts = append(opts, snapshot.WithSkipIntegrityCheck())
-	}
-	if valueConformance {
-		opts = append(opts, snapshot.WithValueConformance())
+	opts := []snapshot.LoadOption{
+		snapshot.WithIntegrityCheck(!skipIntegrity),
+		snapshot.WithValueConformance(valueConformance),
 	}
 	if revalidate {
 		opts = append(opts, snapshot.WithRevalidation(diag.Warning))
@@ -86,7 +88,7 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	// Render diagnostics — the load's residual warnings folded in, so one
 	// invocation writes one result (and in JSON, one document).
 	result := cli.MergeResults(pending, verifyResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
 
 	exitCode := cli.ExitForResult(result)
 	if exitCode != cli.ExitOK {

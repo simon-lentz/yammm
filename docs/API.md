@@ -49,8 +49,8 @@ s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, op
 | `WithModuleRoot` | Root directory for module-style imports |
 | `WithIssueLimit` | Maximum diagnostic issues to collect (default: 100) |
 | `WithLogger` | Structured logger for load diagnostics |
-| `WithDisallowImports` | Prevent import declarations from being processed |
-| `WithSourcesOnly` | Restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources) |
+| `WithImportsAllowed` | Whether import declarations are processed (default `true`); `false` refuses them with `E_IMPORT_NOT_ALLOWED` |
+| `WithSourcesOnly` | With `true`, restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources) |
 | `WithSyntheticRoot` | Give in-memory sources synthetic identities under a root such as `embedded://app`, so type identities do not move with the working directory (see [Synthetic source identities](#synthetic-source-identities)) |
 
 ### Synthetic source identities
@@ -66,7 +66,7 @@ s, result := schema.LoadSourcesWithEntry(ctx,
     gen.SerializedSources(),  // a generated package's embedded sources
     gen.SerializedEntry,
     "",                       // no module root: the synthetic root stands in
-    schema.WithSourcesOnly(),
+    schema.WithSourcesOnly(true),
     schema.WithSyntheticRoot("embedded://app"),
 )
 ```
@@ -136,7 +136,7 @@ closure — each exactly once:
   nil `*Schema`; completeness changes what `result` carries, not the
   contract.
 
-`LoadString` — and any load with `WithDisallowImports` — still rejects
+`LoadString` — and any load with `WithImportsAllowed(false)` — still rejects
 import declarations categorically with a single `E_IMPORT_NOT_ALLOWED`, but
 the rejection no longer suppresses the source's other findings: the
 remaining diagnostics are reported alongside it, with references through
@@ -699,8 +699,9 @@ if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 
 | Option | Description |
 | ------ | ----------- |
-| `WithSkipIntegrityCheck` | Disable integrity hash verification (for debugging hand-edited files) |
-| `WithValueConformance` | Report a stored `Timestamp`/`Date`/`UUID` value that does not conform to its constraint (`W_SNAPSHOT_VALUE_NONCONFORMING`, Warning); not re-validation |
+| `WithIssueLimit` | Maximum issues `Load` and `Verify` store (default 100, matching `schema.Load`; 0 for unlimited). The walk always completes, so `DroppedCount` is exact |
+| `WithIntegrityCheck` | Whether the integrity hash is verified (default `true`); `false` skips it for debugging hand-edited files |
+| `WithValueConformance` | With `true`, report a stored `Timestamp`/`Date`/`UUID` value that does not conform to its constraint (`W_SNAPSHOT_VALUE_NONCONFORMING`, Warning); not re-validation |
 | `WithRevalidation` | Run every instance — composed children, edges, invariants included — back through `instance.Validator`, reporting each finding at the given severity; `Error` refuses the load. A `Required` unresolved record draws `W_SNAPSHOT_UNRESOLVED_REQUIRED` |
 
 ### Snapshot Info
@@ -994,7 +995,7 @@ result.OK()             // No fatal or error issues
 result.HasErrors()      // Has fatal or error issues
 result.HasFatal()       // Has fatal issues
 result.HasWarnings()    // Has warning issues
-result.HasCode(code)    // A retained issue with the given code, at any severity. For gating that must stay truthful under truncation use HasErrors/SeverityCounts
+result.HasCode(code)    // A retained issue with the given code, at any severity. For gating that must stay truthful under truncation use CodeCounts/HasErrors/SeverityCounts
 result.LimitReached()   // Issue collection limit was reached
 
 // Issue access (returns iter.Seq[Issue]; use slices.Collect for a []Issue)
@@ -1007,11 +1008,12 @@ result.Len()              // Retained issue count; the total seen is Len() + Dro
 result.Limit()            // Configured collection limit
 result.DroppedCount()     // Issues dropped after limit
 result.SeverityCounts()   // Counts by severity level
+result.CodeCounts(diag.Warning) // Seen-based per-code counts at one severity — a copy; truthful under truncation where HasCode is not
 result.TruncationNote()   // Canonical dropped-issues line; "" when nothing was dropped
 
 // Conversion
 result.Err()              // Returns error if !OK(), nil otherwise
-result.String()           // "OK" when OK(), formatted issues otherwise
+result.String()           // "OK" when there is no issue at all; otherwise a summary line (errors, warnings, info, hints, the limit note) and one line per retained issue at every severity
 ```
 
 ### Rendering Diagnostics
@@ -1584,7 +1586,7 @@ Re-load under a synthetic root:
 ```go
 s, result := schema.LoadSourcesWithEntry(ctx,
     gen.SerializedSources(), gen.SerializedEntry, "",
-    schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://app"))
+    schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
 ```
 
 Module root `"."` also re-loads, but note what it costs: it canonicalizes against the process working directory, and that directory then lands inside every `TypeID` the re-loaded schema carries. See [Synthetic source identities](#synthetic-source-identities).
@@ -1666,6 +1668,7 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
 ```go
 doc, err := markdown.Marshal(s)                                  // full document
 doc, err := markdown.Marshal(s, markdown.WithClassDiagram(false)) // no class diagram
+doc, err := markdown.Marshal(s, markdown.WithClassMembers(false)) // diagram without member lines
 ```
 
 `Marshal` requires a completed schema (always true for one returned by `schema.Load*` or `schema.Builder.Build`). Source backing is optional: on a Builder-built schema, invariant sections degrade to their message line instead of a source fence — nothing else needs source content.
@@ -1675,7 +1678,7 @@ doc, err := markdown.Marshal(s, markdown.WithClassDiagram(false)) // no class di
 One document per invocation, covering the entry schema plus its whole import closure:
 
 - **Title + schema doc** — `# Schema <Name>`, then the schema's doc-comment verbatim.
-- **Class diagram** — a `## Class Diagram` heading, then one Mermaid `classDiagram` fence over the entire closure. Classes carry each type's **own** members as `name KindLabel` pairs (named DataTypes show their name; constraint detail stays out of the diagram); abstract and part types carry `<<Abstract>>` / `<<Part>>` stereotypes; edges are `Parent <|-- Child` for inheritance and DSL-labeled `Owner --> Target : NAME (mult)` / `Owner *-- Child : NAME (mult)` for each type's own associations and compositions — inherited structure is conveyed by the inheritance edges, not redrawn. Qualified names (invalid as Mermaid class ids) emit the sanitized-id form `class common_Region["common.Region"]`; Mermaid namespaces are deliberately not used (some Markdown renderers do not support them in class diagrams).
+- **Class diagram** — a `## Class Diagram` heading, then one Mermaid `classDiagram` fence over the entire closure. Classes carry each type's **own** members as `name KindLabel` pairs (named DataTypes show their name; constraint detail stays out of the diagram) — `WithClassMembers(false)` drops the member lines and keeps the classes, stereotypes and edges; abstract and part types carry `<<Abstract>>` / `<<Part>>` stereotypes; edges are `Parent <|-- Child` for inheritance and DSL-labeled `Owner --> Target : NAME (mult)` / `Owner *-- Child : NAME (mult)` for each type's own associations and compositions — inherited structure is conveyed by the inheritance edges, not redrawn. Qualified names (invalid as Mermaid class ids) emit the sanitized-id form `class common_Region["common.Region"]`; Mermaid namespaces are deliberately not used (some Markdown renderers do not support them in class diagrams). **The labelled form needs Mermaid 10.1.0 or later** — the first release whose class-diagram grammar has the `classLabel` production; Mermaid 9 fails it with a lexical error. Only an imported type is labelled (an entry-schema type name is always a valid id), so a schema with imports is in scope and an import-free one renders on Mermaid 9. When the emitter has written a labelled class it says so in the document: one sentence under the `## Class Diagram` heading, before the fence — *This diagram uses Mermaid's labelled class form and needs Mermaid 10.1.0 or later.* An import-free document carries no such sentence and its bytes do not move.
 - **Type sections** — a `## Types` heading, then one `### <TypeName>` per type in declaration order: a badge line (`*Abstract type*` / `*Part type*` / `Extends: [Parent](#parent)`), the doc-comment, then a **flattened property table** (Property | Type | Modifiers | Description) over the full inheritance chain — the Type column renders each constraint's DSL form (`String[1, 100]`, `List<FipsCode>`), and inherited rows carry `from <Owner>` in Modifiers. Associations and compositions follow as DSL-notation bullets with linked targets, an inherited relation carrying the same provenance as a ` — from <Owner>` marker; a relation's doc-comment nests as an indented line under its bullet, and its edge properties as a sub-table.
 - **Invariants** — the failure message as a bullet (an inherited invariant carrying the ` — from <Owner>` marker), the doc-comment beneath, then the declaration source in a `yammm` fence extracted via the invariant's span, with its doc comment stripped (it renders separately) and continuation lines dedented.
 - **Data Types** — a Name | Definition | Description table per schema.
@@ -1690,10 +1693,10 @@ Output is deterministic (byte-identical across runs and checkouts), so generated
 ### CLI
 
 ```text
-yammm gen --to md <schema.yammm> [--no-class-diagram] [--output <path>] [--module-root <dir>]
+yammm gen --to md <schema.yammm> [--no-class-diagram] [--no-class-members] [--output <path>] [--module-root <dir>]
 ```
 
-`markdown` is accepted as an alias for `md`. Per-target flag enforcement extends to the md target: `--no-class-diagram` is rejected for other targets, and go/jsonschema-only flags are rejected for md.
+`markdown` is accepted as an alias for `md`. Per-target flag enforcement extends to the md target: `--no-class-diagram` and `--no-class-members` are rejected for other targets, and go/jsonschema-only flags are rejected for md.
 
 ## Formatting
 
@@ -1726,5 +1729,7 @@ The formatter then applies a five-phase pipeline:
 3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at `LineWidthThreshold`, and collapses an existing multiline enum, extends clause or datatype-alias enum back onto one line when the joined form fits. A multiline invariant is never collapsed
 4. **Column alignment:** pads the member-name column so the column after it lines up — the type for a property, the multiplicity for a relationship, the `=` for a datatype alias — and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases — broken by a kind change or by any line that is not alignable — a blank line, a comment-only line, a type head or closing brace, an `extends` clause, the first line of a multiline construct. A type-block boundary breaks a run because its brace lines are not alignable, not because blocks are tracked
 5. **Text finalization:** trims trailing whitespace from each line, removes trailing blank lines, and ensures the file ends with a newline
+
+Phases 2–4 read one line classification — blank, comment, or content — computed once between phases 1 and 2. No phase decides on its own whether a line is a comment, so a comment line is never wrapped, aligned, or read as an enum value or a type name, whatever its text looks like; a comment inside a multiline enum or `extends` list keeps its place and the construct is re-indented rather than collapsed.
 
 Output is deterministic and idempotent. The formatter is used by the LSP server for `textDocument/formatting` and by the CLI for the `yammm fmt` command.

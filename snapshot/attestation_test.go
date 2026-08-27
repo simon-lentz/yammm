@@ -154,7 +154,7 @@ func TestLoad_AbsentAttestationReadsFalse(t *testing.T) {
 	s, data := attWireFixture(t)
 
 	stripped := bytes.Replace(data, []byte(attTrueSegment), nil, 1)
-	snap, res := snapshot.Load(t.Context(), stripped, s, snapshot.WithSkipIntegrityCheck())
+	snap, res := snapshot.Load(t.Context(), stripped, s, snapshot.WithIntegrityCheck(false))
 	if res.HasErrors() {
 		t.Fatalf("Load: %s", res.String())
 	}

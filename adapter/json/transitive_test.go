@@ -45,7 +45,7 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 		"entry.yammm": []byte(transEntry),
 		"mid.yammm":   []byte(transMid),
 		"deep.yammm":  []byte(transDeep),
-	}, "entry.yammm", ".", schema.WithSourcesOnly())
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}

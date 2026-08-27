@@ -24,31 +24,45 @@ type alignableLine struct {
 
 // AlignColumns pads the name column within alignment groups to produce
 // columnar output. Groups are contiguous runs of the same member kind,
-// broken by blank lines, comment-only lines, non-alignable lines, or kind changes.
+// broken by blank lines, comment lines, non-alignable lines, or kind changes.
 func AlignColumns(text string) string {
 	if text == "" {
 		return ""
 	}
-	lines := strings.Split(text, "\n")
-	result := make([]string, 0, len(lines))
+	return joinLines(alignColumns(classifyText(text)))
+}
+
+// alignColumns is AlignColumns over classified lines. Only a content line
+// can join a group; a blank or comment line ends the group and passes
+// through untouched, whatever its text looks like.
+func alignColumns(ls []line) []line {
+	result := make([]line, 0, len(ls))
 	var group []alignableLine
 
 	i := 0
-	for i < len(lines) {
-		line := lines[i]
+	for i < len(ls) {
+		ln := ls[i]
 
-		if isMultilineStart(line) {
+		if ln.class != lineContent {
 			result = flushAlignGroup(result, group)
 			group = nil
-			result, i = emitMultilineConstruct(result, lines, i)
+			result = append(result, ln)
+			i++
 			continue
 		}
 
-		parsed, ok := parseAlignableLine(line)
+		if isMultilineStart(ln.text) {
+			result = flushAlignGroup(result, group)
+			group = nil
+			result, i = emitMultilineConstruct(result, ls, i)
+			continue
+		}
+
+		parsed, ok := parseAlignableLine(ln.text)
 		if !ok {
 			result = flushAlignGroup(result, group)
 			group = nil
-			result = append(result, line)
+			result = append(result, ln)
 			i++
 			continue
 		}
@@ -61,11 +75,10 @@ func AlignColumns(text string) string {
 		group = append(group, parsed)
 		i++
 	}
-	result = flushAlignGroup(result, group)
-	return strings.Join(result, "\n")
+	return flushAlignGroup(result, group)
 }
 
-// parseAlignableLine classifies a line and extracts the alignable name column.
+// parseAlignableLine classifies a content line and extracts the alignable name column.
 func parseAlignableLine(line string) (alignableLine, bool) {
 	trimmed := strings.TrimLeft(line, "\t ")
 	indent := line[:len(line)-len(trimmed)]
@@ -177,10 +190,10 @@ func findInlineComment(s string) int {
 
 // flushAlignGroup pads names to a common width and rebuilds each line.
 // Groups of 0 or 1 members pass through unchanged.
-func flushAlignGroup(result []string, group []alignableLine) []string {
+func flushAlignGroup(result []line, group []alignableLine) []line {
 	if len(group) <= 1 {
 		for _, al := range group {
-			result = append(result, al.raw)
+			result = append(result, contentLine(al.raw))
 		}
 		return result
 	}
@@ -240,24 +253,19 @@ func flushAlignGroup(result []string, group []alignableLine) []string {
 	for _, rl := range rebuilt {
 		if hasComments && rl.comment != "" {
 			padding := max(maxContentWidth-len(rl.content)+1, 1)
-			result = append(result, rl.content+strings.Repeat(" ", padding)+rl.comment)
+			result = append(result, contentLine(rl.content+strings.Repeat(" ", padding)+rl.comment))
 		} else {
-			result = append(result, rl.content)
+			result = append(result, contentLine(rl.content))
 		}
 	}
 
 	return result
 }
 
-// isMultilineStart returns true if the line has unbalanced [ brackets.
+// isMultilineStart returns true if a content line has unbalanced [ brackets.
 func isMultilineStart(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") {
-		return false
-	}
-
 	depth := 0
-	sc := newQuoteAwareScanner(trimmed)
+	sc := newQuoteAwareScanner(strings.TrimSpace(line))
 	for i, ch := sc.next(); i >= 0; i, ch = sc.next() {
 		if ch == '[' {
 			depth++
@@ -270,19 +278,15 @@ func isMultilineStart(line string) bool {
 }
 
 // emitMultilineConstruct emits lines until bracket depth returns to zero.
-func emitMultilineConstruct(result, lines []string, startIdx int) ([]string, int) {
+// Only content lines move the depth; a comment inside the construct is
+// emitted and not counted.
+func emitMultilineConstruct(result, ls []line, startIdx int) ([]line, int) {
 	depth := 0
 	i := startIdx
-	for i < len(lines) {
-		result = append(result, lines[i])
-		sc := newQuoteAwareScanner(lines[i])
-		for j, ch := sc.next(); j >= 0; j, ch = sc.next() {
-			if ch == '[' {
-				depth++
-			}
-			if ch == ']' {
-				depth--
-			}
+	for i < len(ls) {
+		result = append(result, ls[i])
+		if ls[i].class == lineContent {
+			depth += bracketDelta(ls[i].text)
 		}
 		i++
 		if depth <= 0 {
@@ -290,4 +294,20 @@ func emitMultilineConstruct(result, lines []string, startIdx int) ([]string, int
 		}
 	}
 	return result, i
+}
+
+// bracketDelta returns the number of [ minus the number of ] outside
+// string literals.
+func bracketDelta(text string) int {
+	depth := 0
+	sc := newQuoteAwareScanner(text)
+	for i, ch := sc.next(); i >= 0; i, ch = sc.next() {
+		if ch == '[' {
+			depth++
+		}
+		if ch == ']' {
+			depth--
+		}
+	}
+	return depth
 }

@@ -162,7 +162,7 @@ func verifyUniformRoundTrip(ctx context.Context, srcs *schema.Sources, ids []loc
 		}
 		m[sourceKey(root, entry, id)] = content
 	}
-	got, res := schema.LoadSourcesWithEntry(ctx, m, sourceKey(root, entry, entry), ".", schema.WithSourcesOnly())
+	got, res := schema.LoadSourcesWithEntry(ctx, m, sourceKey(root, entry, entry), ".", schema.WithSourcesOnly(true))
 	if res.HasErrors() {
 		return fmt.Errorf("gogen: embedded SerializedSources does not re-load: %w", res.Err())
 	}

@@ -474,8 +474,8 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ca
 	validInstance := newValidatedInstance(
 		canonicalName,
 		typ.ID(),
-		immutable.WrapKey(pkComponents, immutable.WithClone()),
-		immutable.WrapProperties(validatedProps, immutable.WithClone()),
+		immutable.WrapKey(pkComponents, immutable.WithClone(true)),
+		immutable.WrapProperties(validatedProps, immutable.WithClone(true)),
 		edges,
 		composed,
 		raw.Provenance,

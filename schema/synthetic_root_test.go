@@ -69,7 +69,7 @@ func TestWithSyntheticRoot_SameSchemaDifferentIdentities(t *testing.T) {
 		t.Fatalf("module-root load: %s", firstError(res))
 	}
 	embedded, res := schema.LoadSourcesWithEntry(ctx, syntheticRootSources(), "main.yammm", "",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://app"))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
 	if res.HasErrors() {
 		t.Fatalf("synthetic-root load: %s", firstError(res))
 	}
@@ -105,7 +105,7 @@ func TestWithSyntheticRoot_DerivedIdentityIsExact(t *testing.T) {
 	t.Parallel()
 
 	s, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://root"))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://root"))
 	if res.HasErrors() {
 		t.Fatalf("load: %s", firstError(res))
 	}
@@ -126,7 +126,7 @@ func TestWithSyntheticRoot_ModuleStyleImportResolves(t *testing.T) {
 	t.Parallel()
 
 	s, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://app"))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
 	if res.HasErrors() {
 		t.Fatalf("load: %s", firstError(res))
 	}
@@ -150,7 +150,7 @@ func TestWithSyntheticRoot_RelativeImportRejected(t *testing.T) {
 			"type County {\n\tfips String primary\n\t--> IN_REGION (one) core.Region\n}\n"),
 	}
 	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", "",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://app"))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
 	if !res.HasErrors() {
 		t.Fatal("expected a relative import under a synthetic root to fail")
 	}
@@ -169,7 +169,7 @@ func TestWithSyntheticRoot_KeyResolvingToRootIsError(t *testing.T) {
 			t.Parallel()
 			sources := map[string][]byte{key: []byte("schema \"s\"\n\ntype T {\n\tid String primary\n}\n")}
 			_, res := schema.LoadSourcesWithEntry(t.Context(), sources, key, "",
-				schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://app"))
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
 			if !res.HasErrors() {
 				t.Fatalf("expected key %q to be rejected", key)
 			}
@@ -187,7 +187,7 @@ func TestWithSyntheticRoot_AbsoluteKeyIsError(t *testing.T) {
 
 	sources := map[string][]byte{"/abs/main.yammm": []byte("schema \"s\"\n\ntype T {\n\tid String primary\n}\n")}
 	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "/abs/main.yammm", "",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://app"))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
 	if !res.HasErrors() {
 		t.Fatal("expected an absolute key to be rejected")
 	}
@@ -208,7 +208,7 @@ func TestWithSyntheticRoot_DotSlashKeyMatchesBareKey(t *testing.T) {
 		"./main.yammm":  src["main.yammm"],
 	}
 	s, res := schema.LoadSourcesWithEntry(t.Context(), dotted, "./main.yammm", "",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://root"))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://root"))
 	if res.HasErrors() {
 		t.Fatalf("load: %s", firstError(res))
 	}
@@ -233,7 +233,7 @@ func TestWithSyntheticRoot_KeyEscapingRootResolves(t *testing.T) {
 		"../main.yammm": src["main.yammm"],
 	}
 	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "../main.yammm", "",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://root"))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://root"))
 	if res.HasErrors() {
 		t.Fatalf("load: %s", firstError(res))
 	}
@@ -255,7 +255,7 @@ func TestWithSyntheticRoot_TrailingSlashTrimmed(t *testing.T) {
 		t.Run("root="+root, func(t *testing.T) {
 			t.Parallel()
 			s, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
-				schema.WithSourcesOnly(), schema.WithSyntheticRoot(root))
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
 			if res.HasErrors() {
 				t.Fatalf("load: %s", firstError(res))
 			}
@@ -276,7 +276,7 @@ func TestWithSyntheticRoot_InvalidRoot(t *testing.T) {
 		t.Run("root="+root, func(t *testing.T) {
 			t.Parallel()
 			_, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
-				schema.WithSourcesOnly(), schema.WithSyntheticRoot(root))
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
 			if !res.HasErrors() {
 				t.Fatalf("expected root %q to be rejected", root)
 			}
@@ -309,7 +309,7 @@ func TestWithSyntheticRoot_RejectsModuleRoot(t *testing.T) {
 	t.Parallel()
 
 	_, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "/project",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://app"))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
 	if !res.HasErrors() {
 		t.Fatal("expected a synthetic root with a module root to be rejected")
 	}
@@ -349,7 +349,7 @@ func TestWithSyntheticRoot_EmptyRootIsNotSilentlyIgnored(t *testing.T) {
 	t.Parallel()
 
 	_, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
-		schema.WithSourcesOnly(), schema.WithSyntheticRoot(""))
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(""))
 	if !res.HasErrors() {
 		t.Fatal("expected an empty synthetic root to be rejected")
 	}

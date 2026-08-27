@@ -84,9 +84,9 @@ schema.Load(ctx, path,
     schema.WithModuleRoot("/custom/root"),
     schema.WithIssueLimit(100),
     schema.WithLogger(logger),
-    schema.WithDisallowImports(),
+    schema.WithImportsAllowed(false),
     schema.WithRegistry(registry),
-    schema.WithSourcesOnly(), // hermetic: imports resolve only against in-memory sources — pair with LoadSourcesWithEntry, which seeds them
+    schema.WithSourcesOnly(true), // hermetic: imports resolve only against in-memory sources — pair with LoadSourcesWithEntry, which seeds them
 )
 ```
 
@@ -284,7 +284,7 @@ data, result := snapshot.Marshal(ctx, snap,
 
 ```go
 snap, result := snapshot.Load(ctx, data, s,
-    snapshot.WithSkipIntegrityCheck(),
+    snapshot.WithIntegrityCheck(false),
 )
 ```
 

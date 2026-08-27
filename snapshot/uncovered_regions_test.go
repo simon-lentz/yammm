@@ -225,7 +225,7 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(crossSchemaEdgeEntry),
 		"base.yammm":  []byte(crossSchemaEdgeBase),
-	}, "entry.yammm", ".", schema.WithSourcesOnly())
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if result.HasErrors() {
 		t.Fatalf("load cross-schema-with-edge fixture: %s", result)
 	}
