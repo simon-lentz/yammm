@@ -15,7 +15,7 @@ var rules = lexer.Rules{"Root": {
 	{Name: "WS", Pattern: `[ \t\r\n]+`},
 	{Name: "DOC_COMMENT", Pattern: `/\*(?s:.)*?\*/`},
 	{Name: "SL_COMMENT", Pattern: `//[^\r\n]*`},
-	{Name: "REGEXP", Pattern: `/(?:\\(?s:.)|[^\\/\r\n])*/`},
+	{Name: "REGEXP", Pattern: `/(?:\\[^\r\n]|[^\\/\r\n])*/`},
 	{Name: "STRING", Pattern: `"(?:\\[btnfrux0"'\\]|[^\\"\r\n])*"|'(?:\\[btnfrux0"'\\]|[^\\'\r\n])*'`},
 	{Name: "VARIABLE", Pattern: `\$(?:[0-9]+|[a-z][a-zA-Z0-9_]*)`},
 	{Name: "FLOAT", Pattern: `[0-9]+\.[0-9]+(?:[eE][-+]?[0-9]+)?\b`},

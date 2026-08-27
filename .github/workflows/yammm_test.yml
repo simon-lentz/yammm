@@ -34,10 +34,28 @@ jobs:
         run: |
           go build -o "${{ runner.temp }}/bin/golangci-lint" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
           echo "${{ runner.temp }}/bin" >> "$GITHUB_PATH"
+      # The schema comes from the module cache, not from golangci-lint.run.
+      # The action's own `verify` fetches it over the network at the start of
+      # the lint step, and a fetch timeout there fails lint before `go test`
+      # ever runs — so a transient DNS or CDN problem reports the tree as
+      # broken. It did that twice in twenty runs. The module already ships the
+      # schema its own source builds against, so pointing at it keeps the check
+      # and removes the network: the same argument the step above makes for
+      # building the linter from go.mod rather than downloading a release.
+      #
+      # `next` is the right file, not a versioned one. For a source build the
+      # binary asks for `golangci.next.jsonschema.json` at its own ref, and the
+      # newest versioned schema in the module lags the module's own version.
+      - name: Verify the linter config
+        run: |
+          schema="$(go list -m -f '{{.Dir}}' github.com/golangci/golangci-lint/v2)/jsonschema/golangci.next.jsonschema.json"
+          test -f "$schema" || { echo "schema not found at $schema"; exit 1; }
+          golangci-lint config verify --config=.golangci.yml --schema "file://$schema"
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           install-mode: none
+          verify: false
           args: --config=.golangci.yml
       - name: Test
         # -race enforces the data-race gate in CI rather than as local

@@ -39,6 +39,21 @@ func TestLex_FirstMatchOrdering(t *testing.T) {
 			want: []Token{{Kind: "REGEXP", Value: "/ab/", Start: 0, End: 4}},
 		},
 		{
+			// The escape branch must stay line-bounded too: a backslash before
+			// a raw newline is not an escaped newline inside the literal, so the
+			// opening slash has no partner on its line and lexes as division.
+			name: "a backslash cannot carry a regex across a line",
+			src:  "/a\\\nb/",
+			want: []Token{
+				{Kind: "SLASH", Value: "/", Start: 0, End: 1},
+				{Kind: "LC_WORD", Value: "a", Start: 1, End: 2},
+				{Kind: "ANY_OTHER", Value: "\\", Start: 2, End: 3},
+				{Kind: "WS", Value: "\n", Start: 3, End: 4},
+				{Kind: "LC_WORD", Value: "b", Start: 4, End: 5},
+				{Kind: "SLASH", Value: "/", Start: 5, End: 6},
+			},
+		},
+		{
 			name: "a lone slash is division",
 			src:  "a / b",
 			want: []Token{

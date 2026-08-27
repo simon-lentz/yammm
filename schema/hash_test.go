@@ -104,7 +104,7 @@ func buildTypeWithProps(name string, props []*schema.Property) *schema.Type {
 }
 
 func TestStructuralHashVersion(t *testing.T) {
-	assert.Equal(t, 2, schema.StructuralHashVersion)
+	assert.Equal(t, 3, schema.StructuralHashVersion)
 }
 
 func TestStructuralHash_NilPanics(t *testing.T) {

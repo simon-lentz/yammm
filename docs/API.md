@@ -631,7 +631,7 @@ Renaming the `schema "X"` declaration changes the hash even when every member is
 
 **Annotations are the sole exclusion.** They drive downstream store DDL and never reject data, so they cannot change what instance data is valid.
 
-The hash is used by the `snapshot` package to verify that a persisted snapshot is compatible with the schema provided at load time. `StructuralHashVersion` (currently `2`) identifies the hashing algorithm version; v0.15.0 raised it from `1` when invariants and the `abstract` / `part` markers joined the input.
+The hash is used by the `snapshot` package to verify that a persisted snapshot is compatible with the schema provided at load time. `StructuralHashVersion` (currently `3`) identifies the hashing algorithm version; v0.15.0 raised it from `1` when invariants and the `abstract` / `part` markers joined the input, and v0.17.0 raised it to `3` when the input widened from the entry schema's own declarations to its whole import closure.
 
 ## Snapshot Persistence
 

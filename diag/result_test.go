@@ -536,3 +536,57 @@ func TestResult_Err_MatchesString(t *testing.T) {
 		t.Errorf("Error() = %q; want %q (same as String())", err.Error(), r.String())
 	}
 }
+
+// The retained set must follow arrival order across MORE than one eviction.
+// After the first eviction the victim slot is overwritten in place, so slice
+// position no longer says which issue arrived first; a victim chosen by slot
+// position then evicts the wrong one. Two warnings, two errors and a fatal
+// through a two-slot collector must keep the FIRST error, not the second.
+func TestCollector_LimitEvictsLatestAcrossRepeatedEvictions(t *testing.T) {
+	c := NewCollector(2)
+	c.Collect(NewIssue(Warning, E_SYNTAX, "W1").Build())
+	c.Collect(NewIssue(Warning, E_SYNTAX, "W2").Build())
+	c.Collect(NewIssue(Error, E_INTERNAL, "E1").Build())
+	c.Collect(NewIssue(Error, E_INTERNAL, "E2").Build())
+	c.Collect(NewIssue(Fatal, E_INTERNAL, "F1").Build())
+
+	got := retainedMessages(c)
+	want := []string{"E1", "F1"}
+	if !slices.Equal(got, want) {
+		t.Errorf("retained messages = %v, want %v (earliest-arrived of each severity survives)", got, want)
+	}
+}
+
+// The same rule must hold when the evicting issues arrive through Merge, which
+// shares the storage path.
+func TestCollector_MergeEvictsLatestAcrossRepeatedEvictions(t *testing.T) {
+	c := NewCollector(2)
+	c.Collect(NewIssue(Warning, E_SYNTAX, "W1").Build())
+	c.Collect(NewIssue(Warning, E_SYNTAX, "W2").Build())
+
+	errs := NewCollectorUnlimited()
+	errs.Collect(NewIssue(Error, E_INTERNAL, "E1").Build())
+	errs.Collect(NewIssue(Error, E_INTERNAL, "E2").Build())
+	c.Merge(errs.Result())
+
+	fatal := NewCollectorUnlimited()
+	fatal.Collect(NewIssue(Fatal, E_INTERNAL, "F1").Build())
+	c.Merge(fatal.Result())
+
+	got := retainedMessages(c)
+	want := []string{"E1", "F1"}
+	if !slices.Equal(got, want) {
+		t.Errorf("retained messages = %v, want %v", got, want)
+	}
+}
+
+// retainedMessages returns the stored issues' messages sorted, so a test can
+// assert the retained SET without depending on Result's severity ordering.
+func retainedMessages(c *Collector) []string {
+	var got []string
+	for iss := range c.Result().Issues() {
+		got = append(got, iss.Message())
+	}
+	slices.Sort(got)
+	return got
+}
