@@ -21,8 +21,8 @@ type Slice struct {
 // to s or any mutable value reachable from s. Mutation after WrapSlice is
 // undefined behavior.
 //
-// Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
-// caller to freely retain and mutate the original.
+// Pass [WithClone] with true to deep-clone what would be stored as-is — a
+// non-string-keyed map and its contents — so the caller can retain it.
 func WrapSlice(s []any, opts ...Option) Slice {
 	if s == nil {
 		return Slice{}
