@@ -15,7 +15,7 @@ Some validation surfaces have no value to return and produce a bare `diag.Result
 - `value != nil && result.OK()` — success. The result may still carry warnings.
 - `value == nil && !result.OK()` — failure.
 - `value != nil && !result.OK()` — a partial or unvalidated answer, and a documented contract on several surfaces. `snapshot.Info` returns a populated summary beside an Error-severity `E_SNAPSHOT_INTEGRITY_MISMATCH`; `snapshot.ScanDirSliceWith` returns the entries collected before cancellation beside a Fatal `E_CONTEXT_CANCELLED`; `instance.Validator.Validate` returns one slot per input, nil for the failures, beside a merged non-OK result. Discarding the value here loses real data.
-- `value == nil && result.OK()` — nothing to do. `instance.Validator.Validate` and `ValidateForComposition` return `nil, diag.OK()` for nil input, which is distinct from the empty slice they return for empty input.
+- `value == nil && result.OK()` — nothing to do. `instance.Validator.Validate` and `ValidateForComposition` return `nil, diag.OK()` for nil input. For a non-nil empty input `Validate` returns the empty slice unconditionally; `ValidateForComposition` returns it only once the parent type and the relation resolve, and returns `nil` beside a non-OK result when either does not.
 
 Use `result.Err()` to convert to a standard Go `error` when `!result.OK()`.
 
@@ -322,7 +322,10 @@ if !result.OK() {
 // Validate a single instance
 one, result := validator.ValidateOne(ctx, "Person", rawInstance)
 
-// Validate instances in a composition context (part types allowed)
+// Validate instances in a composition context (part types allowed). Primary keys
+// are enforced exactly as ValidateOne enforces them; what is relaxed lives
+// elsewhere: a part type may declare no primary key at load, and a keyless
+// child type skips the duplicate-key scan.
 composed, result := validator.ValidateForComposition(ctx, "Car", "WHEELS", rawWheels)
 ```
 
@@ -390,7 +393,7 @@ Build errors include the bound type's name, the offending property/relation, and
 
 `SchemaBuilder` is NOT concurrent-safe; construct one per goroutine. The bound `*schema.Schema` remains safe to share across many concurrent builders.
 
-The shape portion of `ValidateOne` — property and relation names, and association cardinality — is guaranteed to pass on the output of a successful `Build`. Compositions are not covered: the builder cannot produce one. Value-level validation (constraint checks, PK coercion, reference integrity) still runs at `ValidateOne` time.
+The shape portion of `ValidateOne` — property and relation names, and association cardinality — is guaranteed to pass on the output of a successful `Build`. Compositions are not covered: the builder cannot produce one. Value-level validation (constraint checks, PK coercion, foreign-key shape and key-component checks) still runs at `ValidateOne` time. Reference integrity — whether an association's target exists — is checked by `graph.Check`, never by the validator.
 
 ### Value Functions
 
@@ -498,7 +501,7 @@ finRes, err := ba.Finalize(ctx)
 
 New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK`, and `Finalize`'s check covers the union — a required association imported from the seed and still unresolved fails the batch with `E_UNRESOLVED_REQUIRED`. `Count()` reflects only records added through the assembler (seeded instances are not counted), and construction diagnostics are not carried over from the seed (`.ys`-loaded snapshots carry none by design; `Duplicates` and `Unresolved` are the persistent structural records, and both import). The seed snapshot must originate from the same schema — taken from a `Graph` bound to it, or loaded via `snapshot.Load` against it, which verifies structural compatibility. Every other contract — lifecycle, finalize barrier, validator access, `FinalizeResult` — is identical to `NewBatchAssembler`.
 
-**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `internal/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict, parent and relation coordinates), provenance-presence-aware, and exact for every numeric property, dynamic type included: schema-aware float emission keeps `KindFloat` values `float64` across a marshal/load round trip, so an `int64`/`float64` mismatch is a real defect, not a wire artifact. One deliberate exception: a `float32` compares equal to the `float64` its 32-bit shortest wire form parses to, because `Load` materializes dynamic numerics as `int64` and `float64` only and the wire carries value fidelity, not width.
+**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `internal/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict, parent and relation coordinates), provenance-presence-aware, and exact for every numeric property, dynamic type included: schema-aware float emission keeps `KindFloat` values `float64` across a marshal/load round trip, so an `int64`/`float64` mismatch is a real defect, not a wire artifact. One deliberate exception: a `float32` compares equal to the `float64` its 32-bit shortest wire form parses to, because `Load` materializes a finite dynamic numeric as `int64` or `float64` and the wire carries value fidelity, not width.
 
 ### Seeding from a Snapshot
 
@@ -565,9 +568,9 @@ The `Snapshot` type provides read-only access to graph state:
 
 - `Snapshot.Types()`: Lexicographic by `TypeID` — schema path, then name
 - `Snapshot.InstancesOf()`: Lexicographic by primary key
-- `Snapshot.Edges()`: Lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
+- `Snapshot.Edges()`: Lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey), then the edge properties
 - `Snapshot.Duplicates()`: Lexicographic by (`TypeID`, primaryKey), then relation, conflict `TypeID`, conflict primary key, parent slot, and finally the rejected instance's properties
-- `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
+- `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey), then reason, then required (optional before required), and finally the edge properties
 
 Types are identified by `schema.TypeID`, never by name. A name is a rendering of an identity — bare for a local type, alias-qualified for a directly imported one — so it cannot name a transitively imported type and cannot separate two same-named types in different schemas. Use `schema.TagForm(snap.Schema(), id)` where a name is wanted for output.
 
@@ -625,11 +628,11 @@ The `schema` package provides a content-based hashing function for structural co
 hash := schema.StructuralHash(s) // returns "sha256:<hex>"
 ```
 
-`StructuralHash` computes a deterministic hash over the rules that decide what instance data is valid. Two schemas produce the same hash if and only if they agree on **the schema name**, and on their types, properties, relations, compositions, data types and constraints (by name, kind, and parameters), their **invariants**, and each type's **`abstract` and `part` markers**.
+`StructuralHash` computes a deterministic hash over the rules that decide what instance data is valid, across the schema's whole import closure (`Schema.Closure()`). For every member schema — the entry schema and each schema it imports, directly or transitively — the input covers **the member's schema name**, its types (properties with constraints and modifiers, the primary-key set, associations with targets, multiplicities and edge properties, compositions, **inheritance edges**, **invariant expressions**, and the **`abstract` and `part` markers**) and its data types. Two schemas that hash the same agree on every one of those rules everywhere in their closures. The converse does not hold: a hash can also move on a change to an imported schema this schema never references, because closure membership is part of the identity.
 
-Renaming the `schema "X"` declaration changes the hash even when every member is identical. Invariant *expressions* are hashed order-independently; an invariant's *name* is not.
+Each member is framed under its schema name — renaming any member's `schema "X"` declaration changes the hash even when every declaration is identical — the entry schema first and the remaining members ordered by name, so the order imports are declared in does not enter the digest. An invariant's *name* is not hashed at all; it is the failure message. Invariant expressions hash as an order-independent set per type, while the operands inside one expression hash in declared order, because operand order is semantic.
 
-**Annotations are the sole exclusion.** They drive downstream store DDL and never reject data, so they cannot change what instance data is valid.
+**Excluded, deliberately:** annotations, which drive downstream store DDL and never reject data; import aliases and source paths — relation and supertype targets hash by name, never by schema path, and a member frame carries the declared schema name, never its source, so `embedded://` and disk loads of one schema text agree; and documentation, source spans, and every derived index or cache.
 
 The hash is used by the `snapshot` package to verify that a persisted snapshot is compatible with the schema provided at load time. `StructuralHashVersion` (currently `3`) identifies the hashing algorithm version; v0.15.0 raised it from `1` when invariants and the `abstract` / `part` markers joined the input, and v0.17.0 raised it to `3` when the input widened from the entry schema's own declarations to its whole import closure.
 
@@ -639,7 +642,7 @@ The `snapshot` package serializes and deserializes `graph.Snapshot` values to an
 
 ### File Format
 
-The `.ys` format is JSON-based and preserves structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip. One numeric qualification: the wire carries value fidelity, not width — `Load` materializes dynamic numeric values as `int64` and `float64`, with one exception — a literal no finite `float64` can hold (`1e400`) returns as an unconverted `json.Number`, so a `float32` property returns as the `float64` its 32-bit shortest wire form parses to (converting it back to `float32` returns the original). A caller-assembled snapshot the writer cannot serialize returns nil bytes with a Fatal `E_INTERNAL`; snapshots built through `graph.Graph` or `Load` never trigger that path.
+The `.ys` format is JSON-based and preserves structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip, with three qualifications. Provenance survives as source name and path only: a loaded instance's `Provenance().Span()` is zero. A duplicate's `Diagnostic` is not persisted and reads as a zero `diag.Issue` after `Load`; code that runs on both constructed and loaded snapshots guards on `IsZero`. And the wire carries numeric value fidelity, not width — `Load` materializes dynamic numeric values as `int64` and `float64`, with two exceptions — a literal no finite `float64` can hold (`1e400`) returns as an unconverted `json.Number`, and so does a number nested more than 64 levels deep inside a dynamic value, where normalization stops recursing — so a `float32` property returns as the `float64` its 32-bit shortest wire form parses to (converting it back to `float32` returns the original). A caller-assembled snapshot the writer cannot serialize returns nil bytes with a Fatal `E_INTERNAL`; snapshots built through `graph.Graph` or `Load` never trigger that path.
 
 The format includes:
 
@@ -950,7 +953,7 @@ func UpdateMetadataOrReMarshal(
 func WithUpdateCreatedAt(t time.Time) UpdateOption
 ```
 
-**When to use which.** `UpdateMetadataOrReMarshal` is the default entry point for most consumers: it runs the fast path and transparently falls back to `Load + Marshal` on any recoverable Fatal (body-offset failure, malformed header, other non-cancellation Fatal), emitting a Warning-severity `W_UPDATE_METADATA_FALLBACK` on the returned `diag.Result` so operators can observe the transition. The primitive `UpdateMetadata` stays exported for consumers who genuinely need the strict fast path — benchmarks isolating the fast-path cost, or workflows where any Load + Marshal round-trip is operationally unacceptable.
+**When to use which.** `UpdateMetadataOrReMarshal` is the default entry point for most consumers: it runs the fast path and transparently falls back to `Load + Marshal` whenever the fast path reports an Error or a Fatal — a body-offset failure, a malformed header, an unsupported version, feature or hash algorithm; anything but cancellation — emitting a Warning-severity `W_UPDATE_METADATA_FALLBACK` on the returned `diag.Result` so operators can observe the transition. When the fallback then fails too, the returned result is the union of both passes, so an issue the two share appears twice. The primitive `UpdateMetadata` stays exported for consumers who genuinely need the strict fast path — benchmarks isolating the fast-path cost, or workflows where any Load + Marshal round-trip is operationally unacceptable.
 
 **Speedup.** On a 20 MB `.ys` input the fast path is several times faster than the equivalent `Load + Marshal` round trip. **The enforced lower bound is 3×**: `TestUpdateMetadataRatioFloor` in the `snapshot` package measures both paths over a median of five samples and fails below that ratio. This document states the floor rather than an absolute timing, because the measured ratio varies with hardware and falls as `UpdateMetadata` gains header checks before the body splice.
 
@@ -958,7 +961,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 **Failure modes.** The primitive returns structured diagnostics with stable codes:
 
-- `E_SNAPSHOT_MALFORMED` — the input header does not parse (truncated JSON, missing required fields, wrong first key). Same code `HeaderOnly` / `HeaderOnlyRead` emit for equivalent conditions.
+- `E_SNAPSHOT_MALFORMED` — the document's outer shape or header is malformed: the four top-level keys absent, repeated, out of order, `null`, joined by a fifth key or followed by trailing bytes; a header that does not parse (truncated JSON, missing required fields); or a `types` table stating one identity on two rows. Same code `HeaderOnly` / `HeaderOnlyRead` emit for equivalent conditions.
 - `E_SNAPSHOT_UNSUPPORTED_VERSION` — the header states a version no read path accepts (v1 and v2 included; v3 is the only readable version). The document is refused rather than relabelled — `UpdateMetadata` is a header rewrite, never a migration — and `UpdateMetadataOrReMarshal`'s `Load` fallback refuses it the same way.
 - `E_UPDATE_METADATA_BODY_OFFSET` — the header parsed cleanly but the body-boundary tracking resolved to an unexpected byte pattern, indicating the input does not match the shape `Marshal` produces. Byte-identical recovery via the fast path is not possible; `UpdateMetadataOrReMarshal` falls back to `Load + Marshal` automatically.
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — the header's `features` array holds an entry this version does not recognize. One issue per unrecognized entry.
@@ -1113,7 +1116,7 @@ n, err := adapter.WriteObject(ctx, w, snap, writeOpts...)
 
 The object output is keyed by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — `MarshalObject` and `WriteObject` return an error naming both identities instead of merging the pair under one key.
 
-The writers emit exactly what the parse methods and `instance.Validator` accept (v0.15.0): an association renders as a `_target_<pk>`-keyed object with its edge properties beside the key fields — one object for `(one)`, an array of objects for `(many)` — with key components and edge-property values rendered through their constraints' canonical forms. A composition renders as an array of child objects for every multiplicity. Unresolved edges are not written; the round-trip identity is scoped to fully resolved graphs.
+The writers emit exactly what `ParseObject` and `instance.Validator` accept (v0.15.0): an association renders as a `_target_<pk>`-keyed object with its edge properties beside the key fields — one object for `(one)`, an array of objects for `(many)` — with key components and edge-property values rendered through their constraints' canonical forms. A composition renders as an array of child objects for every multiplicity. Unresolved edges are not written; the round-trip identity is scoped to fully resolved graphs.
 
 ### Write Options
 
@@ -1146,7 +1149,7 @@ adapter := neo4j.New(opts...)
 | `WithEdition` | Neo4j edition (`Enterprise` or `Community`); controls constraint types |
 | `WithLabelSeparator` | Separator between the schema name and the type name inside one label (default: `__`) |
 | `WithLabelPrefix` | Prefix for generated labels. Applied only when a schema name is supplied to `Label`; an unscoped label is the sanitized type name alone |
-| `WithScalarTypeConstraints` | Emit **scalar** `PROPERTY_TYPE` constraints (Enterprise only). List-type constraints are emitted regardless |
+| `WithScalarTypeConstraints` | Emit **scalar** `PROPERTY_TYPE` constraints (Enterprise only). List-type constraints are emitted regardless of this option |
 | `WithRequiredOnlyTypeConstraints` | Emit type constraints only for required properties |
 | `WithNodeKeyConstraints` | Emit `NODE KEY` constraints (requires Neo4j 5.7+) |
 | `WithNamedConstraints` | Emit a name on each constraint. `IF NOT EXISTS` is emitted either way; names are what `DROP CONSTRAINT` and diff tooling need |
@@ -1210,7 +1213,7 @@ shapes, result := adapter.ShapeForSchema(ctx, s)
 
 `ShapeForSchema` returns a `*GraphShape` whose `Types` map is keyed by `schema.TypeID` and holds `NodeShape` values. Each `NodeShape` describes the `Type` (original yammm type name), `Label` (fully qualified Neo4j label), `PrimaryKeys`, `RequiredFields`, and `ImmutableKeys` (the type's `@writeOnce` properties, always populated and non-nil even when empty) for a type.
 
-The walk covers the whole import closure (`Schema.Closure()`): every member schema's types — imported and transitively imported ones included — get a shape, labelled under the declaring schema's name (v0.15.0). A label collision across closure members is refused with `E_NEO4J_LABEL_COLLISION`.
+The walk covers the whole import closure (`Schema.Closure()`): every member schema's non-abstract, renderable types — imported and transitively imported ones included — get a shape, labelled under the declaring schema's name (v0.15.0). A label collision across closure members is refused with `E_NEO4J_LABEL_COLLISION`.
 
 ### Write Queries
 
@@ -1312,7 +1315,7 @@ func CoerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 
 Coercion rules: `Float` ← any Go integer width (`int`, `int8`…`int64`, `uint`…`uint64`) or `float32` → `float64` (a `float64` passes through); `Timestamp` ← a string parsed against the constraint's custom Go layout when it declares one (`Timestamp["…"]`) or RFC3339 / RFC3339Nano otherwise → `time.Time` (a `time.Time` passes through); `Date` ← `"2006-01-02"` string or `time.Time` → `dbtype.Date` (a `dbtype.Date` passes through); `Integer` ← any signed or unsigned Go integer width, or a whole `float32`/`float64` → `int64` (a fractional float, or one outside the `int64` range, is an error); every other scalar kind passes through unchanged. `List<T>` values are coerced element-wise into the concrete typed slice (`List<Float>` of `int64`s → `[]float64`, `List<Date>` of strings → `[]dbtype.Date`, and so on); a `List<Timestamp["…"]>` honors the element's custom layout too.
 
-**Zone handling, for `Timestamp`.** The driver sends an instant either as an offset or as a time-zone identifier the server must resolve, so `Coerce` expresses every instant in a location the driver can send. Two rules, in order: `time.Local` is always re-expressed in its offset — a value built by `time.Now` carries the host's location, whose name is `"Local"` on a host with no `TZ` set and which no server resolves; and any other location is kept only when the host's tz database resolves its name (an IANA name such as `Europe/Berlin`, or a legacy name such as `EST`), otherwise it too is re-expressed in its offset. A value parsed from text lands wherever `time.Parse` put it: a `Z` suffix yields `time.UTC`, which is kept as-is; an offset matching the host's local offset at that instant yields `time.Local`, which the first rule re-expresses; any other offset yields an unnamed zone, which is already the offset form. The coerced value depends on the text alone and not on where the process runs. The instant never moves. A consumer binary that must keep IANA names on a host without a tz database imports `time/tzdata`.
+**Zone handling, for `Timestamp`.** The driver sends an instant either as an offset or as a time-zone identifier the server must resolve, so `Coerce` expresses every instant in a location the driver can send. Two rules, in order: `time.Local` is always re-expressed in its offset — a value built by `time.Now` carries the host's location, whose name is `"Local"` on a host with no `TZ` set and which no server resolves; and any other location is kept only when the host's tz database resolves its name (an IANA name such as `Europe/Berlin`, or a legacy name such as `EST`), otherwise it too is re-expressed in its offset. A value parsed from text lands wherever `time.Parse` put it: a `Z` suffix yields `time.UTC`, which is kept as-is; an offset matching the host's local offset at that instant yields `time.Local`, which the first rule re-expresses; any other offset yields an unnamed zone, which the second rule re-expresses in its offset: the driver selects the offset encoding by zone name, so an unnamed zone is not yet that form. The coerced value depends on the text alone and not on where the process runs. The instant never moves. A consumer binary that must keep IANA names on a host without a tz database imports `time/tzdata`.
 
 The four transforming kinds (`Float`, `Integer`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value always passes through; an unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
@@ -1359,9 +1362,9 @@ owned := adapter.OwnedLabels(ctx, s)
 diff := adapter.DiffIndexes(desired, actual, owned)
 ```
 
-`OwnedLabels` is the set of labels this adapter emits for the schema. The diff entry points take it rather than a schema name because ownership cannot be recovered from a label string: `Label` composes a label from a caller-configurable prefix and separator around two sanitized free-form names, so for any rule that tries to read a schema back out of a label there is a configuration, or a sibling schema name, that satisfies the rule without belonging to the schema.
+`OwnedLabels` is a superset of the labels this adapter emits for the schema: it lists every member type's label, while the emitters additionally skip a type whose assembled label fails `ValidateIdentifier` — a deliberate divergence the method's own godoc states. The diff entry points take it rather than a schema name because ownership cannot be recovered from a label string: `Label` composes a label from a caller-configurable prefix and separator around two sanitized free-form names, so for any rule that tries to read a schema back out of a label there is a configuration, or a sibling schema name, that satisfies the rule without belonging to the schema.
 
-`DiffIndexes` returns an `*IndexDiffResult` with **five** sets: `Match`, `Drift` (four producers: a vector index whose dimension or similarity differs; a definition change under a name the database already holds; an index in a state that serves no queries; and a desired index whose name or definition is held by an object the schema does not own or cannot express), `Create`, `Drop`, and `Unverified`. Composite property order is significant, a deliberate divergence from `DiffConstraints`: a same-set/different-order remote index is a distinct index — create + drop when its name differs too, and drift when it holds the desired index's name (a `CREATE ... IF NOT EXISTS` under a name the database already holds is a silent no-op). A schema-owned remote index with no declaration is reported as a drop; drops are reported, never applied.
+`DiffIndexes` returns an `*IndexDiffResult` with **five** sets: `Match`, `Drift` (four producers: a vector index whose dimension or similarity differs; a definition change under a name the database already holds; an index in a state that serves no queries and will not recover (`FAILED`); and a desired index whose name or definition is already held by another object — including one this schema owns, such as an index realising a different declaration, or a constraint's backing index), `Create`, `Drop`, and `Unverified`. Composite property order is significant, a deliberate divergence from `DiffConstraints`: a same-set/different-order remote index is a distinct index — create + drop when its name differs too, and drift when it holds the desired index's name (a `CREATE ... IF NOT EXISTS` under a name the database already holds is a silent no-op). A schema-owned remote index with no declaration is reported as a drop; drops are reported, never applied.
 
 Fulltext rows participate in that classification exactly as range and vector rows do — **with one exclusion**: a multi-label fulltext index (`FOR (n:A|B)`) is a shape no per-type annotation can declare, so it is never matched, never dropped, and never treated as serving a single-label declaration's definition (the server creates the declaration beside it); it is counted in `Excluded`, while its **name** still blocks every `CREATE`.
 
@@ -1432,11 +1435,13 @@ names, primary keys, assembled labels) are validated during constraint and index
 generation and rejected with `ErrReservedKeyword` — the check is
 case-insensitive. `ShapeForSchema` validates the assembled **label** only; it is
 not a property-name gate. Namespaced labels usually absorb reserved type names
-(`app__MATCH` is not a keyword); a reserved property name always fails. For
+(`app__MATCH` is not a keyword); a reserved property name fails wherever an
+emitter validates it — and `WithScalarTypeConstraints(false)` and
+`WithRequiredOnlyTypeConstraints(true)` each narrow that set. For
 export-compatibility feedback before write time, run `ConstraintsForSchema`
 **and** `IndexesForSchema`, or call `ValidateIdentifier` on names directly — the
-index pass is what covers a property named only by an `@index`, `@@index` or
-`@vector` annotation.
+index pass is what covers a property named only by an `@index`, `@@index`,
+`@vector`, `@fulltext` or `@@fulltext` annotation.
 
 ## CSV Adapter
 
@@ -1495,10 +1500,10 @@ CSV values are strings. The adapter uses schema constraint metadata to coerce va
 - **Boolean**: `strconv.ParseBool` — every spelling it takes (`1`, `t`, `T`, `true`, `TRUE`, `True`, and the false equivalents)
 - **Date**: validated as `"2006-01-02"` format, kept as string
 - **Timestamp**: validated against the constraint's declared layout when it has one — that layout alone, RFC 3339 refused — and against RFC 3339 / RFC3339Nano for the default layout; kept as string
-
-On the write side the adapter renders `Timestamp`, `Date` and `UUID` through their constraint, so a cell carries the same text the validator stores — including foreign-key columns, whose components render through the **target** type's primary-key constraints, and list elements, which render through the element constraint. A value the constraint cannot render is written as it arrived: an export has no diagnostic channel, and one malformed cell must not fail the file.
 - **List**: split by list separator, elements coerced recursively
 - **Vector**: split by the list separator, each element through `strconv.ParseFloat`
+
+On the write side the adapter renders `Timestamp`, `Date` and `UUID` through their constraint, so a cell carries the same text the validator stores — including foreign-key columns, whose components render through the **target** type's primary-key constraints, and list elements, which render through the element constraint. A value the constraint cannot render is written as it arrived: an export has no diagnostic channel, and one malformed cell must not fail the file.
 
 ### Relation Columns
 
@@ -1626,7 +1631,7 @@ The document title is the schema name.
 
 The document describes exactly the object form `adapter/json`'s `ParseObject` + `instance.Validator` accept:
 
-- **Envelope** — one object keyed by type name (`{"Person": [...], "Car": [...]}`), each key an array of instances. Entry-schema **concrete, non-`part`** types under their bare name (an `abstract` or `part` type is `$defs`-only — neither can be instantiated at top level); **directly imported** types under their alias-qualified name (`common.Region` — the only form the validator resolves for them); transitively imported types are `$defs`-only.
+- **Envelope** — one object keyed by type name (`{"Person": [...], "Car": [...]}`), each key an array of instances. Entry-schema **concrete, non-`part`** types under their bare name (a `part` type is `$defs`-only and an `abstract` type appears in neither position — neither can be instantiated at top level); **directly imported** types under their alias-qualified name (`common.Region` — the only form the validator resolves for them); transitively imported types are `$defs`-only.
 - **Instance objects** — properties by name, relations by their lower_snake field name; `additionalProperties: false` (the instance layer rejects unknown fields); required properties in `required`.
 - **Associations** — an edge object (to-one) or array of edge objects (to-many), each `$ref`ing an `EDGE_<Owner>_<field>_<Target>` def carrying the required `_target_<pk_name>` foreign-key fields (validated against the target key's own constraint — a DataType-typed key keeps its `$ref`) plus edge properties. Association **presence is deliberately not `required`**: the instance layer defers it to graph assembly, so a per-file requirement would flag files yammm validates cleanly; the generated `description` states the multiplicity, and for a **required** association the enforcement point as well.
 - **Compositions** — always arrays of child objects; required compositions are `required` + `minItems: 1`; to-one compositions get `maxItems: 1` (mirroring graph-assembly enforcement).
@@ -1671,10 +1676,10 @@ One document per invocation, covering the entry schema plus its whole import clo
 
 - **Title + schema doc** — `# Schema <Name>`, then the schema's doc-comment verbatim.
 - **Class diagram** — a `## Class Diagram` heading, then one Mermaid `classDiagram` fence over the entire closure. Classes carry each type's **own** members as `name KindLabel` pairs (named DataTypes show their name; constraint detail stays out of the diagram); abstract and part types carry `<<Abstract>>` / `<<Part>>` stereotypes; edges are `Parent <|-- Child` for inheritance and DSL-labeled `Owner --> Target : NAME (mult)` / `Owner *-- Child : NAME (mult)` for each type's own associations and compositions — inherited structure is conveyed by the inheritance edges, not redrawn. Qualified names (invalid as Mermaid class ids) emit the sanitized-id form `class common_Region["common.Region"]`; Mermaid namespaces are deliberately not used (some Markdown renderers do not support them in class diagrams).
-- **Type sections** — a `## Types` heading, then one `### <TypeName>` per type in declaration order: a badge line (`*Abstract type*` / `*Part type*` / `Extends: [Parent](#parent)`), the doc-comment, then a **flattened property table** (Property | Type | Modifiers | Description) over the full inheritance chain — the Type column renders each constraint's DSL form (`String[1, 100]`, `List<FipsCode>`), and inherited rows carry `from <Owner>` in Modifiers. Associations and compositions follow as DSL-notation bullets with linked targets, an inherited relation carrying the same provenance as a ` — from <Owner>` marker; edge properties nest as a sub-table under their relation's bullet.
+- **Type sections** — a `## Types` heading, then one `### <TypeName>` per type in declaration order: a badge line (`*Abstract type*` / `*Part type*` / `Extends: [Parent](#parent)`), the doc-comment, then a **flattened property table** (Property | Type | Modifiers | Description) over the full inheritance chain — the Type column renders each constraint's DSL form (`String[1, 100]`, `List<FipsCode>`), and inherited rows carry `from <Owner>` in Modifiers. Associations and compositions follow as DSL-notation bullets with linked targets, an inherited relation carrying the same provenance as a ` — from <Owner>` marker; a relation's doc-comment nests as an indented line under its bullet, and its edge properties as a sub-table.
 - **Invariants** — the failure message as a bullet (an inherited invariant carrying the ` — from <Owner>` marker), the doc-comment beneath, then the declaration source in a `yammm` fence extracted via the invariant's span, with its doc comment stripped (it renders separately) and continuation lines dedented.
 - **Data Types** — a Name | Definition | Description table per schema.
-- **Imported schemas** — one `## Schema <Name> (imported as <alias>)` section per import in closure order (transitive imports, which have no entry alias, head as plain `## Schema <Name>`), with collision-proof `### <schemaName>.<TypeName>` headings.
+- **Imported schemas** — one `## Schema <Name> (imported as <alias>)` section per import in closure order (transitive imports, which have no entry alias, head as plain `## Schema <Name>`), the schema's doc-comment beneath the heading when it has one, with collision-proof `### <schemaName>.<TypeName>` headings.
 
 Arbitrary doc/enum text cannot break structure: table cells escape backslashes and pipes and fold newlines to `<br>`; a value containing a backtick renders through an entity-escaped `<code>` element; fences are sized past any backtick run in their body.
 
@@ -1697,7 +1702,7 @@ The `format` package provides canonical formatting for `.yammm` schema files:
 ```go
 func TokenStream(text string) (string, error)
 
-// The phase functions, exported and consumer-less today
+// Two pipeline phases (3 and 4) and two phase-1 helpers, exported and consumer-less today
 func WrapLongLines(text string) string
 func AlignColumns(text string) string
 func NormalizeIndentation(line string) string
@@ -1716,10 +1721,10 @@ Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF,
 
 The formatter then applies a five-phase pipeline:
 
-1. **Token-stream rewriting:** canonical spacing between tokens and indentation normalization — **except inside invariant expressions**, whose regions keep the author's own spacing
+1. **Token-stream rewriting:** canonical spacing between tokens and indentation normalization — **except inside invariant expressions**, whose regions keep the author's own spacing between tokens (a continuation line's leading indentation is still normalized)
 2. **Blank line collapsing:** removes excess blank lines while preserving section breaks, and *inserts* one after the schema header and after the last import when the following line is not already blank
 3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at `LineWidthThreshold`, and collapses an existing multiline enum, extends clause or datatype-alias enum back onto one line when the joined form fits. A multiline invariant is never collapsed
-4. **Column alignment:** pads the member-name column so the type column lines up, and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases — broken by blank lines, comment-only lines, or a kind change, which is not the same as type-block boundaries
+4. **Column alignment:** pads the member-name column so the column after it lines up — the type for a property, the multiplicity for a relationship, the `=` for a datatype alias — and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases — broken by a kind change or by any line that is not alignable — a blank line, a comment-only line, a type head or closing brace, an `extends` clause, the first line of a multiline construct. A type-block boundary breaks a run because its brace lines are not alignable, not because blocks are tracked
 5. **Text finalization:** trims trailing whitespace from each line, removes trailing blank lines, and ensures the file ends with a newline
 
 Output is deterministic and idempotent. The formatter is used by the LSP server for `textDocument/formatting` and by the CLI for the `yammm fmt` command.

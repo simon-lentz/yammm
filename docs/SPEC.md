@@ -39,9 +39,9 @@ Productions are expressions constructed from terms and the following operators, 
 {}  repetition (0 to n times)
 ```
 
-Three naming conventions are used. **UPPER_SNAKE** names a lexical token produced by the lexer (`UC_WORD`, `LC_WORD`, `STRING`, `INTEGER`, `FLOAT`, `REGEXP`, `VARIABLE`, `DOC_COMMENT`, `EOF`). **CamelCase** names a syntactic non-terminal. **lower case** names a helper non-terminal that expands to a phrase rather than to a single token — `min`, `max`, `minLen`, `maxLen`, `format`, `dimensions` and `exponent`. Literal tokens are enclosed in double quotes `""` or back quotes `` ` ``.
+Three naming conventions are used. **UPPER_SNAKE** names a lexical token produced by the lexer (`UC_WORD`, `LC_WORD`, `STRING`, `INTEGER`, `FLOAT`, `REGEXP`, `VARIABLE`, `DOC_COMMENT`, `EOF`) — with one exception, `BOOLEAN`, which is a non-terminal over the two word spellings `true` and `false` and is spelled in upper snake because it stands in for a literal. **CamelCase** names a syntactic non-terminal. **lower case** names a helper non-terminal defined where it is first used — a character class (`upper_letter`, `lower_letter`, `decimal_digit`, `newline`, `line_char`, `escape_sequence`), a single token (`format`, `dimensions`, `minLen`, `maxLen`), or a phrase (`min`, `max`, `exponent`). Literal tokens are enclosed in double quotes `""` or back quotes `` ` ``.
 
-Some productions carry `label=` prefixes, which name the field the reference implementation binds; the Grammar Summary writes the same productions without them. A `/* … */` description is informal prose standing in for a rule not written out, and a `//` comment is commentary, not grammar.
+Some productions carry `label=` prefixes, which name the field the reference implementation binds (`path=` and `alias=` on `ImportDecl`, `qualifier=` and `name=` on `TypeRef`, `message=` and `expr=` on `Invariant`); the Grammar Summary writes the same productions without them. A `/* … */` description is informal prose standing in for a rule not written out, and a `//` comment is commentary, not grammar.
 
 Inside a production, `"a" ... "z"` is a character range — the closed set from `a` to `z`. Outside a production, the horizontal ellipsis `...` informally denotes an enumeration or code snippet that is not further specified.
 
@@ -53,7 +53,7 @@ Each code point is distinct; upper and lower case letters are different characte
 
 ### Characters
 
-Comments, string literals and regex literals run to the end of a line, which is either code point:
+Line comments, string literals and regex literals run to the end of a line, which is either code point; a block comment may span lines:
 
 ```text
 newline    = /* the Unicode code point U+000A or U+000D */ .
@@ -110,13 +110,13 @@ Identifiers name entities such as types, properties, and relationships. There ar
 **Upper-case identifiers** start with an ASCII upper-case letter (A-Z). Type names and data type aliases must take this form; relationship names and import aliases may:
 
 ```text
-UC_WORD = ascii_upper { ascii_letter | digit | "_" } .
+UC_WORD = upper_letter { upper_letter | lower_letter | decimal_digit | "_" } .
 ```
 
 **Lower-case identifiers** start with an ASCII lower-case letter (a-z). Property names and annotation names must take this form; relationship names and import aliases may:
 
 ```text
-LC_WORD = ascii_lower { ascii_letter | digit | "_" } .
+LC_WORD = lower_letter { upper_letter | lower_letter | decimal_digit | "_" } .
 ```
 
 Note: Identifiers must start with ASCII letters (A-Z or a-z). Subsequent characters may include ASCII letters, digits, and underscores.
@@ -187,7 +187,7 @@ nil
 
 **Reserved identifiers** (`datatype`, `includes`) are not used as structural grammar tokens but are reserved for forward compatibility.
 
-A small set of keywords and reserved identifiers may be used as property names via the `lc_keyword` rule. This allows properties named `schema`, `type`, etc. without ambiguity:
+Every keyword and reserved identifier except six may be used as a property name — the property-name production admits any `LC_WORD`, and only the six spellings named below are refused. So properties named `schema`, `type`, etc. carry no ambiguity:
 
 ```text
 schema    type    datatype    required    primary    extends
@@ -244,8 +244,10 @@ Examples:
 A string literal represents a string constant obtained from a sequence of characters. Strings may be enclosed in single or double quotes:
 
 ```text
-STRING = `"` { unicode_value | escape_sequence } `"` |
-         `'` { unicode_value | escape_sequence } `'` .
+STRING          = `"` { string_char | escape_sequence } `"` |
+                  `'` { string_char | escape_sequence } `'` .
+string_char     = /* line_char except the enclosing quote and `\` */ .
+escape_sequence = `\` ( "b" | "t" | "n" | "f" | "r" | "u" | "x" | "0" | `"` | "'" | `\` ) .
 ```
 
 Several escape sequences allow arbitrary values to be encoded as ASCII text:
@@ -282,7 +284,8 @@ Examples:
 Regular expression literals are enclosed in forward slashes:
 
 ```text
-REGEXP = "/" { regexp_char | escape_sequence } "/" .
+REGEXP      = "/" { regexp_char | `\` line_char } "/" .
+regexp_char = /* line_char except "/" and `\` */ .
 ```
 
 The content follows Go's `regexp` package syntax. Backslashes within the pattern escape the following character.
@@ -295,7 +298,7 @@ Examples:
 /\d{3}-\d{4}/        // phone number pattern
 ```
 
-> **A `/` that does not open a comment starts a regex literal when another `/` follows on the same line.** A `/` immediately followed by `/` or `*` opens a comment and is never a regex, because the comment rules precede the regex rule. Any other `/` begins a pattern that runs to the next `/`, so `(0.0 / 0.0) == (0.0 / 0.0)` fails to parse. This is reachable from ordinary arithmetic. The workaround is one such `/` per source line: `(x / 2.0) > 0.0 // halve it` fails, because the division's `/` opens a regex that swallows the `//`. Put the comment on its own line, where it lexes as a comment.
+> **A `/` that does not open a comment starts a regex literal when another `/` follows on the same line.** A `/` immediately followed by `/` opens a line comment and is never a regex, because the comment rules precede the regex rule; a `/` followed by `*` opens a block comment only when a closing `*/` exists, and an unterminated `/*` followed by another `/` on its line lexes as a regex literal instead. Any other `/` begins a pattern that runs to the next `/`, so `(0.0 / 0.0) == (0.0 / 0.0)` fails to parse. This is reachable from ordinary arithmetic. The workaround is one such `/` per source line: `(x / 2.0) > 0.0 // halve it` fails, because the division's `/` opens a regex that swallows the `//`. Put the comment on its own line, where it lexes as a comment.
 
 ### Boolean Literals
 
@@ -353,7 +356,7 @@ schema "Vehicles"
 Imports allow types to be shared across schema files. Import declarations appear after the schema name and before any type or data type declarations:
 
 ```text
-ImportDecl = "import" path=STRING [ "as" alias=AliasName ] .
+ImportDecl = "import" path=STRING [ "as" alias=AliasName ] .   // labels: see Notation
 AliasName  = UC_WORD | LC_WORD .
 ```
 
@@ -521,12 +524,12 @@ Inheritance rules:
 
 - Properties, associations, and compositions are inherited from parent types
 - Child types may override inherited properties with compatible narrower constraints
-- Relationship definitions must be unique after inheritance. Two relations reaching a type under one field name are an error when their definitions **differ** — a different target, multiplicity, or edge-property set; structurally identical ones are deduplicated keep-first with no diagnostic. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
+- Relationship definitions must be unique after inheritance. Two relations of one kind reaching a type under one field name are an error when their definitions **differ** — a different declared spelling, target, multiplicity, or edge-property set; structurally identical ones are deduplicated keep-first with no diagnostic. An association and a composition that normalize to one field name are caught separately, after both merges, as `E_RELATION_NORMALIZATION_COLLISION`. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
 
 **Linearization order:** Ancestors are flattened **ancestors-first**: each supertype's own ancestors are appended before the supertype itself, left to right across the `extends` clause, with keep-first deduplication. For `D extends C`, `C extends B`, `B extends A` the order is `[A, B, C]`; for `D extends B, C` with both extending `A` it is `[A, B, C]`.
 
 1. Own declarations (from the type body) come first
-2. Inherited **properties, relations and annotations** follow in that ancestors-first order, so the most distant ancestor is read before the nearest. **Invariants do not** — see Invariant merging below, where a subtype reads each direct supertype's already-merged set so a nearer declaration wins
+2. Inherited **properties, relations and type-level annotations** follow in that ancestors-first order, so the most distant ancestor is read before the nearest. **Invariants and property-level annotations do not** — see Invariant merging and Annotation Inheritance below, where a subtype reads each direct supertype's already-merged set so a nearer declaration wins
 3. When the same ancestor is reachable via multiple paths (diamond inheritance), the first occurrence is kept and duplicates are skipped
 
 **Property conflict resolution:**
@@ -585,7 +588,7 @@ Properties define the data fields of a type.
 
 ```text
 Property     = [ DOC_COMMENT ] PropertyName DataTypeRef [ "primary" | "required" ] { Annotation } .
-PropertyName = LC_WORD | lc_keyword .
+PropertyName = LC_WORD .   // except as, part, in, nil, true, false
 ```
 
 Property names must start with a lower-case letter.
@@ -617,10 +620,14 @@ Properties without modifiers are **optional** and may be omitted from instance d
 **An explicit `null` is the absent case.** For a property — on a type or on an
 association's edge — instance data carrying `null` is treated exactly as if the
 key were not there: a required property draws `E_MISSING_REQUIRED`, and an
-optional one is dropped rather than stored. The two other slots that accept a
-`null` keep their own rules, because neither is a property: a foreign-key
-component is a structural key position and reports `E_TYPE_MISMATCH`, and a
-composition value must be an array and reports `E_EDGE_SHAPE_MISMATCH`.
+optional one is dropped rather than stored. The other slots that accept a
+`null` keep their own rules, because none is a property: an association's
+value must be an object or an array of objects, so `{"employer": null}` reports
+`E_EDGE_SHAPE_MISMATCH` rather than reading as absent (leave the key out to
+omit the association); a foreign-key component is a structural key position and
+reports `E_TYPE_MISMATCH`; a composition value must be an array and reports
+`E_EDGE_SHAPE_MISMATCH`; and a `null` element of a `(many)` association array
+or a `null` composition child reports `E_EDGE_SHAPE_MISMATCH` too.
 
 **A `null` inside a collection is not the absent case.** No element position is
 optional, so the element constraint applies to it and `["a", null]` is rejected
@@ -693,8 +700,10 @@ Represents signed integer values with optional bounds:
 ```text
 IntegerT = "Integer" [ "[" min "," max "]" ] .
 min      = [ "-" ] ( "_" | INTEGER ) .
-max      = "_" | [ "-" ] INTEGER .
+max      = [ "-" ] ( "_" | INTEGER ) .
 ```
+
+A minus sign before `_` is accepted and has no effect; the loader reports it at Warning severity under `E_INVALID_CONSTRAINT`, and the schema still loads.
 
 The underscore `_` represents an unbounded limit. An optional leading `-` allows negative bounds.
 
@@ -717,8 +726,10 @@ Represents floating-point values with optional bounds:
 ```text
 FloatT = "Float" [ "[" min "," max "]" ] .
 min    = [ "-" ] ( "_" | INTEGER | FLOAT ) .
-max    = "_" | [ "-" ] ( INTEGER | FLOAT ) .
+max    = [ "-" ] ( "_" | INTEGER | FLOAT ) .
 ```
+
+As for `Integer`, a minus sign before `_` is accepted with a Warning and no effect.
 
 Examples:
 
@@ -1174,7 +1185,7 @@ Annotations are validated at load, after inheritance linearization. Violations p
 
 ### Annotation Inheritance
 
-Property-level annotations travel with the property they decorate: a subtype that inherits a property unchanged inherits its annotations. Type-level annotations linearize like invariants — the subtype's own annotations first, then inherited ones, with exact duplicates (same name and argument list) deduplicated keep-first. Two `@@index` members differing only in argument list are distinct indexes and both survive.
+Property-level annotations travel with the property they decorate: a subtype that inherits a property unchanged inherits its annotations. Type-level annotations linearize like properties and relations, not like invariants — the subtype's own annotations first, then inherited ones in ancestors-first order, with exact duplicates (same name and argument list) deduplicated keep-first and no override by name. Two `@@index` members differing only in argument list are distinct indexes and both survive.
 
 Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype and the load reports `W_ANNOTATION_SHADOWED` (a warning; the load still succeeds). Re-state the annotations on the re-declaration to keep them.
 
@@ -1205,7 +1216,7 @@ Invariants are constraints attached to types that are evaluated during instance 
 ### Invariant Declaration
 
 ```text
-Invariant = [ DOC_COMMENT ] "!" message=STRING constraint=Expr .
+Invariant = [ DOC_COMMENT ] "!" message=STRING expr=Expr .
 ```
 
 The message is displayed when the invariant evaluates to false:
@@ -1509,7 +1520,7 @@ Results on an empty collection are a mixed family:
 | Functions | Result on empty |
 | --------- | --------------- |
 | `All`, `AllOrNone` | `true` (vacuous truth) |
-| `Any` | `false` |
+| `Any`, `Contains` | `false` |
 | `First`, `Last` | `nil` |
 | `Sum`, `Count` | `0` |
 | `Sort`, `Reverse`, `Flatten`, `Unique`, `Compact`, `Map`, `Filter` | empty list |
@@ -1599,8 +1610,9 @@ type Person {
     // Email format validation — guarded, because email is optional
     ! "email must be valid" email == nil || email =~ /.+@.+/
 
-    // Mutually exclusive fields
-    ! "cannot have both" !(hasA && hasB)
+    // Mutually exclusive fields — guarded, because both flags are optional and
+    // && over an absent operand is an evaluation error, not false
+    ! "cannot have both" hasA == nil || hasB == nil || !(hasA && hasB)
 
     // Nil-guard: skip validation when optional field is absent (using _)
     ! "desc not empty if present" description == _ || description != ""
@@ -1660,7 +1672,7 @@ YAMMM uses structured diagnostics with stable error codes. The Go programmatic i
 
 ### Diagnostic Codes
 
-Codes are stable identifiers for programmatic matching. The authoritative list is in `diag/code.go`. Categories and their codes:
+Codes are stable identifiers for programmatic matching. The authoritative list is the registry `diag.AllCodes()` returns: `diag/code.go` holds the built-in codes, and the adapter packages register their own on import. Categories and their codes:
 
 **Sentinel** — internal conditions:
 
@@ -1750,7 +1762,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
 - `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch
 - `E_SNAPSHOT_UNKNOWN_TYPE` — type name not found in schema
-- `E_SNAPSHOT_TYPE_MISMATCH` — instances section inconsistent with the types table
+- `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under
 - `E_SNAPSHOT_DANGLING_REFERENCE` — edge target or duplicate conflict not found
 - `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
@@ -1787,15 +1799,17 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 
 ## Schema Identity
 
-Each compiled schema has a deterministic structural hash (SHA-256) computed over:
+Each compiled schema has a deterministic structural hash (SHA-256) computed over its whole import closure. For every member schema — the entry schema and each schema it imports, directly or transitively — the input covers:
 
-- Schema name
+- The member's schema name
 - Type names, properties (with constraints and modifiers), the primary-key set, relations (with targets and cardinalities), compositions, association edge properties, and inheritance edges
 - Each type's `abstract` and `part` markers
 - Invariant expressions (the invariant's *name* is excluded — it is the failure message)
 - Data type names and constraints
 
-**Annotations are the sole exclusion.** They drive downstream store DDL and write shape and never reject data, so they cannot change what instance data is valid. A schema that gains its first annotation hashes identically, and every persisted `.ys` snapshot header hash stays valid. Adding an invariant, an edge property, or flipping a type between concrete and `part` all change the hash.
+Two schemas that hash the same agree on every one of those rules everywhere in their closures. The converse does not hold: a hash can also move on a change to an imported schema this schema never references, because closure membership is part of the identity. Members are framed under their schema names, the entry schema first and the rest ordered by name, so the order imports are declared in does not enter the digest.
+
+**Excluded, deliberately:** annotations — they drive downstream store DDL and write shape and never reject data, so a schema that gains its first annotation hashes identically and every persisted `.ys` snapshot header hash stays valid; import aliases and source paths — relation and supertype targets hash by name, never by schema path, and a member is framed by its declared name, never its source, so `embedded://` and disk loads of one schema text agree; and documentation and source positions. Adding an invariant, an edge property, or flipping a type between concrete and `part` changes the hash in any member.
 
 The hash is deterministic. Most inputs are sorted by name; invariant blobs are sorted by their serialized bytes, and the operands of one expression are hashed in declared order, because operand order is semantic.
 
@@ -1811,7 +1825,9 @@ as `Enum["a"]` parses and is then refused with `E_INVALID_CONSTRAINT`, never
 `E_SYNTAX`.
 
 It is maintained by hand. Nothing checks it automatically, and no second grammar
-exists to check it against.
+exists to check it against. Two non-terminals it names are defined elsewhere in
+this document rather than repeated here: `Expr`, under Expressions and
+Invariants, and the six spellings `PropertyName` refuses, under Keywords.
 
 ```text
 Schema     = SchemaName { ImportDecl } { TypeDecl | DataTypeDecl } EOF .
@@ -1829,7 +1845,7 @@ ExtendsClause = "extends" TypeRef { "," TypeRef } [ "," ] .
 TypeBody   = { Property | Association | Composition | Invariant | TypeAnnotation } .
 
 Property   = [ DOC_COMMENT ] PropertyName DataTypeRef [ "primary" | "required" ] { Annotation } .
-PropertyName = LC_WORD | lc_keyword .
+PropertyName = LC_WORD .   // except as, part, in, nil, true, false
 DataTypeRef = BuiltIn | QualifiedAlias .
 QualifiedAlias = [ AliasName "." ] UC_WORD .
 
@@ -1842,7 +1858,10 @@ Association = [ DOC_COMMENT ] "-->" Name [ Multiplicity ] TypeRef
               [ "{" { RelProperty } "}" ] .
 Composition = [ DOC_COMMENT ] "*->" Name [ Multiplicity ] TypeRef .
 Name       = UC_WORD | LC_WORD .
-Multiplicity = "(" MultiplicitySpec ")" .
+Multiplicity     = "(" MultiplicitySpec ")" .
+MultiplicitySpec = "_" [ ":" ( "one" | "many" ) ]
+                 | "one" [ ":" ( "one" | "many" ) ]
+                 | "many" .
 
 Invariant  = [ DOC_COMMENT ] "!" STRING Expr .
 RelProperty = [ DOC_COMMENT ] PropertyName DataTypeRef [ "required" ] .

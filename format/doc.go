@@ -52,12 +52,12 @@
 //
 // # Additional Functions
 //
-// The individual pipeline phases are exported, and none of them has a consumer
-// outside this package today:
+// Two pipeline phases and two helpers are exported, and none of them has a
+// consumer outside this package today:
 //
-//   - [WrapLongLines]: wrap lines exceeding [LineWidthThreshold]
-//   - [AlignColumns]: align property types and modifiers within type blocks
-//   - [NormalizeIndentation]: convert spaces to tabs
+//   - [WrapLongLines]: phase 3, wrap lines exceeding [LineWidthThreshold]
+//   - [AlignColumns]: phase 4, align property types and modifiers within type blocks
+//   - [NormalizeIndentation]: a phase-1 helper over one line, convert spaces to tabs
 //   - [DisplayWidth]: compute visual width of a line (tab-aware)
 //
 // [TokenStream] is what the LSP server calls for textDocument/formatting, and

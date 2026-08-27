@@ -289,8 +289,9 @@ func (b *SchemaBuilder) edgeStateFor(rel *schema.Relation) *edgeState {
 // On success the returned RawInstance is guaranteed to pass the shape
 // portion of [Validator.ValidateOne]: property names and relation names are
 // schema-valid and cardinality invariants hold. Value-level validation
-// (constraint checks, PK type coercion, reference integrity) still happens
-// at ValidateOne time.
+// (constraint checks, PK type coercion, foreign-key shape and key-component
+// checks) still happens at ValidateOne time; whether an association's target
+// exists is [graph.Graph.Check]'s question, never the validator's.
 //
 // Error messages include:
 //   - the offending call's target (property or relation name)

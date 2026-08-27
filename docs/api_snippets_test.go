@@ -325,6 +325,12 @@ func TestDocumentedFormatSurface(t *testing.T) {
 	if err != nil || formatted == "" {
 		t.Fatalf("the documented TokenStream shape: %v", err)
 	}
-	_, _, _ = format.WrapLongLines, format.AlignColumns, format.NormalizeIndentation
-	_ = format.DisplayWidth
+	// The four documented signatures, held as typed values so a shape change
+	// fails here rather than only in the prose.
+	var (
+		wrap, align, indent func(string) string
+		width               func(string) int
+	)
+	wrap, align, indent, width = format.WrapLongLines, format.AlignColumns, format.NormalizeIndentation, format.DisplayWidth
+	_, _, _, _ = wrap, align, indent, width
 }
