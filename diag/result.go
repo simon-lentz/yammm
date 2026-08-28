@@ -3,6 +3,7 @@ package diag
 import (
 	"fmt"
 	"iter"
+	"maps"
 	"strings"
 )
 
@@ -95,8 +96,8 @@ func (c *SeverityCounts) addCounts(o SeverityCounts) {
 // success results.
 //
 // Result satisfies [fmt.Stringer]; its [Result.String] method returns "OK" when
-// there are no errors, or a multi-line summary of error messages suitable for
-// test failures and log output.
+// there are no issues at all, or a summary line followed by one line per
+// retained issue at every severity, suitable for test failures and log output.
 //
 // There is no public constructor accepting arbitrary issues; this ensures
 // all issues in a Result are valid.
@@ -112,6 +113,54 @@ type Result struct {
 	// reflect every issue seen, not only those stored (see
 	// [Collector.collectLocked]).
 	counts SeverityCounts
+
+	// Per-severity, per-code counts over every issue seen — the code axis of
+	// counts, truthful under truncation the same way. Read through
+	// [Result.CodeCounts]; never handed out.
+	codeCounts codeCounts
+}
+
+// codeCounts counts issues seen by severity and code.
+type codeCounts map[Severity]map[Code]int
+
+// add increments the counter for one issue.
+func (c *codeCounts) add(sev Severity, code Code) {
+	if *c == nil {
+		*c = make(codeCounts)
+	}
+	m := (*c)[sev]
+	if m == nil {
+		m = make(map[Code]int)
+		(*c)[sev] = m
+	}
+	m[code]++
+}
+
+// addCounts folds o into c, for [Collector.Merge].
+func (c *codeCounts) addCounts(o codeCounts) {
+	for sev, m := range o {
+		for code, n := range m {
+			if *c == nil {
+				*c = make(codeCounts)
+			}
+			if (*c)[sev] == nil {
+				(*c)[sev] = make(map[Code]int)
+			}
+			(*c)[sev][code] += n
+		}
+	}
+}
+
+// clone deep-copies c, so a Result never shares a map with its Collector.
+func (c codeCounts) clone() codeCounts {
+	if c == nil {
+		return nil
+	}
+	out := make(codeCounts, len(c))
+	for sev, m := range c {
+		out[sev] = maps.Clone(m)
+	}
+	return out
 }
 
 // newResult creates a Result, computing the severity counts from issues.
@@ -124,23 +173,26 @@ type Result struct {
 // limit, which must still count toward OK/HasErrors).
 func newResult(issues []Issue, limit int, limitReached bool, droppedCount int) Result {
 	var counts SeverityCounts
+	var codes codeCounts
 	for _, issue := range issues {
 		counts.add(issue.Severity())
+		codes.add(issue.Severity(), issue.Code())
 	}
-	return newResultWithCounts(issues, limit, limitReached, droppedCount, counts)
+	return newResultWithCounts(issues, limit, limitReached, droppedCount, counts, codes)
 }
 
 // newResultWithCounts builds a Result from explicit precomputed severity counts.
 // It is the single point that constructs the Result struct, so a new Result
 // field is added in exactly one place. The issues slice is owned by the Result
 // (see [newResult]'s contract).
-func newResultWithCounts(issues []Issue, limit int, limitReached bool, droppedCount int, counts SeverityCounts) Result {
+func newResultWithCounts(issues []Issue, limit int, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts) Result {
 	return Result{
 		issues:       issues,
 		limit:        limit,
 		limitReached: limitReached,
 		droppedCount: droppedCount,
 		counts:       counts,
+		codeCounts:   codes,
 	}
 }
 
@@ -180,9 +232,10 @@ func (r Result) HasWarnings() bool {
 // severity. Like [Result.Issues] and [Result.Len], it reflects the issues the
 // result can enumerate: when the issue limit was reached ([Result.LimitReached]),
 // a code present only among the dropped issues reads false here. Use the
-// seen-based queries ([Result.HasErrors], [Result.SeverityCounts]) for gating
-// that must stay truthful under truncation, and [Result.DroppedCount] to detect
-// that the enumerable set is incomplete.
+// seen-based queries — [Result.CodeCounts] for a code, [Result.HasErrors] and
+// [Result.SeverityCounts] for a severity — for gating that must stay truthful
+// under truncation, and [Result.DroppedCount] to detect that the enumerable
+// set is incomplete.
 func (r Result) HasCode(code Code) bool {
 	for _, issue := range r.issues {
 		if issue.Code() == code {
@@ -237,6 +290,20 @@ func (r Result) Limit() int {
 // SeverityCounts returns counts by severity level.
 func (r Result) SeverityCounts() SeverityCounts {
 	return r.counts
+}
+
+// CodeCounts returns, for the given severity, how many issues of each code
+// were seen — stored and dropped alike, so it stays truthful under truncation
+// where [Result.HasCode] does not. Severity is independent of code: one code
+// can arrive at two severities and counts once under each. The map is a copy;
+// a code never seen at that severity is absent. The total over severities is
+// the number of issues seen with that code.
+func (r Result) CodeCounts(sev Severity) map[Code]int {
+	m := r.codeCounts[sev]
+	if m == nil {
+		return map[Code]int{}
+	}
+	return maps.Clone(m)
 }
 
 // Issues returns an iterator over all issues without copying.
@@ -327,12 +394,13 @@ func (r Result) Err() error {
 
 // String returns a minimal multi-line representation suitable for quick debugging.
 //
-// String returns "OK" when OK() is true (no Fatal/Error issues), regardless of
-// warnings or hints. Each error/fatal issue is printed on its own line (message
-// only, no excerpts). Use [SeverityCounts] for full severity breakdown.
-// For formatted output with excerpts, use [Renderer.FormatResult].
+// String returns "OK" only when the result holds no issue at all. Otherwise it
+// returns a summary line — "OK" or the error count, then the warning, info and
+// hint counts where non-zero, then the truncation note — followed by one line
+// per retained issue at every severity (code and message, no excerpts). For
+// formatted output with excerpts, use [Renderer.FormatResult].
 func (r Result) String() string {
-	if r.OK() {
+	if len(r.issues) == 0 && !r.limitReached {
 		return "OK"
 	}
 
@@ -340,20 +408,27 @@ func (r Result) String() string {
 	counts := r.SeverityCounts()
 
 	// Summary line
-	fmt.Fprintf(&sb, "%d error(s)", counts.Fatal+counts.Errors)
+	if r.OK() {
+		sb.WriteString("OK")
+	} else {
+		fmt.Fprintf(&sb, "%d error(s)", counts.Fatal+counts.Errors)
+	}
 	if counts.Warnings > 0 {
 		fmt.Fprintf(&sb, ", %d warning(s)", counts.Warnings)
+	}
+	if counts.Info > 0 {
+		fmt.Fprintf(&sb, ", %d info", counts.Info)
+	}
+	if counts.Hints > 0 {
+		fmt.Fprintf(&sb, ", %d hint(s)", counts.Hints)
 	}
 	if r.limitReached {
 		fmt.Fprintf(&sb, " [limit reached, %d dropped]", r.droppedCount)
 	}
 	sb.WriteString("\n")
 
-	// Error messages
 	for _, issue := range r.issues {
-		if issue.Severity().IsFailure() {
-			fmt.Fprintf(&sb, "  %s: %s\n", issue.Code(), issue.Message())
-		}
+		fmt.Fprintf(&sb, "  %s: %s\n", issue.Code(), issue.Message())
 	}
 
 	return sb.String()

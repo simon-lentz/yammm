@@ -71,21 +71,25 @@
 //	wrapped := immutable.WrapMap(data)
 //	// data must not be used after this point
 //
-// Pass [WithClone] to deep-clone mutable values before wrapping. The caller may
-// freely retain and mutate the original value after construction:
+// String-keyed maps and slices are copied into immutable containers on every
+// path, so a mutation of the caller's map or slice header after Wrap does not
+// reach the wrapped value. What Wrap stores as-is is a map with a non-string
+// key, and that is what [WithClone] reaches: with true, such a map and
+// everything inside it is deep-cloned first, and the caller can retain and
+// mutate the original:
 //
-//	data := map[string]any{"key": "value"}
-//	wrapped := immutable.WrapMap(data, immutable.WithClone())
-//	data["key"] = "modified" // safe: wrapped is isolated
+//	data := map[string]any{"by_id": map[int]any{1: "value"}}
+//	wrapped := immutable.WrapMap(data, immutable.WithClone(true))
+//	data["by_id"].(map[int]any)[1] = "modified" // safe: wrapped holds a clone
 //
 // Use bare Wrap when you control the value's origin (e.g., freshly constructed in the
-// same scope). Use WithClone when the value comes from external sources, is shared,
-// or when ownership cannot be verified.
+// same scope). Use WithClone(true) when the value comes from external sources, is
+// shared, or when ownership cannot be verified.
 //
-// Note: Deep cloning only applies to maps and slices. Struct values and pointer
-// values are stored as-is (shallow copy). For full isolation of struct-based data,
-// ensure the original struct is not mutated after calling Wrap with WithClone, or pass
-// a map/slice representation of the data.
+// Note: cloning reaches only what is stored as-is. Struct values and pointer
+// values are stored as-is on every path and are never cloned. For full
+// isolation of struct-based data, do not mutate the original after Wrap, or
+// pass a map/slice representation of the data.
 //
 // # Nil Semantics
 //
@@ -122,7 +126,7 @@
 // | Wrap(primitive) | O(1), no allocation | Primitives stored directly |
 // | Wrap(map) | O(n) | Iterates map once to wrap values |
 // | Wrap(slice) | O(n) | Iterates slice once to wrap elements |
-// | Wrap(any, WithClone()) | O(n) deep | Clones maps/slices recursively; structs/pointers stored as-is |
+// | Wrap(any, WithClone(true)) | O(n) deep | Clones non-string-keyed maps recursively; structs/pointers stored as-is |
 // | Get(key) / Get(i) | O(1) | Map/slice lookup |
 // | Keys() / Iter() | O(1) start | Iterator creation is cheap |
 // | Clone() | O(n) deep | Full recursive clone for escape hatch |

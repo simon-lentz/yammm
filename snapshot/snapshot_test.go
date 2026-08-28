@@ -408,13 +408,35 @@ func TestVerify_SkipIntegrityCheck(t *testing.T) {
 		corrupted[idx] = 'X'
 	}
 
-	// With skip integrity check, should not fail on integrity.
-	result := snapshot.Verify(ctx, corrupted, s, snapshot.WithSkipIntegrityCheck())
+	// With the integrity check off, should not fail on integrity.
+	result := snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(false))
 	// May have other issues but not integrity mismatch.
 	for issue := range result.Errors() {
 		if issue.Code() == diag.E_SNAPSHOT_INTEGRITY_MISMATCH {
-			t.Error("should not get E_SNAPSHOT_INTEGRITY_MISMATCH with skip option")
+			t.Error("should not get E_SNAPSHOT_INTEGRITY_MISMATCH with the check off")
 		}
+	}
+}
+
+// TestVerify_WithIntegrityCheckTrue_ReportsTheMismatch is the control for the
+// test above: an explicit true is the default, so the corrupted byte draws the
+// mismatch. Without it an implementation that ignored the argument would pass.
+func TestVerify_WithIntegrityCheckTrue_ReportsTheMismatch(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap)
+
+	corrupted := bytes.Replace(data, []byte("Acme"), []byte("Xcme"), 1)
+	if bytes.Equal(corrupted, data) {
+		t.Fatal("the corruption did not apply")
+	}
+
+	result := snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(true))
+	if !result.HasCode(diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
+		t.Errorf("expected E_SNAPSHOT_INTEGRITY_MISMATCH with the check on, got: %s", result)
 	}
 }
 
@@ -1273,21 +1295,21 @@ func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 // version named, rather than being read under rules it was never written to.
 //
 // Integrity is not the point of this test (we are constructing a v1 doc by
-// hand rather than recomputing its SHA-256), so WithSkipIntegrityCheck
+// hand rather than recomputing its SHA-256), so WithIntegrityCheck(false)
 // keeps the test focused on version-acceptance semantics.
 func TestLoad_V1Rejected(t *testing.T) {
 	s := testSchema(t)
 	// Minimal v1-style document. The unresolved-edge entry has NO
 	// "properties" field (the v1 shape). The schema_hash matches
 	// testSchema's StructuralHash so schema-compatibility passes; the
-	// integrity_hash is a placeholder under WithSkipIntegrityCheck.
+	// integrity_hash is a placeholder under WithIntegrityCheck(false).
 	// types[] lists only Person because no Company instances are present
 	// (matches Marshal's type-emission behavior).
 	schemaHash := schema.StructuralHash(s)
 	doc := fmt.Sprintf(`{"yammm_snapshot":{"version":1,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":["Person"],"instances":{"Person":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]},"diagnostics":{"duplicates":[],"unresolved":[{"source_type":"Person","source_key":["p1"],"relation":"EMPLOYER","target_type":"Company","target_key":["c99"],"required":true,"reason":"target_missing"}]}}`, schemaHash)
 
 	ctx := context.Background()
-	loaded, result := snapshot.Load(ctx, []byte(doc), s, snapshot.WithSkipIntegrityCheck())
+	loaded, result := snapshot.Load(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
 	require.Nil(t, loaded, "a refused document yields no snapshot")
 	require.True(t, hasCode(result, diag.E_SNAPSHOT_UNSUPPORTED_VERSION),
 		"v1 must be refused with the supported version named: %v", result)
@@ -1306,7 +1328,7 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 			doc := fmt.Sprintf(`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":[],"instances":{},"diagnostics":{"duplicates":[],"unresolved":[]}}`, v, schemaHash)
 
 			_, result := snapshot.Load(context.Background(), []byte(doc), s,
-				snapshot.WithSkipIntegrityCheck())
+				snapshot.WithIntegrityCheck(false))
 			require.True(t, result.HasErrors(), "version %d must be rejected", v)
 
 			found := false

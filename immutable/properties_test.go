@@ -242,7 +242,7 @@ func TestProperties_WrapProperties_WithClone_Isolation(t *testing.T) {
 	nested := map[string]any{"key": "original"}
 	input := map[string]any{"nested": nested}
 
-	p := WrapProperties(input, WithClone())
+	p := WrapProperties(input, WithClone(true))
 
 	// Mutate original
 	nested["key"] = "mutated"

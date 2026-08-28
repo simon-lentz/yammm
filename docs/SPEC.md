@@ -1716,7 +1716,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_IMPORT_CYCLE` — circular import dependency
 - `E_INVALID_ALIAS` — import alias is not a valid identifier
 - `E_PATH_ESCAPE` — import path escapes allowed directory
-- `E_IMPORT_NOT_ALLOWED` — imports disabled via `WithDisallowImports`
+- `E_IMPORT_NOT_ALLOWED` — imports refused via `WithImportsAllowed(false)`
 - `E_DUPLICATE_IMPORT` — the same schema imported multiple times, or two different schemas sharing one alias
 - `E_IMPORT_ALIAS_COLLISION` — import alias collides with local name
 

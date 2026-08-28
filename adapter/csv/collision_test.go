@@ -51,7 +51,7 @@ func collidingSnapshot(t *testing.T) (*graph.Snapshot, schema.TypeID, schema.Typ
 		"base.yammm":  []byte(collideBaseSource),
 		"deep.yammm":  []byte(collideDeepSource),
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly())
+	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if result.HasErrors() {
 		t.Fatalf("load colliding fixture: %s", result)
 	}

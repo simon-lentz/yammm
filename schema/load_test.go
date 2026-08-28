@@ -89,7 +89,44 @@ func TestString_DisallowsImports(t *testing.T) {
 	loadErr(t, source)
 }
 
-func TestWithDisallowImports_SourcesWithEntry(t *testing.T) {
+// TestString_DisallowsImportsEvenWhenAllowed pins that LoadString rejects
+// imports whatever the caller passes: a string has no directory to resolve
+// against, so WithImportsAllowed(true) cannot turn the rejection off.
+func TestString_DisallowsImportsEvenWhenAllowed(t *testing.T) {
+	t.Parallel()
+	_, res := schema.LoadString(t.Context(), `schema "test" import "./other"`, "test.yammm",
+		schema.WithImportsAllowed(true))
+	assert.True(t, res.HasCode(diag.E_IMPORT_NOT_ALLOWED), "expected E_IMPORT_NOT_ALLOWED, got %s", res)
+}
+
+// TestWithImportsAllowed_TrueIsTheDefault is the control for the false arm
+// below: the same import under WithImportsAllowed(true) is processed, so it
+// fails to resolve rather than being refused.
+func TestWithImportsAllowed_TrueIsTheDefault(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	tmpDir := t.TempDir()
+	source := `schema "test"
+
+import "foo" as f
+
+type Bar {
+	id String primary
+}`
+	sources := map[string][]byte{
+		filepath.Join(tmpDir, "test.yammm"): []byte(source),
+	}
+
+	_, result := schema.LoadSourcesWithEntry(
+		ctx, sources, filepath.Join(tmpDir, "test.yammm"), tmpDir,
+		schema.WithImportsAllowed(true),
+	)
+	assert.False(t, result.HasCode(diag.E_IMPORT_NOT_ALLOWED), "imports were refused under WithImportsAllowed(true): %s", result)
+	assert.True(t, result.HasCode(diag.E_IMPORT_RESOLVE), "expected the module-style import to be processed and miss under the root: %s", result)
+}
+
+func TestWithImportsAllowed_FalseRejectsImports(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
@@ -109,7 +146,7 @@ type Bar {
 
 	s, result := schema.LoadSourcesWithEntry(
 		ctx, sources, filepath.Join(tmpDir, "test.yammm"), tmpDir,
-		schema.WithDisallowImports(),
+		schema.WithImportsAllowed(false),
 	)
 
 	assert.Nil(t, s)
@@ -2008,7 +2045,7 @@ func TestWithSourcesOnly(t *testing.T) {
 		root, _ := writeModuleTree(t) // dep exists ON DISK under root
 		_, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
 			"sub/entry.yammm": entrySrc,
-		}, "sub/entry.yammm", root, schema.WithSourcesOnly())
+		}, "sub/entry.yammm", root, schema.WithSourcesOnly(true))
 		require.True(t, res.HasErrors(), "expected the import miss to fail under WithSourcesOnly")
 		assert.Contains(t, res.Err().Error(), "not found in pre-registered sources")
 	})
@@ -2023,12 +2060,22 @@ func TestWithSourcesOnly(t *testing.T) {
 		assert.Equal(t, "entry", s.Name())
 	})
 
+	t.Run("false is the default and keeps the disk fallback", func(t *testing.T) {
+		t.Parallel()
+		root, _ := writeModuleTree(t)
+		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+			"sub/entry.yammm": entrySrc,
+		}, "sub/entry.yammm", root, schema.WithSourcesOnly(false))
+		requireOK(t, res)
+		assert.Equal(t, "entry", s.Name())
+	})
+
 	t.Run("complete in-memory set satisfies the option", func(t *testing.T) {
 		t.Parallel()
 		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
 			"sub/entry.yammm": entrySrc,
 			"lib/dep.yammm":   depSrc,
-		}, "sub/entry.yammm", t.TempDir(), schema.WithSourcesOnly())
+		}, "sub/entry.yammm", t.TempDir(), schema.WithSourcesOnly(true))
 		requireOK(t, res)
 		assert.Equal(t, "entry", s.Name())
 	})
@@ -2068,7 +2115,7 @@ func TestWithSourcesOnly_SymlinkedImportDir(t *testing.T) {
 			s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
 				"lib/entry.yammm": entrySrc,
 				"lib/dep.yammm":   depSrc,
-			}, "lib/entry.yammm", root, schema.WithSourcesOnly())
+			}, "lib/entry.yammm", root, schema.WithSourcesOnly(true))
 			requireOK(t, res)
 			require.NotNil(t, s)
 			assert.Equal(t, "entry", s.Name())

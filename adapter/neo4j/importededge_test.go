@@ -38,7 +38,7 @@ func TestBatchEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(importedEdgeEntry),
 		"base.yammm":  []byte(importedEdgeBase),
-	}, "entry.yammm", ".", schema.WithSourcesOnly())
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
@@ -138,7 +138,7 @@ func TestBatchNodeQueries_TransitivelyImportedTypeWritesUnderItsOwnLabel(t *test
 		"entry.yammm": []byte(collidingShapeEntry),
 		"mid.yammm":   []byte(collidingShapeMid),
 		"deep.yammm":  []byte(collidingShapeDeep),
-	}, "entry.yammm", ".", schema.WithSourcesOnly())
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}

@@ -68,8 +68,8 @@ func spliceOnce(t *testing.T, data []byte, anchor, replacement string) []byte {
 // loadAndVerify renders both read surfaces over one document.
 func loadAndVerify(ctx context.Context, t *testing.T, data []byte, s *schema.Schema) (loadSig, verifySig string, loaded *graph.Snapshot) {
 	t.Helper()
-	snap, loadRes := snapshot.Load(ctx, data, s, snapshot.WithSkipIntegrityCheck())
-	verifyRes := snapshot.Verify(ctx, data, s, snapshot.WithSkipIntegrityCheck())
+	snap, loadRes := snapshot.Load(ctx, data, s, snapshot.WithIntegrityCheck(false))
+	verifyRes := snapshot.Verify(ctx, data, s, snapshot.WithIntegrityCheck(false))
 	return sigOf(loadRes), sigOf(verifyRes), snap
 }
 
@@ -205,7 +205,7 @@ func TestWireProbe_DuplicateAtDepthTwo(t *testing.T) {
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
 	expectOutcome(t, "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]", "load["+loadSig+"] verify["+verifySig+"]")
 
-	_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 	var named bool
 	for iss := range loadRes.Issues() {
 		if strings.Contains(iss.Message(), "does not resolve to a root instance") {
@@ -783,7 +783,7 @@ func TestWireProbe_UnresolvedSourceRowOutOfRange(t *testing.T) {
 	data := unresolvedDoc(ctx, t, s)
 
 	edited := spliceOnce(t, data, `{"source_type":0,`, `{"source_type":9,`)
-	snap, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	snap, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 	fact := "; snapshot=nil"
 	if snap != nil {
 		fact = fmt.Sprintf("; snapshot=non-nil with %d unresolved", len(snap.Unresolved()))

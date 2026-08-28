@@ -34,6 +34,11 @@
 //  5. Text finalization: trims trailing whitespace from each line, removes
 //     trailing blank lines, and ensures the file ends with a newline.
 //
+// Phases 2 to 4 read one line classification — blank, comment, or content —
+// computed once between phases 1 and 2. No phase decides on its own whether a
+// line is a comment, so a comment line is never wrapped, aligned, or read as
+// a value or type name, whatever its text looks like.
+//
 // # Annotation Spacing
 //
 // An annotation is written tight: no space between the @ / @@ sigil and the

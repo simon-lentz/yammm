@@ -49,6 +49,7 @@ func TestMarshal_Golden(t *testing.T) {
 		{name: "docs"},
 		{name: "escaping"},
 		{name: "no_diagram", opts: []Option{WithClassDiagram(false)}},
+		{name: "no_members", opts: []Option{WithClassMembers(false)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,6 +107,46 @@ func TestMarshal_ClassDiagramOption(t *testing.T) {
 	if strings.Contains(string(without), "## Class Diagram") ||
 		strings.Contains(string(without), "```mermaid") {
 		t.Errorf("WithClassDiagram(false) output still contains the diagram section:\n%s", without)
+	}
+}
+
+// TestMarshal_ClassMembersOption pins that WithClassMembers(false) keeps the
+// diagram, its classes, stereotypes and edges, and drops only the member
+// lines — and that the default keeps them.
+func TestMarshal_ClassMembersOption(t *testing.T) {
+	t.Parallel()
+
+	s := loadTestdata(t, "no_members")
+	withMembers, err := Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(withMembers), "        code String\n") {
+		t.Errorf("default output lacks the member line:\n%s", withMembers)
+	}
+
+	without, err := Marshal(s, WithClassMembers(false))
+	if err != nil {
+		t.Fatalf("Marshal(WithClassMembers(false)): %v", err)
+	}
+	got := string(without)
+	for _, want := range []string{
+		"## Class Diagram", "```mermaid",
+		"    class Entity {\n        <<Abstract>>\n    }\n",
+		"    class Part {\n        <<Part>>\n    }\n",
+		"    class Landmark\n",
+		"    Entity <|-- Landmark\n",
+		"    Landmark --> Landmark : NEAR (many)\n",
+		"    Landmark *-- Part : PARTS (many)\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("WithClassMembers(false) output lacks %q:\n%s", want, got)
+		}
+	}
+	for _, absent := range []string{"        code String\n", "        id UUID\n", "        label String\n"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("WithClassMembers(false) output still carries the member line %q:\n%s", absent, got)
+		}
 	}
 }
 

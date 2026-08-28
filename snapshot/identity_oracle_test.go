@@ -130,7 +130,7 @@ func loadIdentitySchema(t *testing.T) *schema.Schema {
 		"base.yammm":  []byte(identityBaseSource),
 		"deep.yammm":  []byte(identityDeepSource),
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly())
+	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if result.HasErrors() {
 		t.Fatalf("load identity fixture: %s", result)
 	}

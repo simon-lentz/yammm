@@ -207,7 +207,7 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //
 // The opts parameter accepts optional [schema.LoadOption] values that are forwarded
 // to [schema.LoadSourcesWithEntry]. For example, callers may pass
-// [schema.WithDisallowImports] to reject import declarations.
+// [schema.WithImportsAllowed] with false to reject import declarations.
 //
 // Source-registry invariance: The Analyzer creates its own [source.Registry],
 // pre-registers overlay content, and — after the load — copies the loaded

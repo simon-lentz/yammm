@@ -76,6 +76,13 @@ exec yammm gen --to md --no-class-diagram county.yammm
 ! stdout 'mermaid'
 stdout '### County'
 
+# --no-class-members keeps the diagram and drops the member lines.
+exec yammm gen --to md --no-class-members county.yammm
+stdout 'mermaid'
+stdout 'class County'
+! stdout 'fips String'
+stdout '### County'
+
 # "markdown" is accepted as an alias for md.
 exec yammm gen --to markdown county.yammm
 stdout '# Schema geo'
@@ -97,6 +104,8 @@ stdout '### deplib\.Vendor'
 stderr 'flag --package applies only to --to go'
 ! exec yammm gen --to go --no-class-diagram county.yammm
 stderr 'flag --no-class-diagram applies only to --to md'
+! exec yammm gen --to go --no-class-members county.yammm
+stderr 'flag --no-class-members applies only to --to md'
 
 -- county.yammm --
 schema "geo"

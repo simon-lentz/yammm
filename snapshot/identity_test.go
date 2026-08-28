@@ -36,7 +36,7 @@ type Basin {
 
 func loadCrossSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), crossSchemaSources, "entry.yammm", ".", schema.WithSourcesOnly())
+	s, result := schema.LoadSourcesWithEntry(t.Context(), crossSchemaSources, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if result.HasErrors() {
 		t.Fatalf("load cross-schema fixture: %s", result)
 	}

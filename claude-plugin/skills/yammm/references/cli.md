@@ -40,6 +40,7 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 
 ```bash
 yammm validate schema.yammm
+yammm validate --module-root . pipelines/x/schema.yammm   # module-style imports resolve against the root
 ```
 
 Compiles a schema file and reports diagnostics. Exit code 0 on success, non-zero on errors.
@@ -219,11 +220,12 @@ yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 | `--package` | go target: generated package name (default: derived from schema name) |
 | `--output` | Output file path (default: stdout) |
 | `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
-| `--module-root` | Root directory for module-style imports (default: the schema's directory) |
+| `--module-root` | Root directory for module-style imports (default: the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes` |
 | `--schema-id` | jsonschema target: value for the emitted `"$id"` (omitted when unset) |
 | `--no-class-diagram` | md target: omit the Mermaid class-diagram section |
+| `--no-class-members` | md target: keep the diagram and omit the member lines inside each class |
 
-Per-target flags are enforced with a usage error: `--package`/`--initialisms` apply only to `--to go`, `--schema-id` only to `--to jsonschema`, `--no-class-diagram` only to `--to md`.
+Per-target flags are enforced with a usage error: `--package`/`--initialisms` apply only to `--to go`, `--schema-id` only to `--to jsonschema`, `--no-class-diagram` and `--no-class-members` only to `--to md`.
 
 ---
 

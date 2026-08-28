@@ -61,6 +61,48 @@ part type Wheel {
 	}
 }
 
+// TestEmitClassDiagram_MembersOff pins WithClassMembers(false): classes,
+// stereotypes and edges survive; member lines do not. A stereotyped class
+// keeps the braced form with the stereotype alone, an unstereotyped one
+// declares in the compact form.
+func TestEmitClassDiagram_MembersOff(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, `schema "fleet"
+
+abstract type Vehicle {
+	vin String primary
+	make String required
+}
+
+type Car extends Vehicle {
+	color String
+}
+
+type Truck extends Vehicle {
+}
+`)
+	g := newTestGenerator(t, s)
+	g.classMembers = false
+	g.emitClassDiagram()
+	want := "## Class Diagram\n" +
+		"\n" +
+		"```mermaid\n" +
+		"classDiagram\n" +
+		"    direction TB\n" +
+		"    class Vehicle {\n" +
+		"        <<Abstract>>\n" +
+		"    }\n" +
+		"    class Car\n" +
+		"    class Truck\n" +
+		"    Vehicle <|-- Car\n" +
+		"    Vehicle <|-- Truck\n" +
+		"```\n"
+	if got := g.buf.String(); got != want {
+		t.Errorf("diagram = %q, want %q", got, want)
+	}
+}
+
 func TestEmitClassDiagram_InheritanceAndAbstract(t *testing.T) {
 	t.Parallel()
 
@@ -130,6 +172,8 @@ abstract type Located {
 	g.emitClassDiagram()
 	want := "## Class Diagram\n" +
 		"\n" +
+		mermaidFloorSentence + "\n" +
+		"\n" +
 		"```mermaid\n" +
 		"classDiagram\n" +
 		"    direction TB\n" +
@@ -148,6 +192,29 @@ abstract type Located {
 		"```\n"
 	if got := g.buf.String(); got != want {
 		t.Errorf("diagram = %q, want %q", got, want)
+	}
+}
+
+// TestEmitClassDiagram_FloorSentenceOnlyWhenLabelled pins that the emitter
+// states the Mermaid floor exactly when it wrote a labelled class — which a
+// schema without imports never does, so such a document keeps rendering on
+// Mermaid 9 and its bytes do not move.
+func TestEmitClassDiagram_FloorSentenceOnlyWhenLabelled(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, `schema "fleet"
+
+type Car {
+	vin String primary
+}
+`)
+	g := newTestGenerator(t, s)
+	g.emitClassDiagram()
+	if got := g.buf.String(); strings.Contains(got, "Mermaid 10.1.0") {
+		t.Errorf("an import-free diagram carries the floor sentence:\n%s", got)
+	}
+	if mermaidFloorSentence != "This diagram uses Mermaid's labelled class form and needs Mermaid 10.1.0 or later." {
+		t.Errorf("floor sentence = %q; the floor is 10.1.0, the first tag whose grammar has classLabel", mermaidFloorSentence)
 	}
 }
 

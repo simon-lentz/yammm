@@ -167,7 +167,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 		overlays := map[string][]byte{
 			virtualPath: []byte(block.Content),
 		}
-		snapshot, err := w.sched.analyzer.Analyze(analyzeCtx, virtualPath, overlays, "", w.PositionEncoding(), schema.WithDisallowImports())
+		snapshot, err := w.sched.analyzer.Analyze(analyzeCtx, virtualPath, overlays, "", w.PositionEncoding(), schema.WithImportsAllowed(false))
 		if err != nil {
 			w.logger.Warn("markdown block analysis failed",
 				slog.String("uri", uri), slog.Int("block", i), slog.Any("error", err))

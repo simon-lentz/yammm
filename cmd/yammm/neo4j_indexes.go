@@ -27,6 +27,7 @@ func newNeo4jIndexesCmd() *cobra.Command {
 	// against a disjoint set of labels.
 	registerLabelFlags(cmd)
 
+	registerModuleRootFlag(cmd)
 	return cmd
 }
 
@@ -47,8 +48,12 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load schema
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	if err != nil {
+		return err
+	}
+	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
 	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
@@ -60,7 +65,7 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string) error {
 	// invocation writes one result on either path.
 	statements, indexResult := adapter.IndexesForSchema(cmd.Context(), s)
 	result := cli.MergeResults(pending, indexResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
 	if result.HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}

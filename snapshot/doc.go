@@ -179,7 +179,8 @@
 //
 // [Load] and [Verify] accept [LoadOption] values:
 //
-//   - [WithSkipIntegrityCheck]: skip SHA-256 integrity verification (useful for debugging)
+//   - [WithIssueLimit]: maximum issues stored (default 100; 0 for unlimited); the walk always completes
+//   - [WithIntegrityCheck]: with false, skip SHA-256 integrity verification (useful for debugging)
 //   - [WithValueConformance]: report stored Timestamp/Date/UUID values that do not conform to their constraints (Warning)
 //   - [WithRevalidation]: run every instance back through the real validator, reported at the given severity
 //

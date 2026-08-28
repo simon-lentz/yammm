@@ -17,6 +17,28 @@ exec yammm check --type Person valid.yammm data.csv
 stderr '"severity"'
 stderr '"error"'
 
+# --module-root reaches every schema-loading command, not only gen.
+! exec yammm check sub/entry.yammm empty.json
+stderr 'E_IMPORT_RESOLVE'
+exec yammm check --module-root . sub/entry.yammm empty.json
+
+-- sub/entry.yammm --
+schema "entry"
+
+import "lib/dep" as dep
+
+type Thing {
+	id String primary
+	--> USES (one) dep.Part
+}
+-- lib/dep.yammm --
+schema "dep"
+
+type Part {
+	part_id String primary
+}
+-- empty.json --
+{"Thing": []}
 -- valid.yammm --
 schema "test"
 

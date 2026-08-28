@@ -48,7 +48,7 @@ type Ground {
 }
 `),
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly())
+	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if result.HasErrors() {
 		t.Fatalf("load: %v", result.Err())
 	}

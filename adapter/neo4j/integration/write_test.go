@@ -210,7 +210,7 @@ part type Note {
 `
 	s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
 		"cw.yammm": []byte(src),
-	}, "cw.yammm", ".", schema.WithSourcesOnly())
+	}, "cw.yammm", ".", schema.WithSourcesOnly(true))
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}

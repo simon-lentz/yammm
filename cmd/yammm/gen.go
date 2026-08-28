@@ -42,7 +42,9 @@ Targets:
                    class diagram of every type in the import closure, per-type
                    sections (property tables, relations, invariants), and
                    data-type tables. "markdown" is accepted as an alias. Use
-                   --no-class-diagram to omit the diagram section.
+                   --no-class-diagram to omit the diagram section, or
+                   --no-class-members to keep the diagram and drop the
+                   member lines inside each class.
 
 Use --module-root to resolve module-style imports against a root directory other
 than the schema's own (e.g. a repository root); for the go target the embedded
@@ -54,9 +56,10 @@ source keys are relative to that root.`,
 	cmd.Flags().String("package", "", "go target: generated package name (default: derived from schema name)")
 	cmd.Flags().String("output", "", "output file path (default: stdout)")
 	cmd.Flags().StringSlice("initialisms", nil, "go target: extra acronyms to upper-case in generated names, e.g. GUID,JWT")
-	cmd.Flags().String("module-root", "", "root directory for module-style imports (default: the schema's directory)")
+	registerModuleRootFlag(cmd)
 	cmd.Flags().String("schema-id", "", `jsonschema target: value for the emitted "$id" (omitted when unset)`)
 	cmd.Flags().Bool("no-class-diagram", false, "md target: omit the Mermaid class-diagram section")
+	cmd.Flags().Bool("no-class-members", false, "md target: omit the member lines inside each diagram class")
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
 }
@@ -72,6 +75,7 @@ func rejectInapplicableFlags(cmd *cobra.Command, target string) error {
 		{"initialisms", "go"},
 		{"schema-id", "jsonschema"},
 		{"no-class-diagram", "md"},
+		{"no-class-members", "md"},
 	}
 	for _, pf := range perTarget {
 		if pf.target != target && cmd.Flags().Changed(pf.flag) {
@@ -87,7 +91,6 @@ func runGen(cmd *cobra.Command, args []string) error {
 	noColor, _ := cmd.Flags().GetBool("no-color")
 	toFormat, _ := cmd.Flags().GetString("to")
 	outputPath, _ := cmd.Flags().GetString("output")
-	moduleRoot, _ := cmd.Flags().GetString("module-root")
 
 	outputFormat, err := cli.ParseOutputFormat(formatStr)
 	if err != nil {
@@ -112,16 +115,9 @@ func runGen(cmd *cobra.Command, args []string) error {
 		return &cli.ExitError{Code: cli.ExitUsage}
 	}
 
-	var loadOpts []schema.LoadOption
-	moduleRootAbs := ""
-	if moduleRoot != "" {
-		absRoot, err := filepath.Abs(moduleRoot)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: resolve module root %q: %v\n", moduleRoot, err)
-			return &cli.ExitError{Code: cli.ExitUsage}
-		}
-		loadOpts = append(loadOpts, schema.WithModuleRoot(absRoot))
-		moduleRootAbs = absRoot
+	moduleRootAbs, loadOpts, err := moduleRootOptions(cmd)
+	if err != nil {
+		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
 	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRootAbs, absSchemaPath, schemaResult)
@@ -154,11 +150,10 @@ func runGen(cmd *cobra.Command, args []string) error {
 		data, err = jschema.Marshal(s, opts...)
 	case "md":
 		noDiagram, _ := cmd.Flags().GetBool("no-class-diagram")
-		var opts []markdown.Option
-		if noDiagram {
-			opts = append(opts, markdown.WithClassDiagram(false))
-		}
-		data, err = markdown.Marshal(s, opts...)
+		noMembers, _ := cmd.Flags().GetBool("no-class-members")
+		data, err = markdown.Marshal(s,
+			markdown.WithClassDiagram(!noDiagram),
+			markdown.WithClassMembers(!noMembers))
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: generate %s: %v\n", target, err)

@@ -81,18 +81,35 @@ type loadConfig struct {
 
 	revalidate         bool
 	revalidateSeverity diag.Severity
+
+	issueLimit int
 }
 
+// defaultIssueLimit matches schema.Load's default.
+const defaultIssueLimit = 100
+
 func applyLoadOptions(opts []LoadOption) loadConfig {
-	var cfg loadConfig
+	cfg := loadConfig{issueLimit: defaultIssueLimit}
 	for _, o := range opts {
 		o(&cfg)
 	}
 	return cfg
 }
 
-// WithValueConformance makes [Load] and [Verify] report a stored value that
-// does not conform to its schema constraint, as a Warning carrying
+// WithIssueLimit sets the maximum number of issues [Load] and [Verify] store.
+// The walk always completes: past the limit the collector keeps the most
+// severe issues seen, and [github.com/simon-lentz/yammm/diag.Result.DroppedCount],
+// [github.com/simon-lentz/yammm/diag.Result.LimitReached] and
+// [github.com/simon-lentz/yammm/diag.Result.TruncationNote] report the rest
+// exactly. Set to 0 for unlimited. Default is 100, matching schema.Load.
+func WithIssueLimit(limit int) LoadOption {
+	return func(c *loadConfig) {
+		c.issueLimit = limit
+	}
+}
+
+// WithValueConformance selects whether [Load] and [Verify] report a stored
+// value that does not conform to its schema constraint, as a Warning carrying
 // [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_VALUE_NONCONFORMING]. Off by
 // default, so nothing changes and the walk costs nothing when nobody asks.
 //
@@ -105,9 +122,9 @@ func applyLoadOptions(opts []LoadOption) loadConfig {
 // Warning severity is deliberate: Load still returns the snapshot together
 // with the findings. Reporting a document is not refusing it, and the values
 // themselves are rendered rather than rejected — [Load] never re-validates.
-func WithValueConformance() LoadOption {
+func WithValueConformance(report bool) LoadOption {
 	return func(c *loadConfig) {
-		c.valueConformance = true
+		c.valueConformance = report
 	}
 }
 
@@ -131,6 +148,10 @@ func WithValueConformance() LoadOption {
 // declare is reported rather than silently skipped — such a document is
 // exactly what the option exists to find. Off by default: without the
 // option, Load returns what was written.
+//
+// A systematic defect on a large document produces one finding per instance;
+// [WithIssueLimit] bounds what is stored (default 100), and the counts stay
+// exact past it.
 func WithRevalidation(severity diag.Severity) LoadOption {
 	return func(c *loadConfig) {
 		c.revalidate = true
@@ -138,13 +159,14 @@ func WithRevalidation(severity diag.Severity) LoadOption {
 	}
 }
 
-// WithSkipIntegrityCheck disables integrity hash verification on load
-// and verify. All other structural validation still runs and produces
-// diagnostics with the standard snapshot codes. This follows etcd's
-// SkipHashCheck pattern and supports debugging workflows where .ys files
-// have been hand-edited for inspection.
-func WithSkipIntegrityCheck() LoadOption {
+// WithIntegrityCheck selects whether [Load] and [Verify] verify the
+// integrity hash. With false, the hash is not checked; all other structural
+// validation still runs and produces diagnostics with the standard snapshot
+// codes. This follows etcd's SkipHashCheck pattern and supports debugging
+// workflows where .ys files have been hand-edited for inspection. With true —
+// the default — a mismatch draws E_SNAPSHOT_INTEGRITY_MISMATCH.
+func WithIntegrityCheck(check bool) LoadOption {
 	return func(c *loadConfig) {
-		c.skipIntegrityCheck = true
+		c.skipIntegrityCheck = !check
 	}
 }

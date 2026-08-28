@@ -81,7 +81,7 @@ type Anchor {
 }
 `),
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", ".", schema.WithSourcesOnly())
+	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", ".", schema.WithSourcesOnly(true))
 	if result.HasErrors() {
 		t.Fatalf("load: %v", result.Err())
 	}

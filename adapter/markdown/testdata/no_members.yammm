@@ -1,0 +1,15 @@
+schema "geo"
+
+abstract type Entity {
+	id UUID primary
+}
+
+part type Part {
+	label String primary
+}
+
+type Landmark extends Entity {
+	code String
+	--> NEAR (many) Landmark
+	*-> PARTS (many) Part
+}

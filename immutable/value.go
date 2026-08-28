@@ -12,12 +12,15 @@ type wrapConfig struct {
 	clone bool
 }
 
-// WithClone causes the Wrap constructor to deep-clone maps and slices before
-// wrapping. The caller may freely retain and mutate the original value after
-// construction. Use this when the value comes from external sources, is shared,
-// or when ownership cannot be verified.
-func WithClone() Option {
-	return func(c *wrapConfig) { c.clone = true }
+// WithClone selects whether a value the constructor would store as-is — a map
+// with a non-string key, and everything reachable through it — is deep-cloned
+// first. String-keyed maps and slices are copied into immutable containers
+// whether or not it is set; structs and pointers are stored as-is whether or
+// not it is set. With true, the caller can retain and mutate such a map after
+// construction. With false — the default — the constructor takes ownership and
+// the caller must not touch the value again.
+func WithClone(clone bool) Option {
+	return func(c *wrapConfig) { c.clone = clone }
 }
 
 func resolveConfig(opts []Option) wrapConfig {
@@ -46,8 +49,8 @@ type Value struct {
 // After calling Wrap, the caller MUST NOT retain or use any reference to v
 // or any mutable value reachable from v. Mutation after Wrap is undefined behavior.
 //
-// Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
-// caller to freely retain and mutate the original.
+// Pass [WithClone] with true to deep-clone what would be stored as-is — a
+// non-string-keyed map and its contents — so the caller can retain it.
 func Wrap(v any, opts ...Option) Value {
 	cfg := resolveConfig(opts)
 	return Value{val: wrapValue(v, cfg.clone)}
@@ -232,7 +235,8 @@ func (v Value) Slice() (Slice, bool) {
 }
 
 // wrapValue recursively wraps a value.
-// If clone is true, mutable values are deep-cloned before wrapping.
+// If clone is true, a value that would be stored as-is (a non-string-keyed
+// map) is deep-cloned first.
 func wrapValue(v any, clone bool) any {
 	if v == nil {
 		return nil

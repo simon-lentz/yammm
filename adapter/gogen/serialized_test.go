@@ -97,7 +97,7 @@ func TestUniformSources_ReloadUnderSyntheticRoot(t *testing.T) {
 
 			got, res := schema.LoadSourcesWithEntry(context.Background(), sources,
 				sourceKey(root, entry, entry), "",
-				schema.WithSourcesOnly(), schema.WithSyntheticRoot("embedded://fixture"))
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://fixture"))
 			if res.HasErrors() {
 				t.Fatalf("synthetic-root re-load: %v", res.Err())
 			}

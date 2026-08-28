@@ -37,8 +37,8 @@ type Key struct {
 // This is a programmer error—key components must be JSON-compatible values.
 // This behavior matches [graph.FormatKey].
 //
-// Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
-// caller to freely retain and mutate the original.
+// Pass [WithClone] with true to deep-clone what would be stored as-is — a
+// non-string-keyed map and its contents — so the caller can retain it.
 func WrapKey(components []any, opts ...Option) Key {
 	if components == nil {
 		return Key{str: "[]"}

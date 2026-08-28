@@ -60,7 +60,11 @@
 // whole document speaks one vocabulary. Mermaid namespaces are deliberately
 // not used (some Markdown renderers do not support them in class
 // diagrams); qualified type names render as sanitized class ids
-// with a display label instead.
+// with a display label instead. That labelled form needs Mermaid 10.1.0 or
+// later, and only an imported type takes it, so a schema with imports is in
+// scope and an import-free one renders on Mermaid 9. When the diagram holds
+// a labelled class the document says so in one sentence under the "## Class
+// Diagram" heading, before the fence.
 //
 // Relations render in the type sections as DSL-notation bullets with the
 // target linked to its section:

@@ -19,7 +19,6 @@ import (
 // Markdown renderers do not support classDiagram namespaces.
 func (g *generator) emitClassDiagram() {
 	g.anchors["class-diagram"] = true
-	g.buf.WriteString("## Class Diagram\n\n")
 
 	var b strings.Builder
 	b.WriteString("classDiagram\n")
@@ -34,19 +33,32 @@ func (g *generator) emitClassDiagram() {
 			g.writeEdges(&b, t)
 		}
 	}
+
+	g.buf.WriteString("## Class Diagram\n\n")
+	if g.labelled {
+		g.buf.WriteString(mermaidFloorSentence + "\n\n")
+	}
 	writeFence(&g.buf, "mermaid", b.String())
 }
 
+// mermaidFloorSentence states the renderer floor the labelled class form
+// needs. The emitter is the only party that knows it wrote one, so the
+// emitter says so, in the document, before the fence. Mermaid 10.1.0 is the
+// first release whose class-diagram grammar carries the classLabel
+// production; 9.x fails the form with a lexical error.
+const mermaidFloorSentence = "This diagram uses Mermaid's labelled class form and needs Mermaid 10.1.0 or later."
+
 // writeClass writes one class declaration. Members are the type's own
-// properties only — inherited members are conveyed by the inheritance
-// edges, not repeated in every subtype's box. A class with no annotation
-// and no members declares in the compact single-line form.
+// properties only (inheritance edges convey the rest), and none when
+// classMembers is off. A class with no annotation and no members declares
+// in the compact single-line form.
 func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
 	e := g.types[t.ID()]
 	id := mermaidID(e.display)
 	head := "class " + id
 	if e.display != id {
 		head += `["` + e.display + `"]`
+		g.labelled = true
 	}
 
 	annotation := ""
@@ -57,7 +69,10 @@ func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
 		annotation = "<<Part>>"
 	}
 
-	props := t.PropertiesSlice()
+	var props []*schema.Property
+	if g.classMembers {
+		props = t.PropertiesSlice()
+	}
 	if annotation == "" && len(props) == 0 {
 		b.WriteString("    " + head + "\n")
 		return

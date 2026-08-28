@@ -85,13 +85,20 @@ if ! command -v yammm >/dev/null 2>&1; then
   exit 0
 fi
 
+# The VCS root stands in for the module root so module-style imports resolve;
+# outside a checkout, validate's own default (the schema's directory) applies.
+module_root_args=()
+if module_root=$(git -C "$(dirname "$file_path")" rev-parse --show-toplevel 2>/dev/null) && [ -n "$module_root" ]; then
+  module_root_args=(--module-root "$module_root")
+fi
+
 # Run yammm validate and capture combined output (stdout + stderr).
 # Diagnostics go to stderr at every severity, so both streams are captured.
 #
 # `|| true` keeps errexit from terminating the script on a non-zero exit; the
 # status is deliberately discarded, because what decides whether there is
 # something to report is whether validate SAID anything, not how it exited.
-validate_output=$(yammm validate "$file_path" 2>&1) || true
+validate_output=$(yammm validate "${module_root_args[@]}" "$file_path" 2>&1) || true
 
 # Nothing printed — either the schema is diagnostic-free, or validate failed
 # before emitting anything (unusual, but possible). Either way there is nothing

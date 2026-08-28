@@ -1,0 +1,53 @@
+# Schema geo
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    direction TB
+    class Entity {
+        <<Abstract>>
+    }
+    class Part {
+        <<Part>>
+    }
+    class Landmark
+    Entity <|-- Landmark
+    Landmark --> Landmark : NEAR (many)
+    Landmark *-- Part : PARTS (many)
+```
+
+## Types
+
+### Entity
+
+*Abstract type* — no direct instances.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `id` | `UUID` | primary |  |
+
+### Part
+
+*Part type* — instances exist only as composed children.
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `label` | `String` | primary |  |
+
+### Landmark
+
+Extends: [Entity](#entity).
+
+| Property | Type | Modifiers | Description |
+| --- | --- | --- | --- |
+| `code` | `String` |  |  |
+| `id` | `UUID` | primary, from Entity |  |
+
+**Associations**
+
+- `--> NEAR (many)` [Landmark](#landmark)
+
+**Compositions**
+
+- `*-> PARTS (many)` [Part](#part)

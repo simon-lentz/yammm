@@ -46,7 +46,7 @@ func loadMulti(t *testing.T, sources map[string]string, entry string) *schema.Sc
 	for k, v := range sources {
 		m[k] = []byte(v)
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), m, entry, ".", schema.WithSourcesOnly())
+	s, res := schema.LoadSourcesWithEntry(t.Context(), m, entry, ".", schema.WithSourcesOnly(true))
 	if res.HasErrors() {
 		t.Fatalf("load multi: %v", res.Err())
 	}

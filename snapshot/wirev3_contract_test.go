@@ -69,7 +69,7 @@ func TestWireV3_DuplicateGroupEntryIsReported(t *testing.T) {
 	}
 	edited := append(append([]byte{}, data[:idx]...), append([]byte(`,{"type":1,"items":[]}`), data[idx:]...)...)
 
-	_, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	_, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("two instances entries referencing one table row loaded without %s: %v",
 			diag.E_SNAPSHOT_MALFORMED, res)
@@ -101,7 +101,7 @@ func TestWireV3_ComposedChildWithoutTypeIsReported(t *testing.T) {
 	}
 	stripped := body[:idx+len(`"CHILDREN":[{"key":["c1"],`)] + body[idx+len(anchor)+end+1:]
 
-	_, res := snapshot.Load(ctx, []byte(stripped), s, snapshot.WithSkipIntegrityCheck())
+	_, res := snapshot.Load(ctx, []byte(stripped), s, snapshot.WithIntegrityCheck(false))
 	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("a composed child carrying no type index loaded without %s: %v",
 			diag.E_SNAPSHOT_MALFORMED, res)
@@ -186,7 +186,7 @@ func TestWireV3_UnresolvableSchemaPathIsReported(t *testing.T) {
 		t.Fatalf("fixture shape changed; %s row not found in:\n%s", rooted, data)
 	}
 
-	loaded, res := snapshot.Load(ctx, moved, s, snapshot.WithSkipIntegrityCheck())
+	loaded, res := snapshot.Load(ctx, moved, s, snapshot.WithIntegrityCheck(false))
 	if !hasCode(res, diag.E_SNAPSHOT_UNKNOWN_TYPE) {
 		t.Errorf("a moved schema path loaded without %s: %v", diag.E_SNAPSHOT_UNKNOWN_TYPE, res)
 	}
@@ -213,7 +213,7 @@ func TestWireV3_UnknownTableRowIsReported(t *testing.T) {
 		t.Fatalf("fixture shape changed; name not found in:\n%s", data)
 	}
 
-	loaded, res := snapshot.Load(ctx, ghosted, s, snapshot.WithSkipIntegrityCheck())
+	loaded, res := snapshot.Load(ctx, ghosted, s, snapshot.WithIntegrityCheck(false))
 	if !hasCode(res, diag.E_SNAPSHOT_UNKNOWN_TYPE) {
 		t.Errorf("a types table row naming nothing loaded without %s: %v",
 			diag.E_SNAPSHOT_UNKNOWN_TYPE, res)
@@ -347,7 +347,7 @@ func TestWireV3_AbsentSectionIsMalformed(t *testing.T) {
 				t.Fatalf("edit is vacuous: the document is unchanged")
 			}
 
-			loaded, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+			loaded, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 			if !hasMalformedReason(res, tc.wantReason) {
 				t.Errorf("Load did not report %q: %v", tc.wantReason, res)
 			}
@@ -355,7 +355,7 @@ func TestWireV3_AbsentSectionIsMalformed(t *testing.T) {
 				t.Errorf("Load returned a snapshot beside a malformed document")
 			}
 
-			vres := snapshot.Verify(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+			vres := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 			if !hasMalformedReason(vres, tc.wantReason) {
 				t.Errorf("Verify did not report %q: %v", tc.wantReason, vres)
 			}
@@ -450,10 +450,10 @@ func TestWireV3_UnresolvedReasonBindsItsPayload(t *testing.T) {
 			if bytes.Equal(edited, data) {
 				t.Fatalf("fixture shape changed; %s not found in:\n%s", tc.from, data)
 			}
-			if _, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck()); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+			if _, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 				t.Errorf("Load accepted it without %s: %v", diag.E_SNAPSHOT_MALFORMED, res)
 			}
-			if res := snapshot.Verify(ctx, edited, s, snapshot.WithSkipIntegrityCheck()); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+			if res := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 				t.Errorf("Verify accepted it without %s: %v", diag.E_SNAPSHOT_MALFORMED, res)
 			}
 		})
@@ -479,7 +479,7 @@ func TestWireV3_EmptyProvenancePathWarns(t *testing.T) {
 		t.Fatalf("fixture shape changed; no provenance field in:\n%s", data)
 	}
 
-	_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 	if !hasCode(loadRes, diag.E_SNAPSHOT_PATH_FALLBACK) {
 		t.Errorf("an empty provenance path drew no %s: %v", diag.E_SNAPSHOT_PATH_FALLBACK, loadRes)
 	}
@@ -529,7 +529,7 @@ func TestWireV3_StrayParentCoordinateIsReported(t *testing.T) {
 			cut := idx + len(anchor)
 			edited := append(append([]byte{}, data[:cut]...), append([]byte(tc.field), data[cut:]...)...)
 
-			if _, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck()); !hasMalformedReason(res, "states no relation but carries parent coordinates") {
+			if _, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !hasMalformedReason(res, "states no relation but carries parent coordinates") {
 				t.Errorf("Load accepted a root duplicate carrying %s: %v", tc.field, res)
 			}
 		})
@@ -567,7 +567,7 @@ func TestWireV3_RejectedRowDoesNotAttributeAWarning(t *testing.T) {
 	broken = append(broken, []byte("99")...)
 	broken = append(broken, edited[cut+end:]...)
 
-	_, res := snapshot.Load(ctx, broken, s, snapshot.WithSkipIntegrityCheck())
+	_, res := snapshot.Load(ctx, broken, s, snapshot.WithIntegrityCheck(false))
 	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Fatalf("fixture is vacuous: the out-of-range row was accepted: %v", res)
 	}
@@ -601,7 +601,7 @@ func TestWireV3_NegativeRowIndexIsMalformed(t *testing.T) {
 
 	const wantReason = "instances entry 0 references types table row -1"
 
-	loaded, res := snapshot.Load(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	loaded, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 	if !hasMalformedReason(res, wantReason) {
 		t.Errorf("Load did not report %q: %v", wantReason, res)
 	}
@@ -609,7 +609,7 @@ func TestWireV3_NegativeRowIndexIsMalformed(t *testing.T) {
 		t.Errorf("Load returned a snapshot for a negative row reference")
 	}
 
-	vres := snapshot.Verify(ctx, edited, s, snapshot.WithSkipIntegrityCheck())
+	vres := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 	if !hasMalformedReason(vres, wantReason) {
 		t.Errorf("Verify did not report %q: %v", wantReason, vres)
 	}

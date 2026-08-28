@@ -30,26 +30,36 @@ func WrapLongLines(text string) string {
 	if text == "" {
 		return ""
 	}
+	return joinLines(wrapLongLines(classifyText(text)))
+}
 
-	lines := strings.Split(text, "\n")
-	var result []string
+// wrapLongLines is WrapLongLines over classified lines. Only a content line
+// starts a construct or is wrapped; a blank or comment line passes through
+// untouched, whatever its text looks like.
+func wrapLongLines(ls []line) []line {
+	result := make([]line, 0, len(ls))
 	i := 0
 
-	for i < len(lines) {
-		line := lines[i]
+	for i < len(ls) {
+		ln := ls[i]
+		if ln.class != lineContent {
+			result = append(result, ln)
+			i++
+			continue
+		}
+		line := ln.text
 
 		// Category 1: Existing multiline Enum constructs
 		if isMultilineEnumStart(line) {
-			collected, nextIdx := collectMultilineConstruct(lines, i)
-			collapsed := tryCollapseEnum(collected)
-			result = append(result, collapsed...)
+			collected, nextIdx := collectMultilineConstruct(ls, i)
+			result = append(result, tryCollapseEnum(collected)...)
 			i = nextIdx
 			continue
 		}
 
 		// Category 1: Existing multiline extends constructs
 		if isMultilineExtendsStart(line) {
-			collapsed, nextIdx := collapseMultilineExtends(lines, i)
+			collapsed, nextIdx := collapseMultilineExtends(ls, i)
 			result = append(result, collapsed...)
 			i = nextIdx
 			continue
@@ -57,19 +67,16 @@ func WrapLongLines(text string) string {
 
 		// Category 1: Existing multiline datatype alias Enum
 		if isMultilineDatatypeAliasEnumStart(line) {
-			collected, nextIdx := collectMultilineConstruct(lines, i)
-			collapsed := tryCollapseDatatypeAliasEnum(collected)
-			result = append(result, collapsed...)
+			collected, nextIdx := collectMultilineConstruct(ls, i)
+			result = append(result, tryCollapseDatatypeAliasEnum(collected)...)
 			i = nextIdx
 			continue
 		}
 
 		// Category 1: Existing multiline invariant — pass through unchanged
-		if isMultilineInvariantStart(lines, i) {
-			nextIdx := advancePastMultilineInvariant(lines, i)
-			for j := i; j < nextIdx; j++ {
-				result = append(result, lines[j])
-			}
+		if isMultilineInvariantStart(ls, i) {
+			nextIdx := advancePastMultilineInvariant(ls, i)
+			result = append(result, ls[i:nextIdx]...)
 			i = nextIdx
 			continue
 		}
@@ -77,35 +84,75 @@ func WrapLongLines(text string) string {
 		// Category 2: Long single lines — try wrapping
 		if DisplayWidth(line) > LineWidthThreshold {
 			if wrapped, ok := tryWrapSingleLineEnum(line); ok {
-				result = append(result, wrapped...)
+				result = append(result, contentLines(wrapped)...)
 			} else if wrapped, ok := tryWrapSingleLineExtends(line); ok {
-				result = append(result, wrapped...)
+				result = append(result, contentLines(wrapped)...)
 			} else if wrapped, ok := tryWrapDatatypeAliasEnum(line); ok {
-				result = append(result, wrapped...)
+				result = append(result, contentLines(wrapped)...)
 			} else if wrapped, ok := tryWrapInvariant(line); ok {
-				result = append(result, wrapped...)
+				result = append(result, contentLines(wrapped)...)
 			} else {
-				result = append(result, line)
+				result = append(result, ln)
 			}
 			i++
 			continue
 		}
 
 		// Category 3: Short lines — pass through unchanged
-		result = append(result, line)
+		result = append(result, ln)
 		i++
 	}
 
-	return strings.Join(result, "\n")
+	return result
+}
+
+// allContent reports whether every line is a content line.
+func allContent(ls []line) bool {
+	for _, ln := range ls {
+		if ln.class != lineContent {
+			return false
+		}
+	}
+	return true
+}
+
+// reindentConstruct re-emits a multiline bracket or extends construct that
+// holds a comment line in its canonical shape: the first line as it is,
+// interior lines one level deeper than it, and a closing "]" or "{" line
+// at its indentation. Comment lines keep their text and take their place.
+func reindentConstruct(ls []line) []line {
+	indent := extractIndent(ls[0].text)
+	out := make([]line, 0, len(ls))
+	out = append(out, ls[0])
+	for i, ln := range ls[1:] {
+		if ln.class == lineBlank {
+			out = append(out, ln)
+			continue
+		}
+		trimmed := strings.TrimSpace(ln.text)
+		last := i == len(ls)-2
+		if last && (strings.HasPrefix(trimmed, "]") || trimmed == "{") {
+			out = append(out, line{text: indent + trimmed, class: ln.class})
+			continue
+		}
+		out = append(out, line{text: indent + "\t" + trimmed, class: ln.class})
+	}
+	return out
+}
+
+// contentLines classifies the lines a wrapper emitted in place of one
+// declaration line.
+func contentLines(texts []string) []line {
+	out := make([]line, len(texts))
+	for i, t := range texts {
+		out[i] = contentLine(t)
+	}
+	return out
 }
 
 // isMultilineEnumStart checks if a line starts a multiline Enum (has `Enum[`
 // with unbalanced brackets) but is NOT a datatype alias (no ` = Enum[`).
 func isMultilineEnumStart(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") {
-		return false
-	}
 	if !containsEnumBracket(line) {
 		return false
 	}
@@ -311,11 +358,17 @@ func tryWrapSingleLineEnum(line string) ([]string, bool) {
 }
 
 // tryCollapseEnum attempts to collapse a multiline Enum into a single line.
-// If it doesn't fit, re-emit as canonical multiline.
-func tryCollapseEnum(collected []string) []string {
-	if len(collected) < 2 {
-		return collected
+// If it doesn't fit, re-emit as canonical multiline. A construct holding a
+// comment line is not a list of values: it keeps its lines, re-indented to
+// the canonical multiline shape.
+func tryCollapseEnum(collectedLines []line) []line {
+	if len(collectedLines) < 2 {
+		return collectedLines
 	}
+	if !allContent(collectedLines) {
+		return reindentConstruct(collectedLines)
+	}
+	collected := textsOf(collectedLines)
 
 	firstLine := collected[0]
 	indent := extractIndent(firstLine)
@@ -323,7 +376,7 @@ func tryCollapseEnum(collected []string) []string {
 	// Find Enum[ in first line
 	enumIdx := strings.Index(firstLine, "Enum[")
 	if enumIdx < 0 {
-		return collected
+		return collectedLines
 	}
 	prefix := firstLine[:enumIdx+5] // up to and including "Enum["
 
@@ -357,17 +410,17 @@ func tryCollapseEnum(collected []string) []string {
 	}
 
 	if len(values) == 0 {
-		return collected
+		return collectedLines
 	}
 
 	// Try single-line form
 	singleLine := buildSingleLineEnum(prefix, values, suffix)
 	if DisplayWidth(singleLine) <= LineWidthThreshold {
-		return []string{singleLine}
+		return []line{contentLine(singleLine)}
 	}
 
 	// Re-emit canonical multiline
-	return buildWrappedEnum(indent, prefix, values, suffix)
+	return contentLines(buildWrappedEnum(indent, prefix, values, suffix))
 }
 
 // isMultilineExtendsStart checks if a line is an extends header without `{` on the same line.
@@ -457,14 +510,14 @@ func buildSingleLineExtends(indent, header string, types []string) string {
 }
 
 // collapseMultilineExtends collects a multiline extends and attempts to collapse it.
-func collapseMultilineExtends(lines []string, startIdx int) ([]string, int) {
-	firstLine := lines[startIdx]
+func collapseMultilineExtends(ls []line, startIdx int) ([]line, int) {
+	firstLine := ls[startIdx].text
 	indent := extractIndent(firstLine)
 	trimmed := strings.TrimSpace(firstLine)
 
 	extendsIdx := strings.Index(trimmed, " extends")
 	if extendsIdx < 0 {
-		return []string{firstLine}, startIdx + 1
+		return ls[startIdx : startIdx+1], startIdx + 1
 	}
 	header := trimmed[:extendsIdx+len(" extends")]
 
@@ -480,11 +533,18 @@ func collapseMultilineExtends(lines []string, startIdx int) ([]string, int) {
 		}
 	}
 
-	// Collect subsequent lines until we find `{`
+	// Collect subsequent lines until we find `{`. A comment line inside the
+	// list is not a type name: the construct is re-indented, not collapsed.
 	i := startIdx + 1
 	braceFound := false
-	for i < len(lines) {
-		lt := strings.TrimSpace(lines[i])
+	sawComment := false
+	for i < len(ls) {
+		if ls[i].class != lineContent {
+			sawComment = true
+			i++
+			continue
+		}
+		lt := strings.TrimSpace(ls[i].text)
 		if lt == "{" {
 			braceFound = true
 			i++
@@ -511,19 +571,20 @@ func collapseMultilineExtends(lines []string, startIdx int) ([]string, int) {
 
 	if !braceFound || len(types) == 0 {
 		// Can't parse, pass through
-		out := make([]string, i-startIdx)
-		copy(out, lines[startIdx:i])
-		return out, i
+		return ls[startIdx:i], i
+	}
+	if sawComment {
+		return reindentConstruct(ls[startIdx:i]), i
 	}
 
 	// Try single-line form
 	singleLine := buildSingleLineExtends(indent, header, types)
 	if DisplayWidth(singleLine) <= LineWidthThreshold {
-		return []string{singleLine}, i
+		return []line{contentLine(singleLine)}, i
 	}
 
 	// Re-emit canonical multiline
-	return buildWrappedExtends(indent, header, types), i
+	return contentLines(buildWrappedExtends(indent, header, types)), i
 }
 
 // tryWrapDatatypeAliasEnum attempts to wrap a long single-line datatype alias Enum.
@@ -567,7 +628,7 @@ func tryWrapDatatypeAliasEnum(line string) ([]string, bool) {
 }
 
 // tryCollapseDatatypeAliasEnum attempts to collapse a multiline datatype alias Enum.
-func tryCollapseDatatypeAliasEnum(collected []string) []string {
+func tryCollapseDatatypeAliasEnum(collected []line) []line {
 	// Reuse the same logic as regular Enum collapsing
 	return tryCollapseEnum(collected)
 }
@@ -576,11 +637,11 @@ func tryCollapseDatatypeAliasEnum(collected []string) []string {
 // This detects two cases:
 // 1. Line is `! "message"` with nothing after (expression on next line)
 // 2. Line is `! "message" expr_start` and next line is a continuation
-func isMultilineInvariantStart(lines []string, idx int) bool {
-	if idx >= len(lines) {
+func isMultilineInvariantStart(ls []line, idx int) bool {
+	if idx >= len(ls) {
 		return false
 	}
-	line := lines[idx]
+	line := ls[idx].text
 	trimmed := strings.TrimSpace(line)
 	if !strings.HasPrefix(trimmed, "! \"") {
 		return false
@@ -596,20 +657,18 @@ func isMultilineInvariantStart(lines []string, idx int) bool {
 
 	// Case 1: nothing after message (expression entirely on next lines)
 	if afterMsg == "" {
-		return idx+1 < len(lines)
+		return idx+1 < len(ls)
 	}
 
-	// Case 2: Check if the next line is a continuation (indented deeper, not a new declaration)
-	if idx+1 >= len(lines) {
+	// Case 2: Check if the next line is a content continuation (indented
+	// deeper, not a new declaration)
+	if idx+1 >= len(ls) || ls[idx+1].class != lineContent {
 		return false
 	}
 
 	currentIndent := len(extractIndent(line))
-	nextLine := lines[idx+1]
+	nextLine := ls[idx+1].text
 	nextTrimmed := strings.TrimSpace(nextLine)
-	if nextTrimmed == "" {
-		return false
-	}
 	nextIndent := len(extractIndent(nextLine))
 
 	if nextIndent <= currentIndent {
@@ -643,7 +702,7 @@ func findEndOfInvariantMessage(trimmed string) int {
 // declaration. Hoisted to package level to avoid per-call slice allocation.
 var declarationPrefixes = []string{
 	"type ", "abstract ", "part ", "schema ", "import ",
-	"! ", "-->", "*->", "//", "/*", "}", "@@", "@",
+	"! ", "-->", "*->", "}", "@@", "@",
 }
 
 // isNewDeclarationStart checks if a trimmed line starts a new declaration.
@@ -668,18 +727,18 @@ func isNewDeclarationStart(trimmed string) bool {
 
 // advancePastMultilineInvariant returns the index after the last continuation line
 // of a multiline invariant starting at idx.
-func advancePastMultilineInvariant(lines []string, idx int) int {
-	if idx >= len(lines) {
+func advancePastMultilineInvariant(ls []line, idx int) int {
+	if idx >= len(ls) {
 		return idx
 	}
-	currentIndent := len(extractIndent(lines[idx]))
+	currentIndent := len(extractIndent(ls[idx].text))
 	i := idx + 1
-	for i < len(lines) {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed == "" {
+	for i < len(ls) {
+		if ls[i].class != lineContent {
 			break
 		}
-		lineIndent := len(extractIndent(lines[i]))
+		trimmed := strings.TrimSpace(ls[i].text)
+		lineIndent := len(extractIndent(ls[i].text))
 		if lineIndent <= currentIndent {
 			break
 		}
@@ -834,27 +893,20 @@ func extractIndent(line string) string {
 }
 
 // collectMultilineConstruct gathers lines starting at startIdx until bracket depth
-// returns to 0. Returns the collected lines and the next index to process.
-func collectMultilineConstruct(lines []string, startIdx int) ([]string, int) {
-	var collected []string
+// returns to 0. Only content lines move the depth. Returns the collected lines
+// and the next index to process.
+func collectMultilineConstruct(ls []line, startIdx int) ([]line, int) {
 	depth := 0
 	i := startIdx
 
-	for i < len(lines) {
-		collected = append(collected, lines[i])
-		sc := newQuoteAwareScanner(lines[i])
-		for j, ch := sc.next(); j >= 0; j, ch = sc.next() {
-			if ch == '[' {
-				depth++
-			}
-			if ch == ']' {
-				depth--
-			}
+	for i < len(ls) {
+		if ls[i].class == lineContent {
+			depth += bracketDelta(ls[i].text)
 		}
 		i++
 		if depth <= 0 {
 			break
 		}
 	}
-	return collected, i
+	return ls[startIdx:i], i
 }

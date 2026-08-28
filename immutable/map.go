@@ -23,8 +23,8 @@ type Map[K comparable] struct {
 // to m or any mutable value reachable from m. Mutation after WrapMap is
 // undefined behavior.
 //
-// Pass [WithClone] to deep-clone mutable values before wrapping, allowing the
-// caller to freely retain and mutate the original.
+// Pass [WithClone] with true to deep-clone what would be stored as-is — a
+// non-string-keyed map and its contents — so the caller can retain it.
 func WrapMap[K comparable](m map[K]any, opts ...Option) Map[K] {
 	if m == nil {
 		return Map[K]{}

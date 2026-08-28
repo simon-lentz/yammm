@@ -41,6 +41,7 @@ Use --timestamp to include a creation timestamp.`,
 	cmd.Flags().Bool("indent", false, "produce indented output for human inspection")
 	cmd.Flags().String("into", "", "existing .ys file to merge new data into")
 
+	registerModuleRootFlag(cmd)
 	return cmd
 }
 
@@ -87,8 +88,12 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load schema.
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, "", absSchemaPath, schemaResult)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	if err != nil {
+		return err
+	}
+	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
 	if failed {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
@@ -107,7 +112,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 		}
 		pending = cli.MergeResults(pending, loadResult)
 		if loadResult.HasErrors() {
-			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), pending)
+			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), pending)
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 		g = graph.NewFromSnapshot(s, snap)
@@ -135,7 +140,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	// pending set carries load and imported-snapshot warnings that are only
 	// reachable here.
 	result := cli.MergeResults(pending, parseResult, validateResult, graphResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, "", absSchemaPath), result)
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
 	if result.HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}

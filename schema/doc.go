@@ -56,7 +56,7 @@
 //   - [WithSourcesOnly]: resolve imports only against the in-memory sources
 //   - [WithSyntheticRoot]: synthetic identities for in-memory sources
 //   - [WithIssueLimit]: maximum diagnostic issues to collect (default 100)
-//   - [WithDisallowImports]: prevent import processing
+//   - [WithImportsAllowed]: with false, refuse import declarations
 //   - [WithLogger]: structured logger for diagnostics
 //
 // # Builder API

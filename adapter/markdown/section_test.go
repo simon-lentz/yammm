@@ -24,7 +24,7 @@ func loadSchema(t *testing.T, src string) *schema.Schema {
 // point and fails the test on any load error.
 func loadSources(t *testing.T, sources map[string][]byte) *schema.Schema {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", ".", schema.WithSourcesOnly())
+	s, res := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if err := res.Err(); err != nil {
 		t.Fatalf("LoadSourcesWithEntry: %v", err)
 	}

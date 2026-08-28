@@ -365,6 +365,58 @@ func TestResult_String_OK(t *testing.T) {
 	}
 }
 
+// TestResult_String_WarningsOnlyRendersThem pins that an OK result carrying
+// warnings renders them: a caller on a HasWarnings branch that reaches for
+// String must not log a bare "OK".
+func TestResult_String_WarningsOnlyRendersThem(t *testing.T) {
+	c := NewCollectorUnlimited()
+	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "shadowed").Build())
+	c.Collect(NewIssue(Info, E_INTERNAL, "for the record").Build())
+	r := c.Result()
+	if !r.OK() {
+		t.Fatal("setup: result must be OK")
+	}
+
+	s := r.String()
+	for _, want := range []string{"OK, 1 warning(s), 1 info", "W_ANNOTATION_SHADOWED: shadowed", "E_INTERNAL: for the record"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("String() = %q; want it to contain %q", s, want)
+		}
+	}
+}
+
+// TestResult_String_ErrorsAndWarningsRenderBoth pins the other branch: the
+// non-OK rendering lists every issue, not only the failures.
+func TestResult_String_ErrorsAndWarningsRenderBoth(t *testing.T) {
+	c := NewCollectorUnlimited()
+	c.Collect(NewIssue(Error, E_SYNTAX, "syntax error").Build())
+	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "first shadow").Build())
+	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "second shadow").Build())
+	s := c.Result().String()
+
+	for _, want := range []string{"1 error(s), 2 warning(s)", "E_SYNTAX: syntax error", "first shadow", "second shadow"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("String() = %q; want it to contain %q", s, want)
+		}
+	}
+}
+
+// TestResult_String_WarningsOnlyKeepsTheLimitNote pins that the truncation
+// suffix survives on the OK branch too.
+func TestResult_String_WarningsOnlyKeepsTheLimitNote(t *testing.T) {
+	c := NewCollector(1)
+	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "kept").Build())
+	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "dropped").Build())
+	s := c.Result().String()
+
+	if !strings.Contains(s, "OK, 2 warning(s) [limit reached, 1 dropped]") {
+		t.Errorf("String() = %q; want the limit note on the OK branch", s)
+	}
+	if !strings.Contains(s, "kept") || strings.Contains(s, "dropped\n") {
+		t.Errorf("String() = %q; want the stored warning listed and the dropped one absent", s)
+	}
+}
+
 func TestResult_String_WithErrors(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "syntax error").Build(),

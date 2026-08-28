@@ -171,7 +171,7 @@ func TokenStream(text string) (string, error) {
 		writeText(&out, pendingWS.String(), &lineStart)
 	}
 
-	return finalizeFormattedText(AlignColumns(WrapLongLines(collapseBlankLines(out.String())))), nil
+	return finalizeFormattedText(AlignColumns(WrapLongLines(joinLines(collapseBlankLines(classifyText(out.String())))))), nil
 }
 
 // invariantExpressionRanges returns the byte extent of every invariant
