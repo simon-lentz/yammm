@@ -77,12 +77,12 @@ func composedSiblingCollision(ctx context.Context, t *testing.T, s *schema.Schem
 	}
 	for _, key := range []string{"c1", "c2"} {
 		child := mustValidInstance(t, s, "Child", []any{key}, map[string]any{"value": key})
-		if res := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "CHILDREN", child); res.HasErrors() {
+		if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child); res.HasErrors() {
 			t.Fatalf("add child %s: %v", key, res)
 		}
 	}
 	collider := mustValidInstance(t, s, "Child", []any{"c1"}, map[string]any{"value": "second"})
-	if res := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "CHILDREN", collider); !res.HasErrors() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", collider); !res.HasErrors() {
 		t.Fatal("a colliding child key must report a duplicate")
 	}
 

@@ -237,7 +237,7 @@ func mustAdd(t *testing.T, g *graph.Graph, instances ...*instance.ValidInstance)
 }
 
 // mustAddComposed attaches a composed part instance, failing fast on issues.
-func mustAddComposed(t *testing.T, g *graph.Graph, parentType, parentKey, relation string, part *instance.ValidInstance) {
+func mustAddComposed(t *testing.T, g *graph.Graph, parentType schema.TypeID, parentKey, relation string, part *instance.ValidInstance) {
 	t.Helper()
 	if err := g.AddComposed(context.Background(), parentType, parentKey, relation, part).Err(); err != nil {
 		t.Fatalf("graph.AddComposed(%s.%s): %v", parentType, relation, err)
@@ -363,9 +363,9 @@ func TestMarshalObject_Golden(t *testing.T) {
 				mustAdd(t, g, mustValidInstance(t, s, "Order", []any{"o1"}, map[string]any{
 					"id": "o1", "customer": "Alice",
 				}))
-				mustAddComposed(t, g, "Order", `["o1"]`, "ITEMS",
+				mustAddComposed(t, g, mustTypeID(t, s, "Order"), `["o1"]`, "ITEMS",
 					mustValidInstance(t, s, "Item", []any{"SKU-A"}, map[string]any{"sku": "SKU-A", "qty": int64(2)}))
-				mustAddComposed(t, g, "Order", `["o1"]`, "ITEMS",
+				mustAddComposed(t, g, mustTypeID(t, s, "Order"), `["o1"]`, "ITEMS",
 					mustValidInstance(t, s, "Item", []any{"SKU-B"}, map[string]any{"sku": "SKU-B", "qty": int64(1)}))
 			},
 		},
@@ -377,7 +377,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 				mustAdd(t, g, mustValidInstance(t, s, "Order", []any{"o1"}, map[string]any{
 					"id": "o1", "customer": "Alice",
 				}))
-				mustAddComposed(t, g, "Order", `["o1"]`, "ITEMS",
+				mustAddComposed(t, g, mustTypeID(t, s, "Order"), `["o1"]`, "ITEMS",
 					mustValidInstance(t, s, "Item", []any{"SKU-A"}, map[string]any{"sku": "SKU-A", "qty": int64(2)}))
 			},
 		},
@@ -389,7 +389,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 				mustAdd(t, g, mustValidInstance(t, s, "Car", []any{"VIN123"}, map[string]any{
 					"vin": "VIN123", "model": "Sedan",
 				}))
-				mustAddComposed(t, g, "Car", `["VIN123"]`, "ENGINE",
+				mustAddComposed(t, g, mustTypeID(t, s, "Car"), `["VIN123"]`, "ENGINE",
 					mustValidInstance(t, s, "Engine", []any{"ENG001"}, map[string]any{"serial": "ENG001", "displacement": int64(2000)}))
 			},
 		},

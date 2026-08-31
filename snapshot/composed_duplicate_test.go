@@ -24,11 +24,11 @@ func composedPKCollision(t *testing.T) *graph.Snapshot {
 		t.Fatalf("Add parent: %v", res)
 	}
 	first := mustValidInstance(t, s, "Child", []any{"c1"}, map[string]any{"value": "first"})
-	if res := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "CHILDREN", first); res.HasErrors() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", first); res.HasErrors() {
 		t.Fatalf("AddComposed first child: %v", res)
 	}
 	second := mustValidInstance(t, s, "Child", []any{"c1"}, map[string]any{"value": "second"})
-	if res := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "CHILDREN", second); !res.HasErrors() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", second); !res.HasErrors() {
 		t.Fatal("AddComposed with a colliding child key must report a duplicate")
 	}
 
@@ -91,12 +91,12 @@ func TestRoundTrip_ComposedChildDuplicateAmongSiblings(t *testing.T) {
 	}
 	for key, value := range map[string]string{"c1": "first", "c2": "second"} {
 		child := mustValidInstance(t, s, "Child", []any{key}, map[string]any{"value": value})
-		if res := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "CHILDREN", child); res.HasErrors() {
+		if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child); res.HasErrors() {
 			t.Fatalf("AddComposed %s: %v", key, res)
 		}
 	}
 	colliding := mustValidInstance(t, s, "Child", []any{"c2"}, map[string]any{"value": "third"})
-	if res := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "CHILDREN", colliding); !res.HasErrors() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", colliding); !res.HasErrors() {
 		t.Fatal("AddComposed with a colliding child key must report a duplicate")
 	}
 
@@ -188,11 +188,11 @@ func TestRoundTrip_OneSlotKeylessConflict(t *testing.T) {
 		t.Fatalf("Add holder: %v", res)
 	}
 	occupant := mustValidInstance(t, s, "Note", nil, map[string]any{"text": "first"})
-	if res := g.AddComposed(ctx, "Holder", graph.FormatKey("h1"), "NOTE", occupant); res.HasErrors() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Holder"), graph.FormatKey("h1"), "NOTE", occupant); res.HasErrors() {
 		t.Fatalf("AddComposed occupant: %v", res)
 	}
 	rejected := mustValidInstance(t, s, "Note", nil, map[string]any{"text": "second"})
-	if res := g.AddComposed(ctx, "Holder", graph.FormatKey("h1"), "NOTE", rejected); !res.HasErrors() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Holder"), graph.FormatKey("h1"), "NOTE", rejected); !res.HasErrors() {
 		t.Fatal("a second child in a (one) slot must be rejected")
 	}
 

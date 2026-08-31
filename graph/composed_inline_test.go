@@ -5,7 +5,9 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -22,14 +24,10 @@ part type Wheel {
 }
 `
 
-// TestAdd_InlineComposition_OneCardinalityViolated pins the inline-path
-// enforcement of (one) composition cardinality: a RawInstance carrying two
-// composed children under a (one) composition passes instance validation
-// (validateComposition accepts any array length) and is rejected by
-// [graph.Graph.Add] with E_DUPLICATE_COMPOSED_PK. The streaming path's
-// equivalent is [TestAddComposed_OneCardinality_Duplicate]; this covers the
-// nested-children-in-one-Add branch.
-func TestAdd_InlineComposition_OneCardinalityViolated(t *testing.T) {
+// TestValidateOne_InlineComposition_OneCardinalityRefused pins the instance
+// layer's own enforcement: a composition always arrives as an array, so
+// nothing about the shape settles multiplicity and the validator has to.
+func TestValidateOne_InlineComposition_OneCardinalityRefused(t *testing.T) {
 	ctx := t.Context()
 	s, res := schema.LoadString(ctx, toOneCompositionSchema, "test://to_one_composition.yammm")
 	if res.HasErrors() {
@@ -37,64 +35,67 @@ func TestAdd_InlineComposition_OneCardinalityViolated(t *testing.T) {
 	}
 
 	v := instance.NewValidator(s)
-	raw := instance.RawInstance{Properties: map[string]any{
+	_, vres := v.ValidateOne(ctx, "Car", instance.RawInstance{Properties: map[string]any{
 		"vin": "v1",
 		"spare": []any{
 			map[string]any{"position": "left"},
 			map[string]any{"position": "right"},
 		},
-	}}
+	}})
+	if vres.OK() {
+		t.Fatal("two children under a (one) composition passed validation")
+	}
+	if !vres.HasCode(diag.E_EDGE_SHAPE_MISMATCH) {
+		t.Fatalf("want E_EDGE_SHAPE_MISMATCH, got %s", vres.String())
+	}
+}
 
-	inst, vres := v.ValidateOne(ctx, "Car", raw)
-	if !vres.OK() {
-		t.Fatalf("instance layer should accept the shape (cardinality is a graph-layer concern): %v", vres)
+// TestAdd_InlineComposition_OneCardinalityViolated pins the graph's own guard
+// on the same shape, which only a bypass caller can now build, and pins that
+// the refusal leaves nothing behind.
+func TestAdd_InlineComposition_OneCardinalityViolated(t *testing.T) {
+	ctx := t.Context()
+	s, res := schema.LoadString(ctx, toOneCompositionSchema, "test://to_one_composition.yammm")
+	if res.HasErrors() {
+		t.Fatalf("schema load: %v", res.Err())
 	}
 
+	wheel := func(position string) *instance.ValidInstance {
+		return instancetest.VI(
+			"Wheel",
+			instancetest.TypeID(mustTypeID(t, s, "Wheel")),
+			instancetest.Props(map[string]any{"position": position}),
+		)
+	}
+	car := instancetest.VI(
+		"Car",
+		instancetest.TypeID(mustTypeID(t, s, "Car")),
+		instancetest.PK("v1"),
+		instancetest.Props(map[string]any{"vin": "v1"}),
+		instancetest.Composed(map[string]immutable.Value{
+			"SPARE": immutable.Wrap([]any{wheel("left"), wheel("right")}),
+		}),
+	)
+
 	g := graph.New(s)
-	result := g.Add(ctx, inst)
+	result := g.Add(ctx, car)
 	if result.OK() {
 		t.Fatal("Add should reject 2 children under a (one) composition")
 	}
 	assertHasCode(t, result, diag.E_DUPLICATE_COMPOSED_PK)
 
-	// The overflow now leaves the same record the streamed path leaves:
-	// one Duplicate, addressed to the root parent's slot, so the loss
-	// survives a Marshal/Load round trip instead of vanishing with the
-	// transient diagnostic.
 	snap := g.Snapshot()
-	dups := snap.Duplicates()
-	if len(dups) != 1 {
-		t.Fatalf("inline (one) overflow left %d Duplicate records, want 1", len(dups))
+	if cars := snap.InstancesOf(mustTypeID(t, s, "Car")); len(cars) != 0 {
+		t.Fatalf("a refused record installed %d cars", len(cars))
 	}
-	d := dups[0]
-	if d.Relation != "SPARE" {
-		t.Errorf("Duplicate.Relation = %q, want SPARE", d.Relation)
-	}
-	if d.Parent == nil || d.Parent.PrimaryKey().String() != `["v1"]` {
-		t.Error("Duplicate.Parent does not address the root car")
-	}
-	pos := func(i *graph.Instance) string {
-		v, _ := i.Property("position")
-		s, _ := v.Unwrap().(string)
-		return s
-	}
-	if d.Conflict == nil || pos(d.Conflict) != "left" {
-		t.Error("Duplicate.Conflict is not the attached first child")
-	}
-	if pos(d.Instance) != "right" {
-		t.Error("Duplicate.Instance is not the rejected second child")
-	}
-	cars := snap.InstancesOf(inst.TypeID())
-	if len(cars) != 1 || cars[0].ComposedCount("SPARE") != 1 {
-		t.Error("the first child did not stay attached alone")
+	if dups := snap.Duplicates(); len(dups) != 0 {
+		t.Fatalf("a refused record left %d Duplicate records", len(dups))
 	}
 }
 
-// TestAdd_InlineComposition_NestedOneOverflowStaysDiagnosticOnly pins the
-// root-only rule: a Duplicate whose parent is not a root would marshal into
-// a dangling reference, so a deeper slot keeps the transient diagnostic and
-// records nothing.
-func TestAdd_InlineComposition_NestedOneOverflowStaysDiagnosticOnly(t *testing.T) {
+// TestAdd_InlineComposition_NestedOneOverflowRefusesRoot pins that the guard
+// reaches a slot at any depth, and that a violation there refuses the root.
+func TestAdd_InlineComposition_NestedOneOverflowRefusesRoot(t *testing.T) {
 	ctx := t.Context()
 	const nested = `schema "fleet"
 
@@ -119,28 +120,43 @@ part type Wheel {
 		t.Fatalf("schema load: %v", res.Err())
 	}
 
-	v := instance.NewValidator(s)
-	inst, vres := v.ValidateOne(ctx, "Car", instance.RawInstance{Properties: map[string]any{
-		"vin": "v1",
-		"holds": []any{map[string]any{
-			"label": "b1",
-			"spare": []any{
-				map[string]any{"position": "left"},
-				map[string]any{"position": "right"},
-			},
-		}},
-	}})
-	if !vres.OK() {
-		t.Fatalf("instance layer should accept the shape: %v", vres)
+	wheel := func(position string) *instance.ValidInstance {
+		return instancetest.VI(
+			"Wheel",
+			instancetest.TypeID(mustTypeID(t, s, "Wheel")),
+			instancetest.Props(map[string]any{"position": position}),
+		)
 	}
+	box := instancetest.VI(
+		"Box",
+		instancetest.TypeID(mustTypeID(t, s, "Box")),
+		instancetest.Props(map[string]any{"label": "b1"}),
+		instancetest.Composed(map[string]immutable.Value{
+			"SPARE": immutable.Wrap([]any{wheel("left"), wheel("right")}),
+		}),
+	)
+	car := instancetest.VI(
+		"Car",
+		instancetest.TypeID(mustTypeID(t, s, "Car")),
+		instancetest.PK("v1"),
+		instancetest.Props(map[string]any{"vin": "v1"}),
+		instancetest.Composed(map[string]immutable.Value{
+			"HOLDS": immutable.Wrap([]any{box}),
+		}),
+	)
 
 	g := graph.New(s)
-	result := g.Add(ctx, inst)
+	result := g.Add(ctx, car)
 	if result.OK() {
 		t.Fatal("Add should report the nested (one) overflow")
 	}
 	assertHasCode(t, result, diag.E_DUPLICATE_COMPOSED_PK)
-	if dups := g.Snapshot().Duplicates(); len(dups) != 0 {
-		t.Fatalf("a nested slot recorded %d Duplicates; the wire cannot address its parent", len(dups))
+
+	snap := g.Snapshot()
+	if cars := snap.InstancesOf(mustTypeID(t, s, "Car")); len(cars) != 0 {
+		t.Fatalf("a nested violation still installed %d roots", len(cars))
+	}
+	if dups := snap.Duplicates(); len(dups) != 0 {
+		t.Fatalf("a refused record left %d Duplicate records", len(dups))
 	}
 }

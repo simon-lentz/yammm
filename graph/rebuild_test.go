@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -776,5 +777,53 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 				t.Errorf("expected Fatal E_INTERNAL naming %q, got: %s", tc.want, result)
 			}
 		})
+	}
+}
+
+// TestRebuildSnapshot_EstablishesTheDocumentedOrdering pins the symmetry
+// between the two Snapshot constructors. RebuildSnapshot sorted only edges and
+// types, so a caller-assembled Snapshot violated the ordering its own
+// accessors document while a Graph-built one honoured it.
+func TestRebuildSnapshot_EstablishesTheDocumentedOrdering(t *testing.T) {
+	t.Parallel()
+	s := testSchemaWithComposition(t)
+	parentID := mustTypeID(t, s, "Parent")
+
+	ip := func(key string) graph.InstanceParts {
+		return graph.InstanceParts{
+			TypeName:   "Parent",
+			TypeID:     parentID,
+			PrimaryKey: immutable.WrapKey([]any{key}),
+			Properties: immutable.WrapProperties(map[string]any{"id": key, "name": key}),
+		}
+	}
+
+	// Deliberately unsorted, and with a repeated identity.
+	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types:     []schema.TypeID{parentID, parentID},
+		Instances: map[schema.TypeID][]graph.InstanceParts{parentID: {ip("p3"), ip("p1"), ip("p2")}},
+	})
+	if res.HasErrors() {
+		t.Fatalf("rebuild: %s", res.String())
+	}
+
+	if got := snap.Types(); len(got) != 1 {
+		t.Errorf("Types() = %d entries, want 1 — a repeated identity was not deduplicated", len(got))
+	}
+	var keys []string
+	for _, inst := range snap.InstancesOf(parentID) {
+		keys = append(keys, inst.PrimaryKey().String())
+	}
+	if !slices.IsSorted(keys) {
+		t.Errorf("InstancesOf is not sorted by primary key: %v", keys)
+	}
+	// AllInstances walks Types x InstancesOf, so a duplicated identity would
+	// yield every instance twice.
+	n := 0
+	for range snap.AllInstances() {
+		n++
+	}
+	if n != 3 {
+		t.Errorf("AllInstances yielded %d instances, want 3", n)
 	}
 }

@@ -206,7 +206,7 @@ func TestBatchAssembler_AddError_WrapsAsContextualError(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("error is not *diag.ContextualError: %T (%v)", err, err)
 	}
-	wantTag := "Person (record #1)"
+	wantTag := "Person (attempt #1)"
 	if ce.Tag != wantTag {
 		t.Errorf("Tag: got %q, want %q", ce.Tag, wantTag)
 	}
@@ -279,27 +279,11 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 // Test 4: Finalize success with warnings — warnings reachable on success path.
 // -----------------------------------------------------------------------------
 
-func TestBatchAssembler_FinalizeSuccess_WithWarnings(t *testing.T) {
-	// Trigger a duplicate-PK warning by adding the same Person twice.
-	// Per graph/graph.go's Add: duplicate PKs land on the snapshot's
-	// diagnostics as ERROR severity (E_DUPLICATE_PK), but the second Add
-	// itself returns the error rather than silently warning. So this test
-	// exercises a different shape: we add via AddValid (which goes through
-	// the same Graph.Add path) twice and assert the second AddValid returns
-	// an error AND the snapshot's diagnostics carries the E_DUPLICATE_PK.
-	//
-	// This is the closest "diagnostic-on-success-path" surface yammm
-	// currently exposes; pure warning-severity construction-time issues
-	// don't have a canonical trigger today. The test confirms warnings/
-	// errors on res.Snapshot.Diagnostics() are reachable when Finalize
-	// returns nil — not blocked by Check (which is the only thing that
-	// gates the err return).
-	//
-	// Variant chosen: add a single Person, then Finalize. No errors, no
-	// warnings — assert the success path returns (res, nil) with a clean
-	// diagnostics slice. The "warnings on success" claim then collapses
-	// to "Finalize did not swallow Diagnostics access" which is the
-	// load-bearing user-visible contract.
+// TestBatchAssembler_FinalizeSuccess_CarriesCleanDiagnostics pins the success
+// path's diagnostics surface. It does not pin warnings: no construction-time
+// diagnostic in this package is warning-severity, so there is nothing to
+// build a warning fixture from.
+func TestBatchAssembler_FinalizeSuccess_CarriesCleanDiagnostics(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	ctx := t.Context()
 
@@ -458,9 +442,9 @@ func TestBatchAssembler_Concurrent_Default(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Test 9: Concurrent Add-vs-Finalize ordering (INV-1 regression pin).
+// Concurrent Add-vs-Finalize ordering: the load-bearing regression pin.
 //
-// This is the LOAD-BEARING regression test for INV-1: every Add that returns
+// Every Add that returns
 // nil must occur before Finalize's snapshot. A naive design where Finalize
 // drains the validator pool would violate this in pool mode (the validator
 // is returned to the pool before Graph.Add runs). The implementation
@@ -474,21 +458,16 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	ctx := t.Context()
 
-	for _, mode := range []struct {
-		name string
-		opts []graph.BatchAssemblerOption
-	}{
-		{"default", nil},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			ba := graph.NewBatchAssembler(ctx, s, mode.opts...)
+	{
+		t.Run("default", func(t *testing.T) {
+			ba := graph.NewBatchAssembler(ctx, s)
 
 			const numWorkers = 8
 			const perWorker = 200
 
 			// successAttempts collects the (worker, j) pairs that returned nil.
 			// We compare them against the Person instances present in the
-			// final snapshot to assert INV-1.
+			// final snapshot to assert the ordering guarantee.
 			var successMu sync.Mutex
 			successKeys := make(map[string]struct{})
 
@@ -536,7 +515,7 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 				t.Fatalf("Finalize: %v", finalErr)
 			}
 
-			// INV-1: every key that was reported as a successful Add must be
+			// Every key reported as a successful Add must be
 			// in the final snapshot.
 			persons := finalRes.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))
 			snapKeys := make(map[string]struct{}, len(persons))
@@ -549,7 +528,7 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 			for id := range successKeys {
 				keyStr := fmt.Sprintf("[%q]", id)
 				if _, ok := snapKeys[keyStr]; !ok {
-					t.Errorf("INV-1 violation: Add(%s) returned nil but not in snapshot", id)
+					t.Errorf("ordering violation: Add(%s) returned nil but is not in the snapshot", id)
 				}
 			}
 			// Conversely, every snapshot key must be one of our successKeys
@@ -604,22 +583,6 @@ func TestBatchAssembler_Concurrent_AddValid(t *testing.T) {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Test 11: WithValidatorPool correctness (pool size 4, N=8, M=1000).
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// Test 12: Pool back-pressure with n=1 — 4 concurrent Adds all complete.
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// Test 13: WithValidatorPool panics on n <= 0 (table-driven).
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// Test 14: Mode parity — default vs pool mode produce identical output.
-// -----------------------------------------------------------------------------
 
 // -----------------------------------------------------------------------------
 // Seed-snapshot fixture for the NewBatchAssemblerFromSnapshot tests.
@@ -838,8 +801,8 @@ func TestNewBatchAssemblerFromSnapshot_DuplicateAgainstSeeded(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("error is not *diag.ContextualError: %T", err)
 	}
-	// Attempt numbering starts fresh after seeding: this is record #1.
-	if want := "Person (record #1)"; ce.Tag != want {
+	// Attempt numbering starts fresh after seeding: this is attempt #1.
+	if want := "Person (attempt #1)"; ce.Tag != want {
 		t.Errorf("Tag: got %q, want %q", ce.Tag, want)
 	}
 	foundDup := false
@@ -921,14 +884,9 @@ func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T
 		t.Fatalf("manual: marshal: %s", mRes.String())
 	}
 
-	for _, mode := range []struct {
-		name string
-		opts []graph.BatchAssemblerOption
-	}{
-		{"default", nil},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed, mode.opts...)
+	{
+		t.Run("default", func(t *testing.T) {
+			ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
 			for _, rec := range resumeRecords {
 				if err := ba.Add(rec.typeName, rec.raw); err != nil {
 					t.Fatalf("Add(%s): %v", rec.typeName, err)
@@ -944,8 +902,8 @@ func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T
 				t.Fatalf("marshal: %s", asmRes.String())
 			}
 			if string(manualBytes) != string(asmBytes) {
-				t.Errorf("marshal bytes differ from manual path (manual=%d, %s=%d)",
-					len(manualBytes), mode.name, len(asmBytes))
+				t.Errorf("marshal bytes differ from manual path (manual=%d, assembler=%d)",
+					len(manualBytes), len(asmBytes))
 			}
 		})
 	}

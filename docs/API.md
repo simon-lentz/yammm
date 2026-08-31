@@ -425,7 +425,7 @@ The `graph` package builds an in-memory graph from validated instances.
 
 ### Graph Options
 
-`graph.New` and `graph.NewFromSnapshot` accept `graph.Option` values. No options are defined at present, so every call passes none.
+`graph.New` and `graph.NewFromSnapshot` accept `graph.Option` values. `graph.WithLogger(*slog.Logger)` attaches a structured logger to the graph's operation boundaries: `Add`, `AddComposed` and `Check` each open and close a traced operation, and edge resolution, forward references, duplicate primary keys and unresolved required associations are logged as they occur. With no logger every trace call returns immediately. It is symmetric with `schema.WithLogger`.
 
 ### Graph Operations
 
@@ -439,7 +439,7 @@ if !result.OK() {
 }
 
 // Add a composed child (part type instance embedded in a parent)
-result = g.AddComposed(ctx, "Car", graph.FormatKey("vin-123"), "WHEELS", composedChild)
+result = g.AddComposed(ctx, carTypeID, graph.FormatKey("vin-123"), "WHEELS", composedChild)
 
 // Check completeness (required associations)
 result = g.Check(ctx)
@@ -452,6 +452,12 @@ for _, typeID := range snap.Types() {
     }
 }
 ```
+
+**Type resolution.** No lookup in this package takes a rendered type name — a rendering is lossy, so keying a lookup by one merges types that are not the same type. `AddComposed` takes the parent's `schema.TypeID`, the same identity `Snapshot.Types` and `Instance.TypeID` hand you. Two lookups then answer different questions. `Add` resolves a root's type from its identity, restricted to the same set as a matter of *ownership* — a graph bound to a schema holds instances of the types that schema declares or directly imports, and the diagnostic's hint says so. A composed child resolves across the *whole* import closure: its type comes from a relation the schema already resolved, and no ownership question arises because the child arrived inside a parent the graph does own. A schema where an imported type composes a part type from a further import therefore loads, validates and builds. Where two identities render alike, a diagnostic naming them falls back to the full identity rather than reading `"X" does not match "X"`.
+
+**A non-OK `Add` leaves the graph unchanged.** `Add` and `AddComposed` walk an instance once. That walk both checks the whole structure — the names and multiplicities of its edges, and every slot and child of its composition tree at any depth — and assembles the tree to install, touching no graph state; only a walk that raised no error reaches the commit. A record that violates one of those rules is refused entire: no instance, no child, no edge and no duplicate record survives it. The check runs for every instance, whatever `ValidInstance.Validated()` reports, because the graph cannot verify that bit and because a validator hole in one of these rules is exactly what the check exists to catch.
+
+The codes it can raise are `E_GRAPH_UNKNOWN_RELATION` (data filed under a name the type does not declare in that slot), `E_GRAPH_CARDINALITY` (a `(one)` association carrying several targets), `E_GRAPH_INVALID_COMPOSITION` (a composed child that is not an instance of its relation's target type), `E_DUPLICATE_COMPOSED_PK` (a `(one)` composition carrying several children, or two children of one `(many)` slot sharing a primary key), `E_GRAPH_TYPE_NOT_FOUND` (a composed child whose type is not in the schema's import closure at all) and `E_GRAPH_INVALID_PK` (a composed child of a keyed part type whose key is empty, has the wrong arity, or disagrees with its own key property). See the package doc's Error Handling section for the full per-method list.
 
 ### Batch Assembly
 
@@ -478,7 +484,11 @@ qualityCollector.Merge(res.Snapshot.Diagnostics())
 
 **`FinalizeResult.Snapshot` is always non-nil**, on both success and error paths. The struct exists to encode this contract at the type level; callers read `res.Snapshot` directly without gating on `err == nil`. On the error path `res.Snapshot` is the partial snapshot at the point Graph.Check tripped — operators logging a failed batch see which instances were assembled before the check failure.
 
-**Error shapes.** Both `Add` / `AddValid` and `Finalize` return errors whose cause is a `*diag.ContextualError` (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)). `Add`'s tag is `"<TypeName> (record #N)"` so the offending record is locatable from the error alone; `Finalize`'s tag is the fixed string `"batch_finalize"` so downstream log consumers have a stable filter key. Recover with `errors.As` or `diag.AsContextualError`.
+**Error shapes.** Both `Add` / `AddValid` and `Finalize` return errors whose cause is a `*diag.ContextualError` (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)). `Add`'s tag is `"<TypeName> (attempt #N)"`, where N is the assembler-wide 1-indexed attempt ordinal: it counts calls across every goroutine sharing the assembler, so it identifies the call and not the caller's input row. A caller that needs to locate its own record keeps that mapping itself. `Finalize`'s tag is the fixed string `"batch_finalize"` so downstream log consumers have a stable filter key. Recover with `errors.As` or `diag.AsContextualError`.
+
+**What `Finalize`'s error reports.** `Graph.Check` alone. `Snapshot.Diagnostics()` carries the construction diagnostics from every `Add` and `AddComposed`; `Check` accumulates nothing into it, which is what makes `Check` idempotent. A caller that discards per-record `Add` errors must read `res.Snapshot.Diagnostics()` to see them — a nil error from `Finalize` means the completeness check passed, not that every record was added.
+
+**Calling `Finalize` twice.** The second call returns the first call's stored `FinalizeResult` and error, with no second `Check` pass and no second snapshot. A later context, cancelled or not, cannot change the outcome.
 
 **Post-finalize sentinel.** After `Finalize`, subsequent `Add` / `AddValid` calls return `graph.ErrAssemblerFinalized`, matchable via `errors.Is`. Consumers performing retry / cleanup logic key off the sentinel rather than the error string.
 
@@ -486,7 +496,7 @@ qualityCollector.Merge(res.Snapshot.Diagnostics())
 
 **Concurrency contract.** `BatchAssembler` is safe for concurrent use across all methods (`Add`, `AddValid`, `Count`, `Graph`, `Finalize`). The library coordinates Add lifecycle against Finalize via an internal `sync.RWMutex` so every Add that returns nil is guaranteed to be in the finalized snapshot, and any Add that arrives after Finalize takes its lock returns `ErrAssemblerFinalized`. No external mutex required at call sites — the worker-pool pattern (one assembler shared across N scraper goroutines, coordinator goroutine calls Finalize at end-of-batch) is supported directly.
 
-**Resuming from a prior snapshot.** `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap, opts...)` constructs an assembler whose graph starts pre-populated from an existing `Snapshot` — the same import semantics as `NewFromSnapshot` (see [Seeding from a Snapshot](#seeding-from-a-snapshot)) — instead of `NewBatchAssembler`'s empty graph. Consumers that persist a batch and continue it on a later run seed a new assembler from the loaded snapshot and `Add` only the outstanding records:
+**Resuming from a prior snapshot.** `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)` constructs an assembler whose graph starts pre-populated from an existing `Snapshot` — the same import semantics as `NewFromSnapshot` (see [Seeding from a Snapshot](#seeding-from-a-snapshot)) — instead of `NewBatchAssembler`'s empty graph. Consumers that persist a batch and continue it on a later run seed a new assembler from the loaded snapshot and `Add` only the outstanding records:
 
 ```go
 snap, res := snapshot.Load(ctx, data, s) // prior batch's .ys
@@ -499,7 +509,7 @@ for _, rec := range outstanding { // e.g. resume-by-set-difference
 finRes, err := ba.Finalize(ctx)
 ```
 
-New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK`, and `Finalize`'s check covers the union — a required association imported from the seed and still unresolved fails the batch with `E_UNRESOLVED_REQUIRED`. `Count()` reflects only records added through the assembler (seeded instances are not counted), and construction diagnostics are not carried over from the seed (`.ys`-loaded snapshots carry none by design; `Duplicates` and `Unresolved` are the persistent structural records, and both import). The seed snapshot must originate from the same schema — taken from a `Graph` bound to it, or loaded via `snapshot.Load` against it, which verifies structural compatibility. Every other contract — lifecycle, finalize barrier, validator access, `FinalizeResult` — is identical to `NewBatchAssembler`.
+New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK`, and `Finalize`'s check covers the union — a required association imported from the seed and still unresolved fails the batch with `E_UNRESOLVED_REQUIRED`. `Count()` reflects only records added through the assembler (seeded instances are not counted), and construction diagnostics are not carried over from the seed (`.ys`-loaded snapshots carry none by design; `Duplicates` and `Unresolved` are the persistent structural records, and both import). The seed snapshot must originate from the same schema — taken from a `Graph` bound to it, or loaded via `snapshot.Load` against it, which verifies structural compatibility. Seeding from a snapshot built against a different schema is neither detected nor filtered: the import consults no schema, so every type in the seed is installed. Every other contract — lifecycle, finalize barrier, validator access, `FinalizeResult` — is identical to `NewBatchAssembler`.
 
 **Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances (build them with `internal/instancetest.VI`), `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict, parent and relation coordinates), provenance-presence-aware, and exact for every numeric property, dynamic type included: schema-aware float emission keeps `KindFloat` values `float64` across a marshal/load round trip, so an `int64`/`float64` mismatch is a real defect, not a wire artifact. One deliberate exception: a `float32` compares equal to the `float64` its 32-bit shortest wire form parses to, because `Load` materializes a finite dynamic numeric as `int64` or `float64` and the wire carries value fidelity, not width.
 

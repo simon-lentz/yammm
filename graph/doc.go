@@ -85,6 +85,52 @@
 // rebuilt instances report Validated() == false. This is the
 // deserialization entry point used by the snapshot package.
 //
+// # Type Resolution
+//
+// Two lookups, and they answer different questions:
+//
+//   - [Graph.Add] resolves a root's type from its identity, restricted to the
+//     same set as a matter of OWNERSHIP: a graph bound to a schema holds
+//     instances of the types that schema declares or directly imports, and the
+//     diagnostic's hint says so.
+//   - A composed child resolves across the WHOLE import closure. Its type comes
+//     from a relation the schema already resolved, and no ownership question
+//     arises because the child arrived inside a parent this graph does own.
+//
+// A schema where an imported type composes a part type from a further import
+// therefore loads, validates and builds. Resolving the child on the root's rule
+// instead dropped its subtree and disabled sibling duplicate detection with it.
+//
+// No lookup in this package takes a rendered type name. Where two identities
+// render alike, a diagnostic naming them falls back to the full identity rather
+// than reading "X does not match X".
+//
+// # Build Then Commit
+//
+// [Graph.Add] and [Graph.AddComposed] walk an instance ONCE. That walk both
+// checks the whole structure — edge names and multiplicities, and every slot
+// and child of the composition tree at any depth — and assembles the [Instance]
+// tree to install, touching no graph state. Only a walk that raised no error
+// reaches the commit phase, which takes the lock and installs the tree, the
+// staged association records and the attestation together.
+//
+// A non-OK result therefore leaves the graph unchanged, and does so
+// structurally rather than by two functions agreeing. The alternative,
+// installing first and rejecting during the walk, left a record in the graph
+// that the caller had been told had failed: [BatchAssembler.Count]
+// under-reported against a snapshot that held the instance, and a retry of that
+// record drew E_DUPLICATE_PK. The shape after that, checking in one walk and
+// attaching in another, kept the same four predicates in two places and let the
+// attaching walk skip in silence exactly what the checking walk rejected.
+//
+// The check runs for every instance, not only for one reporting
+// [instance.ValidInstance.Validated] == false. Two reasons: the graph cannot
+// verify that bit, since no exported constructor sets it and a validator
+// defect would set it on malformed data; and the validator has held a hole in
+// one of these very rules — a (one) composition accepted an array of any
+// length — which this guard was the only thing to catch. A trust boundary
+// that deletes the check which found the last defect is not a trust boundary.
+//
 // # Key Types
 //
 // [BatchAssembler] composes Validator + Graph + Snapshot for the
@@ -113,9 +159,12 @@
 //
 // # Graph Options
 //
-// [New] and [NewFromSnapshot] accept [Option] values. No options are defined
-// at present; the type is the extension point, and passing none is the only
-// call shape.
+// [New] and [NewFromSnapshot] accept [Option] values. [WithLogger] attaches a
+// structured logger to the graph's operation boundaries — Add, AddComposed and
+// Check each open and close a traced operation, and edge resolution, forward
+// references, duplicate primary keys and unresolved required associations are
+// logged as they occur. With no logger, every trace call returns immediately.
+// Symmetric with [github.com/simon-lentz/yammm/schema.WithLogger].
 //
 // # Type Identity and Type Names
 //
@@ -138,6 +187,7 @@
 //   - [Snapshot.Types]
 //   - [Snapshot.InstancesOf]
 //   - [Snapshot.InstanceByKey]
+//   - [Graph.AddComposed]'s parentType parameter
 //   - [SnapshotParts.Types] and [SnapshotParts.Instances] map keys
 //   - the type fields on [EdgeParts], [DuplicateParts] and [UnresolvedParts]
 //   - [UnresolvedEdge.TargetType]
@@ -171,7 +221,34 @@
 //   - [diag.Result.OK]: success (may have warnings)
 //
 // Programmer errors (nil receiver, nil instance, schema mismatch) panic.
-// Semantic issues use diag.Code values like E_DUPLICATE_PK, E_UNRESOLVED_REQUIRED.
+//
+// [Graph.Add] emits:
+//
+//   - E_GRAPH_TYPE_NOT_FOUND: a root's type is not declared by this graph's
+//     schema or a direct import, or a composed child's type is not in the
+//     import closure at all
+//   - E_GRAPH_MISSING_PK: the type declares no primary key
+//   - E_GRAPH_INVALID_COMPOSITION: a part type was added directly, or a
+//     composed child is not an instance of its relation's target type
+//   - E_GRAPH_ABSTRACT_TYPE: the type is abstract
+//   - E_GRAPH_INVALID_PK: a primary key — the instance's own, or a composed
+//     child's of a keyed part type — is empty, has the wrong arity, or
+//     disagrees with its own key property
+//   - E_GRAPH_CARDINALITY: a (one) association carries several targets
+//   - E_GRAPH_UNKNOWN_RELATION: edge data or composed children arrived under a
+//     name the type does not declare in that slot
+//   - E_DUPLICATE_COMPOSED_PK: a (one) composition carries several children,
+//     or two children of one (many) slot share a primary key
+//   - E_DUPLICATE_PK: the primary key already exists for this type
+//   - E_CONTEXT_CANCELLED: the context was cancelled
+//
+// [Graph.AddComposed] emits E_GRAPH_PARENT_NOT_FOUND when the parent instance
+// is absent, E_GRAPH_INVALID_COMPOSITION when the named relation is not a
+// composition, E_DUPLICATE_COMPOSED_PK when the slot already holds the child
+// it can hold, and otherwise the same codes as Add — its child runs the same
+// structural guard.
+//
+// [Graph.Check] emits E_UNRESOLVED_REQUIRED and E_CONTEXT_CANCELLED.
 //
 // # Diagnostics Lifecycle
 //
@@ -195,9 +272,15 @@
 //
 //   - [Snapshot.Types]: lexicographic by TypeID (schema path, then name)
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
-//   - [Snapshot.Edges]: lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey)
-//   - [Snapshot.Duplicates]: lexicographic by (typeName, primaryKey)
-//   - [Snapshot.Unresolved]: lexicographic by (sourceType, sourceKey, relation, targetType, targetKey)
+//   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
+//     targetKey, edge properties)
+//   - [Snapshot.Duplicates]: (type, primaryKey, relation, conflictType,
+//     conflictKey, parent slot, rejected instance's properties)
+//   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
+//     targetKey, reason, required, edge properties)
+//
+// Each tuple is total: every arm is compared, so no two distinct records tie
+// and inherit map-iteration order.
 //
 // Sorting is performed at [Graph.Snapshot] time, amortized across accessor calls.
 //
@@ -229,10 +312,11 @@
 //
 //	// Child streamed later, with nested GrandChild inline
 //	childInstance := ... // includes GrandChild in composed property
-//	g.AddComposed(ctx, "Parent", parentKey, "children", childInstance)
+//	g.AddComposed(ctx, parentTypeID, parentKey, "children", childInstance)
 //	// Both Child and GrandChild are now attached
 //
 // # Dependencies
 //
 //	graph  ──imports──▶  schema, instance, diag, location, immutable
+//	graph  ──imports──▶  internal/trace, internal/value
 package graph

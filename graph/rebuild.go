@@ -3,6 +3,7 @@ package graph
 import (
 	"cmp"
 	"fmt"
+	"iter"
 	"slices"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -180,9 +181,6 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		edges = append(edges, newEdge(ep.Relation, source, target, canon.edge(ep).Properties))
 	}
 
-	// Sort edges for deterministic ordering.
-	slices.SortFunc(edges, compareEdges)
-
 	// Step 3: Create Duplicate records.
 	duplicates := make([]*Duplicate, 0, len(parts.Duplicates))
 	for _, dp := range parts.Duplicates {
@@ -238,15 +236,11 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		return nil, collector.Result()
 	}
 
-	// Step 5: Assemble the Snapshot. Types is sorted here rather than trusted
-	// from the caller, because [Snapshot.Types] documents the ordering.
+	// Step 5: Assemble the Snapshot. newSnapshot establishes every ordering.
 	types := slices.Clone(parts.Types)
 	if types == nil {
 		types = []schema.TypeID{}
 	}
-	slices.SortFunc(types, func(a, b schema.TypeID) int {
-		return cmpString(a.String(), b.String())
-	})
 
 	snap := newSnapshot(s, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK(), parts.Attestation)
 	return snap, diag.OK()
@@ -389,19 +383,19 @@ func lookupInstance(index map[schema.TypeID]map[string]*Instance, id schema.Type
 // Sorts by (sourceType, sourceKey, relation, targetType, targetKey), comparing
 // types by identity so two types rendering one name do not interleave.
 func compareEdges(a, b *Edge) int {
-	if c := cmpString(a.source.typeID.String(), b.source.typeID.String()); c != 0 {
+	if c := cmp.Compare(a.source.typeID.String(), b.source.typeID.String()); c != 0 {
 		return c
 	}
-	if c := cmpString(a.source.primaryKey.String(), b.source.primaryKey.String()); c != 0 {
+	if c := cmp.Compare(a.source.primaryKey.String(), b.source.primaryKey.String()); c != 0 {
 		return c
 	}
-	if c := cmpString(a.relation, b.relation); c != 0 {
+	if c := cmp.Compare(a.relation, b.relation); c != 0 {
 		return c
 	}
-	if c := cmpString(a.target.typeID.String(), b.target.typeID.String()); c != 0 {
+	if c := cmp.Compare(a.target.typeID.String(), b.target.typeID.String()); c != 0 {
 		return c
 	}
-	if c := cmpString(a.target.primaryKey.String(), b.target.primaryKey.String()); c != 0 {
+	if c := cmp.Compare(a.target.primaryKey.String(), b.target.primaryKey.String()); c != 0 {
 		return c
 	}
 	return compareProps(a.properties, b.properties)
@@ -421,19 +415,26 @@ func compareEdges(a, b *Edge) int {
 // for a composite it may not be, and that residue is stated rather than
 // claimed away.
 func compareProps(a, b immutable.Properties) int {
-	an := slices.Sorted(a.Keys())
-	bn := slices.Sorted(b.Keys())
-	for i := range min(len(an), len(bn)) {
-		if c := cmpString(an[i], bn[i]); c != 0 {
+	// The sorted key order is precomputed at construction, so walking both
+	// iterators in lockstep neither re-sorts nor allocates a key slice.
+	nextA, stopA := iter.Pull2(a.SortedRange())
+	defer stopA()
+	nextB, stopB := iter.Pull2(b.SortedRange())
+	defer stopB()
+
+	for {
+		an, av, okA := nextA()
+		bn, bv, okB := nextB()
+		if !okA || !okB {
+			return cmp.Compare(a.Len(), b.Len())
+		}
+		if c := cmp.Compare(an, bn); c != 0 {
 			return c
 		}
-		av, _ := a.Get(an[i])
-		bv, _ := b.Get(bn[i])
-		if c := cmpString(renderValue(av), renderValue(bv)); c != 0 {
+		if c := cmp.Compare(renderValue(av), renderValue(bv)); c != 0 {
 			return c
 		}
 	}
-	return cmp.Compare(len(an), len(bn))
 }
 
 // renderValue renders one property value with its type, so values of different
@@ -444,16 +445,6 @@ func renderValue(v immutable.Value) string {
 	return fmt.Sprintf("%T|%v", u, u)
 }
 
-func cmpString(a, b string) int {
-	if a < b {
-		return -1
-	}
-	if a > b {
-		return 1
-	}
-	return 0
-}
-
 // compareUnresolved orders unresolved records. Graph.pending is a map,
 // so the slice these are collected into arrives in map-iteration order; an
 // ordering that leaves any two distinct records equal hands their positions to
@@ -461,22 +452,22 @@ func cmpString(a, b string) int {
 // Reproduced before this comparator was completed: sixty tied pairs spread
 // across sixty pending buckets produced ten distinct documents in ten runs.
 func compareUnresolved(a, b *UnresolvedEdge) int {
-	if c := cmpString(a.Source.TypeID().String(), b.Source.TypeID().String()); c != 0 {
+	if c := cmp.Compare(a.Source.TypeID().String(), b.Source.TypeID().String()); c != 0 {
 		return c
 	}
-	if c := cmpString(a.Source.PrimaryKey().String(), b.Source.PrimaryKey().String()); c != 0 {
+	if c := cmp.Compare(a.Source.PrimaryKey().String(), b.Source.PrimaryKey().String()); c != 0 {
 		return c
 	}
-	if c := cmpString(a.Relation, b.Relation); c != 0 {
+	if c := cmp.Compare(a.Relation, b.Relation); c != 0 {
 		return c
 	}
-	if c := cmpString(a.TargetType.String(), b.TargetType.String()); c != 0 {
+	if c := cmp.Compare(a.TargetType.String(), b.TargetType.String()); c != 0 {
 		return c
 	}
-	if c := cmpString(a.TargetKey, b.TargetKey); c != 0 {
+	if c := cmp.Compare(a.TargetKey, b.TargetKey); c != 0 {
 		return c
 	}
-	if c := cmpString(a.Reason, b.Reason); c != 0 {
+	if c := cmp.Compare(a.Reason, b.Reason); c != 0 {
 		return c
 	}
 	if a.Required != b.Required {
@@ -492,22 +483,22 @@ func compareUnresolved(a, b *UnresolvedEdge) int {
 // key against one conflict differ only in the instance they carry, so the
 // rejected instance's properties are the last discriminator.
 func compareDuplicates(a, b *Duplicate) int {
-	if c := cmpString(a.Instance.TypeID().String(), b.Instance.TypeID().String()); c != 0 {
+	if c := cmp.Compare(a.Instance.TypeID().String(), b.Instance.TypeID().String()); c != 0 {
 		return c
 	}
-	if c := cmpString(a.Instance.PrimaryKey().String(), b.Instance.PrimaryKey().String()); c != 0 {
+	if c := cmp.Compare(a.Instance.PrimaryKey().String(), b.Instance.PrimaryKey().String()); c != 0 {
 		return c
 	}
-	if c := cmpString(a.Relation, b.Relation); c != 0 {
+	if c := cmp.Compare(a.Relation, b.Relation); c != 0 {
 		return c
 	}
-	if c := cmpString(a.Conflict.TypeID().String(), b.Conflict.TypeID().String()); c != 0 {
+	if c := cmp.Compare(a.Conflict.TypeID().String(), b.Conflict.TypeID().String()); c != 0 {
 		return c
 	}
-	if c := cmpString(a.Conflict.PrimaryKey().String(), b.Conflict.PrimaryKey().String()); c != 0 {
+	if c := cmp.Compare(a.Conflict.PrimaryKey().String(), b.Conflict.PrimaryKey().String()); c != 0 {
 		return c
 	}
-	if c := cmpString(parentKeyOf(a), parentKeyOf(b)); c != 0 {
+	if c := cmp.Compare(parentKeyOf(a), parentKeyOf(b)); c != 0 {
 		return c
 	}
 	return compareProps(a.Instance.Properties(), b.Instance.Properties())

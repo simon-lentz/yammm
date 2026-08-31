@@ -1,13 +1,12 @@
 package graph
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
-	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -31,6 +30,13 @@ type Graph struct {
 	schema *schema.Schema
 	config graphConfig
 	mu     sync.RWMutex
+
+	// closureSchemas is every schema in the bound schema's import closure, and
+	// ownedSchemas the subset this graph accepts roots from. Both are fixed at
+	// construction: the schema is immutable and its imports are wired before it
+	// is observable.
+	closureSchemas map[location.SourceID]bool
+	ownedSchemas   map[location.SourceID]bool
 
 	// instances indexes instances by TypeID, then by PK string.
 	instances map[schema.TypeID]map[string]*Instance
@@ -87,13 +93,26 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 		opt(&cfg)
 	}
 
+	closure := make(map[location.SourceID]bool)
+	for _, dep := range s.Closure() {
+		closure[dep.SourceID()] = true
+	}
+	owned := map[location.SourceID]bool{s.SourceID(): true}
+	for imp := range s.Imports() {
+		if dep := imp.Schema(); dep != nil {
+			owned[dep.SourceID()] = true
+		}
+	}
+
 	return &Graph{
-		schema:       s,
-		config:       cfg,
-		instances:    make(map[schema.TypeID]map[string]*Instance),
-		pending:      make(map[pendingKey][]*pendingEdge),
-		collector:    diag.NewCollector(0), // unlimited
-		attestValues: true,
+		schema:         s,
+		config:         cfg,
+		closureSchemas: closure,
+		ownedSchemas:   owned,
+		instances:      make(map[schema.TypeID]map[string]*Instance),
+		pending:        make(map[pendingKey][]*pendingEdge),
+		collector:      diag.NewCollector(0), // unlimited
+		attestValues:   true,
 	}
 }
 
@@ -104,36 +123,28 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 // forward references that target this instance.
 //
 // Return semantics: check [diag.Result.OK] for success. A non-OK result
-// contains diagnostic issues. A Fatal issue indicates context cancellation.
+// contains diagnostic issues and the graph is unchanged — every rejection is
+// decided before the instance installs. The package doc's Error Handling
+// section enumerates the codes Add can emit.
 //
 // Panics if g is nil, inst is nil, or inst's schema does not match the graph's schema.
-//
-// Error codes that may appear in result:
-//   - E_GRAPH_TYPE_NOT_FOUND: Instance type not in schema
-//   - E_GRAPH_MISSING_PK: Type has no primary key
-//   - E_DUPLICATE_PK: Primary key already exists for this type
-//   - E_CONTEXT_CANCELLED: Context was cancelled
 func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Result {
-	// Nil receiver check — programmer error
+	// Programmer errors: a caller cannot recover from any of these.
 	if g == nil {
 		panic("graph.Add: nil *Graph receiver")
 	}
 
-	// Nil instance check — programmer error
 	if inst == nil {
 		panic("graph.Add: nil ValidInstance")
 	}
 
-	// Nil context check
 	if ctx == nil {
 		panic("graph.Add: nil context")
 	}
 
-	// Per-operation collector for this Add call only
 	opCollector := diag.NewCollector(0)
 
-	// Operation boundary logging - must come before context check so
-	// cancellations are traced (consistency with walk package pattern)
+	// Opened before the context check so a cancelled Add is still traced.
 	op := trace.Begin(
 		ctx, g.config.logger, "yammm.graph.add",
 		slog.String("type", inst.TypeName()),
@@ -141,14 +152,11 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	)
 	defer func() { op.End(opCollector.Result().Err()) }()
 
-	// Context cancellation check
 	if err := ctx.Err(); err != nil {
-		opCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
+		return g.reject(opCollector, diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 			"graph.Add cancelled: "+err.Error()).Build())
-		return opCollector.Result()
 	}
 
-	// Resolve type
 	typeID := inst.TypeID()
 
 	// Schema mismatch check — programmer error
@@ -156,256 +164,137 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 		panic("graph.Add: instance schema does not match graph schema")
 	}
 
-	typ, ok := g.lookupType(typeID)
-	if !ok {
+	typ, ok := g.schema.TypeByID(typeID)
+	if !ok || !g.ownsType(typeID) {
 		msg := fmt.Sprintf("type %q not found in schema", inst.TypeName())
 		builder := diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND, msg).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName())
-		// Add pk detail when available
 		if pk := inst.PrimaryKey(); pk.Len() > 0 {
 			builder = builder.WithDetail(diag.DetailKeyPrimaryKey, pk.String())
 		}
-		// Detect alias-qualified name (suggests imported type from potentially transitive import)
 		if strings.Contains(inst.TypeName(), ".") {
 			builder = builder.WithHint("if this type is from a transitively imported schema, add a direct import to access it")
-			// Add type_schema detail (the schema path from the type ID)
 			builder = builder.WithDetail(diag.DetailKeyTypeSchema, typeID.SchemaPath().String())
 		}
-		issue := builder.Build()
-		opCollector.Collect(issue)
-		g.mu.Lock()
-		g.collector.Collect(issue)
-		g.mu.Unlock()
-		return opCollector.Result()
+		return g.reject(opCollector, builder.Build())
 	}
 
-	// Check type has primary key
 	if !typ.HasPrimaryKey() {
-		issue := diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
 			fmt.Sprintf("type %q has no primary key; cannot add to graph", inst.TypeName())).
-			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build()
-		opCollector.Collect(issue)
-		g.mu.Lock()
-		g.collector.Collect(issue)
-		g.mu.Unlock()
-		return opCollector.Result()
+			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
 	}
 
-	// Check part types cannot be added directly
 	if typ.IsPart() {
-		issue := diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
 			fmt.Sprintf("part type %q cannot be added directly; use AddComposed", inst.TypeName())).
-			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build()
-		opCollector.Collect(issue)
-		g.mu.Lock()
-		g.collector.Collect(issue)
-		g.mu.Unlock()
-		return opCollector.Result()
+			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
 	}
 
-	// The validator rejects an abstract type before construction, so only
-	// a bypass constructor reaches this guard.
 	if typ.IsAbstract() {
-		issue := diag.NewIssue(diag.Error, diag.E_GRAPH_ABSTRACT_TYPE,
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_ABSTRACT_TYPE,
 			fmt.Sprintf("abstract type %q cannot be instantiated in the graph", inst.TypeName())).
-			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build()
-		opCollector.Collect(issue)
-		g.mu.Lock()
-		g.collector.Collect(issue)
-		g.mu.Unlock()
-		return opCollector.Result()
+			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
 	}
 
-	// An empty key would install under the literal "[]"; a key disagreeing
-	// with a present key property is a forged address. An absent key
-	// property is tolerated — fixtures carry keys without the property map.
+	// An empty key installs under the literal "[]", and a key disagreeing with
+	// a present key property is a forged address.
 	if err := checkInstanceKey(typ, inst); err != nil {
-		issue := diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
 			fmt.Sprintf("instance of type %q: %s", inst.TypeName(), err)).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).
-			WithDetail(diag.DetailKeyPrimaryKey, inst.PrimaryKey().String()).Build()
-		opCollector.Collect(issue)
-		g.mu.Lock()
-		g.collector.Collect(issue)
-		g.mu.Unlock()
+			WithDetail(diag.DetailKeyPrimaryKey, inst.PrimaryKey().String()).Build())
+	}
+
+	// One walk checks the instance and builds the tree to install. Every
+	// rejection is decided here, before the first mutation, so a non-OK Add
+	// leaves no trace of the record it refused.
+	b := newInstanceBuilder(g, opCollector)
+	var staged []stagedEdge
+	graphInst := b.build(typ, inst, &staged)
+	if opCollector.HasErrors() {
+		g.collector.Merge(opCollector.Result())
 		return opCollector.Result()
 	}
 
-	// A (one) association carrying several targets is a bypass-only shape:
-	// validateEdgeData enforces it for RawInstance input. Rejected before
-	// the instance installs, so no partial instance survives.
-	for relationName, edgeData := range g.iterEdges(inst) {
-		rel, ok := typ.Relation(relationName)
-		if !ok || rel.Kind() != schema.RelationAssociation || rel.IsMany() {
-			continue
-		}
-		if len(edgeData.Targets()) > 1 {
-			issue := diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
-				fmt.Sprintf("association %q on type %q is (one) and carries %d targets",
-					relationName, inst.TypeName(), len(edgeData.Targets()))).
-				WithDetail(diag.DetailKeyTypeName, inst.TypeName()).
-				WithDetail(diag.DetailKeyRelationName, relationName).Build()
-			opCollector.Collect(issue)
-			g.mu.Lock()
-			g.collector.Collect(issue)
-			g.mu.Unlock()
-			return opCollector.Result()
-		}
-	}
-
-	// Compute instance tag form and primary key
-	typeName := g.instanceTagForm(typeID)
+	typeName := graphInst.TypeName()
 	pkString := inst.PrimaryKey().String()
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	// Check for duplicate PK
 	typeInstances := g.instances[typeID]
 	if typeInstances != nil {
 		if existing, found := typeInstances[pkString]; found {
-			// Duplicate detected
-			graphInst := newInstance(typeName, typeID, inst.PrimaryKey(), inst.Properties(), inst.Provenance(), inst.Validated())
+			// Duplicate.Instance is documented as carrying no composed
+			// children, so the record gets its own childless instance.
+			rejected := newInstance(typeName, typeID, inst.PrimaryKey(), inst.Properties(), inst.Provenance(), inst.Validated())
 			diagBuilder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
 				fmt.Sprintf("duplicate primary key %s for type %q", pkString, typeName)).
 				WithDetail(diag.DetailKeyTypeName, typeName).
 				WithDetail(diag.DetailKeyPrimaryKey, pkString)
-			// Attach span from provenance if available
 			if prov := inst.Provenance(); prov != nil {
 				diagBuilder = diagBuilder.WithSpan(prov.Span())
 			}
-			dup := newDuplicate(graphInst, existing, nil, "", diagBuilder.Build())
+			dup := newDuplicate(rejected, existing, nil, "", diagBuilder.Build())
 			g.duplicates = append(g.duplicates, dup)
-			opCollector.Collect(dup.Diagnostic)
-			g.collector.Collect(dup.Diagnostic)
 			trace.Warn(
 				ctx, g.config.logger, "duplicate primary key",
 				slog.String("type", typeName),
 				slog.String("pk", pkString),
 			)
-			return opCollector.Result()
+			return g.reject(opCollector, dup.Diagnostic)
 		}
 	} else {
 		g.instances[typeID] = make(map[string]*Instance)
 	}
 
-	// Create Instance
-	graphInst := newInstance(typeName, typeID, inst.PrimaryKey(), inst.Properties(), inst.Provenance(), inst.Validated())
-
-	// The rejected-duplicate path above never reaches this AND: a rejected
+	// Commit. The rejected-duplicate path above never reaches this: a rejected
 	// payload is outside the Values attestation.
-	g.attestValues = g.attestValues && inst.Validated()
-
-	// Add to instances map
+	g.attestValues = g.attestValues && b.attested
 	g.instances[typeID][pkString] = graphInst
 
-	// Process associations - create edges
-	// Capture edge data for both iteration and absent-field detection
-	edgeDataMap := g.iterEdges(inst)
-	for relationName, edgeData := range edgeDataMap {
-		rel, ok := typ.Relation(relationName)
-		if !ok || rel.Kind() != schema.RelationAssociation {
-			// Undeclared names were skipped silently here; the silence hid
-			// bypass-written data the next Marshal then dropped.
-			issue := diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
-				fmt.Sprintf("type %q declares no association %q; its edges are dropped",
-					typeName, relationName)).
-				WithDetail(diag.DetailKeyTypeName, typeName).
-				WithDetail(diag.DetailKeyRelationName, relationName).Build()
-			opCollector.Collect(issue)
-			g.collector.Collect(issue)
-			continue
-		}
-
-		targetTypeID := rel.TargetID()
-		targetTypeName := g.instanceTagForm(targetTypeID)
-		isRequired := !rel.IsOptional()
-
-		for target := range edgeData.TargetsIter() {
-			targetKey := target.TargetKey().String()
-
-			// Try to resolve target
-			if targetInst := g.findInstance(targetTypeID, targetKey); targetInst != nil {
-				// Create resolved edge
-				edge := newEdge(relationName, graphInst, targetInst, target.Properties())
-				g.edges = append(g.edges, edge)
+	for _, se := range staged {
+		if se.reason == "" {
+			if targetInst := g.findInstance(se.targetType, se.targetKey); targetInst != nil {
+				g.edges = append(g.edges, newEdge(se.relation, graphInst, targetInst, se.properties))
 				trace.Debug(
 					ctx, g.config.logger, "edge resolved",
-					slog.String("relation", relationName),
+					slog.String("relation", se.relation),
 					slog.String("source_type", typeName),
 					slog.String("source_pk", pkString),
-					slog.String("target_type", targetTypeName),
-					slog.String("target_pk", targetKey),
+					slog.String("target_type", g.instanceTagForm(se.targetType)),
+					slog.String("target_pk", se.targetKey),
 				)
-			} else {
-				// Create pending edge (forward reference)
-				pk := pendingKey{targetTypeID: targetTypeID, targetKey: targetKey}
-				g.pending[pk] = append(g.pending[pk], &pendingEdge{
-					source:       graphInst,
-					relation:     relationName,
-					jsonField:    rel.FieldName(),
-					targetType:   targetTypeID,
-					targetKey:    targetKey,
-					properties:   target.Properties(),
-					isRequired:   isRequired,
-					reasonDetail: "", // will be "target_missing" in Check
-				})
-				trace.Debug(
-					ctx, g.config.logger, "forward reference created",
-					slog.String("relation", relationName),
-					slog.String("source_type", typeName),
-					slog.String("source_pk", pkString),
-					slog.String("target_type", targetTypeName),
-					slog.String("target_pk", targetKey),
-				)
+				continue
 			}
+			trace.Debug(
+				ctx, g.config.logger, "forward reference created",
+				slog.String("relation", se.relation),
+				slog.String("source_type", typeName),
+				slog.String("source_pk", pkString),
+				slog.String("target_type", g.instanceTagForm(se.targetType)),
+				slog.String("target_pk", se.targetKey),
+			)
 		}
-
-		// Check for empty required edge
-		if isRequired && edgeData.IsEmpty() {
-			pk := pendingKey{targetTypeID: targetTypeID, targetKey: ""}
-			g.pending[pk] = append(g.pending[pk], &pendingEdge{
-				source:       graphInst,
-				relation:     relationName,
-				jsonField:    rel.FieldName(),
-				targetType:   targetTypeID,
-				targetKey:    "",
-				isRequired:   true,
-				reasonDetail: "empty",
-			})
-		}
-	}
-
-	// Track absent required associations
-	for rel := range typ.AllAssociations() {
-		if rel.IsOptional() {
-			continue
-		}
-		relationName := rel.Name()
-		// Check if relation was processed (has edge data)
-		if _, processed := edgeDataMap[relationName]; processed {
-			continue // Handled above (has targets or is empty)
-		}
-		// Required association field is absent
-		targetTypeID := rel.TargetID()
-		pk := pendingKey{targetTypeID: targetTypeID, targetKey: ""}
+		pk := pendingKey{targetTypeID: se.targetType, targetKey: se.targetKey}
 		g.pending[pk] = append(g.pending[pk], &pendingEdge{
 			source:       graphInst,
-			relation:     relationName,
-			jsonField:    rel.FieldName(),
-			targetType:   targetTypeID,
-			targetKey:    "",
-			isRequired:   true,
-			reasonDetail: "absent",
+			relation:     se.relation,
+			jsonField:    se.jsonField,
+			targetType:   se.targetType,
+			targetKey:    se.targetKey,
+			properties:   se.properties,
+			isRequired:   se.isRequired,
+			reasonDetail: se.reason, // Check renders the empty form as "target_missing".
 		})
 	}
 
-	// Resolve ALL pending edges that target this instance
+	// Resolve every pending edge that targets this instance.
 	pk := pendingKey{targetTypeID: typeID, targetKey: pkString}
 	if pendingList, ok := g.pending[pk]; ok {
 		for _, pend := range pendingList {
-			edge := newEdge(pend.relation, pend.source, graphInst, pend.properties)
-			g.edges = append(g.edges, edge)
+			g.edges = append(g.edges, newEdge(pend.relation, pend.source, graphInst, pend.properties))
 		}
 		if len(pendingList) > 0 {
 			trace.Debug(
@@ -418,9 +307,6 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 		delete(g.pending, pk)
 	}
 
-	// Extract and attach composed children
-	g.extractCompositions(inst, graphInst, opCollector, true)
-
 	return opCollector.Result()
 }
 
@@ -432,7 +318,9 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 //
 // # Parameters
 //
-//   - parentType: the type name in instance tag form (e.g., "Person" or "c.Entity")
+//   - parentType: the parent's type identity, as [Snapshot.Types] and
+//     [Instance.TypeID] carry it. A rendered name cannot denote a type exactly
+//     — see the package doc's Type Identity and Type Names section.
 //   - parentKey: the parent's primary key in canonical string form, as returned by
 //     [FormatKey]. For example, FormatKey("alice") returns `["alice"]`.
 //   - relationName: the composition relation name as declared in the schema
@@ -447,54 +335,42 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 //   - Stream children only to top-level parents
 //
 // Return semantics: check [diag.Result.OK] for success. A non-OK result
-// contains diagnostic issues. A Fatal issue indicates context cancellation.
-//
-// Error codes that may appear in result:
-//   - E_GRAPH_TYPE_NOT_FOUND: Parent type not found
-//   - E_GRAPH_PARENT_NOT_FOUND: Parent instance not found (may occur if parentKey
-//     format doesn't match [FormatKey] output)
-//   - E_GRAPH_INVALID_COMPOSITION: Relation not found or not a composition
-//   - E_DUPLICATE_COMPOSED_PK: Child with same PK already exists (for PK'd children)
-//   - E_CONTEXT_CANCELLED: Context was cancelled
+// contains diagnostic issues and the child is not attached. The package doc's
+// Error Handling section enumerates the codes AddComposed can emit.
 func (g *Graph) AddComposed(
 	ctx context.Context,
-	parentType, parentKey, relationName string,
+	parentType schema.TypeID,
+	parentKey, relationName string,
 	child *instance.ValidInstance,
 ) diag.Result {
-	// Nil receiver check — programmer error
+	// Programmer errors: a caller cannot recover from any of these.
 	if g == nil {
 		panic("graph.AddComposed: nil *Graph receiver")
 	}
 
-	// Nil child check — programmer error
 	if child == nil {
 		panic("graph.AddComposed: nil ValidInstance")
 	}
 
-	// Nil context check
 	if ctx == nil {
 		panic("graph.AddComposed: nil context")
 	}
 
-	// Per-operation collector for this AddComposed call only
 	opCollector := diag.NewCollector(0)
 
-	// Operation boundary logging - must come before context check so
-	// cancellations are traced (consistency with walk package pattern)
+	// Opened before the context check so a cancelled AddComposed is still traced.
 	op := trace.Begin(
 		ctx, g.config.logger, "yammm.graph.add_composed",
-		slog.String("parent_type", parentType),
+		slog.String("parent_type", g.instanceTagForm(parentType)),
 		slog.String("parent_pk", parentKey),
 		slog.String("relation", relationName),
 		slog.String("child_type", child.TypeName()),
 	)
 	defer func() { op.End(opCollector.Result().Err()) }()
 
-	// Context cancellation check
 	if err := ctx.Err(); err != nil {
-		opCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
+		return g.reject(opCollector, diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 			"graph.AddComposed cancelled: "+err.Error()).Build())
-		return opCollector.Result()
 	}
 
 	// Schema mismatch check — programmer error
@@ -505,84 +381,81 @@ func (g *Graph) AddComposed(
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	// Resolve parent type
-	parentTypeID, ok := g.resolveTypeName(parentType)
-	if !ok {
-		msg := fmt.Sprintf("parent type %q not found", parentType)
-		builder := diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND, msg).
-			WithDetail(diag.DetailKeyTypeName, parentType)
-		// Detect alias-qualified name (suggests imported type from potentially transitive import)
-		if strings.Contains(parentType, ".") {
-			builder = builder.WithHint("if this type is from a transitively imported schema, add a direct import to access it")
-		}
-		issue := builder.Build()
-		opCollector.Collect(issue)
-		g.collector.Collect(issue)
-		return opCollector.Result()
-	}
+	parentName := g.instanceTagForm(parentType)
 
-	// Find parent instance
-	parentInst := g.findInstance(parentTypeID, parentKey)
+	parentInst := g.findInstance(parentType, parentKey)
 	if parentInst == nil {
-		issue := diag.NewIssue(diag.Error, diag.E_GRAPH_PARENT_NOT_FOUND,
-			fmt.Sprintf("parent instance %s[%s] not found", parentType, parentKey)).
-			WithDetail(diag.DetailKeyTypeName, parentType).
-			WithDetail(diag.DetailKeyPrimaryKey, parentKey).Build()
-		opCollector.Collect(issue)
-		g.collector.Collect(issue)
-		return opCollector.Result()
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_PARENT_NOT_FOUND,
+			fmt.Sprintf("parent instance %s[%s] not found", parentName, parentKey)).
+			WithDetail(diag.DetailKeyTypeName, parentName).
+			WithDetail(diag.DetailKeyTypeSchema, parentType.SchemaPath().String()).
+			WithDetail(diag.DetailKeyPrimaryKey, parentKey).Build())
 	}
 
-	// Lookup parent type and relation
-	typ, ok := g.lookupType(parentTypeID)
+	// The parent is installed, so its type is somewhere in the closure even
+	// when this graph's schema does not import it directly.
+	typ, ok := g.schema.TypeByID(parentType)
 	if !ok {
-		issue := diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
-			fmt.Sprintf("parent type %q not found", parentType)).
-			WithDetail(diag.DetailKeyTypeName, parentType).Build()
-		opCollector.Collect(issue)
-		g.collector.Collect(issue)
-		return opCollector.Result()
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
+			fmt.Sprintf("parent type %s not found in schema", parentType)).
+			WithDetail(diag.DetailKeyTypeName, parentName).
+			WithDetail(diag.DetailKeyTypeSchema, parentType.SchemaPath().String()).Build())
 	}
 
 	rel, ok := typ.Relation(relationName)
 	if !ok || rel.Kind() != schema.RelationComposition {
-		issue := diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("relation %q on type %q is not a composition", relationName, parentType)).
-			WithDetail(diag.DetailKeyTypeName, parentType).
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
+			fmt.Sprintf("relation %q on type %q is not a composition", relationName, parentName)).
+			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyPrimaryKey, parentKey).
-			WithDetail(diag.DetailKeyRelationName, relationName).Build()
-		opCollector.Collect(issue)
-		g.collector.Collect(issue)
-		return opCollector.Result()
+			WithDetail(diag.DetailKeyRelationName, relationName).Build())
 	}
 
-	// Validate child type matches relation target
 	if child.TypeID() != rel.TargetID() {
-		issue := diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("child type %q does not match relation target %q", child.TypeName(), g.instanceTagForm(rel.TargetID()))).
-			WithDetail(diag.DetailKeyTypeName, parentType).
+		got, want := g.describeTypePair(child.TypeID(), rel.TargetID())
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
+			fmt.Sprintf("child type %s does not match relation target %s", got, want)).
+			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyPrimaryKey, parentKey).
 			WithDetail(diag.DetailKeyRelationName, relationName).
-			WithDetail(diag.DetailKeyExpected, g.instanceTagForm(rel.TargetID())).
-			WithDetail(diag.DetailKeyGot, child.TypeName()).Build()
-		opCollector.Collect(issue)
-		g.collector.Collect(issue)
+			WithDetail(diag.DetailKeyExpected, want).
+			WithDetail(diag.DetailKeyGot, got).Build())
+	}
+
+	// Identity, not name — see checkComposedChild.
+	childTyp, ok := g.schema.TypeByID(child.TypeID())
+	if !ok {
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
+			fmt.Sprintf("child type %q not found in schema", child.TypeName())).
+			WithDetail(diag.DetailKeyTypeName, child.TypeName()).Build())
+	}
+
+	// The child's own key and subtree run the same rules Add applies to a root
+	// and the builder applies to an inline child, and the tree it returns is
+	// what attaches on success.
+	if childTyp.HasPrimaryKey() {
+		if err := checkInstanceKey(childTyp, child); err != nil {
+			return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
+				fmt.Sprintf("composed child of type %q: %s", child.TypeName(), err)).
+				WithDetail(diag.DetailKeyTypeName, child.TypeName()).
+				WithDetail(diag.DetailKeyRelationName, relationName).
+				WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).Build())
+		}
+	}
+	b := newInstanceBuilder(g, opCollector)
+	builtChild := b.build(childTyp, child, nil)
+	if opCollector.HasErrors() {
+		g.collector.Merge(opCollector.Result())
 		return opCollector.Result()
 	}
 
-	// Check for duplicates per
 	isMany := rel.IsMany()
-	childTyp, _ := g.lookupType(child.TypeID())
-	hasPK := childTyp != nil && childTyp.HasPrimaryKey()
 
 	if !isMany {
-		// (one) cardinality: any child exists is a duplicate
 		if parentInst.HasComposed(relationName) {
-			// Create child Instance for duplicate record
-			childTypeName := g.instanceTagForm(child.TypeID())
-			childInst := newInstance(childTypeName, child.TypeID(), child.PrimaryKey(), child.Properties(), child.Provenance(), child.Validated())
+			childInst := newInstance(g.instanceTagForm(child.TypeID()), child.TypeID(),
+				child.PrimaryKey(), child.Properties(), child.Provenance(), child.Validated())
 
-			// Find existing child as conflict
 			var conflictInst *Instance
 			if existing := parentInst.composed[relationName]; len(existing) > 0 {
 				conflictInst = existing[0]
@@ -590,75 +463,59 @@ func (g *Graph) AddComposed(
 
 			builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 				fmt.Sprintf("composition %q already has a child", relationName)).
-				WithDetail(diag.DetailKeyTypeName, parentType).
+				WithDetail(diag.DetailKeyTypeName, parentName).
 				WithDetail(diag.DetailKeyRelationName, relationName).
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-			if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName, nil); err == nil {
+			if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName,
+				composedKeyOrIndex(childTyp, child.PrimaryKey())); err == nil {
 				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
 			}
 			issue := builder.Build()
 
-			// Record duplicate
-			dup := newDuplicate(childInst, conflictInst, parentInst, relationName, issue)
-			g.duplicates = append(g.duplicates, dup)
-
-			opCollector.Collect(issue)
-			g.collector.Collect(issue)
+			g.duplicates = append(g.duplicates, newDuplicate(childInst, conflictInst, parentInst, relationName, issue))
 			trace.Warn(
 				ctx, g.config.logger, "duplicate composed child",
-				slog.String("parent_type", parentType),
+				slog.String("parent_type", parentName),
 				slog.String("parent_pk", parentKey),
 				slog.String("relation", relationName),
 			)
-			return opCollector.Result()
+			return g.reject(opCollector, issue)
 		}
-	} else if hasPK {
-		// (many) with PK: check for duplicate PK among siblings
+	} else if childTyp.HasPrimaryKey() {
 		childPKString := child.PrimaryKey().String()
 		for _, existing := range parentInst.composed[relationName] {
-			if existing.PrimaryKey().String() == childPKString {
-				// Create child Instance for duplicate record
-				childTypeName := g.instanceTagForm(child.TypeID())
-				childInst := newInstance(childTypeName, child.TypeID(), child.PrimaryKey(), child.Properties(), child.Provenance(), child.Validated())
-
-				childKeyValues := keyToValues(child.PrimaryKey())
-				builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
-					"duplicate composed child primary key "+childPKString).
-					WithDetail(diag.DetailKeyTypeName, parentType).
-					WithDetail(diag.DetailKeyRelationName, relationName).
-					WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-				if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName, childKeyValues); err == nil {
-					builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
-				}
-				issue := builder.Build()
-
-				// Record duplicate (existing is the conflict)
-				dup := newDuplicate(childInst, existing, parentInst, relationName, issue)
-				g.duplicates = append(g.duplicates, dup)
-
-				opCollector.Collect(issue)
-				g.collector.Collect(issue)
-				trace.Warn(
-					ctx, g.config.logger, "duplicate composed child",
-					slog.String("parent_type", parentType),
-					slog.String("parent_pk", parentKey),
-					slog.String("relation", relationName),
-					slog.String("child_pk", childPKString),
-				)
-				return opCollector.Result()
+			if existing.PrimaryKey().String() != childPKString {
+				continue
 			}
+			childInst := newInstance(g.instanceTagForm(child.TypeID()), child.TypeID(),
+				child.PrimaryKey(), child.Properties(), child.Provenance(), child.Validated())
+
+			builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+				"duplicate composed child primary key "+childPKString).
+				WithDetail(diag.DetailKeyTypeName, parentName).
+				WithDetail(diag.DetailKeyRelationName, relationName).
+				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
+			if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName,
+				composedKeyOrIndex(childTyp, child.PrimaryKey())); err == nil {
+				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
+			}
+			issue := builder.Build()
+
+			g.duplicates = append(g.duplicates, newDuplicate(childInst, existing, parentInst, relationName, issue))
+			trace.Warn(
+				ctx, g.config.logger, "duplicate composed child",
+				slog.String("parent_type", parentName),
+				slog.String("parent_pk", parentKey),
+				slog.String("relation", relationName),
+				slog.String("child_pk", childPKString),
+			)
+			return g.reject(opCollector, issue)
 		}
 	}
 	// (many) without PK: always append (positional identity)
 
-	// Create child Instance and attach
-	childTypeName := g.instanceTagForm(child.TypeID())
-	childInst := newInstance(childTypeName, child.TypeID(), child.PrimaryKey(), child.Properties(), child.Provenance(), child.Validated())
-	g.attestValues = g.attestValues && child.Validated()
-	// The streamed child sits at depth 1, so its nested slots are not
-	// root-addressable.
-	g.extractCompositions(child, childInst, opCollector, false)
-	parentInst.addComposed(relationName, childInst)
+	g.attestValues = g.attestValues && b.attested
+	parentInst.addComposed(relationName, builtChild)
 
 	return opCollector.Result()
 }
@@ -675,27 +532,22 @@ func (g *Graph) AddComposed(
 //   - E_UNRESOLVED_REQUIRED: Required association target not in graph
 //   - E_CONTEXT_CANCELLED: Context was cancelled
 func (g *Graph) Check(ctx context.Context) diag.Result {
-	// Nil receiver check — programmer error
 	if g == nil {
 		panic("graph.Check: nil *Graph receiver")
 	}
 
-	// Nil context check
 	if ctx == nil {
 		panic("graph.Check: nil context")
 	}
 
-	// Per-operation collector for this Check call only.
-	// Unlike Add/AddComposed, Check does NOT merge into g.collector,
-	// making it idempotent: multiple calls return identical results.
+	// Check does NOT merge into g.collector, which is what makes it
+	// idempotent: multiple calls return identical results.
 	opCollector := diag.NewCollector(0)
 
-	// Operation boundary logging - must come before context check so
-	// cancellations are traced (consistency with walk package pattern)
+	// Opened before the context check so a cancelled Check is still traced.
 	op := trace.Begin(ctx, g.config.logger, "yammm.graph.check")
 	defer func() { op.End(opCollector.Result().Err()) }()
 
-	// Context cancellation check
 	if err := ctx.Err(); err != nil {
 		opCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 			"graph.Check cancelled: "+err.Error()).Build())
@@ -705,14 +557,12 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	// Check pending edges for required associations
 	unresolvedCount := 0
 	for _, pendingList := range g.pending {
 		for _, pend := range pendingList {
 			if !pend.isRequired {
 				continue
 			}
-
 			unresolvedCount++
 
 			var reason string
@@ -737,7 +587,7 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 				WithDetail(diag.DetailKeyJSONField, pend.jsonField).
 				WithDetail(diag.DetailKeyReason, reasonToken)
 
-			// Add target_type and target_pk only for target_missing case
+			// The "absent" and "empty" reasons carry no target to name.
 			if reasonToken == "target_missing" {
 				builder = builder.WithDetail(diag.DetailKeyTargetType, schema.TagForm(g.schema, pend.targetType))
 				if pend.targetKey != "" {
@@ -745,13 +595,11 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 				}
 			}
 
-			// Attach span from source instance provenance if available
 			if prov := pend.source.Provenance(); prov != nil {
 				builder = builder.WithSpan(prov.Span())
 			}
 
-			issue := builder.Build()
-			opCollector.Collect(issue)
+			opCollector.Collect(builder.Build())
 
 			trace.Warn(
 				ctx, g.config.logger, "unresolved required association",
@@ -799,9 +647,6 @@ func (g *Graph) Snapshot() *Snapshot {
 	for typeID := range g.instances {
 		types = append(types, typeID)
 	}
-	slices.SortFunc(types, func(a, b schema.TypeID) int {
-		return cmp.Compare(a.String(), b.String())
-	})
 
 	// Build instances map with deep-cloned instances per type
 	instances := make(map[schema.TypeID][]*Instance, len(g.instances))
@@ -814,11 +659,6 @@ func (g *Graph) Snapshot() *Snapshot {
 			cloned := cloneInstance(inst, cloneMap)
 			insts = append(insts, cloned)
 		}
-
-		// Sort by PK string
-		slices.SortFunc(insts, func(a, b *Instance) int {
-			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
-		})
 
 		instances[typeID] = insts
 
@@ -845,7 +685,6 @@ func (g *Graph) Snapshot() *Snapshot {
 		}
 		edges[i] = newEdge(e.relation, clonedSource, clonedTarget, e.properties)
 	}
-	slices.SortFunc(edges, compareEdges)
 
 	// Rebuild duplicates with cloned instance references.
 	// Defensive: clone on-demand if instances are not already in cloneMap.
@@ -872,7 +711,6 @@ func (g *Graph) Snapshot() *Snapshot {
 		}
 		duplicates[i] = newDuplicate(clonedInstance, clonedConflict, clonedParent, d.Relation, d.Diagnostic)
 	}
-	slices.SortFunc(duplicates, compareDuplicates)
 
 	// Rebuild unresolved edges with cloned source references.
 	// Defensive: clone on-demand if source is not already in cloneMap.
@@ -898,7 +736,6 @@ func (g *Graph) Snapshot() *Snapshot {
 			))
 		}
 	}
-	slices.SortFunc(unresolved, compareUnresolved)
 
 	// The Values attestation is graph-level state, never an instance walk:
 	// a seeded graph's imported clones all report Validated() == false
@@ -930,89 +767,30 @@ func (g *Graph) Snapshot() *Snapshot {
 	return newSnapshot(g.schema, types, instances, instanceIndex, edges, duplicates, unresolved, g.collector.Result(), att)
 }
 
-// isKnownSchema checks if the given schema path is the graph's schema or one of its imports.
-// Used for schema mismatch detection in Add/AddComposed.
+// isKnownSchema reports whether schemaPath is anywhere in the bound schema's
+// import closure. An instance from outside it is a programmer error.
 func (g *Graph) isKnownSchema(schemaPath location.SourceID) bool {
-	// Check if it's the graph's own schema
-	if schemaPath == g.schema.SourceID() {
-		return true
-	}
-
-	// Check imported schemas (including transitive imports)
-	// We use a visited set to avoid cycles
-	visited := make(map[location.SourceID]bool)
-	return checkSchemaImports(g.schema, schemaPath, visited)
+	return schemaPath == g.schema.SourceID() || g.closureSchemas[schemaPath]
 }
 
-// checkSchemaImports recursively checks if schemaPath is in the import tree of s.
-func checkSchemaImports(s *schema.Schema, schemaPath location.SourceID, visited map[location.SourceID]bool) bool {
-	for imp := range s.Imports() {
-		impSchema := imp.Schema()
-		if impSchema == nil {
-			continue
-		}
-
-		impPath := impSchema.SourceID()
-		if impPath == schemaPath {
-			return true
-		}
-
-		// Avoid cycles
-		if visited[impPath] {
-			continue
-		}
-		visited[impPath] = true
-
-		// Recursively check transitive imports
-		if checkSchemaImports(impSchema, schemaPath, visited) {
-			return true
-		}
-	}
-
-	return false
+// ownsType reports whether this graph accepts a root instance of id's type: the
+// bound schema declares it, or directly imports the schema that does. This is a
+// policy, not a resolution rule — [schema.Schema.TypeByID] resolves an identity
+// anywhere in the closure, and a composed child uses that reach.
+func (g *Graph) ownsType(id schema.TypeID) bool {
+	path := id.SchemaPath()
+	return path == g.schema.SourceID() || g.ownedSchemas[path]
 }
 
-// lookupType looks up a Type by TypeID. Direct imports only, deliberately:
-// [Graph.Add] documents that contract in its own diagnostic hint.
-func (g *Graph) lookupType(id schema.TypeID) (*schema.Type, bool) {
-	// Check local types
-	if id.SchemaPath() == g.schema.SourceID() {
-		return g.schema.Type(id.Name())
+// describeTypePair renders two type identities so a reader can tell them apart.
+// Tag forms collide whenever a type has no alias to qualify with, and a message
+// reading `X does not match X` is worse than none.
+func (g *Graph) describeTypePair(got, want schema.TypeID) (string, string) {
+	gotName, wantName := g.instanceTagForm(got), g.instanceTagForm(want)
+	if gotName == wantName {
+		return got.String(), want.String()
 	}
-
-	// Check imported schemas
-	for imp := range g.schema.Imports() {
-		if imp.Schema() != nil && imp.Schema().SourceID() == id.SchemaPath() {
-			return imp.Schema().Type(id.Name())
-		}
-	}
-
-	return nil, false
-}
-
-// resolveTypeName resolves a type name string to TypeID.
-func (g *Graph) resolveTypeName(typeName string) (schema.TypeID, bool) {
-	// Check for alias-qualified name
-	if before, after, ok := strings.Cut(typeName, "."); ok {
-		alias := before
-		name := after
-		imp, ok := g.schema.ImportByAlias(alias)
-		if !ok || imp.Schema() == nil {
-			return schema.TypeID{}, false
-		}
-		typ, ok := imp.Schema().Type(name)
-		if !ok {
-			return schema.TypeID{}, false
-		}
-		return typ.ID(), true
-	}
-
-	// Unqualified name: local type only
-	typ, ok := g.schema.Type(typeName)
-	if !ok {
-		return schema.TypeID{}, false
-	}
-	return typ.ID(), true
+	return strconv.Quote(gotName), strconv.Quote(wantName)
 }
 
 // instanceTagForm computes the canonical instance tag form for a TypeID.
@@ -1033,153 +811,73 @@ func (g *Graph) iterEdges(inst *instance.ValidInstance) map[string]*instance.Val
 	return maps.Collect(inst.Edges())
 }
 
-// extractCompositions extracts composed children from a ValidInstance.
-//
-// Handles both slice and bare *ValidInstance shapes for defensive robustness.
-// Enforces (one) cardinality for inline compositions.
-//
-// The opCollector receives per-operation diagnostics; g.collector receives
-// cumulative diagnostics for Snapshot().Diagnostics().
-func (g *Graph) extractCompositions(valid *instance.ValidInstance, graphInst *Instance, opCollector *diag.Collector, parentIsRoot bool) {
-	// Get the type definition to check cardinality
-	typ, ok := g.lookupType(valid.TypeID())
-	if !ok {
-		return // Shouldn't happen with validated instances
-	}
-
-	for relationName, composedValue := range valid.Compositions() {
-		rel, hasRel := typ.Relation(relationName)
-		if !hasRel || rel.Kind() != schema.RelationComposition {
-			// This attached under an assumed (many) before; an undeclared
-			// name must not decide multiplicity for data it cannot describe.
-			issue := diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
-				fmt.Sprintf("type %q declares no composition %q; its children are dropped",
-					graphInst.TypeName(), relationName)).
-				WithDetail(diag.DetailKeyTypeName, graphInst.TypeName()).
-				WithDetail(diag.DetailKeyRelationName, relationName).Build()
-			opCollector.Collect(issue)
-			g.collector.Collect(issue)
-			continue
-		}
-		isMany := rel.IsMany()
-
-		unwrapped := composedValue.Unwrap()
-
-		// Handle slice shape (normal case from validator)
-		if slice, ok := unwrapped.(immutable.Slice); ok {
-			// Cardinality check for (one) relations
-			var overflowIssue diag.Issue
-			if !isMany && slice.Len() > 1 {
-				parentKeyValues := keyToValues(graphInst.PrimaryKey())
-				builder := diag.NewIssue(
-					diag.Error,
-					diag.E_DUPLICATE_COMPOSED_PK,
-					fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", relationName, slice.Len()),
-				).WithDetail(diag.DetailKeyTypeName, graphInst.TypeName()).
-					WithDetail(diag.DetailKeyRelationName, relationName).
-					WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-				if composedPK, err := FormatComposedKey(parentKeyValues, relationName, nil); err == nil {
-					builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
-				}
-				overflowIssue = builder.Build()
-				opCollector.Collect(overflowIssue)
-				g.collector.Collect(overflowIssue)
-			}
-
-			// Note: For (many) compositions with primary keys, duplicate checking
-			// is NOT performed here because inline compositions arrive from
-			// ValidInstance objects that have already been validated by
-			// instance.Validate(). For streamed children, AddComposed performs
-			// the equivalent check.
-			count := 0
-			for i := range slice.Len() {
-				val := slice.Get(i)
-				childValid, ok := val.Unwrap().(*instance.ValidInstance)
-				if !ok {
-					continue
-				}
-				if !isMany && count >= 1 {
-					// The streamed path records the rejection as a Duplicate;
-					// this path matches it for a root parent, whose slot the
-					// wire can address. A deeper slot stays diagnostic-only:
-					// its Duplicate record would marshal into a dangling
-					// reference.
-					if parentIsRoot {
-						extra := newInstance(g.instanceTagForm(childValid.TypeID()), childValid.TypeID(),
-							childValid.PrimaryKey(), childValid.Properties(), childValid.Provenance(), childValid.Validated())
-						var firstChild *Instance
-						if kids := graphInst.composed[relationName]; len(kids) > 0 {
-							firstChild = kids[0]
-						}
-						g.duplicates = append(g.duplicates, newDuplicate(extra, firstChild, graphInst, relationName, overflowIssue))
-					}
-					continue
-				}
-				g.attachComposedChild(childValid, graphInst, relationName, rel, opCollector)
-				count++
-			}
-			continue
-		}
-
-		// Handle bare *ValidInstance shape (defensive)
-		if childValid, ok := unwrapped.(*instance.ValidInstance); ok {
-			g.attachComposedChild(childValid, graphInst, relationName, rel, opCollector)
-		}
-		// Skip nil/zero values (absent optional compositions)
-	}
-}
-
-// checkInstanceKey rejects an empty key, a key whose arity disagrees with
-// the type's declared primary keys, and a component that disagrees with the
-// instance's own present key property. An absent property is not a
-// mismatch.
+// checkInstanceKey rejects an empty key, a key whose arity disagrees with the
+// type's declared primary keys, and a component that disagrees with the
+// instance's own present key property. An absent property is not a mismatch.
 func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance) error {
-	comps := keyToValues(inst.PrimaryKey())
-	if len(comps) == 0 {
+	key := inst.PrimaryKey()
+	if key.Len() == 0 {
 		return errors.New("primary key is empty")
 	}
-	pks := typ.PrimaryKeysSlice()
-	if len(comps) != len(pks) {
-		return fmt.Errorf("primary key has %d components; type declares %d", len(comps), len(pks))
+	declared := 0
+	for range typ.PrimaryKeys() {
+		declared++
 	}
-	for i, pk := range pks {
+	if key.Len() != declared {
+		return fmt.Errorf("primary key has %d components; type declares %d", key.Len(), declared)
+	}
+	i := 0
+	for pk := range typ.PrimaryKeys() {
 		val, ok := inst.Property(pk.Name())
-		if !ok {
-			continue
-		}
-		want := immutable.WrapKey([]any{val.Unwrap()}).String()
-		got := immutable.WrapKey([]any{comps[i]}).String()
-		if want != got {
+		if ok && !keyComponentAgrees(key.Get(i), val) {
 			return fmt.Errorf("primary key component %d disagrees with property %q (%s vs %s)",
-				i, pk.Name(), got, want)
+				i, pk.Name(), renderKeyComponent(key.Get(i)), renderKeyComponent(val))
 		}
+		i++
 	}
 	return nil
 }
 
-// attachComposedChild creates and attaches a single composed child after
-// checking the child's identity against the relation target — the streamed
-// path's check, applied to the inline path.
-func (g *Graph) attachComposedChild(childValid *instance.ValidInstance, graphInst *Instance, relationName string, rel *schema.Relation, opCollector *diag.Collector) {
-	if childValid.TypeID() != rel.TargetID() {
-		issue := diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("child type %q does not match relation target %q", childValid.TypeName(), g.instanceTagForm(rel.TargetID()))).
-			WithDetail(diag.DetailKeyTypeName, graphInst.TypeName()).
-			WithDetail(diag.DetailKeyRelationName, relationName).
-			WithDetail(diag.DetailKeyExpected, g.instanceTagForm(rel.TargetID())).
-			WithDetail(diag.DetailKeyGot, childValid.TypeName()).Build()
-		opCollector.Collect(issue)
-		g.collector.Collect(issue)
-		return
+// keyComponentAgrees reports whether a key component and its property hold the
+// same value. Identical scalar kinds settle it without allocating, which is
+// what keeps the check affordable once per composed child rather than once per
+// root; anything else falls back to the canonical rendering, the form that
+// decides key equality on the wire.
+func keyComponentAgrees(component, property immutable.Value) bool {
+	x, y := component.Unwrap(), property.Unwrap()
+	switch xv := x.(type) {
+	case string:
+		if yv, ok := y.(string); ok {
+			return xv == yv
+		}
+	case int64:
+		if yv, ok := y.(int64); ok {
+			return xv == yv
+		}
+	case float64:
+		if yv, ok := y.(float64); ok {
+			return xv == yv
+		}
+	case bool:
+		if yv, ok := y.(bool); ok {
+			return xv == yv
+		}
+	case nil:
+		return y == nil
 	}
+	return renderKeyComponent(component) == renderKeyComponent(property)
+}
 
-	childTypeName := g.instanceTagForm(childValid.TypeID())
-	childInst := newInstance(childTypeName, childValid.TypeID(),
-		childValid.PrimaryKey(), childValid.Properties(), childValid.Provenance(), childValid.Validated())
-	g.attestValues = g.attestValues && childValid.Validated()
+// renderKeyComponent renders one value in the canonical key form.
+func renderKeyComponent(v immutable.Value) string {
+	return immutable.WrapKey([]any{v.Unwrap()}).String()
+}
 
-	// Recursively extract nested compositions
-	g.extractCompositions(childValid, childInst, opCollector, false)
-
-	graphInst.addComposed(relationName, childInst)
+// reject records issue in the per-call collector and in the graph's cumulative
+// one, and returns the per-call result. [diag.Collector] synchronizes itself,
+// so the graph's own lock is not needed for the second write.
+func (g *Graph) reject(opCollector *diag.Collector, issue diag.Issue) diag.Result {
+	opCollector.Collect(issue)
+	g.collector.Collect(issue)
+	return opCollector.Result()
 }

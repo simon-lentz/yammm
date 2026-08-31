@@ -37,8 +37,8 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
 
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child1)
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child1)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child2)
 
 	// Get multiple snapshots
 	snap1 := g.Snapshot()
@@ -113,7 +113,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 		[]any{"c3"}, map[string]any{"name": "Third Child"})
 
 	for _, child := range []*instance.ValidInstance{child1, child2, child3} {
-		result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
+		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed should succeed: %v", err)
 		}
@@ -191,7 +191,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	// Add composed child AFTER snapshot
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
 
 	// Take second snapshot
 	snap2 := g.Snapshot()
