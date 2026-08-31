@@ -11,3 +11,12 @@ type Option func(*graphConfig)
 type graphConfig struct {
 	logger *slog.Logger
 }
+
+// WithLogger provides a structured logger for graph operation diagnostics.
+// If not provided, logging is disabled. Symmetric with
+// [github.com/simon-lentz/yammm/schema.WithLogger].
+func WithLogger(logger *slog.Logger) Option {
+	return func(c *graphConfig) {
+		c.logger = logger
+	}
+}

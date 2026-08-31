@@ -87,7 +87,7 @@ func buildWireTestSnapshot(t *testing.T, s *schema.Schema, reading any, samples 
 	g.Add(ctx, sensor)
 
 	part := mustValidPartInstance(t, s, "Part", []any{"p1"}, map[string]any{"name": "p1", "weight": float64(3)})
-	g.AddComposed(ctx, "Sensor", graph.FormatKey("s1"), "PARTS", part)
+	g.AddComposed(ctx, mustTypeID(t, s, "Sensor"), graph.FormatKey("s1"), "PARTS", part)
 
 	// Same PK as sensor: rejected into the duplicates section, floats intact.
 	dup := instancetest.VI(

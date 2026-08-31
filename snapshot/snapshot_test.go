@@ -238,7 +238,7 @@ func TestMarshalLoad_RoundTrip_WithComposition(t *testing.T) {
 
 	// Add composed child via AddComposed.
 	child := mustValidPartInstance(t, s, "Child", []any{"ch1"}, map[string]any{"id": "ch1", "value": "hello"})
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "CHILDREN", child)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
 
 	snap := g.Snapshot()
 	snapshottest.AssertRoundTrip(t, snap, s)

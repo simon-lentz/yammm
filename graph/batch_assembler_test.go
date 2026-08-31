@@ -206,7 +206,7 @@ func TestBatchAssembler_AddError_WrapsAsContextualError(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("error is not *diag.ContextualError: %T (%v)", err, err)
 	}
-	wantTag := "Person (record #1)"
+	wantTag := "Person (attempt #1)"
 	if ce.Tag != wantTag {
 		t.Errorf("Tag: got %q, want %q", ce.Tag, wantTag)
 	}
@@ -279,27 +279,11 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 // Test 4: Finalize success with warnings — warnings reachable on success path.
 // -----------------------------------------------------------------------------
 
-func TestBatchAssembler_FinalizeSuccess_WithWarnings(t *testing.T) {
-	// Trigger a duplicate-PK warning by adding the same Person twice.
-	// Per graph/graph.go's Add: duplicate PKs land on the snapshot's
-	// diagnostics as ERROR severity (E_DUPLICATE_PK), but the second Add
-	// itself returns the error rather than silently warning. So this test
-	// exercises a different shape: we add via AddValid (which goes through
-	// the same Graph.Add path) twice and assert the second AddValid returns
-	// an error AND the snapshot's diagnostics carries the E_DUPLICATE_PK.
-	//
-	// This is the closest "diagnostic-on-success-path" surface yammm
-	// currently exposes; pure warning-severity construction-time issues
-	// don't have a canonical trigger today. The test confirms warnings/
-	// errors on res.Snapshot.Diagnostics() are reachable when Finalize
-	// returns nil — not blocked by Check (which is the only thing that
-	// gates the err return).
-	//
-	// Variant chosen: add a single Person, then Finalize. No errors, no
-	// warnings — assert the success path returns (res, nil) with a clean
-	// diagnostics slice. The "warnings on success" claim then collapses
-	// to "Finalize did not swallow Diagnostics access" which is the
-	// load-bearing user-visible contract.
+// TestBatchAssembler_FinalizeSuccess_CarriesCleanDiagnostics pins the success
+// path's diagnostics surface. It does not pin warnings: no construction-time
+// diagnostic in this package is warning-severity, so there is nothing to
+// build a warning fixture from.
+func TestBatchAssembler_FinalizeSuccess_CarriesCleanDiagnostics(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	ctx := t.Context()
 
@@ -458,9 +442,9 @@ func TestBatchAssembler_Concurrent_Default(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Test 9: Concurrent Add-vs-Finalize ordering (INV-1 regression pin).
+// Concurrent Add-vs-Finalize ordering: the load-bearing regression pin.
 //
-// This is the LOAD-BEARING regression test for INV-1: every Add that returns
+// Every Add that returns
 // nil must occur before Finalize's snapshot. A naive design where Finalize
 // drains the validator pool would violate this in pool mode (the validator
 // is returned to the pool before Graph.Add runs). The implementation
@@ -474,21 +458,16 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	ctx := t.Context()
 
-	for _, mode := range []struct {
-		name string
-		opts []graph.BatchAssemblerOption
-	}{
-		{"default", nil},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			ba := graph.NewBatchAssembler(ctx, s, mode.opts...)
+	{
+		t.Run("default", func(t *testing.T) {
+			ba := graph.NewBatchAssembler(ctx, s)
 
 			const numWorkers = 8
 			const perWorker = 200
 
 			// successAttempts collects the (worker, j) pairs that returned nil.
 			// We compare them against the Person instances present in the
-			// final snapshot to assert INV-1.
+			// final snapshot to assert the ordering guarantee.
 			var successMu sync.Mutex
 			successKeys := make(map[string]struct{})
 
@@ -536,7 +515,7 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 				t.Fatalf("Finalize: %v", finalErr)
 			}
 
-			// INV-1: every key that was reported as a successful Add must be
+			// Every key reported as a successful Add must be
 			// in the final snapshot.
 			persons := finalRes.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))
 			snapKeys := make(map[string]struct{}, len(persons))
@@ -549,7 +528,7 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 			for id := range successKeys {
 				keyStr := fmt.Sprintf("[%q]", id)
 				if _, ok := snapKeys[keyStr]; !ok {
-					t.Errorf("INV-1 violation: Add(%s) returned nil but not in snapshot", id)
+					t.Errorf("ordering violation: Add(%s) returned nil but is not in the snapshot", id)
 				}
 			}
 			// Conversely, every snapshot key must be one of our successKeys
@@ -604,22 +583,6 @@ func TestBatchAssembler_Concurrent_AddValid(t *testing.T) {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Test 11: WithValidatorPool correctness (pool size 4, N=8, M=1000).
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// Test 12: Pool back-pressure with n=1 — 4 concurrent Adds all complete.
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// Test 13: WithValidatorPool panics on n <= 0 (table-driven).
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// Test 14: Mode parity — default vs pool mode produce identical output.
-// -----------------------------------------------------------------------------
 
 // -----------------------------------------------------------------------------
 // Seed-snapshot fixture for the NewBatchAssemblerFromSnapshot tests.
@@ -838,8 +801,8 @@ func TestNewBatchAssemblerFromSnapshot_DuplicateAgainstSeeded(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("error is not *diag.ContextualError: %T", err)
 	}
-	// Attempt numbering starts fresh after seeding: this is record #1.
-	if want := "Person (record #1)"; ce.Tag != want {
+	// Attempt numbering starts fresh after seeding: this is attempt #1.
+	if want := "Person (attempt #1)"; ce.Tag != want {
 		t.Errorf("Tag: got %q, want %q", ce.Tag, want)
 	}
 	foundDup := false
@@ -921,14 +884,9 @@ func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T
 		t.Fatalf("manual: marshal: %s", mRes.String())
 	}
 
-	for _, mode := range []struct {
-		name string
-		opts []graph.BatchAssemblerOption
-	}{
-		{"default", nil},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed, mode.opts...)
+	{
+		t.Run("default", func(t *testing.T) {
+			ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
 			for _, rec := range resumeRecords {
 				if err := ba.Add(rec.typeName, rec.raw); err != nil {
 					t.Fatalf("Add(%s): %v", rec.typeName, err)
@@ -944,8 +902,8 @@ func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T
 				t.Fatalf("marshal: %s", asmRes.String())
 			}
 			if string(manualBytes) != string(asmBytes) {
-				t.Errorf("marshal bytes differ from manual path (manual=%d, %s=%d)",
-					len(manualBytes), mode.name, len(asmBytes))
+				t.Errorf("marshal bytes differ from manual path (manual=%d, assembler=%d)",
+					len(manualBytes), len(asmBytes))
 			}
 		})
 	}
@@ -1022,3 +980,91 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 // happen to not use it. The package-level imports are all genuinely used,
 // but referencing context here documents the binding to caller intent.
 var _ = context.Background
+
+// TestBatchAssembler_Finalize_SecondCallReturnsTheFirstError pins the error half
+// of the memoization. Returning nil on the second call would tell a caller with
+// a retry or defer-and-recheck loop that an incomplete graph is complete.
+func TestBatchAssembler_Finalize_SecondCallReturnsTheFirstError(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ctx := t.Context()
+
+	// batchAssemblerTestSchema's employer is optional, so an unresolved target
+	// does not fail Check. This fixture makes it required.
+	required, res := schema.NewBuilder().
+		WithName("required_employer").
+		WithSourceID(location.MustNewSourceID("test://required_employer.yammm")).
+		AddType("Company").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithRelation("employer", schema.LocalTypeRef("Company", location.Span{}), false, false).
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("schema build: %s", res.String())
+	}
+	_ = s
+
+	ba := graph.NewBatchAssembler(ctx, required)
+	if err := ba.Add("Person", instance.RawInstance{Properties: map[string]any{
+		"id":       "alice",
+		"employer": map[string]any{"_target_id": "missing-co"},
+	}}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	first, err1 := ba.Finalize(ctx)
+	if err1 == nil {
+		t.Fatal("the fixture did not produce a failing Check")
+	}
+	second, err2 := ba.Finalize(ctx)
+	if err2 == nil {
+		t.Fatal("the second Finalize reported success for a batch that failed")
+	}
+	if err1.Error() != err2.Error() {
+		t.Errorf("second Finalize error = %q, want the first call's %q", err2, err1)
+	}
+	if second.Snapshot != first.Snapshot {
+		t.Error("the second Finalize re-took the snapshot")
+	}
+}
+
+// TestBatchAssembler_Finalize_CancellationIsNotMemoized pins the one outcome
+// Finalize does not store. The assembler refuses further Adds once Finalize
+// runs, so if an expired deadline were memoized there would be no recovery at
+// all for a batch whose records are all present and valid.
+func TestBatchAssembler_Finalize_CancellationIsNotMemoized(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ba := graph.NewBatchAssembler(t.Context(), s)
+	if err := ba.Add("Person", personRaw("alice", "Alice")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := ba.Finalize(cancelled); err == nil {
+		t.Fatal("Finalize with a cancelled context reported success")
+	}
+
+	// The retry salvages the batch: the records were never in doubt.
+	res, err := ba.Finalize(t.Context())
+	if err != nil {
+		t.Fatalf("the retry could not salvage the batch: %v", err)
+	}
+	if res.Snapshot == nil {
+		t.Fatal("res.Snapshot is nil")
+	}
+	if n := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); n != 1 {
+		t.Errorf("salvaged snapshot holds %d Person instances, want 1", n)
+	}
+
+	// And the completed outcome IS memoized from then on.
+	again, err := ba.Finalize(t.Context())
+	if err != nil {
+		t.Fatalf("third Finalize: %v", err)
+	}
+	if again.Snapshot != res.Snapshot {
+		t.Error("the completed result was not memoized after the successful retry")
+	}
+}

@@ -1,7 +1,9 @@
 package graph
 
 import (
+	"cmp"
 	"iter"
+	"slices"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
@@ -39,9 +41,15 @@ type Attestation struct {
 // compares types by TypeID so two types rendering one name still sort apart:
 //   - [Snapshot.Types]: lexicographic by TypeID (schema path, then name)
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
-//   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType, targetKey)
-//   - [Snapshot.Duplicates]: (type, primaryKey)
-//   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType, targetKey)
+//   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
+//     targetKey, edge properties)
+//   - [Snapshot.Duplicates]: (type, primaryKey, relation, conflictType,
+//     conflictKey, parent slot, instance properties)
+//   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
+//     targetKey, reason, required, edge properties)
+//
+// Each tuple is total: every arm is compared, so two records that differ at
+// all sort apart and none inherits map-iteration order.
 //
 // No instance map is exposed, so there is no iteration order to be surprised
 // by: [Snapshot.AllInstances] yields every root instance in the order above,
@@ -143,8 +151,8 @@ func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
 		if r == nil {
 			return
 		}
-		for _, typeName := range r.types {
-			for _, inst := range r.instances[typeName] {
+		for _, typeID := range r.types {
+			for _, inst := range r.instances[typeID] {
 				if !yield(inst) {
 					return
 				}
@@ -171,8 +179,8 @@ func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool)
 
 // Edges returns all resolved relationship edges in sorted order.
 //
-// Edges are sorted by the tuple:
-// (sourceTypeName, sourceKey, relationName, targetTypeName, targetKey)
+// Edges are sorted by the tuple (sourceType, sourceKey, relation, targetType,
+// targetKey, edge properties), comparing types by identity.
 //
 // Returns a defensive copy.
 func (r *Snapshot) Edges() []*Edge {
@@ -241,7 +249,8 @@ func (r *Snapshot) Attestation() Attestation {
 
 // Duplicates returns duplicate primary key records in sorted order.
 //
-// Duplicates are sorted by (typeName, primaryKey).
+// Duplicates are sorted by the tuple (type, primaryKey, relation,
+// conflictType, conflictKey, parent slot, rejected instance's properties).
 // Returns nil if no duplicates were detected.
 // Returns a defensive copy.
 func (r *Snapshot) Duplicates() []*Duplicate {
@@ -255,9 +264,9 @@ func (r *Snapshot) Duplicates() []*Duplicate {
 
 // Unresolved returns unresolved edge records in sorted order.
 //
-// Unresolved edges are associations whose target instances are not in the graph.
-// They are sorted by:
-// (sourceTypeName, sourceKey, relationName, targetTypeName, targetKey)
+// Unresolved edges are associations whose target instances are not in the
+// graph. They are sorted by the tuple (sourceType, sourceKey, relation,
+// targetType, targetKey, reason, required, edge properties).
 //
 // Returns nil if all edges are resolved.
 // Returns a defensive copy.
@@ -270,8 +279,17 @@ func (r *Snapshot) Unresolved() []*UnresolvedEdge {
 	return result
 }
 
-// newSnapshot creates a Snapshot from sorted graph data.
-// All slices must already be sorted according to the ordering guarantees.
+// newSnapshot creates a Snapshot, establishing the ordering its accessors
+// document rather than trusting a caller to have done it. Both constructors —
+// [Graph.Snapshot] and [RebuildSnapshot] — reach the same shape here, so a
+// third one cannot get it wrong.
+//
+// It takes ownership of every slice it is handed: types, each per-type instance
+// slice, edges, duplicates and unresolved are sorted in place, and types is
+// re-sliced to drop repeats. Pass slices nothing else holds.
+//
+// Composed children are deliberately untouched: their order is the caller's,
+// and a keyless child's position IS its identity ([InstanceParts]).
 func newSnapshot(
 	s *schema.Schema,
 	types []schema.TypeID,
@@ -283,6 +301,22 @@ func newSnapshot(
 	diagnostics diag.Result,
 	attestation Attestation,
 ) *Snapshot {
+	// A repeated identity would make every instance of that type appear twice
+	// in AllInstances and twice in the persisted document.
+	slices.SortFunc(types, func(a, b schema.TypeID) int {
+		return cmp.Compare(a.String(), b.String())
+	})
+	types = slices.CompactFunc(types, func(a, b schema.TypeID) bool { return a == b })
+
+	for _, insts := range instances {
+		slices.SortFunc(insts, func(a, b *Instance) int {
+			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
+		})
+	}
+	slices.SortFunc(edges, compareEdges)
+	slices.SortFunc(duplicates, compareDuplicates)
+	slices.SortFunc(unresolved, compareUnresolved)
+
 	snap := &Snapshot{
 		schema:        s,
 		types:         types,

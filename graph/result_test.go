@@ -76,9 +76,12 @@ func TestEdgesFrom_MultipleEdges(t *testing.T) {
 
 	edges := snap.EdgesFrom(personInst)
 	require.Len(t, edges, 2)
-	// Edges should be sorted by target key
 	assert.Equal(t, "employers", edges[0].Relation())
 	assert.Equal(t, "employers", edges[1].Relation())
+	// Both edges carry the same relation, so the target key is the only arm
+	// that can pin the order.
+	assert.Equal(t, `["c1"]`, edges[0].Target().PrimaryKey().String())
+	assert.Equal(t, `["c2"]`, edges[1].Target().PrimaryKey().String())
 }
 
 func TestEdgesFrom_InstanceFromDifferentSnapshot(t *testing.T) {

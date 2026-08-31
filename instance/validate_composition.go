@@ -179,6 +179,21 @@ func (v *Validator) validateComposition(
 		return immutable.Wrap([]*ValidInstance{})
 	}
 
+	// A composition always arrives as an array, so its multiplicity is not
+	// settled by the shape the way a (one) association's object form is.
+	if !rel.IsMany() && len(arr) > 1 {
+		issue := diag.NewIssue(
+			diag.Error,
+			ErrEdgeShapeMismatch,
+			fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", rel.Name(), len(arr)),
+		).WithExpectedGot("1 child", fmt.Sprintf("%d children", len(arr))).
+			WithDetail(diag.DetailKeyRelationName, rel.Name())
+		withProvenance(issue, prov, basePath.String()).
+			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
+		collector.Collect(issue.Build())
+		return immutable.Value{}
+	}
+
 	// Build raw instances for children
 	childRaws := make([]RawInstance, 0, len(arr))
 	for i, elem := range arr {

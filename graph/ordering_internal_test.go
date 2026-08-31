@@ -6,6 +6,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -131,5 +132,87 @@ func TestCompareDuplicates_RootAndComposedDoNotCollide(t *testing.T) {
 
 	if compareDuplicates(root, composed) == 0 {
 		t.Error("a root duplicate and a composed one compare equal")
+	}
+}
+
+// TestCompareDuplicates_PropertiesDiscriminate drives the final arm: two
+// rejections of one key against one conflict, from one slot, differing only
+// in the rejected instance's payload. Every earlier arm ties, so nothing but
+// the properties can separate them and the wire order would otherwise be the
+// input order.
+func TestCompareDuplicates_PropertiesDiscriminate(t *testing.T) {
+	t.Parallel()
+
+	withName := func(name string) *Instance {
+		return rebuildInstance(InstanceParts{
+			TypeName:   "Person",
+			TypeID:     orderingTypeID("Person"),
+			PrimaryKey: immutable.WrapKey([]any{"p1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": name}),
+		})
+	}
+	conflict := withName("first")
+
+	a := newDuplicate(withName("alice"), conflict, nil, "", diag.Issue{})
+	b := newDuplicate(withName("bob"), conflict, nil, "", diag.Issue{})
+
+	if compareDuplicates(a, b) == 0 {
+		t.Error("two rejections differing only in the instance payload compare equal, so their order on the wire is the input order")
+	}
+	if compareDuplicates(a, b) != -compareDuplicates(b, a) {
+		t.Error("compareDuplicates is not antisymmetric across the properties arm")
+	}
+	if c := compareDuplicates(a, a); c != 0 {
+		t.Errorf("compareDuplicates(a, a) = %d, want 0", c)
+	}
+}
+
+// TestCompareProps_LengthArm pins the arm that separates two property sets
+// where one is a prefix of the other. Without it they tie and slices.SortFunc
+// leaves their order to the input, which for edges and duplicates is map order.
+func TestCompareProps_LengthArm(t *testing.T) {
+	t.Parallel()
+
+	short := immutable.WrapProperties(map[string]any{"a": "1"})
+	long := immutable.WrapProperties(map[string]any{"a": "1", "b": "2"})
+
+	if c := compareProps(short, long); c >= 0 {
+		t.Errorf("compareProps(short, long) = %d, want < 0", c)
+	}
+	if c := compareProps(long, short); c <= 0 {
+		t.Errorf("compareProps(long, short) = %d, want > 0", c)
+	}
+	if c := compareProps(short, short); c != 0 {
+		t.Errorf("compareProps(x, x) = %d, want 0", c)
+	}
+}
+
+// TestCompareDuplicates_ProvenanceDiscriminates pins the final arm: two rows of
+// one file colliding with one instance, identical in every other field and in
+// their properties, separated only by where they came from.
+func TestCompareDuplicates_ProvenanceDiscriminates(t *testing.T) {
+	t.Parallel()
+
+	at := func(line int) *Instance {
+		return newInstance("Person", orderingTypeID("Person"),
+			immutable.WrapKey([]any{"p1"}),
+			immutable.WrapProperties(map[string]any{"id": "p1"}),
+			location.NewProvenance("people.json", path.Root().Index(line),
+				location.Span{Start: location.Position{Line: line, Column: 1}}),
+			false)
+	}
+	conflict := at(1)
+
+	a := newDuplicate(at(7), conflict, nil, "", diag.Issue{})
+	b := newDuplicate(at(9), conflict, nil, "", diag.Issue{})
+
+	if compareDuplicates(a, b) == 0 {
+		t.Error("two rejections differing only in source position compare equal, so their order on the wire is the input order")
+	}
+	if compareDuplicates(a, b) != -compareDuplicates(b, a) {
+		t.Error("compareDuplicates is not antisymmetric across the provenance arm")
+	}
+	if c := compareDuplicates(a, a); c != 0 {
+		t.Errorf("compareDuplicates(a, a) = %d, want 0", c)
 	}
 }

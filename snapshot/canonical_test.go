@@ -117,7 +117,7 @@ func buildTemporalSnapshot(t *testing.T, s *schema.Schema, native bool) *graph.S
 		"name":     "r1",
 		"taken_at": edgeSeenAt(native),
 	})
-	g.AddComposed(ctx, "Sensor", graph.FormatKey("s1"), "READINGS", reading)
+	g.AddComposed(ctx, mustTypeID(t, s, "Sensor"), graph.FormatKey("s1"), "READINGS", reading)
 
 	return g.Snapshot()
 }

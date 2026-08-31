@@ -133,11 +133,11 @@ func TestWireProbe_DuplicateOneSlotConflict(t *testing.T) {
 		t.Fatalf("Add holder: %v", res)
 	}
 	occupant := mustValidInstance(t, s, "Filler", []any{"f1"}, map[string]any{"id": "f1", "label": "first"})
-	if res := g.AddComposed(ctx, "Holder", graph.FormatKey("h1"), "SLOT", occupant); res.HasErrors() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Holder"), graph.FormatKey("h1"), "SLOT", occupant); res.HasErrors() {
 		t.Fatalf("AddComposed occupant: %v", res)
 	}
 	rejected := mustValidInstance(t, s, "Filler", []any{"f2"}, map[string]any{"id": "f2", "label": "second"})
-	if res := g.AddComposed(ctx, "Holder", graph.FormatKey("h1"), "SLOT", rejected); !res.HasErrors() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Holder"), graph.FormatKey("h1"), "SLOT", rejected); !res.HasErrors() {
 		t.Fatal("a second child in a required-single slot must be rejected")
 	}
 

@@ -33,7 +33,7 @@ func TestAddComposed_OneCardinality_Success(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "child", child)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "child", child)
 	if err := result.Err(); err != nil {
 		t.Errorf("AddComposed should succeed: %v", err)
 	}
@@ -64,13 +64,13 @@ func TestAddComposed_OneCardinality_Duplicate(t *testing.T) {
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "child", child1)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "child", child1)
 
 	// Try to add second child (should fail for (one) cardinality)
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
 
-	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "child", child2)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "child", child2)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for (one) cardinality with existing child")
@@ -96,7 +96,7 @@ func TestAddComposed_ManyWithPK_Success(t *testing.T) {
 		child := mustValidPartInstance(t, s, "Child",
 			[]any{id}, map[string]any{"name": "Child " + id})
 
-		result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
+		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed %s should succeed: %v", id, err)
 		}
@@ -124,13 +124,13 @@ func TestAddComposed_ManyWithPK_Duplicate(t *testing.T) {
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child1)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child1)
 
 	// Try to add child with same PK
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1 Duplicate"})
 
-	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child2)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for duplicate child PK")
@@ -156,7 +156,7 @@ func TestAddComposed_ManyWithoutPK_Appends(t *testing.T) {
 		item := mustValidPKLessInstance(t, s, "Item",
 			map[string]any{"value": "item"})
 
-		result := g.AddComposed(ctx, "Container", graph.FormatKey("box1"), "items", item)
+		result := g.AddComposed(ctx, mustTypeID(t, s, "Container"), graph.FormatKey("box1"), "items", item)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed item %d should succeed: %v", i, err)
 		}
@@ -184,7 +184,7 @@ func TestAddComposed_TypeMismatch(t *testing.T) {
 	wrongChild := mustValidInstance(t, s, "Parent",
 		[]any{"p2"}, map[string]any{"name": "Parent 2"})
 
-	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", wrongChild)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", wrongChild)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for wrong child type")
@@ -203,7 +203,7 @@ func TestAddComposed_ParentNotFound(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result := g.AddComposed(ctx, "Parent", graph.FormatKey("missing"), "children", child)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("missing"), "children", child)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for missing parent")
@@ -212,22 +212,66 @@ func TestAddComposed_ParentNotFound(t *testing.T) {
 	assertHasCode(t, result, diag.E_GRAPH_PARENT_NOT_FOUND)
 }
 
+// TestAddComposed_ParentTypeNotFound drives an identity no schema in this
+// graph's closure declares. A rendered name could not express this case
+// unambiguously, which is why the parameter is an identity.
 func TestAddComposed_ParentTypeNotFound(t *testing.T) {
-	// Unknown parent type → E_GRAPH_TYPE_NOT_FOUND
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
+	other, res := schema.NewBuilder().
+		WithName("elsewhere").
+		WithSourceID(location.MustNewSourceID("test://elsewhere-parent.yammm")).
+		AddType("Parent").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("build second schema: %s", res.String())
+	}
+
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result := g.AddComposed(ctx, "NonExistentType", graph.FormatKey("x"), "children", child)
-
+	result := g.AddComposed(ctx, mustTypeID(t, other, "Parent"), graph.FormatKey("x"), "children", child)
 	if result.OK() {
-		t.Error("AddComposed should fail for unknown parent type")
+		t.Error("AddComposed should fail for a parent identity outside the closure")
 	}
-
+	// The identity resolves before the instance does, so a wrong type and a
+	// wrong key stay distinguishable.
 	assertHasCode(t, result, diag.E_GRAPH_TYPE_NOT_FOUND)
+}
+
+// TestAddComposed_ZeroParentTypeID pins the zero identity a caller reaches by
+// forgetting to set one: TypeByID reports false for it, so it is named as a
+// type problem rather than reported as a missing parent.
+func TestAddComposed_ZeroParentTypeID(t *testing.T) {
+	s := testSchemaWithComposition(t)
+	g := graph.New(s)
+	ctx := t.Context()
+
+	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
+	result := g.AddComposed(ctx, schema.TypeID{}, graph.FormatKey("p1"), "children", child)
+	if result.OK() {
+		t.Error("a zero parent TypeID was accepted")
+	}
+	assertHasCode(t, result, diag.E_GRAPH_TYPE_NOT_FOUND)
+}
+
+// TestAddComposed_ParentInstanceNotFound is the other arm: the type resolves
+// and no instance carries the key.
+func TestAddComposed_ParentInstanceNotFound(t *testing.T) {
+	s := testSchemaWithComposition(t)
+	g := graph.New(s)
+	ctx := t.Context()
+
+	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("nobody"), "children", child)
+	if result.OK() {
+		t.Error("AddComposed should fail when no parent carries the key")
+	}
+	assertHasCode(t, result, diag.E_GRAPH_PARENT_NOT_FOUND)
 }
 
 func TestAddComposed_NotComposition(t *testing.T) {
@@ -246,7 +290,7 @@ func TestAddComposed_NotComposition(t *testing.T) {
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "Acme"})
 
-	result := g.AddComposed(ctx, "Person", graph.FormatKey("alice"), "employer", company)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Person"), graph.FormatKey("alice"), "employer", company)
 
 	if result.OK() {
 		t.Error("AddComposed should fail for association relation")
@@ -273,13 +317,13 @@ func TestAddComposed_AfterAdd_Mixed(t *testing.T) {
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child1)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child1)
 
 	// Add another child
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
 
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child2)
 
 	// Verify both children are present
 	snap := g.Snapshot()
@@ -311,7 +355,7 @@ func TestAddComposed_NilChild(t *testing.T) {
 			t.Error("AddComposed(nil child) should panic")
 		}
 	}()
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", nil)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", nil)
 }
 
 func TestAddComposed_SchemaMismatch(t *testing.T) {
@@ -351,7 +395,7 @@ func TestAddComposed_SchemaMismatch(t *testing.T) {
 			t.Error("AddComposed with mismatched schema should panic")
 		}
 	}()
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", otherChild)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", otherChild)
 }
 
 func TestAddComposed_NilReceiver(t *testing.T) {
@@ -369,7 +413,7 @@ func TestAddComposed_NilReceiver(t *testing.T) {
 			t.Error("AddComposed on nil Graph should panic")
 		}
 	}()
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
 }
 
 func TestAddComposed_ContextCancelled(t *testing.T) {
@@ -382,7 +426,7 @@ func TestAddComposed_ContextCancelled(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
 	if result.OK() {
 		t.Error("AddComposed with canceled context should produce a non-OK result")
 	}
@@ -409,7 +453,7 @@ func TestAddComposed_ErrorDetails(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
 
 	// Check issue has expected details
 	found := false
@@ -463,12 +507,12 @@ func TestResult_Duplicates_IncludesComposedDuplicates_OneCardinality(t *testing.
 	// Add first child
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "child", child1)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "child", child1)
 
 	// Try to add second child (should fail for (one) cardinality)
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
-	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "child", child2)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "child", child2)
 
 	if result.OK() {
 		t.Fatal("AddComposed should fail for (one) cardinality with existing child")
@@ -508,12 +552,12 @@ func TestResult_Duplicates_IncludesComposedDuplicates_ManyWithPK(t *testing.T) {
 	// Add first child
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child1)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child1)
 
 	// Try to add child with same PK
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1 Duplicate"})
-	result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child2)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child2)
 
 	if result.OK() {
 		t.Fatal("AddComposed should fail for duplicate child PK")
@@ -537,8 +581,70 @@ func TestResult_Duplicates_IncludesComposedDuplicates_ManyWithPK(t *testing.T) {
 	if dup.Conflict == nil {
 		t.Error("Duplicate.Conflict should not be nil")
 	}
-	// Verify Instance and Conflict are different instances
+	// The collision is on the key, so both carry it; what separates them is
+	// the payload, and a record that returned the attached child as its own
+	// rejected instance would carry no information.
 	if dup.Instance.PrimaryKey().String() != dup.Conflict.PrimaryKey().String() {
-		t.Errorf("Instance and Conflict should have same PK for this test")
+		t.Error("Instance and Conflict should have the same PK for this test")
+	}
+	if dup.Instance == dup.Conflict {
+		t.Error("Instance and Conflict are the same object")
+	}
+	instName, _ := dup.Instance.Property("name")
+	conflictName, _ := dup.Conflict.Property("name")
+	if instName.Unwrap() != "Child 1 Duplicate" {
+		t.Errorf("Duplicate.Instance is not the rejected child: name=%v", instName.Unwrap())
+	}
+	if conflictName.Unwrap() != "Child 1" {
+		t.Errorf("Duplicate.Conflict is not the attached child: name=%v", conflictName.Unwrap())
+	}
+}
+
+// TestAdd_InheritingPartTypeChild_PassesTheKeyRule pins the composed-child key
+// rule against inheritance, the one shape this package's corpus never declared:
+// the rule reads the type's primary keys, and an inherited key has to be in
+// that set or every validated child of an extending part type is refused.
+func TestAdd_InheritingPartTypeChild_PassesTheKeyRule(t *testing.T) {
+	ctx := t.Context()
+	const src = `schema "fleet"
+
+part type Base {
+	id String primary
+}
+
+part type Wheel extends Base {
+	position String required
+}
+
+type Car {
+	vin String primary
+
+	*-> WHEELS (many) Wheel
+}
+`
+	s, res := schema.LoadString(ctx, src, "test://inheriting_part.yammm")
+	if res.HasErrors() {
+		t.Fatalf("schema load: %s", res.String())
+	}
+
+	v := instance.NewValidator(s)
+	inst, vres := v.ValidateOne(ctx, "Car", instance.RawInstance{Properties: map[string]any{
+		"vin": "v1",
+		"wheels": []any{
+			map[string]any{"id": "w1", "position": "left"},
+			map[string]any{"id": "w2", "position": "right"},
+		},
+	}})
+	if !vres.OK() {
+		t.Fatalf("validation: %s", vres.String())
+	}
+
+	g := graph.New(s)
+	if r := g.Add(ctx, inst); !r.OK() {
+		t.Fatalf("a validated child of an extending part type was refused: %s", r.String())
+	}
+	car := g.Snapshot().InstancesOf(inst.TypeID())[0]
+	if n := car.ComposedCount("WHEELS"); n != 2 {
+		t.Fatalf("children attached = %d, want 2", n)
 	}
 }

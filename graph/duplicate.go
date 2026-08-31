@@ -102,8 +102,8 @@ type UnresolvedEdge struct {
 // Returns (zero Value, false) if the property does not exist or the receiver is nil.
 //
 // Edge properties on unresolved edges are declared on the forward reference
-// via the yammm DSL; they survive Marshal/Load in .ys wire format v2 and
-// later. Symmetric with [Edge.Property] for resolved edges.
+// via the yammm DSL; they survive Marshal/Load in every readable .ys wire
+// format. Symmetric with [Edge.Property] for resolved edges.
 func (u *UnresolvedEdge) Property(name string) (immutable.Value, bool) {
 	if u == nil {
 		return immutable.Value{}, false

@@ -292,12 +292,21 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 		})
 
 		wg.Go(func() {
-			// Check should not error even during concurrent adds
-			g.Check(ctx)
+			// Concurrent Check must never report a Fatal: the graph is
+			// consistent at every point an Add can be observed from.
+			if res := g.Check(ctx); res.HasFatal() {
+				t.Errorf("concurrent Check returned Fatal: %s", res.String())
+			}
 		})
 	}
 
 	wg.Wait()
+
+	// No Person declares a required association, so the settled graph checks
+	// clean however the concurrent adds interleaved.
+	if res := g.Check(ctx); !res.OK() {
+		t.Errorf("Check after the concurrent phase: %s", res.String())
+	}
 }
 
 func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
@@ -526,7 +535,7 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 		child := mustValidPartInstance(t, s, "Child",
 			[]any{fmt.Sprintf("c%d", i)}, map[string]any{"name": fmt.Sprintf("Child %d", i)})
 
-		result := g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
+		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed child %d should succeed: %v", i, err)
 		}
@@ -716,7 +725,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 				child := mustValidPartInstance(t, s, "Child",
 					[]any{fmt.Sprintf("c-%d-%d", w, i)},
 					map[string]any{"name": fmt.Sprintf("Child %d-%d", w, i)})
-				g.AddComposed(ctx, "Parent", graph.FormatKey("p1"), "children", child)
+				g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
 			}
 		})
 	}

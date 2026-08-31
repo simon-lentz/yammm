@@ -95,12 +95,18 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 		case 0: // Add
 			id := r.Intn(100) // Use limited ID space to create some duplicates
 			pk := []any{formatID(workerID, id)}
+			// Half the instances carry a friend reference, so edges and
+			// unresolved records both form and the oracle's edge block runs.
+			var edges map[string]*instance.ValidEdgeData
+			if r.Intn(2) == 0 {
+				edges = edgeData("friend", nil, []any{formatID(workerID, r.Intn(100))})
+			}
 			inst := instance.NewValidInstance(
 				"Person",
 				personType.ID(),
 				immutable.WrapKey(pk),
 				immutable.WrapProperties(map[string]any{"name": formatName(workerID, id)}),
-				nil, nil, nil,
+				edges, nil, nil,
 			)
 			// Ignore results - we just want to test for races/panics
 			g.Add(ctx, inst)
@@ -150,13 +156,20 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 		}
 	}
 
-	// All edges should have valid source instances
+	// Both endpoints of every resolved edge are in the graph, and the source
+	// of every unresolved record is too. The corpus must produce edges for
+	// this to mean anything; runFuzzOperations gives half its instances a
+	// friend reference for that reason.
 	for _, edge := range snap.Edges() {
-		srcType := edge.Source().TypeID()
-		srcKey := edge.Source().PrimaryKey().String()
-		_, ok := snap.InstanceByKey(srcType, srcKey)
-		if !ok {
-			t.Errorf("Edge source %s/%s not in graph", srcType, srcKey)
+		for _, endpoint := range []*graph.Instance{edge.Source(), edge.Target()} {
+			if _, ok := snap.InstanceByKey(endpoint.TypeID(), endpoint.PrimaryKey().String()); !ok {
+				t.Errorf("Edge endpoint %s/%s not in graph", endpoint.TypeID(), endpoint.PrimaryKey())
+			}
+		}
+	}
+	for _, unres := range snap.Unresolved() {
+		if _, ok := snap.InstanceByKey(unres.Source.TypeID(), unres.Source.PrimaryKey().String()); !ok {
+			t.Errorf("Unresolved source %s/%s not in graph", unres.Source.TypeID(), unres.Source.PrimaryKey())
 		}
 	}
 }

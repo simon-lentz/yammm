@@ -37,23 +37,29 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 		t.Errorf("Add user should succeed: %v", err)
 	}
 
-	// Try to add Entity using unqualified name - should fail since Entity is in common, not local
+	// The name is unqualified, but Add resolves by TypeID and this instance
+	// carries the common schema's identity — so it installs under that
+	// identity and not under any main-schema one. The rendering is not the
+	// address; that is the whole of the v0.12.0 identity break.
 	entityType, _ := commonSchema.Type("Entity")
 	entity := instance.NewValidInstance(
-		"Entity", // Unqualified - won't match because Entity is imported, not local
+		"Entity",
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
 		immutable.WrapProperties(map[string]any{"name": "Entity 1"}),
 		nil, nil, nil,
 	)
 
-	g.Add(ctx, entity)
+	if res := g.Add(ctx, entity); !res.OK() {
+		t.Fatalf("Add resolves by identity, so the unqualified name is irrelevant: %s", res.String())
+	}
 
-	// Snapshot should have User but the Entity add should have triggered diagnostics
-	// because the type name lookup would fail with unqualified "Entity"
 	snap := g.Snapshot()
 	if len(snap.InstancesOf(tagID(t, mainSchema, "User"))) != 1 {
 		t.Errorf("Expected 1 User instance, got %d", len(snap.InstancesOf(tagID(t, mainSchema, "User"))))
+	}
+	if n := len(snap.InstancesOf(entityType.ID())); n != 1 {
+		t.Errorf("Expected the Entity to install under the common schema's identity, got %d", n)
 	}
 }
 

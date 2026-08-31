@@ -520,3 +520,44 @@ func TestOwnership_ValidateForCompositionIsolation(t *testing.T) {
 	assert.Equal(t, `["100"]`, valid[0].PrimaryKey().String(), "ValidateForComposition isolation failed: PK was mutated")
 	assert.Equal(t, `["101"]`, valid[1].PrimaryKey().String(), "ValidateForComposition isolation failed: PK was mutated")
 }
+
+// TestValidateCompositions_OneCardinality pins this package's own enforcement
+// of (one) composition cardinality. A composition always arrives as an array,
+// so nothing about the shape settles multiplicity the way a (one) association's
+// object form does, and the check has to be explicit.
+func TestValidateCompositions_OneCardinality(t *testing.T) {
+	s := mustBuild(t, schema.NewBuilder().
+		WithName("test").
+		WithSourceID(location.MustNewSourceID("test://one_cardinality.yammm")).
+		AddType("Address").
+		AsPart().
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithProperty("street", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithComposition("home", schema.LocalTypeRef("Address", location.Span{}), true, false).
+		Done())
+
+	validator := instance.NewValidator(s)
+	person := func(homes ...any) instance.RawInstance {
+		return instance.RawInstance{Properties: map[string]any{"id": "1", "home": homes}}
+	}
+	addr := func(id string) any { return map[string]any{"id": id, "street": "Main St"} }
+
+	// One child is the whole of what a (one) slot may hold.
+	valid, result := validator.ValidateOne(t.Context(), "Person", person(addr("100")))
+	require.True(t, result.OK(), result.String())
+	require.NotNil(t, valid)
+
+	// Two is refused here, not deferred to the graph.
+	_, result = validator.ValidateOne(t.Context(), "Person", person(addr("100"), addr("200")))
+	require.False(t, result.OK())
+	assert.True(t, result.HasCode(instance.ErrEdgeShapeMismatch),
+		"want E_EDGE_SHAPE_MISMATCH, got %s", result.String())
+
+	// An empty array on an optional (one) slot stays legal — the cardinality
+	// check must not swallow the empty case the arm above it handles.
+	_, result = validator.ValidateOne(t.Context(), "Person", person())
+	require.True(t, result.OK(), result.String())
+}

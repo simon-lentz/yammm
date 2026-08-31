@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -465,13 +466,30 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 	result2 := g.Check(ctx)
 	result3 := g.Check(ctx)
 
-	// All results should have same OK status
-	if result1.OK() != result2.OK() || result2.OK() != result3.OK() {
-		t.Error("Check results should be consistent across multiple calls")
+	// OK() alone is trivially stable because Check holds no state; what the
+	// contract promises is that the issues themselves repeat and that none
+	// of them reaches the snapshot.
+	// Compare the SET of issues, not Result.String(): Check walks g.pending,
+	// a map, so the rendered order is not stable even for one call's own
+	// output and a string comparison would be flaky rather than meaningful.
+	render := func(r diag.Result) []string {
+		var out []string
+		for issue := range r.Issues() {
+			out = append(out, issue.Code().String()+" "+issue.Message())
+		}
+		slices.Sort(out)
+		return out
 	}
-
-	// Note: Issue count may accumulate in collector
-	// The key invariant is that Check doesn't change graph state
+	if !slices.Equal(render(result1), render(result2)) || !slices.Equal(render(result2), render(result3)) {
+		t.Errorf("Check results differ across calls:\n1: %v\n2: %v\n3: %v",
+			render(result1), render(result2), render(result3))
+	}
+	if !result1.HasCode(diag.E_UNRESOLVED_REQUIRED) {
+		t.Fatalf("the fixture did not produce an unresolved required association: %s", render(result1))
+	}
+	if g.Snapshot().Diagnostics().HasCode(diag.E_UNRESOLVED_REQUIRED) {
+		t.Error("Check accumulated into the snapshot's construction diagnostics")
+	}
 }
 
 // Edge Properties Tests
@@ -529,10 +547,9 @@ func TestGraph_Edge_Properties(t *testing.T) {
 }
 
 // TestGraph_UnresolvedEdge_Properties pins the pendingEdge.properties →
-// graph.UnresolvedEdge.properties thread-through in graph.Graph.Snapshot. Without this
-// test, a regression in the conversion at graph.go:825-827 would surface
-// only at the full snapshot round-trip layer rather than the graph
-// in-memory layer. Parallel in shape to TestGraph_Edge_Properties above.
+// [graph.UnresolvedEdge] thread-through in [graph.Graph.Snapshot]. Without it a
+// regression in that conversion would surface only at the snapshot round-trip
+// layer. Parallel in shape to [TestGraph_Edge_Properties].
 func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 	g := graph.New(s)

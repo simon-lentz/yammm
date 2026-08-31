@@ -33,9 +33,16 @@ func TestFormatKey(t *testing.T) {
 			want:   `["us",12345]`,
 		},
 		{
-			name:   "empty values",
+			name:   "empty slice spread",
 			values: []any{},
 			want:   `[]`,
+		},
+		{
+			// The godoc's own no-argument case: a variadic given nothing is a
+			// nil slice, which marshals to null rather than to [].
+			name:   "no arguments",
+			values: nil,
+			want:   `null`,
 		},
 		{
 			name:   "string with quotes",
