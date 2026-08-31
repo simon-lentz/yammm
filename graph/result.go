@@ -284,6 +284,10 @@ func (r *Snapshot) Unresolved() []*UnresolvedEdge {
 // [Graph.Snapshot] and [RebuildSnapshot] — reach the same shape here, so a
 // third one cannot get it wrong.
 //
+// It takes ownership of every slice it is handed: types, each per-type instance
+// slice, edges, duplicates and unresolved are sorted in place, and types is
+// re-sliced to drop repeats. Pass slices nothing else holds.
+//
 // Composed children are deliberately untouched: their order is the caller's,
 // and a keyless child's position IS its identity ([InstanceParts]).
 func newSnapshot(

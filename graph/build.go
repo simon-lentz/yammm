@@ -2,7 +2,6 @@ package graph
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
@@ -36,10 +35,13 @@ type stagedEdge struct {
 	relation   string
 	jsonField  string
 	targetType schema.TypeID
-	targetKey  string
-	properties immutable.Properties
-	isRequired bool
-	reason     string
+	// targetTypeName is the rendered target, computed once per relation
+	// OUTSIDE the graph's lock — the commit phase only reads it.
+	targetTypeName string
+	targetKey      string
+	properties     immutable.Properties
+	isRequired     bool
+	reason         string
 }
 
 func newInstanceBuilder(g *Graph, c *diag.Collector) *instanceBuilder {
@@ -48,29 +50,34 @@ func newInstanceBuilder(g *Graph, c *diag.Collector) *instanceBuilder {
 
 // build walks inst and returns the Instance to install. stage receives the
 // instance's association records, and is nil for a composed child: a child's
-// edges are checked like any other, but no path installs them (the graph
-// package doc's Composed Children section states that gap).
+// edges are checked like any other, but no path installs them — the package
+// doc's Composed Children section states that gap.
 func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, stage *[]stagedEdge) *Instance {
 	b.attested = b.attested && inst.Validated()
 	graphInst := newInstance(b.g.instanceTagForm(inst.TypeID()), inst.TypeID(),
 		inst.PrimaryKey(), inst.Properties(), inst.Provenance(), inst.Validated())
 
-	b.edges(typ, inst, stage)
+	// Diagnostics name the graph's canonical tag form, never the instance's
+	// self-declared TypeName: a consumer keying on type_name must get a name
+	// that round-trips through Snapshot.Types.
+	typeName := graphInst.TypeName()
+
+	b.edges(typ, inst, typeName, stage)
 
 	for relationName, composedValue := range inst.Compositions() {
 		rel, ok := typ.Relation(relationName)
 		if !ok {
-			b.c.Collect(undeclaredRelation(inst.TypeName(), relationName,
-				fmt.Sprintf("type %q declares no composition %q", inst.TypeName(), relationName)))
+			b.c.Collect(undeclaredRelation(typeName, relationName,
+				fmt.Sprintf("type %q declares no composition %q", typeName, relationName)))
 			continue
 		}
 		if rel.Kind() != schema.RelationComposition {
-			b.c.Collect(undeclaredRelation(inst.TypeName(), relationName,
+			b.c.Collect(undeclaredRelation(typeName, relationName,
 				fmt.Sprintf("relation %q on type %q is declared as an association, not a composition",
-					relationName, inst.TypeName())))
+					relationName, typeName)))
 			continue
 		}
-		b.slot(inst, graphInst, relationName, rel, composedValue)
+		b.slot(inst, graphInst, typeName, relationName, rel, composedValue)
 	}
 
 	return graphInst
@@ -82,38 +89,41 @@ func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, 
 // The map form is materialized only for a staging walk, which needs it for the
 // absent-required pass. A composed child's edges are checked but never
 // installed, so its walk reads the iterator and allocates nothing.
-func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, stage *[]stagedEdge) {
+func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, typeName string, stage *[]stagedEdge) {
 	if stage == nil {
 		for relationName, edgeData := range inst.Edges() {
-			b.checkEdgeRelation(typ, inst, relationName, edgeData)
+			b.checkEdgeRelation(typ, typeName, relationName, edgeData)
 		}
 		return
 	}
 
 	declared := b.g.iterEdges(inst)
 	for relationName, edgeData := range declared {
-		rel, ok := b.checkEdgeRelation(typ, inst, relationName, edgeData)
+		rel, ok := b.checkEdgeRelation(typ, typeName, relationName, edgeData)
 		if !ok {
 			continue
 		}
 		isRequired := !rel.IsOptional()
+		targetName := b.g.instanceTagForm(rel.TargetID())
 		for target := range edgeData.TargetsIter() {
 			*stage = append(*stage, stagedEdge{
-				relation:   relationName,
-				jsonField:  rel.FieldName(),
-				targetType: rel.TargetID(),
-				targetKey:  target.TargetKey().String(),
-				properties: target.Properties(),
-				isRequired: isRequired,
+				relation:       relationName,
+				jsonField:      rel.FieldName(),
+				targetType:     rel.TargetID(),
+				targetTypeName: targetName,
+				targetKey:      target.TargetKey().String(),
+				properties:     target.Properties(),
+				isRequired:     isRequired,
 			})
 		}
 		if isRequired && edgeData.IsEmpty() {
 			*stage = append(*stage, stagedEdge{
-				relation:   relationName,
-				jsonField:  rel.FieldName(),
-				targetType: rel.TargetID(),
-				isRequired: true,
-				reason:     "empty",
+				relation:       relationName,
+				jsonField:      rel.FieldName(),
+				targetType:     rel.TargetID(),
+				targetTypeName: targetName,
+				isRequired:     true,
+				reason:         "empty",
 			})
 		}
 	}
@@ -126,11 +136,12 @@ func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, 
 			continue
 		}
 		*stage = append(*stage, stagedEdge{
-			relation:   rel.Name(),
-			jsonField:  rel.FieldName(),
-			targetType: rel.TargetID(),
-			isRequired: true,
-			reason:     "absent",
+			relation:       rel.Name(),
+			jsonField:      rel.FieldName(),
+			targetType:     rel.TargetID(),
+			targetTypeName: b.g.instanceTagForm(rel.TargetID()),
+			isRequired:     true,
+			reason:         "absent",
 		})
 	}
 }
@@ -140,20 +151,20 @@ func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, 
 // the relation when the slot is sound enough to install.
 func (b *instanceBuilder) checkEdgeRelation(
 	typ *schema.Type,
-	inst *instance.ValidInstance,
+	typeName string,
 	relationName string,
 	edgeData *instance.ValidEdgeData,
 ) (*schema.Relation, bool) {
 	rel, ok := typ.Relation(relationName)
 	if !ok {
-		b.c.Collect(undeclaredRelation(inst.TypeName(), relationName,
-			fmt.Sprintf("type %q declares no association %q", inst.TypeName(), relationName)))
+		b.c.Collect(undeclaredRelation(typeName, relationName,
+			fmt.Sprintf("type %q declares no association %q", typeName, relationName)))
 		return nil, false
 	}
 	if rel.Kind() != schema.RelationAssociation {
-		b.c.Collect(undeclaredRelation(inst.TypeName(), relationName,
+		b.c.Collect(undeclaredRelation(typeName, relationName,
 			fmt.Sprintf("relation %q on type %q is declared as a composition, not an association",
-				relationName, inst.TypeName())))
+				relationName, typeName)))
 		return nil, false
 	}
 	if rel.IsMany() {
@@ -166,8 +177,8 @@ func (b *instanceBuilder) checkEdgeRelation(
 	if targets > 1 {
 		b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 			fmt.Sprintf("association %q on type %q is (one) and carries %d targets",
-				relationName, inst.TypeName(), targets)).
-			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).
+				relationName, typeName, targets)).
+			WithDetail(diag.DetailKeyTypeName, typeName).
 			WithDetail(diag.DetailKeyRelationName, relationName).Build())
 		return nil, false
 	}
@@ -179,6 +190,7 @@ func (b *instanceBuilder) checkEdgeRelation(
 func (b *instanceBuilder) slot(
 	parent *instance.ValidInstance,
 	graphParent *Instance,
+	parentName string,
 	relationName string,
 	rel *schema.Relation,
 	composedValue immutable.Value,
@@ -186,27 +198,27 @@ func (b *instanceBuilder) slot(
 	switch v := composedValue.Unwrap().(type) {
 	case immutable.Slice:
 		if !rel.IsMany() && v.Len() > 1 {
-			b.c.Collect(b.g.composedOverflowIssue(parent, relationName, rel, v))
+			b.c.Collect(b.g.composedOverflowIssue(parentName, relationName, rel, v))
 		}
 		seen := make(map[string]int, v.Len())
 		for i := range v.Len() {
 			child, ok := v.Get(i).Unwrap().(*instance.ValidInstance)
 			if !ok || child == nil {
-				b.c.Collect(nonInstanceChild(parent.TypeName(), relationName, rel, i))
+				b.c.Collect(nonInstanceChild(parentName, relationName, rel, i))
 				continue
 			}
-			b.child(parent, graphParent, relationName, rel, child, i, seen)
+			b.child(parent, graphParent, parentName, relationName, rel, child, i, seen)
 		}
 	case *instance.ValidInstance:
 		if v == nil {
-			b.c.Collect(nonInstanceChild(parent.TypeName(), relationName, rel, 0))
+			b.c.Collect(nonInstanceChild(parentName, relationName, rel, 0))
 			return
 		}
-		b.child(parent, graphParent, relationName, rel, v, 0, nil)
+		b.child(parent, graphParent, parentName, relationName, rel, v, 0, nil)
 	case nil:
 		// An absent optional composition arrives as a nil value.
 	default:
-		b.c.Collect(nonInstanceChild(parent.TypeName(), relationName, rel, 0))
+		b.c.Collect(nonInstanceChild(parentName, relationName, rel, 0))
 	}
 }
 
@@ -216,6 +228,7 @@ func (b *instanceBuilder) slot(
 func (b *instanceBuilder) child(
 	parent *instance.ValidInstance,
 	graphParent *Instance,
+	parentName string,
 	relationName string,
 	rel *schema.Relation,
 	child *instance.ValidInstance,
@@ -223,10 +236,11 @@ func (b *instanceBuilder) child(
 	seen map[string]int,
 ) {
 	if child.TypeID() != rel.TargetID() {
-		got, want := b.g.describeTypePair(child.TypeID(), rel.TargetID())
+		got, want, ident := b.g.describeTypePair(child.TypeID(), rel.TargetID())
 		b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("child type %s does not match relation target %s", got, want)).
-			WithDetail(diag.DetailKeyTypeName, parent.TypeName()).
+			fmt.Sprintf("child type %s does not match relation target %s",
+				quoteTypeName(got, ident), quoteTypeName(want, ident))).
+			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyRelationName, relationName).
 			WithDetail(diag.DetailKeyExpected, want).
 			WithDetail(diag.DetailKeyGot, got).Build())
@@ -254,7 +268,7 @@ func (b *instanceBuilder) child(
 		if seen != nil && rel.IsMany() {
 			keyStr := child.PrimaryKey().String()
 			if first, dup := seen[keyStr]; dup {
-				b.c.Collect(b.g.siblingDuplicateIssue(parent, relationName, rel, child, childTyp, first, index))
+				b.c.Collect(b.g.siblingDuplicateIssue(parent, parentName, relationName, rel, child, childTyp, first, index))
 			} else {
 				seen[keyStr] = index
 			}
@@ -264,45 +278,41 @@ func (b *instanceBuilder) child(
 	graphParent.addComposed(relationName, b.build(childTyp, child, nil))
 }
 
-// unresolvableChildType reports a composed child whose type the graph cannot
-// resolve. [Graph.Add] refuses the same shape at a root and [Graph.AddComposed]
-// at a streamed child; dropping the subtree silently was the third answer.
+// unresolvableChildType reports a composed child whose identity is not in the
+// schema's import closure.
+//
+// No public constructor reaches it: the caller's identity must already equal
+// the relation's target, and a relation's target is resolved by the schema
+// layer at load, so it is always in the closure. Reaching this means the
+// closure and the relation disagree, which is why it is Fatal E_INTERNAL and
+// not a graph-category error — and why no test drives it. Dropping the subtree
+// in silence was the alternative, and that is the regression it exists to
+// prevent.
 func unresolvableChildType(child *instance.ValidInstance) diag.Issue {
-	builder := diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
-		fmt.Sprintf("composed child type %q not found in schema", child.TypeName())).
-		WithDetail(diag.DetailKeyTypeName, child.TypeName())
-	if strings.Contains(child.TypeName(), ".") {
-		builder = builder.WithHint("if this type is from a transitively imported schema, add a direct import to access it")
-	}
-	return builder.Build()
+	return diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+		fmt.Sprintf("composed child type %s is not in the schema's import closure", child.TypeID())).
+		WithDetail(diag.DetailKeyTypeName, child.TypeName()).
+		WithDetail(diag.DetailKeyTypeSchema, child.TypeID().SchemaPath().String()).Build()
 }
 
 // composedOverflowIssue reports a (one) composition slot carrying several
 // children. The address it names is the second child's, which is the one the
 // slot cannot hold.
 func (g *Graph) composedOverflowIssue(
-	parent *instance.ValidInstance,
+	parentName string,
 	relationName string,
 	rel *schema.Relation,
 	children immutable.Slice,
 ) diag.Issue {
 	builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 		fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", relationName, children.Len())).
-		WithDetail(diag.DetailKeyTypeName, parent.TypeName()).
+		WithDetail(diag.DetailKeyTypeName, parentName).
 		WithDetail(diag.DetailKeyRelationName, relationName).
 		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 
-	var extra *instance.ValidInstance
-	if children.Len() > 1 {
-		if child, ok := children.Get(1).Unwrap().(*instance.ValidInstance); ok {
-			extra = child
-		}
-	}
-	if composedPK, err := FormatComposedKey(
-		keyToValues(parent.PrimaryKey()), relationName, g.composedChildAddress(rel, extra),
-	); err == nil {
-		builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
-	}
+	// No primary_key detail: the whole record is refused, so not one of these
+	// children attaches and no composed key is assigned to any of them. A
+	// detail naming an address the writers never create is worse than none.
 	return builder.Build()
 }
 
@@ -311,6 +321,7 @@ func (g *Graph) composedOverflowIssue(
 // against the children already attached.
 func (g *Graph) siblingDuplicateIssue(
 	parent *instance.ValidInstance,
+	parentName string,
 	relationName string,
 	rel *schema.Relation,
 	child *instance.ValidInstance,
@@ -320,38 +331,27 @@ func (g *Graph) siblingDuplicateIssue(
 	builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 		fmt.Sprintf("duplicate composed child primary key %s at indices %d and %d",
 			child.PrimaryKey().String(), firstIndex, index)).
-		WithDetail(diag.DetailKeyTypeName, parent.TypeName()).
+		WithDetail(diag.DetailKeyTypeName, parentName).
 		WithDetail(diag.DetailKeyRelationName, relationName).
 		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 	if composedPK, err := FormatComposedKey(
-		keyToValues(parent.PrimaryKey()), relationName, composedKeyOrIndex(childTyp, child.PrimaryKey()),
+		keyToValues(parent.PrimaryKey()), relationName, composedKeyOrIndex(childTyp, child.PrimaryKey(), firstIndex),
 	); err == nil {
 		builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
 	}
 	return builder.Build()
 }
 
-// composedChildAddress renders the address the writers assign child, or the
-// slot's own address when no child is available to name.
-func (g *Graph) composedChildAddress(rel *schema.Relation, child *instance.ValidInstance) any {
-	if child == nil {
-		return nil
-	}
-	childTyp, ok := g.schema.TypeByID(rel.TargetID())
-	if !ok {
-		return nil
-	}
-	return composedKeyOrIndex(childTyp, child.PrimaryKey())
-}
-
 // composedKeyOrIndex renders a composed child's address the way the writers do:
 // its own key values when the part type declares a primary key and the child
-// carries one, and the slot's address otherwise.
-func composedKeyOrIndex(partType *schema.Type, key immutable.Key) any {
+// carries one, and its position in the slot otherwise. adapter/neo4j's
+// write_composed.go makes exactly that choice, and a diagnostic that made a
+// different one named a node no writer ever created.
+func composedKeyOrIndex(partType *schema.Type, key immutable.Key, index int) any {
 	if partType != nil && partType.HasPrimaryKey() && key.Len() > 0 {
 		return key.Clone()
 	}
-	return nil
+	return index
 }
 
 // undeclaredRelation builds the diagnostic for instance data filed under a

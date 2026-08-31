@@ -980,3 +980,91 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 // happen to not use it. The package-level imports are all genuinely used,
 // but referencing context here documents the binding to caller intent.
 var _ = context.Background
+
+// TestBatchAssembler_Finalize_SecondCallReturnsTheFirstError pins the error half
+// of the memoization. Returning nil on the second call would tell a caller with
+// a retry or defer-and-recheck loop that an incomplete graph is complete.
+func TestBatchAssembler_Finalize_SecondCallReturnsTheFirstError(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ctx := t.Context()
+
+	// batchAssemblerTestSchema's employer is optional, so an unresolved target
+	// does not fail Check. This fixture makes it required.
+	required, res := schema.NewBuilder().
+		WithName("required_employer").
+		WithSourceID(location.MustNewSourceID("test://required_employer.yammm")).
+		AddType("Company").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		Done().
+		AddType("Person").
+		WithPrimaryKey("id", schema.StringConstraint{}).
+		WithRelation("employer", schema.LocalTypeRef("Company", location.Span{}), false, false).
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("schema build: %s", res.String())
+	}
+	_ = s
+
+	ba := graph.NewBatchAssembler(ctx, required)
+	if err := ba.Add("Person", instance.RawInstance{Properties: map[string]any{
+		"id":       "alice",
+		"employer": map[string]any{"_target_id": "missing-co"},
+	}}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	first, err1 := ba.Finalize(ctx)
+	if err1 == nil {
+		t.Fatal("the fixture did not produce a failing Check")
+	}
+	second, err2 := ba.Finalize(ctx)
+	if err2 == nil {
+		t.Fatal("the second Finalize reported success for a batch that failed")
+	}
+	if err1.Error() != err2.Error() {
+		t.Errorf("second Finalize error = %q, want the first call's %q", err2, err1)
+	}
+	if second.Snapshot != first.Snapshot {
+		t.Error("the second Finalize re-took the snapshot")
+	}
+}
+
+// TestBatchAssembler_Finalize_CancellationIsNotMemoized pins the one outcome
+// Finalize does not store. The assembler refuses further Adds once Finalize
+// runs, so if an expired deadline were memoized there would be no recovery at
+// all for a batch whose records are all present and valid.
+func TestBatchAssembler_Finalize_CancellationIsNotMemoized(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ba := graph.NewBatchAssembler(t.Context(), s)
+	if err := ba.Add("Person", personRaw("alice", "Alice")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := ba.Finalize(cancelled); err == nil {
+		t.Fatal("Finalize with a cancelled context reported success")
+	}
+
+	// The retry salvages the batch: the records were never in doubt.
+	res, err := ba.Finalize(t.Context())
+	if err != nil {
+		t.Fatalf("the retry could not salvage the batch: %v", err)
+	}
+	if res.Snapshot == nil {
+		t.Fatal("res.Snapshot is nil")
+	}
+	if n := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); n != 1 {
+		t.Errorf("salvaged snapshot holds %d Person instances, want 1", n)
+	}
+
+	// And the completed outcome IS memoized from then on.
+	again, err := ba.Finalize(t.Context())
+	if err != nil {
+		t.Fatalf("third Finalize: %v", err)
+	}
+	if again.Snapshot != res.Snapshot {
+		t.Error("the completed result was not memoized after the successful retry")
+	}
+}

@@ -131,6 +131,17 @@
 // length — which this guard was the only thing to catch. A trust boundary
 // that deletes the check which found the last defect is not a trust boundary.
 //
+// # Composed Children
+//
+// A composed child is checked exactly as a root is — its edge names and
+// multiplicities, its own key, and its own composition tree — but **its
+// association edges are never installed.** A part type that declares or
+// inherits an association therefore produces no [Edge], no
+// [UnresolvedEdge], and no effect on [Attestation]'s Associations dimension.
+// The check still runs, so data filed under a name the part type does not
+// declare is reported rather than dropped in silence; what does not happen is
+// the edge resolution a root gets.
+//
 // # Key Types
 //
 // [BatchAssembler] composes Validator + Graph + Snapshot for the
@@ -242,11 +253,21 @@
 //   - E_DUPLICATE_PK: the primary key already exists for this type
 //   - E_CONTEXT_CANCELLED: the context was cancelled
 //
-// [Graph.AddComposed] emits E_GRAPH_PARENT_NOT_FOUND when the parent instance
-// is absent, E_GRAPH_INVALID_COMPOSITION when the named relation is not a
-// composition, E_DUPLICATE_COMPOSED_PK when the slot already holds the child
-// it can hold, and otherwise the same codes as Add — its child runs the same
-// structural guard.
+// [Graph.AddComposed] emits:
+//
+//   - E_GRAPH_TYPE_NOT_FOUND: the PARENT's identity is not in the schema's
+//     import closure, or is the zero TypeID
+//   - E_GRAPH_PARENT_NOT_FOUND: no instance carries that identity and key
+//   - E_GRAPH_INVALID_COMPOSITION: the named relation is not a composition, or
+//     the child is not an instance of its target type
+//   - E_GRAPH_INVALID_PK: the child's key is empty, has the wrong arity, or
+//     disagrees with its own key property
+//   - E_GRAPH_CARDINALITY, E_GRAPH_UNKNOWN_RELATION, E_DUPLICATE_COMPOSED_PK:
+//     from the child's own structure, which runs the same check as a root's
+//   - E_CONTEXT_CANCELLED: the context was cancelled
+//
+// It does NOT emit E_GRAPH_MISSING_PK, E_GRAPH_ABSTRACT_TYPE or
+// E_DUPLICATE_PK; those three belong to a root.
 //
 // [Graph.Check] emits E_UNRESOLVED_REQUIRED and E_CONTEXT_CANCELLED.
 //
@@ -282,7 +303,10 @@
 // Each tuple is total: every arm is compared, so no two distinct records tie
 // and inherit map-iteration order.
 //
-// Sorting is performed at [Graph.Snapshot] time, amortized across accessor calls.
+// Sorting is established when the Snapshot is constructed — by [Graph.Snapshot]
+// and by [RebuildSnapshot] alike, which reach it through one place — and is
+// amortized across accessor calls. Neither constructor asks its caller to
+// pre-sort, and neither can skip it.
 //
 // # Streaming Scenarios
 //

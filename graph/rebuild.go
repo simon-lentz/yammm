@@ -3,7 +3,6 @@ package graph
 import (
 	"cmp"
 	"fmt"
-	"iter"
 	"slices"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -415,26 +414,23 @@ func compareEdges(a, b *Edge) int {
 // for a composite it may not be, and that residue is stated rather than
 // claimed away.
 func compareProps(a, b immutable.Properties) int {
-	// The sorted key order is precomputed at construction, so walking both
-	// iterators in lockstep neither re-sorts nor allocates a key slice.
-	nextA, stopA := iter.Pull2(a.SortedRange())
-	defer stopA()
-	nextB, stopB := iter.Pull2(b.SortedRange())
-	defer stopB()
-
-	for {
-		an, av, okA := nextA()
-		bn, bv, okB := nextB()
-		if !okA || !okB {
-			return cmp.Compare(a.Len(), b.Len())
-		}
-		if c := cmp.Compare(an, bn); c != 0 {
+	// The key order is precomputed at construction, so collecting it costs one
+	// allocation and no sort. An earlier rewrite walked two iter.Pull2
+	// coroutines to save that allocation and paid a coroutine pair per call
+	// instead — inside three comparators a sort runs O(n log n) times.
+	an := slices.Collect(a.SortedKeys())
+	bn := slices.Collect(b.SortedKeys())
+	for i := range min(len(an), len(bn)) {
+		if c := cmp.Compare(an[i], bn[i]); c != 0 {
 			return c
 		}
+		av, _ := a.Get(an[i])
+		bv, _ := b.Get(bn[i])
 		if c := cmp.Compare(renderValue(av), renderValue(bv)); c != 0 {
 			return c
 		}
 	}
+	return cmp.Compare(len(an), len(bn))
 }
 
 // renderValue renders one property value with its type, so values of different
@@ -501,7 +497,27 @@ func compareDuplicates(a, b *Duplicate) int {
 	if c := cmp.Compare(parentKeyOf(a), parentKeyOf(b)); c != 0 {
 		return c
 	}
-	return compareProps(a.Instance.Properties(), b.Instance.Properties())
+	if c := compareProps(a.Instance.Properties(), b.Instance.Properties()); c != 0 {
+		return c
+	}
+	// Two rows of one file can collide with one instance carrying identical
+	// properties, and differ only in where they came from. Without this arm
+	// they tie, and slices.SortFunc is not stable, so a consumer pairing the
+	// Nth record with the Nth input row pairs the wrong span.
+	return cmp.Compare(provenanceKeyOf(a.Instance), provenanceKeyOf(b.Instance))
+}
+
+// provenanceKeyOf renders an instance's source position for ordering. A loaded
+// snapshot carries no provenance, so both sides render empty and the arm ties —
+// which is correct there: two records with nothing left to tell apart are the
+// same record.
+func provenanceKeyOf(i *Instance) string {
+	prov := i.Provenance()
+	if prov == nil {
+		return ""
+	}
+	span := prov.Span()
+	return fmt.Sprintf("%s\x00%d:%d", prov.SourceName(), span.Start.Line, span.Start.Column)
 }
 
 // parentKeyOf renders a duplicate's parent slot, or the empty string for a root

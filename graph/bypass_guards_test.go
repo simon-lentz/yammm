@@ -352,7 +352,11 @@ func TestAddComposed_BypassGuard_ChecksTheStreamedChildsSubtree(t *testing.T) {
 		t.Fatal("a streamed child with an undeclared edge name attached")
 	}
 	assertHasCode(t, result, diag.E_GRAPH_UNKNOWN_RELATION)
-	if n := g.Snapshot().InstancesOf(mustTypeID(t, s, "Parent"))[0].ComposedCount("children"); n != 0 {
+	parents := g.Snapshot().InstancesOf(mustTypeID(t, s, "Parent"))
+	if len(parents) != 1 {
+		t.Fatalf("the parent did not survive a refused child (%d parents)", len(parents))
+	}
+	if n := parents[0].ComposedCount("children"); n != 0 {
 		t.Fatalf("the refused child attached anyway (%d children)", n)
 	}
 }
@@ -452,8 +456,10 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 	}
 	assertHasCode(t, r, diag.E_DUPLICATE_COMPOSED_PK)
 
-	// The (one) overflow's composed-key detail is rendered from the part
-	// type too, so it needs the same identity resolution.
+	// The (one) overflow carries NO composed-key detail: the whole record is
+	// refused, so none of the children attaches and no writer assigns any of
+	// them an address. Naming one would send an operator to a node that does
+	// not exist — the defect the fix-diff round found in the streamed path.
 	overflow := instancetest.VI(
 		"b.Middle",
 		instancetest.TypeID(middleID),
@@ -467,23 +473,20 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 	if r.OK() {
 		t.Fatal("a (one) composition carrying two children was accepted")
 	}
-	want, err := graph.FormatComposedKey([]any{"m3"}, "sole", []any{"s2"})
-	if err != nil {
-		t.Fatalf("FormatComposedKey: %v", err)
-	}
-	var got string
+	var sawOverflow bool
 	for issue := range r.Issues() {
 		if issue.Code() != diag.E_DUPLICATE_COMPOSED_PK {
 			continue
 		}
+		sawOverflow = true
 		for _, d := range issue.Details() {
 			if d.Key == diag.DetailKeyPrimaryKey {
-				got = d.Value
+				t.Errorf("the overflow names composed key %q, but the record is refused entire so no child is addressed", d.Value)
 			}
 		}
 	}
-	if got != want {
-		t.Errorf("overflow primary_key detail = %q, want %q", got, want)
+	if !sawOverflow {
+		t.Error("no E_DUPLICATE_COMPOSED_PK for the (one) overflow")
 	}
 }
 

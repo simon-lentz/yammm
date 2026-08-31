@@ -325,10 +325,18 @@ func (ba *BatchAssembler) AddValid(valid *instance.ValidInstance) error {
 	attemptN := ba.attempts.Add(1)
 
 	if valid == nil {
+		// E_INTERNAL, not E_GRAPH_INVALID_PK: the record is absent, not
+		// mis-keyed, and a consumer routing remediation off the code would be
+		// sent to inspect a primary key that does not exist.
+		issue := diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			"AddValid received a nil instance; ValidateForComposition returns nil for a child that failed validation").Build()
 		collector := diag.NewCollector(0)
-		collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
-			"AddValid received a nil instance").Build())
-		return ba.wrapAddError("", attemptN, collector.Result())
+		collector.Collect(issue)
+		// Every other Add rejection reaches Snapshot.Diagnostics(); this one
+		// has to as well, or a caller that discards per-record errors — the
+		// pattern docs/API.md accommodates — has no record of the loss at all.
+		ba.graph.collector.Collect(issue)
+		return ba.wrapNilInstanceError(attemptN, collector.Result())
 	}
 
 	// AddValid does not need validator access, but the success-counter
@@ -343,6 +351,14 @@ func (ba *BatchAssembler) AddValid(valid *instance.ValidInstance) error {
 	}
 	ba.successes.Add(1)
 	return nil
+}
+
+// wrapNilInstanceError tags a nil-instance rejection. There is no type name to
+// substitute, and an empty one would render " (attempt #N)" with a leading
+// space — breaking the single-token shape docs/API.md states.
+func (ba *BatchAssembler) wrapNilInstanceError(attemptN int64, res diag.Result) error {
+	//nolint:wrapcheck // returning *diag.ContextualError directly is the documented contract; consumers errors.As against it
+	return res.WithContext(fmt.Sprintf("nil-instance (attempt #%d)", attemptN))
 }
 
 // wrapAddError formats an Add / AddValid failure as a *diag.ContextualError
@@ -391,7 +407,13 @@ func (ba *BatchAssembler) wrapAddError(typeName string, attemptN int64, res diag
 // Add / AddValid calls return [ErrAssemblerFinalized]. Calling Finalize
 // twice is supported: the second call returns the first call's stored
 // FinalizeResult and error, with no second Check pass and no second
-// snapshot, so a later ctx cannot change the outcome.
+// snapshot, so a later ctx cannot change a completed outcome.
+//
+// One outcome is not stored: a Check that returned a Fatal — that is, ctx was
+// already cancelled. Cancellation is an abort rather than a result, the graph
+// is unchanged, and a retry with a live context can still finalize. The
+// assembler still refuses further Add / AddValid calls, so retrying Finalize
+// is the only recovery there is and memoizing the cancellation would remove it.
 //
 // Panics if ctx is nil (consistent with [Graph.Check]).
 func (ba *BatchAssembler) Finalize(ctx context.Context) (FinalizeResult, error) {
@@ -420,7 +442,19 @@ func (ba *BatchAssembler) Finalize(ctx context.Context) (FinalizeResult, error) 
 	}
 
 	checkRes := ba.graph.Check(ctx)
-	ba.finalizeRes = FinalizeResult{Snapshot: ba.graph.Snapshot()} // always non-nil
+	res := FinalizeResult{Snapshot: ba.graph.Snapshot()} // always non-nil
+
+	// A Fatal is a cancelled Check — an abort, not a result. The graph is
+	// unchanged and a retry with a live context can still finalize, so this
+	// outcome is NOT memoized: storing it would make one expired deadline
+	// permanent with no other recovery, since the assembler already refuses
+	// further Adds.
+	if checkRes.HasFatal() {
+		//nolint:wrapcheck // returning *diag.ContextualError directly is the documented contract; consumers errors.As against it
+		return res, checkRes.WithContext("batch_finalize")
+	}
+
+	ba.finalizeRes = res
 	if checkRes.HasErrors() {
 		ba.finalizeErr = checkRes.WithContext("batch_finalize")
 	}

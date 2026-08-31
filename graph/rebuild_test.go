@@ -827,3 +827,47 @@ func TestRebuildSnapshot_EstablishesTheDocumentedOrdering(t *testing.T) {
 		t.Errorf("AllInstances yielded %d instances, want 3", n)
 	}
 }
+
+// TestSnapshot_DuplicatesComeBackSorted pins the accessor, not the comparator.
+// Only compareDuplicates was unit-tested, so deleting newSnapshot's sort left
+// Duplicates() in append order — which under concurrent Add is the goroutine
+// interleaving, and the marshalled document then varies run to run.
+func TestSnapshot_DuplicatesComeBackSorted(t *testing.T) {
+	t.Parallel()
+	s := rebuildTestSchema(t)
+	personID := mustTypeID(t, s, "Person")
+
+	ip := func(key string) graph.InstanceParts {
+		return graph.InstanceParts{
+			TypeName:   "Person",
+			TypeID:     personID,
+			PrimaryKey: immutable.WrapKey([]any{key}),
+			Properties: immutable.WrapProperties(map[string]any{"name": key}),
+		}
+	}
+	dp := func(key string) graph.DuplicateParts {
+		return graph.DuplicateParts{
+			Type: personID, Key: immutable.WrapKey([]any{key}),
+			Instance:     ip(key),
+			ConflictType: personID, ConflictKey: immutable.WrapKey([]any{"anchor"}),
+		}
+	}
+
+	// Handed in descending key order; the accessor must return ascending.
+	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types:      []schema.TypeID{personID},
+		Instances:  map[schema.TypeID][]graph.InstanceParts{personID: {ip("anchor")}},
+		Duplicates: []graph.DuplicateParts{dp("d3"), dp("d1"), dp("d2")},
+	})
+	if res.HasErrors() {
+		t.Fatalf("rebuild: %s", res.String())
+	}
+
+	var keys []string
+	for _, d := range snap.Duplicates() {
+		keys = append(keys, d.Instance.PrimaryKey().String())
+	}
+	if !slices.IsSorted(keys) {
+		t.Errorf("Duplicates() is not in compareDuplicates order: %v", keys)
+	}
+}

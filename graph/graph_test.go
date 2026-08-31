@@ -2202,16 +2202,30 @@ func TestGraph_WithLogger_TracesEachOperation(t *testing.T) {
 // sequence emits nothing and does not panic.
 func TestGraph_NoLogging_WhenNilLogger(t *testing.T) {
 	s := testSchemaWithAssociation(t)
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	g := graph.New(s) // no WithLogger
-
 	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
+
+	// The handler is attached to a graph that is then NOT given it, so the
+	// comparison is against a run that did record. Asserting an unattached
+	// handler is empty proves nothing: no production change can turn it red.
+	attached := yammmtest.NewRecordHandler(slog.LevelDebug)
+	withLogger := graph.New(s, graph.WithLogger(slog.New(attached)))
+	if r := withLogger.Add(t.Context(), company); !r.OK() {
+		t.Fatalf("Add failed: %s", r.String())
+	}
+	withLogger.Check(t.Context())
+	if len(attached.Records()) == 0 {
+		t.Fatal("the control run recorded nothing, so the comparison below is vacuous")
+	}
+
+	silent := yammmtest.NewRecordHandler(slog.LevelDebug)
+	logger := slog.New(silent)
+	_ = logger // built and deliberately not passed to New
+	g := graph.New(s)
 	if r := g.Add(t.Context(), company); !r.OK() {
 		t.Fatalf("Add failed: %s", r.String())
 	}
 	g.Check(t.Context())
-
-	if n := len(h.Records()); n != 0 {
+	if n := len(silent.Records()); n != 0 {
 		t.Errorf("a graph built without WithLogger emitted %d records", n)
 	}
 }

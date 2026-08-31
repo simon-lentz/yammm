@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -468,9 +469,19 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 	// OK() alone is trivially stable because Check holds no state; what the
 	// contract promises is that the issues themselves repeat and that none
 	// of them reaches the snapshot.
-	render := func(r diag.Result) string { return r.String() }
-	if render(result1) != render(result2) || render(result2) != render(result3) {
-		t.Errorf("Check results differ across calls:\n1: %s\n2: %s\n3: %s",
+	// Compare the SET of issues, not Result.String(): Check walks g.pending,
+	// a map, so the rendered order is not stable even for one call's own
+	// output and a string comparison would be flaky rather than meaningful.
+	render := func(r diag.Result) []string {
+		var out []string
+		for issue := range r.Issues() {
+			out = append(out, issue.Code().String()+" "+issue.Message())
+		}
+		slices.Sort(out)
+		return out
+	}
+	if !slices.Equal(render(result1), render(result2)) || !slices.Equal(render(result2), render(result3)) {
+		t.Errorf("Check results differ across calls:\n1: %v\n2: %v\n3: %v",
 			render(result1), render(result2), render(result3))
 	}
 	if !result1.HasCode(diag.E_UNRESOLVED_REQUIRED) {

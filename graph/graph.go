@@ -212,8 +212,11 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	b := newInstanceBuilder(g, opCollector)
 	var staged []stagedEdge
 	graphInst := b.build(typ, inst, &staged)
+	// Merged whatever the severity: the walks this replaced collected into
+	// both collectors at every site, and gating on HasErrors would drop the
+	// first sub-Error issue the check ever produces from Snapshot.Diagnostics().
+	g.collector.Merge(opCollector.Result())
 	if opCollector.HasErrors() {
-		g.collector.Merge(opCollector.Result())
 		return opCollector.Result()
 	}
 
@@ -263,7 +266,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 					slog.String("relation", se.relation),
 					slog.String("source_type", typeName),
 					slog.String("source_pk", pkString),
-					slog.String("target_type", g.instanceTagForm(se.targetType)),
+					slog.String("target_type", se.targetTypeName),
 					slog.String("target_pk", se.targetKey),
 				)
 				continue
@@ -273,7 +276,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 				slog.String("relation", se.relation),
 				slog.String("source_type", typeName),
 				slog.String("source_pk", pkString),
-				slog.String("target_type", g.instanceTagForm(se.targetType)),
+				slog.String("target_type", se.targetTypeName),
 				slog.String("target_pk", se.targetKey),
 			)
 		}
@@ -361,7 +364,7 @@ func (g *Graph) AddComposed(
 	// Opened before the context check so a cancelled AddComposed is still traced.
 	op := trace.Begin(
 		ctx, g.config.logger, "yammm.graph.add_composed",
-		slog.String("parent_type", g.instanceTagForm(parentType)),
+		slog.String("parent_type", parentType.String()),
 		slog.String("parent_pk", parentKey),
 		slog.String("relation", relationName),
 		slog.String("child_type", child.TypeName()),
@@ -381,6 +384,17 @@ func (g *Graph) AddComposed(
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	// The identity resolves before the instance does, so a wrong type and a
+	// wrong key stay distinguishable. TypeByID reports false for the zero
+	// TypeID, which is how a caller that forgot to set one is told.
+	typ, ok := g.schema.TypeByID(parentType)
+	if !ok {
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
+			fmt.Sprintf("parent type %s not found in schema", parentType)).
+			WithDetail(diag.DetailKeyTypeName, g.instanceTagForm(parentType)).
+			WithDetail(diag.DetailKeyTypeSchema, parentType.SchemaPath().String()).Build())
+	}
+
 	parentName := g.instanceTagForm(parentType)
 
 	parentInst := g.findInstance(parentType, parentKey)
@@ -390,16 +404,6 @@ func (g *Graph) AddComposed(
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyTypeSchema, parentType.SchemaPath().String()).
 			WithDetail(diag.DetailKeyPrimaryKey, parentKey).Build())
-	}
-
-	// The parent is installed, so its type is somewhere in the closure even
-	// when this graph's schema does not import it directly.
-	typ, ok := g.schema.TypeByID(parentType)
-	if !ok {
-		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
-			fmt.Sprintf("parent type %s not found in schema", parentType)).
-			WithDetail(diag.DetailKeyTypeName, parentName).
-			WithDetail(diag.DetailKeyTypeSchema, parentType.SchemaPath().String()).Build())
 	}
 
 	rel, ok := typ.Relation(relationName)
@@ -412,9 +416,10 @@ func (g *Graph) AddComposed(
 	}
 
 	if child.TypeID() != rel.TargetID() {
-		got, want := g.describeTypePair(child.TypeID(), rel.TargetID())
+		got, want, ident := g.describeTypePair(child.TypeID(), rel.TargetID())
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("child type %s does not match relation target %s", got, want)).
+			fmt.Sprintf("child type %s does not match relation target %s",
+				quoteTypeName(got, ident), quoteTypeName(want, ident))).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyPrimaryKey, parentKey).
 			WithDetail(diag.DetailKeyRelationName, relationName).
@@ -422,7 +427,7 @@ func (g *Graph) AddComposed(
 			WithDetail(diag.DetailKeyGot, got).Build())
 	}
 
-	// Identity, not name — see checkComposedChild.
+	// Identity, not name — see [instanceBuilder.child].
 	childTyp, ok := g.schema.TypeByID(child.TypeID())
 	if !ok {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
@@ -444,8 +449,8 @@ func (g *Graph) AddComposed(
 	}
 	b := newInstanceBuilder(g, opCollector)
 	builtChild := b.build(childTyp, child, nil)
+	g.collector.Merge(opCollector.Result())
 	if opCollector.HasErrors() {
-		g.collector.Merge(opCollector.Result())
 		return opCollector.Result()
 	}
 
@@ -466,9 +471,14 @@ func (g *Graph) AddComposed(
 				WithDetail(diag.DetailKeyTypeName, parentName).
 				WithDetail(diag.DetailKeyRelationName, relationName).
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-			if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName,
-				composedKeyOrIndex(childTyp, child.PrimaryKey())); err == nil {
-				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
+			// The address must name the node that EXISTS — the occupant the
+			// writers already keyed. The rejected child never attaches, so
+			// its own address is assigned to nothing.
+			if conflictInst != nil {
+				if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName,
+					composedKeyOrIndex(childTyp, conflictInst.PrimaryKey(), 0)); err == nil {
+					builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
+				}
 			}
 			issue := builder.Build()
 
@@ -483,7 +493,7 @@ func (g *Graph) AddComposed(
 		}
 	} else if childTyp.HasPrimaryKey() {
 		childPKString := child.PrimaryKey().String()
-		for _, existing := range parentInst.composed[relationName] {
+		for existingIndex, existing := range parentInst.composed[relationName] {
 			if existing.PrimaryKey().String() != childPKString {
 				continue
 			}
@@ -496,7 +506,7 @@ func (g *Graph) AddComposed(
 				WithDetail(diag.DetailKeyRelationName, relationName).
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName,
-				composedKeyOrIndex(childTyp, child.PrimaryKey())); err == nil {
+				composedKeyOrIndex(childTyp, child.PrimaryKey(), existingIndex)); err == nil {
 				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
 			}
 			issue := builder.Build()
@@ -785,12 +795,22 @@ func (g *Graph) ownsType(id schema.TypeID) bool {
 // describeTypePair renders two type identities so a reader can tell them apart.
 // Tag forms collide whenever a type has no alias to qualify with, and a message
 // reading `X does not match X` is worse than none.
-func (g *Graph) describeTypePair(got, want schema.TypeID) (string, string) {
-	gotName, wantName := g.instanceTagForm(got), g.instanceTagForm(want)
+func (g *Graph) describeTypePair(got, want schema.TypeID) (gotName, wantName string, collide bool) {
+	gotName, wantName = g.instanceTagForm(got), g.instanceTagForm(want)
 	if gotName == wantName {
-		return got.String(), want.String()
+		return got.String(), want.String(), true
 	}
-	return strconv.Quote(gotName), strconv.Quote(wantName)
+	return gotName, wantName, false
+}
+
+// quoteTypeName renders a type name for a message. A tag form is quoted the way
+// every other name in these diagnostics is; a full identity already reads as
+// one token and quoting it only adds noise.
+func quoteTypeName(name string, isIdentity bool) string {
+	if isIdentity {
+		return name
+	}
+	return strconv.Quote(name)
 }
 
 // instanceTagForm computes the canonical instance tag form for a TypeID.
@@ -854,17 +874,15 @@ func keyComponentAgrees(component, property immutable.Value) bool {
 		if yv, ok := y.(int64); ok {
 			return xv == yv
 		}
-	case float64:
-		if yv, ok := y.(float64); ok {
-			return xv == yv
-		}
 	case bool:
 		if yv, ok := y.(bool); ok {
 			return xv == yv
 		}
-	case nil:
-		return y == nil
 	}
+	// float64 and nil are deliberately absent. Go equality disagrees with the
+	// canonical rendering on both: -0.0 == 0.0 while WrapKey renders [-0] and
+	// [0], and a typed nil is not == to an untyped one while both render
+	// [null]. The rendering decides key identity, so it decides here.
 	return renderKeyComponent(component) == renderKeyComponent(property)
 }
 

@@ -238,7 +238,39 @@ func TestAddComposed_ParentTypeNotFound(t *testing.T) {
 	if result.OK() {
 		t.Error("AddComposed should fail for a parent identity outside the closure")
 	}
-	// No instance carries that identity, so the parent lookup refuses first.
+	// The identity resolves before the instance does, so a wrong type and a
+	// wrong key stay distinguishable.
+	assertHasCode(t, result, diag.E_GRAPH_TYPE_NOT_FOUND)
+}
+
+// TestAddComposed_ZeroParentTypeID pins the zero identity a caller reaches by
+// forgetting to set one: TypeByID reports false for it, so it is named as a
+// type problem rather than reported as a missing parent.
+func TestAddComposed_ZeroParentTypeID(t *testing.T) {
+	s := testSchemaWithComposition(t)
+	g := graph.New(s)
+	ctx := t.Context()
+
+	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
+	result := g.AddComposed(ctx, schema.TypeID{}, graph.FormatKey("p1"), "children", child)
+	if result.OK() {
+		t.Error("a zero parent TypeID was accepted")
+	}
+	assertHasCode(t, result, diag.E_GRAPH_TYPE_NOT_FOUND)
+}
+
+// TestAddComposed_ParentInstanceNotFound is the other arm: the type resolves
+// and no instance carries the key.
+func TestAddComposed_ParentInstanceNotFound(t *testing.T) {
+	s := testSchemaWithComposition(t)
+	g := graph.New(s)
+	ctx := t.Context()
+
+	child := mustValidPartInstance(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("nobody"), "children", child)
+	if result.OK() {
+		t.Error("AddComposed should fail when no parent carries the key")
+	}
 	assertHasCode(t, result, diag.E_GRAPH_PARENT_NOT_FOUND)
 }
 
