@@ -1,0 +1,186 @@
+{
+  "name": "\"graph_corpus\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "types": [
+    {
+      "name": "Order",
+      "name_span": {
+        "s": 28,
+        "e": 33
+      },
+      "props": [
+        {
+          "name": "order_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 49,
+              "e": 55
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 40,
+            "e": 63
+          }
+        },
+        {
+          "name": "customer",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 77,
+              "e": 83
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 68,
+            "e": 92
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "SECTIONS",
+          "name_span": {
+            "s": 102,
+            "e": 110
+          },
+          "target": {
+            "name": "Section",
+            "span": {
+              "s": 120,
+              "e": 127
+            }
+          },
+          "optional": true,
+          "many": true,
+          "span": {
+            "s": 98,
+            "e": 127
+          }
+        }
+      ],
+      "span": {
+        "s": 23,
+        "e": 129
+      }
+    },
+    {
+      "name": "Section",
+      "name_span": {
+        "s": 141,
+        "e": 148
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "section_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 166,
+              "e": 172
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 155,
+            "e": 180
+          }
+        },
+        {
+          "name": "heading",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 196,
+              "e": 202
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 185,
+            "e": 211
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "NOTES",
+          "name_span": {
+            "s": 221,
+            "e": 226
+          },
+          "target": {
+            "name": "Note",
+            "span": {
+              "s": 236,
+              "e": 240
+            }
+          },
+          "optional": true,
+          "many": true,
+          "span": {
+            "s": 217,
+            "e": 240
+          }
+        }
+      ],
+      "span": {
+        "s": 131,
+        "e": 242
+      }
+    },
+    {
+      "name": "Note",
+      "name_span": {
+        "s": 254,
+        "e": 258
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "note_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 273,
+              "e": 279
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 265,
+            "e": 287
+          }
+        },
+        {
+          "name": "body",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 300,
+              "e": 306
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 292,
+            "e": 315
+          }
+        }
+      ],
+      "span": {
+        "s": 244,
+        "e": 317
+      }
+    }
+  ]
+}

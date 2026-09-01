@@ -3,6 +3,9 @@ package neo4j
 import (
 	"testing"
 	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // Both outcomes are memoized: a name the host cannot resolve must not cost a
@@ -74,10 +77,12 @@ func TestDriverZone_AgreeingNameIsKept(t *testing.T) {
 // zero, so a pre-1970 instant with a time of day landed a day late — measured
 // against a live server as 1969-07-20T18:00:00Z stored as 1969-07-21.
 //
-// Mutation: returning dbtype.Date(v) unchanged turns the pre-1970 case red.
+// It drives [Coerce], not calendarDate, and covers all THREE Date arms: the
+// rule holds only where it is wired in, and the dbtype.Date arm passed its
+// input through for a release after the time.Time arm was fixed.
 func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
+	instants := []struct {
 		name string
 		in   time.Time
 		want string
@@ -89,13 +94,46 @@ func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
 			"a non-UTC zone keeps its own wall-clock date",
 			time.Date(2001, 7, 20, 23, 0, 0, 0, time.FixedZone("X", -5*3600)), "2001-07-20",
 		},
-	} {
-		got := calendarDate(tc.in)
-		if got.Format(time.DateOnly) != tc.want {
-			t.Errorf("%s: calendarDate(%s) = %s, want %s", tc.name, tc.in.Format(time.RFC3339), got.Format(time.DateOnly), tc.want)
+	}
+	arms := []struct {
+		arm  string
+		wrap func(time.Time) any
+	}{
+		{"time.Time", func(t time.Time) any { return t }},
+		{"dbtype.Date", func(t time.Time) any { return dbtype.Date(t) }},
+	}
+
+	for _, arm := range arms {
+		for _, tc := range instants {
+			out, err := Coerce(schema.DateConstraint{}, arm.wrap(tc.in))
+			if err != nil {
+				t.Errorf("%s/%s: Coerce: %v", arm.arm, tc.name, err)
+				continue
+			}
+			d, ok := out.(dbtype.Date)
+			if !ok {
+				t.Errorf("%s/%s: Coerce returned %T, want dbtype.Date", arm.arm, tc.name, out)
+				continue
+			}
+			got := time.Time(d)
+			if got.Format(time.DateOnly) != tc.want {
+				t.Errorf("%s/%s: Coerce(%s) = %s, want %s",
+					arm.arm, tc.name, tc.in.Format(time.RFC3339), got.Format(time.DateOnly), tc.want)
+			}
+			if h, m, sec := got.Clock(); h|m|sec != 0 {
+				t.Errorf("%s/%s: a date reached the driver carrying %02d:%02d:%02d",
+					arm.arm, tc.name, h, m, sec)
+			}
 		}
-		if h, m, s := got.Clock(); h|m|s != 0 {
-			t.Errorf("%s: a date reached the driver carrying %02d:%02d:%02d", tc.name, h, m, s)
-		}
+	}
+
+	// The string arm parses with time.DateOnly, which is midnight by
+	// construction; it is here so all three arms are named in one place.
+	out, err := Coerce(schema.DateConstraint{}, "1969-07-20")
+	if err != nil {
+		t.Fatalf("string arm: Coerce: %v", err)
+	}
+	if got := time.Time(out.(dbtype.Date)); got.Format(time.DateOnly) != "1969-07-20" {
+		t.Errorf("string arm: Coerce = %s, want 1969-07-20", got.Format(time.DateOnly))
 	}
 }

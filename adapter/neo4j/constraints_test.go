@@ -658,3 +658,23 @@ func TestConstraints_RequiredOnlyTypes_SkipsOptionalList(t *testing.T) {
 	// disabled.
 	assertContains(t, stmts, "REQUIRE n.name IS :: STRING")
 }
+
+// docs/SPEC.md promises a nested-collection property is rejected with
+// E_NEO4J_UNSUPPORTED_TYPE unconditionally — "constraint generation is
+// all-or-nothing [and] emits nothing for the whole schema". The volume option
+// gates emission, so it must not gate that rejection: the property is optional,
+// which is exactly what WithRequiredOnlyTypeConstraints skips.
+func TestConstraints_NestedListRejectedEvenWhenSkippedForVolume(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _ := loadSchemaAndValidator(t, "nested_list_optional.yammm")
+
+	for _, requiredOnly := range []bool{false, true} {
+		a := New(WithRequiredOnlyTypeConstraints(requiredOnly))
+		_, res := a.ConstraintsStructured(ctx, s)
+		if !res.HasCode(E_NEO4J_UNSUPPORTED_TYPE) {
+			t.Errorf("WithRequiredOnlyTypeConstraints(%v): no %s for an optional List<List<Integer>>",
+				requiredOnly, E_NEO4J_UNSUPPORTED_TYPE)
+		}
+	}
+}

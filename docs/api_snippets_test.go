@@ -274,20 +274,23 @@ func TestDocumentedRendererCallShapes(t *testing.T) {
 	_ = diag.ContextualError{Result: diag.OK(), Tag: "t"}
 }
 
-// TestDocumentedKeyFunctions pins the graph key surface. FormatComposedKey's
-// first parameter is the parent's key components, not a formatted key — the
-// distinction API.md's table erased.
+// TestDocumentedKeyFunctions pins the graph key surface API.md documents, in
+// both directions: FormatKey's canonical rendering and the round trip its
+// table promises.
 func TestDocumentedKeyFunctions(t *testing.T) {
 	t.Parallel()
-	parent := graph.FormatKey("vin-123")
-	if parent != `["vin-123"]` {
-		t.Errorf("FormatKey returned %q; the documented canonical form is [\"vin-123\"]", parent)
+	if got := graph.FormatKey("vin-123"); got != `["vin-123"]` {
+		t.Errorf("FormatKey returned %q; the documented canonical form is [\"vin-123\"]", got)
 	}
-	vehicle := schema.NewTypeID(location.NewSourceID("test://car.yammm"), "Vehicle")
-	composed, err := graph.FormatComposedKey(vehicle, []any{"vin-123"},
-		[]graph.ComposedStep{{Relation: "WHEELS", KeyOrIndex: []any{"front-left"}}})
-	if err != nil || composed == "" {
-		t.Fatalf("FormatComposedKey: %v", err)
+	if got := graph.FormatKey("us", 12345); got != `["us",12345]` {
+		t.Errorf("FormatKey returned %q; the documented form is [\"us\",12345]", got)
+	}
+	parts, err := graph.ParseKeyStrings(`["us","ca"]`)
+	if err != nil {
+		t.Fatalf("ParseKeyStrings: %v", err)
+	}
+	if len(parts) != 2 || parts[0] != "us" || parts[1] != "ca" {
+		t.Errorf("ParseKeyStrings returned %v; the documented round trip is [us ca]", parts)
 	}
 }
 

@@ -163,10 +163,30 @@
 // delete (SET c = ..., never SET c +=), so a stale property cannot survive
 // on a part the way it can on a merged root node.
 //
-// Part nodes carry their identity in the _composed_key property (see
-// [graph.FormatComposedKey]); for a keyless (many) part the key is
+// Part nodes carry their identity in the _composed_key property, which this
+// adapter mints because a part has none of its own: the library identifies one
+// through its parent composition, and only a store that must address each node
+// separately needs an address. For a keyless (many) part the segment is
 // positional and NOT a stable identity across writes — safe under replace
 // semantics, which never match an existing part node by key.
+//
+// The address is a flat JSON array: the owning root's LABEL, the root's key
+// values, then one two-element segment per composition hop, except a (one)
+// composition, whose segment names the relation alone.
+//
+//	["shop__Order",["o1"],["SECTIONS",["s1"]],["NOTES",0]]
+//
+// Three properties earn that shape. It is FLAT, so the address grows linearly
+// with depth; nesting each level's rendering inside the next escapes the level
+// above on every hop and the escapes compound. It leads with the root's LABEL,
+// because the depth-2 parent MATCH is scoped by the PART label and not by the
+// root, so two root types sharing a key value and a relation name would
+// otherwise mint one address for children under one part label —
+// [Adapter.ShapeForSchema] refuses a closure whose labels collide, which is
+// what makes the label exact. And it carries NO source path: a type identity
+// renders a file-backed schema's absolute path, which would put the writing
+// machine's directory layout on every part node and change every address when
+// the schema file moves.
 //
 // # Write-Once Derivation
 //

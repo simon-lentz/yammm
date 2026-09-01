@@ -471,14 +471,13 @@ func (g *Graph) AddComposed(
 				WithDetail(diag.DetailKeyTypeName, parentName).
 				WithDetail(diag.DetailKeyRelationName, relationName).
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-			// The address must name the node that EXISTS — the occupant the
-			// writers already keyed. The rejected child never attaches, so
-			// its own address is assigned to nothing.
-			if conflictInst != nil {
-				if composedPK, err := FormatComposedKey(parentInst.TypeID(), keyToValues(parentInst.PrimaryKey()),
-					[]ComposedStep{{Relation: relationName, KeyOrIndex: composedKeyOrIndex(childTyp, conflictInst.PrimaryKey(), 0)}}); err == nil {
-					builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
-				}
+			// The key must name the occupant that EXISTS, not the rejected
+			// child, which never attaches. Whether there is a key at all is a
+			// question for the SCHEMA: a part type declaring none has no key to
+			// report however an instance was constructed, and the detail is
+			// then absent rather than carrying a stand-in.
+			if conflictInst != nil && childTyp.HasPrimaryKey() {
+				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, conflictInst.PrimaryKey().String())
 			}
 			issue := builder.Build()
 
@@ -493,23 +492,20 @@ func (g *Graph) AddComposed(
 		}
 	} else if childTyp.HasPrimaryKey() {
 		childPKString := child.PrimaryKey().String()
-		for existingIndex, existing := range parentInst.composed[relationName] {
+		for _, existing := range parentInst.composed[relationName] {
 			if existing.PrimaryKey().String() != childPKString {
 				continue
 			}
 			childInst := newInstance(g.instanceTagForm(child.TypeID()), child.TypeID(),
 				child.PrimaryKey(), child.Properties(), child.Provenance(), child.Validated())
 
-			builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+			issue := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 				"duplicate composed child primary key "+childPKString).
 				WithDetail(diag.DetailKeyTypeName, parentName).
 				WithDetail(diag.DetailKeyRelationName, relationName).
-				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-			if composedPK, err := FormatComposedKey(parentInst.TypeID(), keyToValues(parentInst.PrimaryKey()),
-				[]ComposedStep{{Relation: relationName, KeyOrIndex: composedKeyOrIndex(childTyp, child.PrimaryKey(), existingIndex)}}); err == nil {
-				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
-			}
-			issue := builder.Build()
+				WithDetail(diag.DetailKeyJSONField, rel.FieldName()).
+				WithDetail(diag.DetailKeyPrimaryKey, childPKString).
+				Build()
 
 			g.duplicates = append(g.duplicates, newDuplicate(childInst, existing, parentInst, relationName, issue))
 			trace.Warn(

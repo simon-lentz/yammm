@@ -1,0 +1,61 @@
+{
+  "name": "\"ft_pk\"",
+  "span": {
+    "s": 0,
+    "e": 14
+  },
+  "types": [
+    {
+      "name": "Doc",
+      "name_span": {
+        "s": 21,
+        "e": 24
+      },
+      "props": [
+        {
+          "name": "title",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 37,
+              "e": 43
+            }
+          },
+          "primary": true,
+          "anns": [
+            {
+              "name": "fulltext",
+              "span": {
+                "s": 52,
+                "e": 61
+              }
+            }
+          ],
+          "span": {
+            "s": 31,
+            "e": 61
+          }
+        },
+        {
+          "name": "body",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 72,
+              "e": 78
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 66,
+            "e": 87
+          }
+        }
+      ],
+      "span": {
+        "s": 16,
+        "e": 89
+      }
+    }
+  ]
+}

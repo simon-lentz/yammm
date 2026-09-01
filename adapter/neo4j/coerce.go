@@ -27,19 +27,21 @@ import (
 //     list path ([coerceSlice]), which applies the same rule per element.
 //   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
 //     constraint's custom Go layout when it declares one (Timestamp["…"]) and
-//     against RFC3339 / RFC3339Nano otherwise; a time.Time passes through. A
-//     string that does not parse, or any non-string non-time.Time value, is a
-//     coercion failure and returns an error. The instant is always expressed in
-//     a location the driver can send: a location whose name the host's tz
-//     database resolves is kept, and time.Local, an unnamed location, or a name
-//     the host cannot resolve is re-expressed in its offset. A consumer that
-//     must keep IANA names on a host without a tz database imports time/tzdata.
-//   - Date: a "2006-01-02" string OR a time.Time -> dbtype.Date (Neo4j DATE); a
-//     dbtype.Date passes through. A string that does not parse, or any other
-//     non-temporal value, is a coercion failure and returns an error. Mapping a
-//     time.Time to dbtype.Date keeps a Date-constrained value from reaching Neo4j
-//     as ZONED DATETIME and unifies this scalar path with the list path
-//     ([coerceSlice]) on one rule.
+//     against RFC3339 otherwise; a time.Time passes through. A string that does
+//     not parse, or any non-string non-time.Time value, is a coercion failure
+//     and returns an error. The instant is always expressed in a location the
+//     driver can send, under one rule: a named location is kept only when the
+//     host's tz database resolves it AND the resolved offset agrees with the
+//     one the value carries; time.Local, an unnamed location, an unresolvable
+//     name and a name whose offset disagrees are all re-expressed in the
+//     value's own offset. A consumer that must keep IANA names on a host
+//     without a tz database imports time/tzdata.
+//   - Date: a "2006-01-02" string, a time.Time, OR a dbtype.Date -> dbtype.Date
+//     (Neo4j DATE). A string that does not parse, or any other non-temporal
+//     value, is a coercion failure and returns an error. All three arms are
+//     normalised to midnight UTC: a date carries no time of day, and the driver
+//     derives its day number by a division that truncates toward zero, so a
+//     pre-1970 instant carrying a clock would land a day late.
 //   - Every other (non-transforming) kind is already driver-native and passes
 //     through unchanged.
 //
@@ -141,7 +143,10 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 	case schema.KindDate:
 		switch v := raw.(type) {
 		case dbtype.Date:
-			return v, nil // already Neo4j DATE native
+			// Native already, but not necessarily normalised: dbtype.Date is a
+			// plain time.Time conversion with no constructor that zeroes the
+			// clock, so a caller can build one carrying a time of day.
+			return dbtype.Date(calendarDate(time.Time(v))), nil
 		case time.Time:
 			return dbtype.Date(calendarDate(v)), nil
 		case string:

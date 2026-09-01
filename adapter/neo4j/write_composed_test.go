@@ -188,42 +188,18 @@ func TestBatchNodeQueries_ComposedKeys(t *testing.T) {
 		}
 	}
 
-	orderID := snap.Types()[0]
-	for _, id := range snap.Types() {
-		if strings.HasSuffix(id.String(), ":Order") {
-			orderID = id
-		}
-	}
-	sections := func(child string) []graph.ComposedStep {
-		return []graph.ComposedStep{{Relation: "SECTIONS", KeyOrIndex: []any{child}}}
-	}
-	s1CK, err := graph.FormatComposedKey(orderID, []any{"o1"}, sections("s1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s2CK, err := graph.FormatComposedKey(orderID, []any{"o1"}, sections("s2"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// LITERALS, not a second call to the renderer under test. Comparing the
+	// adapter's output against a value computed the same way pins nothing: it
+	// stays green under any format change that is applied consistently.
+	const (
+		s1CK = `["nested_test__Order",["o1"],["SECTIONS",["s1"]]]`
+		s2CK = `["nested_test__Order",["o1"],["SECTIONS",["s2"]]]`
+		n0CK = `["nested_test__Order",["o1"],["SECTIONS",["s1"]],["NOTES",0]]`
+		n1CK = `["nested_test__Order",["o1"],["SECTIONS",["s1"]],["NOTES",1]]`
+	)
+
 	if got, want := cks["Section"], []string{s1CK, s2CK}; !slices.Equal(got, want) {
 		t.Errorf("Section composed keys = %v; want %v", got, want)
-	}
-
-	// The keyless Note children append a positional segment to s1's PATH. They
-	// do not nest s1's rendered address inside their own.
-	note := func(i int) []graph.ComposedStep {
-		return append(sections("s1"), graph.ComposedStep{Relation: "NOTES", KeyOrIndex: i})
-	}
-	n0CK, err := graph.FormatComposedKey(orderID, []any{"o1"}, note(0))
-	if err != nil {
-		t.Fatal(err)
-	}
-	n1CK, err := graph.FormatComposedKey(orderID, []any{"o1"}, note(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(n0CK, `\\"`) {
-		t.Errorf("a depth-2 address carries a compounded escape, so it nested instead of appending: %s", n0CK)
 	}
 	if got, want := cks["Note"], []string{n0CK, n1CK}; !slices.Equal(got, want) {
 		t.Errorf("Note composed keys = %v; want %v", got, want)
@@ -232,20 +208,36 @@ func TestBatchNodeQueries_ComposedKeys(t *testing.T) {
 		t.Errorf("Note parent_ck values = %v; want %v", got, want)
 	}
 
-	// The documented flat form: root identity, root key, then one segment per
-	// hop. A depth-2 address is therefore FOUR elements, and a depth-1 address
-	// three — the length tracks depth instead of the nesting staying constant
-	// while each level's rendering grows.
-	var deep []any
-	if err := json.Unmarshal([]byte(n0CK), &deep); err != nil || len(deep) != 4 {
-		t.Errorf("depth-2 composed key %q is not a 4-element JSON array (%v)", n0CK, err)
+	// The address carries the root's LABEL and no source path: a file-backed
+	// schema renders an absolute path in [schema.TypeID], which would put the
+	// writing machine's directory layout on every part node.
+	for label, keys := range cks {
+		for _, ck := range keys {
+			if strings.Contains(ck, "/") || strings.Contains(ck, `\\`) {
+				t.Errorf("%s composed key carries a path or a compounded escape: %s", label, ck)
+			}
+		}
 	}
-	var shallow []any
-	if err := json.Unmarshal([]byte(s1CK), &shallow); err != nil || len(shallow) != 3 {
-		t.Errorf("depth-1 composed key %q is not a 3-element JSON array (%v)", s1CK, err)
-	}
-	if root, ok := deep[0].(string); !ok || !strings.HasSuffix(root, ":Order") {
-		t.Errorf("composed key does not lead with the owning root's type identity: %v", deep[0])
+
+	// Flat, so the element count tracks depth: three at depth 1, four at depth
+	// 2. A nesting form keeps the count constant while each level's rendering
+	// grows.
+	for _, tc := range []struct {
+		name string
+		ck   string
+		want int
+	}{{"depth 1", cks["Section"][0], 3}, {"depth 2", cks["Note"][0], 4}} {
+		var arr []any
+		if err := json.Unmarshal([]byte(tc.ck), &arr); err != nil {
+			t.Errorf("%s composed key %q is not JSON: %v", tc.name, tc.ck, err)
+			continue
+		}
+		if len(arr) != tc.want {
+			t.Errorf("%s composed key %q has %d elements, want %d", tc.name, tc.ck, len(arr), tc.want)
+		}
+		if root, ok := arr[0].(string); !ok || root != "nested_test__Order" {
+			t.Errorf("%s composed key does not lead with the owning root's label: %v", tc.name, arr[0])
+		}
 	}
 }
 

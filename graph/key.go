@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // FormatKey produces a canonical JSON array string for primary key lookup.
@@ -42,97 +41,6 @@ func FormatKey(values ...any) string {
 		panic(fmt.Sprintf("graph.FormatKey: failed to marshal key values: %v", err))
 	}
 	return string(data)
-}
-
-// ComposedStep is one hop in a composed child's address: the composition it
-// arrived through, and which child it is within that slot.
-//
-// KeyOrIndex is nil for a (one) composition, the child's primary key values
-// ([]any) for a keyed part, and its 0-based position (int) for a keyless one.
-// A positional address is not a stable identity across writes, which the
-// replace-whole semantics of a composition make safe.
-type ComposedStep struct {
-	Relation   string
-	KeyOrIndex any
-}
-
-// FormatComposedKey returns the canonical identity string for a composed child.
-//
-// The format is a FLAT JSON array: the owning root's type identity, the root's
-// key values, then one two-element segment per composition hop.
-//
-//	["file:///m/car.yammm:Vehicle",["ABC123"],["WHEELS",["front-left"]]]
-//
-// Two properties earn the shape.
-//
-// It is flat, so the address grows linearly with composition depth. Nesting each
-// level's rendered key inside the next JSON-escapes the level above on every
-// hop, and the escapes compound: three levels grew 21 → 47 → 85 characters, and
-// the address stopped being readable in the database.
-//
-// It carries the root's TYPE IDENTITY, because a key value is not an identity.
-// Two root types that share a primary-key value and a composition relation name
-// would otherwise mint the same address for their children under one part
-// label, and the collision is silent — the same rendering-versus-identity
-// defect the graph package fixed by keying on [schema.TypeID].
-//
-// JSON marshaling failures cause a panic (same rationale as FormatKey).
-//
-// Returns an error if rootType is zero, rootKeyValues is empty, path is empty,
-// or any step names no relation or carries a KeyOrIndex that is not nil, []any
-// or a non-negative int.
-func FormatComposedKey(rootType schema.TypeID, rootKeyValues []any, path []ComposedStep) (string, error) {
-	if rootType.IsZero() {
-		return "", errors.New("rootType cannot be zero: a composed address is keyed by the owning root's identity")
-	}
-	if len(rootKeyValues) == 0 {
-		return "", errors.New("rootKeyValues cannot be nil or empty")
-	}
-	if len(path) == 0 {
-		return "", errors.New("path cannot be empty: a composed child is at least one hop from its root")
-	}
-
-	arr := make([]any, 0, len(path)+2)
-	arr = append(arr, rootType.String(), rootKeyValues)
-	for i, step := range path {
-		if step.Relation == "" {
-			return "", fmt.Errorf("path[%d]: relation cannot be empty", i)
-		}
-		switch v := step.KeyOrIndex.(type) {
-		case nil:
-			arr = append(arr, []any{step.Relation})
-		case []any:
-			if len(v) == 0 {
-				return "", fmt.Errorf("path[%d]: KeyOrIndex []any cannot be empty", i)
-			}
-			arr = append(arr, []any{step.Relation, v})
-		case int:
-			if v < 0 {
-				return "", fmt.Errorf("path[%d]: KeyOrIndex int cannot be negative: %d", i, v)
-			}
-			arr = append(arr, []any{step.Relation, v})
-		default:
-			return "", fmt.Errorf("path[%d]: KeyOrIndex must be nil, []any, or int; got %T", i, step.KeyOrIndex)
-		}
-	}
-
-	data, err := json.Marshal(arr)
-	if err != nil {
-		panic(fmt.Sprintf("graph.FormatComposedKey: failed to marshal: %v", err))
-	}
-	return string(data), nil
-}
-
-// keyToValues extracts []any from immutable.Key for use with FormatComposedKey.
-//
-// This helper converts the immutable key representation to the []any format
-// expected by FormatComposedKey and FormatKey.
-func keyToValues(k immutable.Key) []any {
-	result := make([]any, k.Len())
-	for i := range k.Len() {
-		result[i] = k.Get(i).Unwrap()
-	}
-	return result
 }
 
 // ParseKey decodes a [FormatKey] string back into its component values.

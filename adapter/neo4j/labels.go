@@ -58,10 +58,19 @@ var cypherReservedKeywords = map[string]struct{}{
 	"ADD": {}, "DROP": {},
 }
 
-// SanitizeIdentifier applies Neo4j identifier sanitization rules to a string:
+// SanitizeIdentifier applies Neo4j identifier sanitization rules to a string,
+// in this order:
 //   - Replaces space, hyphen, period, forward slash, backslash with underscore
+//   - Prepends underscore if the string now starts with a digit
 //   - Strips all characters except ASCII letters, digits, and underscores
-//   - Prepends underscore if the result starts with a digit
+//
+// The order matters and the result is NOT guaranteed to be a valid identifier:
+// an input whose first invalid character precedes a digit ("«9x") has that
+// character stripped after the leading-digit test, so it returns "9x". The
+// output is checked by [ValidateIdentifier], and [Adapter.ShapeForSchema]
+// refuses such a schema with [E_NEO4J_INVALID_IDENTIFIER] naming the label —
+// repairing it here instead would silently accept a type name the author
+// should see reported.
 //
 // This is the same transformation applied to each component in [Adapter.Label].
 func SanitizeIdentifier(s string) string {
@@ -136,19 +145,23 @@ func (a *Adapter) Label(ctx context.Context, schemaName, typeName string) string
 		SanitizeIdentifier(trimmedType)
 }
 
-// DetectLabelCollisions checks whether any non-abstract types in the schema
-// would produce the same Neo4j label after sanitization.
+// DetectLabelCollisions checks whether any non-abstract type across the
+// schema's IMPORT CLOSURE would produce the same Neo4j label after
+// sanitization.
 //
-// Both schema front doors (the parser and [schema.NewBuilder]) enforce the
-// DSL name productions, on which [SanitizeIdentifier] is the identity
-// function — so two distinct type names from either front door cannot
-// collide. The check is retained as defense-in-depth for construction
-// paths that bypass both.
+// The closure, because [Adapter.Label] composes a label from the declaring
+// SCHEMA's name as well as the type's: two type names cannot collide through
+// either front door — the parser and [schema.NewBuilder] enforce the DSL name
+// productions, on which [SanitizeIdentifier] is the identity — but two schema
+// names can, because a schema name is a free-form string checked only for
+// emptiness. Members named "geo-regions" and "geo_regions" sanitize alike and
+// render one label for every same-named type they declare.
 //
 // Returns a [diag.Result] containing one [E_NEO4J_LABEL_COLLISION] issue per
-// colliding label, e.g.:
+// colliding label. Its type detail carries full type IDENTITIES, not display
+// names, because the names are what collided:
 //
-//	label "my_schema__FooBar" produced by types: Foo-Bar, Foo_Bar
+//	types file:///a.yammm:Region and file:///b.yammm:Region all render label "geo_regions__Region"
 func (a *Adapter) DetectLabelCollisions(ctx context.Context, s *schema.Schema) diag.Result {
 	collector := diag.NewCollector(0)
 	labelToTypes := make(map[string][]schema.TypeID)

@@ -1,0 +1,20 @@
+schema "graph_corpus"
+
+type Order {
+    order_id String primary
+    customer String required
+
+    *-> SECTIONS (_:many) Section
+}
+
+part type Section {
+    section_id String primary
+    heading    String required
+
+    *-> NOTES (_:many) Note
+}
+
+part type Note {
+    note_id String primary
+    body    String required
+}

@@ -44,22 +44,23 @@ const (
 	RelToRowPrefix   = "to_"
 )
 
-// buildBatchNodeMergeQuery returns the UNWIND-batched variant of
-// the single-node form removed with the class-D cut. Parameter shape:
+// buildBatchNodeMergeQuery renders the UNWIND-batched node MERGE. Parameter
+// shape:
 //
 //	{rows: [{key_<key_1>: v, props: map, [update_props: map]}, ...]}
 //
-// The `update_props` entry per row is required when keys == [immutableKeys]
-// and ignored when keys == [MutableKeys].
+// The `update_props` entry per row is required when keys == [immutableKeys] and
+// ignored when keys == [mutableKeys].
 //
-// Merge keys carry the same `key_` prefix the single-node builder gives its
-// parameters ([batchKeyParamPrefix]), so a row's key entries occupy a namespace
-// disjoint from `props` and `update_props`. That matters because `props` and
-// `update_props` are themselves legal DSL property names: without the prefix a
-// primary key so named would collide with the property map in the same row.
+// Merge keys carry the `key_` prefix ([batchKeyParamPrefix]), so a row's key
+// entries occupy a namespace disjoint from `props` and `update_props`. That
+// matters because `props` and `update_props` are themselves legal DSL property
+// names: without the prefix a primary key so named would collide with the
+// property map in the same row.
 //
-// Node batch merges do not emit a RETURN clause
-// for the rationale.
+// Node batch merges emit no RETURN clause: a MERGE creates the node it does not
+// find, so there is no missed-match case for a count to report. The composition
+// and relationship templates are MATCH-anchored and do carry one.
 func buildBatchNodeMergeQuery(label string, keyNames []string, keys keyMutability) string {
 	var b strings.Builder
 	b.WriteString("UNWIND $rows AS row\n")

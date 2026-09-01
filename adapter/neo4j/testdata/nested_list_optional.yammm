@@ -1,0 +1,6 @@
+schema "nested_opt"
+
+type Grid {
+    id     String primary
+    matrix List<List<Integer>>
+}

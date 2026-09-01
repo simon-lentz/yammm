@@ -1,0 +1,6 @@
+schema "ft_pk"
+
+type Doc {
+    title String primary @fulltext
+    body  String required
+}

@@ -34,9 +34,13 @@ const (
 	// `ON CREATE SET n += $props` + `ON MATCH SET n += $update_props`
 	// (or the `row.props` / `row.update_props` batch variants).
 	//
-	// Callers using this shape must provide `$update_props` (or
-	// `row.update_props` on each batch row) in their parameter map
-	// or Neo4j will raise `Parameter $update_props was not provided`
-	// at execute time.
+	// Callers using this shape must provide `$update_props`, or
+	// `row.update_props` on each batch row. The two omissions fail
+	// differently, measured on 5.26: a missing top-level parameter is
+	// `Expected parameter(s): update_props`, while a row missing the key is
+	// `Expected Property(...update_props) to be a map, but it was NO_VALUE`.
+	// The row case surfaces only once the node EXISTS, because it is the ON
+	// MATCH branch that reads the key — a first write of a batch passes and
+	// the same batch replayed fails.
 	immutableKeys
 )

@@ -336,14 +336,14 @@ func (a *Adapter) composedKeyConstraints(label string) []Constraint {
 			Name:       a.optionalName(label, props, ConstraintUnique),
 			Kind:       ConstraintUnique,
 			Label:      label,
-			Properties: props,
+			Properties: []string{composedKeyProp},
 			Statement:  unique,
 		},
 		{
 			Name:       a.optionalName(label, props, ConstraintNotNull),
 			Kind:       ConstraintNotNull,
 			Label:      label,
-			Properties: props,
+			Properties: []string{composedKeyProp},
 			Statement:  notNull,
 		},
 	}
@@ -421,10 +421,6 @@ func (a *Adapter) listTypeConstraints(t *schema.Type, label string, collector *d
 		if _, exists := seen[propName]; exists {
 			continue
 		}
-		if a.config.requiredOnlyTypeConstraints && !prop.IsRequired() {
-			continue
-		}
-
 		c := schema.ResolveAlias(prop.Constraint())
 		lc, ok := c.(schema.ListConstraint)
 		if !ok {
@@ -455,6 +451,15 @@ func (a *Adapter) listTypeConstraints(t *schema.Type, label string, collector *d
 			continue
 		}
 		seen[propName] = struct{}{}
+
+		// The volume option gates EMISSION, never validation: docs/SPEC.md
+		// promises a nested-collection property is rejected with
+		// E_NEO4J_UNSUPPORTED_TYPE unconditionally, and an unsupported element
+		// type is unsupported whether or not a constraint would be emitted for
+		// it. Skipping earlier let an optional one through unreported.
+		if a.config.requiredOnlyTypeConstraints && !prop.IsRequired() {
+			continue
+		}
 
 		typeExpr := "LIST<" + elemType + ">"
 		props := []string{propName}

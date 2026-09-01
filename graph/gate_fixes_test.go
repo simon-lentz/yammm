@@ -106,13 +106,9 @@ func TestAddComposed_OneDuplicate_NamesTheAddressTheWritersAssign(t *testing.T) 
 		t.Fatal("a second child on a (one) composition was accepted")
 	}
 
-	// The address must name the node that exists — the attached c1, not the
-	// rejected c2, whose address no writer ever assigns.
-	want, err := graph.FormatComposedKey(mustTypeID(t, s, "Parent"), []any{"p1"},
-		[]graph.ComposedStep{{Relation: "child", KeyOrIndex: []any{"c1"}}})
-	if err != nil {
-		t.Fatalf("FormatComposedKey: %v", err)
-	}
+	// The key must name the occupant that exists — the attached c1, not the
+	// rejected c2.
+	want := graph.FormatKey("c1")
 	var got string
 	for issue := range res.Issues() {
 		if issue.Code() != diag.E_DUPLICATE_COMPOSED_PK {
@@ -470,12 +466,10 @@ func TestAddComposed_KeylessOneSlot_NamesThePositionalAddress(t *testing.T) {
 		t.Fatal("a second child on a (one) slot was accepted")
 	}
 
-	// The occupant is at position 0, which is what the writer keys it by.
-	want, err := graph.FormatComposedKey(carID, []any{"v1"},
-		[]graph.ComposedStep{{Relation: "SPARE", KeyOrIndex: 0}})
-	if err != nil {
-		t.Fatalf("FormatComposedKey: %v", err)
-	}
+	// The occupant is a keyless part, so there is no primary key to report and
+	// the detail is absent rather than carrying a synthesized stand-in. The
+	// type, relation and field details still locate the slot.
+	want := ""
 	var got string
 	for issue := range res.Issues() {
 		if issue.Code() != diag.E_DUPLICATE_COMPOSED_PK {
@@ -488,7 +482,7 @@ func TestAddComposed_KeylessOneSlot_NamesThePositionalAddress(t *testing.T) {
 		}
 	}
 	if got != want {
-		t.Errorf("primary_key detail = %q, want the positional address %q", got, want)
+		t.Errorf("primary_key detail = %q, want %q — a keyless part has no key to report", got, want)
 	}
 }
 

@@ -266,14 +266,14 @@ func collectCreateRows(
 
 	// The walk carries the PATH from the root, so each level appends one hop
 	// rather than nesting the level above inside itself.
-	var walk func(parent *graph.Instance, parentType *schema.Type, path []graph.ComposedStep, depth int) error
-	walk = func(parent *graph.Instance, parentType *schema.Type, path []graph.ComposedStep, depth int) error {
+	var walk func(parent *graph.Instance, parentType *schema.Type, path []composedStep, depth int) error
+	walk = func(parent *graph.Instance, parentType *schema.Type, path []composedStep, depth int) error {
 		// Below the root, the rows MATCH their parent by its own composed key,
 		// which is this walk's path — the child's minus its last hop.
 		var parentCK string
 		if depth > 1 {
 			var err error
-			if parentCK, err = graph.FormatComposedKey(rootType.ID(), rootKeyValues, path); err != nil {
+			if parentCK, err = composedKey(rootShape.Label, rootKeyValues, path); err != nil {
 				return fmt.Errorf("composed parent %s: %w", parentType.Name(), err)
 			}
 		}
@@ -303,8 +303,8 @@ func collectCreateRows(
 				} else {
 					keyOrIndex = i
 				}
-				childPath := append(slices.Clip(path), graph.ComposedStep{Relation: relName, KeyOrIndex: keyOrIndex})
-				ck, err := graph.FormatComposedKey(rootType.ID(), rootKeyValues, childPath)
+				childPath := append(slices.Clip(path), composedStep{relation: relName, keyOrIndex: keyOrIndex})
+				ck, err := composedKey(rootShape.Label, rootKeyValues, childPath)
 				if err != nil {
 					return fmt.Errorf("composition %q child %d: %w", relName, i, err)
 				}
@@ -312,6 +312,11 @@ func collectCreateRows(
 				props, err := propsToParamMap(child.Properties(), partType)
 				if err != nil {
 					return fmt.Errorf("part %s: %w", partShape.Label, err)
+				}
+				if props == nil {
+					// A part carrying no properties at all clones to a nil map,
+					// and the composed key still has to go somewhere.
+					props = make(map[string]any, 1)
 				}
 				props[composedKeyProp] = ck
 
@@ -328,7 +333,11 @@ func collectCreateRows(
 					}
 					row["_parent_keys"] = rootShape.PrimaryKeys
 				} else {
-					key.parentLabel = shapes.Types[parent.TypeID()].Label
+					parentShape, ok := shapes.Types[parent.TypeID()]
+					if !ok {
+						return fmt.Errorf("no shape for composed parent type %s", parent.TypeID())
+					}
+					key.parentLabel = parentShape.Label
 					key.parentByCK = true
 					row["parent_ck"] = parentCK
 				}

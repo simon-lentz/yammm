@@ -147,6 +147,24 @@ func (a *Adapter) DiffConstraints(
 		if ri.OwningConstraint != "" || len(ri.LabelsOrTypes) != 1 {
 			continue
 		}
+		// Only a NODE index over the same label can serve a node constraint's
+		// backing index, and only a RANGE one: a uniqueness constraint backs
+		// itself with a range index, and the server refuses only a duplicate of
+		// THAT. Measured on 5.26 Enterprise and 2026.05 Enterprise -- RANGE is
+		// refused ("a constraint cannot be created until the index is
+		// dropped"), while TEXT, POINT, FULLTEXT, VECTOR and any relationship
+		// index are accepted alongside it. Blocking on those reported permanent
+		// drift for a schema the server would have taken, and docs/SPEC.md
+		// blesses the colliding shape: @fulltext on a sole primary key is "a
+		// distinct, legitimate object". An empty column means the record did
+		// not come from [IntrospectIndexesQuery]; it is read the permissive way
+		// the index side reads it.
+		if ri.EntityType != "" && !strings.EqualFold(ri.EntityType, "NODE") {
+			continue
+		}
+		if ri.Type != "" && !strings.EqualFold(ri.Type, "RANGE") {
+			continue
+		}
 		def := constraintDefinitionKey(ri.LabelsOrTypes[0], ri.Properties)
 		if _, taken := blockingDefinitions[def]; !taken {
 			blockingDefinitions[def] = ri

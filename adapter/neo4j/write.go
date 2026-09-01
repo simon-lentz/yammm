@@ -113,9 +113,14 @@ func WithEdgeChunkSize(size int) WriteOption {
 // [CompositionReplace], then every [CompositionCreate] parent-first by
 // depth — execute in order and each parent's composed subtree is replaced
 // whole (see [NodeQueryKind]). Types with more instances than the chunk
-// size produce multiple queries per phase. When two types in the snapshot
-// render the same type name, returns an error naming both identities —
-// they would share one node shape and one label.
+// size produce multiple queries per phase.
+//
+// Requires a [GraphShape] that [Adapter.ShapeForSchema] built from this
+// snapshot's schema, and refuses one built by hand or from another: a shape the
+// adapter did not build carries no key constraints, so merge keys would reach
+// the driver uncoerced while the same properties are coerced from the schema.
+// Two identities that render one type NAME are not refused — [GraphShape.Types]
+// is keyed by [schema.TypeID] and each gets its own label.
 func (a *Adapter) BatchNodeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -203,12 +208,13 @@ func (a *Adapter) BatchNodeQueries(
 // BatchEdgeQueries generates UNWIND-batched MERGE queries for edges,
 // grouped by (sourceType, relationType, targetType) signature.
 //
-// Returns one [BatchEdgeQuery] per signature per chunk. When two types in
-// the snapshot render the same type name, returns an error naming both
-// identities — the writer refuses a rendering it cannot make unambiguous, rather than
-// writing two types under one label.
+// Returns one [BatchEdgeQuery] per signature per chunk. Two identities that
+// render one type NAME are not refused — [GraphShape.Types] is keyed by
+// [schema.TypeID] and each gets its own label.
 //
-// shapes must cover the whole import closure, not just the entry schema: every
+// shapes must come from [Adapter.ShapeForSchema] over this snapshot's schema; a
+// hand-built or foreign one is refused, for the reason [Adapter.BatchNodeQueries]
+// states. It must cover the whole import closure, not just the entry schema: every
 // edge's source and target type is looked up in it, and a missing entry returns
 // "no shape for source type ..." with no further explanation. Build it with
 // [Adapter.ShapeForSchema], which walks the closure.
@@ -724,9 +730,11 @@ func chunkSlice[T any](items []T, size int) [][]T {
 		size = 1
 	}
 	var chunks [][]T
-	for i := 0; i < len(items); i += size {
-		end := min(i+size, len(items))
-		chunks = append(chunks, items[i:end])
+	for chunk := range slices.Chunk(items, size) {
+		// Clipped: an unclipped subslice runs to the end of the backing array,
+		// so a caller appending one row to a chunk's $rows would overwrite the
+		// first row of the next query in the same returned slice.
+		chunks = append(chunks, slices.Clip(chunk))
 	}
 	return chunks
 }

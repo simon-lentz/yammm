@@ -80,6 +80,7 @@ adapter/neo4j/testdata/composite_pk.yammm
 adapter/neo4j/testdata/edge_mixed.yammm
 adapter/neo4j/testdata/edge_typed_props.yammm
 adapter/neo4j/testdata/enum_pattern.yammm
+adapter/neo4j/testdata/fulltext_pk.yammm
 adapter/neo4j/testdata/indexes.yammm
 adapter/neo4j/testdata/indexes_bad_ident.yammm
 adapter/neo4j/testdata/indexes_bad_ident_multi.yammm
@@ -88,8 +89,11 @@ adapter/neo4j/testdata/indexes_duplicate_decl.yammm
 adapter/neo4j/testdata/indexes_fulltext_collision.yammm
 adapter/neo4j/testdata/indexes_inherited.yammm
 adapter/neo4j/testdata/inheritance.yammm
+adapter/neo4j/testdata/labelcollide/entry.yammm
+adapter/neo4j/testdata/labelcollide/geo_regions.yammm
 adapter/neo4j/testdata/list_properties.yammm
 adapter/neo4j/testdata/multiple_types.yammm
+adapter/neo4j/testdata/nested_list_optional.yammm
 adapter/neo4j/testdata/part_types.yammm
 adapter/neo4j/testdata/temporal_pk.yammm
 adapter/neo4j/testdata/write_basic.yammm
@@ -139,6 +143,7 @@ format/testdata/qualified_references.yammm
 format/testdata/trailing_comma_in_constraints.yammm
 format/testdata/wrap_and_align_interaction.yammm
 format/testdata/wrap_long_enum.yammm
+graph/testdata/composed.yammm
 instance/testdata/contract/contract_err.yammm
 instance/testdata/contract/contract_pass.yammm
 internal/parse/testdata/corpus/multibyte.yammm

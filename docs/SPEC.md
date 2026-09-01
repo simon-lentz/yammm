@@ -1033,7 +1033,7 @@ type Car {
 
 Composition data is embedded inline in instance documents rather than using reference objects, and is **always an array**, `(one)` included. Anything else draws `E_EDGE_SHAPE_MISMATCH`. This differs from associations, where `(one)` takes a single object.
 
-A part instance is identified through its parent composition, not by a global key. Exporters that must give each part node an identity of its own (the Neo4j adapter's `_composed_key` property) derive it from the parent's key, the composition name, and the child's key — or, for a **keyless** part, its array position. A positional identity is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
+A part instance is identified through its parent composition, not by a global key. The library mints no address for one. An exporter that must give each part node an identity of its own — the Neo4j adapter's `_composed_key` property is the only one that does — derives it from the **owning root**, not from the immediate parent: the root's identity in that store, the root's key, then one segment per composition hop, each naming the relation and either the child's key or, for a **keyless** part, its array position. Rooting the address at the owning root is what keeps it correct below depth one, and carrying the root's identity is what stops two root types that share a key value and a relation name from naming one part node. A positional segment is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
 
 ### Multiplicity
 

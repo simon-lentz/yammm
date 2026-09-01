@@ -1,0 +1,65 @@
+{
+  "name": "\"nested_opt\"",
+  "span": {
+    "s": 0,
+    "e": 19
+  },
+  "types": [
+    {
+      "name": "Grid",
+      "name_span": {
+        "s": 26,
+        "e": 30
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 44,
+              "e": 50
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 37,
+            "e": 58
+          }
+        },
+        {
+          "name": "matrix",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "List",
+              "elem": {
+                "kind": "Integer",
+                "span": {
+                  "s": 80,
+                  "e": 87
+                }
+              },
+              "span": {
+                "s": 75,
+                "e": 88
+              }
+            },
+            "span": {
+              "s": 70,
+              "e": 89
+            }
+          },
+          "span": {
+            "s": 63,
+            "e": 89
+          }
+        }
+      ],
+      "span": {
+        "s": 21,
+        "e": 91
+      }
+    }
+  ]
+}

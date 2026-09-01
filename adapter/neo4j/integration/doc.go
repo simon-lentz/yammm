@@ -63,8 +63,8 @@
 // where 4 is the driver's failed state and 0 is ready.
 //
 // The failure lands on the innocent query, which makes it read as a defect in
-// whatever ran second. It reached a pull request once, green on the default
-// image and red on the oldest one.
+// whatever ran second, and it is version-dependent: a suite can be green on the
+// default image and red on the oldest one.
 //
 // Two shapes of rejection exist and only one poisons the connection. A query the
 // server runs and rejects on a data rule — a constraint violation — recovers on
