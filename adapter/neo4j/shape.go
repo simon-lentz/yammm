@@ -2,10 +2,12 @@ package neo4j
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -34,10 +36,10 @@ type NodeShape struct {
 	// bound raw where its property is coerced matches nothing: a Date primary
 	// key MERGEs on a string against DATE-valued nodes.
 	//
-	// Unexported, so it can only come from [Adapter.ShapeForSchema] — a shape
-	// built by hand, or restored from a serialization that cannot carry a
-	// [schema.Constraint], has none and its keys pass through unchanged, which
-	// is the behaviour of a shape that never declared their types.
+	// Unexported, so it can only come from [Adapter.ShapeForSchema]. The write
+	// path refuses a shape without it — see [GraphShape.schemaID] — because keys
+	// that pass through uncoerced disagree in type with the properties they
+	// match against.
 	keyConstraints map[string]schema.Constraint
 }
 
@@ -49,9 +51,46 @@ type NodeShape struct {
 // type's instances to another type's label and keys. [NodeShape.Type] carries
 // the rendered name for display.
 //
-// Construct via [Adapter.ShapeForSchema]; do not create directly.
+// Construct via [Adapter.ShapeForSchema]. The write path enforces that rather
+// than asking for it: a shape it did not build is refused.
 type GraphShape struct {
 	Types map[schema.TypeID]NodeShape
+
+	// schemaID is the identity of the schema [Adapter.ShapeForSchema] built this
+	// shape from. Its zero value means the shape came from somewhere else.
+	//
+	// The write path requires it, and requires it to match the snapshot's own
+	// schema. A shape the adapter did not build carries no key constraints, so
+	// merge keys pass through [coerceValue] uncoerced while the SAME properties
+	// are coerced from the schema type — a Date primary key then reaches the
+	// driver as a string in the merge key and as a native date in the
+	// properties. The MERGE matches its key against the stored property, so it
+	// matches nothing and creates a duplicate node on every re-ingestion. A
+	// shape built from a DIFFERENT schema reaches the same place through a
+	// legitimate constructor, which is why the identity is compared and not
+	// merely present.
+	//
+	// Unexported, so nothing outside this package can set it: the guarantee is
+	// structural rather than a request in a doc comment.
+	schemaID location.SourceID
+}
+
+// requireShapeFor refuses a [GraphShape] this adapter did not build, and one
+// built from a schema other than the snapshot's.
+func requireShapeFor(shapes *GraphShape, s *schema.Schema) error {
+	switch {
+	case shapes == nil:
+		return errors.New("neo4j adapter: nil GraphShape; build one with Adapter.ShapeForSchema")
+	case shapes.schemaID.IsZero():
+		return errors.New("neo4j adapter: GraphShape was not built by Adapter.ShapeForSchema, so it carries no key constraints; " +
+			"merge keys would pass through uncoerced while their properties are coerced from the schema, and every re-ingestion would duplicate instead of match")
+	case s == nil:
+		return errors.New("neo4j adapter: snapshot carries no schema to check the GraphShape against")
+	case shapes.schemaID != s.SourceID():
+		return fmt.Errorf("neo4j adapter: GraphShape was built from schema %s but the snapshot carries schema %s",
+			shapes.schemaID, s.SourceID())
+	}
+	return nil
 }
 
 // ShapeForSchema converts a yammm schema into a [GraphShape] describing
@@ -71,7 +110,8 @@ type GraphShape struct {
 func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphShape, diag.Result) {
 	collector := diag.NewCollector(0)
 	shape := &GraphShape{
-		Types: make(map[schema.TypeID]NodeShape),
+		Types:    make(map[schema.TypeID]NodeShape),
+		schemaID: s.SourceID(),
 	}
 
 	// Defense-in-depth, like [Adapter.DetectLabelCollisions]: the source
@@ -80,19 +120,13 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphS
 	// loader-built closure can reach this refusal. It guards construction
 	// paths that bypass the loader.
 	seenLabels := make(map[string]schema.TypeID)
-	for _, member := range s.Closure() {
-		for t, label := range a.emittableTypes(ctx, member, collector) {
-			if first, dup := seenLabels[label]; dup {
-				collector.Collect(diag.NewIssue(diag.Error, E_NEO4J_LABEL_COLLISION,
-					fmt.Sprintf("type %s and type %s both render label %q across the import closure", first, t.ID(), label)).
-					WithDetail(diag.DetailKeyFormat, "neo4j").
-					WithDetail(detailKeyLabel, label).
-					Build())
-				continue
-			}
-			seenLabels[label] = t.ID()
-			a.recordShape(shape, t, label)
+	for t, label := range a.emittableTypes(ctx, s, collector) {
+		if first, dup := seenLabels[label]; dup {
+			collector.Collect(labelCollisionIssue(label, []schema.TypeID{first, t.ID()}))
+			continue
 		}
+		seenLabels[label] = t.ID()
+		a.recordShape(shape, t, label)
 	}
 
 	result := collector.Result()

@@ -77,7 +77,7 @@ func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, 
 					relationName, typeName)))
 			continue
 		}
-		b.slot(inst, graphInst, typeName, relationName, rel, composedValue)
+		b.slot(graphInst, typeName, relationName, rel, composedValue)
 	}
 
 	return graphInst
@@ -188,7 +188,6 @@ func (b *instanceBuilder) checkEdgeRelation(
 // slot checks one composition slot — its cardinality and the shape of what
 // arrived in it — and builds every child it admits.
 func (b *instanceBuilder) slot(
-	parent *instance.ValidInstance,
 	graphParent *Instance,
 	parentName string,
 	relationName string,
@@ -207,14 +206,14 @@ func (b *instanceBuilder) slot(
 				b.c.Collect(nonInstanceChild(parentName, relationName, rel, i))
 				continue
 			}
-			b.child(parent, graphParent, parentName, relationName, rel, child, i, seen)
+			b.child(graphParent, parentName, relationName, rel, child, i, seen)
 		}
 	case *instance.ValidInstance:
 		if v == nil {
 			b.c.Collect(nonInstanceChild(parentName, relationName, rel, 0))
 			return
 		}
-		b.child(parent, graphParent, parentName, relationName, rel, v, 0, nil)
+		b.child(graphParent, parentName, relationName, rel, v, 0, nil)
 	case nil:
 		// An absent optional composition arrives as a nil value.
 	default:
@@ -226,7 +225,6 @@ func (b *instanceBuilder) slot(
 // builds it and attaches it to the parent under construction. seen accumulates
 // the sibling keys already met, and is nil for a slot that cannot hold siblings.
 func (b *instanceBuilder) child(
-	parent *instance.ValidInstance,
 	graphParent *Instance,
 	parentName string,
 	relationName string,
@@ -268,7 +266,7 @@ func (b *instanceBuilder) child(
 		if seen != nil && rel.IsMany() {
 			keyStr := child.PrimaryKey().String()
 			if first, dup := seen[keyStr]; dup {
-				b.c.Collect(b.g.siblingDuplicateIssue(parent, parentName, relationName, rel, child, childTyp, first, index))
+				b.c.Collect(b.g.siblingDuplicateIssue(parentName, relationName, rel, child, first, index))
 			} else {
 				seen[keyStr] = index
 			}
@@ -320,38 +318,20 @@ func (g *Graph) composedOverflowIssue(
 // primary key. The streamed path in [Graph.AddComposed] enforces the same rule
 // against the children already attached.
 func (g *Graph) siblingDuplicateIssue(
-	parent *instance.ValidInstance,
 	parentName string,
 	relationName string,
 	rel *schema.Relation,
 	child *instance.ValidInstance,
-	childTyp *schema.Type,
 	firstIndex, index int,
 ) diag.Issue {
-	builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+	return diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 		fmt.Sprintf("duplicate composed child primary key %s at indices %d and %d",
 			child.PrimaryKey().String(), firstIndex, index)).
 		WithDetail(diag.DetailKeyTypeName, parentName).
 		WithDetail(diag.DetailKeyRelationName, relationName).
-		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-	if composedPK, err := FormatComposedKey(
-		keyToValues(parent.PrimaryKey()), relationName, composedKeyOrIndex(childTyp, child.PrimaryKey(), firstIndex),
-	); err == nil {
-		builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
-	}
-	return builder.Build()
-}
-
-// composedKeyOrIndex renders a composed child's address the way the writers do:
-// its own key values when the part type declares a primary key and the child
-// carries one, and its position in the slot otherwise. adapter/neo4j's
-// write_composed.go makes exactly that choice, and a diagnostic that made a
-// different one named a node no writer ever created.
-func composedKeyOrIndex(partType *schema.Type, key immutable.Key, index int) any {
-	if partType != nil && partType.HasPrimaryKey() && key.Len() > 0 {
-		return key.Clone()
-	}
-	return index
+		WithDetail(diag.DetailKeyJSONField, rel.FieldName()).
+		WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).
+		Build()
 }
 
 // undeclaredRelation builds the diagnostic for instance data filed under a

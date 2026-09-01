@@ -116,32 +116,6 @@ func TestBatchMerge_WriteOncePreservedOnMatch(t *testing.T) {
 	}
 }
 
-// The single-node template's parameter namespace must match the row shape the
-// adapter assembles, the same agreement the batch path needs.
-func TestSingleNodeMerge_KeyParamNamespace(t *testing.T) {
-	ctx := context.Background()
-	driver(t)
-	dropAll(t, ctx)
-	t.Cleanup(func() {
-		run(t, ctx, "MATCH (n:wr__Single) DETACH DELETE n")
-		dropAll(t, ctx)
-	})
-	run(t, ctx, "MATCH (n:wr__Single) DETACH DELETE n")
-
-	const label = "wr__Single"
-	stmt := n4j.BuildNodeMergeQuery(label, []string{"sid"}, n4j.MutableKeys)
-
-	for _, title := range []string{"first", "second"} {
-		execWithParams(t, ctx, stmt, map[string]any{
-			"key_sid": "s1",
-			"props":   map[string]any{"sid": "s1", "title": title},
-		})
-	}
-	if n := countNodes(t, ctx, label); n != 1 {
-		t.Errorf("there are %d nodes after two merges on one key, want 1", n)
-	}
-}
-
 // A primary key literally named update_props is a legal DSL property name, and
 // the key_ namespace is what stops it colliding with the row's own update_props
 // map. Sharing one namespace, the property map would take the key's place and

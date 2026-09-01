@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"iter"
 	"strings"
@@ -187,7 +188,22 @@ func (a *Adapter) emittableTypes(ctx context.Context, s *schema.Schema, collecto
 }
 
 // labeledTypes yields each (type, label) pair for the named, non-abstract types
-// of s, in schema declaration order, WITHOUT validating the label.
+// of s AND OF EVERY SCHEMA IN ITS IMPORT CLOSURE, in closure order then schema
+// declaration order, WITHOUT validating the label.
+//
+// The closure is the scope because [Adapter.ShapeForSchema] gives every closure
+// member's types a label and the write path then writes nodes under it. A walk
+// over the entry schema's own types alone left an imported type with a label and
+// node writes, and with no constraint, no index and no ownership.
+//
+// INVARIANT: the set this yields is both the EMIT set and the OWN set.
+// [Adapter.ConstraintsForSchema], [Adapter.IndexesForSchema],
+// [Adapter.DetectLabelCollisions] and [Adapter.OwnedLabels] all reach their
+// types through this function, so what the adapter creates and what it claims
+// cannot diverge. That is what keeps the diff safe: a label is owned exactly
+// when it is desired, so widening the walk can never make [Adapter.DiffConstraints]
+// plan a DROP for a label the emitter still writes. Narrowing one caller without
+// the others would break that, which is why they share one walk.
 //
 // Split out from [Adapter.emittableTypes] because [Adapter.DetectLabelCollisions]
 // needs the same walk but must not skip an invalid label: two types colliding on
@@ -196,34 +212,75 @@ func (a *Adapter) emittableTypes(ctx context.Context, s *schema.Schema, collecto
 // likely to have one.
 func (a *Adapter) labeledTypes(ctx context.Context, s *schema.Schema) iter.Seq2[*schema.Type, string] {
 	return func(yield func(*schema.Type, string) bool) {
-		for _, t := range s.TypesSlice() {
-			name := strings.TrimSpace(t.Name())
-			if name == "" || t.IsAbstract() {
-				continue
-			}
-			label := a.Label(ctx, s.Name(), name)
-			if label == "" {
-				continue
-			}
-			if !yield(t, label) {
-				return
+		for _, member := range s.Closure() {
+			for _, t := range member.TypesSlice() {
+				name := strings.TrimSpace(t.Name())
+				if name == "" || t.IsAbstract() {
+					continue
+				}
+				// The label composes from the DECLARING member's name, not the
+				// entry schema's: an imported type keeps the label its own
+				// schema gives it, which is the label its nodes are written
+				// under.
+				label := a.Label(ctx, member.Name(), name)
+				if label == "" {
+					continue
+				}
+				if !yield(t, label) {
+					return
+				}
 			}
 		}
 	}
 }
 
-// invalidLabelIssue builds the E_NEO4J_INVALID_IDENTIFIER diagnostic for a type
-// whose Neo4j label fails identifier validation. Shared by the emittable-type
-// gate so the constraint, index, and shape emitters report an invalid label
-// identically.
-func invalidLabelIssue(typeName, label string, err error) diag.Issue {
-	return diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-		fmt.Sprintf("invalid label for type %q: %s", typeName, err)).
+// identifierSubject names what an E_NEO4J_INVALID_IDENTIFIER is about.
+//
+// Each field means one thing, so a consumer reading a detail key does not have
+// to know which site raised the issue. TypeName is a TYPE; Relation is the
+// declaring relation of an edge property, which is where a relation-scoped
+// property is attributed instead.
+type identifierSubject struct {
+	TypeName string
+	Relation string
+	Property string
+	Label    string
+}
+
+// invalidIdentifierIssue builds the one E_NEO4J_INVALID_IDENTIFIER every site
+// emits, and returns the builder so a caller can add its own span.
+//
+// One constructor per code, so a key means the same thing everywhere. Six sites
+// built this by hand in three detail shapes, and one passed a
+// [schema.DeclaringScope] rendering under the TYPE key — which is a RELATION
+// name for an edge property, so a consumer reading "type" could get a relation.
+func invalidIdentifierIssue(msg string, subj identifierSubject, err error) *diag.IssueBuilder {
+	b := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER, msg).
 		WithDetail(diag.DetailKeyFormat, "neo4j").
-		WithDetail(diag.DetailKeyTypeName, typeName).
-		WithDetail(detailKeyLabel, label).
-		WithDetail(diag.DetailKeyDetail, err.Error()).
-		Build()
+		WithDetail(diag.DetailKeyDetail, err.Error())
+	if subj.TypeName != "" {
+		b = b.WithDetail(diag.DetailKeyTypeName, subj.TypeName)
+	}
+	if subj.Relation != "" {
+		b = b.WithDetail(diag.DetailKeyRelationName, subj.Relation)
+	}
+	if subj.Property != "" {
+		b = b.WithDetail(diag.DetailKeyPropertyName, subj.Property)
+	}
+	if subj.Label != "" {
+		b = b.WithDetail(detailKeyLabel, subj.Label)
+	}
+	return b
+}
+
+// invalidLabelIssue builds the E_NEO4J_INVALID_IDENTIFIER diagnostic for a type
+// whose label is not a usable Neo4j identifier.
+func invalidLabelIssue(typeName, label string, err error) diag.Issue {
+	return invalidIdentifierIssue(
+		fmt.Sprintf("invalid label for type %q: %s", typeName, err),
+		identifierSubject{TypeName: typeName, Label: label},
+		err,
+	).Build()
 }
 
 // indexesForType generates all indexes for one emitted (non-abstract) type in
@@ -383,22 +440,34 @@ type indexTargetRef struct {
 func reportIndexTarget(
 	collector *diag.Collector, reported reportedTargets,
 	ref indexTargetRef, ann *schema.Annotation,
-	code diag.Code, scope, msg, detail string,
+	code diag.Code, subj identifierSubject, msg, detail string,
 ) {
 	if reported[ref] {
 		return
 	}
 	reported[ref] = true
-	collector.Collect(diag.NewIssue(diag.Error, code, msg).
+	subj.Property = ref.name
+	if code == E_NEO4J_INVALID_IDENTIFIER {
+		collector.Collect(invalidIdentifierIssue(msg, subj, errors.New(detail)).
+			WithSpan(ann.Span()).Build())
+		return
+	}
+	b := diag.NewIssue(diag.Error, code, msg).
 		WithSpan(ann.Span()).
 		WithDetail(diag.DetailKeyFormat, "neo4j").
-		WithDetail(diag.DetailKeyTypeName, scope).
 		WithDetail(diag.DetailKeyPropertyName, ref.name).
-		WithDetail(diag.DetailKeyDetail, detail).
-		Build())
+		WithDetail(diag.DetailKeyDetail, detail)
+	if subj.TypeName != "" {
+		b = b.WithDetail(diag.DetailKeyTypeName, subj.TypeName)
+	}
+	if subj.Relation != "" {
+		b = b.WithDetail(diag.DetailKeyRelationName, subj.Relation)
+	}
+	collector.Collect(b.Build())
 }
 
-// targetScope names the type a diagnostic should be attributed to.
+// targetScope names what a diagnostic should be attributed to, keeping a type
+// and a relation apart.
 //
 // The declaring scope of the property, when there is one: an inherited property
 // or annotation is reported once for the whole schema, so naming whichever heir
@@ -406,11 +475,28 @@ func reportIndexTarget(
 // involved, and reordering the source would change the name. Where the property
 // does not exist at all — an @@index argument naming nothing — there is no
 // declaring scope, and the annotated type is the closest true answer.
-func targetScope(t *schema.Type, prop *schema.Property) string {
-	if prop != nil {
-		return prop.Origin().DeclaringScope().String()
+//
+// A relation-scoped property is declared on an EDGE, so its scope is a relation
+// name and it is reported as one. Rendering it into the type detail told a
+// consumer a relation was a type.
+func targetScope(t *schema.Type, prop *schema.Property) identifierSubject {
+	if prop == nil {
+		return identifierSubject{TypeName: t.Name()}
 	}
-	return t.Name()
+	scope := prop.Origin().DeclaringScope()
+	if scope.Kind() == schema.ScopeRelation {
+		return identifierSubject{Relation: scope.RelationName()}
+	}
+	return identifierSubject{TypeName: scope.TypeRef().String()}
+}
+
+// String renders the subject for a diagnostic MESSAGE, which names the
+// declaring scope whether that is a type or a relation.
+func (s identifierSubject) String() string {
+	if s.Relation != "" {
+		return s.Relation
+	}
+	return s.TypeName
 }
 
 // validIndexName reports whether a property's own name can appear in emitted
@@ -426,7 +512,7 @@ func validIndexName(t *schema.Type, prop *schema.Property, ann *schema.Annotatio
 	// this diagnostic is deduped once per declared property for the whole schema,
 	// so embedding the emitting heir would make the error text disagree with its
 	// own span and change with source order.
-	err := ValidateIdentifier(name, scope+" property")
+	err := ValidateIdentifier(name, scope.String()+" property")
 	if err == nil {
 		return true
 	}

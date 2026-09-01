@@ -591,7 +591,6 @@ A primary key is carried as a canonical JSON array string — the form `Snapshot
 | Function | Description |
 | -------- | ----------- |
 | `FormatKey(values...)` | Render key components as a canonical JSON array string |
-| `FormatComposedKey(parentKeyValues, relation, childKeyOrIndex)` | Render a composed child's identity. The first argument is the parent's raw key **components** (`[]any`), not a formatted key |
 | `ParseKey(s)` | Decode a `FormatKey` string into `[]any` components |
 | `ParseKeyStrings(s)` | Decode a `FormatKey` string whose components are all strings |
 
@@ -605,7 +604,13 @@ parts, err := graph.ParseKeyStrings(`["us","ca"]`) // []string{"us", "ca"}
 
 `ParseKey` returns the component types a snapshot round trip produces — `string`, `int64`, `float64`, `bool`, `nil` — because it classifies numbers by lexical form, the same rule the `.ys` reader applies: a literal carrying `.`, `e`, or `E` is `float64`, an int-shaped literal is `int64`. An int-shaped literal beyond the int64 range comes back as `float64`; a literal with no finite Go value, such as `1e999`, is an error naming the component's index. So is a component that is itself an array or object: `FormatKey`'s domain is scalars.
 
-The round trip holds in both directions over those types, with one documented carve-out — `FormatKey(float64(5))` renders `5` and `ParseKey` reads it back as `int64(5)`. The wire has the same asymmetry, by the same rule. `FormatComposedKey` has no inverse: composed identities are rendered by the writers and read back by nobody.
+The round trip holds in both directions over those types, with one documented carve-out — `FormatKey(float64(5))` renders `5` and `ParseKey` reads it back as `int64(5)`. The wire has the same asymmetry, by the same rule.
+
+Composed children have no key of their own. A part instance is identified
+through its parent composition, so this package mints no address for one; an
+exporter that must give each part node a separate identity derives it, and
+`adapter/neo4j` is the only one that does — see its `_composed_key` property in
+the Neo4j section.
 
 ## Import Closure & Type Lookup
 
@@ -1161,7 +1166,7 @@ adapter := neo4j.New(opts...)
 | `WithEdition` | Neo4j edition (`Enterprise` or `Community`); controls constraint types |
 | `WithLabelSeparator` | Separator between the schema name and the type name inside one label (default: `__`) |
 | `WithLabelPrefix` | Prefix for generated labels. Applied only when a schema name is supplied to `Label`; an unscoped label is the sanitized type name alone |
-| `WithScalarTypeConstraints` | Emit **scalar** `PROPERTY_TYPE` constraints (Enterprise only). List-type constraints are emitted regardless of this option |
+| `WithScalarTypeConstraints` | Emit `PROPERTY_TYPE` constraints — `REQUIRE n.p IS :: T` — for list-shaped and scalar types alike (Enterprise only). Property-type constraints require Neo4j 5.9; on a 5.0–5.8 server this option is what turns them off |
 | `WithRequiredOnlyTypeConstraints` | Emit type constraints only for required properties |
 | `WithNodeKeyConstraints` | Emit `NODE KEY` constraints (requires Neo4j 5.7+) |
 | `WithNamedConstraints` | Emit a name on each constraint. `IF NOT EXISTS` is emitted either way; names are what `DROP CONSTRAINT` and diff tooling need |
@@ -1229,7 +1234,7 @@ The walk covers the whole import closure (`Schema.Closure()`): every member sche
 
 ### Write Queries
 
-`BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes. Both refuse a snapshot in which two types render the same type name — they would share one node shape and one label — returning an error that names both identities and the rendered name.
+`BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes. Both require a `GraphShape` that `Adapter.ShapeForSchema` built from the snapshot's own schema, and refuse one built by hand or from another schema: a shape the adapter did not build carries no key constraints, so merge keys would reach the driver uncoerced while the same properties are coerced from the schema. Two type identities that render one type name are **not** refused — `GraphShape.Types` is keyed by `schema.TypeID` and each identity gets its own label, so the pair writes correctly.
 
 ```go
 shapes, _ := adapter.ShapeForSchema(ctx, s)
@@ -1241,7 +1246,7 @@ Both return query structs (`BatchNodeQuery`, `BatchEdgeQuery`) with `Statement` 
 
 `BatchNodeQueries` returns a phased, ordered slice; each query carries a `Kind` (`NodeMerge`, `CompositionReplace`, `CompositionCreate`). Every node merge precedes every composition replace, which precedes every composition create (parent-first by depth) — executing the slice in order is correct, and the ordering is a documented guarantee (v0.15.0).
 
-Composed children are written under ownership semantics: a parent write replaces its composed subtree. The replace phase deletes every part reachable from each written root through the schema's composition closure — whether or not the snapshot carries children — and the create phase rebuilds the tree fresh (`SET c = …`, never `+=`). Part nodes carry their identity in the `_composed_key` property (`graph.FormatComposedKey`); for a keyless `(many)` part the key is positional and not a stable identity across writes, which replace semantics make safe. Part DDL pairs with this: `UNIQUE` + `NOT NULL` on `_composed_key`, and no `UNIQUE`/`NODE KEY` on a part's declared primary key.
+Composed children are written under ownership semantics: a parent write replaces its composed subtree. The replace phase deletes every part reachable from each written root through the schema's composition closure — whether or not the snapshot carries children — and the create phase rebuilds the tree fresh (`SET c = …`, never `+=`). Part nodes carry their identity in the `_composed_key` property, which this adapter mints: a flat JSON array of the owning root's **label**, the root's key values, then one segment per composition hop — `["shop__Order",["o1"],["SECTIONS",["s1"]],["NOTES",0]]`. It is rooted at the owning root rather than the immediate parent, and carries no source path. For a keyless `(many)` part the segment is positional and not a stable identity across writes, which replace semantics make safe. Part DDL pairs with this: `UNIQUE` + `NOT NULL` on `_composed_key`, and no `UNIQUE`/`NODE KEY` on a part's declared primary key.
 
 `BuildBatchRelationshipMergeQuery` returns the UNWIND-batched relationship MERGE template those edge queries use internally. It is exported for a consumer resolving edges the adapter write path cannot see — one whose edges cross datasets, for instance — that wants the template without the surrounding param-and-chunk plumbing. It is a pure function: no execution, no driver dependency, no side effects.
 
@@ -1339,7 +1344,7 @@ The rendering counterpart — the string form the library stores for a `Timestam
 
 ```go
 // Generate a .yammm scaffold from introspected Neo4j constraints and relationships
-yammmSource, err := adapter.InferSchema(constraints, relationships, schemaFilter)
+yammmSource := adapter.InferSchema(constraints, relationships, schemaFilter)
 ```
 
 `InferSchema` takes `[]RemoteConstraint` and `[]RemoteRelationship` values (obtained from introspection queries) and produces a `.yammm` source string. Helper functions `IntrospectConstraintsQuery`, `IntrospectRelationshipsQuery`, `ParseRemoteConstraints`, and `ParseRemoteRelationships` assist with gathering introspection data from a live database.

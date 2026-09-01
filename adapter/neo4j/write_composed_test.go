@@ -94,7 +94,8 @@ func TestBatchNodeQueries_ComposedReplaceStatement(t *testing.T) {
 	want := "UNWIND $rows AS row\n" +
 		"MATCH (p:nested_test__Order {order_id: row.key_order_id})\n" +
 		"MATCH (p) (()-[:NOTES|SECTIONS]->(:nested_test__Note|nested_test__Section)){1,} (c)\n" +
-		"DETACH DELETE c"
+		"DETACH DELETE c\n" +
+		"RETURN count(*) AS matched_rows"
 	if replace.Statement != want {
 		t.Errorf("replace statement = %q; want %q", replace.Statement, want)
 	}
@@ -127,7 +128,8 @@ func TestBatchNodeQueries_ComposedCreateStatements(t *testing.T) {
 	wantSections := "UNWIND $rows AS row\n" +
 		"MATCH (p:nested_test__Order {order_id: row.key_order_id})\n" +
 		"CREATE (p)-[:SECTIONS]->(c:nested_test__Section)\n" +
-		"SET c = row.props"
+		"SET c = row.props\n" +
+		"RETURN count(*) AS matched_rows"
 	if creates[0].Statement != wantSections {
 		t.Errorf("depth-1 create = %q; want %q", creates[0].Statement, wantSections)
 	}
@@ -136,7 +138,8 @@ func TestBatchNodeQueries_ComposedCreateStatements(t *testing.T) {
 	wantNotes := "UNWIND $rows AS row\n" +
 		"MATCH (p:nested_test__Section {_composed_key: row.parent_ck})\n" +
 		"CREATE (p)-[:NOTES]->(c:nested_test__Note)\n" +
-		"SET c = row.props"
+		"SET c = row.props\n" +
+		"RETURN count(*) AS matched_rows"
 	if creates[1].Statement != wantNotes {
 		t.Errorf("depth-2 create = %q; want %q", creates[1].Statement, wantNotes)
 	}
@@ -151,10 +154,12 @@ func TestBatchNodeQueries_ComposedCreateStatements(t *testing.T) {
 	}
 }
 
-// TestBatchNodeQueries_ComposedKeys pins the _composed_key values: a keyed
-// child's key carries its own primary-key values; a keyless child's is
-// positional; a depth-2 child's parent component is the parent's composed
-// key string.
+// TestBatchNodeQueries_ComposedKeys pins the _composed_key values: every
+// address names the owning root's type identity and the root's key, then one
+// segment per composition hop. A keyed child's segment carries its own key
+// values; a keyless child's is positional; and a depth-2 child APPENDS its
+// segment rather than nesting the depth-1 address inside itself, so the address
+// grows linearly with depth and no escape compounds.
 func TestBatchNodeQueries_ComposedKeys(t *testing.T) {
 	t.Parallel()
 	a, shape, snap := nestedGraphResult(t)
@@ -183,26 +188,18 @@ func TestBatchNodeQueries_ComposedKeys(t *testing.T) {
 		}
 	}
 
-	s1CK, err := graph.FormatComposedKey([]any{"o1"}, "SECTIONS", []any{"s1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s2CK, err := graph.FormatComposedKey([]any{"o1"}, "SECTIONS", []any{"s2"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	// LITERALS, not a second call to the renderer under test. Comparing the
+	// adapter's output against a value computed the same way pins nothing: it
+	// stays green under any format change that is applied consistently.
+	const (
+		s1CK = `["nested_test__Order",["o1"],["SECTIONS",["s1"]]]`
+		s2CK = `["nested_test__Order",["o1"],["SECTIONS",["s2"]]]`
+		n0CK = `["nested_test__Order",["o1"],["SECTIONS",["s1"]],["NOTES",0]]`
+		n1CK = `["nested_test__Order",["o1"],["SECTIONS",["s1"]],["NOTES",1]]`
+	)
+
 	if got, want := cks["Section"], []string{s1CK, s2CK}; !slices.Equal(got, want) {
 		t.Errorf("Section composed keys = %v; want %v", got, want)
-	}
-
-	// The keyless Note children key positionally under s1's composed key.
-	n0CK, err := graph.FormatComposedKey([]any{s1CK}, "NOTES", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	n1CK, err := graph.FormatComposedKey([]any{s1CK}, "NOTES", 1)
-	if err != nil {
-		t.Fatal(err)
 	}
 	if got, want := cks["Note"], []string{n0CK, n1CK}; !slices.Equal(got, want) {
 		t.Errorf("Note composed keys = %v; want %v", got, want)
@@ -211,10 +208,36 @@ func TestBatchNodeQueries_ComposedKeys(t *testing.T) {
 		t.Errorf("Note parent_ck values = %v; want %v", got, want)
 	}
 
-	// The composed key is the documented JSON array form.
-	var arr []any
-	if err := json.Unmarshal([]byte(n0CK), &arr); err != nil || len(arr) != 3 {
-		t.Errorf("composed key %q is not a 3-element JSON array (%v)", n0CK, err)
+	// The address carries the root's LABEL and no source path: a file-backed
+	// schema renders an absolute path in [schema.TypeID], which would put the
+	// writing machine's directory layout on every part node.
+	for label, keys := range cks {
+		for _, ck := range keys {
+			if strings.Contains(ck, "/") || strings.Contains(ck, `\\`) {
+				t.Errorf("%s composed key carries a path or a compounded escape: %s", label, ck)
+			}
+		}
+	}
+
+	// Flat, so the element count tracks depth: three at depth 1, four at depth
+	// 2. A nesting form keeps the count constant while each level's rendering
+	// grows.
+	for _, tc := range []struct {
+		name string
+		ck   string
+		want int
+	}{{"depth 1", cks["Section"][0], 3}, {"depth 2", cks["Note"][0], 4}} {
+		var arr []any
+		if err := json.Unmarshal([]byte(tc.ck), &arr); err != nil {
+			t.Errorf("%s composed key %q is not JSON: %v", tc.name, tc.ck, err)
+			continue
+		}
+		if len(arr) != tc.want {
+			t.Errorf("%s composed key %q has %d elements, want %d", tc.name, tc.ck, len(arr), tc.want)
+		}
+		if root, ok := arr[0].(string); !ok || root != "nested_test__Order" {
+			t.Errorf("%s composed key does not lead with the owning root's label: %v", tc.name, arr[0])
+		}
 	}
 }
 

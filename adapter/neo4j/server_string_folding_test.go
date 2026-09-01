@@ -111,10 +111,7 @@ func TestInferSchema_FoldsServerColumnCase(t *testing.T) {
 		}),
 	}
 
-	src, err := a.InferSchema(constraints, nil, "app")
-	if err != nil {
-		t.Fatalf("InferSchema: %v", err)
-	}
+	src := a.InferSchema(constraints, nil, "app")
 
 	// A skipped entityType would drop the type and its key entirely.
 	if !strings.Contains(src, "primary") {

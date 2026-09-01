@@ -1,11 +1,21 @@
 schema "catalog"
 
-import "geo"
+import "./geo" as geo // TODO: an import is a path; correct it
 
-// Inferred from Neo4j database.
-// TODO: Replace String types with UUID, Pattern, or Enum where appropriate.
-// TODO: Review inferred relationship field names.
-// TODO: Add invariants if needed.
+// A STARTING POINT inferred from a Neo4j database. Edit it before use:
+// as generated it is not expected to load.
+//
+// A database records labels and properties. It does not record type
+// identity, whether an edge is an association or a composition, or import
+// structure, so the following are guesses:
+// TODO: every edge below is written as an association (-->). A composition
+//       (*->) is indistinguishable from an association in node DDL.
+// TODO: replace String with UUID, Pattern or Enum where appropriate.
+// TODO: a List<Float> may be a Vector; the two share one Neo4j type.
+// TODO: no index metadata is read, so no @index or @@index is emitted.
+// TODO: two labels from different schemas that render one type name are
+//       merged here into one type.
+// TODO: review relationship field names, and add invariants.
 
 type Publisher {
     id String primary // TODO: verify type (could be UUID, Pattern, or Enum)

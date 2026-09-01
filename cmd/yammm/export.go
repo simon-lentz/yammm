@@ -273,7 +273,7 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 // exportFromSnapshot exports a persisted .ys snapshot. pending carries the
 // schema load's residual diagnostics so they render with the snapshot's rather
 // than as a second document.
-func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, pending diag.Result, dataPath string, outputFormat cli.OutputFormat, noColor bool, moduleRoot, absSchemaPath string, toFormat, outputPath, outputDir string) error {
+func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, pending diag.Result, dataPath string, outputFormat cli.OutputFormat, noColor bool, moduleRoot, absSchemaPath, toFormat, outputPath, outputDir string) error {
 	snap, snapResult, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

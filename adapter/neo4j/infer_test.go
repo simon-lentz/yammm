@@ -158,10 +158,7 @@ func TestInferSchema_Golden(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			output, err := New(tc.opts...).InferSchema(tc.constraints, tc.relationships, tc.schemaName)
-			if err != nil {
-				t.Fatalf("InferSchema: %v", err)
-			}
+			output := New(tc.opts...).InferSchema(tc.constraints, tc.relationships, tc.schemaName)
 			yammmtest.Golden(t, "infer_"+tc.name, []byte(output))
 		})
 	}

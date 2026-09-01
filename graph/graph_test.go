@@ -2005,7 +2005,7 @@ func TestCheck_UnresolvedRequired_TargetMissingReason(t *testing.T) {
 }
 
 // TestDuplicateComposedPK_PKDetail verifies that E_DUPLICATE_COMPOSED_PK
-// includes "pk" detail with graph.FormatComposedKey format.
+// includes the duplicated primary key as the "pk" detail.
 func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
@@ -2051,14 +2051,15 @@ func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 		t.Fatalf("Expected E_DUPLICATE_COMPOSED_PK, got %s", issue.Code())
 	}
 
-	// Verify "pk" detail with composed key format
+	// The "pk" detail carries the duplicated PRIMARY KEY, which is what
+	// diag.DetailKeyPrimaryKey's godoc promises and what every other producer
+	// of that key puts there. A writer's composed address belongs to the store
+	// that mints one, not to a diagnostic.
 	var foundPK bool
 	for _, d := range issue.Details() {
 		if d.Key == "pk" {
 			foundPK = true
-			// Should be in graph.FormatComposedKey format: [["p1"],"children",["c1"]]
-			expected := `[["p1"],"children",["c1"]]`
-			if d.Value != expected {
+			if expected := `["c1"]`; d.Value != expected {
 				t.Errorf("Expected pk %q, got %q", expected, d.Value)
 			}
 			break

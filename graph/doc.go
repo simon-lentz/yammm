@@ -219,9 +219,10 @@
 //
 // Use [FormatKey] to construct lookup keys for [Snapshot.InstanceByKey].
 //
-// For composed children, [FormatComposedKey] encodes an identity that handles
-// all special characters safely. It has no inverse: composed identities are
-// rendered by the writers and read back by nobody.
+// Composed children have no key of their own. A part instance is identified
+// through its parent composition, so this package mints no address for one; a
+// store that must give each part node an identity derives it, and
+// [github.com/simon-lentz/yammm/adapter/neo4j] is the only one that does.
 //
 // # Error Handling
 //
@@ -323,7 +324,7 @@
 // Not Supported:
 //
 //   - Streaming grandchildren to composed children (nested streaming)
-//   - Addressing composed parents via [FormatComposedKey]
+//   - Addressing a composed parent by a key of its own
 //
 // For nested compositions, include the full composition tree inline in the
 // [instance.ValidInstance] passed to AddComposed. The graph will recursively

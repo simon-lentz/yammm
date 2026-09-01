@@ -103,116 +103,6 @@ func TestFormatKey_PanicOnUnmarshalable(t *testing.T) {
 	graph.FormatKey(ch)
 }
 
-func TestFormatComposedKey(t *testing.T) {
-	tests := []struct {
-		name            string
-		parentKeyValues []any
-		compositionName string
-		childKeyOrIndex any
-		want            string
-		wantErr         bool
-	}{
-		{
-			name:            "one cardinality",
-			parentKeyValues: []any{"ABC123"},
-			compositionName: "ADDRESS",
-			childKeyOrIndex: nil,
-			want:            `[["ABC123"],"ADDRESS"]`,
-		},
-		{
-			name:            "many with PK",
-			parentKeyValues: []any{"ABC123"},
-			compositionName: "WHEELS",
-			childKeyOrIndex: []any{"front-left"},
-			want:            `[["ABC123"],"WHEELS",["front-left"]]`,
-		},
-		{
-			name:            "many without PK",
-			parentKeyValues: []any{"ABC123"},
-			compositionName: "NOTES",
-			childKeyOrIndex: 0,
-			want:            `[["ABC123"],"NOTES",0]`,
-		},
-		{
-			name:            "composite parent key",
-			parentKeyValues: []any{"us", 12345},
-			compositionName: "GRADES",
-			childKeyOrIndex: []any{"MATH-101"},
-			want:            `[["us",12345],"GRADES",["MATH-101"]]`,
-		},
-		{
-			name:            "special characters in key",
-			parentKeyValues: []any{"order-123"},
-			compositionName: "QUOTES",
-			childKeyOrIndex: []any{`He said "hello"`},
-			want:            `[["order-123"],"QUOTES",["He said \"hello\""]]`,
-		},
-		{
-			name:            "nil parent",
-			parentKeyValues: nil,
-			compositionName: "ADDR",
-			childKeyOrIndex: nil,
-			wantErr:         true,
-		},
-		{
-			name:            "empty parent",
-			parentKeyValues: []any{},
-			compositionName: "ADDR",
-			childKeyOrIndex: nil,
-			wantErr:         true,
-		},
-		{
-			name:            "empty composition name",
-			parentKeyValues: []any{"ABC"},
-			compositionName: "",
-			childKeyOrIndex: nil,
-			wantErr:         true,
-		},
-		{
-			name:            "empty child key slice",
-			parentKeyValues: []any{"ABC"},
-			compositionName: "WHEELS",
-			childKeyOrIndex: []any{},
-			wantErr:         true,
-		},
-		{
-			name:            "negative index",
-			parentKeyValues: []any{"ABC"},
-			compositionName: "NOTES",
-			childKeyOrIndex: -1,
-			wantErr:         true,
-		},
-		{
-			name:            "invalid childKeyOrIndex type",
-			parentKeyValues: []any{"ABC"},
-			compositionName: "ADDR",
-			childKeyOrIndex: "invalid",
-			wantErr:         true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := graph.FormatComposedKey(tt.parentKeyValues, tt.compositionName, tt.childKeyOrIndex)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("graph.FormatComposedKey() expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("graph.FormatComposedKey() unexpected error: %v", err)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("graph.FormatComposedKey() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-// timestampKeySchema carries a Timestamp primary key, which the DSL permits
-// alongside String, UUID and Date.
 func timestampKeySchema(t *testing.T) *schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
@@ -228,11 +118,6 @@ func timestampKeySchema(t *testing.T) *schema.Schema {
 	return s
 }
 
-// Graph identity is Key.String(), so the two representations of one instant
-// collide only where they render the same text. A canonical spelling and the
-// time.Time parsed from it are one instance; a non-canonical spelling and its
-// time.Time are two, which is a key that moves with the caller's choice of
-// representation.
 func TestGraph_TimestampKeyIdentityFollowsTheRendering(t *testing.T) {
 	tests := []struct {
 		spelling      string

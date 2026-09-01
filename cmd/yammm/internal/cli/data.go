@@ -56,7 +56,7 @@ func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.R
 // Returns (T, diag.Result, error) because the error return captures I/O
 // failures (file open errors) which are distinct from semantic parse
 // issues reported through the diag.Result.
-func LoadAndParseCSV(ctx context.Context, path string, typeName string, typeColumn string, s *schema.Schema) (map[string][]instance.RawInstance, diag.Result, error) {
+func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *schema.Schema) (map[string][]instance.RawInstance, diag.Result, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("open data file: %w", err)

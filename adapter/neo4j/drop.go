@@ -8,12 +8,17 @@ import (
 // DropConstraintStatement returns the Cypher that removes a constraint by name.
 //
 // The name comes from introspection or from a diff result, so it is whatever a
-// person or another tool created, not something this package generated. A name
-// this package would emit interpolates bare; any other non-empty name is
-// backtick-quoted so it cannot alter the statement's shape. That includes a
-// Cypher reserved word: rejecting one would make the object undroppable, which
-// is the opposite of what a DROP builder is for. An empty or all-space name is
-// an error wrapping [ErrEmptyIdentifier] — there is no object it could name.
+// person or another tool created, not something this package generated. **Every
+// non-empty name is backtick-quoted**, so it cannot alter the statement's
+// shape and no name is undroppable — including a Cypher reserved word, where
+// refusing would be the opposite of what a DROP builder is for. An empty or
+// all-space name is an error wrapping [ErrEmptyIdentifier] — there is no object
+// it could name.
+//
+// Quoting unconditionally rather than only when [ValidateIdentifier] objects
+// removes this path's dependence on that validator's reserved-word table: the
+// table does not match the Neo4j documentation it cites, and a DROP builder
+// that had to know which words are reserved would need it to.
 //
 // The caller owns the choice of verb. Index and constraint names share one
 // namespace, so the object blocking a desired constraint may be an index; see
@@ -58,11 +63,7 @@ func dropStatement(kind, name string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("%w: drop %s name", ErrEmptyIdentifier, strings.ToLower(kind))
 	}
-	rendered := name
-	if ValidateIdentifier(name, "drop "+strings.ToLower(kind)+" name") != nil {
-		rendered = quoteIdentifier(name)
-	}
-	return "DROP " + kind + " " + rendered + " IF EXISTS", nil
+	return "DROP " + kind + " " + quoteIdentifier(name) + " IF EXISTS", nil
 }
 
 // quoteIdentifier backtick-quotes a name for use in Cypher, doubling any
@@ -70,7 +71,8 @@ func dropStatement(kind, name string) (string, error) {
 //
 // Nothing else in this package quotes: every identifier it generates is
 // validated at emission, so CREATE-side names never need it. Remote names are
-// the exception — they are arbitrary.
+// the exception — they are arbitrary, and quoting every one of them is why this
+// path needs no opinion about which words Cypher reserves.
 func quoteIdentifier(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }

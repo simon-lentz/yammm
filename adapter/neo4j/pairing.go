@@ -24,10 +24,19 @@ type OwnedLabels struct {
 }
 
 // OwnedLabels returns the labels this adapter emits for s — every named,
-// non-abstract type's label, under the adapter's current configuration.
+// non-abstract type's label across the whole IMPORT CLOSURE, under the
+// adapter's current configuration.
 //
-// The set is every named, non-abstract type's label — a SUPERSET of what the
-// emitters produce. [Adapter.ConstraintsStructured], [Adapter.IndexesStructured]
+// The closure, not the entry schema alone: an imported type this schema writes
+// nodes for gets a label, and it is emitted constraints and indexes, so it is
+// the schema's to own. The emit set and the own set are ONE set by construction
+// — both reach their types through the same walk — which is what keeps the
+// desired and owned sides widening together, so a newly-owned object is also
+// newly desired and no spurious DROP arises. A later change must not split
+// them.
+//
+// The set is every such type's label — a SUPERSET of what the emitters
+// produce. [Adapter.ConstraintsStructured], [Adapter.IndexesStructured]
 // and [Adapter.ShapeForSchema] additionally skip a type whose label is not a
 // valid Neo4j identifier, and emit nothing for it; ownership deliberately does
 // not, because a database may still hold objects on that label from an earlier

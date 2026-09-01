@@ -15,10 +15,10 @@ func TestDropStatements_RenderByName(t *testing.T) {
 		index      string
 	}{
 		{
-			name:       "generated name interpolates bare",
+			name:       "a generated name is quoted like any other",
 			identifier: "book_catalog__Publisher_publisher_id_unique",
-			constraint: "DROP CONSTRAINT book_catalog__Publisher_publisher_id_unique IF EXISTS",
-			index:      "DROP INDEX book_catalog__Publisher_publisher_id_unique IF EXISTS",
+			constraint: "DROP CONSTRAINT `book_catalog__Publisher_publisher_id_unique` IF EXISTS",
+			index:      "DROP INDEX `book_catalog__Publisher_publisher_id_unique` IF EXISTS",
 		},
 		{
 			name:       "hyphen fails validation and is quoted",
@@ -112,7 +112,7 @@ func TestConstraintDropStatement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Constraint.DropStatement error: %v", err)
 	}
-	if want := "DROP CONSTRAINT app__Person_id_unique IF EXISTS"; got != want {
+	if want := "DROP CONSTRAINT `app__Person_id_unique` IF EXISTS"; got != want {
 		t.Errorf("Constraint.DropStatement() = %q, want %q", got, want)
 	}
 }
@@ -147,7 +147,7 @@ func TestIndexDropStatement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Index.DropStatement error: %v", err)
 	}
-	if want := "DROP INDEX app__Person_state_idx IF EXISTS"; got != want {
+	if want := "DROP INDEX `app__Person_state_idx` IF EXISTS"; got != want {
 		t.Errorf("Index.DropStatement() = %q, want %q", got, want)
 	}
 }

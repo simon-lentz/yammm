@@ -854,3 +854,69 @@ func TestDiffIndexes_FulltextAnalyzerNotCompared(t *testing.T) {
 	}}
 	wantCounts(t, New().DiffIndexes(desired, actual, ownedSet("app__Doc")), 1, 0, 0, 0, 0)
 }
+
+// Every remote row lands in exactly one bucket. A backing index that serves a
+// declaration is a Match, and counting it as Excluded as well reported the same
+// row twice.
+//
+// Mutation: incrementing Excluded for a non-declarable owned row in the
+// ownership loop, as the code did before, turns this red.
+func TestDiffIndexes_BackingIndexIsMatchedOrExcluded_NotBoth(t *testing.T) {
+	t.Parallel()
+	desired := []Index{{
+		Name: "app__T_id_idx", Kind: IndexRange,
+		Label: "app__T", Properties: []string{"id"},
+	}}
+	backing := []RemoteIndex{{
+		Name: "app__T_id_unique", Type: "RANGE", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__T"}, Properties: []string{"id"},
+		State: "ONLINE", OwningConstraint: "app__T_id_unique",
+	}}
+
+	got := New().DiffIndexes(desired, backing, appOwned())
+	accounted := len(got.Match) + len(got.Drift) + len(got.Create) + len(got.Drop) +
+		len(got.Unverified) + got.Excluded
+	if accounted != len(backing) {
+		t.Errorf("one remote row was accounted %d times: match=%d drift=%d create=%d drop=%d unverified=%d excluded=%d",
+			accounted, len(got.Match), len(got.Drift), len(got.Create), len(got.Drop),
+			len(got.Unverified), got.Excluded)
+	}
+	if len(got.Match) != 1 {
+		t.Errorf("the backing index serves the declaration; want it matched, got %d matches", len(got.Match))
+	}
+	if got.Excluded != 0 {
+		t.Errorf("Excluded = %d; a row the comparison used is not excluded", got.Excluded)
+	}
+}
+
+// A backing index that serves NO declaration stays excluded: it is a row the
+// diff can neither match nor drop.
+func TestDiffIndexes_UnusedBackingIndexStaysExcluded(t *testing.T) {
+	t.Parallel()
+	backing := []RemoteIndex{{
+		Name: "app__T_other_unique", Type: "RANGE", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__T"}, Properties: []string{"other"},
+		State: "ONLINE", OwningConstraint: "app__T_other_unique",
+	}}
+
+	got := New().DiffIndexes(nil, backing, appOwned())
+	if got.Excluded != 1 {
+		t.Errorf("Excluded = %d; a backing index serving no declaration is not compared", got.Excluded)
+	}
+}
+
+// firstLabel's empty arm is reachable through the public API: ParseRemoteIndexes
+// produces a label-less RemoteIndex when a server row omits labelsOrTypes, and a
+// caller may hand-build one.
+func TestFirstLabel_EmptyLabels(t *testing.T) {
+	t.Parallel()
+	if got := firstLabel(nil); got != "" {
+		t.Errorf("firstLabel(nil) = %q, want the empty string", got)
+	}
+	if got := firstLabel([]string{}); got != "" {
+		t.Errorf("firstLabel([]) = %q, want the empty string", got)
+	}
+	if got := firstLabel([]string{"A", "B"}); got != "A" {
+		t.Errorf("firstLabel([A B]) = %q, want %q", got, "A")
+	}
+}

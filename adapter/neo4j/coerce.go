@@ -27,19 +27,21 @@ import (
 //     list path ([coerceSlice]), which applies the same rule per element.
 //   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
 //     constraint's custom Go layout when it declares one (Timestamp["…"]) and
-//     against RFC3339 / RFC3339Nano otherwise; a time.Time passes through. A
-//     string that does not parse, or any non-string non-time.Time value, is a
-//     coercion failure and returns an error. The instant is always expressed in
-//     a location the driver can send: a location whose name the host's tz
-//     database resolves is kept, and time.Local, an unnamed location, or a name
-//     the host cannot resolve is re-expressed in its offset. A consumer that
-//     must keep IANA names on a host without a tz database imports time/tzdata.
-//   - Date: a "2006-01-02" string OR a time.Time -> dbtype.Date (Neo4j DATE); a
-//     dbtype.Date passes through. A string that does not parse, or any other
-//     non-temporal value, is a coercion failure and returns an error. Mapping a
-//     time.Time to dbtype.Date keeps a Date-constrained value from reaching Neo4j
-//     as ZONED DATETIME and unifies this scalar path with the list path
-//     ([coerceSlice]) on one rule.
+//     against RFC3339 otherwise; a time.Time passes through. A string that does
+//     not parse, or any non-string non-time.Time value, is a coercion failure
+//     and returns an error. The instant is always expressed in a location the
+//     driver can send, under one rule: a named location is kept only when the
+//     host's tz database resolves it AND the resolved offset agrees with the
+//     one the value carries; time.Local, an unnamed location, an unresolvable
+//     name and a name whose offset disagrees are all re-expressed in the
+//     value's own offset. A consumer that must keep IANA names on a host
+//     without a tz database imports time/tzdata.
+//   - Date: a "2006-01-02" string, a time.Time, OR a dbtype.Date -> dbtype.Date
+//     (Neo4j DATE). A string that does not parse, or any other non-temporal
+//     value, is a coercion failure and returns an error. All three arms are
+//     normalised to midnight UTC: a date carries no time of day, and the driver
+//     derives its day number by a division that truncates toward zero, so a
+//     pre-1970 instant carrying a clock would land a day late.
 //   - Every other (non-transforming) kind is already driver-native and passes
 //     through unchanged.
 //
@@ -128,10 +130,10 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 				}
 				return raw, fmt.Errorf("coerce %s: cannot parse %q against format %q", kind, v, format)
 			}
+			// One layout, not two: time.Parse against RFC3339 already accepts
+			// fractional seconds, so no input can fail it and then succeed
+			// against RFC3339Nano. The second attempt was unreachable.
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
-				return driverZone(t), nil
-			}
-			if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
 				return driverZone(t), nil
 			}
 			return raw, fmt.Errorf("coerce %s: cannot parse %q as an RFC3339 timestamp", kind, v)
@@ -141,9 +143,12 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 	case schema.KindDate:
 		switch v := raw.(type) {
 		case dbtype.Date:
-			return v, nil // already Neo4j DATE native
+			// Native already, but not necessarily normalised: dbtype.Date is a
+			// plain time.Time conversion with no constructor that zeroes the
+			// clock, so a caller can build one carrying a time of day.
+			return dbtype.Date(calendarDate(time.Time(v))), nil
 		case time.Time:
-			return dbtype.Date(v), nil
+			return dbtype.Date(calendarDate(v)), nil
 		case string:
 			if t, err := time.Parse(time.DateOnly, v); err == nil {
 				return dbtype.Date(t), nil
@@ -331,6 +336,12 @@ func paramKey(prefix, name string) string {
 // both is responsible for describing the merge keys itself and merging the two
 // maps.
 func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
+	if t == nil {
+		// Nil-guarded like [ImmutableKeysFor], its sibling: both take a schema
+		// type a caller may not hold, and one panicking where the other returns
+		// an empty answer is a difference no caller can predict.
+		return ParamTypes{}
+	}
 	pt := make(ParamTypes)
 	// AllProperties, not Properties: an inherited property is as present in a
 	// param map as an own one.
@@ -352,27 +363,63 @@ const driverOffsetZoneName = "Offset"
 // before the resolvability check, which would otherwise keep it.
 const localZoneName = "Local"
 
-// resolvableZones memoizes time.LoadLocation by location name, true when the
-// host's tz database holds the name. It is a cache of a host fact fixed for
-// the process lifetime, not adapter state: LoadLocation opens a zoneinfo file
-// on every call, and a batch write hands every row's instants through Coerce.
+// THE TEMPORAL RULE, stated once because three releases restated it.
+//
+// A temporal value is sent in the form the driver and the server will both read
+// back as the instant, zone and date yammm holds. One rule, two arms, and
+// everything below implements it:
+//
+//   - A zoned instant keeps its location only when the host's tz database holds
+//     the name AND agrees with the offset the value carries. Otherwise the
+//     offset is what yammm holds, and the value goes as a fixed offset.
+//   - A date carries no time of day, because the driver derives its day number
+//     by an integer division that a time of day can push across a boundary.
+//
+// resolvedZones memoizes time.LoadLocation by name: the location when the
+// host's tz database holds it, nil when it does not. It caches a host fact
+// fixed for the process lifetime, not adapter state — LoadLocation opens a
+// zoneinfo file on every call, and a batch write hands every row's instants
+// through Coerce.
 //
 //nolint:gochecknoglobals // a process-wide memo of a fact that cannot change at runtime
-var resolvableZones sync.Map // name -> bool
+var resolvedZones sync.Map // name -> *time.Location (nil when unresolvable)
 
-// zoneNameResolves reports whether the host's tz database holds name, caching
-// negative results too — names come only from caller-built locations, so the
-// set is bounded by the caller's own zones.
-func zoneNameResolves(name string) bool {
-	if v, ok := resolvableZones.Load(name); ok {
-		if resolves, isBool := v.(bool); isBool {
-			return resolves
+// zoneNamed returns the host tz database's location for name, or nil.
+//
+// Two sources reach this and only one is bounded: a caller-built location's own
+// name, and — when a Timestamp layout carries a zone-abbreviation token — an
+// abbreviation read out of instance DATA. The memo is therefore bounded by the
+// distinct abbreviations the data holds, not by the caller's own zones. Each
+// entry is a short string and a pointer, so the growth is small; it is stated
+// because the rule it replaces claimed a bound the code does not have.
+func zoneNamed(name string) *time.Location {
+	if v, ok := resolvedZones.Load(name); ok {
+		loc, isLocation := v.(*time.Location)
+		if !isLocation {
+			return nil
 		}
+		return loc
 	}
-	_, err := time.LoadLocation(name)
-	ok := err == nil
-	resolvableZones.Store(name, ok)
-	return ok
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		loc = nil
+	}
+	resolvedZones.Store(name, loc)
+	return loc
+}
+
+// calendarDate strips the time of day, keeping the wall-clock date the value
+// itself shows.
+//
+// dbtype.Date carries a whole time.Time and the driver derives its day number
+// from it by an integer division that truncates toward zero rather than
+// flooring, so a pre-1970 instant with a nonzero time of day lands a day late.
+// Measured against a live server: 1969-07-20T18:00:00Z stored as 1969-07-21,
+// while the same time of day in 2001 and the same date at midnight both stored
+// correctly.
+func calendarDate(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 // driverZone re-renders an instant into a location the driver can send.
@@ -405,10 +452,22 @@ func driverZone(t time.Time) time.Time {
 	case "", localZoneName:
 		return offsetForm(t)
 	default:
-		if zoneNameResolves(name) {
-			return t
+		// A resolvable NAME is not enough. The driver sends a resolvable name
+		// as a zone identifier and the server re-derives the offset from it, so
+		// a value carrying "MST" at +00:00 — which time.Parse mints from any
+		// layout with a zone-abbreviation token — would come back shifted by
+		// seven hours. Where the name and the carried offset disagree, the
+		// offset is what yammm holds.
+		loc := zoneNamed(name)
+		if loc == nil {
+			return offsetForm(t)
 		}
-		return offsetForm(t)
+		_, carried := t.Zone()
+		_, resolved := t.In(loc).Zone()
+		if carried != resolved {
+			return offsetForm(t)
+		}
+		return t
 	}
 }
 

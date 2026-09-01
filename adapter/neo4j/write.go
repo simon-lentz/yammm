@@ -113,9 +113,14 @@ func WithEdgeChunkSize(size int) WriteOption {
 // [CompositionReplace], then every [CompositionCreate] parent-first by
 // depth — execute in order and each parent's composed subtree is replaced
 // whole (see [NodeQueryKind]). Types with more instances than the chunk
-// size produce multiple queries per phase. When two types in the snapshot
-// render the same type name, returns an error naming both identities —
-// they would share one node shape and one label.
+// size produce multiple queries per phase.
+//
+// Requires a [GraphShape] that [Adapter.ShapeForSchema] built from this
+// snapshot's schema, and refuses one built by hand or from another: a shape the
+// adapter did not build carries no key constraints, so merge keys would reach
+// the driver uncoerced while the same properties are coerced from the schema.
+// Two identities that render one type NAME are not refused — [GraphShape.Types]
+// is keyed by [schema.TypeID] and each gets its own label.
 func (a *Adapter) BatchNodeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -127,7 +132,7 @@ func (a *Adapter) BatchNodeQueries(
 		opt(&cfg)
 	}
 
-	if err := renderedNameCollision(result); err != nil {
+	if err := requireShapeFor(shapes, result.Schema()); err != nil {
 		return nil, err
 	}
 	var queries []*BatchNodeQuery
@@ -148,10 +153,10 @@ func (a *Adapter) BatchNodeQueries(
 		}
 
 		// The effective immutable set is the type's derived @writeOnce keys.
-		immutableKeys := derivedImmutableKeys(&nodeShape, schemaType)
-		km := MutableKeys
-		if len(immutableKeys) > 0 {
-			km = ImmutableKeys
+		writeOnceKeys := derivedImmutableKeys(&nodeShape, schemaType)
+		km := mutableKeys
+		if len(writeOnceKeys) > 0 {
+			km = immutableKeys
 		}
 
 		instances := result.InstancesOf(typeID)
@@ -175,8 +180,8 @@ func (a *Adapter) BatchNodeQueries(
 				row[batchKeyParamPrefix+k] = v
 			}
 			row["props"] = props
-			if len(immutableKeys) > 0 {
-				row["update_props"] = removeKeys(props, immutableKeys)
+			if len(writeOnceKeys) > 0 {
+				row["update_props"] = removeKeys(props, writeOnceKeys)
 			}
 			rows = append(rows, row)
 		}
@@ -191,7 +196,7 @@ func (a *Adapter) BatchNodeQueries(
 		}
 	}
 
-	composed, err := composedQueries(result, shapes, &cfg)
+	composed, err := composedQueries(ctx, result, shapes, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -203,12 +208,13 @@ func (a *Adapter) BatchNodeQueries(
 // BatchEdgeQueries generates UNWIND-batched MERGE queries for edges,
 // grouped by (sourceType, relationType, targetType) signature.
 //
-// Returns one [BatchEdgeQuery] per signature per chunk. When two types in
-// the snapshot render the same type name, returns an error naming both
-// identities — the writer refuses a rendering it cannot make unambiguous, rather than
-// writing two types under one label.
+// Returns one [BatchEdgeQuery] per signature per chunk. Two identities that
+// render one type NAME are not refused — [GraphShape.Types] is keyed by
+// [schema.TypeID] and each gets its own label.
 //
-// shapes must cover the whole import closure, not just the entry schema: every
+// shapes must come from [Adapter.ShapeForSchema] over this snapshot's schema; a
+// hand-built or foreign one is refused, for the reason [Adapter.BatchNodeQueries]
+// states. It must cover the whole import closure, not just the entry schema: every
 // edge's source and target type is looked up in it, and a missing entry returns
 // "no shape for source type ..." with no further explanation. Build it with
 // [Adapter.ShapeForSchema], which walks the closure.
@@ -223,7 +229,7 @@ func (a *Adapter) BatchEdgeQueries(
 		opt(&cfg)
 	}
 
-	if err := renderedNameCollision(result); err != nil {
+	if err := requireShapeFor(shapes, result.Schema()); err != nil {
 		return nil, err
 	}
 
@@ -290,13 +296,31 @@ func (a *Adapter) BatchEdgeQueries(
 			}
 		}
 
+		// One coercion per distinct endpoint instance, not one per edge.
+		// extractKeyProps runs every key value through the full coerceValue
+		// chokepoint, and a hub node at the end of a thousand edges paid for it
+		// a thousand times.
+		keyCache := make(map[string]map[string]any)
+		endpointKeys := func(inst *graph.Instance, shape *NodeShape) (map[string]any, error) {
+			id := inst.TypeID().String() + "\x00" + inst.PrimaryKey().String()
+			if cached, ok := keyCache[id]; ok {
+				return cached, nil
+			}
+			keys, err := extractKeyProps(inst.Properties(), shape)
+			if err != nil {
+				return nil, err
+			}
+			keyCache[id] = keys
+			return keys, nil
+		}
+
 		var rows []map[string]any
 		for _, edge := range sigEdges {
-			srcKeys, err := extractKeyProps(edge.Source().Properties(), &srcShape)
+			srcKeys, err := endpointKeys(edge.Source(), &srcShape)
 			if err != nil {
 				return nil, fmt.Errorf("source %s: %w", sig.sourceType, err)
 			}
-			tgtKeys, err := extractKeyProps(edge.Target().Properties(), &tgtShape)
+			tgtKeys, err := endpointKeys(edge.Target(), &tgtShape)
 			if err != nil {
 				return nil, fmt.Errorf("target %s: %w", sig.targetType, err)
 			}
@@ -338,54 +362,6 @@ func (a *Adapter) BatchEdgeQueries(
 	}
 
 	return queries, nil
-}
-
-// renderedNameCollision reports an error when two type identities in the
-// snapshot render one type name. The rendering is lossy where the snapshot
-// is not, so the writer refuses rather than silently merging the pair.
-//
-// The walk covers composed children, because the composition phases render
-// part labels of their own. The adapter/json and adapter/csv copies do not
-// walk: JSON keys composed children under relation field names inside the
-// parent, and CSV drops them, so a part-type tag collision cannot reach
-// either output.
-func renderedNameCollision(snap *graph.Snapshot) error {
-	s := snap.Schema()
-	seen := make(map[string]schema.TypeID)
-	note := func(id schema.TypeID) error {
-		name := schema.TagForm(s, id)
-		if first, ok := seen[name]; ok && first != id {
-			return fmt.Errorf("neo4j adapter: type %s and type %s both render type name %q, so they would share one node shape and label",
-				first, id, name)
-		}
-		seen[name] = id
-		return nil
-	}
-	var walkComposed func(inst *graph.Instance) error
-	walkComposed = func(inst *graph.Instance) error {
-		for _, relName := range inst.ComposedRelations() {
-			for _, child := range inst.Composed(relName) {
-				if err := note(child.TypeID()); err != nil {
-					return err
-				}
-				if err := walkComposed(child); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	for _, id := range snap.Types() {
-		if err := note(id); err != nil {
-			return err
-		}
-	}
-	for inst := range snap.AllInstances() {
-		if err := walkComposed(inst); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // propsToParamMap converts instance properties to a Neo4j-driver-compatible
@@ -698,6 +674,7 @@ func extractKeyProps(props immutable.Properties, shape *NodeShape) (map[string]a
 	result := make(map[string]any, len(keyNames))
 	var missing []string
 	var nilKeys []string
+	var coerceErrs []error
 
 	for _, name := range keyNames {
 		val, ok := props.Get(name)
@@ -712,11 +689,19 @@ func extractKeyProps(props immutable.Properties, shape *NodeShape) (map[string]a
 		}
 		cv, err := coerceKey(shape, name, unwrapped)
 		if err != nil {
-			return nil, err
+			// Collected, not returned: this function is built to report every
+			// bad key in one pass, and returning here discarded the missing and
+			// nil lists it had already accumulated — so a caller with three
+			// problems learned of whichever the loop met last.
+			coerceErrs = append(coerceErrs, err)
+			continue
 		}
 		result[name] = cv
 	}
 
+	if len(coerceErrs) > 0 {
+		return nil, errors.Join(append(keyListErrs(missing, nilKeys), coerceErrs...)...)
+	}
 	if len(missing) > 0 && len(nilKeys) > 0 {
 		return nil, fmt.Errorf("missing required primary key(s): %v; nil primary key(s): %v", missing, nilKeys)
 	}
@@ -745,9 +730,11 @@ func chunkSlice[T any](items []T, size int) [][]T {
 		size = 1
 	}
 	var chunks [][]T
-	for i := 0; i < len(items); i += size {
-		end := min(i+size, len(items))
-		chunks = append(chunks, items[i:end])
+	for chunk := range slices.Chunk(items, size) {
+		// Clipped: an unclipped subslice runs to the end of the backing array,
+		// so a caller appending one row to a chunk's $rows would overwrite the
+		// first row of the next query in the same returned slice.
+		chunks = append(chunks, slices.Clip(chunk))
 	}
 	return chunks
 }
@@ -775,4 +762,17 @@ func groupEdgesBySignature(edges []*graph.Edge) map[edgeSignature][]*graph.Edge 
 		groups[sig] = append(groups[sig], edge)
 	}
 	return groups
+}
+
+// keyListErrs renders the missing and nil key lists as errors, so a coercion
+// failure can be reported beside them instead of in place of them.
+func keyListErrs(missing, nilKeys []string) []error {
+	var errs []error
+	if len(missing) > 0 {
+		errs = append(errs, fmt.Errorf("missing required primary key(s): %v", missing))
+	}
+	if len(nilKeys) > 0 {
+		errs = append(errs, fmt.Errorf("nil primary key(s): %v", nilKeys))
+	}
+	return errs
 }
