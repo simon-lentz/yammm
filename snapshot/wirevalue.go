@@ -180,31 +180,6 @@ func wireValue(v any, c schema.Constraint) any {
 	return v
 }
 
-// wireKey rewrites a primary key component-wise under the type's declared key
-// constraints, so a key and the properties backing it carry ONE spelling of a
-// value. The properties go through [wireProps]; the key went out verbatim, so
-// a bypass-built instance emitted a Timestamp, Date or UUID key in the
-// caller's form beside its own canonicalized property.
-//
-// The key is the address — edge targets, duplicate coordinates and an
-// adapter's merge key all read it — so two writers of one logical entity
-// produced two addresses for it.
-func wireKey(key immutable.Key, t *schema.Type) []any {
-	vals := key.Clone()
-	if t == nil || len(vals) == 0 {
-		return vals
-	}
-	i := 0
-	for pk := range t.PrimaryKeys() {
-		if i >= len(vals) {
-			break
-		}
-		vals[i] = wireValue(vals[i], pk.Constraint())
-		i++
-	}
-	return vals
-}
-
 // wireCanonical renders a temporal or UUID value in the one form the kind
 // stores, catching a value that reached the graph without validation. A shape
 // the constraint cannot render passes through — Load never re-validates, and a

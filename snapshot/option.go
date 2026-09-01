@@ -167,6 +167,14 @@ func WithValueConformance(report bool) LoadOption {
 // A systematic defect on a large document produces one finding per instance;
 // [WithIssueLimit] bounds what is stored (default 100), and the counts stay
 // exact past it.
+//
+// It also reports a wire row that contradicts the schema: an edge whose
+// target_type, or a composed child whose type, names a type the relation does
+// not declare as its target. Both are [diag.E_SNAPSHOT_TYPE_MISMATCH] at the
+// chosen severity, and neither is visible to the validator alone — the
+// rebuilt input takes its types from the relation, so the document's own claim
+// is only checked here.
+
 func WithRevalidation(severity diag.Severity) LoadOption {
 	return func(c *loadConfig) {
 		c.revalidate = true

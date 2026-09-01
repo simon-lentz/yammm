@@ -92,6 +92,10 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // its shape. [HeaderOnlyRead] is the streaming sibling whose cost is
 // proportional to the header alone.
 //
+// Diagnostics are capped at the same default [Load] uses (100). This surface
+// takes no option that raises it; a caller needing every issue on a
+// heavily-malformed document reads it through [Load].
+//
 // Returns (nil, result) when the document cannot be summarized at all: an
 // unreadable header, an unsupported version, an unrecognized feature, an
 // unrecognized schema hash algorithm, an undecodable section, or a cancelled

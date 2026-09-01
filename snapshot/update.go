@@ -267,11 +267,18 @@ func UpdateMetadata(
 // (E_UPDATE_METADATA_BODY_OFFSET, E_SNAPSHOT_MALFORMED, or any other
 // Fatal-severity issue that is NOT E_CONTEXT_CANCELLED), transparently
 // falls back to [Load] + [Marshal] using s for the Load. The fallback
-// result is byte-identical to what a direct Marshal call would
-// produce — the correctness floor for the primitive.
+// carries the input's indentation and its created_at across, so the result
+// differs from a direct Marshal only where the input document did.
 //
-// When the fallback path fires, the returned [diag.Result] carries one
-// Warning-severity issue with code [diag.W_UPDATE_METADATA_FALLBACK].
+// Panics if s is nil (programming error), on every call rather than only the
+// ones that reach the fallback: the function cannot complete without it, and
+// deferring the panic to the first input the fast path refuses hides the bug
+// until a document is malformed.
+//
+// When the fallback path fires, the returned [diag.Result] carries a
+// Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], every warning the Load
+// and Marshal legs produced, and one further Warning if the input stated a
+// created_at this path could not parse.
 // Its details include the original triggering Fatal code(s) via a
 // comma-joined "triggering_codes" entry so consumers can log or surface
 // the transition without inspecting the error chain. Callers who want
@@ -327,6 +334,7 @@ func UpdateMetadataOrReMarshal(
 		return nil, merged
 	}
 
+	var fallbackWarnings []diag.Issue
 	marshalOpts := updateOptsToMarshalOpts(opts)
 	marshalOpts = append(marshalOpts, WithMetadata(newMeta))
 	// The fallback must not lose what the input document stated. The primitive
@@ -337,10 +345,24 @@ func UpdateMetadataOrReMarshal(
 	if indent := detectIndent(data); indent != "" {
 		marshalOpts = append(marshalOpts, WithIndent(indent))
 	}
-	if !applyUpdateOptions(opts).createdAtSet {
+	// The caller's stamp wins only when it is a real one. WithUpdateCreatedAt
+	// sets createdAtSet even for a zero time, and Marshal omits a zero stamp —
+	// so gating on the flag alone made the fallback DROP the input's created_at
+	// where the fast path keeps it, which is the fast/slow divergence this
+	// helper exists to close.
+	ucfg := applyUpdateOptions(opts)
+	if !ucfg.createdAtSet || ucfg.createdAt.IsZero() {
 		if hdr, hdrRes := HeaderOnly(ctx, data); !hdrRes.HasErrors() && hdr != nil && hdr.CreatedAt != "" {
-			if when, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt); err == nil {
+			when, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt)
+			if err == nil {
 				marshalOpts = append(marshalOpts, WithCreatedAt(when))
+			} else {
+				// Dropping it silently loses a value the input stated. The
+				// primitive preserves the header's bytes whatever they say;
+				// this path cannot, so it reports what it could not carry.
+				fallbackWarnings = append(fallbackWarnings, diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("input header states created_at %q, which is not RFC 3339; the re-marshalled document carries none", hdr.CreatedAt)).
+					Build())
 			}
 		}
 	}
@@ -359,6 +381,9 @@ func UpdateMetadataOrReMarshal(
 	// provenance-path fallback on the way in vanished from the caller's view.
 	c := diag.NewCollector(0)
 	c.Collect(warn)
+	for _, iss := range fallbackWarnings {
+		c.Collect(iss)
+	}
 	c.Merge(loadRes)
 	c.Merge(marshalRes)
 	return reMarshaled, c.Result()

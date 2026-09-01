@@ -28,6 +28,17 @@ import (
 // than the reader accepts returns nil bytes with Error
 // E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises,
 // so the bound reads identically from both sides. Panics if snap is nil.
+//
+// Two further refusals, both Error-severity [diag.E_SNAPSHOT_MALFORMED]: an
+// indent that is not whitespace, which would produce bytes that are not JSON;
+// and a type whose schema is outside the entry schema's import closure, which
+// the document has no portable name for.
+//
+// A SUCCESSFUL Marshal can return Warning-severity issues. They report values
+// the snapshot held that the wire cannot carry — an unresolved record's target
+// key or edge properties under a reason that admits neither, and a target key
+// [graph.ParseKey] cannot read. A caller checking only [diag.Result.Err] sees
+// none of them.
 func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap == nil {
 		panic("snapshot.Marshal: nil Snapshot")
@@ -56,6 +67,18 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 	// identity lives in the types table, every other position is a row index.
 	names := newSchemaNames(s)
 	view := newWriterView(snap, names)
+	// Refused before a byte is written: a type the closure cannot name has no
+	// portable rendering, and writing its source path instead would put a
+	// machine-local path into the one field the re-key exists to keep free of
+	// them — in a document that would otherwise look well-formed.
+	if id, ok := names.requireDenotable(snap.Types()); !ok {
+		c := diag.NewCollector(0)
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
+			fmt.Sprintf("cannot write type %s: its schema is not in the entry schema's import closure, so the document has no portable name for it", id)).
+			WithDetail(diag.DetailKeyTypeName, id.String()).
+			Build())
+		return nil, c.Result()
+	}
 	tt := buildTypeTable(view, names)
 
 	groups, err := marshalInstances(ctx, view, s, tt)
@@ -263,7 +286,7 @@ func marshalInstance(
 	id := inst.TypeID()
 	t, _ := s.TypeByID(id)
 	w := instWire{
-		Key:        wireKey(inst.PrimaryKey(), t),
+		Key:        inst.PrimaryKey().Clone(),
 		Properties: wireProps(inst.Properties(), t),
 	}
 
@@ -288,7 +311,7 @@ func marshalInstance(
 			}
 			ew := edgeWire{
 				TargetType: row,
-				TargetKey:  wireKeyOf(s, e.Target()),
+				TargetKey:  e.Target().PrimaryKey().Clone(),
 				Properties: wireEdgeProps(e.Properties(), rel),
 			}
 			if ew.Properties == nil {
@@ -344,12 +367,12 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags
 			return diagWire{}, err
 		}
 		conflict := &conflictWire{Type: conflictRow}
-		if d.Conflict.PrimaryKey().Len() > 0 {
-			conflict.Key = wireKeyOf(s, d.Conflict)
+		if key := d.Conflict.PrimaryKey(); key.Len() > 0 {
+			conflict.Key = key.Clone()
 		}
 		dw := dupWire{
 			Type:     row,
-			Key:      wireKeyOf(s, d.Instance),
+			Key:      d.Instance.PrimaryKey().Clone(),
 			Instance: inst,
 			Conflict: conflict,
 		}
@@ -363,7 +386,7 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags
 				return diagWire{}, err
 			}
 			dw.ParentType = parentRow
-			dw.ParentKey = wireKeyOf(s, d.Parent)
+			dw.ParentKey = d.Parent.PrimaryKey().Clone()
 			dw.Relation = d.Relation
 		}
 		dupWires = append(dupWires, dw)
@@ -385,7 +408,7 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags
 		}
 		uw := unresolvedWire{
 			SourceType: sourceRow,
-			SourceKey:  wireKeyOf(s, u.Source),
+			SourceKey:  u.Source.PrimaryKey().Clone(),
 			Relation:   u.Relation,
 			TargetType: targetRow,
 			Required:   u.Required,
@@ -485,19 +508,6 @@ func assembleDocument(
 	)
 
 	return finalBytes, diag.OK()
-}
-
-// wireKeyOf canonicalizes an instance's key against its own declared key
-// constraints. Every position that ADDRESSES an instance — an edge target, a
-// duplicate's key, its conflict, its parent, an unresolved source — must spell
-// the key the way the instance's own group spells it, or the reader's index
-// lookup misses and a resolvable reference reads as dangling.
-func wireKeyOf(s *schema.Schema, inst *graph.Instance) []any {
-	if inst == nil {
-		return nil
-	}
-	t, _ := s.TypeByID(inst.TypeID())
-	return wireKey(inst.PrimaryKey(), t)
 }
 
 // nonWhitespaceIndent reports the first non-whitespace rune in an indent, if

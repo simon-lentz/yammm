@@ -651,13 +651,27 @@ func (sd *streamDecoder) wireTypeRef(row *int) string {
 
 // identRef renders a schema identity in the document's own form, so an
 // expected-versus-got pair reads in one vocabulary.
+//
+// The table is consulted first because a row already holds the rendering. An
+// identity the document does not denote is rendered from the closure instead —
+// NOT through schema.TagForm, which produces a bare or alias-qualified name and
+// would put the two halves of one diagnostic in two vocabularies. That case is
+// not rare: it is what happens when the relation's declared target is the type
+// the document failed to name.
 func (sd *streamDecoder) identRef(id schema.TypeID) string {
 	for i, tid := range sd.tableIDs {
 		if tid == id {
 			return sd.refAt(i)
 		}
 	}
-	return schema.TagForm(sd.schema, id)
+	if sd.schema != nil {
+		for _, cs := range sd.schema.Closure() {
+			if cs.SourceID() == id.SchemaPath() {
+				return TypeRef{Schema: cs.Name(), Name: id.Name()}.String()
+			}
+		}
+	}
+	return TypeRef{Schema: id.SchemaPath().String(), Name: id.Name()}.String()
 }
 
 // retagIssue rebuilds a validator issue at the revalidation severity,
@@ -779,6 +793,12 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 
 		if rowOK {
 			sd.checkProvenancePath(dup.Instance, row)
+			// A ROOT duplicate is a rejected root instance, so its type must be
+			// able to hold one. A COMPOSED duplicate is not: a part type is
+			// exactly what belongs there, and Relation is what separates them.
+			if dup.Relation == "" {
+				sd.checkRootTypeEligible(row, di, 1)
+			}
 		}
 
 		if len(dup.Instance.Composed) > 0 {

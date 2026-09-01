@@ -24,10 +24,18 @@
 // its instances never earned; the unforgeable point is the instance layer,
 // and the attestation is the writer's word, not a proof.
 //
-// [Load] returns what was written. A .ys can hold a graph that fails the
-// graph layer's Add-time relation guards, values outside their constraints,
-// and invariant violations; [WithRevalidation] is the option that reports
-// all of it — the real validator, run per root at load time.
+// [Load] returns what was written, with two exceptions it refuses outright.
+// A .ys can hold a graph that fails the graph layer's Add-time relation
+// guards, values outside their constraints, and invariant violations;
+// [WithRevalidation] is the option that reports all of it — the real
+// validator, run per root at load time.
+//
+// The exceptions are structural rather than a matter of validity, so no option
+// excuses them: an instances group keyed by a type that cannot hold a root
+// instance — abstract, part, or declaring no primary key — draws
+// [diag.E_SNAPSHOT_INVALID_ROOT], and two roots at one address draw
+// [diag.E_DUPLICATE_PK]. Neither describes a graph any caller could have
+// built, and the wire has a diagnostics section for a rejected duplicate.
 // [WithValueConformance] is the narrower canonical-form check. Duplicates
 // and unresolved records ride the document as data
 // ([graph.Snapshot.Duplicates], [graph.Snapshot.Unresolved]); a rejected

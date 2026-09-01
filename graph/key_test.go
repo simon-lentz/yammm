@@ -118,14 +118,24 @@ func timestampKeySchema(t *testing.T) *schema.Schema {
 	return s
 }
 
-func TestGraph_TimestampKeyIdentityFollowsTheRendering(t *testing.T) {
+// TestGraph_TimestampKeyIdentityIsCanonical pins that a key denotes a VALUE,
+// not a spelling: a Timestamp key written as text and the same instant written
+// as a time.Time are one instance, whichever text the caller chose.
+//
+// It formerly pinned the opposite — that identity follows the rendering, so
+// "…T03:04:05+00:00" and "…T03:04:05Z" were two instances. That contradicted
+// checkInstanceKey's own rule, which compares a key against its backing
+// property through "the canonical rendering, the form that decides key
+// equality on the wire", and it let one entity occupy two addresses in the
+// index, in every edge that referenced it, and in the document.
+func TestGraph_TimestampKeyIdentityIsCanonical(t *testing.T) {
 	tests := []struct {
 		spelling      string
 		wantDuplicate bool
 	}{
 		{"2020-01-02T03:04:05Z", true},
-		{"2020-01-02T03:04:05+00:00", false},
-		{"2020-01-02T03:04:05.500Z", false},
+		{"2020-01-02T03:04:05+00:00", true},
+		{"2020-01-02T03:04:05.500Z", true},
 	}
 
 	for _, tt := range tests {

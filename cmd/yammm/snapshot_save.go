@@ -164,6 +164,10 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "error: marshal snapshot: %v\n", err)
 		return &cli.ExitError{Code: cli.ExitRuntime}
 	}
+	// Marshal reports values it could not put on the wire as Warnings, and
+	// Err() is nil for a warnings-only result — so checking the error alone
+	// discarded exactly the facts those diagnostics exist to surface.
+	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), marshalResult)
 
 	// Warn on non-.ys extension.
 	w := cmd.ErrOrStderr()

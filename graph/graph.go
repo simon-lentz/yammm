@@ -38,6 +38,11 @@ type Graph struct {
 	closureSchemas map[location.SourceID]bool
 	ownedSchemas   map[location.SourceID]bool
 
+	// canon rewrites values into the representation their constraint stores.
+	// The graph and [RebuildSnapshot] share one so a graph built through Add
+	// and one rebuilt from parts hold the same bytes for the same value.
+	canon *canonicalizer
+
 	// instances indexes instances by TypeID, then by PK string.
 	instances map[schema.TypeID]map[string]*Instance
 
@@ -109,6 +114,7 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 		config:         cfg,
 		closureSchemas: closure,
 		ownedSchemas:   owned,
+		canon:          newCanonicalizer(s),
 		instances:      make(map[schema.TypeID]map[string]*Instance),
 		pending:        make(map[pendingKey][]*pendingEdge),
 		collector:      diag.NewCollector(0), // unlimited
@@ -221,7 +227,9 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	}
 
 	typeName := graphInst.TypeName()
-	pkString := inst.PrimaryKey().String()
+	// Read from the Instance, not the caller's ValidInstance: build canonicalized
+	// the key and the index must agree with what the graph now holds.
+	pkString := graphInst.PrimaryKey().String()
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -231,7 +239,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 		if existing, found := typeInstances[pkString]; found {
 			// Duplicate.Instance is documented as carrying no composed
 			// children, so the record gets its own childless instance.
-			rejected := newInstance(typeName, typeID, inst.PrimaryKey(), inst.Properties(), inst.Provenance(), inst.Validated())
+			rejected := newInstance(typeName, typeID, graphInst.PrimaryKey(), inst.Properties(), inst.Provenance(), inst.Validated())
 			diagBuilder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
 				fmt.Sprintf("duplicate primary key %s for type %q", pkString, typeName)).
 				WithDetail(diag.DetailKeyTypeName, typeName).
