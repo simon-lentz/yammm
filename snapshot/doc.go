@@ -212,16 +212,28 @@
 // transitively imported type or separate two same-named types in
 // different schemas.
 //
+// Version 4 keys each table row by the declaring schema's NAME rather
+// than its source path. A name travels between machines and a path does
+// not: one schema text loaded from two directories produced two
+// documents carrying an identical schema_hash — [schema.StructuralHash]
+// excludes source paths by design — and mutually unreadable type
+// tables, so a document written on one machine failed to load against
+// the same schema elsewhere with one E_SNAPSHOT_UNKNOWN_TYPE per row.
+// Schema names are unique across an import closure, which is what makes
+// them sufficient to denote a type.
+//
 // [MinReadableVersion] names the lowest version this package accepts on
 // read paths; the accept range is the closed interval
-// [[MinReadableVersion], currentVersion], which is [3, 3] at yammm
-// v0.12.0. Documents outside the range surface an Error-severity
+// [[MinReadableVersion], currentVersion]. The two constants are ONE
+// value — this package reads only the version it writes — so widening
+// the range is a deliberate act rather than an edit that forgets to.
+// Documents outside the range surface an Error-severity
 // [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] with the observed version and
-// the supported range named in the message. An older reader (yammm
-// v0.11.0 and earlier) rejects a v3 document the same way, so an
-// operator running an older binary sees a structured diagnostic rather
-// than a misread types section. See docs/VERSIONING.md for the full
-// pre-1.0 / post-1.0 wire-format policy.
+// the supported range named in the message. A v3 document is refused,
+// not migrated; an older reader rejects a v4 document the same way, so
+// an operator running an older binary sees a structured diagnostic
+// rather than a misread types section. See docs/VERSIONING.md for the
+// full pre-1.0 / post-1.0 wire-format policy.
 //
 // # Thread Safety
 //
@@ -229,7 +241,7 @@
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable
+//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable, internal/value
 //
 // The instance edge exists for [WithRevalidation]: re-validation runs the
 // real validator, so the option's fidelity is the validator's own.

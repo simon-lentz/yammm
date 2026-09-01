@@ -36,7 +36,7 @@ var wireStructCases = []struct {
 	{reflect.TypeFor[provenanceWire](), []string{"source_name", "path"}},
 
 	// Body structs.
-	{reflect.TypeFor[typeTableEntry](), []string{"schema_path", "name"}},
+	{reflect.TypeFor[typeTableEntry](), []string{"schema", "name"}},
 	{reflect.TypeFor[instanceGroupWire](), []string{"type", "items"}},
 	{reflect.TypeFor[instWire](), []string{
 		"key", "type,omitempty", "properties", "edges,omitempty",
@@ -240,8 +240,12 @@ func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
 		if got := details[diag.DetailKeyDepth]; got != strconv.Itoa(maxComposedDepth+1) {
 			t.Errorf("depth detail = %q, want %q", got, strconv.Itoa(maxComposedDepth+1))
 		}
-		if got := details[diag.DetailKeyTypeName]; got != node.ID().String() {
-			t.Errorf("type-name detail = %q, want the identity %q", got, node.ID())
+		// The writer states the identity in the SAME form the reader does.
+		// Before the two were split — "path:name" from the writer against
+		// "schema#name" from the reader — for one code both halves share.
+		wantRef := TypeRef{Schema: "deep", Name: node.ID().Name()}.String()
+		if got := details[diag.DetailKeyTypeName]; got != wantRef {
+			t.Errorf("type-name detail = %q, want the reader's own form %q", got, wantRef)
 		}
 		if !strings.Contains(issue.Message(), "composed nesting depth") {
 			t.Errorf("message does not name the bound it reports: %q", issue.Message())

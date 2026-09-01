@@ -765,7 +765,9 @@ func (g *Graph) Snapshot() *Snapshot {
 			break
 		}
 	}
-	att := Attestation{
+	// A built snapshot always makes a claim; only a loaded document can carry
+	// none, and only because it was written before the claim existed.
+	att := &Attestation{
 		Values:       hasInstance && g.attestValues,
 		Associations: !requiredUnresolved,
 	}

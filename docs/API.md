@@ -661,7 +661,7 @@ The `.ys` format is JSON-based and preserves structural fidelity: instances with
 
 The format includes:
 
-- A **version** field for format evolution (current value: `3` since yammm v0.12.0, the only readable version; see [Wire Format Versions](#wire-format-versions))
+- A **version** field for format evolution (current value: `4`, the only readable version; see [Wire Format Versions](#wire-format-versions))
 - A **schema structural hash** for compatibility verification (see [Schema Identity](#schema-identity))
 - An **integrity hash** (SHA-256 over the whole document, header included) for corruption detection
 - A **features array** for forward compatibility
@@ -978,7 +978,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 **Failure modes.** The primitive returns structured diagnostics with stable codes:
 
 - `E_SNAPSHOT_MALFORMED` — the document's outer shape or header is malformed: the four top-level keys absent, repeated, out of order, `null`, joined by a fifth key or followed by trailing bytes; a header that does not parse (truncated JSON, missing required fields); or a `types` table stating one identity on two rows. Same code `HeaderOnly` / `HeaderOnlyRead` emit for equivalent conditions.
-- `E_SNAPSHOT_UNSUPPORTED_VERSION` — the header states a version no read path accepts (v1 and v2 included; v3 is the only readable version). The document is refused rather than relabelled — `UpdateMetadata` is a header rewrite, never a migration — and `UpdateMetadataOrReMarshal`'s `Load` fallback refuses it the same way.
+- `E_SNAPSHOT_UNSUPPORTED_VERSION` — the header states a version no read path accepts (v1, v2 and v3 included; v4 is the only readable version). The document is refused rather than relabelled — `UpdateMetadata` is a header rewrite, never a migration — and `UpdateMetadataOrReMarshal`'s `Load` fallback refuses it the same way.
 - `E_UPDATE_METADATA_BODY_OFFSET` — the header parsed cleanly but the body-boundary tracking resolved to an unexpected byte pattern, indicating the input does not match the shape `Marshal` produces. Byte-identical recovery via the fast path is not possible; `UpdateMetadataOrReMarshal` falls back to `Load + Marshal` automatically.
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — the header's `features` array holds an entry this version does not recognize. One issue per unrecognized entry.
 - `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the header's `schema_hash_algorithm` is not `schema.StructuralHashVersion`. Error-severity here; the Warning downgrade applies only to header-only reads.
@@ -990,9 +990,11 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 ### Wire Format Versions
 
-The `.ys` wire format uses an integer version field in the header for forward evolution, and this package reads one version. yammm v0.12.0 introduced v3 — the `types` section is a table of `{schema_path, name}` identity rows, `instances` is a list of `{type, items}` groups keyed by table row, and every other type reference is a nullable row index that never defaults — and retired every earlier version. v2 named types where it needed to denote them, which no name can do for a transitively imported type or for two same-named types in different schemas.
+The `.ys` wire format uses an integer version field in the header for forward evolution, and this package reads one version. yammm v0.12.0 introduced v3 — the `types` section is a table of identity rows, `instances` is a list of `{type, items}` groups keyed by table row, and every other type reference is a nullable row index that never defaults — and retired every earlier version. v2 named types where it needed to denote them, which no name can do for a transitively imported type or for two same-named types in different schemas.
 
-`snapshot.MinReadableVersion` (exported constant, value `3` since yammm v0.12.0) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `3`) is the version emitted on every write. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Error-severity `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported version named in the message. **v1 and v2 documents are no longer read** — v3 is the only readable version. An older reader (yammm v0.11.0 and earlier) rejects a v3 document the same way, so an operator running an older binary against a v0.12.0-written `.ys` sees a structured diagnostic rather than a misread types section.
+v4 keys each table row as `{schema, name}` — the declaring schema's **name**, not its source path. A name travels between machines and a path does not: under v3, one schema text loaded from two directories produced documents carrying an identical `schema_hash` (`StructuralHash` excludes source paths by design) and mutually unreadable type tables, so a snapshot written on a build machine failed to load on a runner with one `E_SNAPSHOT_UNKNOWN_TYPE` per row and nothing to do but regenerate it. Schema names are unique across an import closure — `Registry.Register` refuses a second schema with an existing name — which is what makes them sufficient to denote a type. `snapshot.TypeRef` carries the same pair and renders it as `schema#name`.
+
+`snapshot.MinReadableVersion` (exported constant, value `4`) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `4`) is the version emitted on every write, and `MinReadableVersion` is **derived from it** rather than written as a second literal — this package reads only the version it writes, so widening the accept range is a deliberate change rather than a bump that forgets its other half. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Error-severity `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported version named in the message. **v1, v2 and v3 documents are no longer read** — v4 is the only readable version, and a v3 document is refused rather than migrated. An older reader rejects a v4 document the same way, so an operator running an older binary sees a structured diagnostic rather than a misread types section.
 
 See [`docs/VERSIONING.md`](VERSIONING.md) for the full pre-1.0 / post-1.0 wire-format policy.
 

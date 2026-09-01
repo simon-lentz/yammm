@@ -12,25 +12,27 @@ import (
 )
 
 // TypeRef is a type identity as a .ys document states it: declaring schema
-// path plus name. It is the schema-less display surface for the Info and
+// name plus type name. It is the schema-less display surface for the Info and
 // HeaderOnly readers, which run without an import closure to resolve
-// against; two same-named types in different schemas stay distinct. TypeRef
-// renders and does not parse: the Info surfaces are a report projection, so
-// there is no UnmarshalText and they serialize one way by design.
+// against; two same-named types in different schemas stay distinct because
+// schema names are unique across a closure. TypeRef renders and does not
+// parse: the Info surfaces are a report projection, so there is no
+// UnmarshalText and they serialize one way by design.
 type TypeRef struct {
-	SchemaPath string
-	Name       string
+	Schema string
+	Name   string
 }
 
-// String renders the identity as "path#name". The '#' separator is
-// deliberate beside [schema.TypeID]'s "path:name": TypeID's rendering is
-// byte-order-bearing (the types-table sort rides it), so the display form
-// stays visibly distinct rather than moving wire bytes to unify them.
+// String renders the identity as "schema#name". It is the ONE rendering of a
+// type identity in this package: the types table stores it, the reader's
+// diagnostics attach it, and the writer's attach it too — a document and the
+// two halves that produce and consume it cannot disagree on how a type is
+// named.
 func (r TypeRef) String() string {
-	return r.SchemaPath + "#" + r.Name
+	return r.Schema + "#" + r.Name
 }
 
-// MarshalText renders the "path#name" form, so a map keyed by TypeRef and a
+// MarshalText renders the "schema#name" form, so a map keyed by TypeRef and a
 // TypeRef slice both serialize as strings under encoding/json. There is no
 // inverse; [TestTypeRef_IsWriteOnly] pins that as a decision rather than a gap.
 func (r TypeRef) MarshalText() ([]byte, error) {
@@ -92,7 +94,8 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 //
 // Returns (nil, result) when the document cannot be summarized at all: an
 // unreadable header, an unsupported version, an unrecognized feature, an
-// undecodable section, or a cancelled context. A document that decodes but
+// unrecognized schema hash algorithm, an undecodable section, or a cancelled
+// context. A document that decodes but
 // fails a structural check returns a summary beside Error-severity
 // diagnostics — an integrity mismatch reports
 // IntegrityStatus "mismatch", and a reference naming no table row is reported
@@ -111,7 +114,7 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		return nil, c.Result()
 	}
 
-	sd := newStreamDecoder(data, nil, loadConfig{})
+	sd := newStreamDecoder(data, nil, defaultLoadConfig())
 
 	// Decode header + types.
 	if err := sd.decodeHeader(); err != nil {
@@ -248,7 +251,9 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 		return nil, c.Result()
 	}
 
-	sd := newStreamDecoder(data, nil, loadConfig{headerOnly: true})
+	cfg := defaultLoadConfig()
+	cfg.headerOnly = true
+	sd := newStreamDecoder(data, nil, cfg)
 
 	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
@@ -351,7 +356,9 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 	}
 
 	lr := newLimitReader(r, MaxHeaderSize)
-	sd := newStreamDecoderFromReader(lr, nil, loadConfig{headerOnly: true})
+	cfg := defaultLoadConfig()
+	cfg.headerOnly = true
+	sd := newStreamDecoderFromReader(lr, nil, cfg)
 
 	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
@@ -453,12 +460,15 @@ func (h *HeaderInfo) SchemaHashMatches(s *schema.Schema) bool {
 // does not declare. An empty result means every row binds at [Load].
 //
 // It is the complement of [HeaderInfo.SchemaHashMatches], and dispatch callers
-// want both: the hash catches a changed schema shape under one source path, and
-// this catches the same shape under a changed path. A snapshot written against
-// one schema layout and read against another passes the hash — StructuralHash
-// hashes names and never source paths — then fails at [Load] with one
-// E_SNAPSHOT_UNKNOWN_TYPE per row. Both checks run on a header-only read, before
-// any body decode.
+// want both: the hash catches a schema whose RULES changed, this catches one
+// that no longer declares a type the document names — a row removed or renamed,
+// or a closure missing the schema that declared it. Both checks run on a
+// header-only read, before any body decode.
+//
+// Moving a schema's files is not one of the cases. The types table names the
+// declaring schema, not its source path, so the same schema text read from
+// another directory binds every row; while the table carried paths, this method
+// and SchemaHashMatches contradicted each other on exactly that input.
 //
 // Nil-safety: a nil receiver returns nil, and a nil schema returns every row,
 // because a closure that declares nothing declares no row.

@@ -25,10 +25,12 @@ type SnapshotParts struct {
 	Duplicates []DuplicateParts
 	Unresolved []UnresolvedParts
 
-	// Attestation carries the loaded header's validity claim verbatim.
-	// RebuildSnapshot stores it without derivation: a rebuilt instance
-	// cannot prove validity, only the writing library's claim survives.
-	Attestation Attestation
+	// Attestation carries the loaded header's validity claim verbatim, and is
+	// nil for a document that carries none. RebuildSnapshot stores it without
+	// derivation: a rebuilt instance cannot prove validity, only the writing
+	// library's claim survives — and a document that claimed nothing must not
+	// come back claiming both dimensions are false.
+	Attestation *Attestation
 }
 
 // InstanceParts holds the data for a single instance. Composed children
@@ -130,6 +132,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 	collector := diag.NewCollector(0)
 
 	validatePartsIdentity(parts, collector)
+	validatePartsRootTypes(s, parts, collector)
 	if collector.HasErrors() {
 		return nil, collector.Result()
 	}
@@ -243,6 +246,46 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 
 	snap := newSnapshot(s, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK(), parts.Attestation)
 	return snap, diag.OK()
+}
+
+// validatePartsRootTypes rejects an instance group keyed by a type that
+// cannot hold a root instance: an abstract type, a part type, or one
+// declaring no primary key. [Graph.Add] refuses all three, so admitting them
+// here would make the rebuild path the one way to assemble a graph the API
+// cannot build — and the snapshot writer would then emit a document its own
+// reader refuses.
+//
+// The rule is the object model's, not a validation preference: an abstract
+// type has no instances, a part instance is addressed through its parent, and
+// a type with no primary key has no address at all. A store cannot hold any
+// of the three as a node.
+func validatePartsRootTypes(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
+	if s == nil {
+		return
+	}
+	for typeID, instParts := range parts.Instances {
+		if len(instParts) == 0 {
+			continue
+		}
+		t, ok := s.TypeByID(typeID)
+		if !ok {
+			continue // an unknown identity is validatePartsIdentity's to report
+		}
+		var rule string
+		switch {
+		case t.IsAbstract():
+			rule = "is abstract"
+		case t.IsPart():
+			rule = "is a part type, addressed through its parent composition"
+		case !t.HasPrimaryKey():
+			rule = "declares no primary key"
+		default:
+			continue
+		}
+		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+			fmt.Sprintf("RebuildSnapshot: %d root instance(s) of type %s, which %s",
+				len(instParts), typeID, rule)).Build())
+	}
 }
 
 // validatePartsIdentity rejects a zero [schema.TypeID] at every parts

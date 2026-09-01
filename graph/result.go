@@ -22,6 +22,12 @@ import (
 // the integrity hash and against nothing else, because [RebuildSnapshot]
 // accepts caller-assembled parts. The snapshot package's re-validation
 // load option is the reader's remedy when a claim is not enough.
+//
+// A snapshot may carry NO claim, which [Snapshot.Attestation] reports as nil.
+// A document written before the attestation existed carries none, and silence
+// is not the same statement as a claim that both dimensions are false — the
+// absence is represented as absence so it cannot be read as the stronger
+// negative one.
 type Attestation struct {
 	Values       bool
 	Associations bool
@@ -86,7 +92,7 @@ type Snapshot struct {
 	diagnostics diag.Result
 
 	// attestation is the validity claim this snapshot carries.
-	attestation Attestation
+	attestation *Attestation
 }
 
 // Schema returns the schema used for validation.
@@ -238,11 +244,12 @@ func (r *Snapshot) Diagnostics() diag.Result {
 	return r.diagnostics
 }
 
-// Attestation returns the validity claim this snapshot carries. See
-// [Attestation] for what each dimension means and what it does not prove.
-func (r *Snapshot) Attestation() Attestation {
+// Attestation returns the validity claim this snapshot carries, or nil when
+// it carries none. See [Attestation] for what each dimension means, what it
+// does not prove, and why absence is distinct from a false claim.
+func (r *Snapshot) Attestation() *Attestation {
 	if r == nil {
-		return Attestation{}
+		return nil
 	}
 	return r.attestation
 }
@@ -299,7 +306,7 @@ func newSnapshot(
 	duplicates []*Duplicate,
 	unresolved []*UnresolvedEdge,
 	diagnostics diag.Result,
-	attestation Attestation,
+	attestation *Attestation,
 ) *Snapshot {
 	// A repeated identity would make every instance of that type appear twice
 	// in AllInstances and twice in the persisted document.

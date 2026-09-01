@@ -1,11 +1,11 @@
 {
 	"yammm_snapshot": {
-		"version": 3,
+		"version": 4,
 		"schema_name": "wiretest",
 		"schema_source": "string://wiretest.yammm",
 		"schema_hash": "sha256:ff5bbea4096a7e2824243105303ca05d9b0e0b4cdbb2a5d4a13d6abfa29f89a8",
 		"schema_hash_algorithm": 3,
-		"integrity_hash": "sha256:10a942fbb4f97c457430efe4e500c6af5bf5167d59e41f9abbed1dbddaf1bb87",
+		"integrity_hash": "sha256:642489f6af97de44fafe733e7c428770d10b47f3feb40ca68d5a9a0ffb04c6ef",
 		"features": [],
 		"attestation": {
 			"values": false,
@@ -14,15 +14,15 @@
 	},
 	"types": [
 		{
-			"schema_path": "string://wiretest.yammm",
+			"schema": "wiretest",
 			"name": "Part"
 		},
 		{
-			"schema_path": "string://wiretest.yammm",
+			"schema": "wiretest",
 			"name": "Sensor"
 		},
 		{
-			"schema_path": "string://wiretest.yammm",
+			"schema": "wiretest",
 			"name": "Station"
 		}
 	],

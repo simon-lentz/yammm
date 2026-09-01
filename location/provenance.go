@@ -28,6 +28,11 @@ type Provenance struct {
 	path       path.Builder
 	span       Span
 	rawPath    string
+	// rawPathSet separates "no raw path recorded" from "the recorded raw path
+	// is the empty string". Both render as "", and a writer that reads only the
+	// string substitutes a synthesized path for a document that carried an
+	// empty one — turning a value the document stated into one it did not.
+	rawPathSet bool
 }
 
 // NewProvenance creates a new Provenance with the given source information.
@@ -94,12 +99,21 @@ func (p *Provenance) RawPath() string {
 // parsed path.Builder cannot faithfully reproduce the original path string.
 func (p *Provenance) WithRawPath(raw string) *Provenance {
 	if p == nil {
-		return &Provenance{rawPath: raw}
+		return &Provenance{rawPath: raw, rawPathSet: true}
 	}
 	return &Provenance{
 		sourceName: p.sourceName,
 		path:       p.path,
 		span:       p.span,
 		rawPath:    raw,
+		rawPathSet: true,
 	}
+}
+
+// HasRawPath reports whether a raw path was recorded, which [Provenance.RawPath]
+// alone cannot answer: a recorded empty string and no record at all both render
+// as "". A writer round-tripping provenance must ask this before substituting a
+// path of its own.
+func (p *Provenance) HasRawPath() bool {
+	return p != nil && p.rawPathSet
 }

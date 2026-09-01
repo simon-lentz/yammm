@@ -76,29 +76,82 @@ type Holder {
 	return s
 }
 
-// TestRoundTripHelpers exercises the live helper surface end-to-end on a
-// snapshot with an instance, a resolved edge, and an unresolved edge.
-func TestRoundTripHelpers(t *testing.T) {
-	s := testSchema(t)
-	edges := map[string]*instance.ValidEdgeData{
+// employerEdge builds the single-target EMPLOYER edge data for a Person.
+func employerEdge(target string) map[string]*instance.ValidEdgeData {
+	return map[string]*instance.ValidEdgeData{
 		"EMPLOYER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"c-missing"}), immutable.WrapProperties(nil)),
+			instance.NewValidEdgeTarget(immutable.WrapKey([]any{target}), immutable.WrapProperties(nil)),
 		}),
 	}
+}
+
+// company builds a Company instance with the given primary key.
+func company(t *testing.T, s *schema.Schema, id string) *instance.ValidInstance {
+	t.Helper()
+	return instancetest.VI(
+		"Company",
+		instancetest.TypeID(typeID(t, s, "Company")),
+		instancetest.PK(id),
+		instancetest.Props(map[string]any{"id": id}),
+	)
+}
+
+// person builds a Person instance whose EMPLOYER edge points at target.
+func person(t *testing.T, s *schema.Schema, id, name, target string) *instance.ValidInstance {
+	t.Helper()
+	return instancetest.VI(
+		"Person",
+		instancetest.TypeID(typeID(t, s, "Person")),
+		instancetest.PK(id),
+		instancetest.Props(map[string]any{"id": id, "name": name}),
+		instancetest.Edges(employerEdge(target)),
+	)
+}
+
+// TestRoundTripHelpers exercises the live helper surface end-to-end on a
+// snapshot with an instance, a resolved edge, and an unresolved edge.
+//
+// The resolved edge needs its target instance in the same snapshot: an edge
+// whose target is absent lands in Unresolved and never reaches the
+// projection's edge arm.
+func TestRoundTripHelpers(t *testing.T) {
+	s := testSchema(t)
 	snap := buildSnapshot(
 		t, s,
-		instancetest.VI(
-			"Person",
-			instancetest.TypeID(typeID(t, s, "Person")),
-			instancetest.PK("p1"),
-			instancetest.Props(map[string]any{"id": "p1", "name": "Alice"}),
-			instancetest.Edges(edges),
-		),
+		company(t, s, "c1"),
+		person(t, s, "p1", "Alice", "c1"),
+		person(t, s, "p2", "Bob", "c-missing"),
 	)
 
 	snapshottest.AssertRoundTrip(t, snap, s)
 	snapshottest.AssertDeterministic(t, snap)
 	snapshottest.DiffSnapshots(t, snap, snap)
+}
+
+// TestDiffSnapshots_DetectsEdgeDifference pins the projection's edge arm.
+// Two snapshots that differ only in an edge's target must not compare equal.
+//
+// Without it the arm is unasserted: deleting the projection's edge loop drops
+// the edges from BOTH sides of every comparison, so every round-trip test
+// stays green while the oracle stops comparing edges at all.
+func TestDiffSnapshots_DetectsEdgeDifference(t *testing.T) {
+	s := testSchema(t)
+	a := buildSnapshot(
+		t, s,
+		company(t, s, "c1"), company(t, s, "c2"),
+		person(t, s, "p1", "Alice", "c1"),
+	)
+	b := buildSnapshot(
+		t, s,
+		company(t, s, "c1"), company(t, s, "c2"),
+		person(t, s, "p1", "Alice", "c2"),
+	)
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, a, b)
+	if !probe.Failed() {
+		t.Error("DiffSnapshots did not fail on snapshots whose edges differ")
+	}
 }
 
 // TestDiffSnapshots_DetectsDifference pins that the comparer actually

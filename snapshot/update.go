@@ -108,6 +108,10 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //   - [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] — the header states a version
 //     no read path accepts. The document is refused rather than
 //     relabelled; UpdateMetadata is a header rewrite, never a migration.
+//   - [diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM] — the header states a
+//     schema hash algorithm this version does not implement. Refused for the
+//     same reason as an unsupported version: the output would carry a schema
+//     identity this library cannot check.
 //   - [diag.E_UPDATE_METADATA_BODY_OFFSET] — the header parsed cleanly
 //     but the body-boundary tracking could not resolve a valid byte
 //     range for the body. This indicates the input does not match the
@@ -157,7 +161,9 @@ func UpdateMetadata(
 	// Decode the existing header via the streaming decoder. We skip the
 	// integrity check: UpdateMetadata's contract is "trust caller-provided
 	// body bytes"; a fresh hash is computed at write time.
-	sd := newStreamDecoder(data, nil, loadConfig{skipIntegrityCheck: true})
+	loadCfg := defaultLoadConfig()
+	loadCfg.skipIntegrityCheck = true
+	sd := newStreamDecoder(data, nil, loadCfg)
 	if err := sd.decodeHeader(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
@@ -297,6 +303,13 @@ func UpdateMetadataOrReMarshal(
 	s *schema.Schema,
 	opts ...UpdateOption,
 ) ([]byte, diag.Result) {
+	// Checked before the fast path, not inside the fallback that dereferences
+	// it: a nil schema is a caller's bug on every input, and only some inputs
+	// reach Load. Deferring the panic let a caller run for months and crash on
+	// the first document the fast path refused.
+	if s == nil {
+		panic("snapshot.UpdateMetadataOrReMarshal: nil Schema")
+	}
 	out, res := UpdateMetadata(ctx, data, newMeta, opts...)
 	if !res.HasErrors() {
 		return out, res
@@ -305,7 +318,7 @@ func UpdateMetadataOrReMarshal(
 		return nil, res
 	}
 
-	triggeringCodes := distinctFatalCodes(res)
+	triggeringCodes := distinctTriggeringCodes(res)
 
 	// Fall back to Load + Marshal.
 	loaded, loadRes := Load(ctx, data, s)
@@ -316,6 +329,21 @@ func UpdateMetadataOrReMarshal(
 
 	marshalOpts := updateOptsToMarshalOpts(opts)
 	marshalOpts = append(marshalOpts, WithMetadata(newMeta))
+	// The fallback must not lose what the input document stated. The primitive
+	// rebuilds the header in place and keeps both; Load + Marshal reconstructs
+	// it, so the indent and the created_at have to be carried across or a
+	// pretty-printed document comes back compact and a stamped one comes back
+	// unstamped.
+	if indent := detectIndent(data); indent != "" {
+		marshalOpts = append(marshalOpts, WithIndent(indent))
+	}
+	if !applyUpdateOptions(opts).createdAtSet {
+		if hdr, hdrRes := HeaderOnly(ctx, data); !hdrRes.HasErrors() && hdr != nil && hdr.CreatedAt != "" {
+			if when, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt); err == nil {
+				marshalOpts = append(marshalOpts, WithCreatedAt(when))
+			}
+		}
+	}
 	reMarshaled, marshalRes := Marshal(ctx, loaded, marshalOpts...)
 	if marshalRes.HasErrors() {
 		merged := mergeResults(res, marshalRes)
@@ -326,8 +354,13 @@ func UpdateMetadataOrReMarshal(
 		"snapshot.UpdateMetadataOrReMarshal: fell back to Load + Marshal after UpdateMetadata refused input").
 		WithDetail("triggering_codes", strings.Join(triggeringCodes, ",")).
 		Build()
+	// The legs' own warnings travel with it. A fresh collector holding only
+	// this warning discarded everything Load and Marshal reported — a
+	// provenance-path fallback on the way in vanished from the caller's view.
 	c := diag.NewCollector(0)
 	c.Collect(warn)
+	c.Merge(loadRes)
+	c.Merge(marshalRes)
 	return reMarshaled, c.Result()
 }
 
@@ -371,9 +404,9 @@ func hasCancellation(r diag.Result) bool {
 	return false
 }
 
-// distinctFatalCodes extracts the distinct Fatal-severity codes from a
+// distinctTriggeringCodes extracts the distinct Fatal-severity codes from a
 // result, sorted alphabetically for deterministic detail output.
-func distinctFatalCodes(r diag.Result) []string {
+func distinctTriggeringCodes(r diag.Result) []string {
 	seen := make(map[string]struct{})
 	for iss := range r.BySeverity(diag.Fatal) {
 		seen[iss.Code().String()] = struct{}{}

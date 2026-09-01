@@ -17,7 +17,7 @@ import (
 // the header validation it is written for.
 func headerDoc(s *schema.Schema, version int, featuresJSON string) []byte {
 	return fmt.Appendf(nil,
-		`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":%d,"integrity_hash":"","features":%s},"types":[{"schema_path":"test://test.yammm","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
+		`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":%d,"integrity_hash":"","features":%s},"types":[{"schema":"test","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
 		version, schema.StructuralHash(s), schema.StructuralHashVersion, featuresJSON)
 }
 
@@ -43,14 +43,14 @@ func TestUpdateMetadata_PreservesInputVersion(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
 
-	data := headerDoc(s, 3, `[]`)
+	data := headerDoc(s, 4, `[]`)
 
 	out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
 	if res.HasErrors() {
 		t.Fatalf("UpdateMetadata on a readable document: %v", res)
 	}
-	if got := headerVersion(t, out); got != 3 {
-		t.Errorf("output version = %d, want 3 — the fast path must write the version it read", got)
+	if got := headerVersion(t, out); got != 4 {
+		t.Errorf("output version = %d, want 4 — the fast path must write the version it read", got)
 	}
 }
 
@@ -81,7 +81,7 @@ func TestUpdateMetadata_RefusesUnsupportedVersion(t *testing.T) {
 func TestUpdateMetadata_RefusesNullFeatures(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
-	data := headerDoc(s, 3, `null`)
+	data := headerDoc(s, 4, `null`)
 
 	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
 	if !res.HasErrors() {
@@ -97,7 +97,7 @@ func TestUpdateMetadata_RefusesNullFeatures(t *testing.T) {
 func TestUpdateMetadata_RefusesUnrecognizedFeature(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
-	data := headerDoc(s, 3, `["nonexistent_feature"]`)
+	data := headerDoc(s, 4, `["nonexistent_feature"]`)
 
 	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
 	if !res.HasErrors() {
@@ -118,7 +118,7 @@ func TestUpdateMetadata_RefusesUnknownHashAlgorithm(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
 	data := fmt.Appendf(nil,
-		`{"yammm_snapshot":{"version":3,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":99,"integrity_hash":"","features":[]},"types":[{"schema_path":"test://test.yammm","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
+		`{"yammm_snapshot":{"version":4,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":99,"integrity_hash":"","features":[]},"types":[{"schema":"test","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
 		schema.StructuralHash(s))
 
 	out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})

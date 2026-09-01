@@ -324,7 +324,7 @@ func TestUpdateMetadata_ConcurrentAccess(t *testing.T) {
 // branch can go dead behind the other.
 func TestUpdateMetadata_BodyOffsetFailure(t *testing.T) {
 	ctx := context.Background()
-	header := fmt.Sprintf(`{"yammm_snapshot":{"version":3,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":%d,"integrity_hash":"","features":[]}`, schema.StructuralHashVersion)
+	header := fmt.Sprintf(`{"yammm_snapshot":{"version":4,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":%d,"integrity_hash":"","features":[]}`, schema.StructuralHashVersion)
 
 	// A document that ends at the header: the decoder rejects it for the
 	// missing types key before the body offset is ever consulted.

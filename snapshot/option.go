@@ -31,6 +31,12 @@ func applyOptions(opts []Option) config {
 // Both compact and indented output include a valid integrity_hash in the
 // header. The canonical-form technique works identically regardless of
 // indentation.
+//
+// The indent must be whitespace. [Marshal] refuses anything else with an
+// Error-severity [diag.E_SNAPSHOT_MALFORMED] rather than emitting it: the
+// string is written between JSON tokens, so a non-whitespace one produces a
+// document that is not JSON at all — which this package's own [Load] refuses
+// and [WriteFile] would put on disk unreadable.
 func WithIndent(indent string) Option {
 	return func(c *config) {
 		c.indent = indent
@@ -88,8 +94,17 @@ type loadConfig struct {
 // defaultIssueLimit matches schema.Load's default.
 const defaultIssueLimit = 100
 
+// defaultLoadConfig is the state every read surface starts from. The surfaces
+// that take no options build their config directly, and a zero value there
+// means issueLimit 0 — unlimited — so Info, HeaderOnly and HeaderOnlyRead ran
+// with an unbounded collector that no option could bound, while Load and
+// Verify defaulted to 100.
+func defaultLoadConfig() loadConfig {
+	return loadConfig{issueLimit: defaultIssueLimit}
+}
+
 func applyLoadOptions(opts []LoadOption) loadConfig {
-	cfg := loadConfig{issueLimit: defaultIssueLimit}
+	cfg := defaultLoadConfig()
 	for _, o := range opts {
 		o(&cfg)
 	}

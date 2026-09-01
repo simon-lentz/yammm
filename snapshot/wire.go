@@ -176,15 +176,23 @@ func skipValue(dec *json.Decoder, key string) error {
 
 // MinReadableVersion is the lowest .ys wire-format version this package
 // accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead).
-// The accept range is the closed interval [MinReadableVersion, currentVersion],
-// which is [3, 3]: v0.12.0 introduced v3 and retired every earlier version.
+// The accept range is the closed interval [MinReadableVersion, currentVersion].
 // A document outside the range draws an Error-severity
 // [diag.E_SNAPSHOT_UNSUPPORTED_VERSION]. The package doc's Wire Format
 // Versions section and docs/VERSIONING.md carry the full policy.
-const MinReadableVersion = 3
+//
+// It is DERIVED from currentVersion, not written as a second literal: this
+// package reads only the version it writes, and two independent literals let
+// a version bump widen the accept range by accident — a reader that silently
+// admits the previous format instead of refusing it. Widening the range is a
+// deliberate act that replaces this expression, never an edit that forgets to.
+const MinReadableVersion = currentVersion
 
 const (
-	currentVersion = 3
+	// Version 4 keys the types table by the declaring schema's NAME. Version 3
+	// keyed it by source path, so a document written on one machine failed to
+	// load against the same schema text at another path.
+	currentVersion = 4
 
 	// currentHashAlgoVersion follows the schema constant structurally: the
 	// writer's label and the reader's comparison were two bare literals
@@ -238,11 +246,21 @@ type provenanceWire struct {
 }
 
 // typeTableEntry is one row of the types table — the document's denotation
-// set. SchemaPath plus Name is the lossless identity; every other position
-// references a row by index.
+// set. Schema plus Name is the identity; every other position references a
+// row by index.
+//
+// Schema is the declaring schema's DECLARED NAME, not its source path. The
+// name travels between machines where a path does not, and it is unique
+// across an import closure because [github.com/simon-lentz/yammm/schema.Registry.Register]
+// refuses a second schema with an existing name. Keying by source path made
+// two documents of one schema text — loaded from two directories, or from
+// disk and from embedded sources — carry an identical schema_hash and
+// mutually unreadable type tables, because
+// [github.com/simon-lentz/yammm/schema.StructuralHash] excludes paths by
+// design and this table did not.
 type typeTableEntry struct {
-	SchemaPath string `json:"schema_path"`
-	Name       string `json:"name"`
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
 }
 
 // instanceGroupWire is one entry of the instances section: one table row's

@@ -1,11 +1,11 @@
 {
 	"yammm_snapshot": {
-		"version": 3,
+		"version": 4,
 		"schema_name": "temporaltest",
 		"schema_source": "string://temporaltest.yammm",
 		"schema_hash": "sha256:7f464f75a9ce6a9d958b0a728747c99953d36cc7cc7636eb3c1e7faed7f183af",
 		"schema_hash_algorithm": 3,
-		"integrity_hash": "sha256:e92760cafca32d1c5b7d87346890b8b19a87e445a9c59f61cdb78310aecff95b",
+		"integrity_hash": "sha256:d96b56539a3b685133d0f8b60933dbe39421f4c702a5705e1f09c6f998964e21",
 		"features": [],
 		"attestation": {
 			"values": true,
@@ -14,15 +14,15 @@
 	},
 	"types": [
 		{
-			"schema_path": "string://temporaltest.yammm",
+			"schema": "temporaltest",
 			"name": "Reading"
 		},
 		{
-			"schema_path": "string://temporaltest.yammm",
+			"schema": "temporaltest",
 			"name": "Sensor"
 		},
 		{
-			"schema_path": "string://temporaltest.yammm",
+			"schema": "temporaltest",
 			"name": "Station"
 		}
 	],

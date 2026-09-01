@@ -149,7 +149,16 @@ func TestUpdateMetadata_DoesNotFabricateAnAttestation(t *testing.T) {
 	}
 }
 
-func TestLoad_AbsentAttestationReadsFalse(t *testing.T) {
+// TestLoad_AbsentAttestationSurvivesTheRoundTrip pins that silence stays
+// silence. A pre-v0.15.0 document carries no attestation, and no claim is a
+// weaker statement than a claim that both dimensions are false — so a load
+// must report absence and the next Marshal must write none.
+//
+// The test above already held UpdateMetadata to this rule; the load path was
+// pinned to the opposite, and collapsing absence to a zero value there is what
+// made a re-marshal fabricate {"values":false,"associations":false} on a
+// document that claimed nothing.
+func TestLoad_AbsentAttestationSurvivesTheRoundTrip(t *testing.T) {
 	t.Parallel()
 	s, data := attWireFixture(t)
 
@@ -158,7 +167,15 @@ func TestLoad_AbsentAttestationReadsFalse(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Load: %s", res.String())
 	}
-	if att := snap.Attestation(); att.Values || att.Associations {
-		t.Fatalf("an absent attestation loaded as %+v, want both false", att)
+	if att := snap.Attestation(); att != nil {
+		t.Fatalf("an absent attestation loaded as %+v, want no claim at all", att)
+	}
+
+	again, mres := snapshot.Marshal(t.Context(), snap)
+	if mres.HasErrors() {
+		t.Fatalf("Marshal: %s", mres.String())
+	}
+	if bytes.Contains(again, []byte(`"attestation"`)) {
+		t.Fatalf("Marshal fabricated an attestation on a document that carried none: %s", again)
 	}
 }

@@ -483,8 +483,8 @@ func TestInfo_Basic(t *testing.T) {
 		t.Fatal("Info returned nil")
 	}
 
-	if info.Version != 3 {
-		t.Errorf("Version: got %d, want 3", info.Version)
+	if info.Version != 4 {
+		t.Errorf("Version: got %d, want 4", info.Version)
 	}
 	if info.SchemaName != "test" {
 		t.Errorf("SchemaName: got %q, want %q", info.SchemaName, "test")
@@ -535,13 +535,13 @@ func TestHeaderOnly_Basic(t *testing.T) {
 	require.NoError(t, result.Err(), "HeaderOnly should succeed")
 	require.NotNil(t, header, "HeaderOnly should return a non-nil HeaderInfo")
 
-	assert.Equal(t, 3, header.Version, "Version")
+	assert.Equal(t, 4, header.Version, "Version")
 	assert.Equal(t, "test", header.SchemaName, "SchemaName")
 	assert.NotEmpty(t, header.SchemaHash, "SchemaHash should be populated")
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash should be populated (value, not verified)")
 	assert.Equal(t, int64(len(data)), header.FileSize, "FileSize")
 	assert.ElementsMatch(t,
-		[]snapshot.TypeRef{{SchemaPath: "test://test.yammm", Name: "Company"}, {SchemaPath: "test://test.yammm", Name: "Person"}},
+		[]snapshot.TypeRef{{Schema: "test", Name: "Company"}, {Schema: "test", Name: "Person"}},
 		header.Types, "Types should include both types")
 }
 
@@ -712,12 +712,12 @@ func TestHeaderOnlyRead_HappyPath(t *testing.T) {
 	require.NoError(t, result.Err(), "HeaderOnlyRead should succeed on well-formed input")
 	require.NotNil(t, header, "HeaderOnlyRead should return a non-nil HeaderInfo")
 
-	assert.Equal(t, 3, header.Version)
+	assert.Equal(t, 4, header.Version)
 	assert.Equal(t, "test", header.SchemaName)
 	assert.NotEmpty(t, header.SchemaHash)
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash is the stored value, not a verification result")
 	assert.ElementsMatch(t,
-		[]snapshot.TypeRef{{SchemaPath: "test://test.yammm", Name: "Company"}, {SchemaPath: "test://test.yammm", Name: "Person"}},
+		[]snapshot.TypeRef{{Schema: "test", Name: "Company"}, {Schema: "test", Name: "Person"}},
 		header.Types)
 	assert.Equal(t, int64(0), header.FileSize, "FileSize is not populated in the reader variant")
 }
@@ -889,7 +889,7 @@ func TestHeaderOnlyRead_SlowReader(t *testing.T) {
 	require.NoError(t, result.Err(), "slow reader should not surface an error on well-formed input")
 	require.NotNil(t, header)
 	assert.Equal(t, "test", header.SchemaName)
-	assert.ElementsMatch(t, []snapshot.TypeRef{{SchemaPath: "test://test.yammm", Name: "Company"}}, header.Types)
+	assert.ElementsMatch(t, []snapshot.TypeRef{{Schema: "test", Name: "Company"}}, header.Types)
 }
 
 func TestHeaderOnlyRead_ContextCancellation(t *testing.T) {
@@ -1313,7 +1313,7 @@ func TestLoad_V1Rejected(t *testing.T) {
 	require.Nil(t, loaded, "a refused document yields no snapshot")
 	require.True(t, hasCode(result, diag.E_SNAPSHOT_UNSUPPORTED_VERSION),
 		"v1 must be refused with the supported version named: %v", result)
-	require.Contains(t, result.Err().Error(), "supported: 3")
+	require.Contains(t, result.Err().Error(), "supported: 4")
 }
 
 // TestLoad_UnsupportedVersion pins the rejection path for versions outside
@@ -1335,7 +1335,7 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 			for issue := range result.Errors() {
 				if issue.Code() == diag.E_SNAPSHOT_UNSUPPORTED_VERSION {
 					found = true
-					require.Contains(t, issue.Message(), "supported: 3",
+					require.Contains(t, issue.Message(), "supported: 4",
 						"reject message names the supported version")
 				}
 			}
