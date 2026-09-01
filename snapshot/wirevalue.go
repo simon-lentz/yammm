@@ -74,16 +74,22 @@ func appendWireFloat(v float64, bitSize int) ([]byte, error) {
 	return b, nil
 }
 
-// typeByWireID resolves a persisted identity — schema path and name together —
-// against the entry schema's import closure. Matching the path as well as the
-// name is what keeps two same-named types in different schemas apart; a
-// name-only lookup silently rebinds one to the other.
-func typeByWireID(s *schema.Schema, schemaPath, name string) (*schema.Type, bool) {
+// typeByWireID resolves a persisted identity — the declaring schema's name and
+// the type's name together — against the entry schema's import closure.
+// Matching the schema as well as the type is what keeps two same-named types
+// in different schemas apart; a type-name-only lookup silently rebinds one to
+// the other.
+//
+// The schema NAME is the match key rather than its source path, because the
+// name is what travels: one schema text loaded from two directories declares
+// one name and two paths, and a path-keyed document written under the first
+// does not load under the second.
+func typeByWireID(s *schema.Schema, schemaName, name string) (*schema.Type, bool) {
 	if s == nil {
 		return nil, false
 	}
 	for _, cs := range s.Closure() {
-		if cs.SourceID().String() != schemaPath {
+		if cs.Name() != schemaName {
 			continue
 		}
 		if t, ok := cs.Type(name); ok {

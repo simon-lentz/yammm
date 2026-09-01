@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -28,20 +29,80 @@ func (e *tableMissError) Error() string {
 // distinguish from a corrupt writer state.
 type depthExceededError struct {
 	depth int
-	id    schema.TypeID
+	ref   string
 	key   string
 }
 
 func (e *depthExceededError) Error() string {
 	return fmt.Sprintf("composed nesting depth %d exceeds limit %d at %s[%s]",
-		e.depth, maxComposedDepth, e.id, e.key)
+		e.depth, maxComposedDepth, e.ref, e.key)
+}
+
+// schemaNames maps each import-closure member's source identity to its
+// declared name — the form the .ys wire states a type in. It is built once
+// per Marshal because a closure walk per type identity would repeat the same
+// answer for every row.
+type schemaNames map[location.SourceID]string
+
+// newSchemaNames indexes the entry schema's whole import closure. A name is
+// unique across a closure: the loader registers every member and
+// [schema.Registry.Register] refuses a second schema with an existing name.
+func newSchemaNames(s *schema.Schema) schemaNames {
+	if s == nil {
+		return nil
+	}
+	names := make(schemaNames)
+	for _, cs := range s.Closure() {
+		names[cs.SourceID()] = cs.Name()
+	}
+	return names
+}
+
+// entry renders one type identity as the document states it, and reports
+// whether the closure could name it.
+//
+// A miss is NOT rendered as a source path. The whole point of keying by name is
+// that a path does not travel, so falling back to one would put a
+// machine-local path into the field that exists to keep it out — and the
+// document would look well-formed.
+//
+// PRECONDITION: requireDenotable has passed. [Marshal] runs it before a byte
+// is written, so every identity reaching here is one the closure names.
+func (n schemaNames) entry(id schema.TypeID) typeTableEntry {
+	return typeTableEntry{Schema: n[id.SchemaPath()], Name: id.Name()}
+}
+
+// requireDenotable reports the first type identity the closure cannot name.
+// An identity outside the closure reaches a snapshot only through
+// caller-assembled parts — [graph.Graph.Add] refuses one — and a document
+// that cannot state its own types is one no reader can bind.
+func (n schemaNames) requireDenotable(ids []schema.TypeID) (schema.TypeID, bool) {
+	for _, id := range ids {
+		if _, ok := n[id.SchemaPath()]; !ok {
+			return id, false
+		}
+	}
+	return schema.TypeID{}, true
 }
 
 // typeTable is the types section under construction: every type identity the
-// document denotes, in TypeID order, with the row index each reference uses.
+// document denotes, ordered by (schema name, type name), with the row index
+// each reference uses.
 type typeTable struct {
 	entries []typeTableEntry
 	index   map[schema.TypeID]int
+}
+
+// ref renders id the way the document states it — "schema#name" — reading the
+// row the table already holds. The writer's diagnostics use it so that the
+// one code both halves share, [diag.E_SNAPSHOT_DEPTH_EXCEEDED], carries the
+// same detail from the writer as [streamDecoder.refAt] gives from the reader.
+// An identity absent from the table falls back to its own rendering.
+func (tt *typeTable) ref(id schema.TypeID) string {
+	if row, ok := tt.index[id]; ok {
+		return TypeRef(tt.entries[row]).String()
+	}
+	return id.String()
 }
 
 // rowRef returns a fresh pointer to the table row for id, for the nullable
@@ -60,7 +121,7 @@ func (tt *typeTable) rowRef(id schema.TypeID, position string) (*int, error) {
 // composed child, edge target, duplicate, conflict, parent, unresolved edge —
 // and orders them by TypeID. An unresolved target has no instance, so the
 // table can be wider than the set of types holding one.
-func buildTypeTable(view *writerView) *typeTable {
+func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 	seen := make(map[schema.TypeID]struct{})
 
 	var collectInstance func(inst *graph.Instance)
@@ -103,21 +164,27 @@ func buildTypeTable(view *writerView) *typeTable {
 		seen[u.TargetType] = struct{}{}
 	}
 
+	// Ordered by the rendered row, not by TypeID: the sort key must be what
+	// the document carries, or one schema text loaded from two directories
+	// assigns different row indices to the same identities and the instances
+	// section follows that order into different bytes.
 	ids := slices.SortedFunc(maps.Keys(seen), func(a, b schema.TypeID) int {
-		return cmp.Compare(a.String(), b.String())
+		ea, eb := names.entry(a), names.entry(b)
+		if c := cmp.Compare(ea.Schema, eb.Schema); c != 0 {
+			return c
+		}
+		return cmp.Compare(ea.Name, eb.Name)
 	})
 
 	tt := &typeTable{
 		entries: make([]typeTableEntry, 0, len(ids)),
 		index:   make(map[schema.TypeID]int, len(ids)),
 	}
-	// Dedup is on TypeID while rows render (SourceID.String(), Name): the two
-	// agree only while location.ValidateSyntheticSourceID keeps String() injective.
+	// Dedup is on TypeID while rows render (schema name, type name): two
+	// identities cannot share a row, because a closure holds one schema per
+	// name and a schema holds one type per name.
 	for i, id := range ids {
-		tt.entries = append(tt.entries, typeTableEntry{
-			SchemaPath: id.SchemaPath().String(),
-			Name:       id.Name(),
-		})
+		tt.entries = append(tt.entries, names.entry(id))
 		tt.index[id] = i
 	}
 	return tt
@@ -147,7 +214,7 @@ func (sd *streamDecoder) resolveTypeTable() {
 	// than per instance and per composed child during materialization.
 	sd.tableTags = make([]string, len(sd.typeTable))
 	for i, e := range sd.typeTable {
-		if t, ok := typeByWireID(sd.schema, e.SchemaPath, e.Name); ok {
+		if t, ok := typeByWireID(sd.schema, e.Schema, e.Name); ok {
 			sd.tableIDs[i] = t.ID()
 			sd.tableTags[i] = schema.TagForm(sd.schema, t.ID())
 			continue
@@ -155,7 +222,7 @@ func (sd *streamDecoder) resolveTypeTable() {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
 			fmt.Sprintf("types table row %d names %s, which the import closure does not declare",
 				i, TypeRef(e))).
-			WithDetail(diag.DetailKeyTypeName, e.Name).
+			WithDetail(diag.DetailKeyTypeName, TypeRef(e).String()).
 			Build())
 	}
 }
@@ -207,7 +274,7 @@ func (sd *streamDecoder) refAt(row int) string {
 func unknownTypeRows(rows []TypeRef, s *schema.Schema) []TypeRef {
 	var unknown []TypeRef
 	for _, row := range rows {
-		if _, ok := typeByWireID(s, row.SchemaPath, row.Name); !ok {
+		if _, ok := typeByWireID(s, row.Schema, row.Name); !ok {
 			unknown = append(unknown, row)
 		}
 	}

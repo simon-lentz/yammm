@@ -423,6 +423,22 @@ var (
 	// which violates the composed children invariant (edges are only on root instances).
 	E_SNAPSHOT_INVALID_COMPOSED = NewCode("E_SNAPSHOT_INVALID_COMPOSED", CategorySnapshot)
 
+	// W_SNAPSHOT_VALUE_DROPPED (Warning) indicates the writer held a value the
+	// wire cannot carry at that position and did not write it: an unresolved
+	// record's target key or edge properties under a reason that admits
+	// neither, or a target key [github.com/simon-lentz/yammm/graph.ParseKey]
+	// cannot read. The document produced is well-formed; the warning names
+	// what is missing from it.
+	W_SNAPSHOT_VALUE_DROPPED = NewCode("W_SNAPSHOT_VALUE_DROPPED", CategorySnapshot)
+
+	// E_SNAPSHOT_INVALID_ROOT indicates an instances-section group names a type
+	// that cannot hold a root instance: an abstract type, a part type, or one
+	// declaring no primary key. The graph layer refuses all three at
+	// [github.com/simon-lentz/yammm/graph.Graph.Add], so a document stating one
+	// describes a graph that cannot be built. The message names which rule the
+	// type fails.
+	E_SNAPSHOT_INVALID_ROOT = NewCode("E_SNAPSHOT_INVALID_ROOT", CategorySnapshot)
+
 	// E_SNAPSHOT_COMPOSED_ON_DUPLICATE indicates a duplicate record's instance contains
 	// composed children, violating the duplicate structural constraint.
 	E_SNAPSHOT_COMPOSED_ON_DUPLICATE = NewCode("E_SNAPSHOT_COMPOSED_ON_DUPLICATE", CategorySnapshot)

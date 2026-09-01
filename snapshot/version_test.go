@@ -27,24 +27,26 @@ func detailValue(iss diag.Issue, key string) (string, bool) {
 // v0.12.0 are currentVersion == 3 (the types-table bump) and
 // MinReadableVersion == 3 (v3 is the only readable version).
 func TestVersionConstants_Pinned(t *testing.T) {
-	require.Equal(t, 3, currentVersion, "currentVersion should be 3 at yammm v0.12.0")
-	require.Equal(t, 3, MinReadableVersion, "MinReadableVersion should be 3 at yammm v0.12.0")
+	require.Equal(t, 4, currentVersion, "currentVersion is 4 since the types table was keyed by schema name")
+	require.Equal(t, currentVersion, MinReadableVersion,
+		"MinReadableVersion is DERIVED from currentVersion: this package reads only the version it writes, and two independent literals let a bump widen the accept range by accident")
 }
 
-// TestAcceptVersion_OnlyV3Accepted pins the live accept range: v3 is the only
-// readable version, and every other version is refused with the supported
-// version named and the observed version carried as a structured detail.
-func TestAcceptVersion_OnlyV3Accepted(t *testing.T) {
-	iss, ok := acceptVersion(3, MinReadableVersion, currentVersion)
-	require.True(t, ok, "the reader must accept a v3 document")
+// TestAcceptVersion_OnlyV4Accepted pins the live accept range: v4 is the only
+// readable version, and every other version — v3 included, the format it
+// replaced — is refused with the supported version named and the observed
+// version carried as a structured detail.
+func TestAcceptVersion_OnlyV4Accepted(t *testing.T) {
+	iss, ok := acceptVersion(4, MinReadableVersion, currentVersion)
+	require.True(t, ok, "the reader must accept a v4 document")
 	require.Equal(t, diag.Issue{}, iss)
 
-	for _, v := range []int{0, 1, 2, 99} {
+	for _, v := range []int{0, 1, 2, 3, 99} {
 		t.Run(strconv.Itoa(v), func(t *testing.T) {
 			iss, ok := acceptVersion(v, MinReadableVersion, currentVersion)
 			require.False(t, ok, "version %d must be rejected", v)
 			require.Equal(t, diag.E_SNAPSHOT_UNSUPPORTED_VERSION, iss.Code())
-			require.Contains(t, iss.Message(), "supported: 3",
+			require.Contains(t, iss.Message(), "supported: 4",
 				"reject message names the supported version")
 			got, found := detailValue(iss, diag.DetailKeyVersion)
 			require.True(t, found, "version detail should be present")
@@ -105,13 +107,13 @@ func TestDistinctFatalCodes_CollectsBothSeverities(t *testing.T) {
 	c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "error again").Build())
 	c.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_PATH_FALLBACK, "warning, excluded").Build())
 
-	got := distinctFatalCodes(c.Result())
+	got := distinctTriggeringCodes(c.Result())
 	want := []string{
 		diag.E_SNAPSHOT_MALFORMED.String(),
 		diag.E_UPDATE_METADATA_BODY_OFFSET.String(),
 	}
 	if len(got) != len(want) {
-		t.Fatalf("distinctFatalCodes = %v, want %v", got, want)
+		t.Fatalf("distinctTriggeringCodes = %v, want %v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {

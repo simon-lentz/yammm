@@ -521,29 +521,35 @@ func identityCases() []identityCase {
 			},
 		},
 		{
-			// A local Part and a transitively imported one render the same bare
-			// tag, so a name-keyed form cannot tell the two groups apart.
+			// A local Beacon and a transitively imported one render the same
+			// bare tag, so a name-keyed form cannot tell the two groups apart.
+			//
+			// Beacon rather than Part because a root group's type must be able
+			// to hold a root: a part type is addressed through its parent and
+			// both RebuildSnapshot and Load refuse one here. The Part pair
+			// carries the same collision in the position parts belong in —
+			// see composed_collided_name_across_schemas.
 			name:     "root_tag_collision_local_and_transitive",
 			origin:   "transitive",
 			position: "root",
 			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
 				t.Helper()
-				localID := mustTypeIDIn(t, s, "", "Part")
-				deepID := mustTransitiveTypeID(t, s, "base", "deep", "Part")
+				localID := mustTypeIDIn(t, s, "", "Beacon")
+				deepID := mustTransitiveTypeID(t, s, "base", "deep", "Beacon")
 				return graph.SnapshotParts{
 					Types: []schema.TypeID{localID, deepID},
 					Instances: map[schema.TypeID][]graph.InstanceParts{
 						localID: {{
 							TypeName:   tagForm(s, localID),
 							TypeID:     localID,
-							PrimaryKey: immutable.WrapKey([]any{"lp1"}),
-							Properties: immutable.WrapProperties(map[string]any{"name": "lp1", "weight": float64(1)}),
+							PrimaryKey: immutable.WrapKey([]any{"lb1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "lb1", "power": float64(1)}),
 						}},
 						deepID: {{
 							TypeName:   tagForm(s, deepID),
 							TypeID:     deepID,
-							PrimaryKey: immutable.WrapKey([]any{"dp1"}),
-							Properties: immutable.WrapProperties(map[string]any{"name": "dp1", "density": float64(1)}),
+							PrimaryKey: immutable.WrapKey([]any{"db1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "db1", "power": float64(2)}),
 						}},
 					},
 				}

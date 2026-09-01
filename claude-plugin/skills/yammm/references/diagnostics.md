@@ -191,6 +191,8 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_SNAPSHOT_TYPE_MISMATCH` | Instances section inconsistent with the types table |
 | `E_SNAPSHOT_DANGLING_REFERENCE` | Edge target references non-existent instance |
 | `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges (invalid) |
+| `E_SNAPSHOT_INVALID_ROOT` | Instances group names a type that cannot be a root: abstract, part, or no primary key |
+| `W_SNAPSHOT_VALUE_DROPPED` | Writer held a value the wire cannot carry at that position and did not write it |
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
 | `E_SNAPSHOT_DEPTH_EXCEEDED` | Composed nesting exceeds depth limit (32) |

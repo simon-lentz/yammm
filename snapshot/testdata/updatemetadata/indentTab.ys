@@ -1,11 +1,11 @@
 {
 	"yammm_snapshot": {
-		"version": 3,
+		"version": 4,
 		"schema_name": "test",
 		"schema_source": "test://test.yammm",
 		"schema_hash": "sha256:7211ffe3d9a211ca4331f9cea4df565eb08a90eac4a3b557378beecec8fbf9b8",
 		"schema_hash_algorithm": 3,
-		"integrity_hash": "sha256:ca79e16e7942a2db3da12bf04758cee66f6a05bc798e147b8d8bcba71438c34e",
+		"integrity_hash": "sha256:cb2b459b2f9ded249282f5e4aeafbd946943ec91d2597f06a33003efc287436b",
 		"features": [],
 		"attestation": {
 			"values": false,
@@ -14,11 +14,11 @@
 	},
 	"types": [
 		{
-			"schema_path": "test://test.yammm",
+			"schema": "test",
 			"name": "Company"
 		},
 		{
-			"schema_path": "test://test.yammm",
+			"schema": "test",
 			"name": "Person"
 		}
 	],

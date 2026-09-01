@@ -54,8 +54,14 @@ func newInstanceBuilder(g *Graph, c *diag.Collector) *instanceBuilder {
 // doc's Composed Children section states that gap.
 func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, stage *[]stagedEdge) *Instance {
 	b.attested = b.attested && inst.Validated()
+	// The key is canonicalized HERE, once, and every address downstream reads
+	// it from the Instance rather than from the caller's ValidInstance — the
+	// index, the sort, the duplicate check and the wire. A key rewritten in
+	// one of those places and not the others is what put two spellings of one
+	// value into a single document.
 	graphInst := newInstance(b.g.instanceTagForm(inst.TypeID()), inst.TypeID(),
-		inst.PrimaryKey(), inst.Properties(), inst.Provenance(), inst.Validated())
+		b.g.canon.key(inst.TypeID(), inst.PrimaryKey()),
+		inst.Properties(), inst.Provenance(), inst.Validated())
 
 	// Diagnostics name the graph's canonical tag form, never the instance's
 	// self-declared TypeName: a consumer keying on type_name must get a name
@@ -111,7 +117,7 @@ func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, 
 				jsonField:      rel.FieldName(),
 				targetType:     rel.TargetID(),
 				targetTypeName: targetName,
-				targetKey:      target.TargetKey().String(),
+				targetKey:      b.g.canon.key(rel.TargetID(), target.TargetKey()).String(),
 				properties:     target.Properties(),
 				isRequired:     isRequired,
 			})

@@ -62,7 +62,10 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	// Associations needs no graph state — step 3 reinstalls the pending
 	// records the derivation in Snapshot reads.
 	if imported > 0 {
-		g.attestValues = g.attestValues && snap.Attestation().Values
+		// A snapshot carrying no claim cannot support one: importing it makes
+		// the graph's own Values claim false, the same as importing a false one.
+		att := snap.Attestation()
+		g.attestValues = g.attestValues && att != nil && att.Values
 	}
 
 	// Step 2: Install resolved edges.

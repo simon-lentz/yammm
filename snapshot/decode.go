@@ -116,9 +116,11 @@ func (sd *streamDecoder) decodeHeader() error {
 	}
 	firstKey, ok := tok.(string)
 	if !ok || firstKey != "yammm_snapshot" {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			"yammm_snapshot header must be the first key in the top-level object").Build())
-		return fmt.Errorf("first key is %q, expected \"yammm_snapshot\"", firstKey)
+		// Returned, not collected: every caller wraps a returned error into one
+		// collected E_SNAPSHOT_MALFORMED, so collecting here too reported one
+		// malformation twice — and this was the only arm in decodeHeader that
+		// did both.
+		return fmt.Errorf("yammm_snapshot must be the first key in the top-level object; got %q", firstKey)
 	}
 
 	// Decode header.
@@ -314,6 +316,7 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 			continue
 		}
 		seenRows[row] = gi
+		sd.checkRootTypeEligible(row, gi, len(g.Items))
 		if idx.exists[row] == nil {
 			idx.exists[row] = make(map[string]bool, len(g.Items))
 		}
@@ -322,6 +325,50 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 		}
 	}
 	return idx, nil
+}
+
+// checkRootTypeEligible refuses an instances group whose type cannot hold a
+// root instance. [github.com/simon-lentz/yammm/graph.Graph.Add] refuses an
+// abstract type, a part type and one declaring no primary key, so a document
+// stating any of the three describes a graph no caller could have built — and
+// no option excuses it: WithRevalidation runs the validator over an
+// instance's PROPERTIES, which says nothing about whether its type may stand
+// alone.
+//
+// It is defence in depth rather than the only guard: since
+// [github.com/simon-lentz/yammm/graph.RebuildSnapshot] refuses the same three,
+// this library cannot write such a document — but a foreign writer can, and a
+// reader that admitted one would hand the caller a snapshot no adapter can
+// consume.
+//
+// A schema-less read (Info, HeaderOnly) resolves no types and checks nothing.
+func (sd *streamDecoder) checkRootTypeEligible(row, gi, items int) {
+	// An EMPTY group states that the snapshot holds the type, not that it holds
+	// a root instance of it — the writer emits one for every type the snapshot
+	// denotes, part types included, and the format documents that shape.
+	if items == 0 || sd.schema == nil || row >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok {
+		return // resolveTypeTable already reported the row
+	}
+	var rule string
+	switch {
+	case t.IsAbstract():
+		rule = "is abstract"
+	case t.IsPart():
+		rule = "is a part type, which is reachable only as a composed child"
+	case !t.HasPrimaryKey():
+		rule = "declares no primary key"
+	default:
+		return
+	}
+	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INVALID_ROOT,
+		fmt.Sprintf("instances entry %d holds root instances of %s, which %s",
+			gi, sd.refAt(row), rule)).
+		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+		Build())
 }
 
 // walkInstance validates one instance at its table row and registers its
@@ -354,6 +401,19 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 
 	keyStr := formatWireKey(inst.Key)
 	if depth == 0 {
+		// Two roots at one address is not data the wire can carry: the format
+		// has a diagnostics section for a rejected duplicate, and the graph
+		// layer puts it there. Admitting the pair produced a snapshot whose
+		// own accessors disagreed — RebuildSnapshot appends every instance to
+		// the type's slice while its index keeps only the last, so InstancesOf
+		// reported two and every edge on that key bound to one.
+		if idx.exists[row][keyStr] {
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
+				fmt.Sprintf("duplicate primary key %s for type %q", keyStr, sd.refAt(row))).
+				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+				WithDetail(diag.DetailKeyPrimaryKey, keyStr).
+				Build())
+		}
 		idx.exists[row][keyStr] = true
 	}
 	if slot != nil {
@@ -419,10 +479,15 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instW
 		return
 	}
 	keyStr := formatWireKey(inst.Key)
-	props := sd.rebuildRawProperties(t, keyStr, inst)
+	props := sd.rebuildRawProperties(t, keyStr, inst, 0)
 	_, res := sd.revalidator.ValidateOne(ctx, sd.tableTags[row], instance.RawInstance{Properties: props})
 	for issue := range res.Issues() {
-		if issue.Code() == diag.E_CONTEXT_CANCELLED {
+		// The severity map moves findings ABOUT THE DATA. A cancellation and
+		// the validator's own internal failure are statements about the run:
+		// retagging a Fatal E_INTERNAL to the caller's chosen Warning made
+		// Load return HasErrors() false on data the validator reported it
+		// could not finish checking.
+		if issue.Code() == diag.E_CONTEXT_CANCELLED || issue.Code() == diag.E_INTERNAL {
 			sd.collector.Collect(issue)
 			continue
 		}
@@ -438,7 +503,14 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instW
 // arity mismatch, or extra targets on a (one) are reported at the option's
 // severity — never silently dropped, because a document holding one is
 // exactly what re-validation exists to find.
-func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, inst instWire) map[string]any {
+func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, inst instWire, depth int) map[string]any {
+	// Bounded like walkInstance, which it follows. walkInstance stops at
+	// maxComposedDepth and then runs revalidateRoot on the SAME untruncated
+	// wire tree, so an unbounded rebuild recursed past the depth the reader had
+	// already refused — on a document deep enough, until the stack gave out.
+	if depth > maxComposedDepth {
+		return nil
+	}
 	// Normalized like instanceParts' materialization: the decoder reads
 	// numbers as json.Number, which the validator does not accept.
 	props := make(map[string]any, len(inst.Properties)+len(inst.Edges)+len(inst.Composed))
@@ -465,6 +537,17 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, ins
 		targets := inst.Edges[relName]
 		arr := make([]any, 0, len(targets))
 		for ei, e := range targets {
+			if !sd.wireTypeMatches(e.TargetType, rel.TargetID()) {
+				sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_TYPE_MISMATCH,
+					fmt.Sprintf("revalidation of %s[%s]: edge %d under %q targets %s, which the association declares as %s",
+						ref, keyStr, ei, relName, sd.wireTypeRef(e.TargetType), sd.identRef(rel.TargetID()))).
+					WithDetail(diag.DetailKeyTypeName, ref).
+					WithDetail(diag.DetailKeyRelationName, relName).
+					WithDetail(diag.DetailKeyExpected, sd.identRef(rel.TargetID())).
+					WithDetail(diag.DetailKeyGot, sd.wireTypeRef(e.TargetType)).
+					Build())
+				continue
+			}
 			if len(e.TargetKey) != len(pks) {
 				sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("revalidation of %s[%s]: edge %d under %q carries %d key components for a %d-part target key",
@@ -516,12 +599,79 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, ins
 		children := inst.Composed[relName]
 		arr := make([]any, 0, len(children))
 		for _, child := range children {
-			arr = append(arr, sd.rebuildRawProperties(childType, formatWireKey(child.Key), child))
+			if !sd.wireTypeMatches(child.Type, rel.TargetID()) {
+				sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_TYPE_MISMATCH,
+					fmt.Sprintf("revalidation of %s[%s]: composed child %s under %q is typed %s, which the composition declares as %s",
+						ref, keyStr, formatWireKey(child.Key), relName,
+						sd.wireTypeRef(child.Type), sd.identRef(rel.TargetID()))).
+					WithDetail(diag.DetailKeyTypeName, ref).
+					WithDetail(diag.DetailKeyRelationName, relName).
+					WithDetail(diag.DetailKeyExpected, sd.identRef(rel.TargetID())).
+					WithDetail(diag.DetailKeyGot, sd.wireTypeRef(child.Type)).
+					Build())
+				continue
+			}
+			arr = append(arr, sd.rebuildRawProperties(childType, formatWireKey(child.Key), child, depth+1))
 		}
 		props[rel.FieldName()] = arr
 	}
 
 	return props
+}
+
+// wireTypeMatches reports whether a nullable wire row denotes want. The graph
+// layer resolves an edge target and a composed child by the relation's
+// declared target ALONE — every staged edge in graph/build.go carries
+// rel.TargetID(), and its composed check is `child.TypeID() != rel.TargetID()`
+// — so the wire's own row is either the same identity or a contradiction.
+// There is no subtype widening to allow for.
+//
+// An unresolvable row matches: walkInstances already reported it, and
+// revalidation reporting it a second time under a different code helps nobody.
+func (sd *streamDecoder) wireTypeMatches(row *int, want schema.TypeID) bool {
+	r, ok := sd.rowAt(row)
+	if !ok || r >= len(sd.tableIDs) {
+		return true
+	}
+	got := sd.tableIDs[r]
+	if got.IsZero() {
+		return true // the row did not resolve; resolveTypeTable owns that
+	}
+	return got == want
+}
+
+// wireTypeRef renders what a nullable wire row denotes, for a diagnostic.
+func (sd *streamDecoder) wireTypeRef(row *int) string {
+	r, ok := sd.rowAt(row)
+	if !ok {
+		return "no types-table row"
+	}
+	return sd.refAt(r)
+}
+
+// identRef renders a schema identity in the document's own form, so an
+// expected-versus-got pair reads in one vocabulary.
+//
+// The table is consulted first because a row already holds the rendering. An
+// identity the document does not denote is rendered from the closure instead —
+// NOT through schema.TagForm, which produces a bare or alias-qualified name and
+// would put the two halves of one diagnostic in two vocabularies. That case is
+// not rare: it is what happens when the relation's declared target is the type
+// the document failed to name.
+func (sd *streamDecoder) identRef(id schema.TypeID) string {
+	for i, tid := range sd.tableIDs {
+		if tid == id {
+			return sd.refAt(i)
+		}
+	}
+	if sd.schema != nil {
+		for _, cs := range sd.schema.Closure() {
+			if cs.SourceID() == id.SchemaPath() {
+				return TypeRef{Schema: cs.Name(), Name: id.Name()}.String()
+			}
+		}
+	}
+	return TypeRef{Schema: id.SchemaPath().String(), Name: id.Name()}.String()
 }
 
 // retagIssue rebuilds a validator issue at the revalidation severity,
@@ -618,6 +768,14 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 	for di, dup := range diags.Duplicates {
 		row, rowOK := sd.requireRow(dup.Type, func() string { return fmt.Sprintf("duplicate record %d", di) })
 		keyStr := formatWireKey(dup.Key)
+		// requireRow's own godoc promises that a nil or out-of-range reference
+		// "never binds to row 0", and the diagnostics below broke that promise
+		// by rendering the sentinel: a record naming no type reported the type
+		// in row 0, pointing debugging at something unrelated.
+		dupRef := "(no types-table row)"
+		if rowOK {
+			dupRef = sd.refAt(row)
+		}
 
 		if rowOK && dup.Instance.Type != nil && *dup.Instance.Type != row {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
@@ -635,26 +793,36 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 
 		if rowOK {
 			sd.checkProvenancePath(dup.Instance, row)
+			// A ROOT duplicate is a rejected root instance, so its type must be
+			// able to hold one. A COMPOSED duplicate is not: a part type is
+			// exactly what belongs there, and Relation is what separates them.
+			if dup.Relation == "" {
+				sd.checkRootTypeEligible(row, di, 1)
+			}
 		}
 
 		if len(dup.Instance.Composed) > 0 {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_COMPOSED_ON_DUPLICATE,
-				fmt.Sprintf("duplicate instance %s[%s] must not have composed children", sd.refAt(row), keyStr)).
-				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
-				WithDetail(diag.DetailKeyPrimaryKey, keyStr).
-				Build())
+			b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_COMPOSED_ON_DUPLICATE,
+				fmt.Sprintf("duplicate instance %s[%s] must not have composed children", dupRef, keyStr)).
+				WithDetail(diag.DetailKeyPrimaryKey, keyStr)
+			if rowOK {
+				b = b.WithDetail(diag.DetailKeyTypeName, dupRef)
+			}
+			sd.collector.Collect(b.Build())
 		}
 		if len(dup.Instance.Edges) > 0 {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_EDGES_ON_DUPLICATE,
-				fmt.Sprintf("duplicate instance %s[%s] must not have edges", sd.refAt(row), keyStr)).
-				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
-				WithDetail(diag.DetailKeyPrimaryKey, keyStr).
-				Build())
+			b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_EDGES_ON_DUPLICATE,
+				fmt.Sprintf("duplicate instance %s[%s] must not have edges", dupRef, keyStr)).
+				WithDetail(diag.DetailKeyPrimaryKey, keyStr)
+			if rowOK {
+				b = b.WithDetail(diag.DetailKeyTypeName, dupRef)
+			}
+			sd.collector.Collect(b.Build())
 		}
 
 		if dup.Conflict == nil {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("duplicate record %d (%s[%s]) carries no conflict block", di, sd.refAt(row), keyStr)).Build())
+				fmt.Sprintf("duplicate record %d (%s[%s]) carries no conflict block", di, dupRef, keyStr)).Build())
 			continue
 		}
 		conflictRow, conflictOK := sd.requireRow(dup.Conflict.Type, func() string {
@@ -923,9 +1091,13 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 
 	// The header's claim rides the parts verbatim; an absent field is a
 	// pre-v0.15.0 document and reads as both false.
-	var att graph.Attestation
+	// nil when the document carries no attestation — a pre-v0.15.0 file, say.
+	// Collapsing that to a zero value made the next Marshal write
+	// {"values":false,"associations":false}, turning silence into a claim the
+	// document never made.
+	var att *graph.Attestation
 	if a := sd.header.Attestation; a != nil {
-		att = graph.Attestation{Values: a.Values, Associations: a.Associations}
+		att = &graph.Attestation{Values: a.Values, Associations: a.Associations}
 	}
 
 	return graph.SnapshotParts{

@@ -292,10 +292,10 @@ func TestWireProbe_TypesTableWiderThanInstances(t *testing.T) {
 	}
 }
 
-// TestWireProbe_TableRowStaleSchemaPath rewrites a table row's schema path to
-// one the closure does not hold. The row's bare name is also declared by the
-// entry schema, so what the reader binds says which rule it followed.
-func TestWireProbe_TableRowStaleSchemaPath(t *testing.T) {
+// TestWireProbe_TableRowStaleSchemaName rewrites a table row's schema name to
+// one the closure does not hold. The row's bare type name is also declared by
+// the entry schema, so what the reader binds says which rule it followed.
+func TestWireProbe_TableRowStaleSchemaName(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
@@ -322,7 +322,7 @@ func TestWireProbe_TableRowStaleSchemaPath(t *testing.T) {
 		},
 	})
 
-	edited := spliceOnce(t, data, `base.yammm","name":"Part"`, `ghost.yammm","name":"Part"`)
+	edited := spliceOnce(t, data, `"schema":"base","name":"Part"`, `"schema":"ghost","name":"Part"`)
 	loadSig, verifySig, loaded := loadAndVerify(ctx, t, edited, s)
 	fact := ""
 	if loaded != nil {
@@ -613,8 +613,8 @@ func TestWireProbe_DuplicateIdentityRefusedWithoutASchema(t *testing.T) {
 
 	data := rootDupTwoRowDoc(ctx, t, s)
 	table := wireTypeTable(t, data)
-	first := fmt.Sprintf(`{"schema_path":%q,"name":%q}`, table[0].SchemaPath, table[0].Name)
-	second := fmt.Sprintf(`{"schema_path":%q,"name":%q}`, table[1].SchemaPath, table[1].Name)
+	first := fmt.Sprintf(`{"schema":%q,"name":%q}`, table[0].Schema, table[0].Name)
+	second := fmt.Sprintf(`{"schema":%q,"name":%q}`, table[1].Schema, table[1].Name)
 	edited := spliceOnce(t, data, second, first)
 
 	// The schema-full surfaces refuse it, which is what makes silence on the

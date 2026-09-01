@@ -25,10 +25,12 @@ type SnapshotParts struct {
 	Duplicates []DuplicateParts
 	Unresolved []UnresolvedParts
 
-	// Attestation carries the loaded header's validity claim verbatim.
-	// RebuildSnapshot stores it without derivation: a rebuilt instance
-	// cannot prove validity, only the writing library's claim survives.
-	Attestation Attestation
+	// Attestation carries the loaded header's validity claim verbatim, and is
+	// nil for a document that carries none. RebuildSnapshot stores it without
+	// derivation: a rebuilt instance cannot prove validity, only the writing
+	// library's claim survives — and a document that claimed nothing must not
+	// come back claiming both dimensions are false.
+	Attestation *Attestation
 }
 
 // InstanceParts holds the data for a single instance. Composed children
@@ -130,6 +132,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 	collector := diag.NewCollector(0)
 
 	validatePartsIdentity(parts, collector)
+	validatePartsRootTypes(s, parts, collector)
 	if collector.HasErrors() {
 		return nil, collector.Result()
 	}
@@ -161,6 +164,10 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 	// Step 2: Create Edge objects, resolving pointers.
 	edges := make([]*Edge, 0, len(parts.Edges))
 	for _, ep := range parts.Edges {
+		// Canonicalized BEFORE the lookup: step 1 rewrote the instance keys the
+		// index is built from, so an endpoint resolved from the caller's
+		// spelling would miss an instance that is present.
+		ep = canon.edge(ep)
 		source := lookupInstance(instanceIndex, ep.SourceType, ep.SourceKey.String())
 		target := lookupInstance(instanceIndex, ep.TargetType, ep.TargetKey.String())
 
@@ -177,12 +184,14 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 			continue
 		}
 
-		edges = append(edges, newEdge(ep.Relation, source, target, canon.edge(ep).Properties))
+		edges = append(edges, newEdge(ep.Relation, source, target, ep.Properties))
 	}
 
 	// Step 3: Create Duplicate records.
 	duplicates := make([]*Duplicate, 0, len(parts.Duplicates))
 	for _, dp := range parts.Duplicates {
+		// Every address in the record moves with the instances step 1 rewrote.
+		dp = canon.duplicate(dp)
 		// Defense-in-depth: duplicate instances must not have composed children.
 		if len(dp.Instance.Composed) > 0 {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
@@ -205,13 +214,16 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 			parent = lookupInstance(instanceIndex, dp.ParentType, dp.ParentKey.String())
 		}
 
-		dupInst := rebuildInstance(canon.instance(dp.Instance))
+		dupInst := rebuildInstance(dp.Instance)
 		duplicates = append(duplicates, newDuplicate(dupInst, conflict, parent, dp.Relation, diag.Issue{}))
 	}
 
 	// Step 4: Create UnresolvedEdge records.
 	unresolvedEdges := make([]*UnresolvedEdge, 0, len(parts.Unresolved))
 	for _, up := range parts.Unresolved {
+		// The source address moves with the instances step 1 rewrote; the
+		// target does not, because no instance carries it to render against.
+		up = canon.unresolved(up)
 		source := lookupInstance(instanceIndex, up.SourceType, up.SourceKey.String())
 		if source == nil {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
@@ -228,7 +240,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		}
 
 		unresolvedEdges = append(unresolvedEdges,
-			newUnresolvedEdge(source, up.Relation, up.TargetType, targetKey, up.Required, up.Reason, canon.unresolved(up).Properties))
+			newUnresolvedEdge(source, up.Relation, up.TargetType, targetKey, up.Required, up.Reason, up.Properties))
 	}
 
 	if collector.HasErrors() {
@@ -243,6 +255,63 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 
 	snap := newSnapshot(s, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK(), parts.Attestation)
 	return snap, diag.OK()
+}
+
+// validatePartsRootTypes rejects an instance group keyed by a type that
+// cannot hold a root instance: an abstract type, a part type, or one
+// declaring no primary key. [Graph.Add] refuses all three, so admitting them
+// here would make the rebuild path the one way to assemble a graph the API
+// cannot build — and the snapshot writer would then emit a document its own
+// reader refuses.
+//
+// The rule is the object model's, not a validation preference: an abstract
+// type has no instances, a part instance is addressed through its parent, and
+// a type with no primary key has no address at all. A store cannot hold any
+// of the three as a node.
+func validatePartsRootTypes(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
+	if s == nil {
+		return
+	}
+	ineligible := func(id schema.TypeID) string {
+		t, ok := s.TypeByID(id)
+		if !ok {
+			return "" // an unknown identity is validatePartsIdentity's to report
+		}
+		switch {
+		case t.IsAbstract():
+			return "is abstract"
+		case t.IsPart():
+			return "is a part type, addressed through its parent composition"
+		case !t.HasPrimaryKey():
+			return "declares no primary key"
+		}
+		return ""
+	}
+
+	for typeID, instParts := range parts.Instances {
+		if len(instParts) == 0 {
+			continue
+		}
+		if rule := ineligible(typeID); rule != "" {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+				fmt.Sprintf("RebuildSnapshot: %d root instance(s) of type %s, which %s",
+					len(instParts), typeID, rule)).Build())
+		}
+	}
+
+	// A ROOT duplicate is a rejected root instance and its type must be able to
+	// hold one. A COMPOSED duplicate is not — a part type is exactly what
+	// belongs there — and Relation is what separates the two.
+	for i, dp := range parts.Duplicates {
+		if dp.Relation != "" {
+			continue
+		}
+		if rule := ineligible(dp.Type); rule != "" {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+				fmt.Sprintf("RebuildSnapshot: duplicate record %d is a root duplicate of type %s, which %s",
+					i, dp.Type, rule)).Build())
+		}
+	}
 }
 
 // validatePartsIdentity rejects a zero [schema.TypeID] at every parts

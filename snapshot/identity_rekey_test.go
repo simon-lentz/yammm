@@ -238,8 +238,8 @@ func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 		t.Fatalf("info: %v", err)
 	}
 
-	localRef := snapshot.TypeRef{SchemaPath: localBeacon.SchemaPath().String(), Name: localBeacon.Name()}
-	deepRef := snapshot.TypeRef{SchemaPath: deepBeacon.SchemaPath().String(), Name: deepBeacon.Name()}
+	localRef := snapshot.TypeRef{Schema: schemaNameOf(t, s, localBeacon), Name: localBeacon.Name()}
+	deepRef := snapshot.TypeRef{Schema: schemaNameOf(t, s, deepBeacon), Name: deepBeacon.Name()}
 	if localRef == deepRef {
 		t.Fatal("fixture is vacuous: the two Beacons share one TypeRef")
 	}
@@ -267,16 +267,15 @@ func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 // does not parse. These three tests pin the rendering, the reason the method
 // exists, and the decision that there is no inverse.
 
-const typeRefRendered = "test://a.yammm#Person"
+const typeRefRendered = "a#Person"
 
 func sampleTypeRef() snapshot.TypeRef {
-	return snapshot.TypeRef{SchemaPath: "test://a.yammm", Name: "Person"}
+	return snapshot.TypeRef{Schema: "a", Name: "Person"}
 }
 
 // TestTypeRef_RendersPathHashName pins the ratified display form. The
 // separator is the contract: schema.TypeID renders "path:name" and TypeRef
-// renders "path#name" so a reader never confuses the byte-order-bearing
-// identity with the display form.
+// renders "schema#name", the one form this package states a type identity in.
 func TestTypeRef_RendersPathHashName(t *testing.T) {
 	t.Parallel()
 	ref := sampleTypeRef()
@@ -334,4 +333,18 @@ func TestTypeRef_IsWriteOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"Types":["`+typeRefRendered+`"]}`), &info); err == nil {
 		t.Error("HeaderInfo decoded from the form yammm snapshot info writes; the surfaces are documented as one-way")
 	}
+}
+
+// schemaNameOf returns the declared name of the closure member that declares
+// id — the form a .ys types-table row carries since the wire was keyed by
+// schema name rather than source path.
+func schemaNameOf(t *testing.T, s *schema.Schema, id schema.TypeID) string {
+	t.Helper()
+	for _, cs := range s.Closure() {
+		if cs.SourceID() == id.SchemaPath() {
+			return cs.Name()
+		}
+	}
+	t.Fatalf("no closure member declares %s", id)
+	return ""
 }

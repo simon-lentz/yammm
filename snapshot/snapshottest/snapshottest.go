@@ -86,7 +86,7 @@ type snapProjection struct {
 	Instances   map[string][]instProjection
 	Duplicates  []dupProjection
 	Unresolved  []unresProjection
-	Attestation graph.Attestation
+	Attestation *graph.Attestation
 }
 
 type instProjection struct {

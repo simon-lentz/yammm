@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -27,6 +28,17 @@ import (
 // than the reader accepts returns nil bytes with Error
 // E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises,
 // so the bound reads identically from both sides. Panics if snap is nil.
+//
+// Two further refusals, both Error-severity [diag.E_SNAPSHOT_MALFORMED]: an
+// indent that is not whitespace, which would produce bytes that are not JSON;
+// and a type whose schema is outside the entry schema's import closure, which
+// the document has no portable name for.
+//
+// A SUCCESSFUL Marshal can return Warning-severity issues. They report values
+// the snapshot held that the wire cannot carry — an unresolved record's target
+// key or edge properties under a reason that admits neither, and a target key
+// [graph.ParseKey] cannot read. A caller checking only [diag.Result.Err] sees
+// none of them.
 func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap == nil {
 		panic("snapshot.Marshal: nil Snapshot")
@@ -38,6 +50,13 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 	}
 
 	cfg := applyOptions(opts)
+	if bad, ok := nonWhitespaceIndent(cfg.indent); ok {
+		c := diag.NewCollector(0)
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("indent must be whitespace; it is written between JSON tokens and %q produces a document that is not JSON", bad)).
+			Build())
+		return nil, c.Result()
+	}
 	s := snap.Schema()
 
 	// Step 1: Compute schema structural hash.
@@ -46,8 +65,21 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 
 	// Step 2: Read the snapshot once, then serialize the payload sections —
 	// identity lives in the types table, every other position is a row index.
-	view := newWriterView(snap)
-	tt := buildTypeTable(view)
+	names := newSchemaNames(s)
+	view := newWriterView(snap, names)
+	// Refused before a byte is written: a type the closure cannot name has no
+	// portable rendering, and writing its source path instead would put a
+	// machine-local path into the one field the re-key exists to keep free of
+	// them — in a document that would otherwise look well-formed.
+	if id, ok := names.requireDenotable(snap.Types()); !ok {
+		c := diag.NewCollector(0)
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
+			fmt.Sprintf("cannot write type %s: its schema is not in the entry schema's import closure, so the document has no portable name for it", id)).
+			WithDetail(diag.DetailKeyTypeName, id.String()).
+			Build())
+		return nil, c.Result()
+	}
+	tt := buildTypeTable(view, names)
 
 	groups, err := marshalInstances(ctx, view, s, tt)
 	if err != nil {
@@ -59,7 +91,8 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 		return nil, marshalFatalErr("instances", err)
 	}
 
-	diags, err := marshalDiagnostics(view, s, tt)
+	writerWarnings := diag.NewCollector(0)
+	diagsWire, err := marshalDiagnostics(view, s, tt, writerWarnings)
 	if err != nil {
 		return nil, marshalFatalErr("diagnostics", err)
 	}
@@ -72,7 +105,7 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 	if marshalErr != nil {
 		return nil, marshalFatalErr("instances", marshalErr)
 	}
-	diagJSON, marshalErr := marshalSection(diags, cfg.indent)
+	diagJSON, marshalErr := marshalSection(diagsWire, cfg.indent)
 	if marshalErr != nil {
 		return nil, marshalFatalErr("diagnostics", marshalErr)
 	}
@@ -89,14 +122,28 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 		metadata = cfg.metadata
 	}
 
-	att := snap.Attestation()
+	// A snapshot carrying no claim writes no attestation block: the wire's
+	// pointer-with-omitempty already states absence, and substituting a
+	// both-false claim would be the writer inventing content.
+	var attWire *attestationWire
+	if att := snap.Attestation(); att != nil {
+		attWire = &attestationWire{Values: att.Values, Associations: att.Associations}
+	}
 
-	return assembleDocument(
+	out, res := assembleDocument(
 		schemaHash, s.Name(), schemaSource, createdAt, features, metadata,
-		&attestationWire{Values: att.Values, Associations: att.Associations},
+		attWire,
 		typesJSON, instancesJSON, diagJSON,
 		cfg.indent, currentVersion,
 	)
+	// The writer's own warnings travel with the bytes: a value it could not
+	// put on the wire is a fact about this document, and silence left the next
+	// reader to find an absence nothing explained.
+	if res.HasErrors() {
+		return out, res
+	}
+	writerWarnings.Merge(res)
+	return out, writerWarnings.Result()
 }
 
 // marshalSection serializes one body section, compact or indented.
@@ -135,7 +182,7 @@ type writerView struct {
 // TypeID — the filing key is a container detail, and an instance whose group
 // differs from its identity would otherwise be silently rebound on load —
 // and a type the snapshot holds with no instances keeps an empty group.
-func newWriterView(snap *graph.Snapshot) *writerView {
+func newWriterView(snap *graph.Snapshot, names schemaNames) *writerView {
 	// Types returns a fresh defensive copy per call, so it is taken once.
 	snapTypes := snap.Types()
 
@@ -170,8 +217,16 @@ func newWriterView(snap *graph.Snapshot) *writerView {
 		})
 		groups = append(groups, writerGroup{id: id, instances: insts})
 	}
+	// Ordered by the rendered identity, the same key buildTypeTable sorts by:
+	// the instances section follows this order, so a group order derived from
+	// the source path would move wire bytes when one schema text is loaded
+	// from two directories.
 	slices.SortFunc(groups, func(a, b writerGroup) int {
-		return cmp.Compare(a.id.String(), b.id.String())
+		ea, eb := names.entry(a.id), names.entry(b.id)
+		if c := cmp.Compare(ea.Schema, eb.Schema); c != 0 {
+			return c
+		}
+		return cmp.Compare(ea.Name, eb.Name)
 	})
 
 	return &writerView{
@@ -224,7 +279,7 @@ func marshalInstance(
 	if depth > maxComposedDepth {
 		return instWire{}, &depthExceededError{
 			depth: depth,
-			id:    inst.TypeID(),
+			ref:   tt.ref(inst.TypeID()),
 			key:   inst.PrimaryKey().String(),
 		}
 	}
@@ -292,7 +347,7 @@ func marshalInstance(
 // marshalDiagnostics builds the diagnostics section. Every duplicate record
 // states its conflict's address; the graph API guarantees the invariants
 // checked here, so a violation is a caller-assembled inconsistency.
-func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diagWire, error) {
+func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags *diag.Collector) (diagWire, error) {
 	dupWires := make([]dupWire, 0, len(view.duplicates))
 	for _, d := range view.duplicates {
 		row, err := tt.rowRef(d.Instance.TypeID(), "duplicate type")
@@ -361,9 +416,37 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 		}
 		switch u.Reason {
 		case "absent", "empty":
+			// The reader refuses a document carrying either under these
+			// reasons, so dropping them silently wrote a document that says
+			// less than the record did. Report what is discarded.
+			if u.TargetKey != "" && u.TargetKey != "[]" {
+				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
+					fmt.Sprintf("unresolved record %s[%s].%s states reason %q and carries target key %s, which the wire cannot hold under that reason",
+						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.Reason, u.TargetKey)).
+					WithDetail(diag.DetailKeyRelationName, u.Relation).
+					Build())
+			}
+			if len(u.Properties().Clone()) > 0 {
+				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
+					fmt.Sprintf("unresolved record %s[%s].%s states reason %q and carries edge properties, which the wire cannot hold under that reason",
+						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.Reason)).
+					WithDetail(diag.DetailKeyRelationName, u.Relation).
+					Build())
+			}
 			uw.TargetKey = nil
 		default:
+			// A key ParseKey cannot read yields nil by design — a wire
+			// assembler has no better answer than "no components" — but the
+			// forward reference's address is lost, so say so rather than let
+			// the next read find an empty key it cannot explain.
 			uw.TargetKey = parseTargetKey(u.TargetKey)
+			if uw.TargetKey == nil && u.TargetKey != "" && u.TargetKey != "[]" {
+				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
+					fmt.Sprintf("unresolved record %s[%s].%s carries target key %s, which cannot be parsed into components; the reference address is not written",
+						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.TargetKey)).
+					WithDetail(diag.DetailKeyRelationName, u.Relation).
+					Build())
+			}
 			var rel *schema.Relation
 			if srcType, ok := s.TypeByID(sourceID); ok {
 				rel, _ = srcType.Relation(u.Relation)
@@ -383,9 +466,14 @@ func marshalProvenance(inst *graph.Instance) *provenanceWire {
 	if prov == nil {
 		return nil
 	}
-	pathStr := prov.RawPath()
-	if pathStr == "" {
-		pathStr = prov.Path().String()
+	// A recorded raw path is written back verbatim, INCLUDING an empty one.
+	// Reading RawPath() alone could not tell a recorded "" from no record, so
+	// a document that carried an empty path came back carrying "$" — and the
+	// E_SNAPSHOT_PATH_FALLBACK warning that named the substitution was gone by
+	// the second read.
+	pathStr := prov.Path().String()
+	if prov.HasRawPath() {
+		pathStr = prov.RawPath()
 	}
 	return &provenanceWire{SourceName: prov.SourceName(), Path: pathStr}
 }
@@ -420,6 +508,19 @@ func assembleDocument(
 	)
 
 	return finalBytes, diag.OK()
+}
+
+// nonWhitespaceIndent reports the first non-whitespace rune in an indent, if
+// any. The indent is emitted verbatim between JSON tokens, so anything else
+// makes the output unparseable — and the writer returned OK on it, leaving a
+// caller to discover the corruption at the next read.
+func nonWhitespaceIndent(indent string) (string, bool) {
+	for _, r := range indent {
+		if !unicode.IsSpace(r) {
+			return string(r), true
+		}
+	}
+	return "", false
 }
 
 // buildDocument assembles a complete .ys document from pre-serialized sections.
@@ -676,7 +777,7 @@ func marshalFatalErr(section string, err error) diag.Result {
 	if de, ok := errors.AsType[*depthExceededError](err); ok {
 		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DEPTH_EXCEEDED, de.Error()).
 			WithDetail(diag.DetailKeyDepth, strconv.Itoa(de.depth)).
-			WithDetail(diag.DetailKeyTypeName, de.id.String()).
+			WithDetail(diag.DetailKeyTypeName, de.ref).
 			Build())
 		return c.Result()
 	}

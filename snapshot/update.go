@@ -97,6 +97,9 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 // not that check, because it now validates the same outermost shape and adds
 // only the header and types table.
 //
+// Diagnostics are capped at the same default [Load] uses (100); this surface
+// takes no option that raises it.
+//
 // Failure modes and error codes:
 //
 //   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse, its
@@ -108,6 +111,10 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //   - [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] — the header states a version
 //     no read path accepts. The document is refused rather than
 //     relabelled; UpdateMetadata is a header rewrite, never a migration.
+//   - [diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM] — the header states a
+//     schema hash algorithm this version does not implement. Refused for the
+//     same reason as an unsupported version: the output would carry a schema
+//     identity this library cannot check.
 //   - [diag.E_UPDATE_METADATA_BODY_OFFSET] — the header parsed cleanly
 //     but the body-boundary tracking could not resolve a valid byte
 //     range for the body. This indicates the input does not match the
@@ -157,7 +164,9 @@ func UpdateMetadata(
 	// Decode the existing header via the streaming decoder. We skip the
 	// integrity check: UpdateMetadata's contract is "trust caller-provided
 	// body bytes"; a fresh hash is computed at write time.
-	sd := newStreamDecoder(data, nil, loadConfig{skipIntegrityCheck: true})
+	loadCfg := defaultLoadConfig()
+	loadCfg.skipIntegrityCheck = true
+	sd := newStreamDecoder(data, nil, loadCfg)
 	if err := sd.decodeHeader(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
@@ -261,11 +270,18 @@ func UpdateMetadata(
 // (E_UPDATE_METADATA_BODY_OFFSET, E_SNAPSHOT_MALFORMED, or any other
 // Fatal-severity issue that is NOT E_CONTEXT_CANCELLED), transparently
 // falls back to [Load] + [Marshal] using s for the Load. The fallback
-// result is byte-identical to what a direct Marshal call would
-// produce — the correctness floor for the primitive.
+// carries the input's indentation and its created_at across, so the result
+// differs from a direct Marshal only where the input document did.
 //
-// When the fallback path fires, the returned [diag.Result] carries one
-// Warning-severity issue with code [diag.W_UPDATE_METADATA_FALLBACK].
+// Panics if s is nil (programming error), on every call rather than only the
+// ones that reach the fallback: the function cannot complete without it, and
+// deferring the panic to the first input the fast path refuses hides the bug
+// until a document is malformed.
+//
+// When the fallback path fires, the returned [diag.Result] carries a
+// Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], every warning the Load
+// and Marshal legs produced, and one further Warning if the input stated a
+// created_at this path could not parse.
 // Its details include the original triggering Fatal code(s) via a
 // comma-joined "triggering_codes" entry so consumers can log or surface
 // the transition without inspecting the error chain. Callers who want
@@ -297,6 +313,13 @@ func UpdateMetadataOrReMarshal(
 	s *schema.Schema,
 	opts ...UpdateOption,
 ) ([]byte, diag.Result) {
+	// Checked before the fast path, not inside the fallback that dereferences
+	// it: a nil schema is a caller's bug on every input, and only some inputs
+	// reach Load. Deferring the panic let a caller run for months and crash on
+	// the first document the fast path refused.
+	if s == nil {
+		panic("snapshot.UpdateMetadataOrReMarshal: nil Schema")
+	}
 	out, res := UpdateMetadata(ctx, data, newMeta, opts...)
 	if !res.HasErrors() {
 		return out, res
@@ -305,7 +328,7 @@ func UpdateMetadataOrReMarshal(
 		return nil, res
 	}
 
-	triggeringCodes := distinctFatalCodes(res)
+	triggeringCodes := distinctTriggeringCodes(res)
 
 	// Fall back to Load + Marshal.
 	loaded, loadRes := Load(ctx, data, s)
@@ -314,8 +337,38 @@ func UpdateMetadataOrReMarshal(
 		return nil, merged
 	}
 
+	var fallbackWarnings []diag.Issue
 	marshalOpts := updateOptsToMarshalOpts(opts)
 	marshalOpts = append(marshalOpts, WithMetadata(newMeta))
+	// The fallback must not lose what the input document stated. The primitive
+	// rebuilds the header in place and keeps both; Load + Marshal reconstructs
+	// it, so the indent and the created_at have to be carried across or a
+	// pretty-printed document comes back compact and a stamped one comes back
+	// unstamped.
+	if indent := detectIndent(data); indent != "" {
+		marshalOpts = append(marshalOpts, WithIndent(indent))
+	}
+	// The caller's stamp wins only when it is a real one. WithUpdateCreatedAt
+	// sets createdAtSet even for a zero time, and Marshal omits a zero stamp —
+	// so gating on the flag alone made the fallback DROP the input's created_at
+	// where the fast path keeps it, which is the fast/slow divergence this
+	// helper exists to close.
+	ucfg := applyUpdateOptions(opts)
+	if !ucfg.createdAtSet || ucfg.createdAt.IsZero() {
+		if hdr, hdrRes := HeaderOnly(ctx, data); !hdrRes.HasErrors() && hdr != nil && hdr.CreatedAt != "" {
+			when, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt)
+			if err == nil {
+				marshalOpts = append(marshalOpts, WithCreatedAt(when))
+			} else {
+				// Dropping it silently loses a value the input stated. The
+				// primitive preserves the header's bytes whatever they say;
+				// this path cannot, so it reports what it could not carry.
+				fallbackWarnings = append(fallbackWarnings, diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
+					fmt.Sprintf("input header states created_at %q, which is not RFC 3339; the re-marshalled document carries none", hdr.CreatedAt)).
+					Build())
+			}
+		}
+	}
 	reMarshaled, marshalRes := Marshal(ctx, loaded, marshalOpts...)
 	if marshalRes.HasErrors() {
 		merged := mergeResults(res, marshalRes)
@@ -326,8 +379,16 @@ func UpdateMetadataOrReMarshal(
 		"snapshot.UpdateMetadataOrReMarshal: fell back to Load + Marshal after UpdateMetadata refused input").
 		WithDetail("triggering_codes", strings.Join(triggeringCodes, ",")).
 		Build()
+	// The legs' own warnings travel with it. A fresh collector holding only
+	// this warning discarded everything Load and Marshal reported — a
+	// provenance-path fallback on the way in vanished from the caller's view.
 	c := diag.NewCollector(0)
 	c.Collect(warn)
+	for _, iss := range fallbackWarnings {
+		c.Collect(iss)
+	}
+	c.Merge(loadRes)
+	c.Merge(marshalRes)
 	return reMarshaled, c.Result()
 }
 
@@ -371,9 +432,9 @@ func hasCancellation(r diag.Result) bool {
 	return false
 }
 
-// distinctFatalCodes extracts the distinct Fatal-severity codes from a
+// distinctTriggeringCodes extracts the distinct Fatal-severity codes from a
 // result, sorted alphabetically for deterministic detail output.
-func distinctFatalCodes(r diag.Result) []string {
+func distinctTriggeringCodes(r diag.Result) []string {
 	seen := make(map[string]struct{})
 	for iss := range r.BySeverity(diag.Fatal) {
 		seen[iss.Code().String()] = struct{}{}

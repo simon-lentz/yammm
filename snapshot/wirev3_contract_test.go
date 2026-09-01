@@ -24,14 +24,14 @@ import (
 
 // wireTypeTable reads a v3 document's types table.
 func wireTypeTable(t *testing.T, data []byte) []struct {
-	SchemaPath string `json:"schema_path"`
-	Name       string `json:"name"`
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
 } {
 	t.Helper()
 	var doc struct {
 		Types []struct {
-			SchemaPath string `json:"schema_path"`
-			Name       string `json:"name"`
+			Schema string `json:"schema"`
+			Name   string `json:"name"`
 		} `json:"types"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
@@ -137,8 +137,8 @@ func TestWireV3_TableIsOrderedByIdentity(t *testing.T) {
 	}
 
 	for i := 1; i < len(table); i++ {
-		prev := table[i-1].SchemaPath + ":" + table[i-1].Name
-		cur := table[i].SchemaPath + ":" + table[i].Name
+		prev := table[i-1].Schema + "#" + table[i-1].Name
+		cur := table[i].Schema + "#" + table[i].Name
 		if prev >= cur {
 			t.Errorf("table row %d (%s) does not follow row %d (%s) in identity order",
 				i, cur, i-1, prev)
@@ -158,12 +158,12 @@ func TestWireV3_TableIsOrderedByIdentity(t *testing.T) {
 	}
 }
 
-// TestWireV3_UnresolvableSchemaPathIsReported pins the strict half of table
+// TestWireV4_UnresolvableSchemaNameIsReported pins the strict half of table
 // resolution: a document was written by a writer that resolved every
 // identity, so a row whose schema path no longer resolves means the schema
 // moved, and silent rebinding by bare name is the one wrong answer. The
 // document is refused with an Error the consumer can act on.
-func TestWireV3_UnresolvableSchemaPathIsReported(t *testing.T) {
+func TestWireV4_UnresolvableSchemaNameIsReported(t *testing.T) {
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
 	data := v3Doc(t)
@@ -180,8 +180,8 @@ func TestWireV3_UnresolvableSchemaPathIsReported(t *testing.T) {
 	}
 
 	moved := bytes.Replace(data,
-		[]byte(`{"schema_path":"`+wireTypeTable(t, data)[row].SchemaPath+`","name":"`+rooted+`"`),
-		[]byte(`{"schema_path":"/nonexistent/moved.yammm","name":"`+rooted+`"`), 1)
+		[]byte(`{"schema":"`+wireTypeTable(t, data)[row].Schema+`","name":"`+rooted+`"`),
+		[]byte(`{"schema":"nonexistent_moved","name":"`+rooted+`"`), 1)
 	if bytes.Equal(moved, data) {
 		t.Fatalf("fixture shape changed; %s row not found in:\n%s", rooted, data)
 	}
