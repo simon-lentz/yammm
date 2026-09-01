@@ -420,14 +420,14 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags
 			// reasons, so dropping them silently wrote a document that says
 			// less than the record did. Report what is discarded.
 			if u.TargetKey != "" && u.TargetKey != "[]" {
-				diags.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_MALFORMED,
+				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
 					fmt.Sprintf("unresolved record %s[%s].%s states reason %q and carries target key %s, which the wire cannot hold under that reason",
 						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.Reason, u.TargetKey)).
 					WithDetail(diag.DetailKeyRelationName, u.Relation).
 					Build())
 			}
 			if len(u.Properties().Clone()) > 0 {
-				diags.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_MALFORMED,
+				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
 					fmt.Sprintf("unresolved record %s[%s].%s states reason %q and carries edge properties, which the wire cannot hold under that reason",
 						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.Reason)).
 					WithDetail(diag.DetailKeyRelationName, u.Relation).
@@ -441,7 +441,7 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags
 			// the next read find an empty key it cannot explain.
 			uw.TargetKey = parseTargetKey(u.TargetKey)
 			if uw.TargetKey == nil && u.TargetKey != "" && u.TargetKey != "[]" {
-				diags.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_MALFORMED,
+				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
 					fmt.Sprintf("unresolved record %s[%s].%s carries target key %s, which cannot be parsed into components; the reference address is not written",
 						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.TargetKey)).
 					WithDetail(diag.DetailKeyRelationName, u.Relation).

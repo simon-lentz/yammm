@@ -97,6 +97,9 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 // not that check, because it now validates the same outermost shape and adds
 // only the header and types table.
 //
+// Diagnostics are capped at the same default [Load] uses (100); this surface
+// takes no option that raises it.
+//
 // Failure modes and error codes:
 //
 //   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse, its
@@ -360,7 +363,7 @@ func UpdateMetadataOrReMarshal(
 				// Dropping it silently loses a value the input stated. The
 				// primitive preserves the header's bytes whatever they say;
 				// this path cannot, so it reports what it could not carry.
-				fallbackWarnings = append(fallbackWarnings, diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_MALFORMED,
+				fallbackWarnings = append(fallbackWarnings, diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
 					fmt.Sprintf("input header states created_at %q, which is not RFC 3339; the re-marshalled document carries none", hdr.CreatedAt)).
 					Build())
 			}

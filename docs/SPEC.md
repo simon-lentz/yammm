@@ -1765,6 +1765,8 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under
 - `E_SNAPSHOT_DANGLING_REFERENCE` — edge target or duplicate conflict not found
 - `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges
+- `E_SNAPSHOT_INVALID_ROOT` — an instances group names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built
+- `E_DUPLICATE_PK` — two root instances in one group state the same primary key. Listed here as well as under Graph: `snapshot.Load` emits it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
 - `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match
@@ -1774,6 +1776,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UPDATE_METADATA_BODY_OFFSET` — `UpdateMetadata` could not resolve the byte range of the body it reuses
 - `W_UPDATE_METADATA_FALLBACK` (Warning) — `UpdateMetadataOrReMarshal` fell back from the fast path to `Load` + `Marshal`
 - `W_SNAPSHOT_VALUE_NONCONFORMING` (Warning) — under `WithValueConformance`, a stored `Timestamp`, `Date` or `UUID` does not conform to its declared constraint
+- `W_SNAPSHOT_VALUE_DROPPED` (Warning) — the writer held a value the wire cannot carry at that position and did not write it. The document is well-formed; the warning names what is missing from it
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record for a required association
 
 **Adapter** — format-specific errors. These are registered by the adapter packages, so they appear in `diag.AllCodes()` only once the package is linked:

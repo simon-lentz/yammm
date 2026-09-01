@@ -247,11 +247,17 @@ func (r *Snapshot) Diagnostics() diag.Result {
 // Attestation returns the validity claim this snapshot carries, or nil when
 // it carries none. See [Attestation] for what each dimension means, what it
 // does not prove, and why absence is distinct from a false claim.
+//
+// The result is a COPY. Snapshot is immutable and safe for concurrent reads,
+// and its two fields are exported, so returning the stored pointer would let
+// one caller rewrite another's claim — the defensive-copy rule [Snapshot.Types],
+// [Snapshot.Duplicates] and [Snapshot.Unresolved] already follow.
 func (r *Snapshot) Attestation() *Attestation {
-	if r == nil {
+	if r == nil || r.attestation == nil {
 		return nil
 	}
-	return r.attestation
+	att := *r.attestation
+	return &att
 }
 
 // Duplicates returns duplicate primary key records in sorted order.
