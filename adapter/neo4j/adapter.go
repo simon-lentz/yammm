@@ -73,9 +73,18 @@ func WithLabelPrefix(prefix string) Option {
 	}
 }
 
-// WithScalarTypeConstraints controls whether scalar property type constraints
-// (e.g., REQUIRE n.prop IS :: STRING) are generated. Requires Neo4j 5.0+.
-// Default: true (all properties).
+// WithScalarTypeConstraints controls whether PROPERTY-TYPE constraints —
+// `REQUIRE n.prop IS :: T` — are generated. Default: true.
+//
+// It covers list-shaped types as well as scalars, because they are one kind of
+// statement: a `Vector[4]` and a `List<Float>` emit the same expression, and
+// gating them apart suppressed the constraint for one declaration and not for
+// an identical one.
+//
+// **Property-type constraints require Neo4j 5.9**, which is older than the 5.0
+// floor this adapter otherwise supports. On a server between 5.0 and 5.8 this
+// option is what turns them off; nothing else does, and the adapter has no
+// version input with which to decide for itself.
 //
 // When enabled alongside WithRequiredOnlyTypeConstraints(true), only required
 // properties receive type constraints. See WithRequiredOnlyTypeConstraints

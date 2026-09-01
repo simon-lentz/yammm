@@ -154,9 +154,11 @@ func (a *Adapter) DiffIndexes(
 	}
 	// A constraint with no backing index — NOT NULL and TYPE — appears in no
 	// SHOW INDEXES row, so its name reaches this diff only through alsoBlocking.
-	// It is folded into byName as a nameless-Type RemoteIndex: Type is what
-	// [describeIndexBlocker] renders, and leaving it empty is what tells a
-	// consumer the holder is a constraint rather than an index.
+	// It is kept in its OWN map, not folded into byName, and consulted only
+	// after [indexCreateBlocker] has found no index holding the name: an index
+	// holding it is the more precise finding, and a constraint holding it is
+	// the rarer case. Its message is built at that site rather than by
+	// [describeIndexBlocker], because it names the constraint's own Type.
 	blockingConstraints := make(map[string]RemoteConstraint, len(alsoBlocking))
 	for _, rc := range alsoBlocking {
 		if rc.Name == "" {
@@ -170,11 +172,22 @@ func (a *Adapter) DiffIndexes(
 		}
 	}
 
+	// Excluded counts remote rows the comparison never reached, and whether it
+	// reached a BACKING index is not knowable here: one that serves a
+	// declaration becomes an IndexMatch below, and counting it now reported the
+	// same row twice — once as excluded and once as matched. Owned
+	// non-declarable rows are therefore held back and counted at the end, by
+	// what the comparison did with them.
 	var ownedRemotes []scoped[RemoteIndex]
+	heldBack := make(map[string]struct{})
 	for _, ri := range actual {
 		label, isOwned := owned.ownedLabel(ri.LabelsOrTypes)
-		if !isOwned || !ri.Declarable() {
+		if !isOwned {
 			result.Excluded++
+			continue
+		}
+		if !ri.Declarable() {
+			heldBack[ri.Name] = struct{}{}
 			continue
 		}
 		ownedRemotes = append(ownedRemotes, scopedObject(ri, label))
@@ -277,10 +290,14 @@ func (a *Adapter) DiffIndexes(
 				result.append(actionable, d, served, reason)
 				continue
 			}
+			delete(heldBack, served.Name)
 			result.Match = append(result.Match, IndexMatch{Desired: d, Actual: served})
 			continue
 		}
 		if blocker, blocked := indexCreateBlocker(d, key, byName, byDefinition); blocked {
+			// Not deleted from heldBack: blocking a create is not being
+			// compared. The row is still one the diff can neither match nor
+			// drop, which is what Excluded counts.
 			result.Drift = append(result.Drift, IndexDrift{
 				Desired: d,
 				Actual:  blocker,
@@ -305,6 +322,9 @@ func (a *Adapter) DiffIndexes(
 	for _, o := range orphans {
 		result.Drop = append(result.Drop, o.obj)
 	}
+
+	// What the comparison never used is what was never compared.
+	result.Excluded += len(heldBack)
 
 	return result
 }

@@ -51,11 +51,11 @@ func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
 	}
 
 	entityNS := shape.Types[typeID(t, s, "Entity")]
-	if want := buildBatchNodeMergeQuery(entityNS.Label, entityNS.PrimaryKeys, ImmutableKeys); entityQ.Statement != want {
+	if want := buildBatchNodeMergeQuery(entityNS.Label, entityNS.PrimaryKeys, immutableKeys); entityQ.Statement != want {
 		t.Errorf("Entity statement = %q; want immutable split %q", entityQ.Statement, want)
 	}
 	plainNS := shape.Types[typeID(t, s, "Plain")]
-	if want := buildBatchNodeMergeQuery(plainNS.Label, plainNS.PrimaryKeys, MutableKeys); plainQ.Statement != want {
+	if want := buildBatchNodeMergeQuery(plainNS.Label, plainNS.PrimaryKeys, mutableKeys); plainQ.Statement != want {
 		t.Errorf("Plain statement = %q; want mutable %q", plainQ.Statement, want)
 	}
 
@@ -101,7 +101,7 @@ func TestBatchNodeQueries_SingleType(t *testing.T) {
 
 	q := queries[0]
 	ns := shape.Types[typeID(t, s, "Entity")]
-	if want := buildBatchNodeMergeQuery(ns.Label, ns.PrimaryKeys, MutableKeys); q.Statement != want {
+	if want := buildBatchNodeMergeQuery(ns.Label, ns.PrimaryKeys, mutableKeys); q.Statement != want {
 		t.Errorf("Statement = %q; want builder output %q", q.Statement, want)
 	}
 	rows, ok := q.Params["rows"].([]map[string]any)
@@ -596,6 +596,17 @@ func TestPropsToParamMap_TemporalErrorPropagates(t *testing.T) {
 	}
 }
 
+// builtShape returns a GraphShape the write path accepts — marked as built from
+// s, exactly as Adapter.ShapeForSchema marks one — carrying only the types
+// given. It exists so a test can reach the per-type "no shape for type" branch
+// without hand-building a shape, which the write path refuses.
+func builtShape(s *schema.Schema, types map[schema.TypeID]NodeShape) *GraphShape {
+	if types == nil {
+		types = map[schema.TypeID]NodeShape{}
+	}
+	return &GraphShape{Types: types, schemaID: s.SourceID()}
+}
+
 func TestBatchNodeQueries_MissingShape(t *testing.T) {
 	t.Parallel()
 	s, v := loadSchemaAndValidator(t, "basic.yammm")
@@ -605,8 +616,8 @@ func TestBatchNodeQueries_MissingShape(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 	})
 
-	// Pass an empty shape map — no shape for "Entity".
-	emptyShapes := &GraphShape{Types: map[schema.TypeID]NodeShape{}}
+	// A shape the adapter built, but with no entry for "Entity".
+	emptyShapes := builtShape(s, nil)
 	_, err := a.BatchNodeQueries(context.Background(), graphResult, emptyShapes)
 	if err == nil {
 		t.Error("expected error for missing shape")
@@ -626,7 +637,7 @@ func TestBatchEdgeQueries_MissingShape(t *testing.T) {
 		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
 	})
 
-	emptyShapes := &GraphShape{Types: map[schema.TypeID]NodeShape{}}
+	emptyShapes := builtShape(s, nil)
 	_, err := a.BatchEdgeQueries(context.Background(), graphResult, emptyShapes)
 	if err == nil {
 		t.Error("expected error for missing shape")
@@ -878,49 +889,6 @@ func TestShapeForSchema_ImmutableKeysNonNilWhenEmpty(t *testing.T) {
 	}
 }
 
-// The batch path honours @writeOnce from a hand-built shape via the schema type,
-// exactly as the single-node path does.
-func TestBatchNodeQueries_HandBuiltShapeStillHonorsWriteOnce(t *testing.T) {
-	t.Parallel()
-	a, s, v, shape := setupWrite(t, "writeonce.yammm")
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
-	})
-
-	// A shape as a pre-upgrade caller would have built it: no ImmutableKeys.
-	stale := &GraphShape{Types: map[schema.TypeID]NodeShape{}}
-	for id, ns := range shape.Types {
-		ns.ImmutableKeys = nil
-		stale.Types[id] = ns
-	}
-
-	queries, err := a.BatchNodeQueries(context.Background(), graphResult, stale)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, q := range queries {
-		if q.Kind != NodeMerge || !strings.Contains(q.Statement, "wo_test__Entity") {
-			continue
-		}
-		if !strings.Contains(q.Statement, "ON CREATE SET") {
-			t.Errorf("a hand-built shape dropped the @writeOnce split: %q", q.Statement)
-		}
-		for _, row := range q.Params["rows"].([]map[string]any) {
-			up, ok := row["update_props"].(map[string]any)
-			if !ok {
-				t.Fatal("Entity row missing update_props")
-			}
-			if _, has := up["first_seen"]; has {
-				t.Error("update_props should exclude the derived @writeOnce key")
-			}
-		}
-	}
-}
-
-// The batch row's merge-key entries and the template that reads them are two
-// halves of one wire contract, so the row must carry exactly the prefixed entry
-// the template reads and no unprefixed one.
 func TestBatchNodeQueries_RowCarriesTheKeyTheTemplateReads(t *testing.T) {
 	t.Parallel()
 	a, s, v, shape := setupWrite(t, "writeonce.yammm")
@@ -1026,4 +994,50 @@ func TestEdgeQueries_CoerceEndpointKeysFromAGraph(t *testing.T) {
 func isDateValue(v any) bool {
 	_, ok := v.(dbtype.Date)
 	return ok
+}
+
+// ParamTypesForType is nil-guarded like its sibling ImmutableKeysFor. Both take
+// a schema type a caller may not hold, and one panicking where the other
+// returns an empty answer is a difference no caller can predict.
+//
+// Mutation: removing the nil guard turns this red with a nil dereference.
+func TestParamTypesForType_NilTypeIsEmptyNotPanic(t *testing.T) {
+	t.Parallel()
+	if got := ParamTypesForType(nil, "rows"); len(got) != 0 {
+		t.Errorf("ParamTypesForType(nil) = %v; want an empty map", got)
+	}
+}
+
+// A key-coercion failure is reported beside the missing and nil keys the walk
+// already found, not instead of them. The function exists to report every bad
+// key in one pass.
+//
+// Mutation: returning on the first coercion error turns this red — the report
+// then names whichever problem the loop met last.
+func TestExtractKeyProps_ReportsEveryProblemInOnePass(t *testing.T) {
+	t.Parallel()
+	// keyConstraints is set the way ShapeForSchema sets it, so "uncoercible"
+	// actually fails coercion — without a constraint the value passes through
+	// and the branch under test is never reached.
+	shape := &NodeShape{
+		Label:       "T",
+		PrimaryKeys: []string{"uncoercible", "absent", "nilled"},
+		keyConstraints: map[string]schema.Constraint{
+			"uncoercible": schema.NewDateConstraint(),
+		},
+	}
+	props := immutable.WrapProperties(map[string]any{
+		"uncoercible": "not-a-date",
+		"nilled":      nil,
+	})
+
+	_, err := extractKeyProps(props, shape)
+	if err == nil {
+		t.Fatal("a shape with a missing key, a nil key and an uncoercible key was accepted")
+	}
+	for _, want := range []string{"absent", "nilled", "uncoercible"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q; every problem belongs in one report", err, want)
+		}
+	}
 }

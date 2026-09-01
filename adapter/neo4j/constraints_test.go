@@ -373,7 +373,17 @@ func TestConstraints_RequiredOnlyTypes(t *testing.T) {
 	assertNotContains(t, stmts, "REQUIRE n.embedding IS ::")
 }
 
-func TestConstraints_ScalarTypesDisabled(t *testing.T) {
+// WithScalarTypeConstraints(false) suppresses EVERY property-type constraint,
+// list-shaped and scalar alike.
+//
+// They are one kind of statement. A Vector and a List<Float> emit the same
+// expression, so gating them apart meant the option suppressed the constraint
+// for one declaration and not for an identical one. It is also the only switch
+// that turns property-type constraints off, which a server older than Neo4j 5.9
+// needs because they do not exist there.
+//
+// Mutation: moving listTypeConstraints back outside the gate turns this red.
+func TestConstraints_TypeConstraintsDisabled(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "list_properties.yammm")
 	a := New(WithScalarTypeConstraints(false))
@@ -383,13 +393,24 @@ func TestConstraints_ScalarTypesDisabled(t *testing.T) {
 		t.Fatalf("ConstraintsForSchema failed: %v", err)
 	}
 
-	// LIST TYPE constraints should still be generated.
-	assertContains(t, stmts, "REQUIRE n.tags IS :: LIST<STRING NOT NULL>")
+	for _, unwanted := range []string{
+		"REQUIRE n.tags IS :: LIST<STRING NOT NULL>",
+		"REQUIRE n.id IS :: STRING",
+		"REQUIRE n.name IS :: STRING",
+		"REQUIRE n.active IS :: BOOLEAN",
+	} {
+		assertNotContains(t, stmts, unwanted)
+	}
+	for _, stmt := range stmts {
+		if strings.Contains(stmt, "IS ::") {
+			t.Errorf("a property-type constraint survived the gate: %q", stmt)
+		}
+	}
 
-	// Scalar TYPE constraints should NOT be generated.
-	assertNotContains(t, stmts, "REQUIRE n.id IS :: STRING")
-	assertNotContains(t, stmts, "REQUIRE n.name IS :: STRING")
-	assertNotContains(t, stmts, "REQUIRE n.active IS :: BOOLEAN")
+	// The gate is the only thing suppressed: keys and NOT NULL still emit.
+	if len(stmts) == 0 {
+		t.Error("every constraint was suppressed; the gate should reach type constraints alone")
+	}
 }
 
 func TestConstraints_DeterministicOrder(t *testing.T) {
@@ -583,4 +604,57 @@ func TestConstraints_EditionOmission_CoexistsWithNodeKeyWarning(t *testing.T) {
 			t.Errorf("expected exactly 1 %s, got %d", code, got)
 		}
 	}
+}
+
+// A Cypher reserved word as a property name is refused by the constraint
+// emitters, not only by the index ones. All four emitter sites raise the same
+// code, and none of them had a test.
+//
+// Mutation: dropping the ValidateIdentifier call in any emitter arm turns this
+// red for that arm's property.
+func TestConstraints_ReservedPropertyNameRefused(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "indexes_bad_ident.yammm")
+
+	structured, result := New().ConstraintsStructured(context.Background(), s)
+	if structured != nil {
+		t.Errorf("a schema with a reserved property name emitted %d constraints; want none", len(structured))
+	}
+	var found bool
+	for issue := range result.Issues() {
+		if issue.Code() == E_NEO4J_INVALID_IDENTIFIER {
+			found = true
+			if !strings.Contains(issue.Message(), "match") {
+				t.Errorf("issue does not name the offending property: %s", issue.Message())
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no E_NEO4J_INVALID_IDENTIFIER for property %q: %s", "match", result)
+	}
+}
+
+// WithRequiredOnlyTypeConstraints(true) skips an OPTIONAL list property, the
+// same way it skips an optional scalar. The list walk carries its own copy of
+// that skip and no test reached it.
+//
+// Mutation: removing the requiredOnly check from listTypeConstraints turns this
+// red.
+func TestConstraints_RequiredOnlyTypes_SkipsOptionalList(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "list_properties.yammm")
+
+	stmts, result := New(WithRequiredOnlyTypeConstraints(true)).
+		ConstraintsForSchema(context.Background(), s)
+	if err := result.Err(); err != nil {
+		t.Fatalf("ConstraintsForSchema: %v", err)
+	}
+
+	// tags, scores, ratios, flags, times and dates are all optional lists.
+	for _, optional := range []string{"tags", "scores", "ratios", "flags", "times", "dates"} {
+		assertNotContains(t, stmts, "REQUIRE n."+optional+" IS ::")
+	}
+	// A required scalar still gets one, so the option narrowed rather than
+	// disabled.
+	assertContains(t, stmts, "REQUIRE n.name IS :: STRING")
 }

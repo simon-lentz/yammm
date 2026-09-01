@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -60,7 +61,7 @@ func compositionClosure(s *schema.Schema, rootType *schema.Type) (relNames []str
 // the subtree whatever names other types reuse. Every part at depth k is
 // the endpoint of the k-hop path, so one statement deletes the whole
 // subtree with nothing orphaned.
-func buildCompositionReplaceQuery(rootLabel string, rootKeys []string, relNames, partLabels []string) string {
+func buildCompositionReplaceQuery(rootLabel string, rootKeys, relNames, partLabels []string) string {
 	var b strings.Builder
 	b.WriteString("UNWIND $rows AS row\n")
 	b.WriteString("MATCH (p:")
@@ -75,7 +76,11 @@ func buildCompositionReplaceQuery(rootLabel string, rootKeys []string, relNames,
 	b.WriteString("})\n")
 	fmt.Fprintf(&b, "MATCH (p) (()-[:%s]->(:%s)){1,} (c)\n",
 		strings.Join(relNames, "|"), strings.Join(partLabels, "|"))
-	b.WriteString("DETACH DELETE c")
+	b.WriteString("DETACH DELETE c\n")
+	// Reports what it deleted, for the same reason the create statement reports
+	// what it matched: both are MATCH-anchored, and a root the MATCH misses is
+	// a silent no-op that leaves the previous subtree in place.
+	b.WriteString("RETURN count(*) AS matched_rows")
 	return b.String()
 }
 
@@ -103,7 +108,12 @@ func buildCompositionCreateQuery(parentLabel string, parentKeys []string, relNam
 	}
 	b.WriteString("})\n")
 	fmt.Fprintf(&b, "CREATE (p)-[:%s]->(c:%s)\n", relName, partLabel)
-	b.WriteString("SET c = row.props")
+	b.WriteString("SET c = row.props\n")
+	// The statement is MATCH-anchored, so a parent the MATCH does not find
+	// silently creates nothing and the whole composed subtree is dropped with
+	// no error. The count is the only signal that says so, and it is the same
+	// always-on RETURN the relationship template carries for the same reason.
+	b.WriteString("RETURN count(*) AS matched_rows")
 	return b.String()
 }
 
@@ -127,13 +137,19 @@ type createGroup struct {
 // children: every instance of a root type whose composition closure is
 // non-empty emits a replace row, so a write with zero children still
 // deletes stale ones. Create groups run parent-first (depth ascending).
-func composedQueries(result *graph.Snapshot, shapes *GraphShape, cfg *writeConfig) ([]*BatchNodeQuery, error) {
+func composedQueries(ctx context.Context, result *graph.Snapshot, shapes *GraphShape, cfg *writeConfig) ([]*BatchNodeQuery, error) {
 	s := result.Schema()
 	var replace []*BatchNodeQuery
 
 	groups := make(map[composedGroupKey]*createGroup)
 
 	for _, typeID := range result.Types() {
+		// Checked per type, as the node and edge loops are: the composition
+		// phases walk every root's whole subtree, and a caller that cancelled
+		// should not wait for that.
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("composed queries: %w", err)
+		}
 		rootType, ok := s.TypeByID(typeID)
 		if !ok {
 			continue
@@ -248,8 +264,19 @@ func collectCreateRows(
 ) error {
 	rootKeyValues := root.PrimaryKey().Clone()
 
-	var walk func(parent *graph.Instance, parentType *schema.Type, parentCK string, depth int) error
-	walk = func(parent *graph.Instance, parentType *schema.Type, parentCK string, depth int) error {
+	// The walk carries the PATH from the root, so each level appends one hop
+	// rather than nesting the level above inside itself.
+	var walk func(parent *graph.Instance, parentType *schema.Type, path []graph.ComposedStep, depth int) error
+	walk = func(parent *graph.Instance, parentType *schema.Type, path []graph.ComposedStep, depth int) error {
+		// Below the root, the rows MATCH their parent by its own composed key,
+		// which is this walk's path — the child's minus its last hop.
+		var parentCK string
+		if depth > 1 {
+			var err error
+			if parentCK, err = graph.FormatComposedKey(rootType.ID(), rootKeyValues, path); err != nil {
+				return fmt.Errorf("composed parent %s: %w", parentType.Name(), err)
+			}
+		}
 		for _, relName := range parent.ComposedRelations() {
 			rel, ok := parentType.Relation(relName)
 			if !ok || rel.Kind() != schema.RelationComposition {
@@ -276,11 +303,8 @@ func collectCreateRows(
 				} else {
 					keyOrIndex = i
 				}
-				parentKeyValues := rootKeyValues
-				if depth > 1 {
-					parentKeyValues = []any{parentCK}
-				}
-				ck, err := graph.FormatComposedKey(parentKeyValues, relName, keyOrIndex)
+				childPath := append(slices.Clip(path), graph.ComposedStep{Relation: relName, KeyOrIndex: keyOrIndex})
+				ck, err := graph.FormatComposedKey(rootType.ID(), rootKeyValues, childPath)
 				if err != nil {
 					return fmt.Errorf("composition %q child %d: %w", relName, i, err)
 				}
@@ -316,12 +340,12 @@ func collectCreateRows(
 				}
 				g.rows = append(g.rows, row)
 
-				if err := walk(child, partType, ck, depth+1); err != nil {
+				if err := walk(child, partType, childPath, depth+1); err != nil {
 					return err
 				}
 			}
 		}
 		return nil
 	}
-	return walk(root, rootType, "", 1)
+	return walk(root, rootType, nil, 1)
 }

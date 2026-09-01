@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -150,26 +151,42 @@ func (a *Adapter) Label(ctx context.Context, schemaName, typeName string) string
 //	label "my_schema__FooBar" produced by types: Foo-Bar, Foo_Bar
 func (a *Adapter) DetectLabelCollisions(ctx context.Context, s *schema.Schema) diag.Result {
 	collector := diag.NewCollector(0)
-	labelToTypes := make(map[string][]string)
+	labelToTypes := make(map[string][]schema.TypeID)
 
 	for t, label := range a.labeledTypes(ctx, s) {
-		labelToTypes[label] = append(labelToTypes[label], strings.TrimSpace(t.Name()))
+		labelToTypes[label] = append(labelToTypes[label], t.ID())
 	}
 
-	for label, types := range labelToTypes {
-		if len(types) > 1 {
-			msg := fmt.Sprintf("label %q produced by types: %s",
-				label, strings.Join(types, ", "))
-			issue := diag.NewIssue(diag.Error, E_NEO4J_LABEL_COLLISION, msg).
-				WithDetail(diag.DetailKeyFormat, "neo4j").
-				WithDetail(detailKeyLabel, label).
-				WithDetail(diag.DetailKeyTypeName, strings.Join(types, ", ")).
-				Build()
-			collector.Collect(issue)
+	for label, ids := range labelToTypes {
+		if len(ids) > 1 {
+			collector.Collect(labelCollisionIssue(label, ids))
 		}
 	}
 
 	return collector.Result()
+}
+
+// labelCollisionIssue builds the one [E_NEO4J_LABEL_COLLISION] every site
+// emits.
+//
+// One constructor per code, so a consumer reading a detail gets the same kind
+// of value whichever site raised the issue. The two sites that built this code
+// by hand disagreed: one attached the label alone, the other added a joined
+// list of display NAMES under the type detail while its sibling code carried an
+// identity there. A collision is between identities — two types that render one
+// label are distinguishable only by identity — so identity is what it reports.
+func labelCollisionIssue(label string, ids []schema.TypeID) diag.Issue {
+	rendered := make([]string, len(ids))
+	for i, id := range ids {
+		rendered[i] = id.String()
+	}
+	slices.Sort(rendered)
+	return diag.NewIssue(diag.Error, E_NEO4J_LABEL_COLLISION,
+		fmt.Sprintf("types %s all render label %q", strings.Join(rendered, " and "), label)).
+		WithDetail(diag.DetailKeyFormat, "neo4j").
+		WithDetail(detailKeyLabel, label).
+		WithDetail(diag.DetailKeyTypeName, strings.Join(rendered, ", ")).
+		Build()
 }
 
 func isASCIILetter(r rune) bool {

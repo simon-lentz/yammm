@@ -15,32 +15,9 @@ const returnCountSuffix = "\nRETURN count(*) AS matched_rows"
 // golden comparison explicitly rather than silently breaking write semantics.
 // -----------------------------------------------------------------------------
 
-func TestBuildNodeMergeQuery_MutableKeys_Golden(t *testing.T) {
-	t.Parallel()
-	got := buildNodeMergeQuery("ns__Type", []string{"a", "b"}, MutableKeys)
-	want := "MERGE (n:ns__Type {a: $key_a, b: $key_b})\nSET n += $props"
-	if got != want {
-		t.Errorf("MutableKeys shape mismatch\n got: %q\nwant: %q", got, want)
-	}
-	if strings.Contains(got, "ON CREATE SET") || strings.Contains(got, "ON MATCH SET") {
-		t.Errorf("MutableKeys must not emit ON CREATE / ON MATCH split: %q", got)
-	}
-}
-
-func TestBuildNodeMergeQuery_ImmutableKeys_Golden(t *testing.T) {
-	t.Parallel()
-	got := buildNodeMergeQuery("ns__Type", []string{"a", "b"}, ImmutableKeys)
-	want := "MERGE (n:ns__Type {a: $key_a, b: $key_b})\n" +
-		"ON CREATE SET n += $props\n" +
-		"ON MATCH SET n += $update_props"
-	if got != want {
-		t.Errorf("ImmutableKeys shape mismatch\n got: %q\nwant: %q", got, want)
-	}
-}
-
 func TestBuildBatchNodeMergeQuery_MutableKeys_Golden(t *testing.T) {
 	t.Parallel()
-	got := buildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, MutableKeys)
+	got := buildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, mutableKeys)
 	want := "UNWIND $rows AS row\n" +
 		"MERGE (n:ns__Type {a: row.key_a, b: row.key_b})\n" +
 		"SET n += row.props"
@@ -54,7 +31,7 @@ func TestBuildBatchNodeMergeQuery_MutableKeys_Golden(t *testing.T) {
 
 func TestBuildBatchNodeMergeQuery_ImmutableKeys_Golden(t *testing.T) {
 	t.Parallel()
-	got := buildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, ImmutableKeys)
+	got := buildBatchNodeMergeQuery("ns__Type", []string{"a", "b"}, immutableKeys)
 	want := "UNWIND $rows AS row\n" +
 		"MERGE (n:ns__Type {a: row.key_a, b: row.key_b})\n" +
 		"ON CREATE SET n += row.props\n" +
@@ -179,19 +156,9 @@ func TestBuildBatchRelationshipMergeQuery_WithProps_Golden(t *testing.T) {
 	}
 }
 
-func TestBuildNodeMergeQuery_NoReturn(t *testing.T) {
-	t.Parallel()
-	for _, km := range []KeyMutability{MutableKeys, ImmutableKeys} {
-		got := buildNodeMergeQuery("Entity", []string{"id"}, km)
-		if strings.Contains(got, "RETURN") {
-			t.Errorf("km=%d: nodes must stay RETURN-free, got: %q", km, got)
-		}
-	}
-}
-
 func TestBuildBatchNodeMergeQuery_NoReturn(t *testing.T) {
 	t.Parallel()
-	for _, km := range []KeyMutability{MutableKeys, ImmutableKeys} {
+	for _, km := range []keyMutability{mutableKeys, immutableKeys} {
 		got := buildBatchNodeMergeQuery("Entity", []string{"id"}, km)
 		if strings.Contains(got, "RETURN") {
 			t.Errorf("km=%d: batch nodes must stay RETURN-free, got: %q", km, got)
@@ -206,18 +173,9 @@ func TestBuildBatchNodeMergeQuery_NoReturn(t *testing.T) {
 // covered by the smoke/golden tests above; this is the N≥2 case.
 // -----------------------------------------------------------------------------
 
-func TestBuildNodeMergeQuery_CompositeKeys(t *testing.T) {
-	t.Parallel()
-	got := buildNodeMergeQuery("X", []string{"a", "b", "c"}, MutableKeys)
-	want := "MERGE (n:X {a: $key_a, b: $key_b, c: $key_c})\nSET n += $props"
-	if got != want {
-		t.Errorf("composite keys mismatch\n got: %q\nwant: %q", got, want)
-	}
-}
-
 func TestBuildBatchNodeMergeQuery_CompositeKeys(t *testing.T) {
 	t.Parallel()
-	got := buildBatchNodeMergeQuery("X", []string{"a", "b", "c"}, MutableKeys)
+	got := buildBatchNodeMergeQuery("X", []string{"a", "b", "c"}, mutableKeys)
 	want := "UNWIND $rows AS row\n" +
 		"MERGE (n:X {a: row.key_a, b: row.key_b, c: row.key_c})\n" +
 		"SET n += row.props"

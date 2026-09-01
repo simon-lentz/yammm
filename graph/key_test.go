@@ -104,115 +104,116 @@ func TestFormatKey_PanicOnUnmarshalable(t *testing.T) {
 }
 
 func TestFormatComposedKey(t *testing.T) {
+	t.Parallel()
+	root := schema.NewTypeID(location.NewSourceID("test://car.yammm"), "Vehicle")
+
 	tests := []struct {
-		name            string
-		parentKeyValues []any
-		compositionName string
-		childKeyOrIndex any
-		want            string
-		wantErr         bool
+		name    string
+		rootKey []any
+		path    []graph.ComposedStep
+		want    string
+		wantErr bool
 	}{
 		{
-			name:            "one cardinality",
-			parentKeyValues: []any{"ABC123"},
-			compositionName: "ADDRESS",
-			childKeyOrIndex: nil,
-			want:            `[["ABC123"],"ADDRESS"]`,
+			name:    "one cardinality carries no child address",
+			rootKey: []any{"ABC123"},
+			path:    []graph.ComposedStep{{Relation: "ADDRESS"}},
+			want:    `["test://car.yammm:Vehicle",["ABC123"],["ADDRESS"]]`,
 		},
 		{
-			name:            "many with PK",
-			parentKeyValues: []any{"ABC123"},
-			compositionName: "WHEELS",
-			childKeyOrIndex: []any{"front-left"},
-			want:            `[["ABC123"],"WHEELS",["front-left"]]`,
+			name:    "keyed child",
+			rootKey: []any{"ABC123"},
+			path:    []graph.ComposedStep{{Relation: "WHEELS", KeyOrIndex: []any{"front-left"}}},
+			want:    `["test://car.yammm:Vehicle",["ABC123"],["WHEELS",["front-left"]]]`,
 		},
 		{
-			name:            "many without PK",
-			parentKeyValues: []any{"ABC123"},
-			compositionName: "NOTES",
-			childKeyOrIndex: 0,
-			want:            `[["ABC123"],"NOTES",0]`,
+			name:    "keyless child is positional",
+			rootKey: []any{"ABC123"},
+			path:    []graph.ComposedStep{{Relation: "NOTES", KeyOrIndex: 0}},
+			want:    `["test://car.yammm:Vehicle",["ABC123"],["NOTES",0]]`,
 		},
 		{
-			name:            "composite parent key",
-			parentKeyValues: []any{"us", 12345},
-			compositionName: "GRADES",
-			childKeyOrIndex: []any{"MATH-101"},
-			want:            `[["us",12345],"GRADES",["MATH-101"]]`,
+			// The address is FLAT: a second hop appends a segment instead of
+			// nesting the first hop's rendering inside itself, so length grows
+			// linearly with depth and nothing escapes anything.
+			name:    "two hops append, they do not nest",
+			rootKey: []any{"r1"},
+			path: []graph.ComposedStep{
+				{Relation: "MID", KeyOrIndex: []any{"m1"}},
+				{Relation: "LEAF", KeyOrIndex: []any{"l1"}},
+			},
+			want: `["test://car.yammm:Vehicle",["r1"],["MID",["m1"]],["LEAF",["l1"]]]`,
 		},
 		{
-			name:            "special characters in key",
-			parentKeyValues: []any{"order-123"},
-			compositionName: "QUOTES",
-			childKeyOrIndex: []any{`He said "hello"`},
-			want:            `[["order-123"],"QUOTES",["He said \"hello\""]]`,
+			name:    "composite root key",
+			rootKey: []any{"a", "b"},
+			path:    []graph.ComposedStep{{Relation: "P", KeyOrIndex: 1}},
+			want:    `["test://car.yammm:Vehicle",["a","b"],["P",1]]`,
 		},
-		{
-			name:            "nil parent",
-			parentKeyValues: nil,
-			compositionName: "ADDR",
-			childKeyOrIndex: nil,
-			wantErr:         true,
-		},
-		{
-			name:            "empty parent",
-			parentKeyValues: []any{},
-			compositionName: "ADDR",
-			childKeyOrIndex: nil,
-			wantErr:         true,
-		},
-		{
-			name:            "empty composition name",
-			parentKeyValues: []any{"ABC"},
-			compositionName: "",
-			childKeyOrIndex: nil,
-			wantErr:         true,
-		},
-		{
-			name:            "empty child key slice",
-			parentKeyValues: []any{"ABC"},
-			compositionName: "WHEELS",
-			childKeyOrIndex: []any{},
-			wantErr:         true,
-		},
-		{
-			name:            "negative index",
-			parentKeyValues: []any{"ABC"},
-			compositionName: "NOTES",
-			childKeyOrIndex: -1,
-			wantErr:         true,
-		},
-		{
-			name:            "invalid childKeyOrIndex type",
-			parentKeyValues: []any{"ABC"},
-			compositionName: "ADDR",
-			childKeyOrIndex: "invalid",
-			wantErr:         true,
-		},
+		{name: "nil root key", rootKey: nil, path: []graph.ComposedStep{{Relation: "ADDR"}}, wantErr: true},
+		{name: "empty root key", rootKey: []any{}, path: []graph.ComposedStep{{Relation: "ADDR"}}, wantErr: true},
+		{name: "empty path", rootKey: []any{"ABC"}, path: nil, wantErr: true},
+		{name: "empty relation", rootKey: []any{"ABC"}, path: []graph.ComposedStep{{Relation: ""}}, wantErr: true},
+		{name: "empty child key slice", rootKey: []any{"ABC"}, path: []graph.ComposedStep{{Relation: "W", KeyOrIndex: []any{}}}, wantErr: true},
+		{name: "negative index", rootKey: []any{"ABC"}, path: []graph.ComposedStep{{Relation: "N", KeyOrIndex: -1}}, wantErr: true},
+		{name: "invalid KeyOrIndex type", rootKey: []any{"ABC"}, path: []graph.ComposedStep{{Relation: "A", KeyOrIndex: "invalid"}}, wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := graph.FormatComposedKey(tt.parentKeyValues, tt.compositionName, tt.childKeyOrIndex)
+			t.Parallel()
+			got, err := graph.FormatComposedKey(root, tt.rootKey, tt.path)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("graph.FormatComposedKey() expected error, got nil")
+					t.Errorf("FormatComposedKey(%v, %v) = %q, want an error", tt.rootKey, tt.path, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Errorf("graph.FormatComposedKey() unexpected error: %v", err)
-				return
+				t.Fatalf("FormatComposedKey: %v", err)
 			}
 			if got != tt.want {
-				t.Errorf("graph.FormatComposedKey() = %q, want %q", got, tt.want)
+				t.Errorf("FormatComposedKey = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-// timestampKeySchema carries a Timestamp primary key, which the DSL permits
-// alongside String, UUID and Date.
+// A zero root type is refused: a key value is not an identity, and two root
+// types sharing a key value and a relation name would otherwise mint the same
+// address for children on one part label.
+func TestFormatComposedKey_ZeroRootTypeRefused(t *testing.T) {
+	t.Parallel()
+	_, err := graph.FormatComposedKey(schema.TypeID{}, []any{"r1"},
+		[]graph.ComposedStep{{Relation: "R", KeyOrIndex: 0}})
+	if err == nil {
+		t.Error("a zero root type was accepted")
+	}
+}
+
+// Two roots of DIFFERENT types sharing a key value and a relation name get
+// different addresses. Before the root's identity was part of the address they
+// collided on one part label, silently.
+func TestFormatComposedKey_RootIdentityDisambiguates(t *testing.T) {
+	t.Parallel()
+	src := location.NewSourceID("test://a.yammm")
+	person := schema.NewTypeID(src, "Person")
+	company := schema.NewTypeID(src, "Company")
+	step := []graph.ComposedStep{{Relation: "ADDRESSES", KeyOrIndex: 0}}
+
+	a, err := graph.FormatComposedKey(person, []any{"1"}, step)
+	if err != nil {
+		t.Fatalf("person: %v", err)
+	}
+	b, err := graph.FormatComposedKey(company, []any{"1"}, step)
+	if err != nil {
+		t.Fatalf("company: %v", err)
+	}
+	if a == b {
+		t.Errorf("two root types sharing key %q mint the same composed address %q", "1", a)
+	}
+}
+
 func timestampKeySchema(t *testing.T) *schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().

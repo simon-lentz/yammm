@@ -123,10 +123,7 @@ func TestInferSchema_UniquenessSpellingsYieldPrimaryKey(t *testing.T) {
 				LabelsOrTypes: []string{"app__Person"}, Properties: []string{"id"},
 			}}
 
-			src, err := a.InferSchema(constraints, nil, "app")
-			if err != nil {
-				t.Fatalf("InferSchema: %v", err)
-			}
+			src := a.InferSchema(constraints, nil, "app")
 
 			// An unrecognised spelling marks no primary key, and the scaffold
 			// then fails to load on E_NO_PRIMARY_KEY — a schema the tool itself

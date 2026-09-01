@@ -38,7 +38,6 @@ const adminPassword = "yammm-integration"
 var shared struct {
 	driver  neo4jdriver.Driver
 	uri     string // the container's Bolt URL, for a test that needs its own pool
-	skip    string // non-empty when the suite cannot run
 	cleanup func()
 }
 
@@ -49,13 +48,16 @@ func TestMain(m *testing.M) {
 				shared.cleanup()
 			}
 		}()
-		start()
+		if err := start(); err != nil {
+			fmt.Fprintf(os.Stderr, "neo4j integration harness: %v\n", err)
+			return 1
+		}
 		return m.Run()
 	}()
 	os.Exit(code)
 }
 
-func start() {
+func start() error {
 	image := defaultImage
 	if custom := os.Getenv("YAMMM_NEO4J_TEST_IMAGE"); custom != "" {
 		image = custom
@@ -74,12 +76,10 @@ func start() {
 	container, err := tcneo4j.Run(ctx, image, opts...)
 	if err != nil {
 		cancel()
-		// A missing or stopped Docker is an environment fact, not a test
-		// failure: the tag already says the operator asked for these tests, and
-		// failing here would only tell them something they can see for
-		// themselves.
-		shared.skip = fmt.Sprintf("cannot start %s (is Docker running?): %v", image, err)
-		return
+		// The build tag means the operator asked for these tests, so a harness
+		// that cannot start its subject fails rather than skipping: a skipped
+		// suite exits 0 and is indistinguishable from one that ran and passed.
+		return fmt.Errorf("cannot start %s (is Docker running?): %w", image, err)
 	}
 
 	// Registered the moment the container exists, so every failure below tears it
@@ -98,24 +98,22 @@ func start() {
 
 	uri, err := container.BoltUrl(ctx)
 	if err != nil {
-		shared.skip = fmt.Sprintf("cannot resolve the container's Bolt URL: %v", err)
-		return
+		return fmt.Errorf("cannot resolve the container's Bolt URL: %w", err)
 	}
 
 	driver, err := neo4jdriver.NewDriver(uri, neo4jdriver.BasicAuth("neo4j", adminPassword, ""))
 	if err != nil {
-		shared.skip = fmt.Sprintf("cannot open a driver against %s: %v", uri, err)
-		return
+		return fmt.Errorf("cannot open a driver against %s: %w", uri, err)
 	}
 	closeDriver = func(closeCtx context.Context) { _ = driver.Close(closeCtx) }
 
 	if err := driver.VerifyConnectivity(ctx); err != nil {
-		shared.skip = fmt.Sprintf("cannot reach %s: %v", uri, err)
-		return
+		return fmt.Errorf("cannot reach %s: %w", uri, err)
 	}
 
 	shared.driver = driver
 	shared.uri = uri
+	return nil
 }
 
 // isolatedDriver returns a driver with its own connection pool, closed when the
@@ -130,9 +128,6 @@ func start() {
 // recovery to chance and to test order.
 func isolatedDriver(t *testing.T) neo4jdriver.Driver {
 	t.Helper()
-	if shared.skip != "" {
-		t.Skip(shared.skip)
-	}
 	d, err := neo4jdriver.NewDriver(shared.uri, neo4jdriver.BasicAuth("neo4j", adminPassword, ""))
 	if err != nil {
 		t.Fatalf("opening an isolated driver against %s: %v", shared.uri, err)
@@ -141,13 +136,11 @@ func isolatedDriver(t *testing.T) neo4jdriver.Driver {
 	return d
 }
 
-// driver returns the shared driver, skipping the test when the container could
-// not be started.
+// driver returns the shared driver. It is always non-nil: [TestMain] exits
+// non-zero when the harness could not reach a server, so no test runs without
+// one.
 func driver(t *testing.T) neo4jdriver.Driver {
 	t.Helper()
-	if shared.skip != "" {
-		t.Skip(shared.skip)
-	}
 	return shared.driver
 }
 

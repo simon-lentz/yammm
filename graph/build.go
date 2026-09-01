@@ -335,7 +335,8 @@ func (g *Graph) siblingDuplicateIssue(
 		WithDetail(diag.DetailKeyRelationName, relationName).
 		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 	if composedPK, err := FormatComposedKey(
-		keyToValues(parent.PrimaryKey()), relationName, composedKeyOrIndex(childTyp, child.PrimaryKey(), firstIndex),
+		parent.TypeID(), keyToValues(parent.PrimaryKey()),
+		[]ComposedStep{{Relation: relationName, KeyOrIndex: composedKeyOrIndex(childTyp, child.PrimaryKey(), firstIndex)}},
 	); err == nil {
 		builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
 	}

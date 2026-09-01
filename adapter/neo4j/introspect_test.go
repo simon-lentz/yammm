@@ -189,3 +189,33 @@ func TestIntrospectRelationshipsQueryFor_EmptyFilter(t *testing.T) {
 	assert.NotContains(t, query, "WHERE")
 	assert.Nil(t, params)
 }
+
+// An all-space schema filter discovers everything, the same as an empty one.
+//
+// Adapter.Label trims a schema name before composing a label, so no written
+// label carries a prefix built from untrimmed space. Testing the raw value took
+// the scoped path and built a prefix nothing matched, which reports a populated
+// database as empty.
+//
+// Mutation: testing schemaFilter instead of its trimmed form turns this red.
+func TestIntrospectRelationshipsQueryFor_AllSpaceFilterIsUnscoped(t *testing.T) {
+	t.Parallel()
+	a := New()
+
+	unscoped, unscopedParams := a.IntrospectRelationshipsQueryFor("")
+	for _, filter := range []string{" ", "   ", "\t"} {
+		got, params := a.IntrospectRelationshipsQueryFor(filter)
+		if got != unscoped {
+			t.Errorf("filter %q built a scoped query:\n got: %s\nwant: %s", filter, got, unscoped)
+		}
+		if len(params) != len(unscopedParams) {
+			t.Errorf("filter %q produced params %v; want %v", filter, params, unscopedParams)
+		}
+	}
+
+	// A real filter still scopes.
+	scoped, params := a.IntrospectRelationshipsQueryFor("app")
+	if scoped == unscoped || params["prefix"] == nil {
+		t.Errorf("a non-empty filter did not scope: %s %v", scoped, params)
+	}
+}

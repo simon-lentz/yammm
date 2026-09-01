@@ -283,7 +283,9 @@ func TestDocumentedKeyFunctions(t *testing.T) {
 	if parent != `["vin-123"]` {
 		t.Errorf("FormatKey returned %q; the documented canonical form is [\"vin-123\"]", parent)
 	}
-	composed, err := graph.FormatComposedKey([]any{"vin-123"}, "WHEELS", []any{"front-left"})
+	vehicle := schema.NewTypeID(location.NewSourceID("test://car.yammm"), "Vehicle")
+	composed, err := graph.FormatComposedKey(vehicle, []any{"vin-123"},
+		[]graph.ComposedStep{{Relation: "WHEELS", KeyOrIndex: []any{"front-left"}}})
 	if err != nil || composed == "" {
 		t.Fatalf("FormatComposedKey: %v", err)
 	}

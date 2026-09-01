@@ -591,7 +591,7 @@ A primary key is carried as a canonical JSON array string — the form `Snapshot
 | Function | Description |
 | -------- | ----------- |
 | `FormatKey(values...)` | Render key components as a canonical JSON array string |
-| `FormatComposedKey(parentKeyValues, relation, childKeyOrIndex)` | Render a composed child's identity. The first argument is the parent's raw key **components** (`[]any`), not a formatted key |
+| `FormatComposedKey(rootType, rootKeyValues, path)` | Render a composed child's identity as a flat path. `rootType` is the owning root's `schema.TypeID`; `rootKeyValues` is the root's raw key **components** (`[]any`), not a formatted key; `path` is one `ComposedStep` per composition hop |
 | `ParseKey(s)` | Decode a `FormatKey` string into `[]any` components |
 | `ParseKeyStrings(s)` | Decode a `FormatKey` string whose components are all strings |
 
@@ -606,6 +606,19 @@ parts, err := graph.ParseKeyStrings(`["us","ca"]`) // []string{"us", "ca"}
 `ParseKey` returns the component types a snapshot round trip produces — `string`, `int64`, `float64`, `bool`, `nil` — because it classifies numbers by lexical form, the same rule the `.ys` reader applies: a literal carrying `.`, `e`, or `E` is `float64`, an int-shaped literal is `int64`. An int-shaped literal beyond the int64 range comes back as `float64`; a literal with no finite Go value, such as `1e999`, is an error naming the component's index. So is a component that is itself an array or object: `FormatKey`'s domain is scalars.
 
 The round trip holds in both directions over those types, with one documented carve-out — `FormatKey(float64(5))` renders `5` and `ParseKey` reads it back as `int64(5)`. The wire has the same asymmetry, by the same rule. `FormatComposedKey` has no inverse: composed identities are rendered by the writers and read back by nobody.
+
+A composed identity is a **flat path** — the owning root's type identity, the root's key components, then one two-element segment per composition hop:
+
+```go
+ck, err := graph.FormatComposedKey(vehicleTypeID, []any{"ABC123"},
+    []graph.ComposedStep{
+        {Relation: "WHEELS", KeyOrIndex: []any{"front-left"}},
+        {Relation: "NOTES", KeyOrIndex: 0},
+    })
+// ["file:///m/car.yammm:Vehicle",["ABC123"],["WHEELS",["front-left"]],["NOTES",0]]
+```
+
+`KeyOrIndex` is `nil` for a `(one)` composition, the child's key components for a keyed part, and its 0-based position for a keyless one. The address is flat, so its length grows linearly with composition depth. It leads with the root's type identity because a key value is not an identity: two root types sharing a primary-key value and a relation name would otherwise mint one address for children on a single part label.
 
 ## Import Closure & Type Lookup
 
@@ -1161,7 +1174,7 @@ adapter := neo4j.New(opts...)
 | `WithEdition` | Neo4j edition (`Enterprise` or `Community`); controls constraint types |
 | `WithLabelSeparator` | Separator between the schema name and the type name inside one label (default: `__`) |
 | `WithLabelPrefix` | Prefix for generated labels. Applied only when a schema name is supplied to `Label`; an unscoped label is the sanitized type name alone |
-| `WithScalarTypeConstraints` | Emit **scalar** `PROPERTY_TYPE` constraints (Enterprise only). List-type constraints are emitted regardless of this option |
+| `WithScalarTypeConstraints` | Emit `PROPERTY_TYPE` constraints — `REQUIRE n.p IS :: T` — for list-shaped and scalar types alike (Enterprise only). Property-type constraints require Neo4j 5.9; on a 5.0–5.8 server this option is what turns them off |
 | `WithRequiredOnlyTypeConstraints` | Emit type constraints only for required properties |
 | `WithNodeKeyConstraints` | Emit `NODE KEY` constraints (requires Neo4j 5.7+) |
 | `WithNamedConstraints` | Emit a name on each constraint. `IF NOT EXISTS` is emitted either way; names are what `DROP CONSTRAINT` and diff tooling need |

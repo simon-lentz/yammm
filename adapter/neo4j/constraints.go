@@ -51,6 +51,12 @@ func (a *Adapter) ConstraintsForSchema(ctx context.Context, s *schema.Schema) ([
 	if !result.OK() {
 		return nil, result
 	}
+	if len(structured) == 0 {
+		// Nil, matching [Adapter.ConstraintsStructured]: the two entry points
+		// describe one schema, so a caller must not have to know which of them
+		// distinguishes an empty slice from a nil one.
+		return nil, result
+	}
 	stmts := make([]string, len(structured))
 	for i, c := range structured {
 		stmts[i] = c.Statement
@@ -94,6 +100,14 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) (
 
 	var constraints []Constraint
 	for t, label := range a.emittableTypes(ctx, s, collector) {
+		// Checked per type, like the write path's own loops: emission walks a
+		// whole closure and a caller that cancelled should not wait for it.
+		if err := ctx.Err(); err != nil {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
+				fmt.Sprintf("constraint emission cancelled: %v", err)).
+				WithDetail(diag.DetailKeyFormat, "neo4j").Build())
+			return nil, collector.Result()
+		}
 		constraints = append(constraints, a.constraintsForType(ctx, t, label, collector)...)
 	}
 
@@ -129,7 +143,8 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) (
 // primary key: sibling-scoped uniqueness is not a Neo4j constraint, so a
 // UNIQUE there would reject legal data. The declared key's NOT NULL and
 // TYPE constraints still emit through the ordinary walks below.
-func (a *Adapter) constraintsForType(_ context.Context, t *schema.Type, label string, collector *diag.Collector) []Constraint {
+func (a *Adapter) constraintsForType(ctx context.Context, t *schema.Type, label string, collector *diag.Collector) []Constraint {
+	_ = ctx // the per-type walk is bounded; cancellation is checked by the caller
 	var constraints []Constraint
 
 	// 1. PRIMARY KEY constraints (UNIQUE or NODE KEY); the composed-key
@@ -143,11 +158,17 @@ func (a *Adapter) constraintsForType(_ context.Context, t *schema.Type, label st
 	// 2. NOT NULL constraints for required properties.
 	constraints = append(constraints, a.notNullConstraints(t, label, collector)...)
 
-	// 3. LIST TYPE constraints.
-	constraints = append(constraints, a.listTypeConstraints(t, label, collector)...)
-
-	// 4. SCALAR TYPE constraints (if enabled).
+	// 3 and 4. PROPERTY-TYPE constraints — `REQUIRE n.p IS :: T` — for lists
+	// and for scalars alike, under one gate.
+	//
+	// One gate because they are one kind of statement. A `Vector[4]` and a
+	// `List<Float>` emit the SAME expression, `IS :: LIST<FLOAT NOT NULL>`, and
+	// gating them differently meant an option suppressed the constraint for one
+	// declaration and not for the other. It is also the switch an operator on a
+	// server older than Neo4j 5.9 needs: property-type constraints do not exist
+	// there, and nothing else in this package turns them all off.
 	if a.config.scalarTypeConstraints {
+		constraints = append(constraints, a.listTypeConstraints(t, label, collector)...)
 		constraints = append(constraints, a.scalarTypeConstraints(t, label, collector)...)
 	}
 
@@ -257,13 +278,11 @@ func (a *Adapter) primaryKeyConstraints(t *schema.Type, label string, collector 
 			continue
 		}
 		if err := ValidateIdentifier(pkName, fmt.Sprintf("type %q primary key", t.Name())); err != nil {
-			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-				fmt.Sprintf("invalid primary key %q on type %q: %s", pkName, t.Name(), err)).
-				WithDetail(diag.DetailKeyFormat, "neo4j").
-				WithDetail(diag.DetailKeyTypeName, t.Name()).
-				WithDetail(diag.DetailKeyPropertyName, pkName).
-				WithDetail(diag.DetailKeyDetail, err.Error()).
-				Build()
+			issue := invalidIdentifierIssue(
+				fmt.Sprintf("invalid primary key %q on type %q: %s", pkName, t.Name(), err),
+				identifierSubject{TypeName: t.Name(), Property: pkName},
+				err,
+			).Build()
 			collector.Collect(issue)
 			continue
 		}
@@ -363,13 +382,11 @@ func (a *Adapter) notNullConstraints(t *schema.Type, label string, collector *di
 			}
 		}
 		if err := ValidateIdentifier(propName, fmt.Sprintf("type %q property", t.Name())); err != nil {
-			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-				fmt.Sprintf("invalid property %q on type %q: %s", propName, t.Name(), err)).
-				WithDetail(diag.DetailKeyFormat, "neo4j").
-				WithDetail(diag.DetailKeyTypeName, t.Name()).
-				WithDetail(diag.DetailKeyPropertyName, propName).
-				WithDetail(diag.DetailKeyDetail, err.Error()).
-				Build()
+			issue := invalidIdentifierIssue(
+				fmt.Sprintf("invalid property %q on type %q: %s", propName, t.Name(), err),
+				identifierSubject{TypeName: t.Name(), Property: propName},
+				err,
+			).Build()
 			collector.Collect(issue)
 			seen[propName] = struct{}{}
 			continue
@@ -428,13 +445,11 @@ func (a *Adapter) listTypeConstraints(t *schema.Type, label string, collector *d
 			continue
 		}
 		if err := ValidateIdentifier(propName, fmt.Sprintf("type %q list property", t.Name())); err != nil {
-			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-				fmt.Sprintf("invalid list property %q on type %q: %s", propName, t.Name(), err)).
-				WithDetail(diag.DetailKeyFormat, "neo4j").
-				WithDetail(diag.DetailKeyTypeName, t.Name()).
-				WithDetail(diag.DetailKeyPropertyName, propName).
-				WithDetail(diag.DetailKeyDetail, err.Error()).
-				Build()
+			issue := invalidIdentifierIssue(
+				fmt.Sprintf("invalid list property %q on type %q: %s", propName, t.Name(), err),
+				identifierSubject{TypeName: t.Name(), Property: propName},
+				err,
+			).Build()
 			collector.Collect(issue)
 			seen[propName] = struct{}{}
 			continue
@@ -490,13 +505,11 @@ func (a *Adapter) scalarTypeConstraints(t *schema.Type, label string, collector 
 		}
 
 		if err := ValidateIdentifier(propName, fmt.Sprintf("type %q property", t.Name())); err != nil {
-			issue := diag.NewIssue(diag.Error, E_NEO4J_INVALID_IDENTIFIER,
-				fmt.Sprintf("invalid property %q on type %q: %s", propName, t.Name(), err)).
-				WithDetail(diag.DetailKeyFormat, "neo4j").
-				WithDetail(diag.DetailKeyTypeName, t.Name()).
-				WithDetail(diag.DetailKeyPropertyName, propName).
-				WithDetail(diag.DetailKeyDetail, err.Error()).
-				Build()
+			issue := invalidIdentifierIssue(
+				fmt.Sprintf("invalid property %q on type %q: %s", propName, t.Name(), err),
+				identifierSubject{TypeName: t.Name(), Property: propName},
+				err,
+			).Build()
 			collector.Collect(issue)
 			seen[propName] = struct{}{}
 			continue

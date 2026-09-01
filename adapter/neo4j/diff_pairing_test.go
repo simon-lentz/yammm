@@ -548,11 +548,41 @@ func TestDiffConstraints_IndexNameBlocksCreate(t *testing.T) {
 	// name was taken.
 	constraintCounts(t, New().DiffConstraints(desired, nil, testOwned()), 0, 0, 1, 0, 0)
 
-	// An index whose name collides with nothing leaves the create alone, so the
-	// branch turns on the name and not on any index being present. Built fresh:
-	// assigning through a shared slice header would rewrite the fixture the
-	// assertions above used.
-	constraintCounts(t, New().DiffConstraints(desired, nil, testOwned(), handMade("unrelated_idx")...), 0, 0, 1, 0, 0)
+	// An index that collides on NEITHER name NOR definition leaves the create
+	// alone, so the branch turns on a blocker and not on any index being
+	// present. Built fresh: assigning through a shared slice header would
+	// rewrite the fixture the assertions above used.
+	elsewhere := []RemoteIndex{{
+		Name: "unrelated_idx", Type: "RANGE", EntityType: "NODE",
+		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"other_prop"},
+	}}
+	constraintCounts(t, New().DiffConstraints(desired, nil, testOwned(), elsewhere...), 0, 0, 1, 0, 0)
+
+	// A plain index over the SAME label and properties blocks under any name:
+	// the server refuses a constraint whose backing index an equivalent index
+	// already provides, so reporting a Create would be a plan that repeats
+	// unchanged for ever.
+	//
+	// Mutation: dropping the blockingDefinitions check in DiffConstraints turns
+	// this red.
+	equivalent := []RemoteIndex{{
+		Name: "some_other_name", Type: "RANGE", EntityType: "NODE",
+		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"},
+	}}
+	byDef := New().DiffConstraints(desired, nil, testOwned(), equivalent...)
+	constraintCounts(t, byDef, 0, 1, 0, 0, 0)
+	if len(byDef.Drift) == 1 && !strings.Contains(byDef.Drift[0].Reason, "already serves") {
+		t.Errorf("Reason = %q; want it to say an equivalent index already serves the definition", byDef.Drift[0].Reason)
+	}
+
+	// A backing index is not an independent blocker: it exists because its own
+	// constraint does, and that constraint is matched or dropped on its own.
+	backing := []RemoteIndex{{
+		Name: "some_other_name", Type: "RANGE", EntityType: "NODE",
+		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"},
+		OwningConstraint: "test__Entity_id_unique",
+	}}
+	constraintCounts(t, New().DiffConstraints(desired, nil, testOwned(), backing...), 0, 0, 1, 0, 0)
 }
 
 // A remote CONSTRAINT whose type the caller lower-cased must still pair with its
@@ -622,5 +652,61 @@ func TestDiffConstraints_ExcludedCountsWhatWasNotCompared(t *testing.T) {
 	constraintCounts(t, got, 1, 0, 0, 0, 0)
 	if got.Excluded != 2 {
 		t.Errorf("Excluded = %d; want the stale-label and relationship constraints counted", got.Excluded)
+	}
+}
+
+// A remote CONSTRAINT holding a desired constraint's name is Drift, not Create.
+// It is the third producer of ConstraintDiffResult.Drift and had no test, so
+// deleting the branch left the suite green.
+//
+// Mutation: removing the byName branch in DiffConstraints turns this red.
+func TestDiffConstraints_ConstraintNameBlocksCreate(t *testing.T) {
+	t.Parallel()
+	desired := []Constraint{{
+		Name: "shared_name", Kind: ConstraintUnique,
+		Label: "app__T", Properties: []string{"id"},
+	}}
+	// The holder is on a label this schema does not own, so it pairs with
+	// nothing and only its NAME collides.
+	remote := []RemoteConstraint{{
+		Name: "shared_name", Type: "UNIQUENESS", EntityType: "NODE",
+		LabelsOrTypes: []string{"other__Foo"}, Properties: []string{"id"},
+	}}
+
+	got := New().DiffConstraints(desired, remote, appOwned())
+	constraintCounts(t, got, 0, 1, 0, 0, 0)
+	if len(got.Drift) == 1 {
+		if !strings.Contains(got.Drift[0].Reason, "constraint name") {
+			t.Errorf("Reason = %q; want it to name the constraint-name collision", got.Drift[0].Reason)
+		}
+		if got.Drift[0].Actual.Type != "UNIQUENESS" {
+			t.Errorf("Actual.Type = %q; a constraint blocker carries its own type", got.Drift[0].Actual.Type)
+		}
+	}
+}
+
+// The blocker message names an owning constraint when the holder is a backing
+// index, because DROP INDEX on one is refused by the server — the operator has
+// to drop the constraint.
+//
+// Mutation: removing the OwningConstraint branch in describeIndexBlocker turns
+// this red.
+func TestDescribeIndexBlocker_NamesTheOwningConstraint(t *testing.T) {
+	t.Parallel()
+	desired := Index{
+		Name: "app__T_id_unique", Kind: IndexRange,
+		Label: "app__T", Properties: []string{"code"},
+	}
+	blocker := RemoteIndex{
+		Name: "app__T_id_unique", Type: "RANGE", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__T"}, Properties: []string{"id"},
+		OwningConstraint: "app__T_id_unique",
+	}
+
+	msg := describeIndexBlocker(desired, blocker, map[string]struct{}{})
+	for _, want := range []string{"backing constraint", "app__T_id_unique"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("blocker message %q does not mention %q", msg, want)
+		}
 	}
 }

@@ -475,8 +475,8 @@ func (g *Graph) AddComposed(
 			// writers already keyed. The rejected child never attaches, so
 			// its own address is assigned to nothing.
 			if conflictInst != nil {
-				if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName,
-					composedKeyOrIndex(childTyp, conflictInst.PrimaryKey(), 0)); err == nil {
+				if composedPK, err := FormatComposedKey(parentInst.TypeID(), keyToValues(parentInst.PrimaryKey()),
+					[]ComposedStep{{Relation: relationName, KeyOrIndex: composedKeyOrIndex(childTyp, conflictInst.PrimaryKey(), 0)}}); err == nil {
 					builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
 				}
 			}
@@ -505,8 +505,8 @@ func (g *Graph) AddComposed(
 				WithDetail(diag.DetailKeyTypeName, parentName).
 				WithDetail(diag.DetailKeyRelationName, relationName).
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-			if composedPK, err := FormatComposedKey(keyToValues(parentInst.PrimaryKey()), relationName,
-				composedKeyOrIndex(childTyp, child.PrimaryKey(), existingIndex)); err == nil {
+			if composedPK, err := FormatComposedKey(parentInst.TypeID(), keyToValues(parentInst.PrimaryKey()),
+				[]ComposedStep{{Relation: relationName, KeyOrIndex: composedKeyOrIndex(childTyp, child.PrimaryKey(), existingIndex)}}); err == nil {
 				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, composedPK)
 			}
 			issue := builder.Build()

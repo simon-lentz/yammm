@@ -5,51 +5,6 @@ import (
 	"strings"
 )
 
-// buildNodeMergeQuery returns the Cypher template for a single-node MERGE
-// keyed on the given primary key fields. Pure function — no execution, no
-// driver dependency, no side effects.
-//
-// Output shape ([MutableKeys]):
-//
-//	MERGE (n:<label> {<key_1>: $key_<key_1>, ...})
-//	SET n += $props
-//
-// Output shape ([ImmutableKeys]):
-//
-//	MERGE (n:<label> {<key_1>: $key_<key_1>, ...})
-//	ON CREATE SET n += $props
-//	ON MATCH SET n += $update_props
-//
-// [ImmutableKeys] callers are responsible for supplying `$update_props`
-// in their parameter map. The enum selects the shape; the [Adapter] layer
-// builds the matching `update_props` value from the schema's declared
-// immutable-property names.
-//
-// Node merges do not emit a RETURN clause — constraint violations
-// surface as driver errors, not silent zero-matches, so there is no
-// silent-failure condition to guard against on nodes.
-func buildNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string {
-	var b strings.Builder
-	b.WriteString("MERGE (n:")
-	b.WriteString(label)
-	b.WriteString(" {")
-	for i, name := range keyNames {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s: $%s%s", name, batchKeyParamPrefix, name)
-	}
-	b.WriteString("})")
-
-	if keys == ImmutableKeys {
-		b.WriteString("\nON CREATE SET n += $props")
-		b.WriteString("\nON MATCH SET n += $update_props")
-	} else {
-		b.WriteString("\nSET n += $props")
-	}
-	return b.String()
-}
-
 // batchKeyParamPrefix namespaces MERGE-key entries away from the `props` and
 // `update_props` entries that share their map. Both builders and both parameter
 // assemblers spell it through this constant, so the two halves of each wire
@@ -90,11 +45,11 @@ const (
 )
 
 // buildBatchNodeMergeQuery returns the UNWIND-batched variant of
-// [buildNodeMergeQuery]. Parameter shape:
+// the single-node form removed with the class-D cut. Parameter shape:
 //
 //	{rows: [{key_<key_1>: v, props: map, [update_props: map]}, ...]}
 //
-// The `update_props` entry per row is required when keys == [ImmutableKeys]
+// The `update_props` entry per row is required when keys == [immutableKeys]
 // and ignored when keys == [MutableKeys].
 //
 // Merge keys carry the same `key_` prefix the single-node builder gives its
@@ -103,9 +58,9 @@ const (
 // `update_props` are themselves legal DSL property names: without the prefix a
 // primary key so named would collide with the property map in the same row.
 //
-// Node batch merges do not emit a RETURN clause; see [buildNodeMergeQuery]
+// Node batch merges do not emit a RETURN clause
 // for the rationale.
-func buildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutability) string {
+func buildBatchNodeMergeQuery(label string, keyNames []string, keys keyMutability) string {
 	var b strings.Builder
 	b.WriteString("UNWIND $rows AS row\n")
 	b.WriteString("MERGE (n:")
@@ -119,7 +74,7 @@ func buildBatchNodeMergeQuery(label string, keyNames []string, keys KeyMutabilit
 	}
 	b.WriteString("})")
 
-	if keys == ImmutableKeys {
+	if keys == immutableKeys {
 		b.WriteString("\nON CREATE SET n += row.props")
 		b.WriteString("\nON MATCH SET n += row.update_props")
 	} else {

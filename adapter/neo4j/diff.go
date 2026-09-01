@@ -128,12 +128,28 @@ func (a *Adapter) DiffConstraints(
 	// into a silent no-op on every run. Omitting them is safe but weaker: such a
 	// constraint then reports as a Create that never takes effect.
 	blockingIndexes := make(map[string]RemoteIndex, len(alsoBlocking))
+	// A PLAIN index over the same label and properties blocks a key-backed
+	// constraint too, under any name: the server refuses to create a constraint
+	// whose backing index an equivalent index already provides. Only the name
+	// case was tested, so such a constraint reported as a Create the server
+	// declines on every run — a plan that never converges. The index side has
+	// modelled this as a definition block all along; see [indexCreateBlocker].
+	blockingDefinitions := make(map[string]RemoteIndex, len(alsoBlocking))
 	for _, ri := range alsoBlocking {
-		if ri.Name == "" {
+		if ri.Name != "" {
+			if _, taken := blockingIndexes[ri.Name]; !taken {
+				blockingIndexes[ri.Name] = ri
+			}
+		}
+		// A backing index is not an independent blocker: it exists because its
+		// constraint does, and that constraint is matched or dropped on its own.
+		// Multi-label rows are skipped for the reason the index side skips them.
+		if ri.OwningConstraint != "" || len(ri.LabelsOrTypes) != 1 {
 			continue
 		}
-		if _, taken := blockingIndexes[ri.Name]; !taken {
-			blockingIndexes[ri.Name] = ri
+		def := constraintDefinitionKey(ri.LabelsOrTypes[0], ri.Properties)
+		if _, taken := blockingDefinitions[def]; !taken {
+			blockingDefinitions[def] = ri
 		}
 	}
 
@@ -274,6 +290,20 @@ func (a *Adapter) DiffConstraints(
 				},
 				Reason: fmt.Sprintf("name %q is already held by a %s index on %s; index and constraint names share one namespace, so drop or rename it before this constraint can be created",
 					blocker.Name, blocker.Type, describeLabels(blocker.LabelsOrTypes)),
+			})
+			continue
+		}
+		if blocker, blocked := blockingDefinitions[constraintDefinitionKey(d.Label, d.Properties)]; blocked && constraintHasBackingIndex(d.Kind) {
+			result.Drift = append(result.Drift, ConstraintDrift{
+				Desired: d,
+				Actual: RemoteConstraint{
+					Name:          blocker.Name,
+					EntityType:    blocker.EntityType,
+					LabelsOrTypes: blocker.LabelsOrTypes,
+					Properties:    blocker.Properties,
+				},
+				Reason: fmt.Sprintf("a %s index %q already serves %s; the server refuses a constraint whose backing index an equivalent index provides, so drop that index before this constraint can be created",
+					blocker.Type, blocker.Name, describeLabels(blocker.LabelsOrTypes)),
 			})
 			continue
 		}
@@ -445,3 +475,17 @@ var allConstraintKinds = []ConstraintKind{
 // is the subset [Adapter.ConstraintsStructured] keeps under
 // [WithEdition]([Community]).
 var communityConstraintKinds = []ConstraintKind{ConstraintUnique}
+
+// constraintDefinitionKey identifies a constraint by what it constrains rather
+// than by its name, so an index serving the same thing under another name is
+// recognisable as a blocker.
+func constraintDefinitionKey(label string, properties []string) string {
+	return identityKey(append([]string{label}, properties...)...)
+}
+
+// constraintHasBackingIndex reports whether creating this kind creates an index
+// the server refuses to duplicate. NOT NULL and TYPE constraints have none, so
+// an equivalent index does not block them.
+func constraintHasBackingIndex(k ConstraintKind) bool {
+	return k == ConstraintUnique || k == ConstraintNodeKey
+}

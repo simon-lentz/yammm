@@ -2056,8 +2056,11 @@ func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 	for _, d := range issue.Details() {
 		if d.Key == "pk" {
 			foundPK = true
-			// Should be in graph.FormatComposedKey format: [["p1"],"children",["c1"]]
-			expected := `[["p1"],"children",["c1"]]`
+			// graph.FormatComposedKey's flat path form: the owning root's type
+			// identity, the root's key, then one segment per composition hop.
+			// The identity is what stops two root types that share a key value
+			// from naming one composed node.
+			expected := `["test://composition.yammm:Parent",["p1"],["children",["c1"]]]`
 			if d.Value != expected {
 				t.Errorf("Expected pk %q, got %q", expected, d.Value)
 			}

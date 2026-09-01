@@ -21,6 +21,14 @@
 // server's output produces, and that introspecting what it just applied diffs
 // clean.
 //
+// It also closes one claim about the write path that no template comparison
+// can: that a row assembled from [github.com/simon-lentz/yammm/adapter/neo4j.RelFromRowPrefix]
+// and [github.com/simon-lentz/yammm/adapter/neo4j.RelToRowPrefix] binds the
+// endpoints the batch relationship template MATCHes, and that a row whose keys
+// carry other prefixes merges nothing and reports matched_rows = 0 instead of
+// an error. That silent failure is the one the exported prefixes exist to
+// prevent, and only a server distinguishes it from a successful merge.
+//
 // # Running
 //
 // Guarded by a build tag, so neither `go test ./...` nor the pre-commit gate
@@ -28,9 +36,13 @@
 //
 //	go test -tags neo4j_integration ./adapter/neo4j/integration/
 //
-// One container is started per package run and shared by every test. If Docker
-// is not reachable the tests skip rather than fail, so the tag is the only
-// thing standing between a developer and running them.
+// One container is started per package run and shared by every test. If the
+// container cannot be started the suite FAILS rather than skipping: the build
+// tag already says the operator asked for these tests, and a skipped suite
+// exits 0, which is indistinguishable from one that ran and passed. A
+// capability the server genuinely lacks — an Enterprise-only constraint on a
+// Community image — still skips, because that is a fact about the target and
+// not about the harness.
 //
 // `make test-integration` runs the whole server matrix, one image after
 // another, and is what the release gate means. A single image proves less than

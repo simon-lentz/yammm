@@ -101,43 +101,131 @@ func collidingSnapshot(t *testing.T) (*graph.Snapshot, schema.TypeID, schema.Typ
 	return snap, localID, deepID
 }
 
-// assertCollisionError checks the refusal contract: the error names both
-// identities and the rendered name.
-func assertCollisionError(t *testing.T, err error, a, b schema.TypeID) {
-	t.Helper()
-	if err == nil {
-		t.Fatal("collision accepted: want an error naming both identities")
+// Two identities that render one TAG FORM are written under DISTINCT labels,
+// and the writer no longer refuses them.
+//
+// Before v0.12.0 keyed GraphShape.Types by rendered name, such a pair really
+// would have shared one shape, and the write path refused the snapshot to stop
+// it. Keying by schema.TypeID removed the sharing: each identity gets its own
+// shape, and Adapter.Label composes the label from the DECLARING schema's name,
+// so the two land on entry__Beacon and deep__Beacon. The refusal outlived what
+// it protected against and was blocking snapshots the identity-keyed path
+// writes correctly.
+//
+// Mutation: keying shape.Types by schema.TagForm instead of by TypeID collapses
+// the pair and turns this red.
+func TestBatchNodeQueries_TagFormCollisionWritesDistinctLabels(t *testing.T) {
+	t.Parallel()
+	snap, localID, deepID := collidingSnapshot(t)
+	ctx := context.Background()
+	a := New()
+
+	shape, res := a.ShapeForSchema(ctx, snap.Schema())
+	if shape == nil {
+		t.Fatalf("ShapeForSchema refused a closure whose labels do not collide: %s", res)
 	}
-	msg := err.Error()
-	for _, want := range []string{a.String(), b.String(), `"Beacon"`} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("collision error %q does not name %s", msg, want)
+	localLabel, deepLabel := shape.Types[localID].Label, shape.Types[deepID].Label
+	if localLabel == deepLabel {
+		t.Fatalf("the two identities share label %q; the premise of this test is gone", localLabel)
+	}
+
+	queries, err := a.BatchNodeQueries(ctx, snap, shape)
+	if err != nil {
+		t.Fatalf("writer refused a snapshot the identity-keyed path handles: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, q := range queries {
+		if q.Kind != NodeMerge {
+			continue
+		}
+		for _, label := range []string{localLabel, deepLabel} {
+			if strings.Contains(q.Statement, label) {
+				seen[label] = true
+			}
+		}
+	}
+	for _, label := range []string{localLabel, deepLabel} {
+		if !seen[label] {
+			t.Errorf("no MERGE was emitted for label %q", label)
 		}
 	}
 }
 
-// The check fires before any shape lookup, so an empty GraphShape never
-// draws its "no shape for type" error here.
-//
-// Mutation: neutralising the renderedNameCollision call in BatchNodeQueries
-// turns this red; forcing it to always error turns
-// TestBatchNodeQueries_DerivedPerType red.
-func TestBatchNodeQueries_RenderedNameCollisionRefused(t *testing.T) {
+// The edge path takes the same snapshot without refusing it.
+func TestBatchEdgeQueries_TagFormCollisionAccepted(t *testing.T) {
 	t.Parallel()
-	snap, localID, deepID := collidingSnapshot(t)
+	snap, _, _ := collidingSnapshot(t)
+	ctx := context.Background()
+	a := New()
 
-	_, err := New().BatchNodeQueries(context.Background(), snap, &GraphShape{})
-	assertCollisionError(t, err, localID, deepID)
+	shape, res := a.ShapeForSchema(ctx, snap.Schema())
+	if shape == nil {
+		t.Fatalf("ShapeForSchema: %s", res)
+	}
+	if _, err := a.BatchEdgeQueries(ctx, snap, shape); err != nil {
+		t.Errorf("edge path refused a tag-form collision the identity-keyed path handles: %v", err)
+	}
 }
 
-// Mutation: neutralising the renderedNameCollision call in BatchEdgeQueries
-// turns this red — with no edges the collision check is the only refusal on
-// the path; forcing it to always error turns
-// TestBatchEdgeQueries_GroupBySignature red.
-func TestBatchEdgeQueries_RenderedNameCollisionRefused(t *testing.T) {
+// A nil GraphShape is refused by name rather than failing later with a
+// per-type "no shape" error that does not say the shape was never built.
+func TestBatchNodeQueries_NilShapeRefused(t *testing.T) {
 	t.Parallel()
-	snap, localID, deepID := collidingSnapshot(t)
+	snap, _, _ := collidingSnapshot(t)
+	_, err := New().BatchNodeQueries(context.Background(), snap, nil)
+	if err == nil || !strings.Contains(err.Error(), "nil GraphShape") {
+		t.Errorf("nil shape error = %v, want one naming the nil GraphShape", err)
+	}
+}
 
-	_, err := New().BatchEdgeQueries(context.Background(), snap, &GraphShape{})
-	assertCollisionError(t, err, localID, deepID)
+// A shape the adapter did not build is refused, because it carries no key
+// constraints: merge keys would reach the driver uncoerced while the same
+// properties are coerced from the schema, and a MERGE whose key type disagrees
+// with the stored property matches nothing and duplicates the node on every
+// re-ingestion.
+//
+// Mutation: dropping the schemaID check in requireShapeFor turns this red.
+func TestBatchNodeQueries_UnbuiltShapeRefused(t *testing.T) {
+	t.Parallel()
+	snap, _, _ := collidingSnapshot(t)
+
+	_, err := New().BatchNodeQueries(context.Background(), snap, &GraphShape{
+		Types: map[schema.TypeID]NodeShape{},
+	})
+	if err == nil {
+		t.Fatal("a shape the adapter did not build was accepted")
+	}
+	if !strings.Contains(err.Error(), "not built by Adapter.ShapeForSchema") {
+		t.Errorf("error %q does not say the shape was not built", err)
+	}
+}
+
+// A shape built from a DIFFERENT schema is refused. Unconstructibility alone
+// does not cover this: the shape came from a legitimate constructor, and
+// partially-overlapping schemas would match some TypeIDs and silently miss
+// others.
+//
+// Mutation: dropping the schemaID equality check turns this red.
+func TestBatchNodeQueries_ShapeFromAnotherSchemaRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	a := New()
+	snap, _, _ := collidingSnapshot(t)
+
+	other, res := schema.LoadString(ctx, "schema \"unrelated\"\n\ntype Widget {\n\tid String primary\n}\n", "other.yammm")
+	if other == nil {
+		t.Fatalf("load unrelated schema: %s", res)
+	}
+	otherShape, sres := a.ShapeForSchema(ctx, other)
+	if otherShape == nil {
+		t.Fatalf("ShapeForSchema: %s", sres)
+	}
+
+	_, err := a.BatchNodeQueries(ctx, snap, otherShape)
+	if err == nil {
+		t.Fatal("a shape built from another schema was accepted")
+	}
+	if !strings.Contains(err.Error(), "but the snapshot carries schema") {
+		t.Errorf("error %q does not name the schema mismatch", err)
+	}
 }

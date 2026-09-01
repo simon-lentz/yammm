@@ -6,20 +6,25 @@ import (
 	"strings"
 )
 
-// InferSchema generates a .yammm DSL scaffold from parsed Neo4j constraints
-// and discovered relationships.
+// InferSchema generates a .yammm STARTING POINT from parsed Neo4j constraints
+// and discovered relationships. The result is for a human to edit, and it is
+// not expected to load as it stands.
 //
-// The output is human-editable text with TODO markers for constructs that
-// cannot be inferred (UUID vs String, pattern constraints, invariants, etc.).
+// A database holds labels and properties. It does not hold type identity, the
+// difference between an association and a composition, or import structure, so
+// this cannot recover them and marks each place it guessed with a TODO instead.
 //
-// The adapter's label separator is used to split labels into schema/type
-// components. The schemaFilter limits inference to labels with this schema
-// name prefix (empty = infer from all labels).
+// The adapter's label separator splits labels into schema and type components,
+// and schemaFilter limits inference to labels carrying that schema name (empty
+// infers from all labels).
+//
+// It returns no error: every failure it can meet is a construct it cannot
+// recover, which is a TODO in the output rather than a refusal to produce one.
 func (a *Adapter) InferSchema(
 	constraints []RemoteConstraint,
 	relationships []RemoteRelationship,
 	schemaFilter string,
-) (string, error) {
+) string {
 	separator := a.config.labelSeparator
 
 	// Group constraints by (schemaName, typeName).
@@ -112,7 +117,7 @@ func (a *Adapter) InferSchema(
 	}
 
 	// Generate DSL.
-	return generateDSL(schemaName, types), nil
+	return generateDSL(schemaName, types)
 }
 
 // parseLabel splits a Neo4j label into schema name and type name.
@@ -257,14 +262,28 @@ func generateDSL(schemaName string, types map[string]*inferredType) string {
 		}
 		slices.Sort(importNames)
 		for _, name := range importNames {
-			fmt.Fprintf(&b, "import %q\n", name)
+			// A yammm import is a FILE PATH resolved against the module root,
+			// and a database records only the schema-name segment of a label.
+			// The path is a guess and is marked as one.
+			fmt.Fprintf(&b, "import %q as %s // TODO: an import is a path; correct it\n",
+				"./"+name, name)
 		}
 	}
 
-	b.WriteString("\n// Inferred from Neo4j database.\n")
-	b.WriteString("// TODO: Replace String types with UUID, Pattern, or Enum where appropriate.\n")
-	b.WriteString("// TODO: Review inferred relationship field names.\n")
-	b.WriteString("// TODO: Add invariants if needed.\n")
+	b.WriteString("\n// A STARTING POINT inferred from a Neo4j database. Edit it before use:\n")
+	b.WriteString("// as generated it is not expected to load.\n")
+	b.WriteString("//\n")
+	b.WriteString("// A database records labels and properties. It does not record type\n")
+	b.WriteString("// identity, whether an edge is an association or a composition, or import\n")
+	b.WriteString("// structure, so the following are guesses:\n")
+	b.WriteString("// TODO: every edge below is written as an association (-->). A composition\n")
+	b.WriteString("//       (*->) is indistinguishable from an association in node DDL.\n")
+	b.WriteString("// TODO: replace String with UUID, Pattern or Enum where appropriate.\n")
+	b.WriteString("// TODO: a List<Float> may be a Vector; the two share one Neo4j type.\n")
+	b.WriteString("// TODO: no index metadata is read, so no @index or @@index is emitted.\n")
+	b.WriteString("// TODO: two labels from different schemas that render one type name are\n")
+	b.WriteString("//       merged here into one type.\n")
+	b.WriteString("// TODO: review relationship field names, and add invariants.\n")
 
 	// Sort type names for deterministic output.
 	typeNames := make([]string, 0, len(types))
@@ -318,11 +337,23 @@ func generateDSL(schemaName string, types map[string]*inferredType) string {
 			fmt.Fprintf(&b, "    %s %s%s%s\n", p.name, p.yammmType, modifiers, comment)
 		}
 
-		// Relations.
-		for _, rel := range it.relations {
+		// Relations, sorted so two runs against an unchanged database produce
+		// the same text: the server returns relationship rows in no defined
+		// order.
+		rels := slices.Clone(it.relations)
+		slices.SortFunc(rels, func(a, b *inferredRelation) int {
+			if c := strings.Compare(a.relationType, b.relationType); c != 0 {
+				return c
+			}
+			return strings.Compare(a.target, b.target)
+		})
+		for _, rel := range rels {
 			comment := ""
-			if rel.crossSchema {
+			switch {
+			case rel.crossSchema:
 				comment = " // TODO: verify cross-schema reference"
+			case types[rel.target] == nil:
+				comment = " // TODO: no type was inferred for this target; declare it or remove the edge"
 			}
 			fmt.Fprintf(&b, "    --> %s %s%s\n", rel.relationType, rel.target, comment)
 		}

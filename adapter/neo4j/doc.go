@@ -5,7 +5,7 @@
 // # Architectural Position
 //
 // The neo4j adapter lives alongside [github.com/simon-lentz/yammm/adapter/json]
-// in the adapter layer. It depends on library packages (schema, graph, instance,
+// in the adapter layer. It depends on library packages (schema, graph,
 // immutable, diag); library packages never depend on adapters.
 //
 // # Neo4j Driver Dependency (Type-Only)
@@ -126,14 +126,20 @@
 // the Neo4j node structure (labels, primary keys, required fields per type).
 // The shape is required input for write query generation.
 //
-// # Dual-Mode Write Surface
-//
-// Write query generation supports two operational modes:
+// # Write Surface
 //
 // [Adapter.BatchNodeQueries] and [Adapter.BatchEdgeQueries] operate on a
-// complete [graph.Snapshot] for high-throughput batch writes. Both refuse a
-// snapshot in which two type identities render one type name, rather than
-// writing two types under one label.
+// complete [graph.Snapshot] for high-throughput batch writes. They are the
+// write surface; the single-item entry points were removed and this section
+// described two modes long after only one remained.
+//
+// Both require a [GraphShape] that [Adapter.ShapeForSchema] built from the
+// snapshot's own schema, and refuse one built by hand or from another schema:
+// a shape the adapter did not build carries no key constraints, so merge keys
+// would reach the driver uncoerced while the same properties are coerced from
+// the schema. Two type identities that render one type name are not refused —
+// [GraphShape.Types] is keyed by [schema.TypeID] and each identity gets its own
+// label, so the pair writes correctly.
 //
 // # Composition Ownership
 //
@@ -142,6 +148,12 @@
 // which precedes every composition create (parent-first by depth). The
 // ordering is a documented guarantee — executing the slice in order is
 // correct.
+//
+// The guarantee is about ORDER, not atomicity. Each query is handed to the
+// caller separately, so a caller that runs each in its own transaction and
+// fails partway leaves a subtree deleted by the replace phase and not yet
+// rebuilt by the create phase. A caller that needs the replace and create of
+// one root to be all-or-nothing runs the slice inside a single transaction.
 //
 // A parent write replaces its composed subtree. The replace phase deletes
 // every part reachable from each written root through the schema's
@@ -347,5 +359,5 @@
 //
 // # Dependencies
 //
-//	adapter/neo4j  --imports-->  schema, graph, instance, immutable, diag, neo4j-go-driver/v6 (dbtype only)
+//	adapter/neo4j  --imports-->  schema, graph, immutable, diag, neo4j-go-driver/v6 (dbtype only)
 package neo4j

@@ -76,12 +76,11 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string) error {
 		return &cli.ExitError{Code: cli.ExitRuntime}
 	}
 
-	// Infer schema
-	dsl, err := adapter.InferSchema(constraints, relationships, schemaFilter)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: infer schema: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
-	}
+	// A starting point for a human to edit, not a schema expected to load:
+	// a database does not record type identity, association-versus-composition
+	// or import structure, so every place the command guessed is a TODO in the
+	// output rather than a failure here.
+	dsl := adapter.InferSchema(constraints, relationships, schemaFilter)
 
 	// Write output
 	if err := cli.WriteTo([]byte(dsl), outputPath, cmd.OutOrStdout()); err != nil {

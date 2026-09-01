@@ -38,7 +38,7 @@ func IsTTY(fd uintptr) bool {
 //
 // When format is FormatJSON, colors and excerpts are disabled regardless
 // of TTY state. The provider parameter may be nil.
-func NewRenderer(format OutputFormat, isTTY bool, noColor bool, provider diag.SourceProvider, moduleRoot string) *diag.Renderer {
+func NewRenderer(format OutputFormat, isTTY, noColor bool, provider diag.SourceProvider, moduleRoot string) *diag.Renderer {
 	colorize := isTTY && format == FormatText && !noColor
 	excerpts := isTTY && format == FormatText
 

@@ -176,9 +176,20 @@ func IntrospectIndexesQuery() string {
 		"WHERE type <> 'LOOKUP'"
 }
 
-// IntrospectRelationshipsQuery returns a Cypher query for discovering relationship
-// signatures. The labelPrefix parameter scopes the query to schema-owned labels
-// for efficiency.
+// IntrospectRelationshipsQuery returns a Cypher query for discovering
+// relationship signatures, optionally narrowed by a label prefix.
+//
+// The prefix is a HEURISTIC FILTER, not an ownership test. A label starting
+// with it may belong to a sibling schema whose sanitized name shares the
+// prefix, and a label belonging to this schema is missed if a caller-configured
+// prefix or separator does not reproduce the one the writer used.
+// [Adapter.OwnedLabels] is the exact set, and it needs a compiled schema —
+// which the introspect path does not have, because it exists to produce one.
+//
+// The scan is unbounded by design: `MATCH (a)-[r]->(b)` visits every
+// relationship in the database, and no index serves a label-prefix predicate,
+// so the filter reduces what is RETURNED and not what is READ. Cost grows with
+// the graph, not with the schema.
 //
 // Returns the query string and a parameter map. When labelPrefix is empty,
 // all relationships are discovered (no filtering).
@@ -198,11 +209,17 @@ func IntrospectRelationshipsQuery(labelPrefix string) (string, map[string]any) {
 
 // IntrospectRelationshipsQueryFor returns a schema-scoped relationship discovery query.
 // It builds the label prefix from the adapter's configuration (labelPrefix + schemaFilter
-// + labelSeparator) and delegates to [IntrospectRelationshipsQuery].
+// + labelSeparator) and delegates to [IntrospectRelationshipsQuery], whose godoc
+// states what a prefix can and cannot establish.
 //
-// When schemaFilter is empty, all relationships are discovered (no filtering).
+// The filter is TRIMMED first, exactly as [Adapter.Label] trims a schema name
+// before composing a label. Testing the raw value instead meant an all-space
+// filter took the scoped path and built a prefix no written label carries,
+// discovering nothing and reporting it as an empty database.
+//
+// When schemaFilter is empty or all space, all relationships are discovered.
 func (a *Adapter) IntrospectRelationshipsQueryFor(schemaFilter string) (string, map[string]any) {
-	if schemaFilter == "" {
+	if strings.TrimSpace(schemaFilter) == "" {
 		return IntrospectRelationshipsQuery("")
 	}
 	prefix := a.config.labelPrefix +

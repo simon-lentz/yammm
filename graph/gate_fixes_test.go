@@ -108,7 +108,8 @@ func TestAddComposed_OneDuplicate_NamesTheAddressTheWritersAssign(t *testing.T) 
 
 	// The address must name the node that exists — the attached c1, not the
 	// rejected c2, whose address no writer ever assigns.
-	want, err := graph.FormatComposedKey([]any{"p1"}, "child", []any{"c1"})
+	want, err := graph.FormatComposedKey(mustTypeID(t, s, "Parent"), []any{"p1"},
+		[]graph.ComposedStep{{Relation: "child", KeyOrIndex: []any{"c1"}}})
 	if err != nil {
 		t.Fatalf("FormatComposedKey: %v", err)
 	}
@@ -470,7 +471,8 @@ func TestAddComposed_KeylessOneSlot_NamesThePositionalAddress(t *testing.T) {
 	}
 
 	// The occupant is at position 0, which is what the writer keys it by.
-	want, err := graph.FormatComposedKey([]any{"v1"}, "SPARE", 0)
+	want, err := graph.FormatComposedKey(carID, []any{"v1"},
+		[]graph.ComposedStep{{Relation: "SPARE", KeyOrIndex: 0}})
 	if err != nil {
 		t.Fatalf("FormatComposedKey: %v", err)
 	}
