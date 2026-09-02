@@ -22,9 +22,11 @@ import (
 // [WithCreatedAt] opts in — so one snapshot and one option set always
 // produce identical bytes. Marshal checks ctx.Err() at the start and once
 // per type group during emission, returning Fatal E_CONTEXT_CANCELLED on
-// cancellation; a caller-assembled state the writer cannot serialize
-// returns nil bytes with Fatal E_INTERNAL, and a snapshot built through
-// [graph.Graph] or [Load] never triggers that path. A snapshot nested deeper
+// cancellation; a caller-assembled state the writer cannot serialize —
+// a type outside its table, an unresolved record with no source instance,
+// or a target key [graph.ParseKey] cannot read — returns nil bytes with
+// Fatal E_INTERNAL, and a snapshot built through [graph.Graph] or [Load]
+// never triggers that path. A snapshot nested deeper
 // than the reader accepts returns nil bytes with Error
 // E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises,
 // so the bound reads identically from both sides. Panics if snap is nil.
@@ -36,9 +38,8 @@ import (
 //
 // A SUCCESSFUL Marshal can return Warning-severity issues. They report values
 // the snapshot held that the wire cannot carry — an unresolved record's target
-// key or edge properties under a reason that admits neither, and a target key
-// [graph.ParseKey] cannot read. A caller checking only [diag.Result.Err] sees
-// none of them.
+// key or edge properties under a reason that admits neither. A caller checking
+// only [diag.Result.Err] sees none of them.
 func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap == nil {
 		panic("snapshot.Marshal: nil Snapshot")
@@ -435,18 +436,12 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags
 			}
 			uw.TargetKey = nil
 		default:
-			// A key ParseKey cannot read yields nil by design — a wire
-			// assembler has no better answer than "no components" — but the
-			// forward reference's address is lost, so say so rather than let
-			// the next read find an empty key it cannot explain.
-			uw.TargetKey = parseTargetKey(u.TargetKey)
-			if uw.TargetKey == nil && u.TargetKey != "" && u.TargetKey != "[]" {
-				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
-					fmt.Sprintf("unresolved record %s[%s].%s carries target key %s, which cannot be parsed into components; the reference address is not written",
-						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.TargetKey)).
-					WithDetail(diag.DetailKeyRelationName, u.Relation).
-					Build())
+			key, err := parseTargetKey(u.TargetKey)
+			if err != nil {
+				return diagWire{}, fmt.Errorf("unresolved record %s[%s].%s: %w",
+					tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, err)
 			}
+			uw.TargetKey = key
 			var rel *schema.Relation
 			if srcType, ok := s.TypeByID(sourceID); ok {
 				rel, _ = srcType.Relation(u.Relation)
@@ -747,19 +742,20 @@ func assembleIndented(headerJSON, typesJSON, instancesJSON, diagJSON []byte, ind
 // parseTargetKey parses an UnresolvedEdge.TargetKey string into []any.
 // TargetKey is in Key.String() canonical form: e.g., `["c99"]` or `[1]`.
 //
-// A key this cannot parse yields nil rather than an error: an unresolved edge
-// carries the key it was written with, and a wire assembler has no better
-// answer than "no components" for one it cannot read. [graph.ParseKey] owns the
-// parsing, so the module holds one decoder rather than two that can drift.
-func parseTargetKey(keyStr string) []any {
+// The keyless forms "" and "[]" yield nil. Every other string the graph writes
+// came from immutable.Key.String, whose inverse is [graph.ParseKey], so a parse
+// failure is the writer's own invariant broken and is returned rather than
+// turned into an empty key. [graph.ParseKey] owns the parsing, so the module
+// holds one decoder rather than two that can drift.
+func parseTargetKey(keyStr string) ([]any, error) {
 	if keyStr == "" || keyStr == "[]" {
-		return nil
+		return nil, nil
 	}
 	values, err := graph.ParseKey(keyStr)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("target key %s: graph.ParseKey: %w", keyStr, err)
 	}
-	return values
+	return values, nil
 }
 
 // writeJSONString writes a JSON-encoded string to a strings.Builder.

@@ -460,33 +460,6 @@ func (h *HeaderInfo) SchemaHashMatches(s *schema.Schema) bool {
 	return h.SchemaHash == hash
 }
 
-// UnknownTypes returns the header's types-table rows that s's import closure
-// does not declare. An empty result means every row binds at [Load].
-//
-// It is the complement of [HeaderInfo.SchemaHashMatches], and dispatch callers
-// want both: the hash catches a schema whose RULES changed, this catches one
-// that no longer declares a type the document names — a row removed or renamed,
-// or a closure missing the schema that declared it. Both checks run on a
-// header-only read, before any body decode.
-//
-// Moving a schema's files is not one of the cases. The types table names the
-// declaring schema, not its source path, so the same schema text read from
-// another directory binds every row; while the table carried paths, this method
-// and SchemaHashMatches contradicted each other on exactly that input.
-//
-// Nil-safety: a nil receiver returns nil, and a nil schema returns every row,
-// because a closure that declares nothing declares no row.
-//
-// [SnapshotInfo] carries the same Types rows and deliberately has no such
-// method: a caller holding one has already paid the full decode, which is the
-// cost this method exists to avoid.
-func (h *HeaderInfo) UnknownTypes(s *schema.Schema) []TypeRef {
-	if h == nil {
-		return nil
-	}
-	return unknownTypeRows(h.Types, s)
-}
-
 // CreatedAtTime parses the header's CreatedAt field. See
 // [HeaderInfo.CreatedAtTime] for the empty-versus-malformed rule and the
 // precision the writers commit to.

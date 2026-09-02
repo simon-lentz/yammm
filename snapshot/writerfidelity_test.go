@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -126,5 +127,71 @@ func TestWriter_PreservesAnEmptyProvenancePath(t *testing.T) {
 	_, res2 := snapshot.Load(t.Context(), again, s)
 	if !res2.HasCode(diag.E_SNAPSHOT_PATH_FALLBACK) {
 		t.Errorf("the fallback warning vanished on the second read: %s", res2)
+	}
+}
+
+// TestWriter_RefusesATargetKeyItCannotParse pins that a target key
+// [graph.ParseKey] cannot read is an internal failure, not a Warning that
+// drops the address. UnresolvedEdge.TargetKey is written from
+// immutable.Key.String on every library path and ParseKey is its pinned
+// inverse, so the only way to reach the arm is caller-assembled parts whose
+// key holds a non-scalar component — the state Marshal's contract assigns to
+// Fatal E_INTERNAL.
+func TestWriter_RefusesATargetKeyItCannotParse(t *testing.T) {
+	t.Parallel()
+
+	s, res := schema.LoadString(t.Context(), bigKeySchema, "bigkey.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load bigkey schema: %s", res)
+	}
+	typ, ok := s.Type("Ref")
+	if !ok {
+		t.Fatal("Ref missing")
+	}
+	id := typ.ID()
+
+	nested := immutable.WrapKey([]any{[]any{"nested"}})
+	if _, err := graph.ParseKey(nested.String()); err == nil {
+		t.Fatalf("fixture is vacuous: ParseKey reads %s", nested)
+	}
+	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types: []schema.TypeID{id},
+		Instances: map[schema.TypeID][]graph.InstanceParts{id: {{
+			TypeName:   "Ref",
+			TypeID:     id,
+			PrimaryKey: immutable.WrapKey([]any{"r1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
+		}}},
+		Unresolved: []graph.UnresolvedParts{{
+			SourceType: id,
+			SourceKey:  immutable.WrapKey([]any{"r1"}),
+			Relation:   "POINTS",
+			TargetType: id,
+			TargetKey:  nested,
+			Reason:     "target_missing",
+		}},
+	})
+	if res.HasErrors() {
+		t.Fatalf("assembling: %s", res)
+	}
+
+	data, mres := snapshot.Marshal(t.Context(), built)
+	if data != nil {
+		t.Errorf("Marshal wrote %d bytes over a key it cannot read back", len(data))
+	}
+	if !mres.HasFatal() || !mres.HasCode(diag.E_INTERNAL) {
+		t.Fatalf("want Fatal E_INTERNAL, got: %s", mres)
+	}
+	if mres.HasCode(diag.W_SNAPSHOT_VALUE_DROPPED) {
+		t.Errorf("the key was dropped under a Warning instead of refused: %s", mres)
+	}
+	named := false
+	for issue := range mres.Issues() {
+		if strings.Contains(issue.Message(), nested.String()) {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("the failure does not name the key %s: %s", nested, mres)
 	}
 }
