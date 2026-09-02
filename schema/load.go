@@ -38,6 +38,17 @@ func fatalResult(err error, partial diag.Result) (*Schema, diag.Result) {
 	return nil, c.Result()
 }
 
+// issueResult creates a diag.Result carrying a single non-Fatal issue and a
+// nil Schema. It is the shape a load takes when it fails on user content
+// before any source is parsed — a malformed module-root marker, today — where
+// [fatalResult]'s Fatal severity would contradict HasFatal's promise of I/O
+// or cancellation.
+func issueResult(issue diag.Issue) diag.Result {
+	c := diag.NewCollectorUnlimited()
+	c.Collect(issue)
+	return c.Result()
+}
+
 // rootLoader provides sandboxed file access for imports using os.Root.
 // This uses kernel-level file access controls rather than string-based
 // path validation, eliminating TOCTOU race conditions.
@@ -171,9 +182,27 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	// Determine module root and canonicalize for consistent path comparison.
 	// This is important because source file paths are canonicalized (symlinks resolved),
 	// so module root must also be canonicalized for filepath.Rel to work correctly.
+	//
+	// The ladder: an explicit WithModuleRoot wins outright and no marker is
+	// read at all — a caller can always override a marker it did not put
+	// there. Otherwise the nearest ancestor holding a yammm.mod supplies the
+	// root, and failing that the entry file's own directory does.
 	moduleRoot := cfg.moduleRoot
+	rootOrigin := diag.ModuleRootExplicit
 	if moduleRoot == "" {
-		moduleRoot = filepath.Dir(absPath)
+		entryDir := filepath.Dir(absPath)
+		discovered, found, err := FindModuleRoot(entryDir)
+		switch {
+		case err != nil:
+			// A marker the author wrote and the loader could not honour fails
+			// the load. Falling through to the entry directory would be the
+			// silently-ignored marker this mechanism exists to remove.
+			return nil, issueResult(ModuleRootIssue(err))
+		case found:
+			moduleRoot, rootOrigin = discovered, diag.ModuleRootDiscovered
+		default:
+			moduleRoot, rootOrigin = entryDir, diag.ModuleRootDefault
+		}
 	} else {
 		var err error
 		moduleRoot, err = makeCanonicalPath(moduleRoot)
@@ -183,7 +212,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	}
 
 	// Create loader and load the schema
-	ldr := newLoader(cfg, moduleRoot, "")
+	ldr := newLoader(cfg, moduleRoot, "", rootOrigin)
 	defer ldr.Close() // Release rootLoader resources when done
 
 	s, result, err := ldr.loadFile(ctx, absPath, content)
@@ -237,8 +266,9 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 	// Create a synthetic source ID (NewSourceID returns just SourceID, no error)
 	sourceID := location.NewSourceID("string://" + sourceName)
 
-	// Create loader and load from string
-	ldr := newLoader(cfg, "", "")
+	// Create loader and load from string. A string source has no directory,
+	// so it has no root to default to — the origin is "none", not "default".
+	ldr := newLoader(cfg, "", "", diag.ModuleRootNone)
 	s, result, err := ldr.loadSource(ctx, sourceID, []byte(sourceCode))
 	if err != nil {
 		return fatalResult(err, result)
@@ -290,8 +320,17 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		moduleRoot = canonical
 	}
 
-	// Create loader
-	ldr := newLoader(cfg, moduleRoot, syntheticRoot)
+	// Create loader. The moduleRoot argument is "explicit" whatever produced
+	// it: a root the caller discovered before calling arrives here as a plain
+	// argument, and the loader has no way to know its provenance.
+	rootOrigin := diag.ModuleRootNone
+	switch {
+	case syntheticRoot != "":
+		rootOrigin = diag.ModuleRootSynthetic
+	case moduleRoot != "":
+		rootOrigin = diag.ModuleRootExplicit
+	}
+	ldr := newLoader(cfg, moduleRoot, syntheticRoot, rootOrigin)
 	defer ldr.Close() // Release rootLoader resources when done
 
 	// Pre-register all sources. SourceIDs are derived textually (no symlink
@@ -377,6 +416,7 @@ type importBinding struct {
 type loader struct {
 	cfg             *loadConfig
 	moduleRoot      string
+	rootOrigin      string      // where moduleRoot came from; one of diag's ModuleRoot* origin values
 	syntheticRoot   string      // normalized WithSyntheticRoot value; empty for every other load
 	rootLoader      *rootLoader // sandboxed file access for imports (nil if no moduleRoot)
 	registry        *Registry
@@ -407,7 +447,7 @@ func (a *registryAdapter) LookupBySourceID(id location.SourceID) (*Schema, bool)
 }
 
 // newLoader creates a new loader with the given configuration.
-func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot string) *loader {
+func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot, rootOrigin string) *loader {
 	registry := cfg.registry
 	if registry == nil {
 		registry = NewRegistry()
@@ -427,6 +467,7 @@ func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot string) *loader {
 	return &loader{
 		cfg:             cfg,
 		moduleRoot:      moduleRoot,
+		rootOrigin:      rootOrigin,
 		syntheticRoot:   syntheticRoot,
 		registry:        registry,
 		sourceRegistry:  sourceReg,
@@ -508,8 +549,8 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// Check for cycle
 	if l.loadingSchemas[sourceID] {
 		l.mu.Unlock()
-		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_CYCLE,
-			fmt.Sprintf("import cycle detected involving %s", sourceID)).Build())
+		root, origin := l.loaderRoot()
+		l.collector.Collect(importCycleIssue(root, origin, sourceID))
 		return nil, l.collector.Result(), nil
 	}
 
@@ -654,8 +695,17 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// Attach sources for diagnostics rendering and record the load's
 	// module root (the basis for module-root-relative source keys, e.g.
 	// gogen's embedded SerializedModel).
+	//
+	// A synthetic root IS the root this load resolved module-style imports
+	// against — hasImportRoot already treats the two as one — so it is what
+	// the accessor reports. Recording "" here would deny the root the loader
+	// used and leave every module-root-relative key deriving from a fallback.
 	s.setSources(NewSources(l.sourceRegistry))
-	s.setModuleRoot(l.moduleRoot)
+	if l.syntheticRoot != "" {
+		s.setModuleRoot(l.syntheticRoot)
+	} else {
+		s.setModuleRoot(l.moduleRoot)
+	}
 
 	// Seal the schema to prevent further mutation
 	s.seal()
@@ -712,8 +762,9 @@ func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, m 
 		// Without a root, we can only resolve relative imports
 		// from file-based sources
 		if !sourceID.IsFilePath() {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
-				"cannot resolve imports without a module root").Build())
+			root, origin := l.loaderRoot()
+			l.collector.Collect(importResolveIssue(root, origin,
+				"cannot resolve imports without a module root", nil))
 			// Nothing can be probed; mark every alias failed so completion
 			// defers references through them instead of re-reporting the
 			// same root cause per declaration.
@@ -899,11 +950,9 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	// Resolve the import path to a relative path (relative to module root)
 	relativePath, err := l.resolveImportToRelative(sourceID, imp.Path)
 	if err != nil {
-		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
-			fmt.Sprintf("cannot resolve import %q: %v", imp.Path, err)).
-			WithSpan(imp.Span).
-			WithDetail(diag.DetailKeyImportPath, imp.Path).
-			WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
+		root, origin := l.loaderRoot()
+		l.collector.Collect(importResolveIssue(root, origin,
+			fmt.Sprintf("cannot resolve import %q: %v", imp.Path, err), imp))
 		l.markImportFailed(imp)
 		return nil
 	}
@@ -929,19 +978,14 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	// Read the import using rootLoader (sandboxed) or in-memory sources
 	content, importSourceID, err := l.readImportFile(relativePath, imp)
 	if err != nil {
+		root, origin := l.loaderRoot()
 		if _, ok := errors.AsType[*pathEscapeError](err); ok { //nolint:errcheck // type check only, value unused
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_PATH_ESCAPE,
-				fmt.Sprintf("import %q escapes module root", imp.Path)).
-				WithSpan(imp.Span).
-				WithDetail(diag.DetailKeyImportPath, imp.Path).Build())
+			l.collector.Collect(pathEscapeIssue(root, origin, imp))
 			l.markImportFailed(imp)
 			return nil
 		}
-		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
-			fmt.Sprintf("cannot read import %q: %v", imp.Path, err)).
-			WithSpan(imp.Span).
-			WithDetail(diag.DetailKeyImportPath, imp.Path).
-			WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
+		l.collector.Collect(importResolveIssue(root, origin,
+			fmt.Sprintf("cannot read import %q: %v", imp.Path, err), imp))
 		l.markImportFailed(imp)
 		return nil
 	}

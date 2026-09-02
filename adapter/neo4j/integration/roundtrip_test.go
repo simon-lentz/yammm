@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	n4j "github.com/simon-lentz/yammm/adapter/neo4j"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -34,6 +35,7 @@ func newAdapter(t *testing.T, ctx context.Context, opts ...n4j.Option) *n4j.Adap
 
 func loadRoundTripSchema(t *testing.T) *schema.Schema {
 	t.Helper()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	s, res := schema.Load(context.Background(), filepath.Join("testdata", "roundtrip.yammm"))
 	if res.HasErrors() {
 		t.Fatalf("loading the round-trip schema: %v", res.Err())

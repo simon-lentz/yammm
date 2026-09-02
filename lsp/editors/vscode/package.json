@@ -2,7 +2,7 @@
   "name": "yammm",
   "displayName": "YAMMM",
   "description": "Language support for YAMMM schema files",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "publisher": "simon-lentz",
   "license": "MIT",
   "icon": "icon.png",
@@ -88,7 +88,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "Override the module root for import resolution. If empty, uses workspace root."
+          "description": "Override the module root for import resolution. If empty, uses the nearest yammm.mod above the file, else the workspace root."
         },
         "yammm.trace.server": {
           "type": "string",

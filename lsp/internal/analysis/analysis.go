@@ -355,6 +355,48 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	return snapshot, nil
 }
 
+// SnapshotForResult builds a snapshot from diagnostics alone, for a document
+// the workspace could not load at all.
+//
+// It exists for the one failure that happens BEFORE a load: the module root
+// could not be resolved, so there is nothing to hand LoadSourcesWithEntry. The
+// diagnostic still belongs on the document, and this is what puts it there —
+// a snapshot with a nil schema and no symbols, whose diagnostics convert
+// through the same path Analyze uses, so a span-less issue lands at the entry
+// document's first position.
+//
+// The contract is Analyze's, deliberately: an error is returned only when the
+// result carries a Fatal issue, so an Error-severity finding publishes through
+// the caller's normal success path with no "analysis failed" log line.
+//
+// The analyzer stays root-agnostic. Resolving the root is the workspace's job,
+// and this method takes the result of that failure rather than repeating it.
+func (a *Analyzer) SnapshotForResult(entryPath string, result diag.Result, posEncoding lsputil.PositionEncoding) (*Snapshot, error) {
+	entrySourceID, idErr := canonicalSourceID(entryPath)
+	if idErr != nil {
+		a.logger.Warn(
+			"failed to create entry source ID",
+			slog.String("path", entryPath),
+			slog.String("error", idErr.Error()),
+		)
+	}
+
+	sourceRegistry := source.NewRegistry()
+	snapshot := &Snapshot{
+		CreatedAt:       time.Now(),
+		EntrySourceID:   entrySourceID,
+		Result:          result,
+		Sources:         sourceRegistry,
+		SymbolsBySource: make(map[location.SourceID]*symbols.SymbolIndex),
+		LSPDiagnostics:  a.convertDiagnostics(result, sourceRegistry, entryPath, posEncoding),
+	}
+
+	if result.HasFatal() {
+		return snapshot, errors.New("load schema: fatal diagnostics")
+	}
+	return snapshot, nil
+}
+
 // buildSymbolIndices builds symbol indices for the schema and its imports.
 // The seen map prevents infinite recursion if the schema loader permits cycles
 // (or if imports resolve to the same canonical file via different paths).

@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -19,6 +20,7 @@ import (
 // cannot exercise anything that leaks one.
 func loadFromDisk(t *testing.T) *schema.Schema {
 	t.Helper()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	path, err := filepath.Abs(filepath.Join("testdata", "composed.yammm"))
 	if err != nil {
 		t.Fatalf("abs testdata path: %v", err)

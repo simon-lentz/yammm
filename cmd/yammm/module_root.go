@@ -17,13 +17,14 @@ import (
 
 // registerModuleRootFlag adds the shared --module-root flag.
 func registerModuleRootFlag(cmd *cobra.Command) {
-	cmd.Flags().String("module-root", "", "root directory for module-style imports (default: the schema's directory)")
+	cmd.Flags().String("module-root", "", "root directory for module-style imports (default: the nearest ancestor holding yammm.mod, else the schema's directory)")
 }
 
 // moduleRootOptions reads --module-root back as the absolute root and the
 // load option carrying it. An unset flag yields "" and no option, so the
-// loader falls back to the schema's directory. It reports a usage error for
-// a root that cannot be made absolute, having already written the message.
+// loader discovers the root: the nearest ancestor holding a yammm.mod, else
+// the schema's directory. It reports a usage error for a root that cannot be
+// made absolute, having already written the message.
 func moduleRootOptions(cmd *cobra.Command) (string, []schema.LoadOption, error) {
 	root, _ := cmd.Flags().GetString("module-root")
 	if root == "" {

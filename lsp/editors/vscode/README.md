@@ -26,7 +26,7 @@ The language server also analyzes fenced yammm blocks inside markdown documents.
 | `yammm.lsp.serverPath` | `""` | Path to the `yammm-lsp` binary. If empty, uses the bundled binary. |
 | `yammm.lsp.logFile` | `""` | Path to a log file for the language server. If empty, logs to stderr. Useful for debugging. |
 | `yammm.lsp.logLevel` | `"info"` | Log level for the language server: `error`, `warn`, `info`, `debug`, or `trace`. |
-| `yammm.lsp.moduleRoot` | `""` | Override the module root for import resolution. If empty, uses the workspace root. |
+| `yammm.lsp.moduleRoot` | `""` | Override the module root for import resolution. If empty, uses the nearest `yammm.mod` above the file, else the workspace root. |
 | `yammm.trace.server` | `"off"` | Trace communication between VS Code and the YAMMM language server: `off`, `messages`, or `verbose`. |
 
 Changing any of these prompts to restart the language server.

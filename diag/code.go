@@ -211,6 +211,12 @@ var (
 	// Covers file read failures, path resolution errors, and other filesystem issues.
 	E_LOAD_IO_FAILURE = NewCode("E_LOAD_IO_FAILURE", CategorySchema)
 
+	// E_LOAD_MODULE_ROOT_MALFORMED indicates a yammm.mod module-root marker
+	// whose content violates the marker rule: it must be empty or hold only
+	// comment lines. Error severity rather than Fatal — the marker is user
+	// content like a schema, and Fatal is reserved for I/O and cancellation.
+	E_LOAD_MODULE_ROOT_MALFORMED = NewCode("E_LOAD_MODULE_ROOT_MALFORMED", CategorySchema)
+
 	// E_UNKNOWN_ANNOTATION indicates an annotation name absent from the built-in
 	// registry for its placement (@name on a property, @@name on a type).
 	E_UNKNOWN_ANNOTATION = NewCode("E_UNKNOWN_ANNOTATION", CategorySchema)
@@ -577,6 +583,24 @@ func IsImportDeclarationCode(code string) bool {
 	switch code {
 	case E_IMPORT_NOT_ALLOWED.String(), E_DUPLICATE_IMPORT.String(),
 		E_IMPORT_ALIAS_COLLISION.String(), E_INVALID_ALIAS.String():
+		return true
+	default:
+		return false
+	}
+}
+
+// IsImportResolutionCode reports whether code (a diagnostic code's String())
+// names an import-RESOLUTION diagnostic — a path that does not resolve, a
+// cycle, or a path that escapes the module root — the complement of
+// [IsImportDeclarationCode] within [CategoryImport].
+//
+// The two predicates partition the category, so a new import code belongs in
+// exactly one of them. This one is the enumeration a family-wide change keys
+// on: every issue in the resolution family carries the module root and its
+// origin as details, and every one is built by a single builder per code.
+func IsImportResolutionCode(code string) bool {
+	switch code {
+	case E_IMPORT_RESOLVE.String(), E_IMPORT_CYCLE.String(), E_PATH_ESCAPE.String():
 		return true
 	default:
 		return false

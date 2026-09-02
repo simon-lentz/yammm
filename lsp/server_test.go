@@ -122,7 +122,9 @@ func TestServer_WorkspaceCreated(t *testing.T) {
 	require.NotNil(t, server.Workspace())
 
 	// The workspace should inherit the config's module root
-	assert.Equal(t, "/test", server.Workspace().FindModuleRoot("/any/path/file.yammm"))
+	root, err := server.Workspace().FindModuleRoot("/any/path/file.yammm")
+	require.NoError(t, err)
+	assert.Equal(t, "/test", root)
 }
 
 func TestIntegration_InitializeSuccess(t *testing.T) {

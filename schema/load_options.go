@@ -77,6 +77,25 @@ func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 // This option is only meaningful for Load(), which operates on filesystem paths.
 // LoadString() has no module root, and LoadSourcesWithEntry() takes one as an
 // explicit argument rather than through this option.
+//
+// It is the first rung of the ladder [Load] resolves a root by: this option,
+// then the directory of the nearest ancestor holding a [ModuleRootMarker]
+// file, then the entry schema's own directory. The editor inserts its
+// workspace folder between the second and the third.
+//
+// Under this option no marker is read at all — not even a malformed one, which
+// would otherwise fail the load. That is what "explicit wins" means: a caller
+// can always override a marker it did not put there.
+//
+// The root is the import sandbox's boundary. A discovered root therefore
+// widens what a load may read: committing a marker at a repository root grants
+// the loader read access to that whole subtree for imports. That widening is
+// the mechanism working — it is what makes a repository-relative import
+// resolve — but it is not something a marker's author should discover later.
+//
+// Discovery walks the canonical (symlink-resolved) ancestor chain, so a marker
+// reachable only through a symlinked spelling of the entry path is invisible
+// to it. Pass this option for that case.
 func WithModuleRoot(root string) LoadOption {
 	return func(c *loadConfig) {
 		c.moduleRoot = root
@@ -143,10 +162,11 @@ func WithSourcesOnly(only bool) LoadOption {
 // stable and distinct. Relative imports ("./x", "../x") are NOT supported under
 // a synthetic root: they resolve through the importing file's canonical path,
 // which a synthetic identity does not have, so the load reports "relative
-// imports require a file-based source". [Schema.ModuleRoot] stays empty, and a
-// schema loaded this way is not a supported input to
+// imports require a file-based source". [Schema.ModuleRoot] reports the
+// synthetic root, because the root is the one this load resolved imports
+// against; a schema loaded this way is a supported input to
 // [github.com/simon-lentz/yammm/adapter/gogen.Marshal], whose embedded keys
-// silently stop matching the disk-loaded ones.
+// are then relative to that root.
 //
 // Do not share a [Registry] between a synthetic-root load and a disk load of
 // the same schema: the two mint different SourceIDs for one schema name, and

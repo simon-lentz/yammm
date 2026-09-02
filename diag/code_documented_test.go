@@ -18,6 +18,12 @@ import (
 // relative to the diag/ package directory.
 const diagnosticsRefPath = "../claude-plugin/skills/yammm/references/diagnostics.md"
 
+// specRefPath is the path to the specification's diagnostic-code appendix,
+// relative to the diag/ package directory. It is the second place every
+// registered code must appear; nothing but [TestRegisteredCodesDocumented]
+// reads it against the registry.
+const specRefPath = "../docs/SPEC.md"
+
 // codePattern matches E_* and W_* diagnostic code identifiers in markdown
 // content. The E_ prefix covers error-severity and sentinel codes (the
 // historical default); the W_ prefix covers warning-severity codes added
@@ -76,28 +82,29 @@ func TestDocumentedCodesExist(t *testing.T) {
 // to the registry that are not yet documented. Together, the two tests enforce
 // bidirectional parity between the code registry and the reference file.
 func TestRegisteredCodesDocumented(t *testing.T) {
-	content, err := os.ReadFile(diagnosticsRefPath)
-	if os.IsNotExist(err) {
-		t.Skip("diagnostics reference file not found")
-	}
-	if err != nil {
-		t.Fatalf("read diagnostics reference: %v", err)
-	}
+	// Both documents enumerate the whole code set, so both are oracles: a
+	// code documented in one and absent from the other is the drift this
+	// guard exists to catch.
+	for _, oracle := range []struct{ name, path string }{
+		{"diagnostics.md", diagnosticsRefPath},
+		{"SPEC.md", specRefPath},
+	} {
+		content, err := os.ReadFile(oracle.path)
+		if os.IsNotExist(err) {
+			t.Errorf("%s not found at %s; the gate has no oracle", oracle.name, oracle.path)
+			continue
+		}
+		if err != nil {
+			t.Fatalf("read %s: %v", oracle.name, err)
+		}
 
-	text := string(content)
-
-	var missing []string
-	for _, c := range diag.AllCodes() {
-		if !strings.Contains(text, c.String()) {
-			missing = append(missing, c.String())
+		text := string(content)
+		for _, c := range diag.AllCodes() {
+			if !strings.Contains(text, c.String()) {
+				t.Errorf("registered code %s is not documented in %s", c, oracle.name)
+			}
 		}
 	}
 
-	if len(missing) > 0 {
-		for _, code := range missing {
-			t.Errorf("registered code %s is not documented in diagnostics.md", code)
-		}
-	}
-
-	t.Logf("verified %d registered codes are all documented", len(diag.AllCodes()))
+	t.Logf("verified %d registered codes against both oracles", len(diag.AllCodes()))
 }

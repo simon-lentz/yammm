@@ -39,6 +39,9 @@ const serverName = "yammm-lsp"
 // Config holds the server configuration.
 type Config struct {
 	// ModuleRoot overrides the computed module root for import resolution.
+	// What it overrides, in order: the directory of the nearest ancestor
+	// holding a yammm.mod marker, then the editor workspace folder containing
+	// the file, then the file's own directory.
 	ModuleRoot string
 
 	// Version is the server version reported during LSP initialization.

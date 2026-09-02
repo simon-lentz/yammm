@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // TestDiagnosticsRoot_Relativizes pins where rendered diagnostic locations
@@ -67,4 +69,63 @@ func TestDiagnosticsRoot_Relativizes(t *testing.T) {
 			t.Errorf("location must not render absolute, stderr:\n%s", stderr)
 		}
 	})
+}
+
+// TestDiagRootFor_NeverReturnsASchemeString pins the guard that keeps a
+// synthetic root out of the renderer. Schema.ModuleRoot now reports the
+// synthetic root a load resolved against, and a scheme string is not a
+// filesystem path: relativizing against it would produce nonsense locations.
+// The CLI never synthetic-loads, so this is defence rather than a live path.
+func TestDiagRootFor_NeverReturnsASchemeString(t *testing.T) {
+	t.Parallel()
+
+	sources := map[string][]byte{
+		"assets/main.yammm": []byte("schema \"main\"\n\ntype T {\n\tid String primary\n}\n"),
+	}
+	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "assets/main.yammm", "",
+		schema.WithSyntheticRoot("embedded://app"), schema.WithSourcesOnly(true))
+	if res.HasErrors() {
+		t.Fatalf("synthetic load: %v", res.Err())
+	}
+	if s.ModuleRoot() != "embedded://app" {
+		t.Fatalf("fixture does not exercise the guard: ModuleRoot = %q", s.ModuleRoot())
+	}
+
+	entry := filepath.Join(t.TempDir(), "main.yammm")
+	got := diagRootFor(s, "", entry)
+	if strings.Contains(got, "://") {
+		t.Errorf("diagRootFor = %q; a scheme string is not a path to relativize against", got)
+	}
+	if want := filepath.Dir(entry); !strings.HasPrefix(got, filepath.VolumeName(want)) || !filepath.IsAbs(got) {
+		t.Errorf("diagRootFor = %q, want an absolute filesystem path", got)
+	}
+}
+
+// TestDiagRootFor_DiscoversOnTheFailurePath pins that a failed load's
+// diagnostics relativize against the same root the loader used. A successful
+// load inherits discovery through Schema.ModuleRoot; a failed one has no
+// schema, so the renderer must discover for itself or it relativizes against
+// a root the loader did not use.
+func TestDiagRootFor_DiscoversOnTheFailurePath(t *testing.T) {
+	t.Parallel()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, schema.ModuleRootMarker), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(sub, "bad.yammm")
+
+	got := diagRootFor(nil, "", entry)
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != resolved {
+		t.Errorf("diagRootFor = %q, want the discovered root %q, not the entry directory", got, resolved)
+	}
 }

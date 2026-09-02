@@ -1927,6 +1927,10 @@ func TestModuleRoot_Recorded(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "solo.yammm")
 		require.NoError(t, os.WriteFile(path, []byte("schema \"solo\"\n\ntype T {\n\tid String primary\n}\n"), 0o600))
+		// A marker in the entry file's OWN directory makes this assertion
+		// independent of whatever sits above the temp root, and the nearest-
+		// ancestor rule means it names exactly the directory asserted below.
+		require.NoError(t, os.WriteFile(filepath.Join(dir, schema.ModuleRootMarker), nil, 0o600))
 		s, res := schema.Load(ctx, path)
 		requireOK(t, res)
 		assert.Equal(t, canonicalPath(t, dir), s.ModuleRoot())

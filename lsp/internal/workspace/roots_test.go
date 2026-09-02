@@ -55,7 +55,11 @@ func TestAddRoot_CanonicalisesLikeEveryOtherSite(t *testing.T) {
 	}
 	doc := filepath.Join(sub, "schema.yammm")
 
-	if got := w.FindModuleRoot(doc); got != want {
+	got, err := w.FindModuleRoot(doc)
+	if err != nil {
+		t.Fatalf("FindModuleRoot(%q): %v", doc, err)
+	}
+	if got != want {
 		t.Errorf("FindModuleRoot(%q) = %q, want %q — the root was registered under a path no document matches",
 			doc, got, want)
 	}
@@ -63,7 +67,11 @@ func TestAddRoot_CanonicalisesLikeEveryOtherSite(t *testing.T) {
 	// RemoveRoot has to canonicalise identically or it removes nothing, and
 	// the fallback is what proves the root is gone rather than merely unmatched.
 	w.RemoveRoot(lsputil.PathToURI(rootArg))
-	if got := w.FindModuleRoot(doc); got != sub {
+	got, err = w.FindModuleRoot(doc)
+	if err != nil {
+		t.Fatalf("FindModuleRoot(%q) after RemoveRoot: %v", doc, err)
+	}
+	if got != sub {
 		t.Errorf("FindModuleRoot(%q) = %q after RemoveRoot, want the directory fallback %q", doc, got, sub)
 	}
 }

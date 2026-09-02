@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -14,6 +15,7 @@ import (
 // module root, the way Marshal's callers do.
 func loadFixture(t *testing.T, name, moduleRoot string) *schema.Schema {
 	t.Helper()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	path, err := filepath.Abs(filepath.Join("testdata", name+".yammm"))
 	if err != nil {
 		t.Fatalf("abs path: %v", err)
