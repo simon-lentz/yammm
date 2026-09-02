@@ -130,20 +130,31 @@ func reportSchemaLoad(
 // diagRootFor selects the root that rendered diagnostic locations are
 // relativized against. A completed load is authoritative: the schema's
 // recorded ModuleRoot is canonical (symlink-resolved), so it textually
-// prefixes every file-backed SourceID the load produced. When no schema is
-// available (the load failed before producing one), the explicit module
-// root — for commands that accept one — or the schema file's directory is
-// canonicalized the same way the loader canonicalizes its module root, so
-// locations still relativize.
+// prefixes every file-backed SourceID the load produced — unless it is a
+// synthetic root, which is a scheme string rather than a path and would
+// relativize nothing. The CLI never synthetic-loads, so that arm is defence.
+//
+// When no schema is available (the load failed before producing one), the
+// root is derived the way the loader derives its own: the explicit module
+// root for commands that accept one, then the nearest ancestor holding a
+// module-root marker, then the schema file's directory — each canonicalized
+// the same way, so locations still relativize. Without the discovery step a
+// failed load's diagnostics would relativize against a root the loader did
+// not use.
 func diagRootFor(s *schema.Schema, explicitRoot, absSchemaPath string) string {
 	if s != nil {
-		if root := s.ModuleRoot(); root != "" {
+		if root := s.ModuleRoot(); root != "" && filepath.IsAbs(root) {
 			return root
 		}
 	}
 	base := explicitRoot
 	if base == "" {
 		base = filepath.Dir(absSchemaPath)
+		// A discovery error is deliberately ignored: the load already
+		// reported it, and the renderer's job is to relativize what it can.
+		if root, found, err := schema.FindModuleRoot(base); err == nil && found {
+			return root
+		}
 	}
 	if resolved, err := filepath.EvalSymlinks(base); err == nil {
 		return resolved

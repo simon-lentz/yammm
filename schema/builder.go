@@ -595,8 +595,10 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 
 	if b.registry == nil {
 		// Imports declared but no registry provided
-		collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
-			"imports declared but no registry provided; call WithRegistry() to enable import resolution").Build())
+		// The Builder resolves through a registry, never through a root, so
+		// its origin is "none" — the same shape the loader's sites carry.
+		collector.Collect(importResolveIssue("", diag.ModuleRootNone,
+			"imports declared but no registry provided; call WithRegistry() to enable import resolution", nil))
 		return nil
 	}
 
@@ -626,10 +628,7 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 			} else {
 				msg = fmt.Sprintf("cannot resolve import %q: schema not found in registry", imp.Path)
 			}
-			collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE, msg).
-				WithSpan(imp.Span).
-				WithDetail(diag.DetailKeyImportPath, imp.Path).
-				WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
+			collector.Collect(importResolveIssue("", diag.ModuleRootNone, msg, imp))
 			hasErrors = true
 			continue
 		}

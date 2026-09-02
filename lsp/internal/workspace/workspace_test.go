@@ -275,7 +275,7 @@ func TestWorkspace_FindModuleRoot_CrossSymlink(t *testing.T) {
 	canonicalFilePath, err := filepath.EvalSymlinks(symlinkFilePath)
 	require.NoError(t, err, "failed to resolve symlink file path")
 
-	got := ws.FindModuleRoot(canonicalFilePath)
+	got := mustFindRoot(t, ws, canonicalFilePath)
 	assert.Equal(t, canonicalProject, got, "FindModuleRoot(%q)", canonicalFilePath)
 }
 
@@ -378,7 +378,7 @@ func TestWorkspace_FindModuleRoot_Configured(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{ModuleRoot: "/configured/root"})
 
-	got := ws.FindModuleRoot("/any/path/file.yammm")
+	got := mustFindRoot(t, ws, "/any/path/file.yammm")
 	assert.Equal(t, "/configured/root", got)
 }
 
@@ -389,7 +389,7 @@ func TestWorkspace_FindModuleRoot_WorkspaceFolder(t *testing.T) {
 	ws := newTestWorkspace(t, logger, Config{})
 	ws.AddRoot("file:///project")
 
-	got := ws.FindModuleRoot("/project/subdir/file.yammm")
+	got := mustFindRoot(t, ws, "/project/subdir/file.yammm")
 	assert.Equal(t, "/project", got)
 }
 
@@ -401,7 +401,7 @@ func TestWorkspace_FindModuleRoot_Fallback(t *testing.T) {
 	ws.AddRoot("file:///other/project")
 
 	// Path not under any workspace folder
-	got := ws.FindModuleRoot("/unrelated/path/file.yammm")
+	got := mustFindRoot(t, ws, "/unrelated/path/file.yammm")
 	assert.Equal(t, "/unrelated/path", got)
 }
 
@@ -416,11 +416,11 @@ func TestWorkspace_FindModuleRoot_NestedWorkspaceFolders(t *testing.T) {
 	ws.AddRoot("file:///project/submodule")
 
 	// File in the nested submodule should use the deepest matching root
-	got := ws.FindModuleRoot("/project/submodule/schemas/file.yammm")
+	got := mustFindRoot(t, ws, "/project/submodule/schemas/file.yammm")
 	assert.Equal(t, "/project/submodule", got, "should use deepest match")
 
 	// File in the parent project should use the parent root
-	got = ws.FindModuleRoot("/project/other/file.yammm")
+	got = mustFindRoot(t, ws, "/project/other/file.yammm")
 	assert.Equal(t, "/project", got)
 }
 
@@ -436,7 +436,7 @@ func TestWorkspace_FindModuleRoot_NestedWorkspaceFolders_ReverseOrder(t *testing
 	ws.AddRoot("file:///project")
 
 	// File in the nested submodule should still use the deepest matching root
-	got := ws.FindModuleRoot("/project/submodule/schemas/file.yammm")
+	got := mustFindRoot(t, ws, "/project/submodule/schemas/file.yammm")
 	assert.Equal(t, "/project/submodule", got, "should use deepest match")
 }
 
@@ -451,15 +451,15 @@ func TestWorkspace_FindModuleRoot_SimilarPrefixRoots(t *testing.T) {
 
 	// File in /project2 should NOT match /project (they share a string prefix
 	// but /project2 is not under /project). Should fall back to file's directory.
-	got := ws.FindModuleRoot("/project2/file.yammm")
+	got := mustFindRoot(t, ws, "/project2/file.yammm")
 	assert.Equal(t, "/project2", got, "should fallback for /project2")
 
 	// File in /project-extra should match /project-extra, not /project
-	got = ws.FindModuleRoot("/project-extra/subdir/file.yammm")
+	got = mustFindRoot(t, ws, "/project-extra/subdir/file.yammm")
 	assert.Equal(t, "/project-extra", got)
 
 	// File directly in /project should still match /project
-	got = ws.FindModuleRoot("/project/file.yammm")
+	got = mustFindRoot(t, ws, "/project/file.yammm")
 	assert.Equal(t, "/project", got)
 }
 
@@ -1026,6 +1026,15 @@ func TestPublishSnapshotDiagnostics_RelatedInfoURIRemapping(t *testing.T) {
 }
 
 // newTestWorkspace creates a Workspace for testing and registers cleanup to prevent goroutine leaks.
+// mustFindRoot resolves a module root and fails the test on a discovery
+// error, which these tier tests never provoke: none of them plants a marker.
+func mustFindRoot(t *testing.T, ws *Workspace, path string) string {
+	t.Helper()
+	root, err := ws.FindModuleRoot(path)
+	require.NoError(t, err, "FindModuleRoot(%q)", path)
+	return root
+}
+
 func newTestWorkspace(t *testing.T, logger *slog.Logger, cfg Config) *Workspace {
 	t.Helper()
 	if logger == nil {

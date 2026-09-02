@@ -46,12 +46,81 @@ s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, op
 | Option | Description |
 | ------ | ----------- |
 | `WithRegistry` | Schema registry for cross-schema type resolution |
-| `WithModuleRoot` | Root directory for module-style imports |
+| `WithModuleRoot` | Root directory for module-style imports. It is the first rung of the ladder in [Module root discovery](#module-root-discovery), and under it no `yammm.mod` marker is read at all |
 | `WithIssueLimit` | Maximum diagnostic issues to collect (default: 100) |
 | `WithLogger` | Structured logger for load diagnostics |
 | `WithImportsAllowed` | Whether import declarations are processed (default `true`); `false` refuses them with `E_IMPORT_NOT_ALLOWED` |
 | `WithSourcesOnly` | With `true`, restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources) |
 | `WithSyntheticRoot` | Give in-memory sources synthetic identities under a root such as `embedded://app`, so type identities do not move with the working directory (see [Synthetic source identities](#synthetic-source-identities)) |
+
+### Module root discovery
+
+The module root is the directory that module-style imports (`import "lib/dep"`)
+resolve against, and the boundary the import sandbox is opened at. `Load`
+resolves it over four tiers:
+
+| Tier | Source of the root | Where it applies |
+| ---- | ------------------ | ---------------- |
+| 1 | Explicit — `WithModuleRoot`, the `--module-root` flag, or the LSP's `ModuleRoot` config | everywhere |
+| 2 | Discovered — the nearest ancestor directory holding a `yammm.mod` marker | everywhere |
+| 3 | The editor workspace folder containing the file | the LSP only |
+| 4 | The entry schema's own directory | everywhere |
+
+Discovery is additive: with no marker anywhere above the entry file, behaviour
+is exactly what it was before — the entry schema's own directory.
+
+```go
+// The nearest ancestor holding a yammm.mod, "" and false when none does, and
+// an error when a marker exists but is malformed or unreadable.
+root, found, err := schema.FindModuleRoot(filepath.Dir(entryPath))
+
+var malformed *schema.MalformedModuleRootError
+if errors.As(err, &malformed) {
+    fmt.Printf("%s line %d: %s\n", malformed.Path, malformed.Line, malformed.Reason)
+}
+
+// The diagnostic Load reports for either error kind. Callers outside the
+// loader — the editor, a custom front end — build it from here so one code
+// keeps one shape.
+issue := schema.ModuleRootIssue(err)
+```
+
+`schema.ModuleRootMarker` is the marker's file name (`yammm.mod`).
+
+**The marker's content rule.** In this version the file must be empty or hold
+only comment lines, where a comment line's first non-space byte is `#`. Any
+other content — including a UTF-8 byte order mark, a directory of that name, a
+dangling symlink of that name, or a file over 64 KiB — draws
+`E_LOAD_MODULE_ROOT_MALFORMED` at Error severity and **fails the load**. A
+marker the author wrote and the loader ignored is the failure this mechanism
+exists to remove, so there is no silent fall-through. Refusing content now
+reserves the whole format space: no file written today can be reinterpreted by
+a later release.
+
+**The nearest marker wins**, so a nested marker deliberately narrows a
+sub-module's root.
+
+**A discovered root widens the import sandbox.** Every import read goes through
+`os.OpenRoot(moduleRoot)`, so committing a `yammm.mod` at a repository root
+grants the loader read access to that whole subtree for imports. That widening
+is the mechanism working — it is what makes a repository-relative import
+resolve — but it is a consequence worth stating before you commit the file.
+
+**The walk is canonical.** It runs on the symlink-resolved ancestor chain, so a
+marker reachable only through a symlinked spelling of the entry path is not
+consulted. Pass `WithModuleRoot` for that case.
+
+**An explicit root reads no marker.** Tier 1 wins before discovery runs, so a
+malformed `yammm.mod` above a load that passes `WithModuleRoot` is never
+reported. That is what "explicit wins" means: a caller can always override a
+marker it did not put there.
+
+**Import failures name the root and where it came from.** Every diagnostic in
+the import-resolution family — `E_IMPORT_RESOLVE`, `E_PATH_ESCAPE`,
+`E_IMPORT_CYCLE` — carries `module_root` and `module_root_origin` details, over
+the five origin values `explicit`, `discovered`, `synthetic`, `default` and
+`none`, and states the same provenance in its message for the text renderer.
+`diag.IsImportResolutionCode` is the family's enumeration.
 
 ### Synthetic source identities
 
@@ -85,11 +154,11 @@ The option refuses rather than degrades. Each of these is an error:
 | The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there |
 | An absolute source key, or one resolving to the root itself | An absolute key collides with file-backed identities, and the root is not itself a source. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
 
-Two limitations are deliberate. Relative imports (`"./x"`, `"../x"`) are not
+One limitation is deliberate. Relative imports (`"./x"`, `"../x"`) are not
 supported: they resolve through the importing source's canonical path, which no
-synthetic identity has. And `Schema.ModuleRoot()` stays empty, which makes a
-schema loaded this way an unsupported input to `gogen.Marshal` — keep generators
-on disk loads.
+synthetic identity has. `Schema.ModuleRoot()` reports the synthetic root — it is
+the root the load resolved imports against — so a schema loaded this way is a
+supported input to `gogen.Marshal`, whose embedded keys are relative to it.
 
 **Adopting a synthetic root re-keys every snapshot already written**, because the
 recorded type identities change. Treat the switch, and any later change to the
@@ -1546,7 +1615,7 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error)
 data, err := gogen.Marshal(s, gogen.WithPackageName("model"))
 ```
 
-`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSourcesWithEntry`. A schema loaded under `schema.WithSyntheticRoot` is **not** a supported input: `Schema.ModuleRoot()` is empty there, so the emitted keys silently stop matching the disk-loaded ones. Keep generators on disk loads. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded source and its round-trip self-check require it.
+`Marshal` requires a **completed, source-backed** schema — one loaded via `schema.Load`, `schema.LoadString`, or `schema.LoadSourcesWithEntry`, including one loaded under `schema.WithSyntheticRoot`: `Schema.ModuleRoot()` reports the synthetic root, so the emitted keys are relative to it exactly as a disk load's keys are relative to its module root. A schema built programmatically with `schema.Builder` retains no source (`Sources()` is nil) and is rejected, because the embedded source and its round-trip self-check require it.
 
 ### Options
 
@@ -1596,7 +1665,7 @@ A named DataType is rendered faithfully in every position — scalar field, list
 
 ### Imports
 
-gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded source keys are relative to the load's recorded module root (`Schema.ModuleRoot()` — the `WithModuleRoot` value when given, the entry file's directory for a plain `Load`, and the canonicalized root argument for `LoadSourcesWithEntry`; it is `""` for a `LoadString` or Builder-built schema, where gogen falls back to the entry's directory), so generated output is byte-reproducible across checkouts and CI runners and the keys match the sources' module-style import statements on re-load. `Marshal` verifies the embedded source re-loads hermetically (`schema.WithSourcesOnly` — no filesystem participation) before returning.
+gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package. Cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` → `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error. Embedded source keys are relative to the load's recorded module root (`Schema.ModuleRoot()` — the `WithModuleRoot` value when given, then for a plain `Load` the directory of the nearest ancestor holding a `yammm.mod` and failing that the entry file's own directory, and the canonicalized root argument for `LoadSourcesWithEntry`; it is `""` for a `LoadString` or Builder-built schema, where gogen falls back to the entry's directory), so generated output is byte-reproducible across checkouts and CI runners and the keys match the sources' module-style import statements on re-load. The module root is therefore an input to the generated bytes alongside the schema, the options and the yammm version: committing a `yammm.mod` above a schema moves the keys for an otherwise unchanged generation, and a generator that passes the root explicitly sees no change. `Marshal` verifies the embedded source re-loads hermetically (`schema.WithSourcesOnly` — no filesystem participation) before returning.
 
 Re-load under a synthetic root:
 

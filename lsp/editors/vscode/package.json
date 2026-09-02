@@ -88,7 +88,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "Override the module root for import resolution. If empty, uses workspace root."
+          "description": "Override the module root for import resolution. If empty, uses the nearest yammm.mod above the file, else the workspace root."
         },
         "yammm.trace.server": {
           "type": "string",

@@ -454,9 +454,14 @@ func (c *completer) indexImports() {
 			resolved, present := c.resolvedImports[id.Alias]
 			switch {
 			case !present:
-				// Key-absent: the loader never resolved this alias at all —
-				// a loader bug, not a user error. Reported and skipped.
-				c.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
+				// Key-absent: the resolution map reached completion without an
+				// entry for this alias — a bug in whichever front door built
+				// it, not a user error, which is why it is E_INTERNAL rather
+				// than a member of the import-resolution family. Neither door
+				// can reach it: the loader binds or fails every alias before
+				// completion, and the Builder discards its resolution map
+				// whenever a path fails. Reported and skipped.
+				c.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
 					fmt.Sprintf("import alias %q has no resolved SourceID; ensure loader provides all import resolutions", id.Alias)).
 					WithSpan(id.Span).
 					WithDetail(diag.DetailKeyAlias, id.Alias).

@@ -55,7 +55,9 @@ Patch releases never introduce breaking changes: no removed or renamed exported 
 
 ## Generated-output surface (`adapter/gogen`)
 
-For an unchanged schema, unchanged `Marshal` options, and an unchanged yammm version, generated output is byte-identical (all walks and name assignments are deterministic). Across versions, changes to the output classify as:
+For an unchanged schema, unchanged `Marshal` options, an unchanged module root, and an unchanged yammm version, generated output is byte-identical (all walks and name assignments are deterministic).
+
+The module root is an input because the embedded source keys and `SerializedEntry` are relative to it. It is the root the caller supplied, the directory of the nearest ancestor holding a `yammm.mod` marker, the synthetic root under `WithSyntheticRoot`, or the entry file's own directory — so committing a marker above a schema changes those keys for an otherwise unchanged generation. A generator that passes the root explicitly sees no change. Across versions, changes to the output classify as:
 
 ### Breaking (major post-1.0; pre-1.0 minor under the standard subtractive rules)
 

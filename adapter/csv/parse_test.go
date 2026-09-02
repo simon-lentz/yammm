@@ -9,12 +9,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func loadTestSchema(t *testing.T, name string) *schema.Schema {
 	t.Helper()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	s, result := schema.Load(context.Background(), filepath.Join("testdata", name))
 	if err := result.Err(); err != nil {
 		t.Fatalf("load schema %s: %v", name, err)

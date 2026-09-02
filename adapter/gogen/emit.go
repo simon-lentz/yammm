@@ -390,8 +390,11 @@ func (g *generator) emitUniformSources(entryKey string) {
 // a module-style `import "a/b/x"` re-resolves to the key "a/b/x.yammm" on
 // re-load, hitting the pre-registered source with no filesystem fallback.
 // An absolute generation-machine path baked into the output would make the
-// .go.golden files non-reproducible across checkouts/CI. When moduleRoot is
-// empty (a LoadString-backed schema; imports are impossible there), keys
+// .go.golden files non-reproducible across checkouts/CI. The root may be one
+// the caller supplied, one discovered from a yammm.mod marker, or a synthetic
+// root — the last is trimmed rather than relativized, because it is not a
+// path. When moduleRoot is empty (a LoadString-backed or Builder-built
+// schema; imports are impossible there), keys
 // fall back to entry-directory-relative — for the single source that exists
 // in that case, its own base name. A source outside the module root (a legal
 // entry layout; imports are sandboxed but the entry is not) yields a
@@ -404,6 +407,15 @@ func sourceKey(moduleRoot string, entry, id location.SourceID) string {
 	root := moduleRoot
 	if root == "" {
 		root = filepath.Dir(entry.String())
+	}
+	// A synthetic root is not a filesystem path, so it is trimmed rather than
+	// relativized. filepath.Rel returns the right answer on these inputs only
+	// because filepath.Clean collapses the scheme's "//" identically on both
+	// arguments — an accident of Clean, not a rule, and one a different scheme
+	// spelling would break. ValidateSyntheticSourceID is the loader's own
+	// absoluteness predicate, so both sides agree on what "not a path" means.
+	if location.ValidateSyntheticSourceID(root) == nil {
+		return strings.TrimPrefix(id.String(), root+"/")
 	}
 	if rel, err := filepath.Rel(root, id.String()); err == nil {
 		return filepath.ToSlash(rel)

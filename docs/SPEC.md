@@ -376,7 +376,13 @@ import "./common/types" as common   // explicit alias
 - The `.yammm` extension is optional and will be appended if not present
 - Imports must resolve to `.yammm` files, not directories
 
-**Security:** Import paths are sandboxed using `os.Root` to prevent path traversal attacks. Paths that attempt to escape the module root are rejected at the kernel level.
+**The module root:** A directory is a module root when it holds a `yammm.mod` marker file. The loader resolves a schema's root in this order: the root the caller supplied (`WithModuleRoot`, or the `--module-root` flag), then the directory of the nearest ancestor holding a `yammm.mod`, then the schema file's own directory. The editor inserts its workspace folder between the second and the third.
+
+In this version the marker file must be empty or hold only comment lines, where a comment line's first non-space byte is `#`. Any other content — including a UTF-8 byte order mark — is an error (`E_LOAD_MODULE_ROOT_MALFORMED`), and the load fails rather than ignoring the marker. Refusing content now reserves the whole format space, so no file written today can be reinterpreted by a later release.
+
+The nearest marker wins, so a nested marker deliberately narrows a sub-module's root. The walk runs on the canonical (symlink-resolved) ancestor chain: a marker reachable only through a symlinked spelling of the path is not consulted. Under an explicit root no marker is read at all.
+
+**Security:** Import paths are sandboxed using `os.Root` to prevent path traversal attacks. Paths that attempt to escape the module root are rejected at the kernel level. The module root is that sandbox's boundary, so committing a `yammm.mod` grants the loader read access to that directory's whole subtree for imports — which is what makes a repository-relative import resolve.
 
 **Default alias derivation:** When no explicit `as` clause is provided, the alias is derived from the last path segment:
 
@@ -1700,6 +1706,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UPSTREAM_FAIL` — imported schema failed to compile
 - `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
 - `E_LOAD_IO_FAILURE` — I/O error during schema loading
+- `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, or duplicate errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)

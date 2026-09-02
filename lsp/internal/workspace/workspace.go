@@ -12,7 +12,9 @@ import (
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
@@ -23,6 +25,9 @@ import (
 // Config holds workspace configuration.
 type Config struct {
 	// ModuleRoot overrides the computed module root for import resolution.
+	// What it overrides, in order: the directory of the nearest ancestor
+	// holding a yammm.mod marker, then the workspace folder containing the
+	// file, then the file's own directory.
 	ModuleRoot string
 
 	// DebounceDelay is the delay between a document change and the analysis
@@ -387,9 +392,19 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 
 	canonicalPath := lsputil.CanonicalPath(path)
 
-	moduleRoot := w.FindModuleRoot(canonicalPath)
-
-	snapshot, err := w.sched.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot, w.PositionEncoding())
+	// The root is resolved before the analyzer is called: the analyzer takes
+	// a root as an argument and never discovers one. A discovery failure is a
+	// document diagnostic rather than a dropped analysis — the editor says
+	// what the CLI says, because schema.ModuleRootIssue builds it for both.
+	var snapshot *analysis.Snapshot
+	moduleRoot, rootErr := w.FindModuleRoot(canonicalPath)
+	if rootErr != nil {
+		result := diag.NewCollectorUnlimited()
+		result.Collect(schema.ModuleRootIssue(rootErr))
+		snapshot, err = w.sched.analyzer.SnapshotForResult(canonicalPath, result.Result(), w.PositionEncoding())
+	} else {
+		snapshot, err = w.sched.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot, w.PositionEncoding())
+	}
 
 	if analyzeCtx.Err() != nil {
 		w.logger.Debug(
@@ -448,6 +463,16 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 
 // FileChanged handles a watched file change notification.
 func (w *Workspace) FileChanged(uri string, changeType protocol.UInteger) {
+	// A marker event moves the root for every document beneath it, and no
+	// document declares a dependency on it, so the reverse-dependency map
+	// below would find nothing. Handled before the source-identity conversion
+	// because a marker is not a source. Nothing is stored: this is a refresh,
+	// not a cache.
+	if path, err := lsputil.URIToPath(uri); err == nil && filepath.Base(path) == schema.ModuleRootMarker {
+		w.ReanalyzeOpenDocuments()
+		return
+	}
+
 	canonicalURI := uri
 	if path, err := lsputil.URIToPath(uri); err == nil {
 		path = lsputil.CanonicalPath(path)
@@ -486,29 +511,56 @@ func (w *Workspace) Shutdown() {
 	w.sched.shutdown()
 }
 
-// FindModuleRoot finds the module root for a file path.
+// FindModuleRoot finds the module root for a file path, over four tiers: the
+// configured root, then the directory of the nearest ancestor holding a
+// module-root marker, then the nearest workspace folder containing the file,
+// then the file's own directory.
+//
+// The marker beats the workspace folder because the marker is a file the
+// author committed and the folder is wherever the editor happened to be
+// opened. The folder tier survives for a workspace carrying no marker, and
+// goes dead the moment one is added.
+//
+// An error means a marker exists and cannot be honoured. It is returned rather
+// than swallowed: falling through to the folder would be the silently ignored
+// marker that discovery exists to remove.
 //
 // This method acquires its own lock to safely read w.roots and w.config.
 // Callers must NOT hold w.mu when calling this method to avoid deadlock.
-func (w *Workspace) FindModuleRoot(path string) string {
+func (w *Workspace) FindModuleRoot(path string) (string, error) {
+	// The configured root and a copy of the folder list are read under the
+	// lock; the marker walk is filesystem I/O and runs outside it, on every
+	// debounced analysis.
 	w.mu.RLock()
-	defer w.mu.RUnlock()
+	configured := w.config.ModuleRoot
+	roots := slices.Clone(w.roots)
+	w.mu.RUnlock()
 
-	if w.config.ModuleRoot != "" {
-		return w.config.ModuleRoot
+	if configured != "" {
+		return configured, nil
+	}
+
+	// No cache: the editor cannot see a marker being created or deleted, and
+	// a cached miss would be the ignored marker again. A marker event
+	// re-analyzes instead (see FileChanged).
+	switch root, found, err := schema.FindModuleRoot(filepath.Dir(path)); {
+	case err != nil:
+		return "", fmt.Errorf("discover module root for %q: %w", path, err)
+	case found:
+		return root, nil
 	}
 
 	var nearest string
-	for _, root := range w.roots {
+	for _, root := range roots {
 		if (path == root || strings.HasPrefix(path, root+string(filepath.Separator))) && len(root) > len(nearest) {
 			nearest = root
 		}
 	}
 	if nearest != "" {
-		return nearest
+		return nearest, nil
 	}
 
-	return filepath.Dir(path)
+	return filepath.Dir(path), nil
 }
 
 // LatestSnapshot returns the latest snapshot for a URI.

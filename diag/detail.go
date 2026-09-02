@@ -133,6 +133,45 @@ const (
 	// DetailKeyHashAlgorithm is the unrecognized hash algorithm version.
 	// Used with E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM.
 	DetailKeyHashAlgorithm = "hash_algorithm"
+
+	// DetailKeyModuleRoot is the canonical module root the load resolved
+	// module-style imports against, empty when the load had none. Carried by
+	// every issue in the import-resolution family (see
+	// [IsImportResolutionCode]) and by E_LOAD_MODULE_ROOT_MALFORMED.
+	DetailKeyModuleRoot = "module_root"
+
+	// DetailKeyModuleRootOrigin names where the module root came from, over
+	// the five values [ModuleRootExplicit], [ModuleRootDiscovered],
+	// [ModuleRootSynthetic], [ModuleRootDefault] and [ModuleRootNone]. It is
+	// the machine-readable half of what the message states in words: a
+	// resolution failure under a defaulted root means something different
+	// from one under a root the caller named.
+	DetailKeyModuleRootOrigin = "module_root_origin"
+)
+
+// Module-root origin values for [DetailKeyModuleRootOrigin].
+//
+// The five are exhaustive: a load either was given a root, found one, stands
+// on a synthetic one, fell back to the entry schema's directory, or has no
+// root in play at all. The last is not the same as the fourth — a string
+// source and a Builder-built schema have no directory to default to.
+const (
+	// ModuleRootExplicit means the caller supplied the root.
+	ModuleRootExplicit = "explicit"
+
+	// ModuleRootDiscovered means a yammm.mod marker in an ancestor directory
+	// supplied the root.
+	ModuleRootDiscovered = "discovered"
+
+	// ModuleRootSynthetic means a synthetic root stands in for the module root.
+	ModuleRootSynthetic = "synthetic"
+
+	// ModuleRootDefault means the root defaulted to the entry schema's own
+	// directory because no marker was found and none was given.
+	ModuleRootDefault = "default"
+
+	// ModuleRootNone means the load had no module root at all.
+	ModuleRootNone = "none"
 )
 
 // ExpectedGot creates a pair of details for type mismatch diagnostics.

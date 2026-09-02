@@ -2,6 +2,7 @@ package docs_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -338,4 +339,67 @@ func TestDocumentedFormatSurface(t *testing.T) {
 	)
 	wrap, align, indent, width = format.WrapLongLines, format.AlignColumns, format.NormalizeIndentation, format.DisplayWidth
 	_, _, _, _ = wrap, align, indent, width
+}
+
+// TestDocumentedModuleRootDiscovery pins the module-root discovery surface the
+// "Module root discovery" section documents: the finder's three results, the
+// typed error matched with errors.As and the fields the prose names, the issue
+// builder, the marker constant, and the family predicate. A signature change
+// fails here rather than only leaving the prose stating a call that no longer
+// exists.
+func TestDocumentedModuleRootDiscovery(t *testing.T) {
+	t.Parallel()
+
+	// The three documented signatures, held as typed values so a shape change
+	// fails here rather than only in the prose.
+	var (
+		find         func(string) (string, bool, error)
+		buildIssue   func(error) diag.Issue
+		isResolution func(string) bool
+	)
+	find, buildIssue, isResolution = schema.FindModuleRoot, schema.ModuleRootIssue, diag.IsImportResolutionCode
+
+	dir := t.TempDir()
+	root, found, err := find(dir)
+	if err != nil {
+		t.Fatalf("FindModuleRoot on a marker-free temp dir: %v", err)
+	}
+	if found || root != "" {
+		t.Fatalf("FindModuleRoot = (%q, %v); a marker sits above this test's temp directory", root, found)
+	}
+
+	// The documented errors.As shape and the three fields the section names.
+	marker := filepath.Join(dir, schema.ModuleRootMarker)
+	if err := os.WriteFile(marker, []byte("module example.com/thing\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = find(dir)
+	malformed, ok := errors.AsType[*schema.MalformedModuleRootError](err)
+	if !ok {
+		t.Fatalf("errors.AsType against *MalformedModuleRootError failed for %v", err)
+	}
+	if malformed.Path == "" || malformed.Line == 0 || malformed.Reason == "" {
+		t.Errorf("the documented fields are not all populated: %+v", malformed)
+	}
+
+	if code := buildIssue(err).Code(); code != diag.E_LOAD_MODULE_ROOT_MALFORMED {
+		t.Errorf("ModuleRootIssue produced %v, want E_LOAD_MODULE_ROOT_MALFORMED", code)
+	}
+
+	// The family predicate and the origin vocabulary the section enumerates.
+	for _, code := range []diag.Code{diag.E_IMPORT_RESOLVE, diag.E_PATH_ESCAPE, diag.E_IMPORT_CYCLE} {
+		if !isResolution(code.String()) {
+			t.Errorf("%s is documented as a member of the import-resolution family", code)
+		}
+	}
+	for _, origin := range []string{
+		diag.ModuleRootExplicit, diag.ModuleRootDiscovered,
+		diag.ModuleRootSynthetic, diag.ModuleRootDefault, diag.ModuleRootNone,
+	} {
+		if origin == "" {
+			t.Error("an origin value the section enumerates is empty")
+		}
+	}
+	_ = diag.DetailKeyModuleRoot
+	_ = diag.DetailKeyModuleRootOrigin
 }

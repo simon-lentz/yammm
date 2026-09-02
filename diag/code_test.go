@@ -406,35 +406,29 @@ func TestNewCodeDuplicatePanics(t *testing.T) {
 }
 
 // TestIsImportDeclarationCode_PartitionsEveryImportCode pins that every code in
-// [CategoryImport] is classified by [IsImportDeclarationCode] as exactly one of
-// the two families it splits: declaration codes (a rejected, duplicated,
-// colliding, or invalid import alias — downgraded to Hint in the LSP markdown
-// surface) and resolution codes (a path/cycle/escape failure that keeps Error
-// severity). The classification is a hand-maintained switch rather than a
-// property of the Code, so this guard converts the silent-drift risk into a
-// loud failure: a new CategoryImport code added without a home in
-// IsImportDeclarationCode's switch (nor in this test's resolution set) fails
-// here rather than silently mis-rendering in the markdown surface.
+// [CategoryImport] is classified as exactly one of the two families the
+// predicates split: declaration codes (a rejected, duplicated, colliding, or
+// invalid import alias — downgraded to Hint in the LSP markdown surface) and
+// resolution codes (a path/cycle/escape failure that keeps Error severity and
+// carries the module root and its origin as details).
+//
+// Both classifications are hand-maintained switches rather than properties of
+// the Code, so this guard converts the silent-drift risk into a loud failure:
+// a new CategoryImport code added to neither switch — or to both — fails here
+// rather than silently mis-rendering in the markdown surface or shipping an
+// issue with no provenance.
 func TestIsImportDeclarationCode_PartitionsEveryImportCode(t *testing.T) {
-	// The resolution family — import codes that must KEEP Error severity in
-	// markdown blocks. Mirrors the split documented on IsImportDeclarationCode.
-	resolution := map[Code]bool{
-		E_IMPORT_RESOLVE: true,
-		E_IMPORT_CYCLE:   true,
-		E_PATH_ESCAPE:    true,
-	}
-
 	imports := CodesByCategory(CategoryImport)
 	if len(imports) == 0 {
 		t.Fatal("CategoryImport has no codes; the partition guard would pass vacuously")
 	}
 	for _, code := range imports {
 		isDecl := IsImportDeclarationCode(code.String())
-		isRes := resolution[code]
+		isRes := IsImportResolutionCode(code.String())
 		if isDecl == isRes {
-			t.Errorf("import code %s: IsImportDeclarationCode=%v, in resolution set=%v; "+
-				"every CategoryImport code must be exactly one — add it to "+
-				"IsImportDeclarationCode's switch or to this test's resolution set",
+			t.Errorf("import code %s: IsImportDeclarationCode=%v, IsImportResolutionCode=%v; "+
+				"every CategoryImport code must satisfy exactly one — add it to "+
+				"one switch and not the other",
 				code, isDecl, isRes)
 		}
 	}

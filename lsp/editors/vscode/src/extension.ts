@@ -389,7 +389,14 @@ function startLanguageServer(context: ExtensionContext, serverPath: string) {
             { scheme: 'file', language: 'markdown' },
         ],
         synchronize: {
-            fileEvents: workspace.createFileSystemWatcher('**/*.yammm'),
+            // The marker watcher is not optional decoration: creating,
+            // editing or deleting a yammm.mod moves the module root for every
+            // schema beneath it, and the server caches no root, so this event
+            // is the only signal that resolution changed.
+            fileEvents: [
+                workspace.createFileSystemWatcher('**/*.yammm'),
+                workspace.createFileSystemWatcher('**/yammm.mod'),
+            ],
         },
         outputChannel: outputChannel,
         traceOutputChannel: outputChannel,

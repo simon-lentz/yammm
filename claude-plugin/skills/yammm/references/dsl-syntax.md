@@ -32,6 +32,7 @@ import "./defaults"                        // alias auto-derived as "defaults"
 - Reserved keywords cannot be used as aliases: `schema`, `import`, `as`, `type`, `datatype`, `abstract`, `part`, `extends`, `includes`, `required`, `primary`, `one`, `many`, `in`. The literals `true`, `false`, and `nil` are also reserved. Built-in type names (`Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`) are reserved because the lexer tokenizes them as literal tokens rather than identifiers.
 - Circular imports are detected and rejected.
 - Paths are sandboxed and cannot escape the module root.
+- The module root is the directory holding the nearest `yammm.mod` marker above the schema, unless the caller supplies one explicitly; failing both, it is the schema's own directory.
 - The `.yammm` extension is optional and appended if absent.
 - Imported types and aliases must be qualified: `alias.TypeName`, `alias.MoneyType`.
 

@@ -61,7 +61,7 @@ func run(stdout io.Writer, args []string) error {
 	var (
 		logLevel      = fs.String("log-level", "info", "log level: error|warn|info|debug|trace")
 		logFile       = fs.String("log-file", "", "log file path (empty to log to stderr)")
-		moduleRoot    = fs.String("module-root", "", "override module root for import resolution")
+		moduleRoot    = fs.String("module-root", "", "override module root for import resolution (default: the nearest ancestor holding yammm.mod, else the workspace folder, else the file's directory)")
 		debounceDelay = fs.Duration("debounce-delay", 0, "delay between a document change and re-analysis (0 uses the server default, 150ms)")
 		showVer       = fs.Bool("version", false, "print version and exit")
 		_             = fs.Bool("stdio", false, "use stdio transport (default, accepted for VS Code compatibility)")
