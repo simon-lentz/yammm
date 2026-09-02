@@ -877,25 +877,6 @@ if !header.SchemaHashMatches(s) {
 
 `SchemaHashMatches` is nil-safe and returns `false` without panicking when the receiver is nil, the schema is nil, the header's `SchemaHash` is empty, the header's `SchemaHashAlgorithm` does not match `schema.StructuralHashVersion`, or `schema.StructuralHash(s)` returns an empty string. Dispatch callers treat `false` as "unknown or incompatible schema, do not proceed" rather than silently continuing.
 
-#### UnknownTypes — the other half of the same cross-check
-
-`HeaderInfo.UnknownTypes(s *schema.Schema) []TypeRef` returns the header's types-table rows that `s`'s import closure does not declare. An empty result means every row binds at `Load`.
-
-```go
-if !header.SchemaHashMatches(s) {
-    return stateStaleSchema  // the schema shape changed under one source path
-}
-if unknown := header.UnknownTypes(s); len(unknown) > 0 {
-    return stateStaleSchema  // the same shape, recorded under different paths
-}
-```
-
-The two are complements, and a dispatch caller wants both. `schema.StructuralHash` hashes names and never source paths, so a snapshot written under one schema layout and read under another **passes** the hash check, classifies as resumable, and then fails at `snapshot.Load` with one `E_SNAPSHOT_UNKNOWN_TYPE` per row. Both checks run on a header-only read, before any body decode.
-
-The returned rows and the closure's own `SourceID().String()` values side by side are the whole diagnosis; log them.
-
-Nil-safety: a nil receiver returns nil, and a nil schema returns every row. `SnapshotInfo` carries the same `Types` rows and deliberately has no such method — a caller holding one has already paid the full decode, which is the cost this method exists to avoid.
-
 ### Atomic Writing
 
 `snapshot.WriteFile` persists bytes to a path using the `tmp+fsync+rename` protocol — the standard crash-safe write primitive every yammm consumer needs when turning `Marshal` output into a durable `.ys` file:

@@ -264,23 +264,6 @@ func (sd *streamDecoder) refAt(row int) string {
 	return TypeRef(sd.typeTable[row]).String()
 }
 
-// unknownTypeRows returns the rows s's import closure does not declare, in table
-// order. It delegates to typeByWireID, so the exact-path match with no name
-// fallback has one implementation and a caller cannot end up with a copy of it
-// that drifts. A nil schema declares nothing, so every row comes back.
-//
-// It takes []TypeRef rather than a carrier so both Info surfaces can call it;
-// only HeaderInfo exposes it today (see [HeaderInfo.UnknownTypes]).
-func unknownTypeRows(rows []TypeRef, s *schema.Schema) []TypeRef {
-	var unknown []TypeRef
-	for _, row := range rows {
-		if _, ok := typeByWireID(s, row.Schema, row.Name); !ok {
-			unknown = append(unknown, row)
-		}
-	}
-	return unknown
-}
-
 // typeRefs returns the table as the schema-less display surface.
 func (sd *streamDecoder) typeRefs() []TypeRef {
 	refs := make([]TypeRef, len(sd.typeTable))
