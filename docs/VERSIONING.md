@@ -851,7 +851,7 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 ## Unreleased — merged to `main`
 
-*Condition-1 unit 4's fixes (`schema/`), on branch `review` at `9007281` and not yet merged. Written in the fix pass that landed the behaviour, not at the tag (A-227). The declaration count below is measured on the committed tree; the run at the merge (A-177) confirms it.*
+*Condition-1 unit 4's fixes (`schema/`), merged to `main` as `fabed40` (PR #102) on 2026-09-03 and not yet released. Written in the fix pass that landed the behaviour, not at the tag (A-227). The declaration count below is measured at `9007281`, whose Go tree is `main`'s; the tag-time run re-confirms it.*
 
 Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive rules, plus an additive builtin catalogue and four diagnostic codes. **The declaration delta is measured, not written from memory:** `gorelease -base=v0.20.0` at `9007281` reports **two incompatible changes and twenty-eight additions**, suggested `v0.21.0`. **What `gorelease` cannot see is most of this section**: the DSL's grammar, the static invariant checker, the evaluator's scope, the registry's rule and the loader's reads all changed with no declaration moving.
 
