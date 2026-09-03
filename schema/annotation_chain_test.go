@@ -893,9 +893,9 @@ func TestAnnotation_Chain_EqualRelationRivalsCollapseAndAreAllNamed(t *testing.T
 	res := loadStringErr(t, `schema "main"
 type U { id String primary }
 type V { id String primary }
-abstract type A { --> Rel (one) U }
-abstract type B { --> Rel (one) V }
-abstract type C { --> Rel (one) V }
+abstract type A { --> REL (one) U }
+abstract type B { --> REL (one) V }
+abstract type C { --> REL (one) V }
 type T extends A, B, C { id String primary }`)
 	wantCounts(t, res, map[diag.Code]int{diag.E_RELATION_COLLISION: 1})
 
@@ -925,9 +925,9 @@ func TestAnnotation_Chain_DistinctRelationRivalsStaySeparate(t *testing.T) {
 type U { id String primary }
 type V { id String primary }
 type W { id String primary }
-abstract type A { --> Rel (one) U }
-abstract type B { --> Rel (one) V }
-abstract type C { --> Rel (one) W }
+abstract type A { --> REL (one) U }
+abstract type B { --> REL (one) V }
+abstract type C { --> REL (one) W }
 type T extends A, B, C { id String primary }`)
 	wantCounts(t, res, map[diag.Code]int{diag.E_RELATION_COLLISION: 2})
 }

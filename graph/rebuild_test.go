@@ -349,7 +349,7 @@ func TestRebuildSnapshot_OneSlotConflictResolvesThroughSlot(t *testing.T) {
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
-				Composed:   map[string][]graph.InstanceParts{"child": {occupant}},
+				Composed:   map[string][]graph.InstanceParts{"CHILD": {occupant}},
 			}},
 		},
 		Duplicates: []graph.DuplicateParts{{
@@ -364,7 +364,7 @@ func TestRebuildSnapshot_OneSlotConflictResolvesThroughSlot(t *testing.T) {
 			ConflictType: childID,
 			ParentType:   parentID,
 			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "child",
+			Relation:     "CHILD",
 		}},
 	}
 
@@ -409,7 +409,7 @@ func TestRebuildSnapshot_ManyConflictSelectsByStatedKey(t *testing.T) {
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
-				Composed:   map[string][]graph.InstanceParts{"children": {child("c1", "kept"), child("c2", "other")}},
+				Composed:   map[string][]graph.InstanceParts{"CHILDREN": {child("c1", "kept"), child("c2", "other")}},
 			}},
 		},
 		Duplicates: []graph.DuplicateParts{{
@@ -420,7 +420,7 @@ func TestRebuildSnapshot_ManyConflictSelectsByStatedKey(t *testing.T) {
 			ConflictKey:  immutable.WrapKey([]any{"c1"}),
 			ParentType:   parentID,
 			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "children",
+			Relation:     "CHILDREN",
 		}},
 	}
 
@@ -461,7 +461,7 @@ func TestRebuildSnapshot_ConflictTypeMismatchIsReported(t *testing.T) {
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
-				Composed: map[string][]graph.InstanceParts{"child": {{
+				Composed: map[string][]graph.InstanceParts{"CHILD": {{
 					TypeName:   "Child",
 					TypeID:     childID,
 					PrimaryKey: immutable.WrapKey([]any{"c1"}),
@@ -481,7 +481,7 @@ func TestRebuildSnapshot_ConflictTypeMismatchIsReported(t *testing.T) {
 			ConflictType: parentID,
 			ParentType:   parentID,
 			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "child",
+			Relation:     "CHILD",
 		}},
 	}
 
@@ -510,7 +510,7 @@ func TestRebuildSnapshot_KeyedConflictTypeMismatchIsReported(t *testing.T) {
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
-				Composed: map[string][]graph.InstanceParts{"children": {{
+				Composed: map[string][]graph.InstanceParts{"CHILDREN": {{
 					TypeName:   "Child",
 					TypeID:     childID,
 					PrimaryKey: immutable.WrapKey([]any{"c1"}),
@@ -531,7 +531,7 @@ func TestRebuildSnapshot_KeyedConflictTypeMismatchIsReported(t *testing.T) {
 			ConflictKey:  immutable.WrapKey([]any{"c1"}),
 			ParentType:   parentID,
 			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "children",
+			Relation:     "CHILDREN",
 		}},
 	}
 
@@ -612,7 +612,7 @@ func TestRebuildSnapshot_EmptyConflictKeyNeedsSoleOccupant(t *testing.T) {
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
-				Composed:   map[string][]graph.InstanceParts{"children": {child("c1"), child("c2")}},
+				Composed:   map[string][]graph.InstanceParts{"CHILDREN": {child("c1"), child("c2")}},
 			}},
 		},
 		Duplicates: []graph.DuplicateParts{{
@@ -622,7 +622,7 @@ func TestRebuildSnapshot_EmptyConflictKeyNeedsSoleOccupant(t *testing.T) {
 			ConflictType: childID,
 			ParentType:   parentID,
 			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "children",
+			Relation:     "CHILDREN",
 		}},
 	}
 

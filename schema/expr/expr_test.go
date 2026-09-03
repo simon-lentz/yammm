@@ -90,6 +90,24 @@ func TestStringLiteral(t *testing.T) {
 		_, ok := expr.StringLiteral(nil)
 		assert.False(t, ok)
 	})
+
+	t.Run("s-expression is not a string literal", func(t *testing.T) {
+		// SExpr.Literal() is the op name, which is a string; that must not
+		// make an S-expression pass as a member or property name.
+		_, ok := expr.StringLiteral(expr.SExpr{expr.Op("Len"), expr.NewLiteral("x")})
+		assert.False(t, ok)
+	})
+
+	t.Run("datatype literal is not a string literal", func(t *testing.T) {
+		_, ok := expr.StringLiteral(expr.DatatypeLiteral("Integer"))
+		assert.False(t, ok)
+	})
+	t.Run("op is not a string literal", func(t *testing.T) {
+		// Op.Literal() returns the operator's spelling, which is a string;
+		// an operator standing alone must not pass as a name either.
+		_, ok := expr.StringLiteral(expr.Op("Len"))
+		assert.False(t, ok)
+	})
 }
 
 func TestIsNilLiteral(t *testing.T) {

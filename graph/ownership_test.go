@@ -37,8 +37,8 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
 
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child1)
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child2)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child1)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child2)
 
 	// Get multiple snapshots
 	snap1 := g.Snapshot()
@@ -82,7 +82,7 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	}
 
 	// Verify composed children are accessible
-	children := parents1[0].Composed("children")
+	children := parents1[0].Composed("CHILDREN")
 	if children == nil {
 		t.Fatal("Expected children composition on parent")
 	}
@@ -113,7 +113,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 		[]any{"c3"}, map[string]any{"name": "Third Child"})
 
 	for _, child := range []*instance.ValidInstance{child1, child2, child3} {
-		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
+		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed should succeed: %v", err)
 		}
@@ -126,7 +126,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
-	children := parents[0].Composed("children")
+	children := parents[0].Composed("CHILDREN")
 	if children == nil {
 		t.Fatal("Expected children composition")
 	}
@@ -191,7 +191,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	// Add composed child AFTER snapshot
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
 
 	// Take second snapshot
 	snap2 := g.Snapshot()
@@ -201,7 +201,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	if len(parents1) != 1 {
 		t.Fatalf("Expected 1 parent in snap1, got %d", len(parents1))
 	}
-	children1 := parents1[0].Composed("children")
+	children1 := parents1[0].Composed("CHILDREN")
 	if len(children1) != 0 {
 		t.Errorf("snap1 should have 0 children, got %d (snapshot not isolated!)", len(children1))
 	}
@@ -211,7 +211,7 @@ func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
 	if len(parents2) != 1 {
 		t.Fatalf("Expected 1 parent in snap2, got %d", len(parents2))
 	}
-	children2 := parents2[0].Composed("children")
+	children2 := parents2[0].Composed("CHILDREN")
 	if len(children2) != 1 {
 		t.Errorf("snap2 should have 1 child, got %d", len(children2))
 	}
@@ -293,7 +293,7 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	// Add person with reference to company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"acme"}})
+		"EMPLOYER", [][]any{{"acme"}})
 	g.Add(ctx, person)
 
 	snap := g.Snapshot()

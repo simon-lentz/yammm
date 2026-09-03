@@ -210,10 +210,10 @@ func (s *Schema) HasSourceProvider() bool {
 // empty root passed to LoadSourcesWithEntry, or a Builder-built schema.
 //
 // The entry schema and every import compiled by the same load record that
-// load's root. An import reused from a shared Registry cache (see
-// [WithRegistry]) instead retains the root of the load that originally
-// compiled it: sealed schemas are immutable, and the cache hands the same
-// pointer to every load that hits it.
+// load's root. A schema reused from a shared Registry (see [WithRegistry]) —
+// an import, or an entry the registry already held with identical content —
+// instead retains the root of the load that first compiled it: sealed
+// schemas are immutable, and the registry hands one pointer to every load.
 func (s *Schema) ModuleRoot() string {
 	return s.moduleRoot
 }
@@ -223,6 +223,9 @@ func (s *Schema) ModuleRoot() string {
 // seal marks the schema as immutable.
 // Called by the loader after all post-completion wiring is done.
 func (s *Schema) seal() {
+	if s.sealed {
+		panic("schema: sealed twice")
+	}
 	s.sealed = true
 }
 

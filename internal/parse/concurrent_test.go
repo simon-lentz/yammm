@@ -79,8 +79,8 @@ func TestRender_Discriminates(t *testing.T) {
 		},
 		{
 			"relation kind",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B\n}\n",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t*-> r B\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> R B\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t*-> R B\n}\n",
 		},
 		{
 			"invariant operator",
@@ -146,18 +146,18 @@ func TestRender_Discriminates(t *testing.T) {
 		},
 		{
 			"relation multiplicity",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r (one) B\n}\n",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r (many) B\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> R (one) B\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> R (many) B\n}\n",
 		},
 		{
 			"relation target",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B\n}\n",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r C\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> R B\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> R C\n}\n",
 		},
 		{
 			"edge property",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B { since Timestamp }\n}\n",
-			"schema \"a\"\ntype A {\n\tid String primary\n\t--> r B { until Timestamp }\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> R B { since Timestamp }\n}\n",
+			"schema \"a\"\ntype A {\n\tid String primary\n\t--> R B { until Timestamp }\n}\n",
 		},
 		{
 			"annotation detached line",
@@ -231,7 +231,7 @@ func TestRender_CarriesEveryNodeField(t *testing.T) {
 		"\tid String primary\n" +
 		"\tn Integer required\n" +
 		"\t@index\n" +
-		"\t--> r (many) B { since Timestamp }\n" +
+		"\t--> R (many) B { since Timestamp }\n" +
 		"}\n"
 
 	file, issues := Parse([]byte(src), location.NewSourceID("c.yammm"))
@@ -247,7 +247,7 @@ func TestRender_CarriesEveryNodeField(t *testing.T) {
 		{"part flag", "A/falsetrue"},
 		{"extends target", "^.Base"},
 		{"primary and required flags", "n/falsetrue"},
-		{"relation name and multiplicity", "/r/truetrue"},
+		{"relation name and multiplicity", "/R/truetrue"},
 		{"relation target", ">.B"},
 		{"edge property", "since/falsefalse"},
 		{"annotation detached line", "@index/false/8"},

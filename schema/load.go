@@ -13,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
@@ -72,16 +75,87 @@ func newRootLoader(moduleRoot string) (*rootLoader, error) {
 	return &rootLoader{root: root, rootPath: canonicalRoot}, nil
 }
 
-// openFile opens a file relative to the module root with sandboxed access.
-// Returns ErrPathEscape if the path would escape the module root.
+// openFile opens a regular file relative to the module root with sandboxed
+// access. Returns ErrPathEscape if the path would escape the module root and
+// errNotRegularFile if it names anything but a regular file.
 func (rl *rootLoader) openFile(relativePath string) (*os.File, error) {
-	// Clean the path to normalize separators and remove . and ..
 	cleanPath := filepath.Clean(relativePath)
-	f, err := rl.root.Open(cleanPath)
+	return openRegular(func(flag int) (*os.File, error) {
+		f, err := rl.root.OpenFile(cleanPath, flag, 0)
+		if err != nil {
+			return nil, rl.handleOpenError(err, relativePath)
+		}
+		return f, nil
+	})
+}
+
+// maxSchemaSourceBytes bounds one schema source, entry or import. The largest
+// real schema is tens of kilobytes; the bound stops a stray large file from
+// being read whole before anything can refuse it.
+const maxSchemaSourceBytes = 16 << 20
+
+// readAtMost reads r up to limit bytes and reports whether more remained. It
+// reads one byte past the limit so a source exactly at it is legal and the
+// first byte beyond it is detectable without reading the rest.
+func readAtMost(r io.Reader, limit int64) (content []byte, tooLong bool, err error) {
+	content, err = io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {
-		return nil, rl.handleOpenError(err, relativePath)
+		return nil, false, fmt.Errorf("read: %w", err)
+	}
+	if int64(len(content)) > limit {
+		return nil, true, nil
+	}
+	return content, false, nil
+}
+
+// readSource reads one schema source up to maxSchemaSourceBytes, naming what
+// it read in any error.
+func readSource(r io.Reader, what string) ([]byte, error) {
+	content, tooLong, err := readAtMost(r, maxSchemaSourceBytes)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	if tooLong {
+		return nil, fmt.Errorf("%s is larger than %d bytes, the most a schema source may hold", what, maxSchemaSourceBytes)
+	}
+	return content, nil
+}
+
+// errNotRegularFile is what openRegular returns for a path that names anything
+// but a regular file.
+var errNotRegularFile = errors.New("not a regular file")
+
+// openRegular opens a file for reading and refuses anything but a regular
+// file. The open is non-blocking so a FIFO cannot stall it, and the kind is
+// read from the open descriptor so nothing can change between check and read.
+func openRegular(open func(flag int) (*os.File, error)) (*os.File, error) {
+	f, err := open(os.O_RDONLY | syscall.O_NONBLOCK)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("stat: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, errNotRegularFile
 	}
 	return f, nil
+}
+
+// readSourceFile opens and reads one schema file within the source bound.
+func readSourceFile(absPath string) ([]byte, error) {
+	f, err := openRegular(func(flag int) (*os.File, error) { return os.OpenFile(absPath, flag, 0) })
+	if err != nil {
+		if errors.Is(err, errNotRegularFile) {
+			return nil, fmt.Errorf("schema path %q is not a regular file", absPath)
+		}
+		return nil, fmt.Errorf("read %q: %w", absPath, err)
+	}
+	defer f.Close()
+	return readSource(f, fmt.Sprintf("schema %q", absPath))
 }
 
 // readFile reads a file relative to the module root with sandboxed access.
@@ -89,13 +163,16 @@ func (rl *rootLoader) openFile(relativePath string) (*os.File, error) {
 func (rl *rootLoader) readFile(relativePath string) ([]byte, location.SourceID, error) {
 	f, err := rl.openFile(relativePath)
 	if err != nil {
+		if errors.Is(err, errNotRegularFile) {
+			return nil, location.SourceID{}, fmt.Errorf("import %q is not a regular file", relativePath)
+		}
 		return nil, location.SourceID{}, err
 	}
 	defer f.Close()
 
-	content, err := io.ReadAll(f)
+	content, err := readSource(f, fmt.Sprintf("import %q", relativePath))
 	if err != nil {
-		return nil, location.SourceID{}, fmt.Errorf("read import %q: %w", relativePath, err)
+		return nil, location.SourceID{}, err
 	}
 
 	// Construct SourceID from the canonical path
@@ -173,10 +250,9 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 		return fatalResult(fmt.Errorf("resolve path %q: %w", path, err), diag.Result{})
 	}
 
-	// Read the file content
-	content, err := os.ReadFile(absPath)
+	content, err := readSourceFile(absPath)
 	if err != nil {
-		return fatalResult(fmt.Errorf("read %q: %w", absPath, err), diag.Result{})
+		return fatalResult(err, diag.Result{})
 	}
 
 	// Determine module root and canonicalize for consistent path comparison.
@@ -221,17 +297,6 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	}
 	if s == nil {
 		return nil, result
-	}
-
-	// Perform cross-schema inheritance cycle detection if there are imports.
-	// This runs after all schemas are loaded when full cross-schema visibility is available.
-	if ldr.registry.Len() > 1 {
-		if cycleIssues := detectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
-			for _, issue := range cycleIssues {
-				ldr.collector.Collect(*issue)
-			}
-			return nil, ldr.collector.Result()
-		}
 	}
 
 	return s, result
@@ -356,10 +421,12 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		// Use the provided entry path
 		selectedEntry = entryPath
 	} else {
-		// Fall back to lexicographic selection
+		// Fall back to lexicographic selection. A found flag, not the empty
+		// string, marks "nothing chosen yet": an empty key is a legal entry.
+		var found bool
 		for path := range sources {
-			if selectedEntry == "" || path < selectedEntry {
-				selectedEntry = path
+			if !found || path < selectedEntry {
+				selectedEntry, found = path, true
 			}
 		}
 	}
@@ -382,17 +449,6 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	}
 	if s == nil {
 		return nil, result
-	}
-
-	// Perform cross-schema inheritance cycle detection if there are imports.
-	// This runs after all schemas are loaded when full cross-schema visibility is available.
-	if ldr.registry.Len() > 1 {
-		if cycleIssues := detectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
-			for _, issue := range cycleIssues {
-				ldr.collector.Collect(*issue)
-			}
-			return nil, ldr.collector.Result()
-		}
 	}
 
 	return s, result
@@ -718,9 +774,16 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 
 	// Register the schema
 	if err := l.registry.Register(s); err != nil {
-		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_TYPE,
-			fmt.Sprintf("register schema: %v", err)).Build())
+		l.collector.Collect(l.registerFailureIssue(s, err))
 		return nil, l.collector.Result(), nil
+	}
+
+	// Two loads sharing a registry can both complete one import in the window
+	// between the cache miss and this call; Register keeps the first and
+	// returns nil for an identical second. Adopt the registered pointer so
+	// every reader of this load sees one object per SourceID.
+	if canonical, ok := l.registry.LookupBySourceID(sourceID); ok {
+		s = canonical
 	}
 
 	l.mu.Lock()
@@ -728,6 +791,54 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	l.mu.Unlock()
 
 	return s, l.collector.Result(), nil
+}
+
+// registerFailureIssue renders a Registry.Register refusal at the schema
+// declaration it is about, naming the source that already holds the name so a
+// reader can find the other half of the clash. Only DuplicateName is an
+// authoring mistake — a registry holds one schema per name, whichever loads
+// registered them — and it draws E_DUPLICATE_SCHEMA; the other kinds mean the
+// loader built something it should not have.
+func (l *loader) registerFailureIssue(s *Schema, err error) diag.Issue {
+	regErr, ok := errors.AsType[*RegistryError](err)
+	if !ok {
+		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			"register schema: "+err.Error()).WithSpan(s.Span()).Build()
+	}
+
+	switch regErr.Kind {
+	case DuplicateName:
+		existing, found := l.registry.LookupByName(s.Name())
+		held := "another source in this closure"
+		if found {
+			held = existing.SourceID().String()
+		}
+		b := diag.NewIssue(diag.Error, diag.E_DUPLICATE_SCHEMA,
+			fmt.Sprintf("schema name %q is already registered by %s; a registry holds "+
+				"one schema per name", s.Name(), held)).
+			WithSpan(s.Span()).
+			WithDetail(diag.DetailKeySchemaName, s.Name())
+		if found {
+			b = b.WithRelated(location.RelatedInfo{
+				Span:    existing.Span(),
+				Message: fmt.Sprintf("%q is declared here", existing.Name()),
+			})
+		}
+		return b.Build()
+	case DuplicateSourceID:
+		// A caller's condition, not the loader's: the registry holds this
+		// source as another load compiled it, and the file has changed since.
+		return diag.NewIssue(diag.Error, diag.E_LOAD_SOURCE_CHANGED,
+			"source re-registered with different content: "+regErr.Message).
+			WithSpan(s.Span()).Build()
+	case InvalidSourceID, InvalidName:
+		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			"the loader built an unregisterable schema: "+regErr.Message).
+			WithSpan(s.Span()).Build()
+	default:
+		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			"register schema: "+regErr.Message).WithSpan(s.Span()).Build()
+	}
 }
 
 // rejectDisallowedImports reports whether the load context structurally
@@ -1329,7 +1440,9 @@ func syntheticSourceKey(key string) (string, error) {
 	if cleaned == "." {
 		return "", fmt.Errorf("source key %q resolves to the synthetic root itself", key)
 	}
-	return cleaned, nil
+	// NFC completes the three normalizations location.SourceIDFromAbsolutePath
+	// applies for a file-backed key; location.NewSourceID applies none.
+	return norm.NFC.String(cleaned), nil
 }
 
 // normalizeSyntheticRoot validates cfg's synthetic root against the load it was
@@ -1359,7 +1472,9 @@ func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) 
 		return "", fmt.Errorf("synthetic root %q cannot be combined with module root %q: "+
 			"pass an empty module root, which the synthetic root stands in for", cfg.syntheticRoot, moduleRoot)
 	}
-	return root, nil
+	// NFC, as syntheticSourceKey applies to the key half: two spellings of one
+	// root must mint one identity, as two spellings of one key do.
+	return norm.NFC.String(root), nil
 }
 
 // rejectSyntheticRoot refuses WithSyntheticRoot on the load functions it cannot

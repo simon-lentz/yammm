@@ -140,6 +140,9 @@ type T {
 	! "p_index_list_property_last" tags[2] == "gamma"
 	! "d_index_list_property_oob_nil" tags[9] == nil
 	! "d_index_list_property_negative_nil" tags[-1] == nil
+	! "p_member_then_index" $self.tags[0] == "alpha"
+	! "p_member_then_pipeline" $self.tags -> Len == 3
+	! "p_postfix_chain_equals_grouped" $self.tags[0] == ($self.tags)[0]
 	! "d_self_is_map" ($self -> TypeOf) == "map"
 	! "d_self_len_counts_properties" ($self -> Len) > 0
 	! "d_numeric_var_unset_nil" $0 == nil

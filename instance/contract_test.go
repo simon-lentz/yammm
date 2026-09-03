@@ -87,6 +87,10 @@ func TestContract_PassCorpus(t *testing.T) {
 
 // TestContract_ErrCorpus pins the error side of the contract: each probe draws
 // exactly its predicted diagnostic, as an exact multiset over (code, message).
+// A defect the static checker refuses at load — an undefined named variable, a
+// member read through an association, a list builtin on a scalar, a bracket
+// with other than one index — cannot appear here; those rows live in
+// invariant_contract_test.go, which judges each by both layers.
 // This arm doubles as the instrument-can-fail proof for the pass corpus — if
 // invariant evaluation stopped running, the expected diagnostics vanish.
 func TestContract_ErrCorpus(t *testing.T) {
@@ -94,17 +98,12 @@ func TestContract_ErrCorpus(t *testing.T) {
 	s, data := contractFixture(t, "contract_err.yammm", "data_err.json")
 
 	want := []string{
-		"E_EVAL_ERROR: invariant evaluation error: All expects slice or array input, got int64",
-		"E_EVAL_ERROR: invariant evaluation error: Contains expects slice or array input, got string",
 		"E_EVAL_ERROR: invariant evaluation error: Upper() expects string argument, got int64",
 		"E_EVAL_ERROR: invariant evaluation error: division by zero",
 		"E_EVAL_ERROR: invariant evaluation error: expected boolean, got int64",
 		"E_EVAL_ERROR: invariant evaluation error: min of empty sequence",
 		"E_EVAL_ERROR: invariant evaluation error: modulo by zero",
 		"E_EVAL_ERROR: invariant evaluation error: reduce of empty sequence with no initial value",
-		"E_EVAL_ERROR: invariant evaluation error: slice access accepts exactly one index",
-		"E_EVAL_ERROR: invariant evaluation error: slice access requires an index",
-		"E_EVAL_ERROR: invariant evaluation error: undefined variable: $undef",
 		"E_INVARIANT_FAIL: f_nil_result_is_falsey",
 	}
 

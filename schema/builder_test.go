@@ -110,7 +110,7 @@ func TestBuilder_Relation(t *testing.T) {
 		WithName("test").
 		AddType("Person").
 		WithPrimaryKey("name", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), false, false).
+		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), false, false).
 		Done().
 		AddType("Company").
 		WithPrimaryKey("title", schema.NewStringConstraint()).
@@ -126,7 +126,7 @@ func TestBuilder_Relation(t *testing.T) {
 	// Relations are split into associations and compositions
 	rels := typ.AssociationsSlice()
 	require.Len(t, rels, 1)
-	assert.Equal(t, "employer", rels[0].Name())
+	assert.Equal(t, "EMPLOYER", rels[0].Name())
 }
 
 func TestBuilder_AbstractType(t *testing.T) {
@@ -284,7 +284,7 @@ func TestBuilder_Composition(t *testing.T) {
 		WithName("test").
 		AddType("Car").
 		WithPrimaryKey("model", schema.NewStringConstraint()).
-		WithComposition("wheels", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
+		WithComposition("WHEELS", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
 		Done().
 		AddType("Wheel").
 		AsPart().
@@ -300,7 +300,7 @@ func TestBuilder_Composition(t *testing.T) {
 
 	rels := car.CompositionsSlice()
 	require.Len(t, rels, 1)
-	assert.Equal(t, "wheels", rels[0].Name())
+	assert.Equal(t, "WHEELS", rels[0].Name())
 	assert.Equal(t, schema.RelationComposition, rels[0].Kind())
 }
 
@@ -544,7 +544,7 @@ func TestBuilder_GrammarValidNamesBuild(t *testing.T) {
 		AddType("Foo_Bar").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("first_name", schema.NewStringConstraint()).
-		WithRelation("wheels", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
+		WithRelation("WHEELS", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
 		WithRelation("WHEELS_2", schema.NewTypeRef("", "Wheel", location.Span{}), true, true).
 		Done().
 		AddType("Wheel").
@@ -779,7 +779,7 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 		AddImport("base", "base").
 		AddType("Person").
 		WithPrimaryKey("name", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("base", "Organization", location.Span{}), true, false).
+		WithRelation("EMPLOYER", schema.NewTypeRef("base", "Organization", location.Span{}), true, false).
 		Done().
 		Build()
 
@@ -792,7 +792,7 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 
 	var employerRel *schema.Relation
 	for rel := range personType.Associations() {
-		if rel.Name() == "employer" {
+		if rel.Name() == "EMPLOYER" {
 			employerRel = rel
 			break
 		}
@@ -1396,4 +1396,31 @@ func TestBuilder_ReservedKeywordAlias(t *testing.T) {
 		}
 	}
 	assert.True(t, hasError, "should emit E_INVALID_ALIAS for reserved alias")
+}
+
+// A caller-built expression may hold any Go value; one the language does not
+// define is refused as a diagnostic, never reached by the structural hash that
+// completion runs over invariants.
+func TestBuilder_RefusesAnUnsupportedLiteralKind(t *testing.T) {
+	t.Parallel()
+
+	build := func(lit any) diag.Result {
+		_, res := schema.NewBuilder().WithName("s").
+			AddType("A").AsAbstract().WithPrimaryKey("id", schema.NewStringConstraint()).
+			WithProperty("n", schema.NewIntegerConstraint()).
+			WithInvariant("rule", expr.SExpr{expr.Op(">"), expr.SExpr{expr.Op("p"), expr.NewLiteral("n")}, &expr.Literal{Val: lit}}, "").Done().
+			AddType("B").AsAbstract().WithPrimaryKey("id", schema.NewStringConstraint()).
+			WithProperty("n", schema.NewIntegerConstraint()).
+			WithInvariant("rule", expr.SExpr{expr.Op(">"), expr.SExpr{expr.Op("p"), expr.NewLiteral("n")}, &expr.Literal{Val: int64(0)}}, "").Done().
+			AddType("C").Extends(schema.LocalTypeRef("A", location.Span{})).Extends(schema.LocalTypeRef("B", location.Span{})).Done().
+			Build()
+		return res
+	}
+	res := build(1) // a Go int, not the int64 the language defines
+	if !res.HasCode(diag.E_INVALID_INVARIANT) {
+		t.Errorf("a Go int literal must be refused as E_INVALID_INVARIANT; got %v", res.Err())
+	}
+	if res := build(int64(1)); res.HasCode(diag.E_INVALID_INVARIANT) {
+		t.Errorf("an int64 literal is the language's; got %v", res.Err())
+	}
 }

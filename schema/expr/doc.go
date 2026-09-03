@@ -16,9 +16,18 @@
 // # Compilation vs Evaluation
 //
 // Compilation (turning parsed expression syntax into Expression trees) is
-// handled by the internal exprcomp package. Evaluation is handled separately by
+// handled by the internal parse package. Evaluation is handled separately by
 // the instance layer, which provides the runtime context (property values,
 // variables, etc.) needed to execute expressions.
+//
+// # Builtin Catalogue
+//
+// [BuiltinSpec] describes each pipeline builtin the language defines — its
+// argument and parameter arity, whether it takes a body, and how it types its
+// result and lambda parameters. [LookupBuiltin] and [Builtins] expose the
+// catalogue. The evaluator enforces the arity fields and the schema layer's
+// static checker follows types through pipelines with the rest, so the two
+// read one table and cannot drift.
 //
 // # Helper Functions
 //

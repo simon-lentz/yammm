@@ -31,7 +31,7 @@ func BenchmarkAdd_WithComposedChildren(b *testing.B) {
 			instancetest.Props(map[string]any{"id": string(rune('a' + i)), "name": "child"}),
 		)
 	}
-	composed := map[string]immutable.Value{"children": immutable.Wrap(kids)}
+	composed := map[string]immutable.Value{"CHILDREN": immutable.Wrap(kids)}
 
 	insts := make([]*instance.ValidInstance, b.N)
 	for i := range insts {
@@ -95,7 +95,7 @@ func benchFixture(b *testing.B) (*schema.Schema, schema.TypeID, schema.TypeID) {
 		AddType("Parent").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("children", schema.LocalTypeRef("Child", location.Span{}), true, true).
+		WithComposition("CHILDREN", schema.LocalTypeRef("Child", location.Span{}), true, true).
 		Done().
 		Build()
 	if res.HasErrors() {

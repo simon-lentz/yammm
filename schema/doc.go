@@ -17,7 +17,7 @@
 //   - [Property]: Typed property with optionality, primary key, and constraint metadata
 //   - [Relation]: Association (reference) or composition (ownership) between types
 //   - [Invariant]: Named boolean constraint expression evaluated at validation time
-//   - [DataType]: Named constraint alias (e.g., "type Email = String /pattern/")
+//   - [DataType]: Named constraint alias (e.g., `type Email = Pattern["^.+@.+$"]`)
 //   - [Import]: Cross-schema import declaration with alias
 //   - [TypeID]: Canonical type identity tuple (SourceID, name) for cross-schema resolution
 //   - [TypeRef]: Syntactic type reference preserving user's original syntax
@@ -120,9 +120,10 @@
 //
 // # Structural Hash
 //
-// [StructuralHash] computes a deterministic SHA-256 hash of a schema's
-// structure (types, properties, relations, constraints). Used by the
-// snapshot package for compatibility verification.
+// [StructuralHash] computes a deterministic SHA-256 hash over the rules that
+// decide what instance data is valid, across the schema's whole import
+// closure — types, properties, relations, constraints and invariants, in
+// every member. Used by the snapshot package for compatibility verification.
 //
 // Annotations are deliberately EXCLUDED from the hash: they drive downstream
 // store DDL and write shape, not which instance data is valid, so a schema
@@ -183,5 +184,7 @@
 //
 // # Dependencies
 //
-//	schema  ──imports──▶  location, diag, immutable
+//	schema  ──imports──▶  diag, location, location/path, schema/expr,
+//	                      internal/parse, internal/source,
+//	                      golang.org/x/text/unicode/norm
 package schema

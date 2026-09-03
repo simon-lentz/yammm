@@ -100,7 +100,7 @@ type Document extends Auditable, Named {
 }
 ```
 
-Multiple parents allowed (comma-separated). Inherits properties, associations, compositions, and invariants. Invariants with duplicate names are deduplicated (child version takes precedence).
+Multiple parents allowed (comma-separated). Inherits properties, associations, compositions, and invariants. An invariant's message is its identity: a child's declaration overrides an inherited one of the same name; declaring one message twice on a type is `E_DUPLICATE_INVARIANT`, and inheriting two different expressions under one message from two parents is `E_INVARIANT_CONFLICT`. A part type may not inherit an association.
 
 ---
 
@@ -158,6 +158,10 @@ References between independently existing types:
 ```
 
 Associations cannot target part types.
+
+Relation names are UPPER_SNAKE (`E_INVALID_NAME` otherwise). The relation's
+field name — its key in instance data and in invariant expressions — is the
+name in lower case: `WORKS_AT` is read as `works_at`.
 
 ### Edge Properties
 

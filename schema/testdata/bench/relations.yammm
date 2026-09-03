@@ -6,8 +6,8 @@ type Warehouse {
 	id String primary
 	name String required
 
-	--> supplies (many) Depot
-	*-> bays (many) Bay
+	--> SUPPLIES (many) Depot
+	*-> BAYS (many) Bay
 }
 
 type Depot {
@@ -15,14 +15,14 @@ type Depot {
 	name String required
 	region String[2, 2] required
 
-	--> nearest (one) Warehouse
-	--> peers (_:many) Depot
-	--> carries (many) Item {
+	--> NEAREST (one) Warehouse
+	--> PEERS (_:many) Depot
+	--> CARRIES (many) Item {
 		quantity Integer required
 		reserved Integer
 		added_at Timestamp
 	}
-	*-> docks (_) Dock
+	*-> DOCKS (_) Dock
 }
 
 part type Bay {
@@ -40,6 +40,6 @@ type Item {
 	title String[1, 200] required
 	weight Float[0.0, _]
 
-	--> replaces (one:one) Item
-	--> variants (one:many) Item
+	--> REPLACES (one:one) Item
+	--> VARIANTS (one:many) Item
 }

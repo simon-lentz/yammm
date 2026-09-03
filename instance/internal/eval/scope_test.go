@@ -62,6 +62,8 @@ func TestMapScope_WithSelf(t *testing.T) {
 	assert.NotNil(t, val.Unwrap())
 }
 
+// A variable name never folds: LookupFold on a variable-only scope is the
+// exact lookup, whichever spelling reaches it.
 func TestMapScope_LookupFold(t *testing.T) {
 	scope := eval.EmptyScope().WithVar("UserName", "Alice")
 
@@ -72,9 +74,9 @@ func TestMapScope_LookupFold(t *testing.T) {
 		found    bool
 	}{
 		{"exact", "UserName", "Alice", true},
-		{"lowercase", "username", "Alice", true},
-		{"uppercase", "USERNAME", "Alice", true},
-		{"mixed", "uSeRnAmE", "Alice", true},
+		{"lowercase", "username", "", false},
+		{"uppercase", "USERNAME", "", false},
+		{"mixed", "uSeRnAmE", "", false},
 		{"not_found", "other", "", false},
 	}
 
@@ -168,16 +170,23 @@ func TestPropertyScope_LookupFold(t *testing.T) {
 	}
 }
 
+// A variable of exactly the looked-up name shadows a property; a variable that
+// differs only in case does not, because variable names never fold while
+// property names always do.
 func TestPropertyScope_LookupFold_VariablePrecedence(t *testing.T) {
 	props := immutable.WrapProperties(map[string]any{
 		"Name": "FromProps",
 	})
-	scope := eval.PropertyScope(props).WithVar("NAME", "FromVar")
 
-	// Variable should take precedence even with case-insensitive lookup
-	val, found := scope.LookupFold("name")
+	exact := eval.PropertyScope(props).WithVar("name", "FromVar")
+	val, found := exact.LookupFold("name")
 	assert.True(t, found)
 	assert.Equal(t, "FromVar", val.Unwrap())
+
+	differing := eval.PropertyScope(props).WithVar("NAME", "FromVar")
+	val, found = differing.LookupFold("name")
+	assert.True(t, found)
+	assert.Equal(t, "FromProps", val.Unwrap())
 }
 
 func TestPropertyScope_WithSelf(t *testing.T) {

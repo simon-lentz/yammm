@@ -10,11 +10,6 @@ type T {
 	! "x_upper_nonstring" 5 -> Upper == "5"
 	! "x_int_div_zero" 1 / 0 == 0
 	! "x_mod_zero" 1 % 0 == 0
-	! "x_contains_string_receiver" "abc" -> Contains("b")
-	! "x_undefined_named_var" $undef == nil
-	! "x_scalar_not_collection" 1 -> All |$x| { true }
 	! "x_nonbool_invariant_result" 5 + 1
-	! "x_index_two_args" [10, 20, 30][0, 2] == 10
-	! "x_index_empty" [10, 20, 30][] == 10
 	! "f_nil_result_is_falsey" nil -> Then |$v| { true }
 }

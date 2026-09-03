@@ -351,7 +351,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "covers",
+          "name": "COVERS",
           "name_span": {
             "s": 738,
             "e": 744
@@ -468,7 +468,7 @@
       "rels": [
         {
           "kind": "comp",
-          "name": "footnotes",
+          "name": "FOOTNOTES",
           "name_span": {
             "s": 917,
             "e": 926

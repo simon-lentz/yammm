@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -64,29 +65,17 @@ func TestIndexing_StringPropertyStillIndexes(t *testing.T) {
 	}
 }
 
-// The empty index list parses — the bracket grammar is more permissive than
-// the language — and must draw an evaluation error, as the SPEC states.
-func TestIndexing_EmptyIndexListIsAnEvaluationError(t *testing.T) {
-	ok, detail := invariantHolds(t, "\ttags List<String>\n", `tags[] -> IsNil`,
-		map[string]any{"tags": []any{"alpha"}})
-	if ok {
-		t.Error("tags[] evaluated without error, want an evaluation error")
-	}
-	if !strings.Contains(detail, "slice access requires an index") {
-		t.Errorf("empty index list reported %q, want the user-facing message", detail)
-	}
-}
-
-// Two indices draw an error naming the same vocabulary as the empty case; the
-// two halves of one contract must not report in different languages.
-func TestIndexing_TwoIndicesReportInTheSameVocabulary(t *testing.T) {
-	ok, detail := invariantHolds(t, "\ttags List<String>\n", `tags[0, 1] -> IsNil`,
-		map[string]any{"tags": []any{"alpha", "beta"}})
-	if ok {
-		t.Error("tags[0, 1] evaluated without error, want an evaluation error")
-	}
-	if !strings.Contains(detail, "slice access accepts exactly one index") {
-		t.Errorf("two indices reported %q, want the user-facing message", detail)
+// The empty index list and the two-index list parse — the bracket grammar is
+// more permissive than the language — and the evaluator refuses both on every
+// input, so the static checker refuses them at load. The evaluator's own
+// refusal is pinned by the contract table's refuse rows.
+func TestIndexing_IndexArityIsRefusedAtLoad(t *testing.T) {
+	for _, inv := range []string{`tags[] -> IsNil`, `tags[0, 1] -> IsNil`} {
+		src := "schema \"x\"\n\ntype T {\n\tid String primary\n\ttags List<String>\n\t! \"probe\" " + inv + "\n}\n"
+		_, res := schema.LoadString(t.Context(), src, "x.yammm")
+		if !res.HasCode(diag.E_INVALID_INVARIANT) || !strings.Contains(res.Err().Error(), "exactly one index") {
+			t.Errorf("%s: want E_INVALID_INVARIANT naming the index count; got %v", inv, res.Err())
+		}
 	}
 }
 

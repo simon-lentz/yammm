@@ -25,7 +25,7 @@ func fkSchema(t *testing.T, optional, many bool) *schema.Schema {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), optional, many).
+		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), optional, many).
 		Done())
 }
 
@@ -42,7 +42,7 @@ func compositeFKSchema(t *testing.T) *schema.Schema {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("enrollment", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
+		WithRelation("ENROLLMENT", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
 		Done())
 }
 
@@ -82,7 +82,7 @@ func TestValidateEdges_SingleFK(t *testing.T) {
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
-	edge, ok := valid.Edge("employer")
+	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.Len(t, edge.Targets(), 1)
@@ -110,7 +110,7 @@ func TestValidateEdges_Many(t *testing.T) {
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
-	edge, ok := valid.Edge("employer")
+	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.Len(t, edge.Targets(), 3)
@@ -134,7 +134,7 @@ func TestValidateEdges_Optional_Nil(t *testing.T) {
 	require.NotNil(t, valid)
 
 	// No edge should be present
-	edge, ok := valid.Edge("employer")
+	edge, ok := valid.Edge("EMPLOYER")
 	assert.False(t, ok)
 	assert.Nil(t, edge)
 }
@@ -160,7 +160,7 @@ func TestValidateEdges_Required_Absent(t *testing.T) {
 	require.NotNil(t, valid)
 
 	// No edge data should be present
-	edge, ok := valid.Edge("employer")
+	edge, ok := valid.Edge("EMPLOYER")
 	assert.False(t, ok)
 	assert.Nil(t, edge)
 }
@@ -432,7 +432,7 @@ func TestValidateEdges_OptionalEdgeWithEmptyArray(t *testing.T) {
 	require.NotNil(t, valid)
 
 	// Edge should be present but empty
-	edge, ok := valid.Edge("employer")
+	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.True(t, edge.IsEmpty())
@@ -459,7 +459,7 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 	require.NotNil(t, valid)
 
 	// Edge should be present but empty
-	edge, ok := valid.Edge("employer")
+	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.True(t, edge.IsEmpty())
@@ -485,7 +485,7 @@ func TestValidateEdges_CompositeFK(t *testing.T) {
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
-	edge, ok := valid.Edge("enrollment")
+	edge, ok := valid.Edge("ENROLLMENT")
 	require.True(t, ok)
 	require.NotNil(t, edge)
 	assert.Len(t, edge.Targets(), 1)
@@ -1006,7 +1006,7 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 				require.True(t, result.OK(), "%s: should succeed but got failure", tc.description)
 				require.NotNil(t, valid, "%s: should have valid instance", tc.description)
 
-				edge, ok := valid.Edge("employer")
+				edge, ok := valid.Edge("EMPLOYER")
 				if tc.expectEdges > 0 {
 					require.True(t, ok, "%s: should have edge", tc.description)
 					assert.Len(t, edge.Targets(), tc.expectEdges, "%s: edge count", tc.description)

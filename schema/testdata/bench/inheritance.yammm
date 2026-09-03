@@ -33,7 +33,7 @@ type Review extends Auditable {
 	rating Integer[1, 5] required
 	verdict Enum["accept", "revise", "reject"] required
 
-	--> covers (one) Article
+	--> COVERS (one) Article
 }
 
 part type Footnote {
@@ -45,5 +45,5 @@ type Chapter extends Tracked {
 	chapter_id String primary
 	ordinal Integer required
 
-	*-> footnotes (many) Footnote
+	*-> FOOTNOTES (many) Footnote
 }

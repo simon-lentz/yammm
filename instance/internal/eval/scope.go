@@ -2,7 +2,6 @@ package eval
 
 import (
 	"maps"
-	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
 )
@@ -85,28 +84,10 @@ func (s *mapScope) Lookup(name string) (immutable.Value, bool) {
 	return v, ok
 }
 
+// LookupFold on a variable-only scope is an exact lookup: variable names
+// never fold, whichever spelling reaches them.
 func (s *mapScope) LookupFold(name string) (immutable.Value, bool) {
-	// First try exact match
-	if v, ok := s.vars[name]; ok {
-		return v, true
-	}
-	// Fall back to case-insensitive search: pick alphabetically first key on collision
-	// for deterministic behavior (matches immutable.Properties.GetFold behavior)
-	lower := strings.ToLower(name)
-	var matchKey string
-	var matchVal immutable.Value
-	for k, v := range s.vars {
-		if strings.ToLower(k) == lower {
-			if matchKey == "" || k < matchKey {
-				matchKey = k
-				matchVal = v
-			}
-		}
-	}
-	if matchKey != "" {
-		return matchVal, true
-	}
-	return immutable.Value{}, false
+	return s.Lookup(name)
 }
 
 func (s *mapScope) WithVar(name string, value any) Scope {
@@ -135,28 +116,13 @@ func (s *propertyScope) Lookup(name string) (immutable.Value, bool) {
 	return s.props.Get(name)
 }
 
+// LookupFold resolves a bare name the way docs/SPEC.md's scope chain states:
+// a variable of exactly that name first, then a property matched
+// case-insensitively. Variable names never fold; property names always do.
 func (s *propertyScope) LookupFold(name string) (immutable.Value, bool) {
-	// Variables take precedence (exact match first)
 	if v, ok := s.vars[name]; ok {
 		return v, true
 	}
-	// Try case-insensitive variable search: pick alphabetically first key on collision
-	// for deterministic behavior (matches immutable.Properties.GetFold behavior)
-	lower := strings.ToLower(name)
-	var matchKey string
-	var matchVal immutable.Value
-	for k, v := range s.vars {
-		if strings.ToLower(k) == lower {
-			if matchKey == "" || k < matchKey {
-				matchKey = k
-				matchVal = v
-			}
-		}
-	}
-	if matchKey != "" {
-		return matchVal, true
-	}
-	// Fall back to properties (using GetFold for case-insensitive)
 	return s.props.GetFold(name)
 }
 

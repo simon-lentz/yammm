@@ -2,7 +2,7 @@ schema "seeded"
 
 type Alpha {
 	id String primary
-	--> r (many:one) Beta
+	--> R (many:one) Beta
 }
 
 type Beta {

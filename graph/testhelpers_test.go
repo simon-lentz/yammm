@@ -31,7 +31,7 @@ func testSchemaWithAssociation(t *testing.T) *schema.Schema {
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("employer", schema.LocalTypeRef("Company", location.Span{}), false, false). // required one
+		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), false, false). // required one
 		Done().
 		Build()
 
@@ -55,7 +55,7 @@ func testSchemaWithOptionalAssociation(t *testing.T) *schema.Schema {
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("employer", schema.LocalTypeRef("Company", location.Span{}), true, false). // optional one
+		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), true, false). // optional one
 		Done().
 		Build()
 
@@ -79,7 +79,7 @@ func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("employers", schema.LocalTypeRef("Company", location.Span{}), false, true). // required many
+		WithRelation("EMPLOYERS", schema.LocalTypeRef("Company", location.Span{}), false, true). // required many
 		Done().
 		Build()
 
@@ -103,12 +103,12 @@ func testSchemaWithChainedAssociations(t *testing.T) *schema.Schema {
 		AddType("TypeB").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("refC", schema.LocalTypeRef("TypeC", location.Span{}), false, false).
+		WithRelation("REF_C", schema.LocalTypeRef("TypeC", location.Span{}), false, false).
 		Done().
 		AddType("TypeA").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("refB", schema.LocalTypeRef("TypeB", location.Span{}), false, false).
+		WithRelation("REF_B", schema.LocalTypeRef("TypeB", location.Span{}), false, false).
 		Done().
 		Build()
 
@@ -133,7 +133,7 @@ func testSchemaWithComposition(t *testing.T) *schema.Schema {
 		AddType("Parent").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("children", schema.LocalTypeRef("Child", location.Span{}), true, true). // optional many
+		WithComposition("CHILDREN", schema.LocalTypeRef("Child", location.Span{}), true, true). // optional many
 		Done().
 		Build()
 
@@ -158,7 +158,7 @@ func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
 		AddType("Parent").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("child", schema.LocalTypeRef("Child", location.Span{}), true, false). // optional one
+		WithComposition("CHILD", schema.LocalTypeRef("Child", location.Span{}), true, false). // optional one
 		Done().
 		Build()
 
@@ -182,7 +182,7 @@ func testSchemaWithPKLessChild(t *testing.T) *schema.Schema {
 		AddType("Container").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("items", schema.LocalTypeRef("Item", location.Span{}), true, true).
+		WithComposition("ITEMS", schema.LocalTypeRef("Item", location.Span{}), true, true).
 		Done().
 		Build()
 
@@ -208,12 +208,12 @@ func testSchemaWithNestedComposition(t *testing.T) *schema.Schema {
 		AsPart().
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("grandChildren", schema.LocalTypeRef("GrandChild", location.Span{}), true, true).
+		WithComposition("GRAND_CHILDREN", schema.LocalTypeRef("GrandChild", location.Span{}), true, true).
 		Done().
 		AddType("Parent").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("children", schema.LocalTypeRef("Child", location.Span{}), true, true).
+		WithComposition("CHILDREN", schema.LocalTypeRef("Child", location.Span{}), true, true).
 		Done().
 		Build()
 
@@ -242,8 +242,8 @@ func testSchemaWithMultipleCompositions(t *testing.T) *schema.Schema {
 		AddType("Document").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("title", schema.StringConstraint{}).
-		WithComposition("notes", schema.LocalTypeRef("Note", location.Span{}), true, true).
-		WithComposition("tags", schema.LocalTypeRef("Tag", location.Span{}), true, true).
+		WithComposition("NOTES", schema.LocalTypeRef("Note", location.Span{}), true, true).
+		WithComposition("TAGS", schema.LocalTypeRef("Tag", location.Span{}), true, true).
 		Done().
 		Build()
 
@@ -283,12 +283,12 @@ func testSchemaWithMutualAssociations(t *testing.T) *schema.Schema {
 		AddType("TypeA").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("refB", schema.LocalTypeRef("TypeB", location.Span{}), true, false). // optional one
+		WithRelation("REF_B", schema.LocalTypeRef("TypeB", location.Span{}), true, false). // optional one
 		Done().
 		AddType("TypeB").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("refA", schema.LocalTypeRef("TypeA", location.Span{}), true, false). // optional one
+		WithRelation("REF_A", schema.LocalTypeRef("TypeA", location.Span{}), true, false). // optional one
 		Done().
 		Build()
 
@@ -308,17 +308,17 @@ func testSchemaWithCircularChain(t *testing.T) *schema.Schema {
 		AddType("TypeA").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("refB", schema.LocalTypeRef("TypeB", location.Span{}), true, false).
+		WithRelation("REF_B", schema.LocalTypeRef("TypeB", location.Span{}), true, false).
 		Done().
 		AddType("TypeB").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("refC", schema.LocalTypeRef("TypeC", location.Span{}), true, false).
+		WithRelation("REF_C", schema.LocalTypeRef("TypeC", location.Span{}), true, false).
 		Done().
 		AddType("TypeC").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("refA", schema.LocalTypeRef("TypeA", location.Span{}), true, false).
+		WithRelation("REF_A", schema.LocalTypeRef("TypeA", location.Span{}), true, false).
 		Done().
 		Build()
 
@@ -516,7 +516,7 @@ func testMultiSchemaSetup(t *testing.T) (*schema.Schema, *schema.Schema) {
 		AddType("User").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("username", schema.StringConstraint{}).
-		WithRelation("entity", schema.NewTypeRef("c", "Entity", location.Span{}), true, false).
+		WithRelation("ENTITY", schema.NewTypeRef("c", "Entity", location.Span{}), true, false).
 		Done().
 		Build()
 
@@ -561,7 +561,7 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 		AddType("MiddleType").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("base", schema.NewTypeRef("c", "BaseType", location.Span{}), true, false).
+		WithRelation("BASE", schema.NewTypeRef("c", "BaseType", location.Span{}), true, false).
 		Done().
 		Build()
 
@@ -582,7 +582,7 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 		AddType("TopType").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("label", schema.StringConstraint{}).
-		WithRelation("middle", schema.NewTypeRef("b", "MiddleType", location.Span{}), true, false).
+		WithRelation("MIDDLE", schema.NewTypeRef("b", "MiddleType", location.Span{}), true, false).
 		Done().
 		Build()
 

@@ -184,6 +184,13 @@ func (b *builder) parseHeader(plex *lexer.PeekingLexer) {
 		b.file.SchemaNameFailed = true
 		return
 	}
+	// The grammar admits an empty STRING; the language does not admit an
+	// empty name, and a nameless schema cannot be registered.
+	if name == "" {
+		b.reportf(diag.E_INVALID_NAME, b.file.NameSpan, "schema name cannot be empty")
+		b.file.SchemaNameFailed = true
+		return
+	}
 	b.file.Name = name
 }
 
@@ -328,6 +335,7 @@ func (b *builder) addAssociation(nt *TypeDecl, a *assocNode) {
 		Doc:      stripDoc(a.Doc),
 		Span:     b.spanOf(a.Pos, a.EndPos),
 	}
+	b.checkRelationName(rel.Name, rel.NameSpan)
 	rel.Optional, rel.Many = multiplicityOf(a.Mult)
 	b.rejectReverse(a.Reverse)
 	if a.Body != nil {
@@ -347,6 +355,7 @@ func (b *builder) addComposition(nt *TypeDecl, c *compNode) {
 		Doc:      stripDoc(c.Doc),
 		Span:     b.spanOf(c.Pos, c.EndPos),
 	}
+	b.checkRelationName(rel.Name, rel.NameSpan)
 	rel.Optional, rel.Many = multiplicityOf(c.Mult)
 	b.rejectReverse(c.Reverse)
 	nt.Relations = append(nt.Relations, rel)

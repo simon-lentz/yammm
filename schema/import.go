@@ -66,6 +66,9 @@ func (i *Import) Span() location.Span {
 // seal prevents further mutation of the import.
 // Called during loading after resolution is complete.
 func (i *Import) seal() {
+	if i.sealed {
+		panic("import: sealed twice")
+	}
 	i.sealed = true
 }
 

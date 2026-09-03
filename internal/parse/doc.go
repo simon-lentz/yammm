@@ -147,10 +147,11 @@
 // the language's own law. Three of them contradict what a C-family reading
 // predicts, and all three are observable:
 //
-//   - Unary minus binds tighter than indexing, pipeline calls and property
-//     access; '!' binds looser than all three. So negating an indexed value
-//     parses as "index the negated operand", while negating with '!' parses as
-//     "negate the indexed operand".
+//   - Indexing, pipeline calls and property access are one postfix level and
+//     chain left to right, so "$self.tags[0]" indexes the property and
+//     "$i.name -> Len" pipes it. Unary minus binds tighter than all three; '!'
+//     binds looser. So negating an indexed value parses as "index the negated
+//     operand", while negating with '!' parses as "negate the indexed operand".
 //   - 'in' binds tighter than the regex-match operators, which bind tighter
 //     than equality.
 //   - '^' is exclusive-or, at the same level as logical or. It is not a power

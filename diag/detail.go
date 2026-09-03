@@ -42,8 +42,8 @@ const (
 	// DetailKeyField is the data-level field name (for unknown/unexpected fields).
 	DetailKeyField = "field"
 
-	// DetailKeyJSONField is the normalized JSON field name for relation in path
-	// (lower_snake form).
+	// DetailKeyJSONField is a relation's JSON field name in a path: the
+	// relation name in lower case.
 	DetailKeyJSONField = "json_field"
 
 	// DetailKeyDetail is the specific error description (grammar violation,
@@ -110,8 +110,9 @@ const (
 	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA and E_SNAPSHOT_INTEGRITY_MISMATCH.
 	DetailKeyActualHash = "actual_hash"
 
-	// DetailKeySchemaName is the schema name from the snapshot header.
-	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA.
+	// DetailKeySchemaName is a schema's declared name: from the snapshot
+	// header for E_SNAPSHOT_INCOMPATIBLE_SCHEMA, and the colliding name for
+	// the E_DUPLICATE_SCHEMA two schemas registered under one name draw.
 	DetailKeySchemaName = "schema_name"
 
 	// DetailKeyVersion is the format version number.
@@ -219,7 +220,7 @@ func TypeField(typeName, fieldName string) []Detail {
 //
 // Provides both the schema relation name (for path) and the normalized JSON
 // field name (for direct lookup in instance data). The jsonFieldName is
-// computed via lower_snake(relationName).
+// the relation name in lower case.
 //
 // Use with relation-path diagnostics (e.g., E_DUPLICATE_COMPOSED_PK,
 // E_UNRESOLVED_REQUIRED_COMPOSITION) to enable users to locate the field

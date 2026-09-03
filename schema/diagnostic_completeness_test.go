@@ -951,7 +951,7 @@ func TestBuild_RegistryQualifiedRelation_UndeclaredImport_Errors(t *testing.T) {
 		WithRegistry(schema.NewRegistry()).
 		AddType("Person").
 		WithPrimaryKey("name", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("bogus", "Organization", location.Span{}), true, false).
+		WithRelation("EMPLOYER", schema.NewTypeRef("bogus", "Organization", location.Span{}), true, false).
 		Done().
 		Build()
 	requireBuildFailed(t, s)

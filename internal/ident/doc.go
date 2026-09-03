@@ -5,19 +5,7 @@
 //
 // This package is internal to the YAMMM module and is not importable by
 // external consumers per Go's internal/ package semantics. It is used by the
-// schema layer for relation name normalization.
-//
-// # lower_snake Algorithm
-//
-// The [ToLowerSnake] function implements the canonical lower_snake algorithm
-// for relation name normalization (schema relation names to JSON field names).
-//
-// Common transformations:
-//
-//	WORKS_AT   -> works_at
-//	HTTPProxy  -> http_proxy
-//	CreatedBy  -> created_by
-//	UserID     -> user_id
+// gogen adapter to derive Go identifiers.
 //
 // # CamelCase Conversion
 //

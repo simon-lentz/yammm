@@ -2,16 +2,16 @@
   {
     "description": "minimal schema with single type and string PK",
     "schema_name": "minimal",
-    "expected_hash": "sha256:8525b14067d799cfc0cb2e09a2f32207fb611725e6cadbffa7c8da68248ba1e5"
+    "expected_hash": "sha256:9e51f5b890dc51c29b8f6a14423bbe5d860a6aafc668b5aa2f4537134ca80a99"
   },
   {
     "description": "relational schema with association, edge properties, and composition",
     "schema_name": "relational",
-    "expected_hash": "sha256:abf822071649ae2e4c8ecc67f9345614be4a3935726b4b5b98cf755f28f417df"
+    "expected_hash": "sha256:dfbc77b7c21af4e397f55fb294d8d9e90a444eae21f5656efa3e565e9cab2fe2"
   },
   {
     "description": "constraint-rich schema exercising every constraint kind",
     "schema_name": "constraint_rich",
-    "expected_hash": "sha256:891efe48f7523c3c829547df369364eb1db430d048c83cc2fce627d234892caa"
+    "expected_hash": "sha256:374060f8f3a4d2f5d3d4847886248601a7aeaa82025995de59429fcf6ee8fd1e"
   }
 ]

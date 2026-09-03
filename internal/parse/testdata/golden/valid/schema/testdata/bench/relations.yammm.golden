@@ -46,7 +46,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "supplies",
+          "name": "SUPPLIES",
           "name_span": {
             "s": 197,
             "e": 205
@@ -67,7 +67,7 @@
         },
         {
           "kind": "comp",
-          "name": "bays",
+          "name": "BAYS",
           "name_span": {
             "s": 224,
             "e": 228
@@ -152,7 +152,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "nearest",
+          "name": "NEAREST",
           "name_span": {
             "s": 333,
             "e": 340
@@ -171,7 +171,7 @@
         },
         {
           "kind": "assoc",
-          "name": "peers",
+          "name": "PEERS",
           "name_span": {
             "s": 362,
             "e": 367
@@ -192,7 +192,7 @@
         },
         {
           "kind": "assoc",
-          "name": "carries",
+          "name": "CARRIES",
           "name_span": {
             "s": 388,
             "e": 395
@@ -258,7 +258,7 @@
         },
         {
           "kind": "comp",
-          "name": "docks",
+          "name": "DOCKS",
           "name_span": {
             "s": 486,
             "e": 491
@@ -432,7 +432,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "replaces",
+          "name": "REPLACES",
           "name_span": {
             "s": 712,
             "e": 720
@@ -451,7 +451,7 @@
         },
         {
           "kind": "assoc",
-          "name": "variants",
+          "name": "VARIANTS",
           "name_span": {
             "s": 741,
             "e": 749

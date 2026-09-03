@@ -2,7 +2,7 @@ schema "seeded"
 
 type Alpha {
 	id String primary
-	--> owner Beta {
+	--> OWNER Beta {
 		since Timestamp primary
 	}
 }

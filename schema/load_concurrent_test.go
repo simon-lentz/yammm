@@ -58,7 +58,7 @@ func TestLoadString_ConcurrentCallsAgree(t *testing.T) {
 
 	const src = "schema \"agree\"\n" +
 		"type Doc = String[1, 40]\n" +
-		"type Alpha {\n\tid Doc primary\n\ttags List<String>\n\t--> peer (one) Beta\n}\n" +
+		"type Alpha {\n\tid Doc primary\n\ttags List<String>\n\t--> PEER (one) Beta\n}\n" +
 		"type Beta {\n\tid String primary\n}\n"
 
 	want, res := schema.LoadString(context.Background(), src, "agree.yammm")

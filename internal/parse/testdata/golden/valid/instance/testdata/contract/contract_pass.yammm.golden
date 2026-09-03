@@ -1466,45 +1466,81 @@
           }
         },
         {
-          "msg": "\"d_self_is_map\"",
-          "expr": "(== (TypeOf ($ \"self\") (args ) (params ) nil) \"map\")",
+          "msg": "\"p_member_then_index\"",
+          "expr": "(== (@ (. ($ \"self\") \"tags\") 0) \"alpha\")",
           "expr_span": {
-            "s": 5799,
-            "e": 5825
+            "s": 5805,
+            "e": 5829
           },
           "span": {
             "s": 5781,
-            "e": 5825
+            "e": 5829
+          }
+        },
+        {
+          "msg": "\"p_member_then_pipeline\"",
+          "expr": "(== (Len (. ($ \"self\") \"tags\") (args ) (params ) nil) 3)",
+          "expr_span": {
+            "s": 5858,
+            "e": 5880
+          },
+          "span": {
+            "s": 5831,
+            "e": 5880
+          }
+        },
+        {
+          "msg": "\"p_postfix_chain_equals_grouped\"",
+          "expr": "(== (@ (. ($ \"self\") \"tags\") 0) (@ (. ($ \"self\") \"tags\") 0))",
+          "expr_span": {
+            "s": 5917,
+            "e": 5949
+          },
+          "span": {
+            "s": 5882,
+            "e": 5949
+          }
+        },
+        {
+          "msg": "\"d_self_is_map\"",
+          "expr": "(== (TypeOf ($ \"self\") (args ) (params ) nil) \"map\")",
+          "expr_span": {
+            "s": 5969,
+            "e": 5995
+          },
+          "span": {
+            "s": 5951,
+            "e": 5995
           }
         },
         {
           "msg": "\"d_self_len_counts_properties\"",
           "expr": "(\u003e (Len ($ \"self\") (args ) (params ) nil) 0)",
           "expr_span": {
-            "s": 5860,
-            "e": 5878
+            "s": 6030,
+            "e": 6048
           },
           "span": {
-            "s": 5827,
-            "e": 5878
+            "s": 5997,
+            "e": 6048
           }
         },
         {
           "msg": "\"d_numeric_var_unset_nil\"",
           "expr": "(== ($ \"0\") nil)",
           "expr_span": {
-            "s": 5908,
-            "e": 5917
+            "s": 6078,
+            "e": 6087
           },
           "span": {
-            "s": 5880,
-            "e": 5917
+            "s": 6050,
+            "e": 6087
           }
         }
       ],
       "span": {
         "s": 24,
-        "e": 5919
+        "e": 6089
       }
     }
   ]

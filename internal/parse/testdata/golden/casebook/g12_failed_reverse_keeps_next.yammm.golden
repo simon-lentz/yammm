@@ -31,7 +31,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "r",
+          "name": "R",
           "name_span": {
             "s": 54,
             "e": 55
@@ -51,7 +51,7 @@
         },
         {
           "kind": "assoc",
-          "name": "q",
+          "name": "Q",
           "name_span": {
             "s": 68,
             "e": 69

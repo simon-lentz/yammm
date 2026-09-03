@@ -65,7 +65,7 @@ var abandonedGroups = []struct {
 	},
 	{
 		name:   "reverse clause",
-		src:    "schema \"s\"\ntype T {\n\t--> r B /\n}\n",
+		src:    "schema \"s\"\ntype T {\n\t--> R B /\n}\n",
 		want:   `unexpected token "/" in a type body`,
 		anchor: "/",
 		types:  1,
@@ -73,7 +73,7 @@ var abandonedGroups = []struct {
 	},
 	{
 		name:   "relation body",
-		src:    "schema \"s\"\ntype T {\n\t--> r B { nil String }\n}\n",
+		src:    "schema \"s\"\ntype T {\n\t--> R B { nil String }\n}\n",
 		want:   `unexpected token "{" in a type body`,
 		anchor: "{",
 		types:  1,
@@ -89,7 +89,7 @@ var abandonedGroups = []struct {
 	},
 	{
 		name:   "multiplicity",
-		src:    "schema \"s\"\ntype T {\n\t--> r (many:one) B\n}\n",
+		src:    "schema \"s\"\ntype T {\n\t--> R (many:one) B\n}\n",
 		want:   `unexpected token "(" in a type body`,
 		anchor: "(",
 		types:  1,
@@ -154,7 +154,7 @@ func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 	})
 
 	t.Run("a failed reverse clause keeps the next association", func(t *testing.T) {
-		src := "schema \"s\"\ntype T {\n\t--> r B /\n\t--> q C\n}\n"
+		src := "schema \"s\"\ntype T {\n\t--> R B /\n\t--> Q C\n}\n"
 		f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
 		if len(f.Types) != 1 {
 			t.Fatalf("got %d types, want 1", len(f.Types))
@@ -163,8 +163,8 @@ func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 		for _, r := range f.Types[0].Relations {
 			rels = append(rels, r.Name)
 		}
-		if strings.Join(rels, ",") != "r,q" {
-			t.Errorf("relations = %v, want [r q]", rels)
+		if strings.Join(rels, ",") != "R,Q" {
+			t.Errorf("relations = %v, want [R Q]", rels)
 		}
 		if n := len(f.Types[0].Properties); n != 0 {
 			t.Errorf("recorded %d properties, want 0 — an association must not be reclassified", n)
@@ -172,7 +172,7 @@ func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 	})
 
 	t.Run("a rejected multiplicity records no relation", func(t *testing.T) {
-		src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> r (many:one) B\n}\n"
+		src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> R (many:one) B\n}\n"
 		f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
 		if len(f.Types) != 1 {
 			t.Fatalf("got %d types, want 1", len(f.Types))

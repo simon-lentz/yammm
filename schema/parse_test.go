@@ -84,7 +84,7 @@ func TestParser_Association(t *testing.T) {
 
 type Person {
 	name String required
-	--> friends Car
+	--> FRIENDS Car
 }`
 
 	reg := source.NewRegistry()
@@ -102,7 +102,7 @@ type Person {
 
 	rel := person.Relations[0]
 	assert.Equal(t, schema.RelationAssociation, rel.Kind)
-	assert.Equal(t, "friends", rel.Name)
+	assert.Equal(t, "FRIENDS", rel.Name)
 	assert.Equal(t, "Car", rel.Target.Name)
 
 	result := collector.Result()
@@ -117,7 +117,7 @@ part type Wheel {
 }
 
 type Car {
-	*-> wheels Wheel
+	*-> WHEELS Wheel
 }`
 
 	reg := source.NewRegistry()
@@ -141,7 +141,7 @@ type Car {
 
 	rel := car.Relations[0]
 	assert.Equal(t, schema.RelationComposition, rel.Kind)
-	assert.Equal(t, "wheels", rel.Name)
+	assert.Equal(t, "WHEELS", rel.Name)
 	assert.Equal(t, "Wheel", rel.Target.Name)
 
 	result := collector.Result()
@@ -254,7 +254,7 @@ func TestParser_Import(t *testing.T) {
 import "parts.yammm" as parts
 
 type Car {
-	*-> wheels parts.Wheel
+	*-> WHEELS parts.Wheel
 }`
 
 	reg := source.NewRegistry()

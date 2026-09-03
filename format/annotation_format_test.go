@@ -37,7 +37,7 @@ func TestFormat_Annotation_MultiplicitySpacingPreserved(t *testing.T) {
 type T {
 	id String primary
 	state String @index
-	--> worksAt (one) Company
+	--> WORKS_AT (one) Company
 }
 type Company {
 	id String primary
@@ -49,8 +49,8 @@ type Company {
 	if !strings.Contains(out, "@index") {
 		t.Errorf("annotation spacing wrong (want @index)\n---\n%s", out)
 	}
-	if !strings.Contains(out, "worksAt (one)") {
-		t.Errorf("multiplicity spacing must be preserved (want `worksAt (one)`)\n---\n%s", out)
+	if !strings.Contains(out, "WORKS_AT (one)") {
+		t.Errorf("multiplicity spacing must be preserved (want `WORKS_AT (one)`)\n---\n%s", out)
 	}
 }
 

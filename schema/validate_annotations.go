@@ -229,13 +229,6 @@ func (c *completer) validatePropertyAnnotations(t *Type, prop *Property) {
 
 		spec, known := annotationRegistry[annotationKey{PlacementProperty, a.name}]
 
-		if a.argsMalformed {
-			// Unreachable: nothing sets argsMalformed. Kept until the field goes.
-			if !known {
-				c.reportUnknownOrMisplaced(a, PlacementProperty)
-			}
-			continue
-		}
 		if first, dup := seen[a.name]; dup {
 			c.duplicateAnnotation(a, first,
 				"property %q declares annotation @%s more than once", prop.Name(), a.name)
@@ -258,13 +251,6 @@ func (c *completer) validateTypeAnnotations(t *Type) {
 	for _, a := range t.annotations {
 		spec, known := annotationRegistry[annotationKey{PlacementType, a.name}]
 
-		if a.argsMalformed {
-			// Unreachable: nothing sets argsMalformed. Kept until the field goes.
-			if !known {
-				c.reportUnknownOrMisplaced(a, PlacementType)
-			}
-			continue
-		}
 		// identity() is computed once and reused for the insert: it builds a
 		// string, and the probe and the insert always agree by construction.
 		id := a.identity()

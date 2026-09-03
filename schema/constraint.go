@@ -80,6 +80,8 @@ type Constraint interface {
 	// For bounds-based constraints (String, Integer, Float): child min >= parent min
 	// and child max <= parent max.
 	// For EnumConstraint: child values must be a subset of parent values.
+	// For ListConstraint: the child's element must narrow the parent's, and its
+	// length bounds must narrow as above.
 	// For parameterless or non-narrowable constraints (Boolean, Date, UUID,
 	// Timestamp, Pattern, Vector): delegates to Equal (no narrowing supported).
 	// For AliasConstraint: resolves alias chain first, then delegates.

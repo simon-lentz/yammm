@@ -382,6 +382,8 @@ In this version the marker file must be empty or hold only comment lines, where 
 
 The nearest marker wins, so a nested marker deliberately narrows a sub-module's root. The walk runs on the canonical (symlink-resolved) ancestor chain: a marker reachable only through a symlinked spelling of the path is not consulted. Under an explicit root no marker is read at all.
 
+**Size:** A schema source — the entry file or an import — is read up to 16 MiB; a larger file is refused before it is parsed.
+
 **Security:** Import paths are sandboxed using `os.Root` to prevent path traversal attacks. Paths that attempt to escape the module root are rejected at the kernel level. The module root is that sandbox's boundary, so committing a `yammm.mod` grants the loader read access to that directory's whole subtree for imports — which is what makes a repository-relative import resolve.
 
 **Default alias derivation:** When no explicit `as` clause is provided, the alias is derived from the last path segment:
@@ -530,7 +532,8 @@ Inheritance rules:
 
 - Properties, associations, and compositions are inherited from parent types
 - Child types may override inherited properties with compatible narrower constraints
-- Relationship definitions must be unique after inheritance. Two relations of one kind reaching a type under one field name are an error when their definitions **differ** — a different declared spelling, target, multiplicity, or edge-property set; structurally identical ones are deduplicated keep-first with no diagnostic. An association and a composition that normalize to one field name are caught separately, after both merges, as `E_RELATION_NORMALIZATION_COLLISION`. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
+- A part type carries no association, declared or inherited (`E_INVALID_ASSOCIATION_TARGET`)
+- Relationship definitions must be unique after inheritance. Two relations of one kind reaching a type under one field name are an error when their definitions **differ** — a different declared spelling, target, multiplicity, or edge-property set; structurally identical ones are deduplicated keep-first with no diagnostic. An association and a composition that reach one type under one name are caught separately, after both merges, as `E_RELATION_COLLISION` naming both declarations. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
 
 **Linearization order:** Ancestors are flattened **ancestors-first**: each supertype's own ancestors are appended before the supertype itself, left to right across the `extends` clause, with keep-first deduplication. For `D extends C`, `C extends B`, `B extends A` the order is `[A, B, C]`; for `D extends B, C` with both extending `A` it is `[A, B, C]`.
 
@@ -549,7 +552,7 @@ Inheritance rules:
 
 `E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. Each subtype that inherits a conflicting combination re-detects and reports it independently.
 
-**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. Deduplication is by name, keep-first, so a subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it.
+**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity. A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. One definition reached through two ancestors merges silently.
 
 ### Constraint Narrowing
 
@@ -991,10 +994,16 @@ YAMMM supports two types of relationships between types: associations and compos
 Associations represent references between independent entities:
 
 ```text
-Association = [ DOC_COMMENT ] "-->" Name [ Multiplicity ] TypeRef
-              [ "{" { RelProperty } "}" ] .
-Name        = UC_WORD | LC_WORD .
+Association  = [ DOC_COMMENT ] "-->" RelationName [ Multiplicity ] TypeRef
+               [ "{" { RelProperty } "}" ] .
+RelationName = upper_letter { upper_letter | decimal_digit | "_" } .
 ```
+
+A relation name is UPPER_SNAKE. Its **field name** — the key instance data
+carries the relation under, and the entry an invariant expression reads — is
+the name in lower case: `WORKS_AT` is read as `works_at`. The two spellings
+differ only by case, so a name in either case resolves to the one entry; any
+other casing is rejected at load with `E_INVALID_NAME`.
 
 Examples:
 
@@ -1010,7 +1019,7 @@ type Car {
 }
 ```
 
-The target must be a concrete type (not abstract or a `part` type), and a `part` type cannot declare an association at all — both draw `E_INVALID_ASSOCIATION_TARGET`. An association
+The target must be a concrete type (not abstract or a `part` type), and a `part` type cannot declare or inherit an association at all — both draw `E_INVALID_ASSOCIATION_TARGET`, an inherited one once, on the first part type in the chain that inherits it. An association
 edge is resolved by the target's identity, and neither an abstract type (never
 instantiated) nor a part type (reachable only through composition) can be the
 referenced node.
@@ -1020,7 +1029,7 @@ referenced node.
 Compositions represent ownership where child entities are embedded within their parent:
 
 ```text
-Composition = [ DOC_COMMENT ] "*->" Name [ Multiplicity ] TypeRef .
+Composition = [ DOC_COMMENT ] "*->" RelationName [ Multiplicity ] TypeRef .
 ```
 
 The target must be a concrete `part` type (not abstract).
@@ -1249,7 +1258,7 @@ Expr = Literal
      | "-" Expr                                         // unary minus
      | Expr "[" [ Expr { "," Expr } ] "]"              // indexing
      | Expr "->" Name [ Arguments ] [ Parameters ] [ "{" Expr "}" ]  // pipeline
-     | Expr "." Expr                                    // property access
+     | Expr "." Name                                    // property access
      | "!" Expr                                         // logical not
      | Expr ( "*" | "/" | "%" ) Expr                   // multiplicative
      | Expr ( "+" | "-" ) Expr                         // additive
@@ -1271,7 +1280,14 @@ Expr = Literal
 
 Arguments  = "(" [ Expr { "," Expr } ] [ "," ] ")" .
 Parameters = "|" VARIABLE { "," VARIABLE } [ "," ] "|" .
+Name       = LC_WORD | UC_WORD .
 ```
+
+The `Name` after `->` is a built-in function's name. The `Name` after `.` is a
+member — a property or a relation's field name — and admits any word, keywords
+included: a property may be named `type` and a relation `IN`, so `$self.type`
+and `$self.in` are member accesses. Whether the member exists is the type's
+question, answered by the static check below, not the grammar's.
 
 > **`_` and `nil` in expressions.** Within invariant expressions, `_` and `nil` are interchangeable — both produce a nil literal. Use whichever reads more naturally: `end_date == nil` for null-guard idioms, `end_date == _` for consistency with other DSL contexts. Note that `_` retains distinct, non-nil roles in constraint bounds (`Integer[0, _]`) and multiplicity (`(_:many)`), where `nil` cannot be used.
 
@@ -1283,19 +1299,19 @@ Operators are listed from highest to lowest precedence:
 | ---------- | --------- | ------------- |
 | 1 | Literals, list literals `[...]` | - |
 | 2 | Unary minus `-x` | Right |
-| 3 | Indexing `expr[i]` | Left |
-| 4 | Pipeline `lhs -> name(args)\|$params\|{body}` | Left |
-| 5 | Property access `lhs.property` | Left |
-| 6 | Logical not `!expr` | Right |
-| 7 | Multiplicative `*`, `/`, `%` | Left |
-| 8 | Additive `+`, `-` | Left |
-| 9 | Comparisons `<`, `<=`, `>`, `>=` | Left |
-| 10 | Membership `in` | Left |
-| 11 | Regex match `=~`, `!~` | Left |
-| 12 | Equality `==`, `!=` | Left |
-| 13 | Logical and `&&` | Left |
-| 14 | Logical or/xor `\|\|`, `^` | Left |
-| 15 | Ternary `? { then : else }` | Left |
+| 3 | Postfix: indexing `expr[i]`, pipeline `lhs -> name(args)\|$params\|{body}`, property access `lhs.name` | Left |
+| 4 | Logical not `!expr` | Right |
+| 5 | Multiplicative `*`, `/`, `%` | Left |
+| 6 | Additive `+`, `-` | Left |
+| 7 | Comparisons `<`, `<=`, `>`, `>=` | Left |
+| 8 | Membership `in` | Left |
+| 9 | Regex match `=~`, `!~` | Left |
+| 10 | Equality `==`, `!=` | Left |
+| 11 | Logical and `&&` | Left |
+| 12 | Logical or/xor `\|\|`, `^` | Left |
+| 13 | Ternary `? { then : else }` | Left |
+
+The three postfix operators share one level and apply left to right: `$self.tags[0]` indexes the property, `$i.name -> Len` pipes it, and `LINES -> First.qty` reads a member of the pipeline's result. The name after `.` is a property or relation name, never an expression.
 
 Parentheses group as usual.
 
@@ -1437,11 +1453,11 @@ name               // implicit property reference
 $item.price        // lambda parameter property
 ```
 
-Property references are checked **statically**: a reference to a property not declared on the type is rejected at schema load (`E_UNKNOWN_PROPERTY`). At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
+Invariant expressions are checked **statically** at schema load. The checker types every sub-expression — an instance, an association key, a list, a scalar — and follows the type through member access, indexing and every pipeline stage, so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. It rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters or arguments. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
 
-**Relations are in scope**, under the relation's field name, and the DSL name
-resolves to the same entry case-insensitively. What a relation evaluates to
-depends on where its data lives:
+**Relations are in scope**, under the relation's field name — the UPPER_SNAKE
+name in lower case — so `WORKS_AT` and `works_at` read one entry. What a
+relation evaluates to depends on where its data lives:
 
 - A **composition**'s children are part of the instance, so the relation
   evaluates to those children — a list for a `many` composition, the single
@@ -1451,7 +1467,8 @@ depends on where its data lives:
   key, not the target's row, so the relation evaluates to the target key — a
   list for a `many` association, the single key otherwise. Presence, cardinality
   and key comparison are answerable; the target type's properties are not in
-  this instance to answer with, and reaching for one is an evaluation error.
+  this instance to answer with, and reaching for one is rejected at load
+  (`E_INVALID_INVARIANT`).
 
 A relation with no value evaluates to `nil`, so the null-guard idioms apply to a
 relation exactly as they do to a property.
@@ -1481,7 +1498,7 @@ type Order {
 
 **Numeric variables** (`$0`, `$1`, ...) are evaluator-local and default to `nil` when unset.
 
-**Named variables** are resolved through the evaluator's parent chain and error if undefined.
+**Named variables** are resolved through the evaluator's parent chain — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body.
 
 **`$self`** is bound when evaluating invariants against property maps and is inherited by child evaluators unless explicitly overridden.
 
@@ -1655,7 +1672,7 @@ Invariant expressions are always evaluated against concrete instance data. There
 **Variable resolution:**
 
 - Numeric variables (`$0`, `$1`, ...) evaluate to `nil` when not bound
-- Named variables (`$item`, `$acc`, ...) produce an evaluation error if not bound
+- Named variables (`$item`, `$acc`, ...) are rejected at schema load if not bound by a lambda parameter or an instance member
 - Lambda parameters shadow outer variables for the duration of the body
 
 **Division semantics:** Integer division by zero produces an evaluation error. Float division by zero yields +/-Inf per IEEE 754. Integer modulo by zero produces an evaluation error.
@@ -1688,10 +1705,12 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 **Schema** — schema compilation errors:
 
 - `E_DUPLICATE_TYPE` — type name conflicts
+- `E_DUPLICATE_SCHEMA` — two schemas in one registry declare one name
 - `E_INHERIT_CYCLE` — circular inheritance chain
 - `E_UNKNOWN_TYPE` — unresolvable type reference
 - `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — property definition errors
-- `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION`, `E_RELATION_NORMALIZATION_COLLISION` — relation conflicts
+- `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION` — relation conflicts
+- `E_DUPLICATE_INVARIANT`, `E_INVARIANT_CONFLICT` — an invariant message declared twice on one type, or inherited with two different expressions
 - `E_CASE_COLLISION` — names differ only by case
 - `E_PROPERTY_RELATION_COLLISION` — property and relation share a name
 - `E_RESERVED_PREFIX` — name uses a reserved prefix
@@ -1707,6 +1726,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
 - `E_LOAD_IO_FAILURE` — I/O error during schema loading
 - `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines
+- `E_LOAD_SOURCE_CHANGED` — a source re-registered in a shared registry with content that differs from what the registry holds
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, or duplicate errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
@@ -1819,11 +1839,11 @@ Each compiled schema has a deterministic structural hash (SHA-256) computed over
 
 Two schemas that hash the same agree on every one of those rules everywhere in their closures. The converse does not hold: a hash can also move on a change to an imported schema this schema never references, because closure membership is part of the identity. Members are framed under their schema names, the entry schema first and the rest ordered by name, so the order imports are declared in does not enter the digest.
 
-**Excluded, deliberately:** annotations — they drive downstream store DDL and write shape and never reject data, so a schema that gains its first annotation hashes identically and every persisted `.ys` snapshot header hash stays valid; import aliases and source paths — relation and supertype targets hash by name, never by schema path, and a member is framed by its declared name, never its source, so `embedded://` and disk loads of one schema text agree; and documentation and source positions. Adding an invariant, an edge property, or flipping a type between concrete and `part` changes the hash in any member.
+**Excluded, deliberately:** annotations — they drive downstream store DDL and write shape and never reject data, so a schema that gains its first annotation hashes identically and every persisted `.ys` snapshot header hash stays valid; import aliases and source paths — a member is framed by its declared name, never its source, a relation target is the pair (owning schema name, type name), and a supertype hashes by name alone, so `embedded://` and disk loads of one schema text agree; and documentation and source positions. Adding an invariant, an edge property, or flipping a type between concrete and `part` changes the hash in any member.
 
 The hash is deterministic. Most inputs are sorted by name; invariant blobs are sorted by their serialized bytes, and the operands of one expression are hashed in declared order, because operand order is semantic.
 
-The hash format is `sha256:<hex>`. A structural hash version (currently `3`) is bumped when the algorithm changes; version 2 arrived in v0.15.0 with invariants and the `abstract` / `part` markers, and version 3 in v0.17.0 when the input widened to the whole import closure. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
+The hash format is `sha256:<hex>`. A structural hash version (currently `4`) is bumped when the algorithm changes; version 2 arrived in v0.15.0 with invariants and the `abstract` / `part` markers, version 3 in v0.17.0 when the input widened to the whole import closure, and version 4 when a relation target became the pair (owning schema name, type name) so two closure members declaring one type name no longer collide. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
 
 ## Grammar Summary
 
@@ -1864,10 +1884,10 @@ TypeAnnotation = [ DOC_COMMENT ] "@@" PropertyName [ AnnotationArgs ] .
 AnnotationArgs = "(" AnnotationArg { "," AnnotationArg } [ "," ] ")" .
 AnnotationArg  = PropertyName | UC_WORD | STRING | INTEGER | FLOAT | BOOLEAN | REGEXP .
 
-Association = [ DOC_COMMENT ] "-->" Name [ Multiplicity ] TypeRef
-              [ "{" { RelProperty } "}" ] .
-Composition = [ DOC_COMMENT ] "*->" Name [ Multiplicity ] TypeRef .
-Name       = UC_WORD | LC_WORD .
+Association  = [ DOC_COMMENT ] "-->" RelationName [ Multiplicity ] TypeRef
+               [ "{" { RelProperty } "}" ] .
+Composition  = [ DOC_COMMENT ] "*->" RelationName [ Multiplicity ] TypeRef .
+RelationName = upper_letter { upper_letter | decimal_digit | "_" } .
 Multiplicity     = "(" MultiplicitySpec ")" .
 MultiplicitySpec = "_" [ ":" ( "one" | "many" ) ]
                  | "one" [ ":" ( "one" | "many" ) ]

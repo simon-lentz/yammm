@@ -26,7 +26,7 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 	// Add Person (source) with edge to Company (target not yet added)
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"acme"}})
+		"EMPLOYER", [][]any{{"acme"}})
 
 	result := g.Add(ctx, person)
 	// Should succeed (forward ref is allowed)
@@ -61,7 +61,7 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 	if edges[0].Target().TypeName() != "Company" {
 		t.Errorf("Edge target should be Company, got %s", edges[0].Target().TypeName())
 	}
-	if edges[0].Relation() != "employer" {
+	if edges[0].Relation() != "EMPLOYER" {
 		t.Errorf("Edge relation should be employer, got %s", edges[0].Relation())
 	}
 }
@@ -76,7 +76,7 @@ func TestGraph_ForwardReference_Multiple(t *testing.T) {
 	for _, name := range []string{"alice", "bob", "carol"} {
 		person := mustValidInstanceWithEdge(t, s, "Person",
 			[]any{name}, map[string]any{"name": name},
-			"employer", [][]any{{"acme"}})
+			"EMPLOYER", [][]any{{"acme"}})
 
 		g.Add(ctx, person)
 	}
@@ -109,7 +109,7 @@ func TestGraph_ForwardReference_Multiple(t *testing.T) {
 		if edge.Target().PrimaryKey().String() != `["acme"]` {
 			t.Errorf("Edge target should be [\"acme\"], got %s", edge.Target().PrimaryKey().String())
 		}
-		if edge.Relation() != "employer" {
+		if edge.Relation() != "EMPLOYER" {
 			t.Errorf("Edge relation should be employer, got %s", edge.Relation())
 		}
 	}
@@ -129,7 +129,7 @@ func TestGraph_ForwardReference_Chain(t *testing.T) {
 	// Add A (references B which doesn't exist)
 	typeA := mustValidInstanceWithEdge(t, s, "TypeA",
 		[]any{"a1"}, map[string]any{"name": "A1"},
-		"refB", [][]any{{"b1"}})
+		"REF_B", [][]any{{"b1"}})
 
 	g.Add(ctx, typeA)
 
@@ -146,7 +146,7 @@ func TestGraph_ForwardReference_Chain(t *testing.T) {
 	// Add B (references C, resolves A→B)
 	typeB := mustValidInstanceWithEdge(t, s, "TypeB",
 		[]any{"b1"}, map[string]any{"name": "B1"},
-		"refC", [][]any{{"c1"}})
+		"REF_C", [][]any{{"c1"}})
 
 	g.Add(ctx, typeB)
 
@@ -165,7 +165,7 @@ func TestGraph_ForwardReference_Snapshot(t *testing.T) {
 	// Add Person with forward ref
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"acme"}})
+		"EMPLOYER", [][]any{{"acme"}})
 
 	g.Add(ctx, person)
 
@@ -180,7 +180,7 @@ func TestGraph_ForwardReference_Snapshot(t *testing.T) {
 	if ur.Source.TypeName() != "Person" {
 		t.Errorf("Unresolved source should be Person, got %s", ur.Source.TypeName())
 	}
-	if ur.Relation != "employer" {
+	if ur.Relation != "EMPLOYER" {
 		t.Errorf("Unresolved relation should be employer, got %s", ur.Relation)
 	}
 	if ur.TargetType != mustTypeID(t, s, "Company") {
@@ -200,7 +200,7 @@ func TestUnresolvedEdge_RequiredAndReasonFields(t *testing.T) {
 	// Add Person with reference to missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"missing-company"}})
+		"EMPLOYER", [][]any{{"missing-company"}})
 
 	g.Add(ctx, person)
 
@@ -229,7 +229,7 @@ func TestUnresolvedEdge_OptionalAssociation(t *testing.T) {
 	// Add Person with reference to missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"missing-company"}})
+		"EMPLOYER", [][]any{{"missing-company"}})
 
 	g.Add(ctx, person)
 
@@ -289,7 +289,7 @@ func TestUnresolvedEdge_EmptyReason(t *testing.T) {
 	// Add Person with empty employers array
 	person := mustValidInstanceWithEmptyEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employers")
+		"EMPLOYERS")
 
 	g.Add(ctx, person)
 
@@ -321,7 +321,7 @@ func TestGraph_ForwardReference_AfterResolution(t *testing.T) {
 	// Add Person with forward ref
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"acme"}})
+		"EMPLOYER", [][]any{{"acme"}})
 
 	g.Add(ctx, person)
 
@@ -362,7 +362,7 @@ func TestGraph_Check_RequiredMissing(t *testing.T) {
 	// Add Person with edge to non-existent Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"missing-company"}})
+		"EMPLOYER", [][]any{{"missing-company"}})
 
 	g.Add(ctx, person)
 
@@ -385,7 +385,7 @@ func TestGraph_Check_RequiredEmpty(t *testing.T) {
 	// Add Person with empty edge array
 	person := mustValidInstanceWithEmptyEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employers")
+		"EMPLOYERS")
 
 	g.Add(ctx, person)
 
@@ -408,7 +408,7 @@ func TestGraph_Check_OptionalMissing(t *testing.T) {
 	// Add Person with edge to non-existent Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"missing-company"}})
+		"EMPLOYER", [][]any{{"missing-company"}})
 
 	g.Add(ctx, person)
 
@@ -430,7 +430,7 @@ func TestGraph_Check_MultipleUnresolved(t *testing.T) {
 	for _, name := range []string{"alice", "bob", "carol"} {
 		person := mustValidInstanceWithEdge(t, s, "Person",
 			[]any{name}, map[string]any{"name": name},
-			"employer", [][]any{{name + "-company"}}) // Each has unique missing target
+			"EMPLOYER", [][]any{{name + "-company"}}) // Each has unique missing target
 
 		g.Add(ctx, person)
 	}
@@ -457,7 +457,7 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 	// Add Person with missing target
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"missing"}})
+		"EMPLOYER", [][]any{{"missing"}})
 
 	g.Add(ctx, person)
 
@@ -509,7 +509,7 @@ func TestGraph_Edge_Properties(t *testing.T) {
 	// Add Person with edge properties
 	person := mustValidInstanceWithEdgeProps(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", []any{"acme"},
+		"EMPLOYER", []any{"acme"},
 		map[string]any{"role": "Engineer", "since": int64(2020)})
 
 	g.Add(ctx, person)
@@ -559,7 +559,7 @@ func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 	// the edge remains unresolved when Snapshot() is called.
 	person := mustValidInstanceWithEdgeProps(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", []any{"missing-acme"},
+		"EMPLOYER", []any{"missing-acme"},
 		map[string]any{"role": "Engineer", "since": int64(2020)})
 
 	g.Add(ctx, person)
@@ -624,7 +624,7 @@ func TestGraph_Check_MultipleUnresolved_SameTarget(t *testing.T) {
 	for _, name := range []string{"alice", "bob", "carol"} {
 		person := mustValidInstanceWithEdge(t, s, "Person",
 			[]any{name}, map[string]any{"name": name},
-			"employer", [][]any{{"missing-acme"}}) // Same target!
+			"EMPLOYER", [][]any{{"missing-acme"}}) // Same target!
 
 		g.Add(ctx, person)
 	}
@@ -670,7 +670,7 @@ func TestGraph_ForwardReference_Multiple_Unresolved_Snapshot(t *testing.T) {
 	for _, name := range []string{"alice", "bob", "carol"} {
 		person := mustValidInstanceWithEdge(t, s, "Person",
 			[]any{name}, map[string]any{"name": name},
-			"employer", [][]any{{"acme"}})
+			"EMPLOYER", [][]any{{"acme"}})
 
 		g.Add(ctx, person)
 	}
@@ -763,7 +763,7 @@ func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {
 		),
 	}
 	edges := map[string]*instance.ValidEdgeData{
-		"employer": instance.NewValidEdgeData(targets),
+		"EMPLOYER": instance.NewValidEdgeData(targets),
 	}
 
 	// Create instance with provenance
@@ -830,7 +830,7 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 	// Now add Person (source) with edge to existing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"acme"}})
+		"EMPLOYER", [][]any{{"acme"}})
 
 	result = g.Add(ctx, person)
 	if err := result.Err(); err != nil {
@@ -868,7 +868,7 @@ func TestGraph_BackwardReference_Multiple(t *testing.T) {
 	for _, name := range []string{"alice", "bob", "carol"} {
 		person := mustValidInstanceWithEdge(t, s, "Person",
 			[]any{name}, map[string]any{"name": name},
-			"employer", [][]any{{"acme"}})
+			"EMPLOYER", [][]any{{"acme"}})
 
 		g.Add(ctx, person)
 	}
@@ -907,7 +907,7 @@ func TestGraph_CircularReference_Basic(t *testing.T) {
 	// Add TypeA referencing TypeB (forward ref)
 	typeA := mustValidInstanceWithEdge(t, s, "TypeA",
 		[]any{"a1"}, map[string]any{"name": "A1"},
-		"refB", [][]any{{"b1"}})
+		"REF_B", [][]any{{"b1"}})
 
 	g.Add(ctx, typeA)
 
@@ -918,7 +918,7 @@ func TestGraph_CircularReference_Basic(t *testing.T) {
 	// Add TypeB referencing TypeA (creates cycle, resolves A→B)
 	typeB := mustValidInstanceWithEdge(t, s, "TypeB",
 		[]any{"b1"}, map[string]any{"name": "B1"},
-		"refA", [][]any{{"a1"}})
+		"REF_A", [][]any{{"a1"}})
 
 	g.Add(ctx, typeB)
 
@@ -943,13 +943,13 @@ func TestGraph_CircularReference_Chain(t *testing.T) {
 	// Add all three in sequence, each creating a forward ref
 	typeA := mustValidInstanceWithEdge(t, s, "TypeA",
 		[]any{"a1"}, map[string]any{"name": "A1"},
-		"refB", [][]any{{"b1"}})
+		"REF_B", [][]any{{"b1"}})
 
 	g.Add(ctx, typeA)
 
 	typeB := mustValidInstanceWithEdge(t, s, "TypeB",
 		[]any{"b1"}, map[string]any{"name": "B1"},
-		"refC", [][]any{{"c1"}})
+		"REF_C", [][]any{{"c1"}})
 
 	g.Add(ctx, typeB)
 
@@ -961,7 +961,7 @@ func TestGraph_CircularReference_Chain(t *testing.T) {
 	// Add TypeC referencing TypeA (completes the cycle)
 	typeC := mustValidInstanceWithEdge(t, s, "TypeC",
 		[]any{"c1"}, map[string]any{"name": "C1"},
-		"refA", [][]any{{"a1"}})
+		"REF_A", [][]any{{"a1"}})
 
 	g.Add(ctx, typeC)
 

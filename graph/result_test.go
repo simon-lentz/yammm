@@ -44,7 +44,7 @@ func TestEdgesFrom_SingleEdge(t *testing.T) {
 	g := graph.New(s)
 
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "employer", [][]any{{"c1"}})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 
 	g.Add(context.Background(), company)
 	g.Add(context.Background(), person)
@@ -54,7 +54,7 @@ func TestEdgesFrom_SingleEdge(t *testing.T) {
 
 	edges := snap.EdgesFrom(personInst)
 	require.Len(t, edges, 1)
-	assert.Equal(t, "employer", edges[0].Relation())
+	assert.Equal(t, "EMPLOYER", edges[0].Relation())
 	assert.Equal(t, "Person", edges[0].Source().TypeName())
 	assert.Equal(t, "Company", edges[0].Target().TypeName())
 }
@@ -65,7 +65,7 @@ func TestEdgesFrom_MultipleEdges(t *testing.T) {
 
 	c1 := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
 	c2 := mustValidInstance(t, s, "Company", []any{"c2"}, map[string]any{"id": "c2", "name": "Beta"})
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "employers", [][]any{{"c1"}, {"c2"}})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYERS", [][]any{{"c1"}, {"c2"}})
 
 	g.Add(context.Background(), c1)
 	g.Add(context.Background(), c2)
@@ -76,8 +76,8 @@ func TestEdgesFrom_MultipleEdges(t *testing.T) {
 
 	edges := snap.EdgesFrom(personInst)
 	require.Len(t, edges, 2)
-	assert.Equal(t, "employers", edges[0].Relation())
-	assert.Equal(t, "employers", edges[1].Relation())
+	assert.Equal(t, "EMPLOYERS", edges[0].Relation())
+	assert.Equal(t, "EMPLOYERS", edges[1].Relation())
 	// Both edges carry the same relation, so the target key is the only arm
 	// that can pin the order.
 	assert.Equal(t, `["c1"]`, edges[0].Target().PrimaryKey().String())
@@ -90,7 +90,7 @@ func TestEdgesFrom_InstanceFromDifferentSnapshot(t *testing.T) {
 	// Build two separate snapshots
 	g1 := graph.New(s)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "employer", [][]any{{"c1"}})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	g1.Add(context.Background(), company)
 	g1.Add(context.Background(), person)
 	snap1 := g1.Snapshot()
@@ -110,7 +110,7 @@ func TestEdgesFrom_DefensiveCopy(t *testing.T) {
 	g := graph.New(s)
 
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "employer", [][]any{{"c1"}})
+	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 
 	g.Add(context.Background(), company)
 	g.Add(context.Background(), person)

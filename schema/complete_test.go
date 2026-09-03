@@ -299,7 +299,7 @@ func TestComplete_Errors(t *testing.T) {
 						Relations: []*schema.TestRelationDecl{
 							{
 								Kind:   schema.RelationComposition,
-								Name:   "item",
+								Name:   "ITEM",
 								Target: &schema.TestASTTypeRef{Name: "Regular"},
 							},
 						},
@@ -322,7 +322,7 @@ func TestComplete_Errors(t *testing.T) {
 						Relations: []*schema.TestRelationDecl{
 							{
 								Kind:   schema.RelationComposition,
-								Name:   "item",
+								Name:   "ITEM",
 								Target: &schema.TestASTTypeRef{Name: "AbstractPart"},
 							},
 						},
@@ -341,55 +341,41 @@ func TestComplete_Errors(t *testing.T) {
 			},
 		},
 		{
-			name: "relation normalization collision associations",
-			model: &schema.TestModel{
-				Name: "test",
-				Types: []*schema.TestTypeDecl{
-					{Name: "Target"},
-					{
-						Name: "Person",
-						Relations: []*schema.TestRelationDecl{
-							{
-								Kind:   schema.RelationAssociation,
-								Name:   "BestFriend",
-								Target: &schema.TestASTTypeRef{Name: "Target"},
-							},
-							{
-								Kind:   schema.RelationAssociation,
-								Name:   "best_friend", // Normalizes to same as BestFriend
-								Target: &schema.TestASTTypeRef{Name: "Target"},
-							},
-						},
-					},
-				},
-			},
-			wantCode: diag.E_RELATION_NORMALIZATION_COLLISION,
-		},
-		{
-			name: "relation normalization collision mixed",
+			name: "inherited association and composition under one name",
 			model: &schema.TestModel{
 				Name: "test",
 				Types: []*schema.TestTypeDecl{
 					{Name: "RegularType"},
 					{Name: "PartType", IsPart: true},
 					{
-						Name: "Container",
+						Name:       "HasAssoc",
+						IsAbstract: true,
 						Relations: []*schema.TestRelationDecl{
 							{
 								Kind:   schema.RelationAssociation,
-								Name:   "Items",
+								Name:   "ITEMS",
 								Target: &schema.TestASTTypeRef{Name: "RegularType"},
 							},
+						},
+					},
+					{
+						Name:       "HasComp",
+						IsAbstract: true,
+						Relations: []*schema.TestRelationDecl{
 							{
 								Kind:   schema.RelationComposition,
-								Name:   "items", // Normalizes to same as Items
+								Name:   "ITEMS",
 								Target: &schema.TestASTTypeRef{Name: "PartType"},
 							},
 						},
 					},
+					{
+						Name:     "Container",
+						Inherits: []*schema.TestASTTypeRef{{Name: "HasAssoc"}, {Name: "HasComp"}},
+					},
 				},
 			},
-			wantCode: diag.E_RELATION_NORMALIZATION_COLLISION,
+			wantCode: diag.E_RELATION_COLLISION,
 		},
 		{
 			name: "property relation collision association",
@@ -875,7 +861,7 @@ func TestComplete_CompositionTarget_Valid(t *testing.T) {
 				Relations: []*schema.TestRelationDecl{
 					{
 						Kind:   schema.RelationComposition,
-						Name:   "item",
+						Name:   "ITEM",
 						Target: &schema.TestASTTypeRef{Name: "Part"},
 					},
 				},
@@ -1238,7 +1224,7 @@ func TestComplete_AssociationTarget_Valid(t *testing.T) {
 				Relations: []*schema.TestRelationDecl{
 					{
 						Kind:   schema.RelationAssociation,
-						Name:   "employer",
+						Name:   "EMPLOYER",
 						Target: &schema.TestASTTypeRef{Name: "Company"},
 					},
 				},

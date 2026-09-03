@@ -29,7 +29,7 @@ func ExampleGraph_Add() {
 		AddType("Employee").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("department", schema.LocalTypeRef("Department", location.Span{}), false, false).
+		WithRelation("DEPARTMENT", schema.LocalTypeRef("Department", location.Span{}), false, false).
 		Done().
 		Build()
 
@@ -84,7 +84,7 @@ func ExampleGraph_Check() {
 		Done().
 		AddType("Child").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithRelation("parent", schema.LocalTypeRef("Parent", location.Span{}), false, false).
+		WithRelation("PARENT", schema.LocalTypeRef("Parent", location.Span{}), false, false).
 		Done().
 		Build()
 

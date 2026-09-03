@@ -1,12 +1,14 @@
 package schema
 
 import (
+	"bytes"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // visitState tracks DFS progress for cycle detection.
@@ -144,13 +146,10 @@ func (c *completer) completeTypes() {
 		supers := make([]ResolvedTypeRef, 0)
 		seenSupers := make(map[TypeID]bool)
 
-		// Initialize with current type to prevent self-inclusion via cross-schema cycles.
-		// If A extends B (cross-schema), and B's SuperTypes includes A, the seenSupers
-		// check will correctly skip adding A to its own supers.
-		// NOTE: This local seenSupers check prevents infinite loops during single-schema
-		// completion. Full cross-schema cycle detection (A → B → A spanning schemas)
-		// is performed separately via detectCrossSchemaInheritanceCycles after all
-		// schemas are loaded.
+		// A cross-schema inheritance cycle cannot form: it would need mutual
+		// import, which the loader refuses (E_IMPORT_CYCLE), and a Builder
+		// schema defers a qualified reference it cannot resolve. Marking the
+		// type itself keeps a local walk from adding a type to its own supers.
 		seenSupers[t.ID()] = true
 
 		// DFS traversal of inheritance, left-to-right, keep-first
@@ -1033,7 +1032,7 @@ func (c *completer) flushShadowedAnnotations() {
 	index := make(map[shadowGroupKey]*group)
 
 	for _, s := range c.pendingShadowed {
-		if s.ann.argsMalformed || c.diagnosedAnnotations[s.ann] {
+		if c.diagnosedAnnotations[s.ann] {
 			continue // The annotation is not usable; advising its re-statement would mislead.
 		}
 		if c.conflictedProperties[s.own] {
@@ -1093,24 +1092,66 @@ func (c *completer) flushShadowedAnnotations() {
 // narrowing-replacement arm that reinstates the nearer declaration. No such
 // relation exists over invariant expressions, so there is nothing here to
 // rescue a wrong pick.
+// mergeInvariants merges own invariants with those each direct supertype has
+// already merged. An invariant's message is its identity: a subtype's
+// declaration overrides an inherited one of the same name, one definition
+// reached through two ancestors merges, and two inherited definitions of one
+// name that differ are a conflict, reported once on the combining type.
 func (c *completer) mergeInvariants(t *Type) []*Invariant {
 	result := t.InvariantsSlice()
-	seen := make(map[string]bool)
+	own := make(map[string]bool, len(result))
 	for _, inv := range result {
-		seen[inv.Name()] = true
+		own[inv.Name()] = true
 	}
 
+	// One conflict is one diagnostic naming every rival, as mergeRelations
+	// reports a relation clash: the walk collects, then reports once per name.
+	inherited := make(map[string]*Invariant)
+	rivals := make(map[string][]*Invariant)
+	var conflicted []string
 	for _, superType := range c.directSuperTypes(t) {
 		for inv := range superType.AllInvariants() {
-			if seen[inv.Name()] {
+			if own[inv.Name()] {
 				continue
 			}
-			seen[inv.Name()] = true
+			if first, seen := inherited[inv.Name()]; seen {
+				if first != inv && !sameExpression(first.Expression(), inv.Expression()) &&
+					!slices.Contains(rivals[inv.Name()], inv) {
+					if rivals[inv.Name()] == nil {
+						conflicted = append(conflicted, inv.Name())
+					}
+					rivals[inv.Name()] = append(rivals[inv.Name()], inv)
+				}
+				continue
+			}
+			inherited[inv.Name()] = inv
 			result = append(result, inv)
 		}
 	}
 
+	for _, name := range conflicted {
+		kept := inherited[name]
+		related := []location.RelatedInfo{{Span: kept.Span(), Message: "kept definition declared here"}}
+		for _, rival := range rivals[name] {
+			related = append(related, location.RelatedInfo{Span: rival.Span(), Message: "conflicting definition declared here"})
+		}
+		c.errorfRelated(t.Span(), diag.E_INVARIANT_CONFLICT, related,
+			"type %q inherits definitions of invariant %q with different expressions "+
+				"(expressions are compared structurally: 1 and 1.0 are different literals)",
+			t.Name(), name)
+	}
+
 	return result
+}
+
+// sameExpression reports whether two expressions serialize to the same bytes
+// under the structural hash's encoding, which is the one canonical form the
+// package already defines for an expression.
+func sameExpression(a, b expr.Expression) bool {
+	var ba, bb bytes.Buffer
+	hashExpression(&ba, a)
+	hashExpression(&bb, b)
+	return bytes.Equal(ba.Bytes(), bb.Bytes())
 }
 
 // mergeAnnotations merges own type-level annotations with inherited ones.
@@ -1195,6 +1236,11 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 
 		for _, r := range inherited {
 			if existing, ok := seen[r.FieldName()]; ok {
+				// An unresolved target already carries its own diagnostic; a
+				// collision report on top of it would blame the same line twice.
+				if existing.TargetID().IsZero() || r.TargetID().IsZero() {
+					continue
+				}
 				if !existing.Equal(r) {
 					matched := false
 					for _, cl := range collisions {
@@ -1237,7 +1283,7 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 		}
 		c.errorfRelated(t.Span(), diag.E_RELATION_COLLISION, related,
 			"type %q inherits conflicting definitions of relation %q from %s and %s",
-			t.Name(), cl.survivor.FieldName(), cl.survivor.Owner(), cl.rivals[0].Owner())
+			t.Name(), cl.survivor.Name(), cl.survivor.Owner(), cl.rivals[0].Owner())
 	}
 
 	return result

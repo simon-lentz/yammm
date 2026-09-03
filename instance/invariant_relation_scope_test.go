@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -133,19 +134,13 @@ func TestInvariantRelationScope_AbsentRelationIsNil(t *testing.T) {
 }
 
 // An association's target is a REFERENCE: the instance holds the foreign key,
-// never the target's row. Reaching for a target property is an evaluation
-// error naming what it got, not a silent nil — which is what the whole defect
-// was.
-//
-// It remains accepted at load, because the load-time checker binds the lambda
-// parameter to the target type for associations and compositions alike.
+// never the target's row, so reaching for a target property can never read a
+// value. The static checker refuses it at load; the evaluator's own refusal
+// is pinned by the contract table's refuse rows.
 func TestInvariantRelationScope_AssociationTargetPropertiesAreNotAvailable(t *testing.T) {
-	ok, detail := relationInvariant(t, `WORKS_AT -> All |$c| { $c.id != "" }`, populatedOrder())
-
-	if ok {
-		t.Fatal("an association lambda read a target property the instance does not hold")
-	}
-	if !strings.Contains(detail, "E_EVAL_ERROR") {
-		t.Errorf("want an evaluation error naming the cause, got: %s", detail)
+	src := strings.Replace(relationInvariantSrc, "%EXPR%", `WORKS_AT -> Then |$c| { $c.id != "" }`, 1)
+	_, res := schema.LoadString(t.Context(), src, "x.yammm")
+	if !res.HasCode(diag.E_INVALID_INVARIANT) || !strings.Contains(res.Err().Error(), "association") {
+		t.Errorf("want E_INVALID_INVARIANT naming the association; got %v", res.Err())
 	}
 }

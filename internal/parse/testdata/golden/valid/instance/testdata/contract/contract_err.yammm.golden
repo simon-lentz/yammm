@@ -90,93 +90,33 @@
           }
         },
         {
-          "msg": "\"x_contains_string_receiver\"",
-          "expr": "(Contains \"abc\" (args \"b\") (params ) nil)",
-          "expr_span": {
-            "s": 444,
-            "e": 466
-          },
-          "span": {
-            "s": 413,
-            "e": 466
-          }
-        },
-        {
-          "msg": "\"x_undefined_named_var\"",
-          "expr": "(== ($ \"undef\") nil)",
-          "expr_span": {
-            "s": 494,
-            "e": 507
-          },
-          "span": {
-            "s": 468,
-            "e": 507
-          }
-        },
-        {
-          "msg": "\"x_scalar_not_collection\"",
-          "expr": "(All 1 (args ) (params x) true)",
-          "expr_span": {
-            "s": 537,
-            "e": 559
-          },
-          "span": {
-            "s": 509,
-            "e": 559
-          }
-        },
-        {
           "msg": "\"x_nonbool_invariant_result\"",
           "expr": "(+ 5 1)",
           "expr_span": {
-            "s": 592,
-            "e": 597
+            "s": 444,
+            "e": 449
           },
           "span": {
-            "s": 561,
-            "e": 597
-          }
-        },
-        {
-          "msg": "\"x_index_two_args\"",
-          "expr": "(== (@ ([] 10 20 30) 0 2) 10)",
-          "expr_span": {
-            "s": 620,
-            "e": 644
-          },
-          "span": {
-            "s": 599,
-            "e": 644
-          }
-        },
-        {
-          "msg": "\"x_index_empty\"",
-          "expr": "(== (@ ([] 10 20 30)) 10)",
-          "expr_span": {
-            "s": 664,
-            "e": 684
-          },
-          "span": {
-            "s": 646,
-            "e": 684
+            "s": 413,
+            "e": 449
           }
         },
         {
           "msg": "\"f_nil_result_is_falsey\"",
           "expr": "(Then nil (args ) (params v) true)",
           "expr_span": {
-            "s": 713,
-            "e": 738
+            "s": 478,
+            "e": 503
           },
           "span": {
-            "s": 686,
-            "e": 738
+            "s": 451,
+            "e": 503
           }
         }
       ],
       "span": {
         "s": 23,
-        "e": 740
+        "e": 505
       }
     }
   ]

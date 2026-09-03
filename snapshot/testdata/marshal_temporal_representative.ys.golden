@@ -3,9 +3,9 @@
 		"version": 4,
 		"schema_name": "temporaltest",
 		"schema_source": "string://temporaltest.yammm",
-		"schema_hash": "sha256:7f464f75a9ce6a9d958b0a728747c99953d36cc7cc7636eb3c1e7faed7f183af",
-		"schema_hash_algorithm": 3,
-		"integrity_hash": "sha256:d96b56539a3b685133d0f8b60933dbe39421f4c702a5705e1f09c6f998964e21",
+		"schema_hash": "sha256:b037b949a44e15446b79891f20a51984bf5df4d6a1a97311c43439524b8a2816",
+		"schema_hash_algorithm": 4,
+		"integrity_hash": "sha256:27ff639a0476e2afe3f0922d0a509e1c696af50482729459a2211737402f1050",
 		"features": [],
 		"attestation": {
 			"values": true,

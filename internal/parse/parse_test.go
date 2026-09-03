@@ -230,7 +230,7 @@ func TestParse_CallArgumentsMatchTheGrammarsCommaRule(t *testing.T) {
 }
 
 // TestParse_BareCommaCallHasNonNilArguments covers the third spelling that
-// reaches an empty argument list. exprcomp builds its own through make, and a
+// reaches an empty argument list. A consumer building its own through make, and a
 // nil slice compares unequal to that, so the differential fails on the call.
 func TestParse_BareCommaCallHasNonNilArguments(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id -> lower(,)\n}\n"
@@ -244,6 +244,119 @@ func TestParse_BareCommaCallHasNonNilArguments(t *testing.T) {
 	}
 	if lists[0] == nil {
 		t.Error("the bare-comma call carries a nil argument slice, want an empty one")
+	}
+}
+
+// sexprString renders an expression as a parenthesized S-expression so a test
+// can assert the parsed shape in one string: (op child...) for an SExpr, the
+// Go value for a literal, args[...] and params[...] for a call's lists.
+func sexprString(e expr.Expression) string {
+	switch v := e.(type) {
+	case expr.SExpr:
+		parts := []string{v.Op()}
+		for _, c := range v.Children() {
+			parts = append(parts, sexprString(c))
+		}
+		return "(" + strings.Join(parts, " ") + ")"
+	case *expr.Literal:
+		switch val := v.Val.(type) {
+		case []expr.Expression:
+			parts := make([]string, len(val))
+			for i, c := range val {
+				parts[i] = sexprString(c)
+			}
+			return "args[" + strings.Join(parts, " ") + "]"
+		case []string:
+			return "params" + fmt.Sprint(val)
+		default:
+			return fmt.Sprintf("%#v", val)
+		}
+	case expr.DatatypeLiteral:
+		return "dt:" + string(v)
+	}
+	return fmt.Sprintf("<%T>", e)
+}
+
+// TestParse_PostfixOperatorsChainLeftToRight pins that indexing, pipeline calls
+// and property access are one postfix level: "$self.tags[0]" indexes the
+// property and "$i.name -> Len" pipes it. Unary minus stays tighter than all
+// three, as the package doc states.
+func TestParse_PostfixOperatorsChainLeftToRight(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{"$self.tags[0]", `(@ (. ($ "self") "tags") 0)`},
+		{"$self.name -> Len", `(Len (. ($ "self") "name") args[] params[] <nil>)`},
+		{"$i.sku -> Len > 0", `(> (Len (. ($ "i") "sku") args[] params[] <nil>) 0)`},
+		{"LINES[0].qty", `(. (@ (p "LINES") 0) "qty")`},
+		{"a.b.c", `(. (. (p "a") "b") "c")`},
+		{"xs -> First.name", `(. (First (p "xs") args[] params[] <nil>) "name")`},
+		{"-x[0]", `(@ (-x (p "x")) 0)`},
+		{"!x[0]", `(! (@ (p "x") 0))`},
+		{"!xs -> Len", `(! (Len (p "xs") args[] params[] <nil>))`},
+	}
+	for _, tc := range cases {
+		src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + tc.src + "\n}\n"
+		file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		if len(issues) != 0 {
+			t.Errorf("%s: unexpected issues %v", tc.src, issues)
+			continue
+		}
+		if got := sexprString(file.Types[0].Invariants[0].Expr); got != tc.want {
+			t.Errorf("%s:\n got %s\nwant %s", tc.src, got, tc.want)
+		}
+	}
+}
+
+// TestParse_EmptySchemaNameIsRefused pins that the grammar's STRING may be
+// empty but the language's schema name may not: the header is refused at the
+// name's span and no usable name is produced, so the loader stops there.
+func TestParse_EmptySchemaNameIsRefused(t *testing.T) {
+	src := "schema \"\"\ntype T {\n\tid String primary\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_NAME {
+		t.Fatalf("got %v, want one E_INVALID_NAME", issues)
+	}
+	if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != `""` {
+		t.Errorf("diagnostic span covers %q, want the empty name literal", got)
+	}
+	if !file.SchemaNameFailed {
+		t.Error("an empty schema name must count as no usable name")
+	}
+}
+
+// TestParse_MemberPositionHoldsOneName pins that the token after '.' is one
+// word and nothing else: the end of the expression, a parenthesis or a number
+// there is a syntax error rather than a member the evaluator would have to
+// interpret.
+func TestParse_MemberPositionHoldsOneName(t *testing.T) {
+	for _, src := range []string{"$self.", "$self.(name)", "$self.5", "$self.\"x\""} {
+		full := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + src + " == nil\n}\n"
+		_, issues := Parse([]byte(full), location.NewSourceID("s.yammm"))
+		if len(issues) == 0 {
+			t.Errorf("%s: parsed clean, want a syntax error at the member position", src)
+		}
+	}
+}
+
+// TestParse_MemberPositionTakesAnyWord pins that the member position admits
+// every word, keywords included: a property may be named type and a relation
+// IN, so their field names must be writable after '.'. The position admits
+// nothing but a name, and the type's members decide whether it resolves.
+func TestParse_MemberPositionTakesAnyWord(t *testing.T) {
+	for _, name := range []string{
+		"type", "schema", "datatype", "required", "primary", "extends",
+		"includes", "abstract", "one", "many", "import", "as", "part", "in",
+		"nil", "true", "false", "Integer", "String", "ITEM", "worksAt",
+	} {
+		full := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" $self." + name + " == nil\n}\n"
+		file, issues := Parse([]byte(full), location.NewSourceID("s.yammm"))
+		if len(issues) != 0 {
+			t.Errorf("$self.%s: %v, want a member access", name, issues)
+			continue
+		}
+		want := `(== (. ($ "self") "` + name + `") <nil>)`
+		if got := sexprString(file.Types[0].Invariants[0].Expr); got != want {
+			t.Errorf("$self.%s parsed as %s, want %s", name, got, want)
+		}
 	}
 }
 
@@ -305,7 +418,7 @@ func TestParse_DiagnosticsNameNoGrammarTypes(t *testing.T) {
 		"schema \"s\"\ntype T {\n\t(\n}\n",
 		"schema \"s\"\ntype T {\n\ta Pattern[]\n}\n",
 		"schema \"s\"\ntype T {\n\ts String[-1, 2]\n}\n",
-		"schema \"s\"\ntype T {\n\t--> rel 123\n}\n",
+		"schema \"s\"\ntype T {\n\t--> REL 123\n}\n",
 		"schema \"s\"\nimport \"a.yammm\" as one\n",
 		"schema \"s\"\ntype T {\n\tn Integer[99999999999999999999, 5]\n}\n",
 		// The Pratt parser's failures are the only ones that reach syntaxErr's
@@ -475,7 +588,7 @@ func TestParse_InvariantExprSpanCoversTheExpression(t *testing.T) {
 
 // TestParse_EmptyCallArgumentsAreNonNil pins that a zero-argument call carries
 // an empty argument slice rather than a nil one, which is what
-// exprcomp.VisitArguments builds. cmp and reflect.DeepEqual report the two as
+// a VisitArguments-style builder produces. cmp and reflect.DeepEqual report the two as
 // unequal, so a nil here makes the A/B differential mismatch on every
 // zero-argument call and buries the real mismatches.
 func TestParse_EmptyCallArgumentsAreNonNil(t *testing.T) {
@@ -816,7 +929,7 @@ var malformedStreamSources = []string{
 	"schema \"s\"\ntype T {\n\tid String[\n}\n",
 	"schema \"s\"\ntype T extends 3 {\n\tid String primary\n}\n",
 	"schema \"s\"\ntype T {\n\t! \"m\" id ->\n}\n",
-	"schema \"s\"\ntype T {\n\tid String primary\n\t--> r B /\n}\n",
+	"schema \"s\"\ntype T {\n\tid String primary\n\t--> R B /\n}\n",
 	"\x00\xff not yammm at all \x00",
 	"",
 }

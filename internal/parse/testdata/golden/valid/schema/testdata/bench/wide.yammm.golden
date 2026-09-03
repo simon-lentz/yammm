@@ -353,7 +353,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "operates",
+          "name": "OPERATES",
           "name_span": {
             "s": 813,
             "e": 821
@@ -374,7 +374,7 @@
         },
         {
           "kind": "assoc",
-          "name": "partners",
+          "name": "PARTNERS",
           "name_span": {
             "s": 843,
             "e": 851
@@ -577,7 +577,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "serves",
+          "name": "SERVES",
           "name_span": {
             "s": 1252,
             "e": 1258
@@ -629,7 +629,7 @@
         },
         {
           "kind": "comp",
-          "name": "zones",
+          "name": "ZONES",
           "name_span": {
             "s": 1328,
             "e": 1333
@@ -975,7 +975,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "alternate",
+          "name": "ALTERNATE",
           "name_span": {
             "s": 1969,
             "e": 1978
@@ -1313,7 +1313,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "travels",
+          "name": "TRAVELS",
           "name_span": {
             "s": 2654,
             "e": 2661
@@ -1332,7 +1332,7 @@
         },
         {
           "kind": "assoc",
-          "name": "handled_by",
+          "name": "HANDLED_BY",
           "name_span": {
             "s": 2679,
             "e": 2689
@@ -1351,7 +1351,7 @@
         },
         {
           "kind": "comp",
-          "name": "parcels",
+          "name": "PARCELS",
           "name_span": {
             "s": 2714,
             "e": 2721
@@ -1692,7 +1692,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "concerns",
+          "name": "CONCERNS",
           "name_span": {
             "s": 3493,
             "e": 3501
@@ -1933,7 +1933,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "applies_to",
+          "name": "APPLIES_TO",
           "name_span": {
             "s": 3922,
             "e": 3932
@@ -2110,7 +2110,7 @@
       "rels": [
         {
           "kind": "assoc",
-          "name": "works_for",
+          "name": "WORKS_FOR",
           "name_span": {
             "s": 4337,
             "e": 4346

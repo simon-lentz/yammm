@@ -168,7 +168,7 @@ func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 		return e.xor(args)
 
 	default:
-		return nil, fmt.Errorf("unknown operation: %s", op)
+		return nil, fmt.Errorf("unknown function: %s", op)
 	}
 }
 
@@ -283,78 +283,25 @@ func (e *Evaluator) evalProperty(children []expr.Expression, scope Scope) (any, 
 	return val.Unwrap(), nil
 }
 
+// evalMember reads one named member of the receiver. The member position holds
+// a name and nothing else: a builtin's name there is an ordinary member, never
+// a call — the pipeline is the only call form.
 func (e *Evaluator) evalMember(children []expr.Expression, scope Scope) (any, error) {
-	if len(children) < 2 {
-		return nil, errors.New("member access requires at least 2 operands")
+	if len(children) != 2 {
+		return nil, errors.New("member access requires exactly 2 operands")
 	}
 
-	// Evaluate the receiver
 	obj, err := e.evaluate(children[0], scope)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get the member name
 	memberName, ok := expr.StringLiteral(children[1])
 	if !ok {
 		return nil, errors.New("member name must be a string literal")
 	}
 
-	// If there are more children (args, params, body), this is a method call
-	if len(children) > 2 {
-		return e.evalMethodCall(obj, memberName, children[2:], scope)
-	}
-
-	// Check if it's a builtin method call (no extra args/body needed)
-	if def, found := lookupBuiltin(strings.ToLower(memberName)); found {
-		// Use unified validation - validates that no args/params/body are required
-		return e.callBuiltin(def, obj, nil, nil, nil, scope)
-	}
-
-	// Simple member access on a map
 	return e.accessMember(obj, memberName)
-}
-
-func (e *Evaluator) evalMethodCall(receiver any, methodName string, rest []expr.Expression, scope Scope) (any, error) {
-	// Look up the method as a builtin
-	def, ok := lookupBuiltin(strings.ToLower(methodName))
-	if !ok {
-		return nil, fmt.Errorf("unknown method: %s", methodName)
-	}
-
-	// Parse args, params, and body from rest
-	var args []any
-	var params []string
-	var body expr.Expression
-
-	for _, child := range rest {
-		// Check if it's an args literal
-		if argList, ok := expr.ArgsLiteral(child); ok {
-			for _, arg := range argList {
-				val, err := e.evaluate(arg, scope)
-				if err != nil {
-					return nil, err
-				}
-				args = append(args, val)
-			}
-			continue
-		}
-		// Check if it's a params literal
-		if paramList, ok := expr.ParamsLiteral(child); ok {
-			params = paramList
-			continue
-		}
-		// Otherwise it's the body expression.
-		// VisitFcall normalizes missing bodies to NewLiteral(nil) (a non-nil
-		// *Literal wrapping nil). Treat that as "no body" so callBuiltin's
-		// acceptBody validation works correctly for source-compiled ASTs.
-		if !expr.IsNilLiteral(child) {
-			body = child
-		}
-	}
-
-	// Use unified validation and dispatch
-	return e.callBuiltin(def, receiver, args, params, body, scope)
 }
 
 func (e *Evaluator) accessMember(obj any, name string) (any, error) {
@@ -499,32 +446,28 @@ func (e *Evaluator) evalList(children []expr.Expression, scope Scope) (any, erro
 
 // --- Builtins ---
 
-// callBuiltin validates builtin constraints and invokes the function.
-// This is the single internal helper that enforces minArgs, maxArgs, maxParams,
-// and acceptBody requirements for ALL builtin call paths (function-style,
-// method-style with args/body, and method-style without args).
+// callBuiltin validates builtin constraints and invokes the function. It is the
+// single helper that enforces minArgs, maxArgs, maxParams and acceptBody for
+// every builtin call; the pipeline is the only call form.
 func (e *Evaluator) callBuiltin(def builtinDef, lhs any, args []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	// Validate args count
-	if len(args) < def.minArgs {
-		return nil, fmt.Errorf("%s requires at least %d arguments", def.name, def.minArgs)
+	if len(args) < def.spec.MinArgs {
+		return nil, fmt.Errorf("%s requires at least %d arguments", def.spec.Name, def.spec.MinArgs)
 	}
 	// maxArgs == -1 means unlimited arguments
-	if def.maxArgs >= 0 && len(args) > def.maxArgs {
-		return nil, fmt.Errorf("%s accepts at most %d arguments", def.name, def.maxArgs)
+	if def.spec.MaxArgs >= 0 && len(args) > def.spec.MaxArgs {
+		return nil, fmt.Errorf("%s accepts at most %d arguments", def.spec.Name, def.spec.MaxArgs)
 	}
 
-	// Validate params count
-	if len(params) > def.maxParams {
-		return nil, fmt.Errorf("%s accepts at most %d parameters", def.name, def.maxParams)
-	}
-
-	// Validate body presence/absence based on acceptBody flag
-	if body != nil {
-		if !def.acceptBody {
-			return nil, fmt.Errorf("%s does not accept a lambda expression", def.name)
-		}
-	} else if def.acceptBody {
-		return nil, fmt.Errorf("%s requires a lambda expression", def.name)
+	// The lambda's shape, in the order the static checker reports it: a body
+	// the builtin never takes is the mistake, not the parameters written on it.
+	switch {
+	case body != nil && !def.spec.AcceptBody:
+		return nil, fmt.Errorf("%s does not accept a lambda expression", def.spec.Name)
+	case body == nil && def.spec.AcceptBody:
+		return nil, fmt.Errorf("%s requires a lambda expression", def.spec.Name)
+	case len(params) > def.spec.MaxParams:
+		return nil, fmt.Errorf("%s accepts at most %d parameters", def.spec.Name, def.spec.MaxParams)
 	}
 
 	return def.fn(e, lhs, args, params, body, scope)
@@ -722,9 +665,22 @@ func (e *Evaluator) numericOp(left, right any, intOp func(int64, int64) any, flo
 	return nil, false
 }
 
+// nilEquality decides a == b when either side is nil: the null-guard idiom
+// holds for every value kind, an instance included, which the total order
+// cannot rank. The second result is false when neither side is nil.
+func nilEquality(a, b any) (equal, decided bool) {
+	if a == nil || b == nil {
+		return (a == nil) == (b == nil), true
+	}
+	return false, false
+}
+
 func (e *Evaluator) equal(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("== requires 2 operands")
+	}
+	if eq, decided := nilEquality(args[0], args[1]); decided {
+		return eq, nil
 	}
 	cmp, err := value.Order(args[0], args[1])
 	if err != nil {
@@ -736,6 +692,9 @@ func (e *Evaluator) equal(args []any) (any, error) {
 func (e *Evaluator) notEqual(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("!= requires 2 operands")
+	}
+	if eq, decided := nilEquality(args[0], args[1]); decided {
+		return !eq, nil
 	}
 	cmp, err := value.Order(args[0], args[1])
 	if err != nil {

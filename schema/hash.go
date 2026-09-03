@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
 
@@ -22,8 +23,10 @@ import (
 // the entry schema's own declarations to its whole import closure, so the
 // hash covers every rule that decides what instance data is valid — an
 // imported type's constraints decide validity for every instance of it the
-// importing schema admits.
-const StructuralHashVersion = 3
+// importing schema admits. Version 4 (v0.21.0) writes a relation target as
+// the pair (owning schema name, type name) and normalizes the two float
+// zeros, so two closure members declaring one type name no longer collide.
+const StructuralHashVersion = 4
 
 // StructuralHash computes a deterministic, content-based identity over the
 // rules that decide what instance data is valid, across the schema's whole
@@ -39,11 +42,15 @@ const StructuralHashVersion = 3
 // order imports are declared in does not enter the digest.
 //
 // Annotations are deliberately excluded — they configure downstream store
-// DDL and never reject data. So are import aliases and paths: relation and
-// supertype targets hash by name, never by schema path, and a member frame
-// carries the schema's declared name, never its source. A hashed path would
-// make embedded:// and disk loads of one schema text disagree, and consumer
-// dispatch relies on the hash carrying no source path.
+// DDL and never reject data. So are import aliases and source paths: a member
+// frame carries the schema's declared name, never its source, and a relation
+// target is the pair (owning schema name, type name) — never a path. A hashed
+// path would make embedded:// and disk loads of one schema text disagree, and
+// consumer dispatch relies on the hash carrying no source path. A supertype
+// hashes by name alone, which loses nothing: inheritance merges the ancestor's
+// members into the subtype and those members are hashed here, so two
+// candidate ancestors that differ in any rule already produce different
+// digests.
 //
 // The returned string has the format "sha256:<hex>".
 //
@@ -56,7 +63,7 @@ func StructuralHash(s *Schema) string {
 	h := sha256.New()
 
 	// Domain separator.
-	writeTag(h, "yammm-schema-v3")
+	writeTag(h, "yammm-schema-v4")
 
 	// Closure() returns the entry schema first; the rest are re-ordered by
 	// name so a re-ordered import list hashes the same. The slice is a copy,
@@ -67,9 +74,14 @@ func StructuralHash(s *Schema) string {
 		return compareName(a.Name(), b.Name())
 	})
 
+	owners := make(map[location.SourceID]string, len(members))
+	for _, member := range members {
+		owners[member.SourceID()] = member.Name()
+	}
+
 	writeLen(h, len(members))
 	for _, member := range members {
-		hashSchemaMember(h, member)
+		hashSchemaMember(h, member, owners)
 	}
 
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
@@ -79,13 +91,13 @@ func StructuralHash(s *Schema) string {
 // frame opened by its name: its local types, then its local data types. The
 // frame is what keeps two different closures from serializing to one byte
 // stream.
-func hashSchemaMember(h io.Writer, s *Schema) {
+func hashSchemaMember(h io.Writer, s *Schema, owners map[location.SourceID]string) {
 	writeTag(h, "schema")
 	writeStr(h, s.Name())
 
 	// Types (lexicographic iteration guaranteed by s.Types()).
 	for _, typ := range s.Types() {
-		hashType(h, typ)
+		hashType(h, typ, owners)
 	}
 
 	// Data types (lexicographic iteration guaranteed by s.DataTypes()).
@@ -97,7 +109,7 @@ func hashSchemaMember(h io.Writer, s *Schema) {
 }
 
 // hashType hashes a single type's structural shape.
-func hashType(h io.Writer, typ *Type) {
+func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	writeTag(h, "type")
 	writeStr(h, typ.ID().Name())
 	writeBool(h, typ.IsAbstract())
@@ -135,7 +147,7 @@ func hashType(h io.Writer, typ *Type) {
 	for _, rel := range assocs {
 		writeTag(h, "assoc")
 		writeStr(h, rel.Name())
-		writeStr(h, rel.TargetID().Name())
+		writeTargetID(h, rel.TargetID(), owners)
 		writeBool(h, rel.IsOptional())
 		writeBool(h, rel.IsMany())
 
@@ -160,7 +172,7 @@ func hashType(h io.Writer, typ *Type) {
 	for _, rel := range comps {
 		writeTag(h, "comp")
 		writeStr(h, rel.Name())
-		writeStr(h, rel.TargetID().Name())
+		writeTargetID(h, rel.TargetID(), owners)
 		writeBool(h, rel.IsOptional())
 		writeBool(h, rel.IsMany())
 	}
@@ -375,6 +387,15 @@ func hwrite(w io.Writer, b []byte) {
 	w.Write(b) //nolint:errcheck,gosec // hash sinks never error: hash.Hash documents it, bytes.Buffer grows or panics
 }
 
+// writeTargetID writes a relation target as the pair that is both unique and
+// portable: the declared name of the closure member that owns the target, then
+// the target's own name. The owning name is empty for a target outside the
+// closure, which only an unresolved relation produces.
+func writeTargetID(h io.Writer, id TypeID, owners map[location.SourceID]string) {
+	writeStr(h, owners[id.SchemaPath()])
+	writeStr(h, id.Name())
+}
+
 // writeStr writes a length-prefixed string: 4-byte big-endian uint32 length
 // followed by the raw bytes.
 func writeStr(h io.Writer, s string) {
@@ -414,6 +435,10 @@ func writeInt64(h io.Writer, v int64) {
 // writeFloat64 writes a float64 as 8 bytes IEEE 754 big-endian
 // (via [math.Float64bits]).
 func writeFloat64(h io.Writer, v float64) {
+	// FloatConstraint.Equal compares with ==, which calls the two zeros equal.
+	if v == 0 {
+		v = 0
+	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], math.Float64bits(v))
 	hwrite(h, buf[:])

@@ -61,7 +61,7 @@ func TestAddComposed_ContextCancelled_ReachesSnapshotDiagnostics(t *testing.T) {
 		instancetest.PK("c1"),
 		instancetest.Props(map[string]any{"id": "c1"}),
 	)
-	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "children", child); !res.HasFatal() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "CHILDREN", child); !res.HasFatal() {
 		t.Fatalf("a cancelled AddComposed returned %s", res.String())
 	}
 	if !g.Snapshot().Diagnostics().HasCode(diag.E_CONTEXT_CANCELLED) {
@@ -97,11 +97,11 @@ func TestAddComposed_OneDuplicate_NamesTheAddressTheWritersAssign(t *testing.T) 
 			instancetest.Props(map[string]any{"id": id}),
 		)
 	}
-	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "child", child("c1")); !res.OK() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "CHILD", child("c1")); !res.OK() {
 		t.Fatalf("first child: %s", res.String())
 	}
 
-	res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "child", child("c2"))
+	res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "CHILD", child("c2"))
 	if res.OK() {
 		t.Fatal("a second child on a (one) composition was accepted")
 	}
@@ -239,10 +239,10 @@ func TestNewFromSnapshot_ComposedDuplicate_KeepsItsComposingCoordinates(t *testi
 			instancetest.Props(map[string]any{"id": id}),
 		)
 	}
-	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "child", child("c1")); !res.OK() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "CHILD", child("c1")); !res.OK() {
 		t.Fatalf("first child: %s", res.String())
 	}
-	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "child", child("c2")); res.OK() {
+	if res := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "CHILD", child("c2")); res.OK() {
 		t.Fatal("the overflow child was accepted")
 	}
 
@@ -251,7 +251,7 @@ func TestNewFromSnapshot_ComposedDuplicate_KeepsItsComposingCoordinates(t *testi
 	if len(dups) != 1 {
 		t.Fatalf("seeded snapshot carries %d duplicates, want 1", len(dups))
 	}
-	if dups[0].Relation != "child" {
+	if dups[0].Relation != "CHILD" {
 		t.Errorf("Duplicate.Relation = %q, want \"child\"", dups[0].Relation)
 	}
 	if dups[0].Parent == nil || dups[0].Parent.PrimaryKey().String() != `["p1"]` {

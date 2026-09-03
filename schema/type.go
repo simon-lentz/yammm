@@ -140,8 +140,10 @@ func (t *Type) IsPart() bool {
 	return t.isPart
 }
 
-// Property returns the property with the given name (own or inherited), if it exists.
-// Uses O(1) lookup.
+// Property returns the property with the given name (own or inherited), if it
+// exists. The lookup is exact-case, as annotation arguments are resolved;
+// invariant expressions resolve names case-insensitively, which
+// [Type.CanonicalPropertyName] serves.
 func (t *Type) Property(name string) (*Property, bool) {
 	p, ok := t.propByName[name]
 	return p, ok
@@ -442,11 +444,32 @@ func (t *Type) CanonicalPropertyMap() map[string]string {
 	return result
 }
 
+// CanonicalPropertyName maps a lowercased property name to the type's declared
+// spelling. It answers the one question every [Type.CanonicalPropertyMap]
+// caller asks without handing out a copy of the whole map.
+func (t *Type) CanonicalPropertyName(lower string) (string, bool) {
+	if t.canonicalMap != nil {
+		name, ok := t.canonicalMap[lower]
+		return name, ok
+	}
+	// Unsealed: the same last-wins walk seal uses to build the map.
+	name, found := "", false
+	for _, p := range t.allProperties {
+		if strings.ToLower(p.name) == lower {
+			name, found = p.name, true
+		}
+	}
+	return name, found
+}
+
 // --- Internal setters used during completion ---
 
 // seal marks the type as immutable.
 // Called by the completer after type completion finishes.
 func (t *Type) seal() {
+	if t.sealed {
+		panic("type: sealed twice")
+	}
 	// Precompute cached maps for thread-safe access after sealing
 	t.canonicalMap = make(map[string]string, len(t.allProperties))
 	for _, p := range t.allProperties {

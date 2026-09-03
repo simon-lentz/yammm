@@ -119,7 +119,7 @@ func TestValidInstance_Edge(t *testing.T) {
 			),
 		}
 		edges := map[string]*instance.ValidEdgeData{
-			"manager": instance.NewValidEdgeData(targets),
+			"MANAGER": instance.NewValidEdgeData(targets),
 		}
 		vi := instancetest.VI(
 			"Employee",
@@ -127,7 +127,7 @@ func TestValidInstance_Edge(t *testing.T) {
 			instancetest.Edges(edges),
 		)
 
-		edge, ok := vi.Edge("manager")
+		edge, ok := vi.Edge("MANAGER")
 		require.True(t, ok)
 		require.NotNil(t, edge)
 		assert.Len(t, edge.Targets(), 1)
@@ -139,14 +139,14 @@ func TestValidInstance_Edge(t *testing.T) {
 			instancetest.PK(int64(1)),
 		)
 
-		edge, ok := vi.Edge("manager")
+		edge, ok := vi.Edge("MANAGER")
 		assert.False(t, ok)
 		assert.Nil(t, edge)
 	})
 
 	t.Run("nonexistent_relation", func(t *testing.T) {
 		edges := map[string]*instance.ValidEdgeData{
-			"manager": instance.NewValidEdgeData(nil),
+			"MANAGER": instance.NewValidEdgeData(nil),
 		}
 		vi := instancetest.VI(
 			"Employee",
@@ -287,8 +287,8 @@ func TestValidInstance_Edges_Iterator(t *testing.T) {
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(201)}), immutable.WrapProperties(nil)),
 		}
 		edges := map[string]*instance.ValidEdgeData{
-			"manager":  instance.NewValidEdgeData(targets1),
-			"coworker": instance.NewValidEdgeData(targets2),
+			"MANAGER":  instance.NewValidEdgeData(targets1),
+			"COWORKER": instance.NewValidEdgeData(targets2),
 		}
 		vi := instancetest.VI(
 			"Employee",
@@ -322,8 +322,8 @@ func TestValidInstance_Edges_Iterator(t *testing.T) {
 func TestValidInstance_Compositions_Iterator(t *testing.T) {
 	t.Run("with_compositions", func(t *testing.T) {
 		composed := map[string]immutable.Value{
-			"addresses": immutable.Wrap([]any{map[string]any{"id": int64(1)}}),
-			"phones":    immutable.Wrap([]any{map[string]any{"id": int64(2)}}),
+			"ADDRESSES": immutable.Wrap([]any{map[string]any{"id": int64(1)}}),
+			"PHONES":    immutable.Wrap([]any{map[string]any{"id": int64(2)}}),
 		}
 		vi := instancetest.VI(
 			"Person",

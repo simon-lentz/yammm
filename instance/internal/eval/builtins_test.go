@@ -11,18 +11,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// makeBuiltinCall creates an SExpr that cAlls a builtin method on the receiver.
-func makeBuiltinCall(receiver expr.Expression, method string, params []string, body expr.Expression) expr.SExpr {
-	result := expr.SExpr{expr.Op(".")}
-	result = append(result, receiver)
-	result = append(result, expr.NewLiteral(method))
-	if len(params) > 0 {
-		result = append(result, expr.NewLiteral(params))
+// makeBuiltinCall builds the five-element pipeline call the parser emits for
+// "receiver -> name(args) |params| { body }": absent parts are present as empty
+// lists and a nil literal, exactly as the parser normalizes them.
+func makeBuiltinCall(receiver expr.Expression, name string, args []expr.Expression, params []string, body expr.Expression) expr.SExpr {
+	if args == nil {
+		args = []expr.Expression{}
 	}
-	if body != nil {
-		result = append(result, body)
+	if params == nil {
+		params = []string{}
 	}
-	return result
+	if body == nil {
+		body = expr.NewLiteral(nil)
+	}
+	return expr.SExpr{expr.Op(name), receiver, expr.NewLiteral(args), expr.NewLiteral(params), body}
 }
 
 func TestBuiltin_Len(t *testing.T) {
@@ -38,7 +40,7 @@ func TestBuiltin_Len(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Len", nil, nil)
+			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Len", nil, nil, nil)
 			evalEq(t, e, tt.expected)
 		})
 	}
@@ -58,7 +60,7 @@ func TestBuiltin_Abs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Abs", nil, nil)
+			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Abs", nil, nil, nil)
 			evalEq(t, e, tt.expected)
 		})
 	}
@@ -77,7 +79,7 @@ func TestBuiltin_Floor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Floor", nil, nil)
+			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Floor", nil, nil, nil)
 			evalEq(t, e, tt.expected)
 		})
 	}
@@ -96,7 +98,7 @@ func TestBuiltin_Ceil(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Ceil", nil, nil)
+			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Ceil", nil, nil, nil)
 			evalEq(t, e, tt.expected)
 		})
 	}
@@ -116,7 +118,7 @@ func TestBuiltin_Round(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Round", nil, nil)
+			e := makeBuiltinCall(expr.NewLiteral(tt.val), "Round", nil, nil, nil)
 			evalEq(t, e, tt.expected)
 		})
 	}
@@ -133,7 +135,7 @@ func TestBuiltin_Compact(t *testing.T) {
 		expr.NewLiteral(int64(3)),
 	}
 
-	e := makeBuiltinCall(list, "Compact", nil, nil)
+	e := makeBuiltinCall(list, "Compact", nil, nil, nil)
 	evalEq(t, e, []any{int64(1), int64(2), int64(3)})
 }
 
@@ -147,7 +149,7 @@ func TestBuiltin_Unique(t *testing.T) {
 		expr.NewLiteral(int64(2)),
 	}
 
-	e := makeBuiltinCall(list, "Unique", nil, nil)
+	e := makeBuiltinCall(list, "Unique", nil, nil, nil)
 	evalEq(t, e, []any{int64(1), int64(2), int64(3)})
 }
 
@@ -163,12 +165,12 @@ func TestBuiltin_Then(t *testing.T) {
 	}
 
 	t.Run("non_nil", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("hello"), "Then", []string{"x"}, body)
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "Then", nil, []string{"x"}, body)
 		evalEq(t, e, "hello world")
 	})
 
 	t.Run("nil_short_circuits", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(nil), "Then", []string{"x"}, body)
+		e := makeBuiltinCall(expr.NewLiteral(nil), "Then", nil, []string{"x"}, body)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
 		assert.Nil(t, result)
@@ -179,12 +181,12 @@ func TestBuiltin_Lest(t *testing.T) {
 	defaultVal := expr.NewLiteral("default")
 
 	t.Run("non_nil_returns_value", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("actual"), "Lest", nil, defaultVal)
+		e := makeBuiltinCall(expr.NewLiteral("actual"), "Lest", nil, nil, defaultVal)
 		evalEq(t, e, "actual")
 	})
 
 	t.Run("nil_evaluates_default", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(nil), "Lest", nil, defaultVal)
+		e := makeBuiltinCall(expr.NewLiteral(nil), "Lest", nil, nil, defaultVal)
 		evalEq(t, e, "default")
 	})
 }
@@ -197,7 +199,7 @@ func TestBuiltin_With(t *testing.T) {
 		expr.NewLiteral(int64(2)),
 	}
 
-	e := makeBuiltinCall(expr.NewLiteral(int64(5)), "With", []string{"x"}, body)
+	e := makeBuiltinCall(expr.NewLiteral(int64(5)), "With", nil, []string{"x"}, body)
 	evalEq(t, e, int64(10))
 }
 
@@ -210,12 +212,7 @@ func TestBuiltin_match(t *testing.T) {
 	// Build: "hello world".Match(pattern)
 	// This uses the args literal for the regexp argument
 	receiver := expr.NewLiteral("hello world")
-	e := expr.SExpr{
-		expr.Op("."),
-		receiver,
-		expr.NewLiteral("Match"),
-		expr.NewLiteral([]expr.Expression{expr.NewLiteral(pattern)}),
-	}
+	e := makeBuiltinCall(receiver, "Match", []expr.Expression{expr.NewLiteral(pattern)}, nil, nil)
 
 	result, err := ev.Evaluate(e, scope)
 	require.NoError(t, err)
@@ -240,12 +237,7 @@ func TestBuiltin_Compare(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			receiver := expr.NewLiteral(tt.left)
-			e := expr.SExpr{
-				expr.Op("."),
-				receiver,
-				expr.NewLiteral("Compare"),
-				expr.NewLiteral([]expr.Expression{expr.NewLiteral(tt.right)}),
-			}
+			e := makeBuiltinCall(receiver, "Compare", []expr.Expression{expr.NewLiteral(tt.right)}, nil, nil)
 			evalEq(t, e, tt.expected)
 		})
 	}
@@ -254,12 +246,7 @@ func TestBuiltin_Compare(t *testing.T) {
 func TestBuiltin_Min(t *testing.T) {
 	t.Run("two_args", func(t *testing.T) {
 		receiver := expr.NewLiteral(int64(5))
-		e := expr.SExpr{
-			expr.Op("."),
-			receiver,
-			expr.NewLiteral("Min"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(3))}),
-		}
+		e := makeBuiltinCall(receiver, "Min", []expr.Expression{expr.NewLiteral(int64(3))}, nil, nil)
 		evalEq(t, e, int64(3))
 	})
 
@@ -271,7 +258,7 @@ func TestBuiltin_Min(t *testing.T) {
 			expr.NewLiteral(int64(8)),
 			expr.NewLiteral(int64(1)),
 		}
-		e := makeBuiltinCall(list, "Min", nil, nil)
+		e := makeBuiltinCall(list, "Min", nil, nil, nil)
 		evalEq(t, e, int64(1))
 	})
 }
@@ -279,12 +266,7 @@ func TestBuiltin_Min(t *testing.T) {
 func TestBuiltin_Max(t *testing.T) {
 	t.Run("two_args", func(t *testing.T) {
 		receiver := expr.NewLiteral(int64(5))
-		e := expr.SExpr{
-			expr.Op("."),
-			receiver,
-			expr.NewLiteral("Max"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(3))}),
-		}
+		e := makeBuiltinCall(receiver, "Max", []expr.Expression{expr.NewLiteral(int64(3))}, nil, nil)
 		evalEq(t, e, int64(5))
 	})
 
@@ -296,7 +278,7 @@ func TestBuiltin_Max(t *testing.T) {
 			expr.NewLiteral(int64(8)),
 			expr.NewLiteral(int64(1)),
 		}
-		e := makeBuiltinCall(list, "Max", nil, nil)
+		e := makeBuiltinCall(list, "Max", nil, nil, nil)
 		evalEq(t, e, int64(8))
 	})
 }
@@ -320,19 +302,19 @@ func TestBuiltin_Reduce(t *testing.T) {
 	}
 
 	t.Run("sum", func(t *testing.T) {
-		e := makeBuiltinCall(list, "Reduce", []string{"acc", "x"}, body)
+		e := makeBuiltinCall(list, "Reduce", nil, []string{"acc", "x"}, body)
 		evalEq(t, e, int64(10))
 	})
 
 	t.Run("empty_list_returns_error", func(t *testing.T) {
 		emptyList := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(emptyList, "Reduce", []string{"acc", "x"}, body)
+		e := makeBuiltinCall(emptyList, "Reduce", nil, []string{"acc", "x"}, body)
 		evalErr(t, e, "empty sequence")
 	})
 
 	t.Run("single_element", func(t *testing.T) {
 		singleList := expr.SExpr{expr.Op("[]"), expr.NewLiteral(int64(42))}
-		e := makeBuiltinCall(singleList, "Reduce", []string{"acc", "x"}, body)
+		e := makeBuiltinCall(singleList, "Reduce", nil, []string{"acc", "x"}, body)
 		evalEq(t, e, int64(42))
 	})
 }
@@ -354,18 +336,18 @@ func TestBuiltin_Map(t *testing.T) {
 	}
 
 	t.Run("double", func(t *testing.T) {
-		e := makeBuiltinCall(list, "Map", []string{"x"}, body)
+		e := makeBuiltinCall(list, "Map", nil, []string{"x"}, body)
 		evalEq(t, e, []any{int64(2), int64(4), int64(6)})
 	})
 
 	t.Run("empty_list", func(t *testing.T) {
 		emptyList := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(emptyList, "Map", []string{"x"}, body)
+		e := makeBuiltinCall(emptyList, "Map", nil, []string{"x"}, body)
 		evalEq(t, e, []any{})
 	})
 
 	t.Run("nil_receiver", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(nil), "Map", []string{"x"}, body)
+		e := makeBuiltinCall(expr.NewLiteral(nil), "Map", nil, []string{"x"}, body)
 		evalEq(t, e, []any{}) // Map on nil returns empty slice
 	})
 }
@@ -389,13 +371,13 @@ func TestBuiltin_Filter(t *testing.T) {
 	}
 
 	t.Run("Filter_greater_than_2", func(t *testing.T) {
-		e := makeBuiltinCall(list, "Filter", []string{"x"}, body)
+		e := makeBuiltinCall(list, "Filter", nil, []string{"x"}, body)
 		evalEq(t, e, []any{int64(3), int64(4), int64(5)})
 	})
 
 	t.Run("empty_list", func(t *testing.T) {
 		emptyList := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(emptyList, "Filter", []string{"x"}, body)
+		e := makeBuiltinCall(emptyList, "Filter", nil, []string{"x"}, body)
 		evalEq(t, e, []any{})
 	})
 
@@ -406,7 +388,7 @@ func TestBuiltin_Filter(t *testing.T) {
 			expr.NewLiteral(int64(1)),
 			expr.NewLiteral(int64(2)),
 		}
-		e := makeBuiltinCall(smAllList, "Filter", []string{"x"}, body)
+		e := makeBuiltinCall(smAllList, "Filter", nil, []string{"x"}, body)
 		evalEq(t, e, []any{})
 	})
 }
@@ -430,18 +412,18 @@ func TestBuiltin_Count(t *testing.T) {
 	}
 
 	t.Run("Count_greater_than_2", func(t *testing.T) {
-		e := makeBuiltinCall(list, "Count", []string{"x"}, body)
+		e := makeBuiltinCall(list, "Count", nil, []string{"x"}, body)
 		evalEq(t, e, int64(3))
 	})
 
 	t.Run("empty_list", func(t *testing.T) {
 		emptyList := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(emptyList, "Count", []string{"x"}, body)
+		e := makeBuiltinCall(emptyList, "Count", nil, []string{"x"}, body)
 		evalEq(t, e, int64(0))
 	})
 
 	t.Run("nil_receiver", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(nil), "Count", []string{"x"}, body)
+		e := makeBuiltinCall(expr.NewLiteral(nil), "Count", nil, []string{"x"}, body)
 		evalEq(t, e, int64(0))
 	})
 }
@@ -461,7 +443,7 @@ func TestBuiltin_All(t *testing.T) {
 			expr.NewLiteral(int64(2)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "All", []string{"x"}, body)
+		e := makeBuiltinCall(list, "All", nil, []string{"x"}, body)
 		evalEq(t, e, true)
 	})
 
@@ -472,20 +454,20 @@ func TestBuiltin_All(t *testing.T) {
 			expr.NewLiteral(int64(-2)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "All", []string{"x"}, body)
+		e := makeBuiltinCall(list, "All", nil, []string{"x"}, body)
 		evalEq(t, e, false)
 	})
 
 	t.Run("empty_list_returns_true_vacuous", func(t *testing.T) {
 		// Vacuous truth: All zero elements satisfy Any predicate
 		emptyList := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(emptyList, "All", []string{"x"}, body)
+		e := makeBuiltinCall(emptyList, "All", nil, []string{"x"}, body)
 		evalEq(t, e, true)
 	})
 
 	t.Run("nil_receiver_returns_true_vacuous", func(t *testing.T) {
 		// nil is treated as empty slice; vacuous truth applies
-		e := makeBuiltinCall(expr.NewLiteral(nil), "All", []string{"x"}, body)
+		e := makeBuiltinCall(expr.NewLiteral(nil), "All", nil, []string{"x"}, body)
 		evalEq(t, e, true)
 	})
 }
@@ -505,7 +487,7 @@ func TestBuiltin_Any(t *testing.T) {
 			expr.NewLiteral(int64(10)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "Any", []string{"x"}, body)
+		e := makeBuiltinCall(list, "Any", nil, []string{"x"}, body)
 		evalEq(t, e, true)
 	})
 
@@ -516,18 +498,18 @@ func TestBuiltin_Any(t *testing.T) {
 			expr.NewLiteral(int64(2)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "Any", []string{"x"}, body)
+		e := makeBuiltinCall(list, "Any", nil, []string{"x"}, body)
 		evalEq(t, e, false)
 	})
 
 	t.Run("empty_list_is_false", func(t *testing.T) {
 		emptyList := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(emptyList, "Any", []string{"x"}, body)
+		e := makeBuiltinCall(emptyList, "Any", nil, []string{"x"}, body)
 		evalEq(t, e, false)
 	})
 
 	t.Run("nil_receiver", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(nil), "Any", []string{"x"}, body)
+		e := makeBuiltinCall(expr.NewLiteral(nil), "Any", nil, []string{"x"}, body)
 		evalEq(t, e, false)
 	})
 }
@@ -547,7 +529,7 @@ func TestBuiltin_AllOrNone(t *testing.T) {
 			expr.NewLiteral(int64(2)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "AllOrNone", []string{"x"}, body)
+		e := makeBuiltinCall(list, "AllOrNone", nil, []string{"x"}, body)
 		evalEq(t, e, true)
 	})
 
@@ -558,7 +540,7 @@ func TestBuiltin_AllOrNone(t *testing.T) {
 			expr.NewLiteral(int64(-2)),
 			expr.NewLiteral(int64(-3)),
 		}
-		e := makeBuiltinCall(list, "AllOrNone", []string{"x"}, body)
+		e := makeBuiltinCall(list, "AllOrNone", nil, []string{"x"}, body)
 		evalEq(t, e, true)
 	})
 
@@ -569,13 +551,13 @@ func TestBuiltin_AllOrNone(t *testing.T) {
 			expr.NewLiteral(int64(-2)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "AllOrNone", []string{"x"}, body)
+		e := makeBuiltinCall(list, "AllOrNone", nil, []string{"x"}, body)
 		evalEq(t, e, false)
 	})
 
 	t.Run("empty_list_is_true", func(t *testing.T) {
 		emptyList := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(emptyList, "AllOrNone", []string{"x"}, body)
+		e := makeBuiltinCall(emptyList, "AllOrNone", nil, []string{"x"}, body)
 		evalEq(t, e, true)
 	})
 }
@@ -588,13 +570,13 @@ func TestBuiltin_Len_WithSlice(t *testing.T) {
 		expr.NewLiteral(int64(3)),
 	}
 
-	e := makeBuiltinCall(list, "Len", nil, nil)
+	e := makeBuiltinCall(list, "Len", nil, nil, nil)
 	evalEq(t, e, int64(3))
 }
 
 func TestBuiltin_Len_Unsupported(t *testing.T) {
 	// Len on int should error
-	e := makeBuiltinCall(expr.NewLiteral(int64(42)), "Len", nil, nil)
+	e := makeBuiltinCall(expr.NewLiteral(int64(42)), "Len", nil, nil, nil)
 	evalErr(t, e, "unsupported")
 }
 
@@ -603,7 +585,7 @@ func TestBuiltin_Floor_Error(t *testing.T) {
 	scope := eval.EmptyScope()
 
 	// Floor on string should error
-	e := makeBuiltinCall(expr.NewLiteral("not-a-number"), "Floor", nil, nil)
+	e := makeBuiltinCall(expr.NewLiteral("not-a-number"), "Floor", nil, nil, nil)
 	_, err := ev.Evaluate(e, scope)
 	assert.Error(t, err)
 }
@@ -613,7 +595,7 @@ func TestBuiltin_Ceil_Error(t *testing.T) {
 	scope := eval.EmptyScope()
 
 	// Ceil on string should error
-	e := makeBuiltinCall(expr.NewLiteral("not-a-number"), "Ceil", nil, nil)
+	e := makeBuiltinCall(expr.NewLiteral("not-a-number"), "Ceil", nil, nil, nil)
 	_, err := ev.Evaluate(e, scope)
 	assert.Error(t, err)
 }
@@ -623,7 +605,7 @@ func TestBuiltin_Round_Error(t *testing.T) {
 	scope := eval.EmptyScope()
 
 	// Round on string should error
-	e := makeBuiltinCall(expr.NewLiteral("not-a-number"), "Round", nil, nil)
+	e := makeBuiltinCall(expr.NewLiteral("not-a-number"), "Round", nil, nil, nil)
 	_, err := ev.Evaluate(e, scope)
 	assert.Error(t, err)
 }
@@ -636,7 +618,7 @@ func TestBuiltin_Min_Floats(t *testing.T) {
 		expr.NewLiteral(2.8),
 	}
 
-	e := makeBuiltinCall(list, "Min", nil, nil)
+	e := makeBuiltinCall(list, "Min", nil, nil, nil)
 	evalEq(t, e, 1.2)
 }
 
@@ -648,20 +630,14 @@ func TestBuiltin_Max_Floats(t *testing.T) {
 		expr.NewLiteral(2.8),
 	}
 
-	e := makeBuiltinCall(list, "Max", nil, nil)
+	e := makeBuiltinCall(list, "Max", nil, nil, nil)
 	evalEq(t, e, 3.5)
 }
 
 func TestBuiltin_Compare_Strings(t *testing.T) {
 	// makeBuiltinCallWithArgs creates a cAll With explicit args
 	makeBuiltinCallWithArgs := func(receiver expr.Expression, method string, args []expr.Expression) expr.SExpr {
-		result := expr.SExpr{expr.Op(".")}
-		result = append(result, receiver)
-		result = append(result, expr.NewLiteral(method))
-		if len(args) > 0 {
-			result = append(result, expr.NewLiteral(args))
-		}
-		return result
+		return makeBuiltinCall(receiver, method, args, nil, nil)
 	}
 
 	t.Run("less", func(t *testing.T) {
@@ -699,12 +675,7 @@ func TestBuiltin_match_NoMatch(t *testing.T) {
 	pattern := regexp.MustCompile(`^abc$`)
 
 	receiver := expr.NewLiteral("xyz")
-	e := expr.SExpr{
-		expr.Op("."),
-		receiver,
-		expr.NewLiteral("Match"),
-		expr.NewLiteral([]expr.Expression{expr.NewLiteral(pattern)}),
-	}
+	e := makeBuiltinCall(receiver, "Match", []expr.Expression{expr.NewLiteral(pattern)}, nil, nil)
 
 	result, err := ev.Evaluate(e, scope)
 	require.NoError(t, err)
@@ -716,12 +687,7 @@ func TestBuiltin_match_NonStringReceiver(t *testing.T) {
 	pattern := regexp.MustCompile(`\d+`)
 
 	receiver := expr.NewLiteral(int64(123))
-	e := expr.SExpr{
-		expr.Op("."),
-		receiver,
-		expr.NewLiteral("Match"),
-		expr.NewLiteral([]expr.Expression{expr.NewLiteral(pattern)}),
-	}
+	e := makeBuiltinCall(receiver, "Match", []expr.Expression{expr.NewLiteral(pattern)}, nil, nil)
 
 	evalErr(t, e, "string")
 }
@@ -731,12 +697,7 @@ func TestBuiltin_match_InvalidPattern(t *testing.T) {
 	scope := eval.EmptyScope()
 
 	receiver := expr.NewLiteral("test")
-	e := expr.SExpr{
-		expr.Op("."),
-		receiver,
-		expr.NewLiteral("Match"),
-		expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(42))}),
-	}
+	e := makeBuiltinCall(receiver, "Match", []expr.Expression{expr.NewLiteral(int64(42))}, nil, nil)
 
 	_, err := ev.Evaluate(e, scope)
 	assert.Error(t, err)
@@ -763,7 +724,7 @@ func TestBuiltin_Count_WithPredicate(t *testing.T) {
 		expr.NewLiteral(int64(0)),
 	}
 
-	e := makeBuiltinCall(list, "Count", []string{"x"}, body)
+	e := makeBuiltinCall(list, "Count", nil, []string{"x"}, body)
 	evalEq(t, e, int64(2))
 }
 
@@ -775,7 +736,7 @@ func TestBuiltin_Sum(t *testing.T) {
 			expr.NewLiteral(int64(2)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "Sum", nil, nil)
+		e := makeBuiltinCall(list, "Sum", nil, nil, nil)
 		evalEq(t, e, int64(6))
 	})
 
@@ -786,18 +747,18 @@ func TestBuiltin_Sum(t *testing.T) {
 			expr.NewLiteral(2.5),
 			expr.NewLiteral(3.0),
 		}
-		e := makeBuiltinCall(list, "Sum", nil, nil)
+		e := makeBuiltinCall(list, "Sum", nil, nil, nil)
 		evalEq(t, e, 7.0)
 	})
 
 	t.Run("empty", func(t *testing.T) {
 		list := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(list, "Sum", nil, nil)
+		e := makeBuiltinCall(list, "Sum", nil, nil, nil)
 		evalEq(t, e, int64(0))
 	})
 
 	t.Run("nil", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(nil), "Sum", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral(nil), "Sum", nil, nil, nil)
 		evalEq(t, e, int64(0))
 	})
 }
@@ -812,20 +773,20 @@ func TestBuiltin_First(t *testing.T) {
 			expr.NewLiteral("apple"),
 			expr.NewLiteral("banana"),
 		}
-		e := makeBuiltinCall(list, "First", nil, nil)
+		e := makeBuiltinCall(list, "First", nil, nil, nil)
 		evalEq(t, e, "apple")
 	})
 
 	t.Run("empty", func(t *testing.T) {
 		list := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(list, "First", nil, nil)
+		e := makeBuiltinCall(list, "First", nil, nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
 		assert.Nil(t, result)
 	})
 
 	t.Run("nil", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(nil), "First", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral(nil), "First", nil, nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
 		assert.Nil(t, result)
@@ -842,13 +803,13 @@ func TestBuiltin_Last(t *testing.T) {
 			expr.NewLiteral("apple"),
 			expr.NewLiteral("banana"),
 		}
-		e := makeBuiltinCall(list, "Last", nil, nil)
+		e := makeBuiltinCall(list, "Last", nil, nil, nil)
 		evalEq(t, e, "banana")
 	})
 
 	t.Run("empty", func(t *testing.T) {
 		list := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(list, "Last", nil, nil)
+		e := makeBuiltinCall(list, "Last", nil, nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
 		assert.Nil(t, result)
@@ -866,7 +827,7 @@ func TestBuiltin_Sort(t *testing.T) {
 			expr.NewLiteral(int64(1)),
 			expr.NewLiteral(int64(2)),
 		}
-		e := makeBuiltinCall(list, "Sort", nil, nil)
+		e := makeBuiltinCall(list, "Sort", nil, nil, nil)
 		evalEq(t, e, []any{int64(1), int64(2), int64(3)})
 	})
 
@@ -877,13 +838,13 @@ func TestBuiltin_Sort(t *testing.T) {
 			expr.NewLiteral("apple"),
 			expr.NewLiteral("cherry"),
 		}
-		e := makeBuiltinCall(list, "Sort", nil, nil)
+		e := makeBuiltinCall(list, "Sort", nil, nil, nil)
 		evalEq(t, e, []any{"apple", "banana", "cherry"})
 	})
 
 	t.Run("empty", func(t *testing.T) {
 		list := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(list, "Sort", nil, nil)
+		e := makeBuiltinCall(list, "Sort", nil, nil, nil)
 		evalEq(t, e, []any{})
 	})
 
@@ -895,7 +856,7 @@ func TestBuiltin_Sort(t *testing.T) {
 			expr.NewLiteral(int64(1)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "Sort", nil, nil)
+		e := makeBuiltinCall(list, "Sort", nil, nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
 		// Numbers come before strings in type strata order
@@ -909,7 +870,7 @@ func TestBuiltin_Sort(t *testing.T) {
 			expr.NewLiteral(map[string]any{"a": 1}),
 			expr.NewLiteral(map[string]any{"b": 2}),
 		}
-		e := makeBuiltinCall(list, "Sort", nil, nil)
+		e := makeBuiltinCall(list, "Sort", nil, nil, nil)
 		evalErr(t, e, "sort")
 	})
 }
@@ -922,13 +883,13 @@ func TestBuiltin_Reverse(t *testing.T) {
 			expr.NewLiteral(int64(2)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "Reverse", nil, nil)
+		e := makeBuiltinCall(list, "Reverse", nil, nil, nil)
 		evalEq(t, e, []any{int64(3), int64(2), int64(1)})
 	})
 
 	t.Run("empty", func(t *testing.T) {
 		list := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(list, "Reverse", nil, nil)
+		e := makeBuiltinCall(list, "Reverse", nil, nil, nil)
 		evalEq(t, e, []any{})
 	})
 }
@@ -947,20 +908,20 @@ func TestBuiltin_Flatten(t *testing.T) {
 			expr.NewLiteral(inner1),
 			expr.NewLiteral(inner2),
 		}
-		e := makeBuiltinCall(list, "Flatten", nil, nil)
+		e := makeBuiltinCall(list, "Flatten", nil, nil, nil)
 		evalEq(t, e, []any{int64(1), int64(2), int64(3), int64(4)})
 	})
 
 	t.Run("empty", func(t *testing.T) {
 		list := expr.SExpr{expr.Op("[]")}
-		e := makeBuiltinCall(list, "Flatten", nil, nil)
+		e := makeBuiltinCall(list, "Flatten", nil, nil, nil)
 		evalEq(t, e, []any{})
 	})
 
 	t.Run("typed_nested_slice", func(t *testing.T) {
 		// A typed nested slice ([][]int, not []any) exercises the reflect
 		// flattening path.
-		e := makeBuiltinCall(expr.NewLiteral([][]int{{1, 2}, {3, 4}}), "Flatten", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral([][]int{{1, 2}, {3, 4}}), "Flatten", nil, nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
 		assert.Len(t, result.([]any), 4)
@@ -974,7 +935,7 @@ func TestBuiltin_Flatten(t *testing.T) {
 			expr.NewLiteral(int64(2)),
 			expr.NewLiteral(int64(3)),
 		}
-		e := makeBuiltinCall(list, "Flatten", nil, nil)
+		e := makeBuiltinCall(list, "Flatten", nil, nil, nil)
 		evalEq(t, e, []any{int64(1), int64(2), int64(3)})
 	})
 }
@@ -988,68 +949,43 @@ func TestBuiltin_Contains(t *testing.T) {
 	}
 
 	t.Run("found", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			list,
-			expr.NewLiteral("Contains"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(2))}),
-		}
+		e := makeBuiltinCall(list, "Contains", []expr.Expression{expr.NewLiteral(int64(2))}, nil, nil)
 		evalEq(t, e, true)
 	})
 
 	t.Run("not_found", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			list,
-			expr.NewLiteral("Contains"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(5))}),
-		}
+		e := makeBuiltinCall(list, "Contains", []expr.Expression{expr.NewLiteral(int64(5))}, nil, nil)
 		evalEq(t, e, false)
 	})
 }
 
 func TestBuiltin_Upper(t *testing.T) {
-	e := makeBuiltinCall(expr.NewLiteral("hello"), "Upper", nil, nil)
+	e := makeBuiltinCall(expr.NewLiteral("hello"), "Upper", nil, nil, nil)
 	evalEq(t, e, "HELLO")
 }
 
 func TestBuiltin_Lower(t *testing.T) {
-	e := makeBuiltinCall(expr.NewLiteral("HELLO"), "Lower", nil, nil)
+	e := makeBuiltinCall(expr.NewLiteral("HELLO"), "Lower", nil, nil, nil)
 	evalEq(t, e, "hello")
 }
 
 func TestBuiltin_Trim(t *testing.T) {
-	e := makeBuiltinCall(expr.NewLiteral("  hello  "), "Trim", nil, nil)
+	e := makeBuiltinCall(expr.NewLiteral("  hello  "), "Trim", nil, nil, nil)
 	evalEq(t, e, "hello")
 }
 
 func TestBuiltin_TrimPrefix(t *testing.T) {
-	e := expr.SExpr{
-		expr.Op("."),
-		expr.NewLiteral("hello world"),
-		expr.NewLiteral("TrimPrefix"),
-		expr.NewLiteral([]expr.Expression{expr.NewLiteral("hello ")}),
-	}
+	e := makeBuiltinCall(expr.NewLiteral("hello world"), "TrimPrefix", []expr.Expression{expr.NewLiteral("hello ")}, nil, nil)
 	evalEq(t, e, "world")
 }
 
 func TestBuiltin_TrimSuffix(t *testing.T) {
-	e := expr.SExpr{
-		expr.Op("."),
-		expr.NewLiteral("hello world"),
-		expr.NewLiteral("TrimSuffix"),
-		expr.NewLiteral([]expr.Expression{expr.NewLiteral(" world")}),
-	}
+	e := makeBuiltinCall(expr.NewLiteral("hello world"), "TrimSuffix", []expr.Expression{expr.NewLiteral(" world")}, nil, nil)
 	evalEq(t, e, "hello")
 }
 
 func TestBuiltin_Split(t *testing.T) {
-	e := expr.SExpr{
-		expr.Op("."),
-		expr.NewLiteral("a,b,c"),
-		expr.NewLiteral("Split"),
-		expr.NewLiteral([]expr.Expression{expr.NewLiteral(",")}),
-	}
+	e := makeBuiltinCall(expr.NewLiteral("a,b,c"), "Split", []expr.Expression{expr.NewLiteral(",")}, nil, nil)
 	evalEq(t, e, []any{"a", "b", "c"})
 }
 
@@ -1061,98 +997,53 @@ func TestBuiltin_Join(t *testing.T) {
 		expr.NewLiteral("c"),
 	}
 
-	e := expr.SExpr{
-		expr.Op("."),
-		list,
-		expr.NewLiteral("Join"),
-		expr.NewLiteral([]expr.Expression{expr.NewLiteral(",")}),
-	}
+	e := makeBuiltinCall(list, "Join", []expr.Expression{expr.NewLiteral(",")}, nil, nil)
 	evalEq(t, e, "a,b,c")
 }
 
 func TestBuiltin_StartsWith(t *testing.T) {
 	t.Run("true", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello world"),
-			expr.NewLiteral("StartsWith"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("hello")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello world"), "StartsWith", []expr.Expression{expr.NewLiteral("hello")}, nil, nil)
 		evalEq(t, e, true)
 	})
 
 	t.Run("false", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello world"),
-			expr.NewLiteral("StartsWith"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("world")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello world"), "StartsWith", []expr.Expression{expr.NewLiteral("world")}, nil, nil)
 		evalEq(t, e, false)
 	})
 }
 
 func TestBuiltin_EndsWith(t *testing.T) {
 	t.Run("true", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello world"),
-			expr.NewLiteral("EndsWith"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("world")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello world"), "EndsWith", []expr.Expression{expr.NewLiteral("world")}, nil, nil)
 		evalEq(t, e, true)
 	})
 
 	t.Run("false", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello world"),
-			expr.NewLiteral("EndsWith"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("hello")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello world"), "EndsWith", []expr.Expression{expr.NewLiteral("hello")}, nil, nil)
 		evalEq(t, e, false)
 	})
 }
 
 func TestBuiltin_Replace(t *testing.T) {
-	e := expr.SExpr{
-		expr.Op("."),
-		expr.NewLiteral("hello world world"),
-		expr.NewLiteral("Replace"),
-		expr.NewLiteral([]expr.Expression{expr.NewLiteral("world"), expr.NewLiteral("there")}),
-	}
+	e := makeBuiltinCall(expr.NewLiteral("hello world world"), "Replace", []expr.Expression{expr.NewLiteral("world"), expr.NewLiteral("there")}, nil, nil)
 	evalEq(t, e, "hello there there")
 }
 
 func TestBuiltin_Substring(t *testing.T) {
 	t.Run("with_end", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello world"),
-			expr.NewLiteral("Substring"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(0)), expr.NewLiteral(int64(5))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello world"), "Substring", []expr.Expression{expr.NewLiteral(int64(0)), expr.NewLiteral(int64(5))}, nil, nil)
 		evalEq(t, e, "hello")
 	})
 
 	t.Run("without_end", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello world"),
-			expr.NewLiteral("Substring"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(6))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello world"), "Substring", []expr.Expression{expr.NewLiteral(int64(6))}, nil, nil)
 		evalEq(t, e, "world")
 	})
 
 	t.Run("unicode", func(t *testing.T) {
 		// Rune-based substring
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("日本語"),
-			expr.NewLiteral("Substring"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(0)), expr.NewLiteral(int64(2))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("日本語"), "Substring", []expr.Expression{expr.NewLiteral(int64(0)), expr.NewLiteral(int64(2))}, nil, nil)
 		evalEq(t, e, "日本")
 	})
 }
@@ -1188,7 +1079,7 @@ func TestBuiltin_TypeOf(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := makeBuiltinCall(expr.NewLiteral(tt.val), "TypeOf", nil, nil)
+			e := makeBuiltinCall(expr.NewLiteral(tt.val), "TypeOf", nil, nil, nil)
 			evalEq(t, e, tt.expected)
 		})
 	}
@@ -1196,34 +1087,24 @@ func TestBuiltin_TypeOf(t *testing.T) {
 
 func TestBuiltin_IsNil(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(nil), "IsNil", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral(nil), "IsNil", nil, nil, nil)
 		evalEq(t, e, true)
 	})
 
 	t.Run("non_nil", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("hello"), "IsNil", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "IsNil", nil, nil, nil)
 		evalEq(t, e, false)
 	})
 }
 
 func TestBuiltin_Default(t *testing.T) {
 	t.Run("nil_uses_default", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral(nil),
-			expr.NewLiteral("Default"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("fallback")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral(nil), "Default", []expr.Expression{expr.NewLiteral("fallback")}, nil, nil)
 		evalEq(t, e, "fallback")
 	})
 
 	t.Run("non_nil_uses_value", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("actual"),
-			expr.NewLiteral("Default"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("fallback")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("actual"), "Default", []expr.Expression{expr.NewLiteral("fallback")}, nil, nil)
 		evalEq(t, e, "actual")
 	})
 }
@@ -1233,36 +1114,21 @@ func TestBuiltin_Coalesce(t *testing.T) {
 	scope := eval.EmptyScope()
 
 	t.Run("first_non_nil", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
+		e := makeBuiltinCall(expr.NewLiteral(nil), "Coalesce", []expr.Expression{
 			expr.NewLiteral(nil),
-			expr.NewLiteral("Coalesce"),
-			expr.NewLiteral([]expr.Expression{
-				expr.NewLiteral(nil),
-				expr.NewLiteral("found"),
-				expr.NewLiteral("ignored"),
-			}),
-		}
+			expr.NewLiteral("found"),
+			expr.NewLiteral("ignored"),
+		}, nil, nil)
 		evalEq(t, e, "found")
 	})
 
 	t.Run("lhs_non_nil", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("first"),
-			expr.NewLiteral("Coalesce"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("second")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("first"), "Coalesce", []expr.Expression{expr.NewLiteral("second")}, nil, nil)
 		evalEq(t, e, "first")
 	})
 
 	t.Run("all_nil", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral(nil),
-			expr.NewLiteral("Coalesce"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(nil)}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral(nil), "Coalesce", []expr.Expression{expr.NewLiteral(nil)}, nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
 		assert.Nil(t, result)
@@ -1274,217 +1140,127 @@ func TestBuiltin_StringErrorPaths(t *testing.T) {
 	scope := eval.EmptyScope()
 
 	t.Run("upper_non_string", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "Upper", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "Upper", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("lower_non_string", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "Lower", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "Lower", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("trim_non_string", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "Trim", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "Trim", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("trim_prefix_non_string_receiver", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral(int64(123)),
-			expr.NewLiteral("TrimPrefix"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("prefix")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "TrimPrefix", []expr.Expression{expr.NewLiteral("prefix")}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("trim_prefix_non_string_arg", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello"),
-			expr.NewLiteral("TrimPrefix"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(123))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "TrimPrefix", []expr.Expression{expr.NewLiteral(int64(123))}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("trim_suffix_non_string_receiver", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral(int64(123)),
-			expr.NewLiteral("TrimSuffix"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("suffix")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "TrimSuffix", []expr.Expression{expr.NewLiteral("suffix")}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("trim_suffix_non_string_arg", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello"),
-			expr.NewLiteral("TrimSuffix"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(123))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "TrimSuffix", []expr.Expression{expr.NewLiteral(int64(123))}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("starts_with_non_string", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral(int64(123)),
-			expr.NewLiteral("StartsWith"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("prefix")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "StartsWith", []expr.Expression{expr.NewLiteral("prefix")}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("starts_with_non_string_arg", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello"),
-			expr.NewLiteral("StartsWith"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(123))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "StartsWith", []expr.Expression{expr.NewLiteral(int64(123))}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("ends_with_non_string", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral(int64(123)),
-			expr.NewLiteral("EndsWith"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("suffix")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "EndsWith", []expr.Expression{expr.NewLiteral("suffix")}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("ends_with_non_string_arg", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello"),
-			expr.NewLiteral("EndsWith"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(123))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "EndsWith", []expr.Expression{expr.NewLiteral(int64(123))}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("replace_non_string", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral(int64(123)),
-			expr.NewLiteral("Replace"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("old"), expr.NewLiteral("new")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "Replace", []expr.Expression{expr.NewLiteral("old"), expr.NewLiteral("new")}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("replace_non_string_old", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello"),
-			expr.NewLiteral("Replace"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(1)), expr.NewLiteral("new")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "Replace", []expr.Expression{expr.NewLiteral(int64(1)), expr.NewLiteral("new")}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("replace_non_string_new", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello"),
-			expr.NewLiteral("Replace"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("old"), expr.NewLiteral(int64(1))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "Replace", []expr.Expression{expr.NewLiteral("old"), expr.NewLiteral(int64(1))}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("substring_non_string", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral(int64(123)),
-			expr.NewLiteral("Substring"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(0)), expr.NewLiteral(int64(5))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "Substring", []expr.Expression{expr.NewLiteral(int64(0)), expr.NewLiteral(int64(5))}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("substring_non_int_start", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello"),
-			expr.NewLiteral("Substring"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral("not int"), expr.NewLiteral(int64(5))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "Substring", []expr.Expression{expr.NewLiteral("not int"), expr.NewLiteral(int64(5))}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("substring_non_int_length", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("hello"),
-			expr.NewLiteral("Substring"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(0)), expr.NewLiteral("not int")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("hello"), "Substring", []expr.Expression{expr.NewLiteral(int64(0)), expr.NewLiteral("not int")}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("split_non_string", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral(int64(123)),
-			expr.NewLiteral("Split"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(",")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral(int64(123)), "Split", []expr.Expression{expr.NewLiteral(",")}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("split_non_string_separator", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("a,b,c"),
-			expr.NewLiteral("Split"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(1))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("a,b,c"), "Split", []expr.Expression{expr.NewLiteral(int64(1))}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("join_non_slice", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral("not a slice"),
-			expr.NewLiteral("Join"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(",")}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Join", []expr.Expression{expr.NewLiteral(",")}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("join_non_string_separator", func(t *testing.T) {
-		e := expr.SExpr{
-			expr.Op("."),
-			expr.NewLiteral([]any{"a", "b"}),
-			expr.NewLiteral("Join"),
-			expr.NewLiteral([]expr.Expression{expr.NewLiteral(int64(1))}),
-		}
+		e := makeBuiltinCall(expr.NewLiteral([]any{"a", "b"}), "Join", []expr.Expression{expr.NewLiteral(int64(1))}, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
@@ -1495,57 +1271,57 @@ func TestBuiltin_Min_Max_Errors(t *testing.T) {
 	scope := eval.EmptyScope()
 
 	t.Run("min_non_slice", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Min", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Min", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("max_non_slice", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Max", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Max", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("abs_non_numeric", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("not numeric"), "Abs", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral("not numeric"), "Abs", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("first_empty_slice", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral([]any{}), "First", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral([]any{}), "First", nil, nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
 		assert.Nil(t, result)
 	})
 
 	t.Run("last_empty_slice", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral([]any{}), "Last", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral([]any{}), "Last", nil, nil, nil)
 		result, err := ev.Evaluate(e, scope)
 		require.NoError(t, err)
 		assert.Nil(t, result)
 	})
 
 	t.Run("first_non_slice", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "First", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "First", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("last_non_slice", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Last", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Last", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("sort_non_slice", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Sort", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Sort", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})
 
 	t.Run("reverse_non_slice", func(t *testing.T) {
-		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Reverse", nil, nil)
+		e := makeBuiltinCall(expr.NewLiteral("not a slice"), "Reverse", nil, nil, nil)
 		_, err := ev.Evaluate(e, scope)
 		require.Error(t, err)
 	})

@@ -137,8 +137,8 @@ func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
 	return mustBuild(t, s, result)
 }
 
-// testSchemaWithCamelCaseRelation creates a schema with CamelCase relation
-// names to test lower_snake field-name normalization.
+// testSchemaWithCamelCaseRelation creates a schema whose relation name lowers
+// to a multi-word field name, to pin that the writer keys on the field name.
 func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
@@ -151,7 +151,7 @@ func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
 		AddType("Service").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("HTTPProxy", schema.LocalTypeRef("Proxy", location.Span{}), true, false). // CamelCase
+		WithRelation("HTTP_PROXY", schema.LocalTypeRef("Proxy", location.Span{}), true, false).
 		Done().
 		Build()
 	return mustBuild(t, s, result)
@@ -266,7 +266,7 @@ func TestWriteObject_NilResult(t *testing.T) {
 // TestMarshalObject_Golden pins the complete marshalled output per graph
 // shape: key order, FK encoding (single = key array, many = array of key
 // arrays — even with one target), composition inlining (one = object,
-// many = array), lower_snake field naming, and the $diagnostics section.
+// many = array), field naming, and the $diagnostics section.
 func TestMarshalObject_Golden(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -398,13 +398,12 @@ func TestMarshalObject_Golden(t *testing.T) {
 			schema: testSchemaWithCamelCaseRelation,
 			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
 				t.Helper()
-				// HTTPProxy must serialize as http_proxy (lower_snake), never
-				// httpproxy.
+				// HTTP_PROXY must serialize under its field name, http_proxy.
 				mustAdd(
 					t, g,
 					mustValidInstance(t, s, "Proxy", []any{"px1"}, map[string]any{"id": "px1", "url": "http://proxy.example.com"}),
 					mustValidInstanceWithEdge(t, s, "Service", []any{"svc1"},
-						map[string]any{"id": "svc1", "name": "API Gateway"}, "HTTPProxy", [][]any{{"px1"}}),
+						map[string]any{"id": "svc1", "name": "API Gateway"}, "HTTP_PROXY", [][]any{{"px1"}}),
 				)
 			},
 		},

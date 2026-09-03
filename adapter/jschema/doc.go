@@ -29,7 +29,7 @@
 //     transitively imported schemas are structurally reachable through $defs
 //     but have no addressable top-level key.
 //   - An instance object holds properties by name, compositions and
-//     associations by their lower_snake field name. Unknown fields are
+//     associations by their lower-case field name. Unknown fields are
 //     rejected by the instance layer, so instance objects emit
 //     additionalProperties false.
 //   - An association renders as an edge object (to-one) or an array of edge
