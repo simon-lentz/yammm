@@ -701,10 +701,56 @@ func (v *Validator) invariantScope(
 		if !ok {
 			continue
 		}
-		scope[rel.FieldName()] = composedScopeValue(value.Unwrap())
+		scope[rel.FieldName()] = v.composedScopeValue(rel, value.Unwrap())
 	}
 
 	return scope
+}
+
+// composedScopeValue renders a composition as docs/SPEC.md states: the single
+// child for a composition that is not many, a list otherwise, each child an
+// instance whose own properties and relations are in scope.
+func (v *Validator) composedScopeValue(rel *schema.Relation, value any) any {
+	children := composedChildren(value)
+	scopes := make([]any, 0, len(children))
+	for _, child := range children {
+		scopes = append(scopes, v.childScope(child))
+	}
+	if rel.IsMany() {
+		return scopes
+	}
+	if len(scopes) == 0 {
+		return nil
+	}
+	return scopes[0]
+}
+
+// composedChildren unwraps a validated composition value into its children.
+func composedChildren(value any) []*ValidInstance {
+	switch c := value.(type) {
+	case *ValidInstance:
+		return []*ValidInstance{c}
+	case []*ValidInstance:
+		return c
+	case immutable.Slice:
+		out := make([]*ValidInstance, 0, c.Len())
+		for elem := range c.Iter() {
+			out = append(out, composedChildren(elem.Unwrap())...)
+		}
+		return out
+	}
+	return nil
+}
+
+// childScope is a composed child as an instance in scope, built by the rule
+// its parent's scope was built by: properties, then relations by field name.
+func (v *Validator) childScope(child *ValidInstance) map[string]any {
+	props := child.Properties().Clone()
+	typ, ok := v.schema.TypeByID(child.TypeID())
+	if !ok {
+		return props
+	}
+	return v.invariantScope(typ, props, maps.Collect(child.Edges()), maps.Collect(child.Compositions()))
 }
 
 // relationValue renders a relation's entries for the invariant scope: a
@@ -729,27 +775,6 @@ func keyValue(k immutable.Key) any {
 		return parts[0]
 	}
 	return parts
-}
-
-// composedScopeValue renders composed children as property maps. A child is
-// stored as a *ValidInstance, which an expression cannot read a member from,
-// so a lambda over a composition would otherwise fail on the first `$i.field`.
-//
-// Nested compositions are NOT reached: a child's own composed children are not
-// among its properties, so `$i.subitems` evaluates to nil.
-func composedScopeValue(v any) any {
-	switch child := v.(type) {
-	case *ValidInstance:
-		return child.Properties().Clone()
-	case immutable.Slice:
-		out := make([]any, 0, child.Len())
-		for elem := range child.Iter() {
-			out = append(out, composedScopeValue(elem.Unwrap()))
-		}
-		return out
-	default:
-		return v
-	}
 }
 
 // evaluateInvariants evaluates all type invariants against the validated properties.

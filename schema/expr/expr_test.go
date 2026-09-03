@@ -102,6 +102,12 @@ func TestStringLiteral(t *testing.T) {
 		_, ok := expr.StringLiteral(expr.DatatypeLiteral("Integer"))
 		assert.False(t, ok)
 	})
+	t.Run("op is not a string literal", func(t *testing.T) {
+		// Op.Literal() returns the operator's spelling, which is a string;
+		// an operator standing alone must not pass as a name either.
+		_, ok := expr.StringLiteral(expr.Op("Len"))
+		assert.False(t, ok)
+	})
 }
 
 func TestIsNilLiteral(t *testing.T) {

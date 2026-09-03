@@ -110,14 +110,22 @@ func TestStructuralHash_RelationTargetDistinguishesOwningSchema(t *testing.T) {
 	}
 }
 
-// TestStructuralHash_SupertypeDistinguishesOwningSchema pins the same property
-// for an inheritance edge, which docs/SPEC.md names beside relation targets.
-func TestStructuralHash_SupertypeDistinguishesOwningSchema(t *testing.T) {
+// TestStructuralHash_AncestorMembersReachTheDigest pins that an ancestor's
+// rules reach the digest through the members merged into the subtype: two
+// same-named ancestors in different schemas that differ in a member hash the
+// entry differently, and one ancestor hashes one way. The extends edge itself
+// hashes by name; inheritance copies the rules, and the copies are what the
+// digest reads.
+func TestStructuralHash_AncestorMembersReachTheDigest(t *testing.T) {
 	t.Parallel()
 
 	a, b := hashTwoVariants(t, hashImports(), entryWithSuper("a.Base"), entryWithSuper("b.Base"))
 	if a == b {
-		t.Errorf("extends clauses naming ancestors that differ in a rule share a structural hash: %s", a)
+		t.Errorf("ancestors that differ in a member share a structural hash: %s", a)
+	}
+	same, again := hashTwoVariants(t, hashImports(), entryWithSuper("a.Base"), entryWithSuper("a.Base"))
+	if same != again {
+		t.Errorf("one ancestor hashes two ways: %s / %s", same, again)
 	}
 }
 

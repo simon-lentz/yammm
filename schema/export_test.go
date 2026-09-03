@@ -1,6 +1,14 @@
 package schema
 
-import "github.com/simon-lentz/yammm/location"
+import (
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
+)
+
+// TestRegisterFailureIssue renders a Registry.Register error as the loader does.
+var TestRegisterFailureIssue = func(reg *Registry, s *Schema, err error) diag.Issue {
+	return (&loader{registry: reg}).registerFailureIssue(s, err)
+}
 
 // Test-only exports for schema_test files in this directory.
 // These are compiled only during `go test ./schema/...` and do not

@@ -144,8 +144,11 @@ func checkModuleRootMarker(path string) (bool, error) {
 // readBounded reads at most limit bytes from path and reports a marker larger
 // than that as malformed by size.
 func readBounded(path string, limit int64) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := openRegular(func(flag int) (*os.File, error) { return os.OpenFile(path, flag, 0) })
 	if err != nil {
+		if errors.Is(err, errNotRegularFile) {
+			return nil, &MalformedModuleRootError{Path: path, Reason: "is not a regular file"}
+		}
 		return nil, fmt.Errorf("open %q: %w", path, err)
 	}
 	defer f.Close()

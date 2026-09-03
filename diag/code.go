@@ -226,6 +226,12 @@ var (
 	// content like a schema, and Fatal is reserved for I/O and cancellation.
 	E_LOAD_MODULE_ROOT_MALFORMED = NewCode("E_LOAD_MODULE_ROOT_MALFORMED", CategorySchema)
 
+	// E_LOAD_SOURCE_CHANGED indicates a source re-registered in a shared
+	// Registry with content that differs from what the registry holds: its
+	// bytes changed, or an import beneath an unchanged entry did. A shared
+	// registry assumes its files do not change while it lives.
+	E_LOAD_SOURCE_CHANGED = NewCode("E_LOAD_SOURCE_CHANGED", CategorySchema)
+
 	// E_UNKNOWN_ANNOTATION indicates an annotation name absent from the built-in
 	// registry for its placement (@name on a property, @@name on a type).
 	E_UNKNOWN_ANNOTATION = NewCode("E_UNKNOWN_ANNOTATION", CategorySchema)

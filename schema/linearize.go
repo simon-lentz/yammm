@@ -1104,27 +1104,41 @@ func (c *completer) mergeInvariants(t *Type) []*Invariant {
 		own[inv.Name()] = true
 	}
 
+	// One conflict is one diagnostic naming every rival, as mergeRelations
+	// reports a relation clash: the walk collects, then reports once per name.
 	inherited := make(map[string]*Invariant)
+	rivals := make(map[string][]*Invariant)
+	var conflicted []string
 	for _, superType := range c.directSuperTypes(t) {
 		for inv := range superType.AllInvariants() {
 			if own[inv.Name()] {
 				continue
 			}
 			if first, seen := inherited[inv.Name()]; seen {
-				if first != inv && !sameExpression(first.Expression(), inv.Expression()) {
-					c.errorfRelated(t.Span(), diag.E_INVARIANT_CONFLICT,
-						[]location.RelatedInfo{
-							{Span: first.Span(), Message: "kept definition declared here"},
-							{Span: inv.Span(), Message: "conflicting definition declared here"},
-						},
-						"type %q inherits two definitions of invariant %q with different expressions",
-						t.Name(), inv.Name())
+				if first != inv && !sameExpression(first.Expression(), inv.Expression()) &&
+					!slices.Contains(rivals[inv.Name()], inv) {
+					if rivals[inv.Name()] == nil {
+						conflicted = append(conflicted, inv.Name())
+					}
+					rivals[inv.Name()] = append(rivals[inv.Name()], inv)
 				}
 				continue
 			}
 			inherited[inv.Name()] = inv
 			result = append(result, inv)
 		}
+	}
+
+	for _, name := range conflicted {
+		kept := inherited[name]
+		related := []location.RelatedInfo{{Span: kept.Span(), Message: "kept definition declared here"}}
+		for _, rival := range rivals[name] {
+			related = append(related, location.RelatedInfo{Span: rival.Span(), Message: "conflicting definition declared here"})
+		}
+		c.errorfRelated(t.Span(), diag.E_INVARIANT_CONFLICT, related,
+			"type %q inherits definitions of invariant %q with different expressions "+
+				"(expressions are compared structurally: 1 and 1.0 are different literals)",
+			t.Name(), name)
 	}
 
 	return result

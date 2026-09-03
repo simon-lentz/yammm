@@ -47,18 +47,21 @@ func NewRegistry() *Registry {
 // Register adds a schema to the registry.
 //
 // Idempotence: when a schema with the same SourceID is already registered and
-// the incoming one is the same source — its entry bytes match, when both carry
-// them, and its StructuralHash matches — Register returns nil without mutating
-// the registry. This makes the common case, the same .yammm file parsed twice
-// in one process by loads sharing a Registry, a safe no-op, and the existing
-// schema's types keep their pointer identity under LookupType. A schema with
-// no sources (Builder-built) is compared by hash alone.
+// the incoming one is the same source — the entry and every source both carry
+// match byte for byte, and its StructuralHash matches — Register returns nil
+// without mutating the registry. This makes the common case, the same .yammm
+// file parsed twice in one process by loads sharing a Registry, a safe no-op,
+// and the existing schema's types keep their pointer identity under
+// LookupType. Two schemas with no sources (Builder-built) are compared by hash
+// alone; a schema with sources beside one without is not the same source, so
+// a Builder-built schema never replaces a loaded one or the reverse.
 //
 // A SourceID match whose bytes or hash differ returns a
 // *RegistryError{Kind: DuplicateSourceID}. The message keeps the "schema
 // already registered with source ID: <id>" prefix and names what differed —
 // the source's bytes, or the two structural hashes — so a file that changed
-// while a registry lived fails loudly rather than being served stale.
+// while a registry lived fails loudly rather than being served stale. The
+// loader reports that refusal as E_LOAD_SOURCE_CHANGED.
 //
 // New SourceIDs register normally. Zero SourceID, empty schema name, and
 // duplicate name (different SourceID, same name) continue to return their
@@ -101,11 +104,11 @@ func (r *Registry) Register(s *Schema) error {
 	// hash is cached on first use; steady-state re-registrations pay only the
 	// incoming schema's hash.
 	if existing, ok := r.schemas[s.sourceID]; ok {
-		if same, decided := sameEntryBytes(existing, s); decided && !same {
+		if same, decided := sameSources(existing, s); decided && !same {
 			return &RegistryError{
 				Kind: DuplicateSourceID,
 				Message: fmt.Sprintf(
-					"schema already registered with source ID: %s (the source's bytes changed since it was registered)",
+					"schema already registered with source ID: %s (the source's bytes, or an import's, changed since it was registered)",
 					s.sourceID.String(),
 				),
 			}
@@ -275,15 +278,28 @@ func (e *RegistryError) Error() string {
 // sameEntryBytes compares the entry source each schema carries for its own
 // SourceID. It is undecided when either schema has no sources or no content
 // for the ID, which is where the structural hash decides alone.
-func sameEntryBytes(a, b *Schema) (same, decided bool) {
+// sameSources reports whether two schemas under one SourceID are the same
+// source: the entry and every source both carry match byte for byte. Two
+// source-less schemas leave the question to the hash. A schema with sources
+// beside one without is not the same source — the provenance differs.
+func sameSources(a, b *Schema) (same, decided bool) {
 	as, bs := a.Sources(), b.Sources()
-	if as == nil || bs == nil {
+	if as == nil && bs == nil {
 		return false, false
+	}
+	if as == nil || bs == nil {
+		return false, true
 	}
 	ca, okA := as.ContentBySource(a.sourceID)
 	cb, okB := bs.ContentBySource(b.sourceID)
-	if !okA || !okB {
-		return false, false
+	if okA != okB || (okA && !bytes.Equal(ca, cb)) {
+		return false, true
 	}
-	return bytes.Equal(ca, cb), true
+	for _, id := range as.SourceIDs() {
+		x, _ := as.ContentBySource(id)
+		if y, ok := bs.ContentBySource(id); ok && !bytes.Equal(x, y) {
+			return false, true
+		}
+	}
+	return true, true
 }

@@ -90,9 +90,9 @@ From highest to lowest:
 | 10 | Equality `==`, `!=` | Left |
 | 11 | Logical AND `&&` | Left |
 | 12 | Logical OR/XOR `\|\|`, `^` | Left |
-| 13 | Ternary `? { then : else }` | Right |
+| 13 | Ternary `? { then : else }` | Left |
 
-The three postfix operators share one level and apply left to right: `$self.tags[0]` indexes the property and `$i.name -> Len` pipes it. The name after `.` is a property or relation name, never an expression.
+The three postfix operators share one level and apply left to right: `$self.tags[0]` indexes the property and `$i.name -> Len` pipes it. The name after `.` is a property or relation name, never an expression, and any word may stand there — `$self.type` reads a property named `type`, `$self.in` a relation named `IN`.
 
 Parentheses override precedence as usual.
 

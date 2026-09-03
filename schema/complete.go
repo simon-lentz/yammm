@@ -147,6 +147,7 @@ type completer struct {
 	// staticMembers caches [completer.membersOf] per type: the merged members
 	// keyed as an invariant expression writes them.
 	staticMembers map[*Type]staticMembers
+	invariantSeen map[string]bool // diagnostics already reported for the invariant being typed
 
 	// pendingShadowed holds the annotations own re-declarations dropped, queued
 	// during linearization and emitted by [completer.flushShadowedAnnotations]

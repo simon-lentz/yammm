@@ -140,9 +140,72 @@ type T extends A1, A2 {
 		}
 	})
 
-	t.Run("inherited agreement", func(t *testing.T) {
+	t.Run("three rivals are one conflict", func(t *testing.T) {
 		t.Parallel()
 		res := loadRules(t, `schema "s"
+
+abstract type A1 {
+    id String primary
+    x Integer
+    ! "rule" x > 0
+}
+
+abstract type A2 {
+    id String primary
+    x Integer
+    ! "rule" x < 100
+}
+
+abstract type A3 {
+    id String primary
+    x Integer
+    ! "rule" x != 50
+}
+
+type T extends A1, A2, A3 {
+    y Integer
+}
+`)
+		if countCode(res, diag.E_INVARIANT_CONFLICT) != 1 {
+			t.Fatalf("one conflict over three ancestors must draw one diagnostic; got %v", res.Err())
+		}
+		is, _ := issueWith(res, diag.E_INVARIANT_CONFLICT, `"rule"`)
+		if n := len(is.Related()); n != 3 {
+			t.Errorf("the diagnostic relates %d declarations, want the kept one and both rivals", n)
+		}
+		if !strings.Contains(is.Message(), "structurally") {
+			t.Errorf("the diagnostic should state that expressions compare structurally: %q", is.Message())
+		}
+	})
+
+	t.Run("integer and float literals are different expressions", func(t *testing.T) {
+		t.Parallel()
+		res := loadRules(t, `schema "s"
+
+abstract type P1 {
+    id String primary
+    n Float
+    ! "rule" n > 1
+}
+
+abstract type P2 {
+    id String primary
+    n Float
+    ! "rule" n > 1.0
+}
+
+type C extends P1, P2 {
+    y Integer
+}
+`)
+		if countCode(res, diag.E_INVARIANT_CONFLICT) != 1 {
+			t.Errorf("1 and 1.0 are different literals, as they are to the structural hash; got %v", res.Err())
+		}
+	})
+
+	t.Run("inherited agreement", func(t *testing.T) {
+		t.Parallel()
+		s, res := schema.LoadString(t.Context(), `schema "s"
 
 abstract type A1 {
     id String primary
@@ -159,9 +222,19 @@ abstract type A2 {
 type T extends A1, A2 {
     y Integer
 }
-`)
+`, "s.yammm")
 		if res.Err() != nil {
-			t.Errorf("two ancestors stating one rule must merge: %v", res.Err())
+			t.Fatalf("two ancestors stating one rule must merge: %v", res.Err())
+		}
+		typ, _ := s.Type("T")
+		n := 0
+		for inv := range typ.AllInvariants() {
+			if inv.Name() == "rule" {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("two agreeing definitions merged into %d invariants, want one", n)
 		}
 	})
 
@@ -216,6 +289,45 @@ type Order {
 	}
 	if !strings.Contains(is.Message(), "inherits") {
 		t.Errorf("the diagnostic should say the association is inherited: %q", is.Message())
+	}
+}
+
+// One inherited association is one mistake, reported on the first part type
+// in the chain that inherits it and on none of its part-type descendants.
+func TestPartType_InheritedAssociationReportedOnce(t *testing.T) {
+	t.Parallel()
+
+	const src = `schema "s"
+
+type Customer {
+    id String primary
+}
+
+abstract type HasOwner {
+    id String primary
+    --> OWNER (one) Customer
+}
+
+part type Line extends HasOwner {
+    qty Integer
+}
+
+part type SpecialLine extends Line {
+    note String
+}
+
+type Order {
+    id String primary
+    *-> LINES (one:many) Line
+    *-> SPECIALS (one:many) SpecialLine
+}
+`
+	res := loadRules(t, src)
+	if n := countCode(res, diag.E_INVALID_ASSOCIATION_TARGET); n != 1 {
+		t.Fatalf("want one E_INVALID_ASSOCIATION_TARGET for the chain; got %d: %v", n, res.Err())
+	}
+	if _, ok := issueWith(res, diag.E_INVALID_ASSOCIATION_TARGET, `"Line"`); !ok {
+		t.Errorf("the one diagnostic should sit on the first part type that inherits it; got %v", res.Err())
 	}
 }
 

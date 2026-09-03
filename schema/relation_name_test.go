@@ -32,15 +32,13 @@ type Order {
 		t.Fatalf("load: %v", res.Err())
 	}
 	order, _ := s.Type("Order")
-	for rel := range order.Compositions() {
-		if rel.FieldName() != strings.ToLower(rel.Name()) || rel.FieldName() != "line2" {
-			t.Errorf("composition %q has field name %q, want %q", rel.Name(), rel.FieldName(), "line2")
-		}
+	comp, ok := order.Relation("LINE2")
+	if !ok || comp.FieldName() != strings.ToLower(comp.Name()) || comp.FieldName() != "line2" {
+		t.Errorf("composition LINE2 has field name %q, want %q", comp.FieldName(), "line2")
 	}
-	for rel := range order.Associations() {
-		if rel.FieldName() != "has_2_parts" {
-			t.Errorf("association %q has field name %q, want %q", rel.Name(), rel.FieldName(), "has_2_parts")
-		}
+	assoc, ok := order.Relation("HAS_2_PARTS")
+	if !ok || assoc.FieldName() != "has_2_parts" {
+		t.Errorf("association HAS_2_PARTS has field name %q, want %q", assoc.FieldName(), "has_2_parts")
 	}
 }
 

@@ -250,6 +250,13 @@ func (c *completer) validateAssociationTargets() {
 				if own[r] {
 					continue
 				}
+				// Reported once, on the first part type in the chain that
+				// inherits it; a part-type ancestor carrying it has already.
+				if c.aSuperCarries(t, func(s *Type) bool {
+					return s.IsPart() && slices.Contains(s.AllAssociationsSlice(), r)
+				}) {
+					continue
+				}
 				c.errorfRelated(t.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
 					[]location.RelatedInfo{{Span: r.Span(), Message: "association declared here"}},
 					"part type %q inherits association %q from %s; a part type cannot carry an association",

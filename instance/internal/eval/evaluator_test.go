@@ -73,7 +73,7 @@ func TestEvaluator_ArithmeticErrors(t *testing.T) {
 		{"mod_with_float", sx("%", lit(5.5), lit(2.0)), "integer operands"},
 		// The unary-minus op token is "-x" (the compiler's spelling); a
 		// non-numeric operand must fail in negate itself, not fall through
-		// to "unknown operation".
+		// to "unknown function".
 		{"negate_non_numeric", sx("-x", lit("not a number")), "-x of non-numeric"},
 		{"sub_non_numeric", sx("-", lit("a"), lit("b")), "non-numeric"},
 		{"mul_non_numeric", sx("*", lit("a"), lit("b")), "non-numeric"},
@@ -126,6 +126,11 @@ func TestEvaluator_Comparison(t *testing.T) {
 
 		{"nil_eq_nil", "==", nil, nil, true},
 		{"value_neq_nil", "!=", int64(5), nil, true},
+		// Equality with nil is nil-ness for every value kind: an instance,
+		// which the total order cannot rank, still answers the null guard.
+		{"map_neq_nil", "!=", map[string]any{"qty": int64(1)}, nil, true},
+		{"map_eq_nil", "==", map[string]any{"qty": int64(1)}, nil, false},
+		{"nil_neq_map", "!=", nil, map[string]any{"qty": int64(1)}, true},
 	}
 
 	for _, tt := range tests {

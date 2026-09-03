@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"golang.org/x/text/unicode/norm"
 
@@ -74,16 +75,18 @@ func newRootLoader(moduleRoot string) (*rootLoader, error) {
 	return &rootLoader{root: root, rootPath: canonicalRoot}, nil
 }
 
-// openFile opens a file relative to the module root with sandboxed access.
-// Returns ErrPathEscape if the path would escape the module root.
+// openFile opens a regular file relative to the module root with sandboxed
+// access. Returns ErrPathEscape if the path would escape the module root and
+// errNotRegularFile if it names anything but a regular file.
 func (rl *rootLoader) openFile(relativePath string) (*os.File, error) {
-	// Clean the path to normalize separators and remove . and ..
 	cleanPath := filepath.Clean(relativePath)
-	f, err := rl.root.Open(cleanPath)
-	if err != nil {
-		return nil, rl.handleOpenError(err, relativePath)
-	}
-	return f, nil
+	return openRegular(func(flag int) (*os.File, error) {
+		f, err := rl.root.OpenFile(cleanPath, flag, 0)
+		if err != nil {
+			return nil, rl.handleOpenError(err, relativePath)
+		}
+		return f, nil
+	})
 }
 
 // maxSchemaSourceBytes bounds one schema source, entry or import. The largest
@@ -118,10 +121,37 @@ func readSource(r io.Reader, what string) ([]byte, error) {
 	return content, nil
 }
 
+// errNotRegularFile is what openRegular returns for a path that names anything
+// but a regular file.
+var errNotRegularFile = errors.New("not a regular file")
+
+// openRegular opens a file for reading and refuses anything but a regular
+// file. The open is non-blocking so a FIFO cannot stall it, and the kind is
+// read from the open descriptor so nothing can change between check and read.
+func openRegular(open func(flag int) (*os.File, error)) (*os.File, error) {
+	f, err := open(os.O_RDONLY | syscall.O_NONBLOCK)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("stat: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, errNotRegularFile
+	}
+	return f, nil
+}
+
 // readSourceFile opens and reads one schema file within the source bound.
 func readSourceFile(absPath string) ([]byte, error) {
-	f, err := os.Open(absPath)
+	f, err := openRegular(func(flag int) (*os.File, error) { return os.OpenFile(absPath, flag, 0) })
 	if err != nil {
+		if errors.Is(err, errNotRegularFile) {
+			return nil, fmt.Errorf("schema path %q is not a regular file", absPath)
+		}
 		return nil, fmt.Errorf("read %q: %w", absPath, err)
 	}
 	defer f.Close()
@@ -131,14 +161,11 @@ func readSourceFile(absPath string) ([]byte, error) {
 // readFile reads a file relative to the module root with sandboxed access.
 // Returns ErrPathEscape if the path would escape the module root.
 func (rl *rootLoader) readFile(relativePath string) ([]byte, location.SourceID, error) {
-	// Stat before Open: opening a FIFO blocks until a writer appears, and
-	// neither this call nor io.ReadAll takes a context to cancel it.
-	if info, statErr := rl.root.Stat(filepath.Clean(relativePath)); statErr == nil && !info.Mode().IsRegular() {
-		return nil, location.SourceID{}, fmt.Errorf("import %q is not a regular file", relativePath)
-	}
-
 	f, err := rl.openFile(relativePath)
 	if err != nil {
+		if errors.Is(err, errNotRegularFile) {
+			return nil, location.SourceID{}, fmt.Errorf("import %q is not a regular file", relativePath)
+		}
 		return nil, location.SourceID{}, err
 	}
 	defer f.Close()
@@ -223,11 +250,6 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 		return fatalResult(fmt.Errorf("resolve path %q: %w", path, err), diag.Result{})
 	}
 
-	// Read the file content. Stat first: os.ReadFile on a FIFO blocks until a
-	// writer appears, and the read takes no context to cancel it.
-	if info, statErr := os.Stat(absPath); statErr == nil && !info.Mode().IsRegular() {
-		return fatalResult(fmt.Errorf("schema path %q is not a regular file", path), diag.Result{})
-	}
 	content, err := readSourceFile(absPath)
 	if err != nil {
 		return fatalResult(err, diag.Result{})
@@ -804,8 +826,10 @@ func (l *loader) registerFailureIssue(s *Schema, err error) diag.Issue {
 		}
 		return b.Build()
 	case DuplicateSourceID:
-		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
-			"one source registered twice with divergent content: "+regErr.Message).
+		// A caller's condition, not the loader's: the registry holds this
+		// source as another load compiled it, and the file has changed since.
+		return diag.NewIssue(diag.Error, diag.E_LOAD_SOURCE_CHANGED,
+			"source re-registered with different content: "+regErr.Message).
 			WithSpan(s.Span()).Build()
 	case InvalidSourceID, InvalidName:
 		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
@@ -1448,7 +1472,9 @@ func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) 
 		return "", fmt.Errorf("synthetic root %q cannot be combined with module root %q: "+
 			"pass an empty module root, which the synthetic root stands in for", cfg.syntheticRoot, moduleRoot)
 	}
-	return root, nil
+	// NFC, as syntheticSourceKey applies to the key half: two spellings of one
+	// root must mint one identity, as two spellings of one key do.
+	return norm.NFC.String(root), nil
 }
 
 // rejectSyntheticRoot refuses WithSyntheticRoot on the load functions it cannot

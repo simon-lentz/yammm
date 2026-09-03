@@ -127,7 +127,7 @@ func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
 		case t.Type == p.tok.period && precPostfix >= minPrec:
 			p.next()
 			name := p.lx.Peek()
-			if !p.isPlainWord(name) {
+			if !p.isWord(name) {
 				return nil, p.errf(name, "expected a member name after '.'")
 			}
 			p.next()
@@ -420,9 +420,16 @@ func (p *exprParser) expect(want lexer.TokenType, what string) error {
 	return nil
 }
 
+// isWord reports whether t is a word of either case. The member position after
+// '.' takes any word: a property or a relation field may be spelled like a
+// keyword (a property named type, a relation named IN), the position admits
+// nothing but a name, and the type's members decide whether it resolves.
+func (p *exprParser) isWord(t *lexer.Token) bool {
+	return t.Type == p.tok.ucWord || t.Type == p.tok.lcWord
+}
+
 // isPlainWord reports whether t can stand as an ordinary identifier — the
-// function-name position after '->' and the member position after '.' are the
-// callers.
+// function-name position after '->' is the caller.
 func (p *exprParser) isPlainWord(t *lexer.Token) bool {
 	if t.Type == p.tok.ucWord {
 		return !datatypeKeywords[t.Value]

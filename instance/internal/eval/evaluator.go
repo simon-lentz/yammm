@@ -168,7 +168,7 @@ func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 		return e.xor(args)
 
 	default:
-		return nil, fmt.Errorf("unknown operation: %s", op)
+		return nil, fmt.Errorf("unknown function: %s", op)
 	}
 }
 
@@ -459,18 +459,15 @@ func (e *Evaluator) callBuiltin(def builtinDef, lhs any, args []any, params []st
 		return nil, fmt.Errorf("%s accepts at most %d arguments", def.spec.Name, def.spec.MaxArgs)
 	}
 
-	// Validate params count
-	if len(params) > def.spec.MaxParams {
-		return nil, fmt.Errorf("%s accepts at most %d parameters", def.spec.Name, def.spec.MaxParams)
-	}
-
-	// Validate body presence/absence based on acceptBody flag
-	if body != nil {
-		if !def.spec.AcceptBody {
-			return nil, fmt.Errorf("%s does not accept a lambda expression", def.spec.Name)
-		}
-	} else if def.spec.AcceptBody {
+	// The lambda's shape, in the order the static checker reports it: a body
+	// the builtin never takes is the mistake, not the parameters written on it.
+	switch {
+	case body != nil && !def.spec.AcceptBody:
+		return nil, fmt.Errorf("%s does not accept a lambda expression", def.spec.Name)
+	case body == nil && def.spec.AcceptBody:
 		return nil, fmt.Errorf("%s requires a lambda expression", def.spec.Name)
+	case len(params) > def.spec.MaxParams:
+		return nil, fmt.Errorf("%s accepts at most %d parameters", def.spec.Name, def.spec.MaxParams)
 	}
 
 	return def.fn(e, lhs, args, params, body, scope)
@@ -668,9 +665,22 @@ func (e *Evaluator) numericOp(left, right any, intOp func(int64, int64) any, flo
 	return nil, false
 }
 
+// nilEquality decides a == b when either side is nil: the null-guard idiom
+// holds for every value kind, an instance included, which the total order
+// cannot rank. The second result is false when neither side is nil.
+func nilEquality(a, b any) (equal, decided bool) {
+	if a == nil || b == nil {
+		return (a == nil) == (b == nil), true
+	}
+	return false, false
+}
+
 func (e *Evaluator) equal(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("== requires 2 operands")
+	}
+	if eq, decided := nilEquality(args[0], args[1]); decided {
+		return eq, nil
 	}
 	cmp, err := value.Order(args[0], args[1])
 	if err != nil {
@@ -682,6 +692,9 @@ func (e *Evaluator) equal(args []any) (any, error) {
 func (e *Evaluator) notEqual(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("!= requires 2 operands")
+	}
+	if eq, decided := nilEquality(args[0], args[1]); decided {
+		return !eq, nil
 	}
 	cmp, err := value.Order(args[0], args[1])
 	if err != nil {

@@ -192,20 +192,6 @@ func TestRelation_EdgePropertiesRejectPrimary(t *testing.T) {
 	}
 }
 
-// TestRelation_NamesRejectReservedSpellings pins that a relation name is an
-// any-name position: neither a reserved lowercase spelling nor a datatype name.
-func TestRelation_NamesRejectReservedSpellings(t *testing.T) {
-	for _, name := range []string{"type", "primary", "in", "many", "String", "Vector"} {
-		t.Run(name, func(t *testing.T) {
-			src := relSource("--> " + name + " Wheel")
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-			if len(issues) == 0 {
-				t.Errorf("relation name %q accepted, want rejected", name)
-			}
-		})
-	}
-}
-
 // TestRelation_NamesAreUpperSnake pins the relation-name production: an
 // uppercase letter, then uppercase letters, digits or underscores. The
 // lower-case spelling is the field name, so any other casing is refused at
@@ -335,7 +321,7 @@ func TestRelation_ReverseClauseIsRejected(t *testing.T) {
 		{"bare name", "--> R Wheel /back", true},
 		{"name with multiplicity", "--> R Wheel /back (one:many)", true},
 		{"refused multiplicity still names the removal", "--> R Wheel /back (many:one)", true},
-		{"composition clause", "*-> c Wheel /back (one)", true},
+		{"composition clause", "*-> C Wheel /back (one)", true},
 		{"no clause at all", "--> R Wheel", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

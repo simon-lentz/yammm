@@ -42,8 +42,8 @@ const (
 	// DetailKeyField is the data-level field name (for unknown/unexpected fields).
 	DetailKeyField = "field"
 
-	// DetailKeyJSONField is the normalized JSON field name for relation in path
-	// (lower_snake form).
+	// DetailKeyJSONField is a relation's JSON field name in a path: the
+	// relation name in lower case.
 	DetailKeyJSONField = "json_field"
 
 	// DetailKeyDetail is the specific error description (grammar violation,

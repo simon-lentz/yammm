@@ -552,7 +552,7 @@ Inheritance rules:
 
 `E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. Each subtype that inherits a conflicting combination re-detects and reports it independently.
 
-**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity. A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits both. One definition reached through two ancestors merges silently.
+**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity. A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. One definition reached through two ancestors merges silently.
 
 ### Constraint Narrowing
 
@@ -1019,7 +1019,7 @@ type Car {
 }
 ```
 
-The target must be a concrete type (not abstract or a `part` type), and a `part` type cannot declare an association at all — both draw `E_INVALID_ASSOCIATION_TARGET`. An association
+The target must be a concrete type (not abstract or a `part` type), and a `part` type cannot declare or inherit an association at all — both draw `E_INVALID_ASSOCIATION_TARGET`, an inherited one once, on the first part type in the chain that inherits it. An association
 edge is resolved by the target's identity, and neither an abstract type (never
 instantiated) nor a part type (reachable only through composition) can be the
 referenced node.
@@ -1280,7 +1280,14 @@ Expr = Literal
 
 Arguments  = "(" [ Expr { "," Expr } ] [ "," ] ")" .
 Parameters = "|" VARIABLE { "," VARIABLE } [ "," ] "|" .
+Name       = LC_WORD | UC_WORD .
 ```
+
+The `Name` after `->` is a built-in function's name. The `Name` after `.` is a
+member — a property or a relation's field name — and admits any word, keywords
+included: a property may be named `type` and a relation `IN`, so `$self.type`
+and `$self.in` are member accesses. Whether the member exists is the type's
+question, answered by the static check below, not the grammar's.
 
 > **`_` and `nil` in expressions.** Within invariant expressions, `_` and `nil` are interchangeable — both produce a nil literal. Use whichever reads more naturally: `end_date == nil` for null-guard idioms, `end_date == _` for consistency with other DSL contexts. Note that `_` retains distinct, non-nil roles in constraint bounds (`Integer[0, _]`) and multiplicity (`(_:many)`), where `nil` cannot be used.
 
@@ -1491,7 +1498,7 @@ type Order {
 
 **Numeric variables** (`$0`, `$1`, ...) are evaluator-local and default to `nil` when unset.
 
-**Named variables** are resolved through the evaluator's parent chain — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`).
+**Named variables** are resolved through the evaluator's parent chain — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body.
 
 **`$self`** is bound when evaluating invariants against property maps and is inherited by child evaluators unless explicitly overridden.
 
@@ -1719,6 +1726,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
 - `E_LOAD_IO_FAILURE` — I/O error during schema loading
 - `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines
+- `E_LOAD_SOURCE_CHANGED` — a source re-registered in a shared registry with content that differs from what the registry holds
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, or duplicate errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)

@@ -452,12 +452,14 @@ func (t *Type) CanonicalPropertyName(lower string) (string, bool) {
 		name, ok := t.canonicalMap[lower]
 		return name, ok
 	}
+	// Unsealed: the same last-wins walk seal uses to build the map.
+	name, found := "", false
 	for _, p := range t.allProperties {
 		if strings.ToLower(p.name) == lower {
-			return p.name, true
+			name, found = p.name, true
 		}
 	}
-	return "", false
+	return name, found
 }
 
 // --- Internal setters used during completion ---

@@ -184,6 +184,13 @@ func (b *builder) parseHeader(plex *lexer.PeekingLexer) {
 		b.file.SchemaNameFailed = true
 		return
 	}
+	// The grammar admits an empty STRING; the language does not admit an
+	// empty name, and a nameless schema cannot be registered.
+	if name == "" {
+		b.reportf(diag.E_INVALID_NAME, b.file.NameSpan, "schema name cannot be empty")
+		b.file.SchemaNameFailed = true
+		return
+	}
 	b.file.Name = name
 }
 

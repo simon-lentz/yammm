@@ -1,7 +1,9 @@
 package schema
 
 import (
+	"fmt"
 	"maps"
+	"regexp"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -22,15 +24,28 @@ const (
 	kindScalar                     // a string, number, boolean, nil or pattern: no members
 )
 
+// scalarKind narrows a scalar as far as indexing needs: a string yields a
+// string when indexed, a number or boolean cannot be indexed at all.
+type scalarKind uint8
+
+const (
+	scalarAny    scalarKind = iota // a scalar of unknown kind
+	scalarString                   // a string, or a value the wire renders as one
+	scalarOther                    // a number or a boolean
+)
+
 type staticType struct {
-	kind staticKind
-	typ  *Type       // kindInstance; nil when the target did not resolve
-	elem *staticType // kindList
+	kind   staticKind
+	scalar scalarKind  // kindScalar
+	typ    *Type       // kindInstance; nil when the target did not resolve
+	elem   *staticType // kindList
 }
 
 var (
-	unknownType = staticType{kind: kindUnknown}
-	scalarType  = staticType{kind: kindScalar}
+	unknownType     = staticType{kind: kindUnknown}
+	scalarType      = staticType{kind: kindScalar}
+	stringType      = staticType{kind: kindScalar, scalar: scalarString}
+	otherScalarType = staticType{kind: kindScalar, scalar: scalarOther}
 )
 
 func listOf(elem staticType) staticType {
@@ -54,20 +69,22 @@ func (t staticType) element() staticType {
 }
 
 // staticScope is the lambda bindings in force at one point of the walk. Names
-// are lower-cased, as the evaluator's scope resolves them.
+// match exactly, as the evaluator's Scope.Lookup resolves them.
 type staticScope struct {
 	vars map[string]staticType
 }
 
+// child binds one variable. Variable names match exactly, as the evaluator's
+// Scope.Lookup does; only member names fold.
 func (s *staticScope) child(name string, t staticType) *staticScope {
 	vars := make(map[string]staticType, len(s.vars)+1)
 	maps.Copy(vars, s.vars)
-	vars[strings.ToLower(name)] = t
+	vars[name] = t
 	return &staticScope{vars: vars}
 }
 
 func (s *staticScope) lookupVar(name string) (staticType, bool) {
-	t, ok := s.vars[strings.ToLower(name)]
+	t, ok := s.vars[name]
 	return t, ok
 }
 
@@ -119,10 +136,28 @@ func propertyType(con Constraint) staticType {
 			return propertyType(a.Resolved())
 		}
 		return unknownType
-	case KindString, KindInteger, KindFloat, KindBoolean, KindTimestamp, KindDate, KindUUID, KindEnum, KindPattern:
-		return scalarType
+	case KindString, KindEnum, KindPattern, KindTimestamp, KindDate, KindUUID:
+		// Temporal and UUID values are canonical text at evaluation time.
+		return stringType
+	case KindInteger, KindFloat, KindBoolean:
+		return otherScalarType
 	}
 	return unknownType
+}
+
+// invariantErrorf reports one defect once per invariant: two occurrences of one
+// bad name in one expression are one mistake, reported at the invariant's span.
+func (c *completer) invariantErrorf(inv *Invariant, code diag.Code, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	key := code.String() + "\x00" + msg
+	if c.invariantSeen[key] {
+		return
+	}
+	if c.invariantSeen == nil {
+		c.invariantSeen = make(map[string]bool)
+	}
+	c.invariantSeen[key] = true
+	c.errorf(inv.Span(), code, "%s", msg)
 }
 
 // binaryOps are the operators whose operands are walked and whose result is a
@@ -160,6 +195,7 @@ func (c *completer) validateInvariantExpressions() {
 			if inv.Expression() == nil {
 				continue
 			}
+			c.invariantSeen = nil
 			c.typeExpr(inv.Expression(), scope, t, inv)
 		}
 	}
@@ -174,10 +210,14 @@ func (c *completer) typeExpr(e expr.Expression, sc *staticScope, owner *Type, in
 		switch ex.Val.(type) {
 		case []expr.Expression, []string:
 			return unknownType
+		case string:
+			return stringType
+		case int64, float64, bool, *regexp.Regexp:
+			return otherScalarType
 		}
 		return scalarType
 	case expr.DatatypeLiteral:
-		return scalarType
+		return otherScalarType
 	case expr.Op:
 		return unknownType
 	case expr.SExpr:
@@ -208,15 +248,21 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 		}
 		return listOf(elem)
 	case "?":
-		if len(children) == 3 {
-			c.typeExpr(children[0], sc, owner, inv)
-			then := c.typeExpr(children[1], sc, owner, inv)
-			otherwise := c.typeExpr(children[2], sc, owner, inv)
-			if then.kind == otherwise.kind && then.typ == otherwise.typ && then.kind != kindList {
-				return then
+		if len(children) != 3 {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"a conditional takes a condition and two branches in invariant %q on type %q", inv.Name(), owner.Name())
+			for _, child := range children {
+				c.typeExpr(child, sc, owner, inv)
 			}
 			return unknownType
 		}
+		c.typeExpr(children[0], sc, owner, inv)
+		then := c.typeExpr(children[1], sc, owner, inv)
+		otherwise := c.typeExpr(children[2], sc, owner, inv)
+		if then.kind == otherwise.kind && then.typ == otherwise.typ && then.kind != kindList {
+			return then
+		}
+		return unknownType
 	case "-x", "!":
 		for _, child := range children {
 			c.typeExpr(child, sc, owner, inv)
@@ -235,23 +281,47 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 		return c.typeCall(spec, children, sc, owner, inv)
 	}
 
-	c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+	c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 		"unknown function %q in invariant %q on type %q", op, inv.Name(), owner.Name())
 	c.walkCallParts(children, sc, owner, inv)
 	return unknownType
 }
 
 // walkCallParts types the operands of a call whose name is unknown, so their
-// own defects are still reported once.
+// own defects are still reported once. The body is typed with its declared
+// parameters bound, as any builtin would bind them, so a well-formed lambda
+// is not also reported as undefined variables.
 func (c *completer) walkCallParts(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) {
-	for _, child := range children {
-		if args, ok := expr.ArgsLiteral(child); ok {
+	child := sc
+	bound := false
+	var body expr.Expression
+	for i, ch := range children {
+		if args, ok := expr.ArgsLiteral(ch); ok {
 			for _, a := range args {
 				c.typeExpr(a, sc, owner, inv)
 			}
 			continue
 		}
-		c.typeExpr(child, sc, owner, inv)
+		if params, ok := expr.ParamsLiteral(ch); ok {
+			for _, p := range params {
+				child = child.child(p, unknownType)
+			}
+			bound = len(params) > 0
+			continue
+		}
+		if i == 0 {
+			c.typeExpr(ch, sc, owner, inv)
+			continue
+		}
+		if !expr.IsNilLiteral(ch) {
+			body = ch
+		}
+	}
+	if body != nil {
+		if !bound {
+			child = child.child("0", unknownType)
+		}
+		c.typeExpr(body, child, owner, inv)
 	}
 }
 
@@ -265,20 +335,23 @@ func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, ow
 	if !ok {
 		return unknownType
 	}
-	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found {
-		return t
-	}
+	// A variable of exactly this name shadows a same-named member, as the
+	// evaluator's scope chain resolves a bare name (docs/SPEC.md).
 	if t, found := sc.lookupVar(name); found {
 		return t
 	}
-	c.errorf(inv.Span(), diag.E_UNKNOWN_PROPERTY,
+	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found {
+		return t
+	}
+	c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
 		"unknown property %q in invariant %q on type %q", name, inv.Name(), owner.Name())
 	return unknownType
 }
 
-// typeVariable resolves $self, a lambda parameter, a member of the owner, or
-// a numeric variable. A numeric variable evaluates to nil when unbound; any
-// other unbound name is a guaranteed evaluation error, so it is refused here.
+// typeVariable resolves a lambda parameter, $self, a member of the owner, or
+// a numeric variable, in the evaluator's order: a parameter named self shadows
+// the owner. A numeric variable evaluates to nil when unbound; any other
+// unbound name is a guaranteed evaluation error, so it is refused here.
 func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
 	if len(children) != 1 {
 		return unknownType
@@ -287,21 +360,19 @@ func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, ow
 	if !ok {
 		return unknownType
 	}
-	if strings.EqualFold(name, "self") {
-		return instanceOf(owner)
-	}
 	if t, found := sc.lookupVar(name); found {
 		return t
 	}
-	// The evaluator's scope holds the instance's members beneath its
-	// variables, so $age reads the property age when no variable shadows it.
+	if name == "self" {
+		return instanceOf(owner)
+	}
 	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found {
 		return t
 	}
 	if isNumericVar(name) {
 		return unknownType
 	}
-	c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+	c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 		"undefined variable $%s in invariant %q on type %q", name, inv.Name(), owner.Name())
 	return unknownType
 }
@@ -320,13 +391,15 @@ func isNumericVar(name string) bool {
 
 // typeMember resolves receiver.name against what the receiver is known to be.
 func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
-	if len(children) < 2 {
+	if len(children) != 2 {
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+			"member access takes a receiver and one name in invariant %q on type %q", inv.Name(), owner.Name())
+		for _, child := range children {
+			c.typeExpr(child, sc, owner, inv)
+		}
 		return unknownType
 	}
 	recv := c.typeExpr(children[0], sc, owner, inv)
-	for _, child := range children[2:] {
-		c.typeExpr(child, sc, owner, inv)
-	}
 	name, ok := expr.StringLiteral(children[1])
 	if !ok {
 		c.typeExpr(children[1], sc, owner, inv)
@@ -335,25 +408,27 @@ func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owne
 
 	switch recv.kind {
 	case kindInstance:
-		if recv.typ == nil {
+		// A type whose supertype chain has an unresolved link has an incomplete
+		// member set; the unresolved reference already carries its diagnostic.
+		if recv.typ == nil || c.hasUnresolvedSupertype(recv.typ) {
 			return unknownType
 		}
 		if t, found := c.membersOf(recv.typ)[strings.ToLower(name)]; found {
 			return t
 		}
-		c.errorf(inv.Span(), diag.E_UNKNOWN_PROPERTY,
+		c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
 			"unknown property %q on type %q in invariant %q on type %q",
 			name, recv.typ.Name(), inv.Name(), owner.Name())
 	case kindKey:
-		c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"%q is read through an association in invariant %q on type %q: an association evaluates to the target key, and the target's properties are not in this instance",
 			name, inv.Name(), owner.Name())
 	case kindList:
-		c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"%q is read from a list in invariant %q on type %q: index or pipe the list first",
 			name, inv.Name(), owner.Name())
 	case kindScalar:
-		c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"%q is read from a value that has no members in invariant %q on type %q",
 			name, inv.Name(), owner.Name())
 	case kindUnknown:
@@ -362,23 +437,36 @@ func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owne
 }
 
 // typeIndexExpr resolves receiver[index]: a list yields its element, a string a
-// string, an instance cannot be indexed.
+// string; a number, a boolean or an instance cannot be indexed, and the bracket
+// takes exactly one index, as the evaluator's slice access does.
 func (c *completer) typeIndexExpr(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
-	if len(children) == 0 {
+	if len(children) != 2 {
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+			"indexing takes exactly one index in invariant %q on type %q", inv.Name(), owner.Name())
+		for _, child := range children {
+			c.typeExpr(child, sc, owner, inv)
+		}
 		return unknownType
 	}
 	recv := c.typeExpr(children[0], sc, owner, inv)
-	for _, child := range children[1:] {
-		c.typeExpr(child, sc, owner, inv)
-	}
+	c.typeExpr(children[1], sc, owner, inv)
 	switch recv.kind {
 	case kindList:
 		return recv.element()
 	case kindScalar:
+		switch recv.scalar {
+		case scalarString:
+			return stringType
+		case scalarOther:
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"a number or boolean cannot be indexed in invariant %q on type %q", inv.Name(), owner.Name())
+			return unknownType
+		case scalarAny:
+		}
 		return scalarType
 	case kindInstance:
 		if recv.typ != nil {
-			c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 				"type %q cannot be indexed in invariant %q on type %q", recv.typ.Name(), inv.Name(), owner.Name())
 		}
 	case kindKey, kindUnknown:
@@ -419,25 +507,45 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 		c.typeExpr(a, sc, owner, inv)
 	}
 
+	switch spec.Receiver {
+	case expr.RecvList, expr.RecvScalarList:
+		if recv.kind == kindScalar || recv.kind == kindInstance || recv.kind == kindKey {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"%s takes a list, and its receiver is not one in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
+		}
+		if spec.Receiver == expr.RecvScalarList && recv.kind == kindList && recv.element().kind == kindInstance {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"%s takes a list of scalars, and its receiver holds instances in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
+		}
+	case expr.RecvScalar:
+		if recv.kind == kindList || recv.kind == kindInstance {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"%s takes a scalar, and its receiver is not one in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
+		}
+	case expr.RecvAny:
+	}
+
 	switch {
 	case len(args) < spec.MinArgs:
-		c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"%s requires at least %d argument(s) in invariant %q on type %q", spec.Name, spec.MinArgs, inv.Name(), owner.Name())
 	case spec.MaxArgs >= 0 && len(args) > spec.MaxArgs:
-		c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"%s accepts at most %d argument(s) in invariant %q on type %q", spec.Name, spec.MaxArgs, inv.Name(), owner.Name())
 	}
-	if len(params) > spec.MaxParams {
-		c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
-			"%s accepts at most %d lambda parameter(s) in invariant %q on type %q", spec.Name, spec.MaxParams, inv.Name(), owner.Name())
-	}
+	// One mistake in the lambda's shape is one diagnostic, and a body the
+	// builtin would never evaluate is not typed.
 	switch {
 	case body != nil && !spec.AcceptBody:
-		c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"%s does not accept a lambda in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
+		body = nil
 	case body == nil && spec.AcceptBody:
-		c.errorf(inv.Span(), diag.E_INVALID_INVARIANT,
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"%s requires a lambda in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
+	case len(params) > spec.MaxParams:
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+			"%s accepts at most %d lambda parameter(s) in invariant %q on type %q", spec.Name, spec.MaxParams, inv.Name(), owner.Name())
 	}
 
 	bodyType := unknownType
@@ -468,10 +576,18 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 		return bodyType
 	case expr.ResultFlattened:
 		if recv.kind == kindList {
-			return listOf(recv.element().element())
+			if inner := recv.element(); inner.kind == kindList {
+				return listOf(inner.element())
+			}
+			return recv
 		}
 	case expr.ResultList:
-		return listOf(scalarType)
+		return listOf(stringType)
+	case expr.ResultElementOrArg:
+		if len(args) == 0 {
+			return recv.element()
+		}
+		return scalarType
 	case expr.ResultUnknown:
 	}
 	return unknownType

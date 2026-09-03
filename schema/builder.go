@@ -23,9 +23,39 @@ var (
 	// builderPropertyNameRE mirrors LC_WORD, which subsumes the lc_keyword
 	// alternatives the property_name production also admits.
 	builderPropertyNameRE = regexp.MustCompile(`^[a-z][A-Za-z0-9_]*$`)
-	// builderRelationNameRE mirrors any_name (UC_WORD | LC_WORD).
+	// builderRelationNameRE is the parser's RelationName production, UPPER_SNAKE.
 	builderRelationNameRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 )
+
+// unsupportedLiteral finds the first literal in e whose Go type the expression
+// language does not define. A caller-built tree may hold any Go value, and the
+// structural hash, which completion now runs over invariants, encodes only the
+// language's kinds; refusing here keeps Build's contract of result.Err().
+func unsupportedLiteral(e expr.Expression) (any, bool) {
+	switch ex := e.(type) {
+	case *expr.Literal:
+		switch v := ex.Val.(type) {
+		case nil, string, int64, float64, bool, *regexp.Regexp, []string:
+			return nil, false
+		case []expr.Expression:
+			for _, arg := range v {
+				if bad, found := unsupportedLiteral(arg); found {
+					return bad, true
+				}
+			}
+			return nil, false
+		default:
+			return v, true
+		}
+	case expr.SExpr:
+		for _, child := range ex.Children() {
+			if bad, found := unsupportedLiteral(child); found {
+				return bad, true
+			}
+		}
+	}
+	return nil, false
+}
 
 // ImportResolver resolves import paths to SourceIDs for synthetic sources.
 // This is required when the builder's SourceID is synthetic (not file-backed)
@@ -455,6 +485,12 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 			if inv.Expr == nil {
 				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
 					fmt.Sprintf("invariant %q in type %q has nil expression", inv.Name, t.name)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyName, inv.Name).Build())
+				hasErrors = true
+			} else if bad, found := unsupportedLiteral(inv.Expr); found {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
+					fmt.Sprintf("invariant %q in type %q holds a literal of Go type %T; an expression literal is nil, string, int64, float64, bool or *regexp.Regexp", inv.Name, t.name, bad)).
 					WithDetail(diag.DetailKeyTypeName, t.name).
 					WithDetail(diag.DetailKeyName, inv.Name).Build())
 				hasErrors = true

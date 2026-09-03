@@ -90,81 +90,33 @@
           }
         },
         {
-          "msg": "\"x_contains_string_receiver\"",
-          "expr": "(Contains \"abc\" (args \"b\") (params ) nil)",
-          "expr_span": {
-            "s": 444,
-            "e": 466
-          },
-          "span": {
-            "s": 413,
-            "e": 466
-          }
-        },
-        {
-          "msg": "\"x_scalar_not_collection\"",
-          "expr": "(All 1 (args ) (params x) true)",
-          "expr_span": {
-            "s": 496,
-            "e": 518
-          },
-          "span": {
-            "s": 468,
-            "e": 518
-          }
-        },
-        {
           "msg": "\"x_nonbool_invariant_result\"",
           "expr": "(+ 5 1)",
           "expr_span": {
-            "s": 551,
-            "e": 556
+            "s": 444,
+            "e": 449
           },
           "span": {
-            "s": 520,
-            "e": 556
-          }
-        },
-        {
-          "msg": "\"x_index_two_args\"",
-          "expr": "(== (@ ([] 10 20 30) 0 2) 10)",
-          "expr_span": {
-            "s": 579,
-            "e": 603
-          },
-          "span": {
-            "s": 558,
-            "e": 603
-          }
-        },
-        {
-          "msg": "\"x_index_empty\"",
-          "expr": "(== (@ ([] 10 20 30)) 10)",
-          "expr_span": {
-            "s": 623,
-            "e": 643
-          },
-          "span": {
-            "s": 605,
-            "e": 643
+            "s": 413,
+            "e": 449
           }
         },
         {
           "msg": "\"f_nil_result_is_falsey\"",
           "expr": "(Then nil (args ) (params v) true)",
           "expr_span": {
-            "s": 672,
-            "e": 697
+            "s": 478,
+            "e": 503
           },
           "span": {
-            "s": 645,
-            "e": 697
+            "s": 451,
+            "e": 503
           }
         }
       ],
       "span": {
         "s": 23,
-        "e": 699
+        "e": 505
       }
     }
   ]

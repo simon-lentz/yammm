@@ -128,7 +128,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, or property datatype) |
 | `E_DUPLICATE_TYPE` | Type name defined multiple times |
 | `E_DUPLICATE_SCHEMA` | Two schemas in one registry declare one name |
-| `E_RELATION_COLLISION` | Relations collide after normalization |
+| `E_RELATION_COLLISION` | A type carries conflicting relation definitions under one name: inherited definitions that differ, or an association and a composition sharing a name |
 | `E_MISSING_SOURCE_ID` | Required SourceID is missing |
 | `E_INVALID_SYNTHETIC_ID` | Synthetic SourceID has invalid format |
 | `E_LIST_ON_EDGE` | List type used in relationship property |
@@ -136,6 +136,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
 | `E_LOAD_IO_FAILURE` | I/O error during schema loading |
 | `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines |
+| `E_LOAD_SOURCE_CHANGED` | A source re-registered in a shared registry with content that differs from what the registry holds |
 | `E_UNKNOWN_ANNOTATION` | Annotation name not in the built-in registry for its placement |
 | `E_UNKNOWN_ANNOTATION_TARGET` | Annotation property-reference argument names no property of the type |
 | `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation |

@@ -44,9 +44,10 @@ func defaultLoadConfig() *loadConfig {
 //     when loadImport encounters a SourceID already registered in r, the
 //     existing *Schema pointer is reused and the import is NOT re-parsed.
 //     This is where cross-Load schema caching pays off.
-//   - Re-registering the same source — same entry bytes, same structural
-//     hash — is a no-op (see Registry.Register); a source whose bytes or hash
-//     changed errors with DuplicateSourceID naming what differed.
+//   - Re-registering the same source — the same bytes for every source both
+//     carry, the same structural hash — is a no-op (see Registry.Register); a
+//     source whose bytes or hash changed fails the load with
+//     E_LOAD_SOURCE_CHANGED naming what differed.
 //   - A root is compiled on every Load call; when r already holds its
 //     SourceID with identical content, Register keeps the first object and
 //     the Load returns that object, so every reader of r sees one *Schema per

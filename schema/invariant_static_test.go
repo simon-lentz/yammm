@@ -12,7 +12,8 @@ import (
 
 // The static invariant checker types every expression — an instance, an
 // association key, a list, a scalar, or unknown — and refuses what the
-// evaluator would refuse. Each row states one shape docs/SPEC.md settles.
+// evaluator would refuse. This table pins the checker alone; the instance
+// package's contract table judges the same shapes by both layers.
 const staticBase = `schema "s"
 
 part type Item {
@@ -65,7 +66,14 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`LINES -> Reduce(0) |$acc, $l| { $acc + $l.qty } > 0`,
 		`LINES -> All |$l| { $l.tags[0] != "" }`,
 		`LINES -> All |$l| { $l.tags -> Len > 0 }`,
-		`LINES -> Sort -> First.qty > 0`,
+		`LINES -> Map |$l| { $l.qty } -> Sort -> First > 0`,
+		// nested compositions: a child is an instance with its own relations
+		`LINES -> All |$l| { $l.ITEM.sku != "" }`,
+		// a parameter shadows a same-named property, and $self may be rebound
+		`LINES -> All |$name| { name.qty > 0 }`,
+		`LINES -> All |$self| { $self.qty > 0 }`,
+		// Lest binds nothing; its body reads the caller's scope
+		`name -> Lest { true }`,
 		// member then pipeline, member then index
 		`$self.name -> Len > 0`,
 		`$self.tags[0] != ""`,
@@ -119,13 +127,26 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`name.length > 0`, diag.E_INVALID_INVARIANT, "no members"},
 		{`LINES.qty > 0`, diag.E_INVALID_INVARIANT, "list"},
 		{`LINES -> All |$l| { $l.Len > 0 }`, diag.E_UNKNOWN_PROPERTY, "Len"},
-		// an undefined named variable is a guaranteed evaluation error
+		// an undefined named variable is a guaranteed evaluation error, and a
+		// variable name never folds
 		{`$undefined > 0`, diag.E_INVALID_INVARIANT, "undefined variable"},
+		{`tags -> All |$myVar| { $myvar -> Len > 0 }`, diag.E_INVALID_INVARIANT, "undefined variable"},
 		// an unknown function and a call shape the builtin refuses
 		{`LINES -> Bogus > 0`, diag.E_INVALID_INVARIANT, "Bogus"},
 		{`LINES -> Len |$l| { $l.qty } > 0`, diag.E_INVALID_INVARIANT, "lambda"},
 		{`LINES -> All > 0`, diag.E_INVALID_INVARIANT, "lambda"},
 		{`name -> Substring(1, 2, 3) != ""`, diag.E_INVALID_INVARIANT, "argument"},
+		{`name -> Lest |$x| { true }`, diag.E_INVALID_INVARIANT, "lambda parameter"},
+		// the receiver rule: a list builtin on a scalar or a key, a scalar
+		// builtin on a list, an ordering builtin on instances
+		{`name -> Filter |$c| { true } -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
+		{`PLACED_BY -> Sort -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
+		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a scalar"},
+		{`LINES -> Sort -> First.qty > 0`, diag.E_INVALID_INVARIANT, "list of scalars"},
+		// the bracket takes one index, and a number cannot be indexed
+		{`tags[] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
+		{`tags[0, 1] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
+		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
 	}
 	for _, tc := range refuse {
 		t.Run("refuses "+tc.inv, func(t *testing.T) {

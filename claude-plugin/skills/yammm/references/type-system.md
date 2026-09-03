@@ -344,7 +344,7 @@ Making a required field optional is widening and not allowed.
 
 ### Relationship Uniqueness
 
-After inheritance, relationships must be unique by normalized field name with full structural equality. Duplicate field name/structure pairs from multiple parents are reported as errors.
+After inheritance, one relation name carries one definition. Two own relations under one name draw `E_DUPLICATE_RELATION`; inherited definitions that differ, or an association and a composition sharing a name, draw `E_RELATION_COLLISION`, reported once on the type that combines them and naming every rival. Identical definitions reached through two ancestors merge silently.
 
 ### Extending Imported Types
 

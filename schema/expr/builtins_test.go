@@ -18,22 +18,36 @@ func TestLookupBuiltin_IsCaseInsensitive(t *testing.T) {
 	}
 }
 
-// A builtin that binds a lambda parameter must accept a body, and one that
-// binds none must not: the two fields describe one fact.
-func TestBuiltins_BodyAndBindingAgree(t *testing.T) {
+// The catalogue's fields describe one fact each way: a builtin that binds a
+// parameter accepts a body and allows at least one parameter; one that binds
+// none allows no parameter, and accepts a body only when it evaluates that
+// body in the caller's scope, as Lest does; a builtin that binds an element
+// of its receiver, or yields one, takes a list receiver.
+func TestBuiltins_FieldsAgree(t *testing.T) {
 	specs := expr.Builtins()
 	if len(specs) < 40 {
 		t.Fatalf("catalogue holds %d builtins; the language defines more than 40", len(specs))
 	}
 	for _, s := range specs {
-		if s.AcceptBody != (s.Params != expr.BindNone) {
-			t.Errorf("%s: AcceptBody=%v but Params=%v", s.Name, s.AcceptBody, s.Params)
+		binds := s.Params != expr.BindNone
+		if binds && (!s.AcceptBody || s.MaxParams == 0) {
+			t.Errorf("%s: binds a parameter but AcceptBody=%v, MaxParams=%d", s.Name, s.AcceptBody, s.MaxParams)
 		}
-		if s.MaxParams == 0 && s.AcceptBody {
-			t.Errorf("%s: accepts a body but allows no parameters", s.Name)
+		if !binds && s.MaxParams != 0 {
+			t.Errorf("%s: binds no parameter but allows %d", s.Name, s.MaxParams)
 		}
 		if s.Params == expr.BindAccumulatorElement && s.MaxParams != 2 {
 			t.Errorf("%s: binds an accumulator and an element but allows %d parameters", s.Name, s.MaxParams)
 		}
+		elementOfReceiver := s.Params == expr.BindElement || s.Params == expr.BindAccumulatorElement ||
+			s.Result == expr.ResultElement || s.Result == expr.ResultFlattened
+		takesList := s.Receiver == expr.RecvList || s.Receiver == expr.RecvScalarList
+		if elementOfReceiver && !takesList {
+			t.Errorf("%s: binds or yields an element of its receiver but does not take a list", s.Name)
+		}
+	}
+	lest, _ := expr.LookupBuiltin("Lest")
+	if !lest.AcceptBody || lest.Params != expr.BindNone || lest.MaxParams != 0 {
+		t.Errorf("Lest evaluates its body in the caller's scope: AcceptBody, BindNone, MaxParams 0; got %+v", lest)
 	}
 }
