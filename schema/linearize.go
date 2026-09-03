@@ -1033,7 +1033,7 @@ func (c *completer) flushShadowedAnnotations() {
 	index := make(map[shadowGroupKey]*group)
 
 	for _, s := range c.pendingShadowed {
-		if s.ann.argsMalformed || c.diagnosedAnnotations[s.ann] {
+		if c.diagnosedAnnotations[s.ann] {
 			continue // The annotation is not usable; advising its re-statement would mislead.
 		}
 		if c.conflictedProperties[s.own] {

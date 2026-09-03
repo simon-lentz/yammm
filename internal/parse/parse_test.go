@@ -230,7 +230,7 @@ func TestParse_CallArgumentsMatchTheGrammarsCommaRule(t *testing.T) {
 }
 
 // TestParse_BareCommaCallHasNonNilArguments covers the third spelling that
-// reaches an empty argument list. exprcomp builds its own through make, and a
+// reaches an empty argument list. A consumer building its own through make, and a
 // nil slice compares unequal to that, so the differential fails on the call.
 func TestParse_BareCommaCallHasNonNilArguments(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id -> lower(,)\n}\n"
@@ -475,7 +475,7 @@ func TestParse_InvariantExprSpanCoversTheExpression(t *testing.T) {
 
 // TestParse_EmptyCallArgumentsAreNonNil pins that a zero-argument call carries
 // an empty argument slice rather than a nil one, which is what
-// exprcomp.VisitArguments builds. cmp and reflect.DeepEqual report the two as
+// a VisitArguments-style builder produces. cmp and reflect.DeepEqual report the two as
 // unequal, so a nil here makes the A/B differential mismatch on every
 // zero-argument call and buries the real mismatches.
 func TestParse_EmptyCallArgumentsAreNonNil(t *testing.T) {

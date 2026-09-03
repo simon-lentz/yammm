@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
@@ -87,6 +89,12 @@ func (rl *rootLoader) openFile(relativePath string) (*os.File, error) {
 // readFile reads a file relative to the module root with sandboxed access.
 // Returns ErrPathEscape if the path would escape the module root.
 func (rl *rootLoader) readFile(relativePath string) ([]byte, location.SourceID, error) {
+	// Stat before Open: opening a FIFO blocks until a writer appears, and
+	// neither this call nor io.ReadAll takes a context to cancel it.
+	if info, statErr := rl.root.Stat(filepath.Clean(relativePath)); statErr == nil && !info.Mode().IsRegular() {
+		return nil, location.SourceID{}, fmt.Errorf("import %q is not a regular file", relativePath)
+	}
+
 	f, err := rl.openFile(relativePath)
 	if err != nil {
 		return nil, location.SourceID{}, err
@@ -173,7 +181,11 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 		return fatalResult(fmt.Errorf("resolve path %q: %w", path, err), diag.Result{})
 	}
 
-	// Read the file content
+	// Read the file content. Stat first: os.ReadFile on a FIFO blocks until a
+	// writer appears, and the read takes no context to cancel it.
+	if info, statErr := os.Stat(absPath); statErr == nil && !info.Mode().IsRegular() {
+		return fatalResult(fmt.Errorf("schema path %q is not a regular file", path), diag.Result{})
+	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return fatalResult(fmt.Errorf("read %q: %w", absPath, err), diag.Result{})
@@ -718,8 +730,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 
 	// Register the schema
 	if err := l.registry.Register(s); err != nil {
-		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_TYPE,
-			fmt.Sprintf("register schema: %v", err)).Build())
+		l.collector.Collect(l.registerFailureIssue(s, err))
 		return nil, l.collector.Result(), nil
 	}
 
@@ -728,6 +739,51 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	l.mu.Unlock()
 
 	return s, l.collector.Result(), nil
+}
+
+// registerFailureIssue renders a Registry.Register refusal at the schema
+// declaration it is about, naming the source that already holds the name so a
+// reader can find the other half of the clash. The kinds are distinguished
+// because only DuplicateName is an authoring mistake; the rest mean the loader
+// built something it should not have.
+func (l *loader) registerFailureIssue(s *Schema, err error) diag.Issue {
+	regErr, ok := errors.AsType[*RegistryError](err)
+	if !ok {
+		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			"register schema: "+err.Error()).WithSpan(s.Span()).Build()
+	}
+
+	switch regErr.Kind {
+	case DuplicateName:
+		existing, found := l.registry.LookupByName(s.Name())
+		held := "another source in this closure"
+		if found {
+			held = existing.SourceID().String()
+		}
+		b := diag.NewIssue(diag.Error, diag.E_DUPLICATE_TYPE,
+			fmt.Sprintf("schema name %q is already declared by %s; a schema name is "+
+				"unique across an import closure", s.Name(), held)).
+			WithSpan(s.Span()).
+			WithDetail(diag.DetailKeySchemaName, s.Name())
+		if found {
+			b = b.WithRelated(location.RelatedInfo{
+				Span:    existing.Span(),
+				Message: fmt.Sprintf("%q is declared here", existing.Name()),
+			})
+		}
+		return b.Build()
+	case DuplicateSourceID:
+		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			"one source registered twice with divergent content: "+regErr.Message).
+			WithSpan(s.Span()).Build()
+	case InvalidSourceID, InvalidName:
+		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			"the loader built an unregisterable schema: "+regErr.Message).
+			WithSpan(s.Span()).Build()
+	default:
+		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			"register schema: "+regErr.Message).WithSpan(s.Span()).Build()
+	}
 }
 
 // rejectDisallowedImports reports whether the load context structurally
@@ -1329,7 +1385,9 @@ func syntheticSourceKey(key string) (string, error) {
 	if cleaned == "." {
 		return "", fmt.Errorf("source key %q resolves to the synthetic root itself", key)
 	}
-	return cleaned, nil
+	// NFC completes the three normalizations location.SourceIDFromAbsolutePath
+	// applies for a file-backed key; location.NewSourceID applies none.
+	return norm.NFC.String(cleaned), nil
 }
 
 // normalizeSyntheticRoot validates cfg's synthetic root against the load it was

@@ -108,11 +108,8 @@ type invariantDecl struct {
 // semantic validation. Documentation is only populated for type-level (@@)
 // annotations, which may carry a leading doc comment.
 type annotationDecl struct {
-	Name string
-	Args []annotationArgDecl
-	// ArgsMalformed reported that the argument list failed to parse. Nothing
-	// sets it: an annotation whose arguments fail now draws its own diagnostic.
-	ArgsMalformed bool
+	Name          string
+	Args          []annotationArgDecl
 	Documentation string
 	Span          location.Span
 

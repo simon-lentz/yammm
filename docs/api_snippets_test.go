@@ -220,8 +220,8 @@ func TestDocumentedScanFilterShape(t *testing.T) {
 // 2 in v0.15.0 and API.md still said 1 until this audit.
 func TestDocumentedSchemaIdentity(t *testing.T) {
 	t.Parallel()
-	if schema.StructuralHashVersion != 3 {
-		t.Errorf("StructuralHashVersion is %d; the documented value is 3", schema.StructuralHashVersion)
+	if schema.StructuralHashVersion != 4 {
+		t.Errorf("StructuralHashVersion is %d; the documented value is 4", schema.StructuralHashVersion)
 	}
 	h := schema.StructuralHash(loadProbeSchema(t, t.Context()))
 	hex, ok := strings.CutPrefix(h, "sha256:")

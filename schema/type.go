@@ -442,6 +442,22 @@ func (t *Type) CanonicalPropertyMap() map[string]string {
 	return result
 }
 
+// CanonicalPropertyName maps a lowercased property name to the type's declared
+// spelling. It answers the one question every [Type.CanonicalPropertyMap]
+// caller asks without handing out a copy of the whole map.
+func (t *Type) CanonicalPropertyName(lower string) (string, bool) {
+	if t.canonicalMap != nil {
+		name, ok := t.canonicalMap[lower]
+		return name, ok
+	}
+	for _, p := range t.allProperties {
+		if strings.ToLower(p.name) == lower {
+			return p.name, true
+		}
+	}
+	return "", false
+}
+
 // --- Internal setters used during completion ---
 
 // seal marks the type as immutable.

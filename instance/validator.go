@@ -643,7 +643,7 @@ func (v *Validator) exactMatchShadowing(typ *schema.Type, inputName string, mapp
 	if v.cfg.strictPropertyNames {
 		return "", false
 	}
-	schemaName, found := typ.CanonicalPropertyMap()[strings.ToLower(inputName)]
+	schemaName, found := typ.CanonicalPropertyName(strings.ToLower(inputName))
 	if !found {
 		return "", false
 	}

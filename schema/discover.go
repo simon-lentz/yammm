@@ -64,10 +64,13 @@ func (e *MalformedModuleRootError) Error() string {
 // between discovery and its default — the editor's workspace folder does
 // exactly that. dir must be a directory: pass filepath.Dir of a file path.
 //
-// The walk runs on the canonical (symlink-resolved) ancestor chain, so a
-// marker reachable only through a symlinked spelling of the path is not
-// consulted. Discovery itself is not sandboxed and cannot be: it runs before
-// any root exists, and costs one os.Lstat per ancestor level.
+// The walk runs on the canonical (symlink-resolved) ancestor chain where
+// resolution succeeds, so a marker reachable only through a symlinked spelling
+// is normally not consulted. Resolution is best-effort: makeCanonicalPath falls
+// back to the cleaned absolute path when it fails — a directory that does not
+// exist, or a permission error under an editor — and the walk then runs on the
+// unresolved chain. Discovery itself is not sandboxed and cannot be: it runs
+// before any root exists, and costs one os.Lstat per ancestor level.
 func FindModuleRoot(dir string) (string, bool, error) {
 	canonical, err := makeCanonicalPath(dir)
 	if err != nil {
@@ -175,14 +178,18 @@ func checkMarkerContent(path string, content []byte) error {
 		}
 	}
 
-	for i, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+	// SplitSeq, not Split: the first offending line ends the scan, so
+	// materializing every line to reject line one is waste up to the size bound.
+	line := 0
+	for raw := range strings.SplitSeq(text, "\n") {
+		line++
+		trimmed := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 		return &MalformedModuleRootError{
 			Path:   path,
-			Line:   i + 1,
+			Line:   line,
 			Reason: "is neither empty nor a comment; a marker may hold only # comment lines",
 		}
 	}

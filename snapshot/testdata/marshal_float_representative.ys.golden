@@ -3,9 +3,9 @@
 		"version": 4,
 		"schema_name": "wiretest",
 		"schema_source": "string://wiretest.yammm",
-		"schema_hash": "sha256:ff5bbea4096a7e2824243105303ca05d9b0e0b4cdbb2a5d4a13d6abfa29f89a8",
-		"schema_hash_algorithm": 3,
-		"integrity_hash": "sha256:642489f6af97de44fafe733e7c428770d10b47f3feb40ca68d5a9a0ffb04c6ef",
+		"schema_hash": "sha256:85707b600a437573cc41db1fc14ea72314086ca4d4d9b57aff1c4e6b434026a5",
+		"schema_hash_algorithm": 4,
+		"integrity_hash": "sha256:cf8bf80fb147cf4d2e2ba3af8c6ea3241d8f436aaddc094c7a97ca41c5a490cc",
 		"features": [],
 		"attestation": {
 			"values": false,

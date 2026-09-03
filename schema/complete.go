@@ -235,24 +235,30 @@ func (c *completer) complete() *Schema {
 		return nil
 	}
 
-	// Phase 8: Seal all types and relations to prevent post-completion mutation
+	// Phase 8: Seal this schema's own declarations.
+	c.sealOwnDeclarations()
+
+	return c.schema
+}
+
+// sealOwnDeclarations closes this schema's own declarations to mutation.
+// Relations come from the own sets: a merged set carries an ancestor's
+// [Relation] pointers, already sealed by their owning schema, and re-sealing
+// them races two loads sharing a [Registry] ([TestSeal_SharedRegistryConcurrentLoads]).
+func (c *completer) sealOwnDeclarations() {
 	for _, t := range c.schema.types {
 		t.seal()
-		// Seal all relations on this type
-		for rel := range t.AllAssociations() {
+		for rel := range t.Associations() {
 			rel.seal()
 		}
-		for rel := range t.AllCompositions() {
+		for rel := range t.Compositions() {
 			rel.seal()
 		}
 	}
 
-	// Seal all data types for consistency with type/relation sealing
 	for _, dt := range c.schema.dataTypes {
 		dt.seal()
 	}
-
-	return c.schema
 }
 
 // indexTypes creates Type objects and indexes them by name. A duplicate
@@ -658,7 +664,7 @@ func convertAnnotations(decls []*annotationDecl) []*Annotation {
 				})
 			}
 		}
-		ann := newAnnotation(d.Name, args, d.Documentation, d.Span, d.ArgsMalformed)
+		ann := newAnnotation(d.Name, args, d.Documentation, d.Span)
 		ann.setDetachedFrom(d.DetachedFromLine)
 		anns = append(anns, ann)
 	}

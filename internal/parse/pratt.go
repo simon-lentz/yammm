@@ -377,7 +377,7 @@ func (p *exprParser) lambdaParams() ([]string, error) {
 
 // exprListUntil parses a possibly-empty, comma-separated, trailing-comma
 // tolerant expression list terminated by the named closing token, which it
-// consumes. The empty list is non-nil, because exprcomp builds its own through
+// consumes. The empty list is non-nil, because a consumer building its own through
 // make and a nil slice compares unequal to that under cmp and DeepEqual.
 func (p *exprParser) exprListUntil(closer lexer.TokenType, bareComma bool) ([]expr.Expression, error) {
 	out := []expr.Expression{}
