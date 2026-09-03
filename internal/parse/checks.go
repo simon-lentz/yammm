@@ -21,6 +21,21 @@ const (
 // unbounded is the spelling that leaves one side of a bound pair open.
 const unbounded = "_"
 
+// relationNameRE is the UPPER_SNAKE production for a relation name. Its
+// lower-case spelling is the relation's field name, so every layer that
+// compares the two case-insensitively is right by construction.
+var relationNameRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+// checkRelationName reports a relation name that is not UPPER_SNAKE at the
+// name's own span; the declaration still projects, so recovery is unaffected.
+func (b *builder) checkRelationName(name string, span location.Span) {
+	if relationNameRE.MatchString(name) {
+		return
+	}
+	b.reportf(diag.E_INVALID_NAME, span,
+		"relation name %q is not UPPER_SNAKE: an uppercase letter, then uppercase letters, digits or underscores", name)
+}
+
 // constraint maps a parsed datatype reference and runs the checks that read
 // only the constraint's own written arguments. span is the enclosing
 // reference's extent, so a datatype declaration and a property that uses it

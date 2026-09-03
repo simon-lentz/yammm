@@ -80,19 +80,19 @@ From highest to lowest:
 | ---------- | --------- | ------------- |
 | 1 | Literals, list literals `[...]` | -- |
 | 2 | Unary minus `-x` | Right |
-| 3 | Indexing `expr[i]` | Left |
-| 4 | Pipeline `lhs -> name(args)\|params\|{body}` | Left |
-| 5 | Property access `lhs.property` | Left |
-| 6 | Logical NOT `!expr` | Right |
-| 7 | Multiplicative `*`, `/`, `%` | Left |
-| 8 | Additive `+`, `-` | Left |
-| 9 | Comparison `<`, `<=`, `>`, `>=` | Left |
-| 10 | Membership `in` | Left |
-| 11 | Regex/type match `=~`, `!~` | Left |
-| 12 | Equality `==`, `!=` | Left |
-| 13 | Logical AND `&&` | Left |
-| 14 | Logical OR/XOR `\|\|`, `^` | Left |
-| 15 | Ternary `? { then : else }` | Right |
+| 3 | Postfix: indexing `expr[i]`, pipeline `lhs -> name(args)\|params\|{body}`, property access `lhs.name` | Left |
+| 4 | Logical NOT `!expr` | Right |
+| 5 | Multiplicative `*`, `/`, `%` | Left |
+| 6 | Additive `+`, `-` | Left |
+| 7 | Comparison `<`, `<=`, `>`, `>=` | Left |
+| 8 | Membership `in` | Left |
+| 9 | Regex/type match `=~`, `!~` | Left |
+| 10 | Equality `==`, `!=` | Left |
+| 11 | Logical AND `&&` | Left |
+| 12 | Logical OR/XOR `\|\|`, `^` | Left |
+| 13 | Ternary `? { then : else }` | Right |
+
+The three postfix operators share one level and apply left to right: `$self.tags[0]` indexes the property and `$i.name -> Len` pipes it. The name after `.` is a property or relation name, never an expression.
 
 Parentheses override precedence as usual.
 
@@ -151,6 +151,8 @@ address.city        // nested property access
 
 Property access on existing instances returns **nil** for properties not present on the object (enabling `Then`/`Lest` nil-guarded patterns). This allows safe navigation without raising evaluation errors.
 
+Every reference is checked statically at schema load: the checker types each sub-expression and follows the type through member access, indexing and pipeline stages. A property the type does not declare draws `E_UNKNOWN_PROPERTY`; a member read through an association key (`$c.name` over `--> CUSTOMERS`), a scalar or a list, an undefined named variable, an unknown function, or a call shape the builtin refuses draws `E_INVALID_INVARIANT`.
+
 ---
 
 ## Indexing
@@ -189,7 +191,7 @@ tracked contract corpus at `instance/testdata/contract/`.
 - `$self` -- bound to the current instance during invariant evaluation
 - `$0`, `$1`, ... -- positional variables (evaluator-local, default nil)
 - `$item`, `$acc`, etc. -- named lambda parameters
-- Named variables are resolved through the evaluator's parent chain; undefined variables raise errors
+- Named variables are resolved through the evaluator's parent chain — lambda parameters, then the instance's own members (`$age` reads the property `age`); a name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`)
 
 ---
 

@@ -6,35 +6,6 @@ import (
 	"unicode/utf8"
 )
 
-// ToLowerSnake converts an identifier to lower_snake_case.
-//
-// This implements the canonical lower_snake algorithm for relation name
-// normalization (schema relation names to JSON field names).
-//
-// Separator characters (underscores, spaces, punctuation) are treated as token
-// boundaries and removed from output. Empty or separator-only inputs return an
-// empty string; callers should validate that relation names are non-empty before
-// normalization.
-//
-// Examples:
-//
-//	ToLowerSnake("WORKS_AT")   = "works_at"
-//	ToLowerSnake("HTTPProxy")  = "http_proxy"
-//	ToLowerSnake("CreatedBy")  = "created_by"
-//	ToLowerSnake("UserID")     = "user_id"
-//	ToLowerSnake("___")        = ""           // separator-only
-func ToLowerSnake(s string) string {
-	tokens := splitIdentifier(s)
-	if len(tokens) == 0 {
-		return ""
-	}
-	parts := make([]string, len(tokens))
-	for i, tok := range tokens {
-		parts[i] = tok.text
-	}
-	return strings.ToLower(strings.Join(parts, "_"))
-}
-
 // Capitalize converts an identifier to UpperCamelCase using rune-aware tokenization.
 // Acronym runs remain upper-case and separators are removed.
 //

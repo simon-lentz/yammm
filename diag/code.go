@@ -148,9 +148,6 @@ var (
 	// E_PROPERTY_RELATION_COLLISION indicates a property and relation have the same name.
 	E_PROPERTY_RELATION_COLLISION = NewCode("E_PROPERTY_RELATION_COLLISION", CategorySchema)
 
-	// E_RELATION_NORMALIZATION_COLLISION indicates relation names collide after normalization.
-	E_RELATION_NORMALIZATION_COLLISION = NewCode("E_RELATION_NORMALIZATION_COLLISION", CategorySchema)
-
 	// E_RESERVED_PREFIX indicates a name uses a reserved prefix.
 	E_RESERVED_PREFIX = NewCode("E_RESERVED_PREFIX", CategorySchema)
 
@@ -165,6 +162,13 @@ var (
 
 	// E_INVALID_INVARIANT indicates an invariant expression is invalid.
 	E_INVALID_INVARIANT = NewCode("E_INVALID_INVARIANT", CategorySchema)
+
+	// E_DUPLICATE_INVARIANT indicates a type declares one invariant message twice.
+	E_DUPLICATE_INVARIANT = NewCode("E_DUPLICATE_INVARIANT", CategorySchema)
+
+	// E_INVARIANT_CONFLICT indicates a type inherits two definitions of one
+	// invariant message with different expressions.
+	E_INVARIANT_CONFLICT = NewCode("E_INVARIANT_CONFLICT", CategorySchema)
 
 	// E_REVERSE_CLAUSE_REMOVED indicates a schema still carries the
 	// reverse clause ("/ name (mult)") the language removed in v0.15.0.
@@ -185,7 +189,12 @@ var (
 	// E_DUPLICATE_TYPE indicates a type name is defined multiple times.
 	E_DUPLICATE_TYPE = NewCode("E_DUPLICATE_TYPE", CategorySchema)
 
-	// E_RELATION_COLLISION indicates relations collide after name normalization.
+	// E_DUPLICATE_SCHEMA indicates two schemas in one registry declare one name.
+	E_DUPLICATE_SCHEMA = NewCode("E_DUPLICATE_SCHEMA", CategorySchema)
+
+	// E_RELATION_COLLISION indicates a type carries conflicting relation
+	// definitions under one name: inherited definitions that differ, or an
+	// association and a composition sharing a name.
 	E_RELATION_COLLISION = NewCode("E_RELATION_COLLISION", CategorySchema)
 
 	// E_MISSING_SOURCE_ID indicates a required SourceID is missing.

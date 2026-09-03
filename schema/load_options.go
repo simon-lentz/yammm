@@ -44,13 +44,17 @@ func defaultLoadConfig() *loadConfig {
 //     when loadImport encounters a SourceID already registered in r, the
 //     existing *Schema pointer is reused and the import is NOT re-parsed.
 //     This is where cross-Load schema caching pays off.
-//   - Same-content re-registration is a no-op (see Registry.Register for
-//     the idempotence contract); divergent-content re-registration still
-//     errors with a full hash-diff diagnostic.
-//   - The root schema returned by each Load call is always a fresh compile.
-//     registry.LookupBySourceID(rootID) returns the first Load's pointer on
-//     repeat calls; only imports benefit from the cache. This asymmetry is
-//     intentional.
+//   - Re-registering the same source — same entry bytes, same structural
+//     hash — is a no-op (see Registry.Register); a source whose bytes or hash
+//     changed errors with DuplicateSourceID naming what differed.
+//   - A root is compiled on every Load call; when r already holds its
+//     SourceID with identical content, Register keeps the first object and
+//     the Load returns that object, so every reader of r sees one *Schema per
+//     SourceID. Divergent content is the error Registry.Register documents.
+//   - A shared registry assumes the files it holds do not change while it
+//     lives: it hands every load the object it first compiled, with that
+//     object's module root, sources, documentation and annotations. Do not
+//     share one across an edit; use a fresh Registry per load instead.
 //   - Cross-Load sharing fires whenever an import resolves to a SourceID
 //     already in r — including across loads with different WithModuleRoot
 //     values whose root+key combinations land on the same canonical path
@@ -171,7 +175,7 @@ func WithSourcesOnly(only bool) LoadOption {
 // Do not share a [Registry] between a synthetic-root load and a disk load of
 // the same schema: the two mint different SourceIDs for one schema name, and
 // [Registry.Register] reports DuplicateName, which the loader surfaces as
-// E_DUPLICATE_TYPE.
+// E_DUPLICATE_SCHEMA.
 func WithSyntheticRoot(root string) LoadOption {
 	return func(c *loadConfig) {
 		c.syntheticRoot = root

@@ -67,7 +67,7 @@ type SchemaBuilder struct {
 	errors     []*buildError
 
 	// relByFieldName is a lazy-built secondary index that maps FieldName()
-	// (lower_snake form, e.g. "in_district") to its relation. Built on first
+	// (the lower-case form, e.g. "in_district") to its relation. Built on first
 	// miss against typ.Relation (which indexes by DSL name, e.g. "IN_DISTRICT")
 	// so callers using either form resolve without needing to know which
 	// the schema author used.
@@ -149,7 +149,7 @@ func (b *SchemaBuilder) Property(name string, value any) *SchemaBuilder {
 //	b.EdgeTo("part_of", prebuiltKey...)        // pre-built slice
 //
 // name accepts either the schema's DSL form (e.g. "IN_REGION") or the
-// lower_snake FieldName form (e.g. "in_region"); both resolve to the same
+// lower-case FieldName form (e.g. "in_region"); both resolve to the same
 // relation.
 //
 // For "many"-cardinality relations, call EdgeTo multiple times — once per

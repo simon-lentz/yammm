@@ -33,7 +33,7 @@
       "Associations": [
         {
           "EdgeProps": [],
-          "FieldName": "my_friend",
+          "FieldName": "myfriend",
           "Many": false,
           "Name": "myFriend",
           "Optional": false,

@@ -73,8 +73,8 @@ func TestRelation_Equal_WithTargetID(t *testing.T) {
 }
 
 func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
-	// Two relations with zero targetIDs are equal if all other fields match
-	// Known limitation: zero targetIDs makes relations appear equal
+	// Two relations with zero targetIDs are never equal, however alike their
+	// other fields are
 	r1 := schema.TestNewRelation(
 		schema.RelationAssociation,
 		"REL",
@@ -102,8 +102,9 @@ func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
 		nil,
 	)
 
-	// With zero targetIDs, they appear equal
-	assert.True(t, r1.Equal(r2), "relations with zero targetIDs are equal")
+	// An unresolved relation is equal to nothing: the load that left it
+	// unresolved already carries that diagnostic.
+	assert.False(t, r1.Equal(r2), "relations with zero targetIDs are never equal")
 }
 
 func TestRelation_Seal_PreventsSetTargetID(t *testing.T) {

@@ -28,8 +28,8 @@ func pcTestSchema(t *testing.T) *schema.Schema {
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("name", schema.NewStringConstraint()).
-		WithRelation("knows", schema.LocalTypeRef("Person", location.Span{}), false, true).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
+		WithRelation("KNOWS", schema.LocalTypeRef("Person", location.Span{}), false, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), false, true).
 		Done().
 		Build()
 	if result.HasErrors() {

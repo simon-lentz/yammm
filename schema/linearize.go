@@ -1,12 +1,14 @@
 package schema
 
 import (
+	"bytes"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // visitState tracks DFS progress for cycle detection.
@@ -144,13 +146,10 @@ func (c *completer) completeTypes() {
 		supers := make([]ResolvedTypeRef, 0)
 		seenSupers := make(map[TypeID]bool)
 
-		// Initialize with current type to prevent self-inclusion via cross-schema cycles.
-		// If A extends B (cross-schema), and B's SuperTypes includes A, the seenSupers
-		// check will correctly skip adding A to its own supers.
-		// NOTE: This local seenSupers check prevents infinite loops during single-schema
-		// completion. Full cross-schema cycle detection (A → B → A spanning schemas)
-		// is performed separately via detectCrossSchemaInheritanceCycles after all
-		// schemas are loaded.
+		// A cross-schema inheritance cycle cannot form: it would need mutual
+		// import, which the loader refuses (E_IMPORT_CYCLE), and a Builder
+		// schema defers a qualified reference it cannot resolve. Marking the
+		// type itself keeps a local walk from adding a type to its own supers.
 		seenSupers[t.ID()] = true
 
 		// DFS traversal of inheritance, left-to-right, keep-first
@@ -1093,24 +1092,52 @@ func (c *completer) flushShadowedAnnotations() {
 // narrowing-replacement arm that reinstates the nearer declaration. No such
 // relation exists over invariant expressions, so there is nothing here to
 // rescue a wrong pick.
+// mergeInvariants merges own invariants with those each direct supertype has
+// already merged. An invariant's message is its identity: a subtype's
+// declaration overrides an inherited one of the same name, one definition
+// reached through two ancestors merges, and two inherited definitions of one
+// name that differ are a conflict, reported once on the combining type.
 func (c *completer) mergeInvariants(t *Type) []*Invariant {
 	result := t.InvariantsSlice()
-	seen := make(map[string]bool)
+	own := make(map[string]bool, len(result))
 	for _, inv := range result {
-		seen[inv.Name()] = true
+		own[inv.Name()] = true
 	}
 
+	inherited := make(map[string]*Invariant)
 	for _, superType := range c.directSuperTypes(t) {
 		for inv := range superType.AllInvariants() {
-			if seen[inv.Name()] {
+			if own[inv.Name()] {
 				continue
 			}
-			seen[inv.Name()] = true
+			if first, seen := inherited[inv.Name()]; seen {
+				if first != inv && !sameExpression(first.Expression(), inv.Expression()) {
+					c.errorfRelated(t.Span(), diag.E_INVARIANT_CONFLICT,
+						[]location.RelatedInfo{
+							{Span: first.Span(), Message: "kept definition declared here"},
+							{Span: inv.Span(), Message: "conflicting definition declared here"},
+						},
+						"type %q inherits two definitions of invariant %q with different expressions",
+						t.Name(), inv.Name())
+				}
+				continue
+			}
+			inherited[inv.Name()] = inv
 			result = append(result, inv)
 		}
 	}
 
 	return result
+}
+
+// sameExpression reports whether two expressions serialize to the same bytes
+// under the structural hash's encoding, which is the one canonical form the
+// package already defines for an expression.
+func sameExpression(a, b expr.Expression) bool {
+	var ba, bb bytes.Buffer
+	hashExpression(&ba, a)
+	hashExpression(&bb, b)
+	return bytes.Equal(ba.Bytes(), bb.Bytes())
 }
 
 // mergeAnnotations merges own type-level annotations with inherited ones.
@@ -1195,6 +1222,11 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 
 		for _, r := range inherited {
 			if existing, ok := seen[r.FieldName()]; ok {
+				// An unresolved target already carries its own diagnostic; a
+				// collision report on top of it would blame the same line twice.
+				if existing.TargetID().IsZero() || r.TargetID().IsZero() {
+					continue
+				}
 				if !existing.Equal(r) {
 					matched := false
 					for _, cl := range collisions {
@@ -1237,7 +1269,7 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 		}
 		c.errorfRelated(t.Span(), diag.E_RELATION_COLLISION, related,
 			"type %q inherits conflicting definitions of relation %q from %s and %s",
-			t.Name(), cl.survivor.FieldName(), cl.survivor.Owner(), cl.rivals[0].Owner())
+			t.Name(), cl.survivor.Name(), cl.survivor.Owner(), cl.rivals[0].Owner())
 	}
 
 	return result

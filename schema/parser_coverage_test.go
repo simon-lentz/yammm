@@ -505,7 +505,7 @@ type Friendship {
 }
 
 type Person {
-	--> friends Person using Friendship
+	--> FRIENDS Person using Friendship
 }`
 
 	model, result := parseSchema(t, schemaSource)
@@ -529,7 +529,7 @@ func TestParse_MultiplicityVariants(t *testing.T) {
 			source: `schema "test"
 type A {}
 type B {
-	--> a (one) A
+	--> A (one) A
 }`,
 			wantOK:       true,
 			wantMany:     false,
@@ -540,7 +540,7 @@ type B {
 			source: `schema "test"
 type A {}
 type B {
-	--> items (many) A
+	--> ITEMS (many) A
 }`,
 			wantOK:   true,
 			wantMany: true,
@@ -550,7 +550,7 @@ type B {
 			source: `schema "test"
 type A {}
 type B {
-	--> items (one:many) A
+	--> ITEMS (one:many) A
 }`,
 			wantOK:   true,
 			wantMany: true,
@@ -560,7 +560,7 @@ type B {
 			source: `schema "test"
 type A {}
 type B {
-	--> a A
+	--> A A
 }`,
 			wantOK:       true,
 			wantMany:     false,
@@ -779,7 +779,7 @@ func TestParse_CompositionMultiplicity(t *testing.T) {
 			source: `schema "test"
 part type Child {}
 type Parent {
-	*-> child (one) Child
+	*-> CHILD (one) Child
 }`,
 			wantOK:   true,
 			wantMany: false,
@@ -789,7 +789,7 @@ type Parent {
 			source: `schema "test"
 part type Child {}
 type Parent {
-	*-> children (many) Child
+	*-> CHILDREN (many) Child
 }`,
 			wantOK:   true,
 			wantMany: true,
@@ -991,7 +991,7 @@ func TestParse_RelationPropertiesExtended(t *testing.T) {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target Target {
+	--> TARGET Target {
 		weight Integer
 	}
 }`,
@@ -1003,7 +1003,7 @@ type Source {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target Target {
+	--> TARGET Target {
 		weight Integer
 		label String
 		score Float
@@ -1017,7 +1017,7 @@ type Source {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target Target {
+	--> TARGET Target {
 		weight Integer required
 	}
 }`,
@@ -1029,7 +1029,7 @@ type Source {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target Target {
+	--> TARGET Target {
 		/* Weight of the relationship */
 		weight Integer
 	}
@@ -1454,7 +1454,7 @@ func TestTypeRef_ToSchemaTypeRef(t *testing.T) {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target Target
+	--> TARGET Target
 }`,
 			wantOK:        true,
 			wantQualified: false,
@@ -1464,7 +1464,7 @@ type Source {
 			source: `schema "test"
 import "other.yammm" as other
 type Source {
-	--> target other.Target
+	--> TARGET other.Target
 }`,
 			wantOK:        true,
 			wantQualified: true,
@@ -1665,7 +1665,7 @@ func TestParse_ExtendedMultiplicityVariants(t *testing.T) {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target (_) Target
+	--> TARGET (_) Target
 }`,
 			wantOK:       true,
 			wantOptional: true,
@@ -1676,7 +1676,7 @@ type Source {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target (_:one) Target
+	--> TARGET (_:one) Target
 }`,
 			wantOK:       true,
 			wantOptional: true,
@@ -1687,7 +1687,7 @@ type Source {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> targets (_:many) Target
+	--> TARGETS (_:many) Target
 }`,
 			wantOK:       true,
 			wantOptional: true,
@@ -1698,7 +1698,7 @@ type Source {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target (one:one) Target
+	--> TARGET (one:one) Target
 }`,
 			wantOK:       true,
 			wantOptional: false,
@@ -1709,7 +1709,7 @@ type Source {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> targets (one:many) Target
+	--> TARGETS (one:many) Target
 }`,
 			wantOK:       true,
 			wantOptional: false,
@@ -1758,7 +1758,7 @@ func TestTypeRef_ToSchemaTypeRefConversion(t *testing.T) {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target Target
+	--> TARGET Target
 }`,
 			wantOK:     true,
 			wantQualif: "",
@@ -1769,7 +1769,7 @@ type Source {
 			source: `schema "test"
 import "other.yammm" as other
 type Source {
-	--> target other.Target
+	--> TARGET other.Target
 }`,
 			wantOK:     true,
 			wantQualif: "other",
@@ -2094,12 +2094,12 @@ func TestParse_RelationDocumentation(t *testing.T) {
 type Target {}
 type Source {
 	/* Reference to the target entity */
-	--> target Target
+	--> TARGET Target
 }
 part type Child {}
 type Parent {
 	/* Children of this parent */
-	*-> children (many) Child
+	*-> CHILDREN (many) Child
 }`
 
 	model, result := parseSchema(t, source)
@@ -2274,8 +2274,8 @@ type Metadata {
 type Source {}
 type Target {}
 type Graph {
-	--> source Source
-	--> target Target using Metadata
+	--> SOURCE Source
+	--> TARGET Target using Metadata
 }`,
 			wantOK: true,
 		},
@@ -2286,8 +2286,8 @@ import "meta.yammm" as meta
 type Source {}
 type Target {}
 type Graph {
-	--> source Source
-	--> target Target using meta.EdgeData
+	--> SOURCE Source
+	--> TARGET Target using meta.EdgeData
 }`,
 			wantOK: true,
 		},
@@ -2313,7 +2313,7 @@ func TestParse_RelationEdgePropertyDocComments(t *testing.T) {
 	source := `schema "test"
 type Target {}
 type Source {
-	--> target Target {
+	--> TARGET Target {
 		/* Weight of the edge */
 		weight Float
 		/* Label for display */
@@ -2379,9 +2379,9 @@ type User extends Entity {
 	age Age
 	status Status required
 	/* User's primary address */
-	*-> address Address
+	*-> ADDRESS Address
 	/* Friends association */
-	--> friends (many) User {
+	--> FRIENDS (many) User {
 		since Date
 	}
 	! "Valid age" age >= 0
@@ -2391,7 +2391,7 @@ type User extends Entity {
 /* Organization type */
 type Organization extends Entity {
 	name String[1, 200] required
-	--> members (many) User {
+	--> MEMBERS (many) User {
 		role String
 		joinedAt Timestamp
 	}
@@ -2545,7 +2545,7 @@ func TestParse_CompositionWithMultiplicity(t *testing.T) {
 			source: `schema "test"
 part type Child {}
 type Parent {
-	*-> child (_) Child
+	*-> CHILD (_) Child
 }`,
 			wantOptional: true,
 			wantMany:     false,
@@ -2555,7 +2555,7 @@ type Parent {
 			source: `schema "test"
 part type Child {}
 type Parent {
-	*-> child (_:one) Child
+	*-> CHILD (_:one) Child
 }`,
 			wantOptional: true,
 			wantMany:     false,
@@ -2565,7 +2565,7 @@ type Parent {
 			source: `schema "test"
 part type Child {}
 type Parent {
-	*-> children (_:many) Child
+	*-> CHILDREN (_:many) Child
 }`,
 			wantOptional: true,
 			wantMany:     true,
@@ -2575,7 +2575,7 @@ type Parent {
 			source: `schema "test"
 part type Child {}
 type Parent {
-	*-> child (one:one) Child
+	*-> CHILD (one:one) Child
 }`,
 			wantOptional: false,
 			wantMany:     false,
@@ -2585,7 +2585,7 @@ type Parent {
 			source: `schema "test"
 part type Child {}
 type Parent {
-	*-> children (one:many) Child
+	*-> CHILDREN (one:many) Child
 }`,
 			wantOptional: false,
 			wantMany:     true,
@@ -2641,8 +2641,8 @@ func TestParse_MultipleRelationsOnType(t *testing.T) {
 part type Component {}
 type Connector {}
 type Machine {
-	*-> component Component
-	--> connector Connector
+	*-> COMPONENT Component
+	--> CONNECTOR Connector
 }`
 
 	model, result := parseSchema(t, source)
@@ -2663,7 +2663,7 @@ func TestParse_AssociationWithRelProperties(t *testing.T) {
 	source := `schema "test"
 type A {}
 type B {
-	--> a A {
+	--> A A {
 		weight Integer
 		label String
 	}
@@ -2689,7 +2689,7 @@ func TestParse_CompositionDefault(t *testing.T) {
 	source := `schema "test"
 part type Component {}
 type Machine {
-	*-> component Component
+	*-> COMPONENT Component
 }`
 
 	model, result := parseSchema(t, source)
@@ -2713,7 +2713,7 @@ func TestParse_QualifiedCompositionTarget(t *testing.T) {
 	source := `schema "test"
 import "parts.yammm" as parts
 type Machine {
-	*-> component parts.Component
+	*-> COMPONENT parts.Component
 }`
 
 	model, result := parseSchema(t, source)
@@ -2819,7 +2819,7 @@ type Source {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target Target {
+	--> TARGET Target {
 		Integer required
 	}
 }`,
@@ -2859,7 +2859,7 @@ type Child extends . {}`,
 			name: "malformed type reference in association",
 			source: `schema "test"
 type Source {
-	--> target other.
+	--> TARGET other.
 }`,
 			wantOK:      false,
 			description: "buildTypeRef nil-safety: qualified type reference missing name",
@@ -2869,7 +2869,7 @@ type Source {
 			source: `schema "test"
 part type Child {}
 type Parent {
-	*-> child .
+	*-> CHILD .
 }`,
 			wantOK:      false,
 			description: "buildTypeRef nil-safety: composition target missing name",
@@ -3053,7 +3053,7 @@ func TestParse_MissingCompositionTarget(t *testing.T) {
 	// Test composition with missing target type
 	source := `schema "test"
 type Parent {
-	*-> orphan
+	*-> ORPHAN
 }`
 
 	_, result := parseSchema(t, source)
@@ -3069,7 +3069,7 @@ func TestParse_InvalidMultiplicityKeyword(t *testing.T) {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target (invalid) Target
+	--> TARGET (invalid) Target
 }`,
 		},
 		{
@@ -3077,7 +3077,7 @@ type Source {
 			source: `schema "test"
 type Target {}
 type Source {
-	--> target (one:invalid) Target
+	--> TARGET (one:invalid) Target
 }`,
 		},
 	}
@@ -3208,7 +3208,7 @@ func TestParse_AssociationUsingMissingTarget(t *testing.T) {
 type Edge { weight Float }
 type Target { id UUID primary }
 type Source {
-	--> rel using Edge Target
+	--> REL using Edge Target
 }`
 
 	_, result := parseSchema(t, source)

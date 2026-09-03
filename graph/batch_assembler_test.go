@@ -33,7 +33,7 @@ func batchAssemblerTestSchema(t *testing.T) *schema.Schema {
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("employer", schema.LocalTypeRef("Company", location.Span{}), true, false).
+		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), true, false).
 		Done().
 		Build()
 	if result.HasErrors() {
@@ -58,7 +58,7 @@ func batchAssemblerRequiredEmployerSchema(t *testing.T) *schema.Schema {
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("employer", schema.LocalTypeRef("Company", location.Span{}), false, false).
+		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), false, false).
 		Done().
 		Build()
 	if result.HasErrors() {
@@ -681,7 +681,7 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 	if len(edges) != 1 {
 		t.Fatalf("edge count: got %d, want 1", len(edges))
 	}
-	if edges[0].Relation() != "employer" ||
+	if edges[0].Relation() != "EMPLOYER" ||
 		edges[0].Source().PrimaryKey().String() != `["bob"]` ||
 		edges[0].Target().PrimaryKey().String() != `["acme"]` {
 		t.Errorf(`edge: got %s %s->%s, want employer ["bob"]->["acme"]`,
@@ -998,7 +998,7 @@ func TestBatchAssembler_Finalize_SecondCallReturnsTheFirstError(t *testing.T) {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithRelation("employer", schema.LocalTypeRef("Company", location.Span{}), false, false).
+		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), false, false).
 		Done().
 		Build()
 	if res.HasErrors() {

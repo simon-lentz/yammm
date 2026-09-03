@@ -37,7 +37,7 @@
       "Compositions": [
         {
           "EdgeProps": [],
-          "FieldName": "part_a",
+          "FieldName": "parta",
           "Many": false,
           "Name": "partA",
           "Optional": false,
@@ -63,7 +63,7 @@
       "Compositions": [
         {
           "EdgeProps": [],
-          "FieldName": "part_b",
+          "FieldName": "partb",
           "Many": false,
           "Name": "partB",
           "Optional": false,
@@ -71,7 +71,7 @@
         },
         {
           "EdgeProps": [],
-          "FieldName": "part_a",
+          "FieldName": "parta",
           "Many": false,
           "Name": "partA",
           "Optional": false,

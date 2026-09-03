@@ -52,7 +52,7 @@
           "EdgeProps": [],
           "FieldName": "employer",
           "Many": false,
-          "Name": "employer",
+          "Name": "EMPLOYER",
           "Optional": false,
           "Target": "Company"
         }

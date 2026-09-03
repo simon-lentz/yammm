@@ -127,12 +127,12 @@ func TestRecovery_SpansAreNeverInverted(t *testing.T) {
 		"schema \"s\"\ntype T {\n\tv Vector[\n}\n", "schema \"s\"\ntype T {\n\tl List<\n}\n",
 		// Relation, extends, annotation-argument and alias shapes: without
 		// these the walk below descends into nothing.
-		"schema \"s\"\ntype T extends A, {\n\t--> r B\n}\n",
-		"schema \"s\"\ntype T extends a.B {\n\t--> r C /back { w Integer }\n\t*-> c D\n}\n",
-		"schema \"s\"\ntype T {\n\t--> r\n}\n",
-		"schema \"s\"\ntype T {\n\t--> r B /\n}\n",
-		"schema \"s\"\ntype T {\n\t*-> c\n}\n",
-		"schema \"s\"\ntype T {\n\t--> r B { w Enum[\"a\",\"b\"] required }\n}\n",
+		"schema \"s\"\ntype T extends A, {\n\t--> R B\n}\n",
+		"schema \"s\"\ntype T extends a.B {\n\t--> R C /back { w Integer }\n\t*-> C D\n}\n",
+		"schema \"s\"\ntype T {\n\t--> R\n}\n",
+		"schema \"s\"\ntype T {\n\t--> R B /\n}\n",
+		"schema \"s\"\ntype T {\n\t*-> C\n}\n",
+		"schema \"s\"\ntype T {\n\t--> R B { w Enum[\"a\",\"b\"] required }\n}\n",
 		"schema \"s\"\ntype T {\n\tid String primary @a(1, \"x\") @b\n\t@@t(y)\n}\n",
 		"schema \"s\"\nimport \"a.yammm\" as al\ntype C = Pattern[\"^a$\"]\ntype T {\n\tx al.Thing\n\ty List<String>[1, 2]\n\tz Timestamp[\"2006\"]\n}\n",
 	}
@@ -160,7 +160,7 @@ func TestRecovery_MembersAfterAFailedOneSurvive(t *testing.T) {
 	}{
 		{
 			"a failed relation keeps every property after it",
-			"schema \"s\"\ntype T {\n\tid String primary\n\t--> owner (bogus) Person\n\tname String\n\tage Integer\n}\n",
+			"schema \"s\"\ntype T {\n\tid String primary\n\t--> OWNER (bogus) Person\n\tname String\n\tage Integer\n}\n",
 			[]string{"id", "name", "age"},
 			nil, 0, 0,
 		},
@@ -190,16 +190,16 @@ func TestRecovery_MembersAfterAFailedOneSurvive(t *testing.T) {
 		},
 		{
 			"a failed member keeps an association after it",
-			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\t--> owner Person\n\tname String\n}\n",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\t--> OWNER Person\n\tname String\n}\n",
 			[]string{"id", "name"},
-			[]string{"owner"},
+			[]string{"OWNER"},
 			0, 0,
 		},
 		{
 			"a failed member keeps a composition after it",
-			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\t*-> parts Part\n\tname String\n}\n",
+			"schema \"s\"\ntype T {\n\tid String primary\n\tbad\n\t*-> PARTS Part\n\tname String\n}\n",
 			[]string{"id", "name"},
-			[]string{"parts"},
+			[]string{"PARTS"},
 			0, 0,
 		},
 		{
@@ -519,7 +519,7 @@ func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 			wantProps: 1, wantIssues: 1, wantAnchor: "(", wantBareAnn: "a",
 		},
 		{
-			name: "multiplicity", member: "--> wheels (many Wheel",
+			name: "multiplicity", member: "--> WHEELS (many Wheel",
 			wantIssues: 1, wantAnchor: "(",
 		},
 	}
@@ -729,9 +729,9 @@ func TestRecovery_ContextualKeywordPropertiesSurvive(t *testing.T) {
 // the middle of the failed member reports it again at a second position.
 func TestRecovery_OneDefectDrawsOneDiagnostic(t *testing.T) {
 	for _, tc := range []struct{ name, member string }{
-		{"relation with junk after its name", "--> rel 123"},
-		{"relation with a malformed multiplicity", "--> r (many:one) B"},
-		{"relation with an unterminated multiplicity", "--> wheels (many Wheel"},
+		{"relation with junk after its name", "--> REL 123"},
+		{"relation with a malformed multiplicity", "--> R (many:one) B"},
+		{"relation with an unterminated multiplicity", "--> WHEELS (many Wheel"},
 		{"a regex-shaped token where a datatype belongs", "x /*/"},
 		{"a property with no datatype, before more members", "id primary\n\tref String"},
 	} {

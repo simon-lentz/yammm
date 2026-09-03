@@ -56,7 +56,7 @@ type T {
 
 	var found bool
 	for is := range res.Issues() {
-		if is.Code().String() != "E_DUPLICATE_TYPE" {
+		if is.Code().String() != "E_DUPLICATE_SCHEMA" {
 			continue
 		}
 		found = true
@@ -75,6 +75,6 @@ type T {
 		}
 	}
 	if !found {
-		t.Error("no E_DUPLICATE_TYPE was reported for a schema-name collision")
+		t.Error("no E_DUPLICATE_SCHEMA was reported for a schema-name collision")
 	}
 }

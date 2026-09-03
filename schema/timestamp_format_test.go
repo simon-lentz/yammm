@@ -33,6 +33,7 @@ func TestTimestampFormat_LossyLayoutWarns(t *testing.T) {
 		"no zone":                 "2006-01-02 15:04:05.000",
 		"no fraction":             "2006-01-02T15:04:05Z07:00",
 		"date only":               "2006-01-02",
+		"zone abbreviation":       "2006-01-02 15:04:05 MST",
 	}
 	for name, layout := range lossy {
 		t.Run("lossy/"+name, func(t *testing.T) {

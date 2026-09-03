@@ -138,13 +138,13 @@ func TestRenderSymbol_Golden(t *testing.T) {
 					Done().
 					AddType("Person").
 					WithPrimaryKey("id", schema.NewStringConstraint()).
-					WithRelation("addresses", schema.LocalTypeRef("Address", location.Span{}), false, true).
+					WithRelation("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), false, true).
 					Done().
 					Build()
 				require.False(t, result.HasErrors())
-				rel, ok := mustType(t, s, "Person").Relation("addresses")
+				rel, ok := mustType(t, s, "Person").Relation("ADDRESSES")
 				require.True(t, ok)
-				return &symbols.Symbol{Name: "addresses", Kind: symbols.SymbolAssociation, ParentName: "Person", Data: rel}
+				return &symbols.Symbol{Name: "ADDRESSES", Kind: symbols.SymbolAssociation, ParentName: "Person", Data: rel}
 			},
 		},
 		{
@@ -160,13 +160,13 @@ func TestRenderSymbol_Golden(t *testing.T) {
 					Done().
 					AddType("Car").
 					WithPrimaryKey("id", schema.NewStringConstraint()).
-					WithComposition("wheels", schema.LocalTypeRef("Wheel", location.Span{}), false, true).
+					WithComposition("WHEELS", schema.LocalTypeRef("Wheel", location.Span{}), false, true).
 					Done().
 					Build()
 				require.False(t, result.HasErrors())
-				rel, ok := mustType(t, s, "Car").Relation("wheels")
+				rel, ok := mustType(t, s, "Car").Relation("WHEELS")
 				require.True(t, ok)
-				return &symbols.Symbol{Name: "wheels", Kind: symbols.SymbolComposition, ParentName: "Car", Data: rel}
+				return &symbols.Symbol{Name: "WHEELS", Kind: symbols.SymbolComposition, ParentName: "Car", Data: rel}
 			},
 		},
 		{

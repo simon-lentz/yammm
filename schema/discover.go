@@ -3,7 +3,6 @@ package schema
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,13 +150,11 @@ func readBounded(path string, limit int64) ([]byte, error) {
 	}
 	defer f.Close()
 
-	// Read one byte past the limit so an exactly-at-limit file is legal and
-	// the first byte beyond it is detectable without reading the whole file.
-	content, err := io.ReadAll(io.LimitReader(f, limit+1))
+	content, tooLong, err := readAtMost(f, limit)
 	if err != nil {
-		return nil, fmt.Errorf("read %q: %w", path, err)
+		return nil, fmt.Errorf("%q: %w", path, err)
 	}
-	if int64(len(content)) > limit {
+	if tooLong {
 		return nil, &MalformedModuleRootError{
 			Path:   path,
 			Reason: fmt.Sprintf("larger than %d bytes; a marker holds comment lines only", limit),

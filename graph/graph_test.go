@@ -519,7 +519,7 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 		item := mustValidPKLessInstance(t, s, "Item",
 			map[string]any{"value": "same-value"})
 
-		result := g.AddComposed(ctx, mustTypeID(t, s, "Container"), graph.FormatKey("box1"), "items", item)
+		result := g.AddComposed(ctx, mustTypeID(t, s, "Container"), graph.FormatKey("box1"), "ITEMS", item)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed item %d should succeed (positional identity): %v", i, err)
 		}
@@ -532,7 +532,7 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 		t.Fatalf("Expected 1 container, got %d", len(containers))
 	}
 
-	assertComposedCount(t, containers[0], "items", 3)
+	assertComposedCount(t, containers[0], "ITEMS", 3)
 }
 
 func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
@@ -553,7 +553,7 @@ func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"shared-pk"}, map[string]any{"name": "Child 1"})
 
-	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child1)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child1)
 	if err := result.Err(); err != nil {
 		t.Errorf("First child should succeed: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"shared-pk"}, map[string]any{"name": "Child 2"})
 
-	result = g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child2)
+	result = g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child2)
 	if result.OK() {
 		t.Error("Second child with same PK should fail")
 	}
@@ -586,7 +586,7 @@ func TestGraph_NestedComposition(t *testing.T) {
 	child := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	if r := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child); !r.OK() {
+	if r := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child); !r.OK() {
 		t.Fatalf("AddComposed child failed: %s", r.String())
 	}
 
@@ -597,7 +597,7 @@ func TestGraph_NestedComposition(t *testing.T) {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
-	children := parents[0].Composed("children")
+	children := parents[0].Composed("CHILDREN")
 	if len(children) != 1 {
 		t.Fatalf("Expected 1 child, got %d", len(children))
 	}
@@ -680,9 +680,9 @@ func TestGraph_Unresolved_Ordering(t *testing.T) {
 
 	// Add instances with forward refs in non-sorted order
 	typeC := mustValidInstance(t, s, "TypeC", []any{"c1"}, map[string]any{"name": "C1"})
-	typeA2 := mustValidInstanceWithEdge(t, s, "TypeA", []any{"a2"}, map[string]any{"name": "A2"}, "refB", [][]any{{"b-missing"}})
-	typeA1 := mustValidInstanceWithEdge(t, s, "TypeA", []any{"a1"}, map[string]any{"name": "A1"}, "refB", [][]any{{"b-missing"}})
-	typeB := mustValidInstanceWithEdge(t, s, "TypeB", []any{"b1"}, map[string]any{"name": "B1"}, "refC", [][]any{{"c-missing"}})
+	typeA2 := mustValidInstanceWithEdge(t, s, "TypeA", []any{"a2"}, map[string]any{"name": "A2"}, "REF_B", [][]any{{"b-missing"}})
+	typeA1 := mustValidInstanceWithEdge(t, s, "TypeA", []any{"a1"}, map[string]any{"name": "A1"}, "REF_B", [][]any{{"b-missing"}})
+	typeB := mustValidInstanceWithEdge(t, s, "TypeB", []any{"b1"}, map[string]any{"name": "B1"}, "REF_C", [][]any{{"c-missing"}})
 
 	// Add in scrambled order
 	if r := g.Add(ctx, typeC); !r.OK() {
@@ -965,10 +965,10 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 	tag := mustValidPartInstance(t, s, "Tag",
 		[]any{"t1"}, map[string]any{})
 
-	if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "notes", note); !r.OK() {
+	if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "NOTES", note); !r.OK() {
 		t.Fatalf("AddComposed note failed: %s", r.String())
 	}
-	if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "tags", tag); !r.OK() {
+	if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "TAGS", tag); !r.OK() {
 		t.Fatalf("AddComposed tag failed: %s", r.String())
 	}
 
@@ -983,11 +983,11 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 		t.Fatalf("Expected 2 composition relations, got %d", len(relations))
 	}
 
-	// Should be sorted: "notes" < "tags"
-	if relations[0] != "notes" {
+	// Should be sorted: "notes" < "TAGS"
+	if relations[0] != "NOTES" {
 		t.Errorf("First relation should be 'notes', got %s", relations[0])
 	}
-	if relations[1] != "tags" {
+	if relations[1] != "TAGS" {
 		t.Errorf("Second relation should be 'tags', got %s", relations[1])
 	}
 }
@@ -1010,7 +1010,7 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	for i := range 3 {
 		note := mustValidPartInstance(t, s, "Note",
 			[]any{fmt.Sprintf("n%d", i)}, map[string]any{"text": fmt.Sprintf("Note %d", i)})
-		if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "notes", note); !r.OK() {
+		if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "NOTES", note); !r.OK() {
 			t.Fatalf("AddComposed note %d failed: %s", i, r.String())
 		}
 	}
@@ -1019,7 +1019,7 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	for i := range 2 {
 		tag := mustValidPartInstance(t, s, "Tag",
 			[]any{fmt.Sprintf("t%d", i)}, map[string]any{})
-		if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "tags", tag); !r.OK() {
+		if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "TAGS", tag); !r.OK() {
 			t.Fatalf("AddComposed tag %d failed: %s", i, r.String())
 		}
 	}
@@ -1027,8 +1027,8 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	snap := g.Snapshot()
 	docs := snap.InstancesOf(mustTypeID(t, s, "Document"))
 
-	assertComposedCount(t, docs[0], "notes", 3)
-	assertComposedCount(t, docs[0], "tags", 2)
+	assertComposedCount(t, docs[0], "NOTES", 3)
+	assertComposedCount(t, docs[0], "TAGS", 2)
 }
 
 // Verification Tests
@@ -1208,7 +1208,7 @@ func TestContract14_ComposedKeyFormat(t *testing.T) {
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	if r := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child1); !r.OK() {
+	if r := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child1); !r.OK() {
 		t.Fatalf("AddComposed child1 failed: %s", r.String())
 	}
 
@@ -1216,7 +1216,7 @@ func TestContract14_ComposedKeyFormat(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1 Dup"})
 
-	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child2)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child2)
 	if result.OK() {
 		t.Error("Duplicate child PK should be rejected")
 	}
@@ -1417,7 +1417,7 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 	parentType, _ := s.Type("Parent")
 	childrenSlice := immutable.WrapSlice([]any{child1, child2})
 	composed := map[string]immutable.Value{
-		"children": immutable.Wrap(childrenSlice),
+		"CHILDREN": immutable.Wrap(childrenSlice),
 	}
 
 	parent := instance.NewValidInstance(
@@ -1440,7 +1440,7 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
-	assertComposedCount(t, parents[0], "children", 2)
+	assertComposedCount(t, parents[0], "CHILDREN", 2)
 }
 
 func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
@@ -1463,7 +1463,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 	childType, _ := s.Type("Child")
 	grandchildrenSlice := immutable.WrapSlice([]any{grandchild})
 	childComposed := map[string]immutable.Value{
-		"grandChildren": immutable.Wrap(grandchildrenSlice),
+		"GRAND_CHILDREN": immutable.Wrap(grandchildrenSlice),
 	}
 	child := instance.NewValidInstance(
 		"Child",
@@ -1477,7 +1477,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 	parentType, _ := s.Type("Parent")
 	childrenSlice := immutable.WrapSlice([]any{child})
 	parentComposed := map[string]immutable.Value{
-		"children": immutable.Wrap(childrenSlice),
+		"CHILDREN": immutable.Wrap(childrenSlice),
 	}
 	parent := instance.NewValidInstance(
 		"Parent",
@@ -1499,15 +1499,15 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
-	assertComposedCount(t, parents[0], "children", 1)
+	assertComposedCount(t, parents[0], "CHILDREN", 1)
 
 	// Verify grandchildren
-	children := parents[0].Composed("children")
+	children := parents[0].Composed("CHILDREN")
 	if len(children) != 1 {
 		t.Fatalf("Expected 1 child, got %d", len(children))
 	}
 
-	assertComposedCount(t, children[0], "grandChildren", 1)
+	assertComposedCount(t, children[0], "GRAND_CHILDREN", 1)
 }
 
 func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
@@ -1520,7 +1520,7 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 	parentType, _ := s.Type("Parent")
 	childrenSlice := immutable.WrapSlice([]any{})
 	composed := map[string]immutable.Value{
-		"children": immutable.Wrap(childrenSlice),
+		"CHILDREN": immutable.Wrap(childrenSlice),
 	}
 
 	parent := instance.NewValidInstance(
@@ -1539,7 +1539,7 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 	// Verify no children
 	snap := g.Snapshot()
 	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
-	assertComposedCount(t, parents[0], "children", 0)
+	assertComposedCount(t, parents[0], "CHILDREN", 0)
 }
 
 // Tests for Graph.Add's type-resolution branches. These were named for
@@ -1668,7 +1668,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 	childType, _ := s.Type("Child")
 	grandchildrenSlice := immutable.WrapSlice([]any{grandchild})
 	childComposed := map[string]immutable.Value{
-		"grandChildren": immutable.Wrap(grandchildrenSlice),
+		"GRAND_CHILDREN": immutable.Wrap(grandchildrenSlice),
 	}
 	child := instance.NewValidInstance(
 		"Child",
@@ -1679,7 +1679,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 	)
 
 	// AddComposed the child (with inline grandchild) to the parent
-	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
 	if err := result.Err(); err != nil {
 		t.Fatalf("AddComposed should succeed: %v", err)
 	}
@@ -1692,13 +1692,13 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 	}
 
 	// Parent should have child
-	children := parents[0].Composed("children")
+	children := parents[0].Composed("CHILDREN")
 	if len(children) != 1 {
 		t.Fatalf("Expected 1 child, got %d", len(children))
 	}
 
 	// Child should have grandchild (extracted from inline composition)
-	grandchildren := children[0].Composed("grandChildren")
+	grandchildren := children[0].Composed("GRAND_CHILDREN")
 	if len(grandchildren) != 1 {
 		t.Fatalf("Expected 1 grandchild (nested composition should be extracted), got %d", len(grandchildren))
 	}
@@ -1741,7 +1741,7 @@ func TestAdd_OneCardinality_MultipleChildren_RefusesWholeRecord(t *testing.T) {
 	parentType, _ := s.Type("Parent")
 	childrenSlice := immutable.WrapSlice([]any{child1, child2})
 	parentComposed := map[string]immutable.Value{
-		"child": immutable.Wrap(childrenSlice),
+		"CHILD": immutable.Wrap(childrenSlice),
 	}
 	parent := instance.NewValidInstance(
 		"Parent",
@@ -1788,7 +1788,7 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 	// This is defensive handling - the validator normally wraps in slice
 	parentType, _ := s.Type("Parent")
 	parentComposed := map[string]immutable.Value{
-		"children": immutable.Wrap(child), // Bare instance, not slice
+		"CHILDREN": immutable.Wrap(child), // Bare instance, not slice
 	}
 	parent := instance.NewValidInstance(
 		"Parent",
@@ -1810,7 +1810,7 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
-	children := parents[0].Composed("children")
+	children := parents[0].Composed("CHILDREN")
 	if len(children) != 1 {
 		t.Fatalf("Expected 1 child (from bare *ValidInstance), got %d", len(children))
 	}
@@ -1875,7 +1875,7 @@ func TestCheck_Idempotent_IssueCount(t *testing.T) {
 	// Add Person with reference to missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"missing-company"}})
+		"EMPLOYER", [][]any{{"missing-company"}})
 
 	if r := g.Add(ctx, person); !r.OK() {
 		t.Fatalf("Add failed: %s", r.String())
@@ -1918,7 +1918,7 @@ func TestCheck_UnresolvedRequired_TargetPK(t *testing.T) {
 	// Add Person with reference to specific missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"acme"}})
+		"EMPLOYER", [][]any{{"acme"}})
 
 	if r := g.Add(ctx, person); !r.OK() {
 		t.Fatalf("Add failed: %s", r.String())
@@ -1970,7 +1970,7 @@ func TestCheck_UnresolvedRequired_TargetMissingReason(t *testing.T) {
 	// Add Person with reference to missing Company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
-		"employer", [][]any{{"missing"}})
+		"EMPLOYER", [][]any{{"missing"}})
 
 	if r := g.Add(ctx, person); !r.OK() {
 		t.Fatalf("Add failed: %s", r.String())
@@ -2023,7 +2023,7 @@ func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 	child1 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
 
-	result1 := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child1)
+	result1 := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child1)
 	if !result1.OK() {
 		t.Fatalf("First AddComposed should succeed: %s", result1.String())
 	}
@@ -2032,7 +2032,7 @@ func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 	child2 := mustValidPartInstance(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1 Dup"})
 
-	result2 := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child2)
+	result2 := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child2)
 	if result2.OK() {
 		t.Fatal("Duplicate AddComposed should fail")
 	}
@@ -2161,7 +2161,7 @@ func TestGraph_WithLogger_TracesEachOperation(t *testing.T) {
 	// A Person whose employer has not arrived: one forward reference, then a
 	// Company that resolves it, then a duplicate Person.
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"},
-		map[string]any{"name": "Alice"}, "employer", [][]any{{"acme"}})
+		map[string]any{"name": "Alice"}, "EMPLOYER", [][]any{{"acme"}})
 	if r := g.Add(ctx, person); !r.OK() {
 		t.Fatalf("Add person: %s", r.String())
 	}

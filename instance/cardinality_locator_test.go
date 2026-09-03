@@ -29,14 +29,14 @@ func TestCardinalityLocator_NamesTheFirstExcessCall(t *testing.T) {
 	}
 
 	b.Property("id", "p1").Property("name", "Alice")
-	b.EdgeTo("works_at", "c1")
+	b.EdgeTo("WORKS_AT", "c1")
 
 	_, _, captureLine, ok := runtime.Caller(0)
 	mustCaller(t, ok)
-	b.EdgeTo("works_at", "c2") // DO NOT MOVE: the offset below counts from captureLine.
+	b.EdgeTo("WORKS_AT", "c2") // DO NOT MOVE: the offset below counts from captureLine.
 	excessLine := captureLine + 2
 
-	b.EdgeTo("works_at", "c3")
+	b.EdgeTo("WORKS_AT", "c3")
 
 	_, err = b.Build()
 	if err == nil {
@@ -66,7 +66,7 @@ func TestCardinalityLocator_OneTargetStillBuilds(t *testing.T) {
 	}
 
 	if _, err := b.Property("id", "p1").Property("name", "Alice").
-		EdgeTo("works_at", "c1").Build(); err != nil {
+		EdgeTo("WORKS_AT", "c1").Build(); err != nil {
 		t.Errorf("a single target must build: %v", err)
 	}
 }

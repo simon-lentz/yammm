@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/internal/ident"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -145,6 +144,10 @@ type completer struct {
 	// validateAnnotations), so a type's answer cannot change between calls.
 	unresolvedSupertypeMemo map[*Type]bool
 
+	// staticMembers caches [completer.membersOf] per type: the merged members
+	// keyed as an invariant expression writes them.
+	staticMembers map[*Type]staticMembers
+
 	// pendingShadowed holds the annotations own re-declarations dropped, queued
 	// during linearization and emitted by [completer.flushShadowedAnnotations]
 	// once validation has established which of them are usable.
@@ -191,6 +194,12 @@ func (c *completer) complete() *Schema {
 	// Phase 3b: Validate relation edge properties (must be after alias resolution)
 	c.validateRelationProperties()
 
+	// Phase 3c: Bind every own relation to its target's identity. This runs
+	// before inheritance merges so Relation.Equal compares identities, and a
+	// relation that shadows an inherited one under the same name collides
+	// when the targets differ.
+	c.resolveRelationTargets()
+
 	// Phase 4: Detect inheritance cycles. This gate stays: linearization
 	// requires cycle-free input. completeTypes' DFS would terminate on a
 	// cycle (early-mark plus seen-dedup), but the merged member sets it
@@ -211,7 +220,9 @@ func (c *completer) complete() *Schema {
 	// Phase 6: Detect collisions
 	c.detectCollisions()
 
-	// Phase 7: Validate relation targets
+	// Phase 7: Validate relation targets against the rules that need the
+	// merged view — a composition reaches a concrete part, an association a
+	// concrete non-part, and a part type carries no association.
 	c.validateRelationTargets()
 
 	// Phase 7b: Validate invariant expressions (static property checking)
@@ -313,7 +324,7 @@ func (c *completer) indexTypes() {
 		t.setCompositions(comps)
 
 		// Convert and set invariants
-		invariants := c.convertInvariants(td.Invariants)
+		invariants := c.convertInvariants(td.Name, td.Invariants)
 		t.setInvariants(invariants)
 
 		// Convert and set type-level annotations (@@name members)
@@ -561,8 +572,7 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 			target = NewTypeRef(rd.Target.Qualifier, rd.Target.Name, rd.Target.Span)
 		}
 
-		// Compute field name using lower_snake normalization
-		fieldName := ident.ToLowerSnake(rd.Name)
+		fieldName := strings.ToLower(rd.Name)
 
 		// Convert edge properties (associations only)
 		var props []*Property
@@ -621,17 +631,25 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 	return assocs, comps
 }
 
-// convertInvariants converts invariantDecl to Invariant.
-func (c *completer) convertInvariants(decls []*invariantDecl) []*Invariant {
+// convertInvariants converts invariantDecl to Invariant. An invariant's
+// message is its identity, so a message declared twice on one type is a
+// duplicate: the first declaration is kept and the second reported.
+func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) []*Invariant {
 	invs := make([]*Invariant, 0, len(decls))
+	first := make(map[string]*invariantDecl, len(decls))
 
 	for _, id := range decls {
 		if id == nil {
 			continue
 		}
-
-		inv := newInvariant(id.Name, id.Expr, id.Span, id.Documentation)
-		invs = append(invs, inv)
+		if prior, dup := first[id.Name]; dup {
+			c.errorfRelated(id.Span, diag.E_DUPLICATE_INVARIANT,
+				[]location.RelatedInfo{{Span: prior.Span, Message: "first declared here"}},
+				"type %q declares invariant %q twice", typeName, id.Name)
+			continue
+		}
+		first[id.Name] = id
+		invs = append(invs, newInvariant(id.Name, id.Expr, id.Span, id.Documentation))
 	}
 
 	return invs

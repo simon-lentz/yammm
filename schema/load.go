@@ -86,6 +86,48 @@ func (rl *rootLoader) openFile(relativePath string) (*os.File, error) {
 	return f, nil
 }
 
+// maxSchemaSourceBytes bounds one schema source, entry or import. The largest
+// real schema is tens of kilobytes; the bound stops a stray large file from
+// being read whole before anything can refuse it.
+const maxSchemaSourceBytes = 16 << 20
+
+// readAtMost reads r up to limit bytes and reports whether more remained. It
+// reads one byte past the limit so a source exactly at it is legal and the
+// first byte beyond it is detectable without reading the rest.
+func readAtMost(r io.Reader, limit int64) (content []byte, tooLong bool, err error) {
+	content, err = io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, false, fmt.Errorf("read: %w", err)
+	}
+	if int64(len(content)) > limit {
+		return nil, true, nil
+	}
+	return content, false, nil
+}
+
+// readSource reads one schema source up to maxSchemaSourceBytes, naming what
+// it read in any error.
+func readSource(r io.Reader, what string) ([]byte, error) {
+	content, tooLong, err := readAtMost(r, maxSchemaSourceBytes)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	if tooLong {
+		return nil, fmt.Errorf("%s is larger than %d bytes, the most a schema source may hold", what, maxSchemaSourceBytes)
+	}
+	return content, nil
+}
+
+// readSourceFile opens and reads one schema file within the source bound.
+func readSourceFile(absPath string) ([]byte, error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %q: %w", absPath, err)
+	}
+	defer f.Close()
+	return readSource(f, fmt.Sprintf("schema %q", absPath))
+}
+
 // readFile reads a file relative to the module root with sandboxed access.
 // Returns ErrPathEscape if the path would escape the module root.
 func (rl *rootLoader) readFile(relativePath string) ([]byte, location.SourceID, error) {
@@ -101,9 +143,9 @@ func (rl *rootLoader) readFile(relativePath string) ([]byte, location.SourceID, 
 	}
 	defer f.Close()
 
-	content, err := io.ReadAll(f)
+	content, err := readSource(f, fmt.Sprintf("import %q", relativePath))
 	if err != nil {
-		return nil, location.SourceID{}, fmt.Errorf("read import %q: %w", relativePath, err)
+		return nil, location.SourceID{}, err
 	}
 
 	// Construct SourceID from the canonical path
@@ -186,9 +228,9 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	if info, statErr := os.Stat(absPath); statErr == nil && !info.Mode().IsRegular() {
 		return fatalResult(fmt.Errorf("schema path %q is not a regular file", path), diag.Result{})
 	}
-	content, err := os.ReadFile(absPath)
+	content, err := readSourceFile(absPath)
 	if err != nil {
-		return fatalResult(fmt.Errorf("read %q: %w", absPath, err), diag.Result{})
+		return fatalResult(err, diag.Result{})
 	}
 
 	// Determine module root and canonicalize for consistent path comparison.
@@ -233,17 +275,6 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	}
 	if s == nil {
 		return nil, result
-	}
-
-	// Perform cross-schema inheritance cycle detection if there are imports.
-	// This runs after all schemas are loaded when full cross-schema visibility is available.
-	if ldr.registry.Len() > 1 {
-		if cycleIssues := detectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
-			for _, issue := range cycleIssues {
-				ldr.collector.Collect(*issue)
-			}
-			return nil, ldr.collector.Result()
-		}
 	}
 
 	return s, result
@@ -368,10 +399,12 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		// Use the provided entry path
 		selectedEntry = entryPath
 	} else {
-		// Fall back to lexicographic selection
+		// Fall back to lexicographic selection. A found flag, not the empty
+		// string, marks "nothing chosen yet": an empty key is a legal entry.
+		var found bool
 		for path := range sources {
-			if selectedEntry == "" || path < selectedEntry {
-				selectedEntry = path
+			if !found || path < selectedEntry {
+				selectedEntry, found = path, true
 			}
 		}
 	}
@@ -394,17 +427,6 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	}
 	if s == nil {
 		return nil, result
-	}
-
-	// Perform cross-schema inheritance cycle detection if there are imports.
-	// This runs after all schemas are loaded when full cross-schema visibility is available.
-	if ldr.registry.Len() > 1 {
-		if cycleIssues := detectCrossSchemaInheritanceCycles(ldr.registry); len(cycleIssues) > 0 {
-			for _, issue := range cycleIssues {
-				ldr.collector.Collect(*issue)
-			}
-			return nil, ldr.collector.Result()
-		}
 	}
 
 	return s, result
@@ -734,6 +756,14 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 		return nil, l.collector.Result(), nil
 	}
 
+	// Two loads sharing a registry can both complete one import in the window
+	// between the cache miss and this call; Register keeps the first and
+	// returns nil for an identical second. Adopt the registered pointer so
+	// every reader of this load sees one object per SourceID.
+	if canonical, ok := l.registry.LookupBySourceID(sourceID); ok {
+		s = canonical
+	}
+
 	l.mu.Lock()
 	l.loadedSchemas[sourceID] = s
 	l.mu.Unlock()
@@ -743,9 +773,10 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 
 // registerFailureIssue renders a Registry.Register refusal at the schema
 // declaration it is about, naming the source that already holds the name so a
-// reader can find the other half of the clash. The kinds are distinguished
-// because only DuplicateName is an authoring mistake; the rest mean the loader
-// built something it should not have.
+// reader can find the other half of the clash. Only DuplicateName is an
+// authoring mistake — a registry holds one schema per name, whichever loads
+// registered them — and it draws E_DUPLICATE_SCHEMA; the other kinds mean the
+// loader built something it should not have.
 func (l *loader) registerFailureIssue(s *Schema, err error) diag.Issue {
 	regErr, ok := errors.AsType[*RegistryError](err)
 	if !ok {
@@ -760,9 +791,9 @@ func (l *loader) registerFailureIssue(s *Schema, err error) diag.Issue {
 		if found {
 			held = existing.SourceID().String()
 		}
-		b := diag.NewIssue(diag.Error, diag.E_DUPLICATE_TYPE,
-			fmt.Sprintf("schema name %q is already declared by %s; a schema name is "+
-				"unique across an import closure", s.Name(), held)).
+		b := diag.NewIssue(diag.Error, diag.E_DUPLICATE_SCHEMA,
+			fmt.Sprintf("schema name %q is already registered by %s; a registry holds "+
+				"one schema per name", s.Name(), held)).
 			WithSpan(s.Span()).
 			WithDetail(diag.DetailKeySchemaName, s.Name())
 		if found {

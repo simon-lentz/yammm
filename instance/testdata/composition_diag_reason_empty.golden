@@ -8,7 +8,7 @@
       },
       {
         "Key": "relation",
-        "Value": "addresses"
+        "Value": "ADDRESSES"
       },
       {
         "Key": "json_field",

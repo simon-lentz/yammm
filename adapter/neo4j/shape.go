@@ -115,7 +115,7 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphS
 	}
 
 	// Defense-in-depth, like [Adapter.DetectLabelCollisions]: the source
-	// registry rejects a duplicated schema name (E_DUPLICATE_TYPE), and
+	// registry rejects a duplicated schema name (E_DUPLICATE_SCHEMA), and
 	// [SanitizeIdentifier] is the identity on front-door names, so no
 	// loader-built closure can reach this refusal. It guards construction
 	// paths that bypass the loader.

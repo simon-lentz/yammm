@@ -48,7 +48,7 @@ func TestAdd_BypassGuard_OneAssociationCardinality(t *testing.T) {
 		instancetest.TypeID(mustTypeID(t, s, "Person")),
 		instancetest.PK("p1"),
 		instancetest.Props(map[string]any{"id": "p1"}),
-		instancetest.Edges(edgeData("employer", nil, []any{"c1"}, []any{"c2"})),
+		instancetest.Edges(edgeData("EMPLOYER", nil, []any{"c1"}, []any{"c2"})),
 	)
 	result := g.Add(t.Context(), vi)
 	if result.OK() {
@@ -279,7 +279,7 @@ func TestAdd_BypassGuard_InlineSiblingDuplicatePK(t *testing.T) {
 		instancetest.PK("p1"),
 		instancetest.Props(map[string]any{"id": "p1"}),
 		instancetest.Composed(map[string]immutable.Value{
-			"children": immutable.Wrap([]any{child("first"), child("second")}),
+			"CHILDREN": immutable.Wrap([]any{child("first"), child("second")}),
 		}),
 	)
 
@@ -347,7 +347,7 @@ func TestAddComposed_BypassGuard_ChecksTheStreamedChildsSubtree(t *testing.T) {
 		instancetest.Props(map[string]any{"id": "c1"}),
 		instancetest.Edges(edgeData("bogus", nil, []any{"x"})),
 	)
-	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "children", child)
+	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "CHILDREN", child)
 	if result.OK() {
 		t.Fatal("a streamed child with an undeclared edge name attached")
 	}
@@ -356,7 +356,7 @@ func TestAddComposed_BypassGuard_ChecksTheStreamedChildsSubtree(t *testing.T) {
 	if len(parents) != 1 {
 		t.Fatalf("the parent did not survive a refused child (%d parents)", len(parents))
 	}
-	if n := parents[0].ComposedCount("children"); n != 0 {
+	if n := parents[0].ComposedCount("CHILDREN"); n != 0 {
 		t.Fatalf("the refused child attached anyway (%d children)", n)
 	}
 }
@@ -395,8 +395,8 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 		AddImport("schema_c", "c").
 		AddType("Middle").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("parts", schema.NewTypeRef("c", "Part", location.Span{}), true, true).
-		WithComposition("sole", schema.NewTypeRef("c", "Part", location.Span{}), true, false).
+		WithComposition("PARTS", schema.NewTypeRef("c", "Part", location.Span{}), true, true).
+		WithComposition("SOLE", schema.NewTypeRef("c", "Part", location.Span{}), true, false).
 		Done().
 		Build()
 	if res.HasErrors() {
@@ -435,7 +435,7 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 			instancetest.TypeID(middleID),
 			instancetest.PK(id),
 			instancetest.Props(map[string]any{"id": id}),
-			instancetest.Composed(map[string]immutable.Value{"parts": immutable.Wrap(kids)}),
+			instancetest.Composed(map[string]immutable.Value{"PARTS": immutable.Wrap(kids)}),
 		)
 	}
 
@@ -444,7 +444,7 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 		t.Fatalf("a composed child of a transitively imported type was refused: %s", r.String())
 	}
 	insts := g.Snapshot().InstancesOf(middleID)
-	if len(insts) != 1 || insts[0].ComposedCount("parts") != 2 {
+	if len(insts) != 1 || insts[0].ComposedCount("PARTS") != 2 {
 		t.Fatalf("the transitively imported children did not attach (%d instances)", len(insts))
 	}
 
@@ -466,7 +466,7 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 		instancetest.PK("m3"),
 		instancetest.Props(map[string]any{"id": "m3"}),
 		instancetest.Composed(map[string]immutable.Value{
-			"sole": immutable.Wrap([]any{part("s1"), part("s2")}),
+			"SOLE": immutable.Wrap([]any{part("s1"), part("s2")}),
 		}),
 	)
 	r = g.Add(ctx, overflow)
@@ -601,7 +601,7 @@ func TestComposedChild_KeyRule_IsTheSameOnBothPaths(t *testing.T) {
 		instancetest.PK("p1"),
 		instancetest.Props(map[string]any{"id": "p1"}),
 		instancetest.Composed(map[string]immutable.Value{
-			"children": immutable.Wrap([]any{keyless(), keyless()}),
+			"CHILDREN": immutable.Wrap([]any{keyless(), keyless()}),
 		}),
 	)); r.OK() {
 		t.Fatal("inline: keyless children of a keyed part type were accepted")
@@ -618,7 +618,7 @@ func TestComposedChild_KeyRule_IsTheSameOnBothPaths(t *testing.T) {
 	)); !r.OK() {
 		t.Fatalf("parent add: %s", r.String())
 	}
-	if r := streamedKeyless.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "children", keyless()); r.OK() {
+	if r := streamedKeyless.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "CHILDREN", keyless()); r.OK() {
 		t.Fatal("streamed: a keyless child of a keyed part type was accepted")
 	} else {
 		assertHasCode(t, r, diag.E_GRAPH_INVALID_PK)
@@ -631,7 +631,7 @@ func TestComposedChild_KeyRule_IsTheSameOnBothPaths(t *testing.T) {
 		instancetest.PK("p1"),
 		instancetest.Props(map[string]any{"id": "p1"}),
 		instancetest.Composed(map[string]immutable.Value{
-			"children": immutable.Wrap([]any{forged()}),
+			"CHILDREN": immutable.Wrap([]any{forged()}),
 		}),
 	))
 	if res.OK() {
@@ -648,7 +648,7 @@ func TestComposedChild_KeyRule_IsTheSameOnBothPaths(t *testing.T) {
 	)); !r.OK() {
 		t.Fatalf("parent add: %s", r.String())
 	}
-	res = streamed.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "children", forged())
+	res = streamed.AddComposed(ctx, mustTypeID(t, s, "Parent"), `["p1"]`, "CHILDREN", forged())
 	if res.OK() {
 		t.Fatal("streamed: a forged composed-child key was accepted")
 	}

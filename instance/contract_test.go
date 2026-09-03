@@ -87,6 +87,9 @@ func TestContract_PassCorpus(t *testing.T) {
 
 // TestContract_ErrCorpus pins the error side of the contract: each probe draws
 // exactly its predicted diagnostic, as an exact multiset over (code, message).
+// A defect the static checker refuses at load — an undefined named variable, a
+// member read through an association — cannot appear here; those are pinned
+// by the schema package's static-invariant tests.
 // This arm doubles as the instrument-can-fail proof for the pass corpus — if
 // invariant evaluation stopped running, the expected diagnostics vanish.
 func TestContract_ErrCorpus(t *testing.T) {
@@ -104,7 +107,6 @@ func TestContract_ErrCorpus(t *testing.T) {
 		"E_EVAL_ERROR: invariant evaluation error: reduce of empty sequence with no initial value",
 		"E_EVAL_ERROR: invariant evaluation error: slice access accepts exactly one index",
 		"E_EVAL_ERROR: invariant evaluation error: slice access requires an index",
-		"E_EVAL_ERROR: invariant evaluation error: undefined variable: $undef",
 		"E_INVARIANT_FAIL: f_nil_result_is_falsey",
 	}
 

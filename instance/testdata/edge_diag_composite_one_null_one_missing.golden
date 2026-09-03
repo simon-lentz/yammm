@@ -4,7 +4,7 @@
     "Details": [
       {
         "Key": "relation",
-        "Value": "enrollment"
+        "Value": "ENROLLMENT"
       },
       {
         "Key": "expected",
@@ -22,7 +22,7 @@
     "Details": [
       {
         "Key": "relation",
-        "Value": "enrollment"
+        "Value": "ENROLLMENT"
       },
       {
         "Key": "field",

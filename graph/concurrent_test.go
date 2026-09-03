@@ -481,11 +481,11 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 	// Add in order: A → B → C (all forward refs)
 	typeA := mustValidInstanceWithEdge(t, s, "TypeA",
 		[]any{"a1"}, map[string]any{"name": "A1"},
-		"refB", [][]any{{"b1"}})
+		"REF_B", [][]any{{"b1"}})
 
 	typeB := mustValidInstanceWithEdge(t, s, "TypeB",
 		[]any{"b1"}, map[string]any{"name": "B1"},
-		"refC", [][]any{{"c1"}})
+		"REF_C", [][]any{{"c1"}})
 
 	typeC := mustValidInstance(t, s, "TypeC",
 		[]any{"c1"}, map[string]any{"name": "C1"})
@@ -535,7 +535,7 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 		child := mustValidPartInstance(t, s, "Child",
 			[]any{fmt.Sprintf("c%d", i)}, map[string]any{"name": fmt.Sprintf("Child %d", i)})
 
-		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
+		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
 		if err := result.Err(); err != nil {
 			t.Errorf("AddComposed child %d should succeed: %v", i, err)
 		}
@@ -548,10 +548,10 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
-	assertComposedCount(t, parents[0], "children", 5)
+	assertComposedCount(t, parents[0], "CHILDREN", 5)
 
 	// Verify children are accessible
-	children := parents[0].Composed("children")
+	children := parents[0].Composed("CHILDREN")
 	for i, child := range children {
 		expected := fmt.Sprintf(`["c%d"]`, i)
 		if child.PrimaryKey().String() != expected {
@@ -657,7 +657,7 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 			person := mustValidInstanceWithEdge(t, s, "Person",
 				[]any{fmt.Sprintf("person-%d", i)},
 				map[string]any{"name": fmt.Sprintf("Person %d", i)},
-				"employer", [][]any{{"shared-company"}})
+				"EMPLOYER", [][]any{{"shared-company"}})
 
 			g.Add(ctx, person)
 		})
@@ -725,7 +725,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 				child := mustValidPartInstance(t, s, "Child",
 					[]any{fmt.Sprintf("c-%d-%d", w, i)},
 					map[string]any{"name": fmt.Sprintf("Child %d-%d", w, i)})
-				g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "children", child)
+				g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
 			}
 		})
 	}
@@ -738,8 +738,8 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 				parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
 				if len(parents) > 0 {
 					// Access Composed() - this would race with addComposed() before the fix
-					_ = parents[0].Composed("children")
-					_ = parents[0].ComposedCount("children")
+					_ = parents[0].Composed("CHILDREN")
+					_ = parents[0].ComposedCount("CHILDREN")
 					_ = parents[0].ComposedRelations()
 				}
 			}
@@ -757,7 +757,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 	}
 
 	expectedChildren := numWriters * opsPerWorker
-	actualChildren := parents[0].ComposedCount("children")
+	actualChildren := parents[0].ComposedCount("CHILDREN")
 	if actualChildren != expectedChildren {
 		t.Errorf("Expected %d children, got %d", expectedChildren, actualChildren)
 	}

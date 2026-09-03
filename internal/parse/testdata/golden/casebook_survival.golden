@@ -399,7 +399,7 @@ noise: 0
 defects:
   d1   syntax   E_SYNTAX                     matched
 decls:
-  Alpha --> r
+  Alpha --> R
   Alpha.id
   Beta.id
   type Alpha
@@ -411,7 +411,7 @@ noise: 0
 defects:
   d1   syntax   E_SYNTAX                     matched
 decls:
-  Alpha --> r
+  Alpha --> R
   Alpha.id
   Beta.id
   type Alpha
@@ -466,8 +466,8 @@ noise: 0
 defects:
   d1   syntax   E_SYNTAX                     matched
 decls:
-  Alpha --> q
-  Alpha --> r
+  Alpha --> Q
+  Alpha --> R
   Alpha.id
   Beta.id
   Gamma.id

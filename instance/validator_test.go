@@ -514,7 +514,7 @@ func TestValidator_ValidateForComposition_Success(t *testing.T) {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -524,7 +524,7 @@ func TestValidator_ValidateForComposition_Success(t *testing.T) {
 		{Properties: map[string]any{"id": "2", "street": "Oak Ave"}},
 	}
 
-	valid, result := validator.ValidateForComposition(t.Context(), "Person", "addresses", raws)
+	valid, result := validator.ValidateForComposition(t.Context(), "Person", "ADDRESSES", raws)
 
 	require.True(t, result.OK())
 	assert.Len(t, valid, 2)
@@ -543,7 +543,7 @@ func TestValidator_ValidateForComposition_ParentTypeNotFound(t *testing.T) {
 		{Properties: map[string]any{"id": "1"}},
 	}
 
-	valid, result := validator.ValidateForComposition(t.Context(), "NonExistent", "children", raws)
+	valid, result := validator.ValidateForComposition(t.Context(), "NonExistent", "CHILDREN", raws)
 
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
@@ -566,7 +566,7 @@ func TestValidator_ValidateForComposition_RelationNotFound(t *testing.T) {
 		{Properties: map[string]any{"id": "1"}},
 	}
 
-	valid, result := validator.ValidateForComposition(t.Context(), "Person", "nonexistent", raws)
+	valid, result := validator.ValidateForComposition(t.Context(), "Person", "NONEXISTENT", raws)
 
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
@@ -585,7 +585,7 @@ func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -597,7 +597,7 @@ func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
 		{Properties: map[string]any{"id": "1"}},
 	}
 
-	_, result := validator.ValidateForComposition(ctx, "Person", "addresses", raws)
+	_, result := validator.ValidateForComposition(ctx, "Person", "ADDRESSES", raws)
 
 	require.True(t, result.HasFatal())
 	issues := slices.Collect(result.Issues())
@@ -615,7 +615,7 @@ func TestValidator_ValidateForComposition_ParentTypeNotFound_EmptyInput(t *testi
 	validator := instance.NewValidator(s)
 
 	valid, result := validator.ValidateForComposition(
-		t.Context(), "NonExistent", "children", []instance.RawInstance{},
+		t.Context(), "NonExistent", "CHILDREN", []instance.RawInstance{},
 	)
 
 	assert.Empty(t, valid)
@@ -640,7 +640,7 @@ func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *te
 	}
 
 	_, result := validator.ValidateForComposition(
-		t.Context(), "NonExistent", "children", raws,
+		t.Context(), "NonExistent", "CHILDREN", raws,
 	)
 
 	require.False(t, result.OK())
@@ -972,12 +972,12 @@ func TestValidator_ValidateForComposition_NilInput_ReturnsNil(t *testing.T) {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
 		Done())
 
 	validator := instance.NewValidator(s)
 
-	valid, result := validator.ValidateForComposition(t.Context(), "Person", "addresses", nil)
+	valid, result := validator.ValidateForComposition(t.Context(), "Person", "ADDRESSES", nil)
 
 	require.True(t, result.OK())
 	assert.Nil(t, valid, "nil input should return nil valid slice")
@@ -993,12 +993,12 @@ func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testin
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
 		Done())
 
 	validator := instance.NewValidator(s)
 
-	valid, result := validator.ValidateForComposition(t.Context(), "Person", "addresses", []instance.RawInstance{})
+	valid, result := validator.ValidateForComposition(t.Context(), "Person", "ADDRESSES", []instance.RawInstance{})
 
 	require.True(t, result.OK())
 	require.NotNil(t, valid, "empty input should return non-nil empty valid slice")
@@ -1022,7 +1022,7 @@ func TestValidator_NilReceiver(t *testing.T) {
 
 	t.Run("ValidateForComposition", func(t *testing.T) {
 		require.Panics(t, func() {
-			v.ValidateForComposition(t.Context(), "Parent", "children", nil)
+			v.ValidateForComposition(t.Context(), "Parent", "CHILDREN", nil)
 		})
 	})
 }
@@ -1096,7 +1096,7 @@ func TestOwnership_Isolation(t *testing.T) {
 	scenarios := []scenario{
 		{
 			name:     "nested map",
-			schema:   compositionSchema("Address", "Person", "addresses", "street", "city"),
+			schema:   compositionSchema("Address", "Person", "ADDRESSES", "street", "city"),
 			typeName: "Person",
 			raw: func() (instance.RawInstance, func()) {
 				addressData := map[string]any{"id": "100", "street": "Original Street", "city": "Original City"}
@@ -1108,13 +1108,13 @@ func TestOwnership_Isolation(t *testing.T) {
 			},
 			verify: func(t *testing.T, valid *instance.ValidInstance) {
 				t.Helper()
-				childProp(t, valid, "addresses", 0, "street", "Original Street")
-				childProp(t, valid, "addresses", 0, "city", "Original City")
+				childProp(t, valid, "ADDRESSES", 0, "street", "Original Street")
+				childProp(t, valid, "ADDRESSES", 0, "city", "Original City")
 			},
 		},
 		{
 			name:     "nested slice",
-			schema:   compositionSchema("Note", "Document", "notes", "text"),
+			schema:   compositionSchema("Note", "Document", "NOTES", "text"),
 			typeName: "Document",
 			raw: func() (instance.RawInstance, func()) {
 				note1 := map[string]any{"id": "1", "text": "Original Note 1"}
@@ -1128,18 +1128,18 @@ func TestOwnership_Isolation(t *testing.T) {
 			},
 			verify: func(t *testing.T, valid *instance.ValidInstance) {
 				t.Helper()
-				composed, ok := composedOf(valid, "notes")
+				composed, ok := composedOf(valid, "NOTES")
 				require.True(t, ok)
 				composedSlice, ok := composed.Slice()
 				require.True(t, ok)
 				require.Equal(t, 2, composedSlice.Len(), "original slice length should be preserved")
-				childProp(t, valid, "notes", 0, "text", "Original Note 1")
-				childProp(t, valid, "notes", 1, "text", "Original Note 2")
+				childProp(t, valid, "NOTES", 0, "text", "Original Note 1")
+				childProp(t, valid, "NOTES", 1, "text", "Original Note 2")
 			},
 		},
 		{
 			name:     "composition replacement",
-			schema:   compositionSchema("Item", "Order", "items", "name"),
+			schema:   compositionSchema("Item", "Order", "ITEMS", "name"),
 			typeName: "Order",
 			raw: func() (instance.RawInstance, func()) {
 				itemData := map[string]any{"id": "100", "name": "Original Item"}
@@ -1153,12 +1153,12 @@ func TestOwnership_Isolation(t *testing.T) {
 			},
 			verify: func(t *testing.T, valid *instance.ValidInstance) {
 				t.Helper()
-				childProp(t, valid, "items", 0, "name", "Original Item")
+				childProp(t, valid, "ITEMS", 0, "name", "Original Item")
 			},
 		},
 		{
 			name:     "deeply nested composition",
-			schema:   compositionSchema("Detail", "Container", "details", "value"),
+			schema:   compositionSchema("Detail", "Container", "DETAILS", "value"),
 			typeName: "Container",
 			raw: func() (instance.RawInstance, func()) {
 				detailData := map[string]any{"id": "1", "value": "Original Value"}
@@ -1170,8 +1170,8 @@ func TestOwnership_Isolation(t *testing.T) {
 			},
 			verify: func(t *testing.T, valid *instance.ValidInstance) {
 				t.Helper()
-				childProp(t, valid, "details", 0, "value", "Original Value")
-				composed, _ := composedOf(valid, "details")
+				childProp(t, valid, "DETAILS", 0, "value", "Original Value")
+				composed, _ := composedOf(valid, "DETAILS")
 				composedSlice, _ := composed.Slice()
 				child := composedSlice.Get(0).Unwrap().(*instance.ValidInstance)
 				assert.Equal(t, `["1"]`, child.PrimaryKey().String(), "isolation failed: PK was mutated")
@@ -1187,7 +1187,7 @@ type Company {
 }
 type Person {
     id String primary
-    --> employer (_) Company {
+    --> EMPLOYER (_) Company {
         role String required
         startDate String
     }
@@ -1205,7 +1205,7 @@ type Person {
 			},
 			verify: func(t *testing.T, valid *instance.ValidInstance) {
 				t.Helper()
-				edge, ok := valid.Edge("employer")
+				edge, ok := valid.Edge("EMPLOYER")
 				require.True(t, ok)
 				targets := edge.Targets()
 				require.Len(t, targets, 1)

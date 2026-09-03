@@ -24,7 +24,7 @@ var (
 	// alternatives the property_name production also admits.
 	builderPropertyNameRE = regexp.MustCompile(`^[a-z][A-Za-z0-9_]*$`)
 	// builderRelationNameRE mirrors any_name (UC_WORD | LC_WORD).
-	builderRelationNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	builderRelationNameRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 )
 
 // ImportResolver resolves import paths to SourceIDs for synthetic sources.
@@ -437,7 +437,7 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 				hasErrors = true
 			case !builderRelationNameRE.MatchString(r.Name):
 				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
-					fmt.Sprintf("relation name %q in type %q is not a valid DSL relation name: relation names start with a letter, followed by letters, digits, or underscores", r.Name, t.name)).
+					fmt.Sprintf("relation name %q in type %q is not a valid DSL relation name: relation names are UPPER_SNAKE — an uppercase letter, then uppercase letters, digits or underscores", r.Name, t.name)).
 					WithDetail(diag.DetailKeyName, r.Name).
 					WithDetail(diag.DetailKeyTypeName, t.name).Build())
 				hasErrors = true

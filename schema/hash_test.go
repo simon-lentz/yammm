@@ -371,8 +371,11 @@ func TestStructuralHash_TypeOrderingDeterministic(t *testing.T) {
 	typB := buildTypeWithProps("Beta", []*schema.Property{propB})
 
 	// Schema.Types() returns lexicographic order regardless of insertion order.
+	// Each schema seals its own objects, so the second gets fresh ones.
 	s1 := buildMinimalSchema("app", []*schema.Type{typB, typA}, nil)
-	s2 := buildMinimalSchema("app", []*schema.Type{typA, typB}, nil)
+	typA2 := buildTypeWithProps("Alpha", []*schema.Property{makeProp("id", schema.NewUUIDConstraint(), false, true)})
+	typB2 := buildTypeWithProps("Beta", []*schema.Property{makeProp("name", schema.NewStringConstraint(), false, false)})
+	s2 := buildMinimalSchema("app", []*schema.Type{typA2, typB2}, nil)
 
 	assert.Equal(t, schema.StructuralHash(s1), schema.StructuralHash(s2),
 		"type insertion order must not affect hash")

@@ -140,8 +140,10 @@ func (t *Type) IsPart() bool {
 	return t.isPart
 }
 
-// Property returns the property with the given name (own or inherited), if it exists.
-// Uses O(1) lookup.
+// Property returns the property with the given name (own or inherited), if it
+// exists. The lookup is exact-case, as annotation arguments are resolved;
+// invariant expressions resolve names case-insensitively, which
+// [Type.CanonicalPropertyName] serves.
 func (t *Type) Property(name string) (*Property, bool) {
 	p, ok := t.propByName[name]
 	return p, ok
@@ -463,6 +465,9 @@ func (t *Type) CanonicalPropertyName(lower string) (string, bool) {
 // seal marks the type as immutable.
 // Called by the completer after type completion finishes.
 func (t *Type) seal() {
+	if t.sealed {
+		panic("type: sealed twice")
+	}
 	// Precompute cached maps for thread-safe access after sealing
 	t.canonicalMap = make(map[string]string, len(t.allProperties))
 	for _, p := range t.allProperties {

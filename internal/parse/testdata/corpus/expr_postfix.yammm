@@ -1,0 +1,19 @@
+schema "expr_postfix"
+
+part type Line {
+	id String primary
+	sku String
+	qty Integer
+}
+
+type Order {
+	id String primary
+	name String
+	tags List<String>
+	*-> LINES (one:many) Line
+	! "member_then_index" tags[0] == $self.tags[0]
+	! "member_then_pipeline" $self.name -> Len > 0
+	! "index_then_member" LINES[0].qty > 0
+	! "lambda_member_then_pipeline" LINES -> All |$l| { $l.sku -> Len > 0 }
+	! "pipeline_then_member" LINES -> First.qty > 0
+}

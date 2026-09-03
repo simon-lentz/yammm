@@ -8,6 +8,11 @@ import (
 // Invariant represents a constraint expression attached to a type.
 // Invariants are validated at runtime; the expression is compiled at schema
 // load time and evaluated at instance validation time.
+//
+// The name is the failure message and also the invariant's identity for
+// inheritance: a subtype's invariant overrides an inherited one of the same
+// name, one type may not declare a name twice, and two inherited invariants
+// sharing a name must carry the same expression.
 type Invariant struct {
 	name string          // user-facing message shown when invariant fails
 	expr expr.Expression // compiled expression

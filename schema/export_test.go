@@ -84,13 +84,12 @@ var (
 
 // Internal functions from merged packages.
 var (
-	TestCompleteModel                      = completeModel
-	TestDetectCrossSchemaInheritanceCycles = detectCrossSchemaInheritanceCycles
-	TestNewParser                          = newParser
-	TestIsValidAlias                       = isValidAlias
-	TestIsReservedKeyword                  = isReservedKeyword
-	TestReservedKeywords                   = reservedKeywords
-	TestDeriveAliasFromPath                = deriveAliasFromPath
+	TestCompleteModel       = completeModel
+	TestNewParser           = newParser
+	TestIsValidAlias        = isValidAlias
+	TestIsReservedKeyword   = isReservedKeyword
+	TestReservedKeywords    = reservedKeywords
+	TestDeriveAliasFromPath = deriveAliasFromPath
 )
 
 // AST types (type aliases for test access).
@@ -107,9 +106,8 @@ type (
 
 // Internal interfaces.
 type (
-	TestCompletionRegistry  = completionRegistry
-	TestResolvedImportMap   = resolvedImportMap
-	TestCrossSchemaRegistry = crossSchemaRegistry
+	TestCompletionRegistry = completionRegistry
+	TestResolvedImportMap  = resolvedImportMap
 )
 
 // TestResolvedImport builds a resolved (non-deferred) entry for a

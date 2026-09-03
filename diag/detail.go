@@ -112,7 +112,7 @@ const (
 
 	// DetailKeySchemaName is a schema's declared name: from the snapshot
 	// header for E_SNAPSHOT_INCOMPATIBLE_SCHEMA, and the colliding name for
-	// the E_DUPLICATE_TYPE a schema-name clash across an import closure draws.
+	// the E_DUPLICATE_SCHEMA two schemas registered under one name draw.
 	DetailKeySchemaName = "schema_name"
 
 	// DetailKeyVersion is the format version number.
@@ -220,7 +220,7 @@ func TypeField(typeName, fieldName string) []Detail {
 //
 // Provides both the schema relation name (for path) and the normalized JSON
 // field name (for direct lookup in instance data). The jsonFieldName is
-// computed via lower_snake(relationName).
+// the relation name in lower case.
 //
 // Use with relation-path diagnostics (e.g., E_DUPLICATE_COMPOSED_PK,
 // E_UNRESOLVED_REQUIRED_COMPOSITION) to enable users to locate the field

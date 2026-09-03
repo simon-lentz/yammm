@@ -146,6 +146,7 @@ format/testdata/wrap_long_enum.yammm
 graph/testdata/composed.yammm
 instance/testdata/contract/contract_err.yammm
 instance/testdata/contract/contract_pass.yammm
+internal/parse/testdata/corpus/expr_postfix.yammm
 internal/parse/testdata/corpus/multibyte.yammm
 lsp/editors/vscode/tests/integration/fixtures/workspace/broken.yammm
 lsp/editors/vscode/tests/integration/fixtures/workspace/valid.yammm

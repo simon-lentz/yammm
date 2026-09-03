@@ -76,7 +76,7 @@ type pendingKey struct {
 type pendingEdge struct {
 	source       *Instance
 	relation     string
-	jsonField    string // normalized JSON field name (lower_snake form)
+	jsonField    string // JSON field name: the lower-case relation name
 	targetType   schema.TypeID
 	targetKey    string
 	properties   immutable.Properties

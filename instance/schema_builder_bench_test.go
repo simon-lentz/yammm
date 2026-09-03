@@ -67,7 +67,7 @@ func benchSchema(b *testing.B) *schema.Schema {
 		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("name", schema.NewStringConstraint()).
 		WithOptionalProperty("nickname", schema.NewStringConstraint()).
-		WithRelation("works_at", schema.LocalTypeRef("Company", location.Span{}), true, false).
+		WithRelation("WORKS_AT", schema.LocalTypeRef("Company", location.Span{}), true, false).
 		Done().
 		Build()
 	if result.HasErrors() {

@@ -2,7 +2,7 @@ schema "seeded"
 
 type Alpha {
 	id String primary
-	--> r Beta { nil String }
+	--> R Beta { nil String }
 }
 
 type Beta {

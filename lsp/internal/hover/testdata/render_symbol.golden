@@ -38,20 +38,20 @@ A person entity.
 - Modifiers: required
 
 === association ===
-**association** `Person.addresses`
+**association** `Person.ADDRESSES`
 
 ```yammm
---> addresses (many) Address
+--> ADDRESSES (many) Address
 ```
 
 - Target: `Address`
 - Multiplicity: many
 
 === composition ===
-**composition** `Car.wheels`
+**composition** `Car.WHEELS`
 
 ```yammm
-*-> wheels (many) Wheel
+*-> WHEELS (many) Wheel
 ```
 
 - Target: `Wheel`

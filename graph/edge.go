@@ -31,7 +31,7 @@ type Edge struct {
 // Relation returns the DSL relation name for this edge.
 //
 // This is the relation name as declared in the schema (e.g., "OWNER"),
-// not the field name used in instance data (which uses lower_snake form).
+// not the field name used in instance data (the lower-case relation name).
 func (e *Edge) Relation() string {
 	if e == nil {
 		return ""

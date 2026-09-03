@@ -166,14 +166,15 @@ func (d DatatypeLiteral) Literal() any {
 // expression implements Expression.
 func (DatatypeLiteral) expression() {}
 
-// StringLiteral extracts a string from a literal expression.
-// Returns false if the expression is nil or not a string literal.
+// StringLiteral extracts the string a [*Literal] wraps. Any other node returns
+// false — including an [SExpr], whose Literal() is its op name and is not a
+// string literal.
 func StringLiteral(expr Expression) (string, bool) {
-	if expr == nil {
+	lit, ok := expr.(*Literal)
+	if !ok {
 		return "", false
 	}
-	val := expr.Literal()
-	str, ok := val.(string)
+	str, ok := lit.Val.(string)
 	return str, ok
 }
 

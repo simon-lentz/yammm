@@ -69,7 +69,7 @@ func buildFuzzSchema(t *testing.T) *schema.Schema {
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
 		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("friend", schema.LocalTypeRef("Person", location.Span{}), true, false).
+		WithRelation("FRIEND", schema.LocalTypeRef("Person", location.Span{}), true, false).
 		Done().
 		Build()
 
@@ -99,7 +99,7 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 			// unresolved records both form and the oracle's edge block runs.
 			var edges map[string]*instance.ValidEdgeData
 			if r.Intn(2) == 0 {
-				edges = edgeData("friend", nil, []any{formatID(workerID, r.Intn(100))})
+				edges = edgeData("FRIEND", nil, []any{formatID(workerID, r.Intn(100))})
 			}
 			inst := instance.NewValidInstance(
 				"Person",

@@ -64,6 +64,9 @@ func (d *DataType) Documentation() string {
 // seal marks the data type as immutable.
 // Called by the loader after schema completion.
 func (d *DataType) seal() {
+	if d.sealed {
+		panic("datatype: sealed twice")
+	}
 	d.sealed = true
 }
 

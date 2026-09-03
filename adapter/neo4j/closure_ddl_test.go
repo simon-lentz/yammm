@@ -22,7 +22,7 @@ import "./base" as base
 
 type Station {
 	station_id String primary
-	--> sits_in (one) base.Basin
+	--> SITS_IN (one) base.Basin
 }
 `
 )

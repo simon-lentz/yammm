@@ -38,7 +38,7 @@ func compositionSchema(t *testing.T, optional bool) *schema.Schema {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), optional, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), optional, true).
 		Done())
 }
 
@@ -53,7 +53,7 @@ func TestValidateCompositions_Single(t *testing.T) {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -72,7 +72,7 @@ func TestValidateCompositions_Single(t *testing.T) {
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
-	composed, ok := composedOf(valid, "addresses")
+	composed, ok := composedOf(valid, "ADDRESSES")
 	require.True(t, ok)
 	require.False(t, composed.IsNil())
 }
@@ -88,7 +88,7 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -109,7 +109,7 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 	require.True(t, result.OK())
 	require.NotNil(t, valid)
 
-	composed, ok := composedOf(valid, "addresses")
+	composed, ok := composedOf(valid, "ADDRESSES")
 	require.True(t, ok)
 	require.False(t, composed.IsNil())
 }
@@ -132,7 +132,7 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 	require.NotNil(t, valid)
 
 	// No composition should be present
-	composed, ok := composedOf(valid, "addresses")
+	composed, ok := composedOf(valid, "ADDRESSES")
 	assert.False(t, ok)
 	assert.True(t, composed.IsNil())
 }
@@ -155,7 +155,7 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 	require.NotNil(t, valid)
 
 	// Composition should be present but empty
-	composed, ok := composedOf(valid, "addresses")
+	composed, ok := composedOf(valid, "ADDRESSES")
 	require.True(t, ok)
 	require.False(t, composed.IsNil())
 }
@@ -231,7 +231,7 @@ func TestValidateCompositions_ChildValidationFails(t *testing.T) {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -424,7 +424,7 @@ func TestValidateCompositions_CompositePK_PathFormat(t *testing.T) {
 		Done().
 		AddType("School").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("enrollments", schema.LocalTypeRef("Enrollment", location.Span{}), true, true).
+		WithComposition("ENROLLMENTS", schema.LocalTypeRef("Enrollment", location.Span{}), true, true).
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -473,7 +473,7 @@ func TestOwnership_ValidateForCompositionIsolation(t *testing.T) {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
 		Done())
 
 	validator := instance.NewValidator(s)
@@ -489,7 +489,7 @@ func TestOwnership_ValidateForCompositionIsolation(t *testing.T) {
 
 	// Validate using streaming path
 	valid, result := validator.ValidateForComposition(
-		t.Context(), "Person", "addresses", raws,
+		t.Context(), "Person", "ADDRESSES", raws,
 	)
 
 	require.True(t, result.OK())
@@ -536,7 +536,7 @@ func TestValidateCompositions_OneCardinality(t *testing.T) {
 		Done().
 		AddType("Person").
 		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithComposition("home", schema.LocalTypeRef("Address", location.Span{}), true, false).
+		WithComposition("HOME", schema.LocalTypeRef("Address", location.Span{}), true, false).
 		Done())
 
 	validator := instance.NewValidator(s)

@@ -49,11 +49,11 @@ func personSchema(t *testing.T) *schema.Schema {
 		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("name", schema.NewStringConstraint()).
 		WithOptionalProperty("nickname", schema.NewStringConstraint()).
-		WithRelation("works_at", schema.LocalTypeRef("Company", location.Span{}), true, false).
-		WithRelation("knows", schema.LocalTypeRef("Person", location.Span{}), true, true).
-		WithRelation("has_part", schema.LocalTypeRef("Part", location.Span{}), true, false).
-		WithComposition("addresses", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		WithComposition("primary_note", schema.LocalTypeRef("Note", location.Span{}), true, false).
+		WithRelation("WORKS_AT", schema.LocalTypeRef("Company", location.Span{}), true, false).
+		WithRelation("KNOWS", schema.LocalTypeRef("Person", location.Span{}), true, true).
+		WithRelation("HAS_PART", schema.LocalTypeRef("Part", location.Span{}), true, false).
+		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
+		WithComposition("PRIMARY_NOTE", schema.LocalTypeRef("Note", location.Span{}), true, false).
 		Done())
 }
 
@@ -196,7 +196,7 @@ func TestSchemaBuilder_EdgeTo_OneHappy(t *testing.T) {
 	raw, err := b.
 		Property("id", "p1").
 		Property("name", "Alice").
-		EdgeTo("works_at", "c1").
+		EdgeTo("WORKS_AT", "c1").
 		Build()
 	require.NoError(t, err)
 
@@ -236,7 +236,7 @@ func TestSchemaBuilder_EdgeTo_CompositePK(t *testing.T) {
 	raw, err := b.
 		Property("id", "p1").
 		Property("name", "Alice").
-		EdgeTo("has_part", "publisher-1", "book-99").
+		EdgeTo("HAS_PART", "publisher-1", "book-99").
 		Build()
 	require.NoError(t, err)
 	edge, _ := raw.Properties["has_part"].(map[string]any)
@@ -253,7 +253,7 @@ func TestSchemaBuilder_EdgeTo_PreBuiltSliceUnpack(t *testing.T) {
 	raw, err := b.
 		Property("id", "p1").
 		Property("name", "Alice").
-		EdgeTo("has_part", key...).
+		EdgeTo("HAS_PART", key...).
 		Build()
 	require.NoError(t, err)
 	edge, _ := raw.Properties["has_part"].(map[string]any)
@@ -266,7 +266,7 @@ func TestSchemaBuilder_EdgeTo_ZeroTargetKey(t *testing.T) {
 	b, err := instance.BuilderFor(s, "Person")
 	require.NoError(t, err)
 
-	_, err = b.Property("id", "p1").Property("name", "Alice").EdgeTo("works_at").Build()
+	_, err = b.Property("id", "p1").Property("name", "Alice").EdgeTo("WORKS_AT").Build()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "EdgeTo requires at least one target-key component")
 }
@@ -287,7 +287,7 @@ func TestSchemaBuilder_EdgeTo_OnCompositionRelation(t *testing.T) {
 	b, err := instance.BuilderFor(s, "Person")
 	require.NoError(t, err)
 
-	_, err = b.EdgeTo("addresses", "x").Build()
+	_, err = b.EdgeTo("ADDRESSES", "x").Build()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "composition")
 	assert.Contains(t, err.Error(), "does not support composed children")
@@ -298,7 +298,7 @@ func TestSchemaBuilder_EdgeTo_OnRelationWithEdgeProps(t *testing.T) {
 	b, err := instance.BuilderFor(s, "Employee")
 	require.NoError(t, err)
 
-	_, err = b.Property("id", "e1").EdgeTo("works_at", "c1").Build()
+	_, err = b.Property("id", "e1").EdgeTo("WORKS_AT", "c1").Build()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "declares edge properties")
 	assert.Contains(t, err.Error(), "does not support")
@@ -310,7 +310,7 @@ func TestSchemaBuilder_EdgeTo_ArityMismatch(t *testing.T) {
 	require.NoError(t, err)
 
 	// "has_part" has a composite PK of 2 components; passing 1 is an arity error.
-	_, err = b.Property("id", "p1").Property("name", "Alice").EdgeTo("has_part", "only-one").Build()
+	_, err = b.Property("id", "p1").Property("name", "Alice").EdgeTo("HAS_PART", "only-one").Build()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "arity mismatch")
 }
@@ -325,12 +325,12 @@ func TestSchemaBuilder_Cardinality_OneWithTwoEdgeTo(t *testing.T) {
 	_, err = b.
 		Property("id", "p1").
 		Property("name", "Alice").
-		EdgeTo("works_at", "c1").
-		EdgeTo("works_at", "c2").
+		EdgeTo("WORKS_AT", "c1").
+		EdgeTo("WORKS_AT", "c2").
 		Build()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cardinality mismatch")
-	assert.Contains(t, err.Error(), "works_at")
+	assert.Contains(t, err.Error(), "WORKS_AT")
 }
 
 func TestSchemaBuilder_Cardinality_ManyZeroCalls(t *testing.T) {
@@ -367,7 +367,7 @@ func TestSchemaBuilder_RelationNameFormParity(t *testing.T) {
 
 	bB, err := instance.BuilderFor(s, "Person")
 	require.NoError(t, err)
-	rawB, err := bB.Property("id", "a").EdgeTo("works_at", "c1").Build()
+	rawB, err := bB.Property("id", "a").EdgeTo("WORKS_AT", "c1").Build()
 	require.NoError(t, err)
 
 	assertPropertiesEqual(t, rawA.Properties, rawB.Properties)
@@ -436,7 +436,7 @@ func TestSchemaBuilder_RoundTrip_ValidatorAccepts(t *testing.T) {
 	raw, err := p.
 		Property("id", "p1").
 		Property("name", "Alice").
-		EdgeTo("works_at", "c1").
+		EdgeTo("WORKS_AT", "c1").
 		EdgeTo("knows", "p2").
 		Build()
 	require.NoError(t, err)

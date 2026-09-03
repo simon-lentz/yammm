@@ -29,7 +29,7 @@
           "EdgeProps": [],
           "FieldName": "item",
           "Many": false,
-          "Name": "item",
+          "Name": "ITEM",
           "Optional": false,
           "Target": "Part"
         }

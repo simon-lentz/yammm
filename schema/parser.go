@@ -71,7 +71,7 @@ func (p *schemaParser) importDecl(imp *parse.Import) *importDecl {
 	}
 	if isReservedKeyword(alias) {
 		p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
-			fmt.Sprintf("import alias %q is a reserved keyword", alias)).
+			fmt.Sprintf("import alias %q is a reserved keyword; use 'as <alias>' to choose another", alias)).
 			WithSpan(imp.Span).Build())
 		return nil
 	}
@@ -279,7 +279,10 @@ func (p *schemaParser) warnLossyTimestampFormat(format string, span location.Spa
 // rather than a scan for zone and fraction directives, so a layout is judged
 // by what it does rather than by how it is spelled.
 func lossyTimestampFormat(format string) bool {
-	probe := time.Date(2026, 8, 19, 12, 34, 56, 789000000, time.FixedZone("", 2*60*60))
+	// The probe zone carries a name: a layout with the MST directive renders
+	// an unnamed zone as a numeric offset, which time.Parse then refuses, and
+	// the error arm would call exactly the lossiest layouts "not lossy".
+	probe := time.Date(2026, 8, 19, 12, 34, 56, 789000000, time.FixedZone("XYZ", 2*60*60))
 	back, err := time.Parse(format, probe.Format(format))
 	if err != nil {
 		// A layout Go cannot parse its own output under is not something this

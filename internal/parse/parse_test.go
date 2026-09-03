@@ -247,6 +247,76 @@ func TestParse_BareCommaCallHasNonNilArguments(t *testing.T) {
 	}
 }
 
+// sexprString renders an expression as a parenthesized S-expression so a test
+// can assert the parsed shape in one string: (op child...) for an SExpr, the
+// Go value for a literal, args[...] and params[...] for a call's lists.
+func sexprString(e expr.Expression) string {
+	switch v := e.(type) {
+	case expr.SExpr:
+		parts := []string{v.Op()}
+		for _, c := range v.Children() {
+			parts = append(parts, sexprString(c))
+		}
+		return "(" + strings.Join(parts, " ") + ")"
+	case *expr.Literal:
+		switch val := v.Val.(type) {
+		case []expr.Expression:
+			parts := make([]string, len(val))
+			for i, c := range val {
+				parts[i] = sexprString(c)
+			}
+			return "args[" + strings.Join(parts, " ") + "]"
+		case []string:
+			return "params" + fmt.Sprint(val)
+		default:
+			return fmt.Sprintf("%#v", val)
+		}
+	case expr.DatatypeLiteral:
+		return "dt:" + string(v)
+	}
+	return fmt.Sprintf("<%T>", e)
+}
+
+// TestParse_PostfixOperatorsChainLeftToRight pins that indexing, pipeline calls
+// and property access are one postfix level: "$self.tags[0]" indexes the
+// property and "$i.name -> Len" pipes it. Unary minus stays tighter than all
+// three, as the package doc states.
+func TestParse_PostfixOperatorsChainLeftToRight(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{"$self.tags[0]", `(@ (. ($ "self") "tags") 0)`},
+		{"$self.name -> Len", `(Len (. ($ "self") "name") args[] params[] <nil>)`},
+		{"$i.sku -> Len > 0", `(> (Len (. ($ "i") "sku") args[] params[] <nil>) 0)`},
+		{"LINES[0].qty", `(. (@ (p "LINES") 0) "qty")`},
+		{"a.b.c", `(. (. (p "a") "b") "c")`},
+		{"xs -> First.name", `(. (First (p "xs") args[] params[] <nil>) "name")`},
+		{"-x[0]", `(@ (-x (p "x")) 0)`},
+	}
+	for _, tc := range cases {
+		src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + tc.src + "\n}\n"
+		file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		if len(issues) != 0 {
+			t.Errorf("%s: unexpected issues %v", tc.src, issues)
+			continue
+		}
+		if got := sexprString(file.Types[0].Invariants[0].Expr); got != tc.want {
+			t.Errorf("%s:\n got %s\nwant %s", tc.src, got, tc.want)
+		}
+	}
+}
+
+// TestParse_MemberPositionHoldsOneName pins that the token after '.' is a plain
+// name: a datatype keyword, a reserved word, or the end of the expression there
+// is a syntax error rather than a member the evaluator would have to interpret.
+func TestParse_MemberPositionHoldsOneName(t *testing.T) {
+	for _, src := range []string{"$self.Integer", "$self.in", "$self.", "$self.(name)", "$self.5"} {
+		full := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + src + " == nil\n}\n"
+		_, issues := Parse([]byte(full), location.NewSourceID("s.yammm"))
+		if len(issues) == 0 {
+			t.Errorf("%s: parsed clean, want a syntax error at the member position", src)
+		}
+	}
+}
+
 func TestParse_SpansAreByteExact(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n}\n"
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
@@ -305,7 +375,7 @@ func TestParse_DiagnosticsNameNoGrammarTypes(t *testing.T) {
 		"schema \"s\"\ntype T {\n\t(\n}\n",
 		"schema \"s\"\ntype T {\n\ta Pattern[]\n}\n",
 		"schema \"s\"\ntype T {\n\ts String[-1, 2]\n}\n",
-		"schema \"s\"\ntype T {\n\t--> rel 123\n}\n",
+		"schema \"s\"\ntype T {\n\t--> REL 123\n}\n",
 		"schema \"s\"\nimport \"a.yammm\" as one\n",
 		"schema \"s\"\ntype T {\n\tn Integer[99999999999999999999, 5]\n}\n",
 		// The Pratt parser's failures are the only ones that reach syntaxErr's
@@ -816,7 +886,7 @@ var malformedStreamSources = []string{
 	"schema \"s\"\ntype T {\n\tid String[\n}\n",
 	"schema \"s\"\ntype T extends 3 {\n\tid String primary\n}\n",
 	"schema \"s\"\ntype T {\n\t! \"m\" id ->\n}\n",
-	"schema \"s\"\ntype T {\n\tid String primary\n\t--> r B /\n}\n",
+	"schema \"s\"\ntype T {\n\tid String primary\n\t--> R B /\n}\n",
 	"\x00\xff not yammm at all \x00",
 	"",
 }

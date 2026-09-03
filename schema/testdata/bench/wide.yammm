@@ -27,8 +27,8 @@ type Organisation extends Identified {
 	headcount Integer[0, _]
 	retired_at Timestamp
 
-	--> operates (many) Facility
-	--> partners (_:many) Organisation
+	--> OPERATES (many) Facility
+	--> PARTNERS (_:many) Organisation
 
 	@@index(country, currency)
 
@@ -44,11 +44,11 @@ type Facility extends Identified {
 	utilisation Fraction required
 	open Boolean required
 
-	--> serves (many) Route {
+	--> SERVES (many) Route {
 		priority Integer required
 		since Timestamp
 	}
-	*-> zones (many) Zone
+	*-> ZONES (many) Zone
 
 	@@index(country, open)
 
@@ -74,7 +74,7 @@ type Route extends Timestamped {
 	mode Enum["air", "rail", "road", "sea"] required
 	tags List<Slug>
 
-	--> alternate (one) Route
+	--> ALTERNATE (one) Route
 
 	@@index(origin, destination)
 	@@index(mode, transit_days)
@@ -96,9 +96,9 @@ type Shipment extends Identified {
 	delivered_at Timestamp
 	signature Vector[128] @vector(cosine)
 
-	--> travels (one) Route
-	--> handled_by (one) Organisation
-	*-> parcels (many) Parcel
+	--> TRAVELS (one) Route
+	--> HANDLED_BY (one) Organisation
+	*-> PARCELS (many) Parcel
 
 	@@index(status, collected_at)
 
@@ -125,7 +125,7 @@ type Event extends Timestamped {
 	location Slug @index
 	note String[0, 500]
 
-	--> concerns (one) Shipment
+	--> CONCERNS (one) Shipment
 
 	@@index(kind, recorded_at)
 
@@ -143,7 +143,7 @@ type Tariff extends Timestamped {
 	effective_from Date required
 	effective_to Date
 
-	--> applies_to (many) Route
+	--> APPLIES_TO (many) Route
 
 	! "the minimum is not below the base rate" minimum >= 0.0
 	! "the surcharge is a fraction" surcharge >= 0.0 && surcharge <= 1.0
@@ -157,7 +157,7 @@ type Contact extends Identified {
 	phone String[0, 40]
 	preferred Boolean required
 
-	--> works_for (one) Organisation
+	--> WORKS_FOR (one) Organisation
 
 	! "a contact is reachable" email -> Len > 0
 }

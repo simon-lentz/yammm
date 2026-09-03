@@ -27,7 +27,7 @@
       "Compositions": [
         {
           "EdgeProps": [],
-          "FieldName": "my_part",
+          "FieldName": "mypart",
           "Many": false,
           "Name": "MyPart",
           "Optional": false,

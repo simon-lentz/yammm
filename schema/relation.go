@@ -36,7 +36,7 @@ func (k RelationKind) String() string {
 type Relation struct {
 	kind       RelationKind
 	name       string        // DSL name (e.g., "OWNER")
-	fieldName  string        // lower_snake(name), cached at completion
+	fieldName  string        // lower-case name, cached at completion
 	target     TypeRef       // syntactic reference
 	targetID   TypeID        // resolved identity
 	span       location.Span // source location
@@ -87,9 +87,9 @@ func (r *Relation) Name() string {
 	return r.name
 }
 
-// FieldName returns the normalized field name used in instance data.
-// This is lower_snake(Name()), e.g., "WORKS_AT" → "works_at".
-// Cached at schema completion for performance.
+// FieldName returns the field name instance data and expressions use: the
+// relation name in lower case, "WORKS_AT" → "works_at". A relation name is
+// UPPER_SNAKE, so the two spellings differ only by case. Cached at completion.
 func (r *Relation) FieldName() string {
 	return r.fieldName
 }
@@ -99,7 +99,11 @@ func (r *Relation) Target() TypeRef {
 	return r.target
 }
 
-// TargetID returns the resolved canonical type identity.
+// TargetID returns the target type's resolved identity. The declaring schema
+// sets it when it resolves relation targets, before inheritance merges, so a
+// relation read from a completed schema always carries it; it is zero only
+// while completion is in progress or for a target that never resolved, which
+// fails the load.
 func (r *Relation) TargetID() TypeID {
 	return r.targetID
 }
@@ -114,9 +118,13 @@ func (r *Relation) setTargetID(id TypeID) {
 	r.targetID = id
 }
 
-// seal prevents further mutation of the relation.
-// Called during schema completion after target resolution.
+// seal prevents further mutation of the relation. Every relation is sealed
+// exactly once, by the completer of the schema that declares it; a second
+// call is a bug and panics like the mutators it protects.
 func (r *Relation) seal() {
+	if r.sealed {
+		panic("relation: sealed twice")
+	}
 	r.sealed = true
 }
 
@@ -145,7 +153,9 @@ func (r *Relation) IsMany() bool {
 	return r.many
 }
 
-// Owner returns the name of the type that declares this relation.
+// Owner returns the declaring type's name as spelled in the declaring schema.
+// It is local to that schema: resolve it there, never against a reader's
+// type index, where the same spelling may name a different type.
 func (r *Relation) Owner() string {
 	return r.owner
 }
@@ -197,12 +207,11 @@ func (r *Relation) HasProperties() bool {
 	return len(r.properties) > 0
 }
 
-// Equal reports whether two relations are structurally equal.
-// Compares: name, kind, target TypeID (or syntactic target if unresolved),
-// multiplicities, edge properties.
-// NOT compared: span, docs (declaration site-specific).
-// Edge properties are compared by name set (order-independent).
-// Enables deduplication of identical relations from distinct ancestors.
+// Equal reports whether two relations are one definition: the same name,
+// kind, resolved target identity, multiplicities and edge properties (by name
+// set). Span and docs are declaration-site facts and are not compared. A
+// relation whose target never resolved is equal to nothing, itself included —
+// the load that left it unresolved already carries that diagnostic.
 func (r *Relation) Equal(other *Relation) bool {
 	if r == nil || other == nil {
 		return r == other
@@ -213,18 +222,8 @@ func (r *Relation) Equal(other *Relation) bool {
 	if r.kind != other.kind {
 		return false
 	}
-	// Compare targets: use semantic identity (targetID) when resolved,
-	// fall back to syntactic comparison when either is unresolved
-	if !r.targetID.IsZero() && !other.targetID.IsZero() {
-		// Both resolved: compare by semantic identity
-		if r.targetID != other.targetID {
-			return false
-		}
-	} else {
-		// At least one unresolved: fall back to syntactic comparison
-		if r.target.String() != other.target.String() {
-			return false
-		}
+	if r.targetID.IsZero() || other.targetID.IsZero() || r.targetID != other.targetID {
+		return false
 	}
 	if r.optional != other.optional || r.many != other.many {
 		return false

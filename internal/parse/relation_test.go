@@ -37,7 +37,7 @@ func TestRelation_MultiplicityTable(t *testing.T) {
 			name = "omitted"
 		}
 		t.Run(name, func(t *testing.T) {
-			src := relSource(fmt.Sprintf("--> wheels %s Wheel", tc.spelling))
+			src := relSource(fmt.Sprintf("--> WHEELS %s Wheel", tc.spelling))
 			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 			if len(issues) != 0 {
 				t.Fatalf("unexpected issues: %v", issues)
@@ -60,7 +60,7 @@ func TestRelation_MultiplicityTable(t *testing.T) {
 func TestRelation_MultiplicitySpellingsOutsideTheTableAreRejected(t *testing.T) {
 	for _, spelling := range []string{"(many:one)", "(many:many)", "(:one)", "(one:)", "(two)", "(_:two)"} {
 		t.Run(spelling, func(t *testing.T) {
-			src := relSource("--> wheels " + spelling + " Wheel")
+			src := relSource("--> WHEELS " + spelling + " Wheel")
 			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 			if len(issues) == 0 {
 				t.Errorf("%q accepted, want rejected", spelling)
@@ -74,13 +74,13 @@ func TestRelation_MultiplicitySpellingsOutsideTheTableAreRejected(t *testing.T) 
 // empty body, and no body at all.
 func TestRelation_AssociationShapes(t *testing.T) {
 	src := relSource(`/* Owns wheels. */
-	--> wheels (many) Wheel {
+	--> WHEELS (many) Wheel {
 		/* When fitted. */
 		fitted Timestamp required
 		note String
 	}
-	--> spare Wheel
-	--> tools (many) Wheel {}`)
+	--> SPARE Wheel
+	--> TOOLS (many) Wheel {}`)
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
@@ -91,7 +91,7 @@ func TestRelation_AssociationShapes(t *testing.T) {
 	}
 
 	full := rels[0]
-	if full.Kind != RelationAssociation || full.Name != "wheels" || full.Target.Name != "Wheel" {
+	if full.Kind != RelationAssociation || full.Name != "WHEELS" || full.Target.Name != "Wheel" {
 		t.Errorf("relation = %+v", full)
 	}
 	if full.Doc != "Owns wheels." {
@@ -111,7 +111,7 @@ func TestRelation_AssociationShapes(t *testing.T) {
 	}
 
 	bare := rels[1]
-	if bare.Name != "spare" {
+	if bare.Name != "SPARE" {
 		t.Errorf("bare relation = %+v, want spare", bare)
 	}
 	if len(bare.Properties) != 0 {
@@ -163,7 +163,7 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 // edge property that stopped forwarding would reach the graph model as an
 // Integer whatever the source declared.
 func TestRelation_EdgePropertyConstraintIsForwarded(t *testing.T) {
-	src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> r B { since Timestamp[\"2006\"] }\n}\n"
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> R B { since Timestamp[\"2006\"] }\n}\n"
 
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 
@@ -186,7 +186,7 @@ func TestRelation_EdgePropertyConstraintIsForwarded(t *testing.T) {
 // TestRelation_EdgePropertiesRejectPrimary pins that an edge property admits
 // 'required' and nothing else.
 func TestRelation_EdgePropertiesRejectPrimary(t *testing.T) {
-	_, issues := Parse([]byte(relSource("--> wheels Wheel {\n\t\tnote String primary\n\t}")), location.NewSourceID("s.yammm"))
+	_, issues := Parse([]byte(relSource("--> WHEELS Wheel {\n\t\tnote String primary\n\t}")), location.NewSourceID("s.yammm"))
 	if len(issues) == 0 {
 		t.Error("an edge property marked primary was accepted, want rejected")
 	}
@@ -206,11 +206,13 @@ func TestRelation_NamesRejectReservedSpellings(t *testing.T) {
 	}
 }
 
-// TestRelation_NamesAcceptEitherCase pins the other half: an any-name position
-// takes an uppercase or a lowercase word.
-func TestRelation_NamesAcceptEitherCase(t *testing.T) {
-	for _, name := range []string{"wheels", "WHEELS", "Wheels", "w2"} {
-		t.Run(name, func(t *testing.T) {
+// TestRelation_NamesAreUpperSnake pins the relation-name production: an
+// uppercase letter, then uppercase letters, digits or underscores. The
+// lower-case spelling is the field name, so any other casing is refused at
+// the name's span and the declaration still projects.
+func TestRelation_NamesAreUpperSnake(t *testing.T) {
+	for _, name := range []string{"WHEELS", "W2", "HAS_2_PARTS", "X"} {
+		t.Run("accepts_"+name, func(t *testing.T) {
 			src := relSource("--> " + name + " Wheel")
 			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 			if len(issues) != 0 {
@@ -218,6 +220,21 @@ func TestRelation_NamesAcceptEitherCase(t *testing.T) {
 			}
 			if got := file.Types[0].Relations[0].Name; got != name {
 				t.Errorf("name = %q, want %q", got, name)
+			}
+		})
+	}
+	for _, name := range []string{"wheels", "Wheels", "w2", "WHEELs"} {
+		t.Run("refuses_"+name, func(t *testing.T) {
+			src := relSource("--> " + name + " Wheel")
+			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_NAME {
+				t.Fatalf("relation name %q: got %v, want one E_INVALID_NAME", name, issues)
+			}
+			if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != name {
+				t.Errorf("diagnostic span covers %q, want the name %q", got, name)
+			}
+			if len(file.Types[0].Relations) != 1 {
+				t.Errorf("the declaration must still project; got %d relations", len(file.Types[0].Relations))
 			}
 		})
 	}
@@ -229,7 +246,7 @@ func TestRelation_NamesAcceptEitherCase(t *testing.T) {
 // a separator — evidenced by the named removal diagnostic, never a regex
 // or bare syntax error.
 func TestRelation_ReverseSeparatorIsNotARegex(t *testing.T) {
-	src := relSource("--> wheels Wheel / car\n\t--> spares Wheel / owner")
+	src := relSource("--> WHEELS Wheel / car\n\t--> SPARES Wheel / owner")
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 2 {
 		t.Fatalf("got %d issues, want one removal diagnostic per clause: %v", len(issues), issues)
@@ -246,12 +263,12 @@ func TestRelation_ReverseSeparatorIsNotARegex(t *testing.T) {
 
 	// Two reverse separators on ONE line is where the regex rule wins and
 	// swallows everything between the slashes.
-	oneLine := relSource("--> wheels Wheel / car\t--> spares Wheel / owner")
+	oneLine := relSource("--> WHEELS Wheel / car\t--> SPARES Wheel / owner")
 	_, issues = Parse([]byte(oneLine), location.NewSourceID("s.yammm"))
 	if len(issues) == 0 {
 		t.Fatal("two reverse separators on one line parsed cleanly, want the regex reading")
 	}
-	swallowed := "/ car\t--> spares Wheel /"
+	swallowed := "/ car\t--> SPARES Wheel /"
 	if got := oneLine[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != swallowed {
 		t.Errorf("first issue covers %q, want the swallowed regex %q", got, swallowed)
 	}
@@ -260,7 +277,7 @@ func TestRelation_ReverseSeparatorIsNotARegex(t *testing.T) {
 // TestRelation_RecoveryTreatsArrowsAsMemberStarts pins that a broken member
 // before a relation does not swallow it.
 func TestRelation_RecoveryTreatsArrowsAsMemberStarts(t *testing.T) {
-	src := relSource("broken @\n\t--> wheels Wheel\n\t*-> PARTS Wheel")
+	src := relSource("broken @\n\t--> WHEELS Wheel\n\t*-> PARTS Wheel")
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX {
 		t.Fatalf("got %v, want one E_SYNTAX", issues)
@@ -269,7 +286,7 @@ func TestRelation_RecoveryTreatsArrowsAsMemberStarts(t *testing.T) {
 	if len(rels) != 2 {
 		t.Fatalf("got %d relations, want 2 — recovery must stop at an arrow", len(rels))
 	}
-	if rels[0].Name != "wheels" || rels[1].Name != "PARTS" {
+	if rels[0].Name != "WHEELS" || rels[1].Name != "PARTS" {
 		t.Errorf("relations = %q, %q", rels[0].Name, rels[1].Name)
 	}
 }
@@ -277,14 +294,14 @@ func TestRelation_RecoveryTreatsArrowsAsMemberStarts(t *testing.T) {
 // TestRelation_BrokenRelationCostsOnlyItself pins per-member recovery inside a
 // body that mixes relations and properties.
 func TestRelation_BrokenRelationCostsOnlyItself(t *testing.T) {
-	src := relSource("--> \n\t--> wheels Wheel\n\tname String")
+	src := relSource("--> \n\t--> WHEELS Wheel\n\tname String")
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 1 {
 		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
 	}
 	ty := file.Types[0]
-	if len(ty.Relations) != 1 || ty.Relations[0].Name != "wheels" {
-		t.Errorf("relations = %+v, want one named wheels", ty.Relations)
+	if len(ty.Relations) != 1 || ty.Relations[0].Name != "WHEELS" {
+		t.Errorf("relations = %+v, want one named WHEELS", ty.Relations)
 	}
 	if len(ty.Properties) != 2 || ty.Properties[1].Name != "name" {
 		t.Errorf("properties = %+v, want id and name", ty.Properties)
@@ -293,17 +310,17 @@ func TestRelation_BrokenRelationCostsOnlyItself(t *testing.T) {
 
 // TestRelation_SpansCoverTheWholeDeclaration pins the extents a consumer reads.
 func TestRelation_SpansCoverTheWholeDeclaration(t *testing.T) {
-	src := relSource("--> wheels (many) Wheel")
+	src := relSource("--> WHEELS (many) Wheel")
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
 	rel := file.Types[0].Relations[0]
-	if got := src[rel.Span.Start.Byte:rel.Span.End.Byte]; got != "--> wheels (many) Wheel" {
+	if got := src[rel.Span.Start.Byte:rel.Span.End.Byte]; got != "--> WHEELS (many) Wheel" {
 		t.Errorf("relation span covers %q", got)
 	}
-	if got := src[rel.NameSpan.Start.Byte:rel.NameSpan.End.Byte]; got != "wheels" {
-		t.Errorf("name span covers %q, want wheels", got)
+	if got := src[rel.NameSpan.Start.Byte:rel.NameSpan.End.Byte]; got != "WHEELS" {
+		t.Errorf("name span covers %q, want WHEELS", got)
 	}
 }
 
@@ -315,11 +332,11 @@ func TestRelation_ReverseClauseIsRejected(t *testing.T) {
 		name, member string
 		wantRemoved  bool
 	}{
-		{"bare name", "--> r Wheel /back", true},
-		{"name with multiplicity", "--> r Wheel /back (one:many)", true},
-		{"refused multiplicity still names the removal", "--> r Wheel /back (many:one)", true},
+		{"bare name", "--> R Wheel /back", true},
+		{"name with multiplicity", "--> R Wheel /back (one:many)", true},
+		{"refused multiplicity still names the removal", "--> R Wheel /back (many:one)", true},
 		{"composition clause", "*-> c Wheel /back (one)", true},
-		{"no clause at all", "--> r Wheel", false},
+		{"no clause at all", "--> R Wheel", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := relSource(tc.member)

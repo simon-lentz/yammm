@@ -575,7 +575,7 @@ type Target { id String primary }
 
 type Owner {
 	id String primary
-	--> rel Target
+	--> REL Target
 }`
 	ctx := t.Context()
 
@@ -603,7 +603,7 @@ part type Component { id String }
 
 type Container {
 	id String primary
-	*-> parts Component
+	*-> PARTS Component
 }`
 	ctx := t.Context()
 
@@ -636,7 +636,7 @@ func TestLoad_CrossSchemaRelationTargetID(t *testing.T) {
 	mainPath := filepath.Join(tmpDir, "main.yammm")
 	mainContent := `schema "main"
 import "./target" as t
-type Owner { id String primary --> rel t.Entity }`
+type Owner { id String primary --> REL t.Entity }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
@@ -676,7 +676,7 @@ func TestLoad_CrossSchemaCompositionTargetID(t *testing.T) {
 	mainPath := filepath.Join(tmpDir, "main.yammm")
 	mainContent := `schema "main"
 import "./component" as c
-type Container { id String primary *-> widgets c.Widget }`
+type Container { id String primary *-> WIDGETS c.Widget }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
@@ -713,7 +713,7 @@ func TestString_Contract19_SchemaNilWhenErrorsExist(t *testing.T) {
 	source := `schema "test"
 type Person {
 	name String
-	--> friend NonExistentType
+	--> FRIEND NonExistentType
 }`
 	ctx := t.Context()
 
@@ -881,8 +881,8 @@ import "./b" as b
 import "./c" as c
 type Connector {
 	id String primary
-	--> toB b.Entity
-	--> toC c.Other
+	--> TO_B b.Entity
+	--> TO_C c.Other
 }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
@@ -1006,8 +1006,8 @@ import "./b" as b
 import "./c" as c
 type AType {
 	id String primary
-	--> toB b.BType
-	--> toC c.CType
+	--> TO_B b.BType
+	--> TO_C c.CType
 }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
@@ -1851,11 +1851,11 @@ func TestLoad_DefaultFreshRegistryPerCall(t *testing.T) {
 }
 
 func TestLoad_SharedRegistry_TopLevelReparse(t *testing.T) {
-	// Document the intentional top-level asymmetry. Load(A) twice against the
-	// same Registry returns two distinct *Schema pointers, but the registry
-	// retains the first pointer. Pins this so future refactors don't quietly
-	// flip the short-circuit onto the top-level parse path (which is out of
-	// scope for PR-7 per the spec).
+	// One object per SourceID for everyone reading a registry: Load(A) twice
+	// against one Registry compiles A twice, Register keeps the first, and
+	// the second Load returns that same registered object rather than its
+	// own discarded compile — exactly as an import re-loaded by two loads
+	// does.
 	dir := t.TempDir()
 	aPath := filepath.Join(dir, "a.yammm")
 	require.NoError(t, os.WriteFile(aPath,
@@ -1876,8 +1876,8 @@ func TestLoad_SharedRegistry_TopLevelReparse(t *testing.T) {
 		"second Load must succeed — Register hits the idempotence path, not the error path: %v",
 		res2)
 
-	assert.NotSame(t, s1, s2,
-		"top-level asymmetry: Load returns a freshly-compiled schema per call even under shared Registry")
+	assert.Same(t, s1, s2,
+		"a root re-loaded against a registry that holds it returns the registered object")
 
 	// The registry retained the first pointer (idempotent Register is a no-op).
 	regStored, ok := reg.LookupBySourceID(s1.SourceID())

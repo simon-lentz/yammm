@@ -233,7 +233,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 		),
 	}
 	edges := map[string]*instance.ValidEdgeData{
-		"entity": instance.NewValidEdgeData(targets),
+		"ENTITY": instance.NewValidEdgeData(targets),
 	}
 	user := instance.NewValidInstance(
 		"User",
@@ -264,7 +264,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 	if edge.Target().TypeName() != "c.Entity" {
 		t.Errorf("Edge target should be c.Entity, got %s", edge.Target().TypeName())
 	}
-	if edge.Relation() != "entity" {
+	if edge.Relation() != "ENTITY" {
 		t.Errorf("Edge relation should be entity, got %s", edge.Relation())
 	}
 }

@@ -14,20 +14,21 @@ import (
 // Binding powers for the invariant-expression grammar, tightest last. Three
 // of them contradict a C-family reading; see the package doc.
 const (
-	precIf     = 7
-	precOr     = 8
-	precAnd    = 9
-	precEq     = 10
-	precMatch  = 11
-	precIn     = 12
-	precCmp    = 13
-	precAdd    = 14
-	precMul    = 15
-	precNot    = 16
-	precPeriod = 17
-	precFcall  = 18
-	precAt     = 19
-	precUminus = 20
+	precIf    = 7
+	precOr    = 8
+	precAnd   = 9
+	precEq    = 10
+	precMatch = 11
+	precIn    = 12
+	precCmp   = 13
+	precAdd   = 14
+	precMul   = 15
+	precNot   = 16
+	// Indexing, pipeline calls and property access are one postfix level and
+	// chain left to right: "$self.tags[0]" indexes the property, "$i.name ->
+	// Len" pipes it.
+	precPostfix = 17
+	precUminus  = 18
 )
 
 // binaryPrec maps operator token values to binding power for the plain
@@ -102,7 +103,7 @@ func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
 			return left, nil
 		}
 		switch {
-		case t.Type == p.tok.lbrack && precAt >= minPrec:
+		case t.Type == p.tok.lbrack && precPostfix >= minPrec:
 			p.next()
 			args, err := p.exprListUntil(p.tok.rbrack, false)
 			if err != nil {
@@ -110,7 +111,7 @@ func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
 			}
 			left = append(expr.SExpr{expr.Op("@"), left}, args...)
 
-		case t.Type == p.tok.arrow && precFcall >= minPrec:
+		case t.Type == p.tok.arrow && precPostfix >= minPrec:
 			p.next()
 			name := p.lx.Peek()
 			if !p.isPlainWord(name) {
@@ -123,20 +124,14 @@ func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
 			}
 			left = node
 
-		case t.Type == p.tok.period && precPeriod >= minPrec:
+		case t.Type == p.tok.period && precPostfix >= minPrec:
 			p.next()
-			right, err := p.parse(precPeriod + 1)
-			if err != nil {
-				return nil, err
+			name := p.lx.Peek()
+			if !p.isPlainWord(name) {
+				return nil, p.errf(name, "expected a member name after '.'")
 			}
-			// Collapse so "a.b" is a two-element access, not an access whose
-			// right operand is itself a lookup.
-			if right.Op() == "p" {
-				if ch := right.Children(); len(ch) > 0 {
-					right = ch[0]
-				}
-			}
-			left = expr.SExpr{expr.Op("."), left, right}
+			p.next()
+			left = expr.SExpr{expr.Op("."), left, expr.NewLiteral(name.Value)}
 
 		case t.Type == p.tok.qmark && precIf >= minPrec:
 			p.next()
@@ -426,7 +421,8 @@ func (p *exprParser) expect(want lexer.TokenType, what string) error {
 }
 
 // isPlainWord reports whether t can stand as an ordinary identifier — the
-// function-name position after '->' is the caller.
+// function-name position after '->' and the member position after '.' are the
+// callers.
 func (p *exprParser) isPlainWord(t *lexer.Token) bool {
 	if t.Type == p.tok.ucWord {
 		return !datatypeKeywords[t.Value]

@@ -110,7 +110,7 @@ func TestBuilder_Relation(t *testing.T) {
 		WithName("test").
 		AddType("Person").
 		WithPrimaryKey("name", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("", "Company", location.Span{}), false, false).
+		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), false, false).
 		Done().
 		AddType("Company").
 		WithPrimaryKey("title", schema.NewStringConstraint()).
@@ -126,7 +126,7 @@ func TestBuilder_Relation(t *testing.T) {
 	// Relations are split into associations and compositions
 	rels := typ.AssociationsSlice()
 	require.Len(t, rels, 1)
-	assert.Equal(t, "employer", rels[0].Name())
+	assert.Equal(t, "EMPLOYER", rels[0].Name())
 }
 
 func TestBuilder_AbstractType(t *testing.T) {
@@ -284,7 +284,7 @@ func TestBuilder_Composition(t *testing.T) {
 		WithName("test").
 		AddType("Car").
 		WithPrimaryKey("model", schema.NewStringConstraint()).
-		WithComposition("wheels", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
+		WithComposition("WHEELS", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
 		Done().
 		AddType("Wheel").
 		AsPart().
@@ -300,7 +300,7 @@ func TestBuilder_Composition(t *testing.T) {
 
 	rels := car.CompositionsSlice()
 	require.Len(t, rels, 1)
-	assert.Equal(t, "wheels", rels[0].Name())
+	assert.Equal(t, "WHEELS", rels[0].Name())
 	assert.Equal(t, schema.RelationComposition, rels[0].Kind())
 }
 
@@ -544,7 +544,7 @@ func TestBuilder_GrammarValidNamesBuild(t *testing.T) {
 		AddType("Foo_Bar").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("first_name", schema.NewStringConstraint()).
-		WithRelation("wheels", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
+		WithRelation("WHEELS", schema.NewTypeRef("", "Wheel", location.Span{}), false, true).
 		WithRelation("WHEELS_2", schema.NewTypeRef("", "Wheel", location.Span{}), true, true).
 		Done().
 		AddType("Wheel").
@@ -779,7 +779,7 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 		AddImport("base", "base").
 		AddType("Person").
 		WithPrimaryKey("name", schema.NewStringConstraint()).
-		WithRelation("employer", schema.NewTypeRef("base", "Organization", location.Span{}), true, false).
+		WithRelation("EMPLOYER", schema.NewTypeRef("base", "Organization", location.Span{}), true, false).
 		Done().
 		Build()
 
@@ -792,7 +792,7 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 
 	var employerRel *schema.Relation
 	for rel := range personType.Associations() {
-		if rel.Name() == "employer" {
+		if rel.Name() == "EMPLOYER" {
 			employerRel = rel
 			break
 		}

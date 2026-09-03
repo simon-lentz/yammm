@@ -1,0 +1,213 @@
+{
+  "name": "\"expr_postfix\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "types": [
+    {
+      "name": "Line",
+      "name_span": {
+        "s": 33,
+        "e": 37
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 44,
+              "e": 50
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 41,
+            "e": 58
+          }
+        },
+        {
+          "name": "sku",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 64,
+              "e": 70
+            }
+          },
+          "span": {
+            "s": 60,
+            "e": 70
+          }
+        },
+        {
+          "name": "qty",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 76,
+              "e": 83
+            }
+          },
+          "span": {
+            "s": 72,
+            "e": 83
+          }
+        }
+      ],
+      "span": {
+        "s": 23,
+        "e": 85
+      }
+    },
+    {
+      "name": "Order",
+      "name_span": {
+        "s": 92,
+        "e": 97
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 104,
+              "e": 110
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 101,
+            "e": 118
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 125,
+              "e": 131
+            }
+          },
+          "span": {
+            "s": 120,
+            "e": 131
+          }
+        },
+        {
+          "name": "tags",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 143,
+                "e": 149
+              }
+            },
+            "span": {
+              "s": 138,
+              "e": 150
+            }
+          },
+          "span": {
+            "s": 133,
+            "e": 150
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "LINES",
+          "name_span": {
+            "s": 156,
+            "e": 161
+          },
+          "target": {
+            "name": "Line",
+            "span": {
+              "s": 173,
+              "e": 177
+            }
+          },
+          "many": true,
+          "span": {
+            "s": 152,
+            "e": 177
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"member_then_index\"",
+          "expr": "(== (@ (p \"tags\") 0) (@ (. ($ \"self\") \"tags\") 0))",
+          "expr_span": {
+            "s": 201,
+            "e": 225
+          },
+          "span": {
+            "s": 179,
+            "e": 225
+          }
+        },
+        {
+          "msg": "\"member_then_pipeline\"",
+          "expr": "(\u003e (Len (. ($ \"self\") \"name\") (args ) (params ) nil) 0)",
+          "expr_span": {
+            "s": 252,
+            "e": 273
+          },
+          "span": {
+            "s": 227,
+            "e": 273
+          }
+        },
+        {
+          "msg": "\"index_then_member\"",
+          "expr": "(\u003e (. (@ (p \"LINES\") 0) \"qty\") 0)",
+          "expr_span": {
+            "s": 297,
+            "e": 313
+          },
+          "span": {
+            "s": 275,
+            "e": 313
+          }
+        },
+        {
+          "msg": "\"lambda_member_then_pipeline\"",
+          "expr": "(All (p \"LINES\") (args ) (params l) (\u003e (Len (. ($ \"l\") \"sku\") (args ) (params ) nil) 0))",
+          "expr_span": {
+            "s": 347,
+            "e": 386
+          },
+          "span": {
+            "s": 315,
+            "e": 386
+          }
+        },
+        {
+          "msg": "\"pipeline_then_member\"",
+          "expr": "(\u003e (. (First (p \"LINES\") (args ) (params ) nil) \"qty\") 0)",
+          "expr_span": {
+            "s": 413,
+            "e": 435
+          },
+          "span": {
+            "s": 388,
+            "e": 435
+          }
+        }
+      ],
+      "span": {
+        "s": 87,
+        "e": 437
+      }
+    }
+  ]
+}

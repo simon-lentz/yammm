@@ -650,44 +650,25 @@ func TestEvaluator_BuiltinErrors(t *testing.T) {
 	})
 }
 
-// TestMethodStyleCallValidation verifies that method-style calls enforce the
-// same validation constraints as function-style calls. Regression: method-style
-// calls were bypassing validation.
-func TestMethodStyleCallValidation(t *testing.T) {
-	t.Run("method_style_no_args_requires_body", func(t *testing.T) {
-		// xs.map (no body) errors because map requires a body.
-		evalErr(t, sx(".", list(int64(1), int64(2)), lit("map")), "requires a lambda expression")
+// TestEvaluator_MemberAccess_NameOnly pins that the member position holds a
+// name and nothing else. A builtin's name there is an ordinary member, an
+// S-expression there is an error, and a third operand is an error — the
+// pipeline is the only call form.
+func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
+	t.Run("builtin_name_is_a_plain_member", func(t *testing.T) {
+		evalEq(t, sx(".", lit(map[string]any{"len": int64(7)}), lit("len")), int64(7))
 	})
 
-	t.Run("method_style_with_body_requires_body", func(t *testing.T) {
-		// xs.filter { true } works — filter requires a body.
-		evalEq(t,
-			sx(".", list(int64(1), int64(2)), lit("filter"), lit(true)),
-			[]any{int64(1), int64(2)})
+	t.Run("builtin_name_on_a_list_is_not_a_call", func(t *testing.T) {
+		evalErr(t, sx(".", list(int64(1), int64(2)), lit("len")), "cannot access member")
 	})
 
-	t.Run("method_style_unexpected_body", func(t *testing.T) {
-		// xs.len { true } errors because len does not accept a body.
-		evalErr(t, sx(".", list(int64(1)), lit("len"), lit(true)), "does not accept a lambda expression")
+	t.Run("sexpr_member_errors", func(t *testing.T) {
+		evalErr(t, sx(".", lit(map[string]any{"name": "Alice"}), sx("p", lit("name"))), "must be a string literal")
 	})
 
-	t.Run("method_style_compact_unexpected_body", func(t *testing.T) {
-		evalErr(t,
-			sx(".", list(int64(1), nil), lit("compact"), lit(true)),
-			"does not accept a lambda expression")
-	})
-
-	t.Run("method_style_too_many_params", func(t *testing.T) {
-		// xs.map(|a, b, c| ...) errors because map only accepts 1 param.
-		e := sx(".", list(int64(1)), lit("map"), lit([]string{"a", "b", "c"}), lit(int64(1)))
-		evalErr(t, e, "accepts at most")
-	})
-
-	t.Run("method_style_reduce_too_many_params", func(t *testing.T) {
-		// xs.reduce(|a, b, c| ...) errors because reduce only accepts 2 params.
-		body := sx("+", sx("$", lit("acc")), sx("$", lit("val")))
-		e := sx(".", list(int64(1), int64(2)), lit("reduce"), lit([]string{"acc", "val", "extra"}), body)
-		evalErr(t, e, "accepts at most")
+	t.Run("third_operand_errors", func(t *testing.T) {
+		evalErr(t, sx(".", list(int64(1)), lit("len"), lit(true)), "exactly 2 operands")
 	})
 }
 
@@ -696,33 +677,33 @@ func TestMethodStyleCallValidation(t *testing.T) {
 // forms, plus the unsupported-type error.
 func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 	t.Run("typed_slice_int", func(t *testing.T) {
-		evalEq(t, sx(".", lit([]int{1, 2, 3, 4, 5}), lit("len")), int64(5))
+		evalEq(t, sx("len", lit([]int{1, 2, 3, 4, 5})), int64(5))
 	})
 
 	t.Run("typed_slice_string", func(t *testing.T) {
-		evalEq(t, sx(".", lit([]string{"a", "b", "c"}), lit("len")), int64(3))
+		evalEq(t, sx("len", lit([]string{"a", "b", "c"})), int64(3))
 	})
 
 	t.Run("nil_slice_returns_zero", func(t *testing.T) {
 		var nilSlice []int
-		evalEq(t, sx(".", lit(nilSlice), lit("len")), int64(0))
+		evalEq(t, sx("len", lit(nilSlice)), int64(0))
 	})
 
 	t.Run("array_type", func(t *testing.T) {
-		evalEq(t, sx(".", lit([4]int{1, 2, 3, 4}), lit("len")), int64(4))
+		evalEq(t, sx("len", lit([4]int{1, 2, 3, 4})), int64(4))
 	})
 
 	t.Run("map_type", func(t *testing.T) {
-		evalEq(t, sx(".", lit(map[string]int{"a": 1, "b": 2}), lit("len")), int64(2))
+		evalEq(t, sx("len", lit(map[string]int{"a": 1, "b": 2})), int64(2))
 	})
 
 	t.Run("nil_map_returns_zero", func(t *testing.T) {
 		var nilMap map[string]int
-		evalEq(t, sx(".", lit(nilMap), lit("len")), int64(0))
+		evalEq(t, sx("len", lit(nilMap)), int64(0))
 	})
 
 	t.Run("unsupported_type_errors", func(t *testing.T) {
-		evalErr(t, sx(".", lit(struct{ X int }{X: 1}), lit("len")), "unsupported")
+		evalErr(t, sx("len", lit(struct{ X int }{X: 1})), "unsupported")
 	})
 }
 
@@ -730,15 +711,15 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 // consume sequences must accept typed slices, not just []any.
 func TestEvaluator_SliceConversion(t *testing.T) {
 	t.Run("sum_typed_slice_int", func(t *testing.T) {
-		evalEq(t, sx(".", lit([]int{1, 2, 3, 4, 5}), lit("sum")), int64(15))
+		evalEq(t, sx("sum", lit([]int{1, 2, 3, 4, 5})), int64(15))
 	})
 
 	t.Run("sum_typed_slice_float", func(t *testing.T) {
-		evalEq(t, sx(".", lit([]float64{1.5, 2.5, 3.0}), lit("sum")), 7.0)
+		evalEq(t, sx("sum", lit([]float64{1.5, 2.5, 3.0})), 7.0)
 	})
 
 	t.Run("non_slice_errors", func(t *testing.T) {
-		evalErr(t, sx(".", lit(int64(42)), lit("sum")), "slice or array")
+		evalErr(t, sx("sum", lit(int64(42))), "slice or array")
 	})
 }
 

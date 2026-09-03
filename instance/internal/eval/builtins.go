@@ -31,14 +31,11 @@ type builtinEvaluator interface {
 // ev allows evaluating sub-expressions.
 type builtinFunc func(ev builtinEvaluator, lhs any, args []any, params []string, body expr.Expression, scope Scope) (any, error)
 
-// builtinDef describes a builtin function.
+// builtinDef pairs a builtin's implementation with the spec the language
+// defines for it in [expr.BuiltinSpec]; the arity rules live only there.
 type builtinDef struct {
-	name       string
-	minArgs    int
-	maxArgs    int
-	maxParams  int
-	acceptBody bool
-	fn         builtinFunc
+	spec expr.BuiltinSpec
+	fn   builtinFunc
 }
 
 // builtinRegistry holds builtin function definitions.
@@ -50,72 +47,69 @@ func init() {
 
 func registerBuiltins() {
 	// Collection builtins
-	register("Reduce", 0, 1, 2, true, builtinReduce)
-	register("Map", 0, 0, 1, true, builtinMap)
-	register("Filter", 0, 0, 1, true, builtinFilter)
-	register("Count", 0, 0, 1, true, builtinCount)
-	register("All", 0, 0, 1, true, builtinAll)
-	register("Any", 0, 0, 1, true, builtinAny)
-	register("AllOrNone", 0, 0, 1, true, builtinAllOrNone)
-	register("Compact", 0, 0, 0, false, builtinCompact)
-	register("Unique", 0, 0, 0, false, builtinUnique)
-	register("Len", 0, 0, 0, false, builtinLen)
-	register("Sum", 0, 0, 0, false, builtinSum)
-	register("First", 0, 0, 0, false, builtinFirst)
-	register("Last", 0, 0, 0, false, builtinLast)
-	register("Sort", 0, 0, 0, false, builtinSort)
-	register("Reverse", 0, 0, 0, false, builtinReverse)
-	register("Flatten", 0, 0, 0, false, builtinFlatten)
-	register("Contains", 1, 1, 0, false, builtinContains)
+	register("Reduce", builtinReduce)
+	register("Map", builtinMap)
+	register("Filter", builtinFilter)
+	register("Count", builtinCount)
+	register("All", builtinAll)
+	register("Any", builtinAny)
+	register("AllOrNone", builtinAllOrNone)
+	register("Compact", builtinCompact)
+	register("Unique", builtinUnique)
+	register("Len", builtinLen)
+	register("Sum", builtinSum)
+	register("First", builtinFirst)
+	register("Last", builtinLast)
+	register("Sort", builtinSort)
+	register("Reverse", builtinReverse)
+	register("Flatten", builtinFlatten)
+	register("Contains", builtinContains)
 
 	// Control flow builtins
-	register("Then", 0, 0, 1, true, builtinThen)
-	register("Lest", 0, 0, 1, true, builtinLest)
-	register("With", 0, 0, 1, true, builtinWith)
+	register("Then", builtinThen)
+	register("Lest", builtinLest)
+	register("With", builtinWith)
 
 	// Numeric builtins
-	register("Abs", 0, 0, 0, false, builtinAbs)
-	register("Floor", 0, 0, 0, false, builtinFloor)
-	register("Ceil", 0, 0, 0, false, builtinCeil)
-	register("Round", 0, 0, 0, false, builtinRound)
-	register("Min", 0, 1, 0, false, builtinMin)
-	register("Max", 0, 1, 0, false, builtinMax)
-	register("Compare", 1, 1, 0, false, builtinCompare)
+	register("Abs", builtinAbs)
+	register("Floor", builtinFloor)
+	register("Ceil", builtinCeil)
+	register("Round", builtinRound)
+	register("Min", builtinMin)
+	register("Max", builtinMax)
+	register("Compare", builtinCompare)
 
 	// String builtins
-	register("Upper", 0, 0, 0, false, builtinUpper)
-	register("Lower", 0, 0, 0, false, builtinLower)
-	register("Trim", 0, 0, 0, false, builtinTrim)
-	register("TrimPrefix", 1, 1, 0, false, builtinTrimPrefix)
-	register("TrimSuffix", 1, 1, 0, false, builtinTrimSuffix)
-	register("Split", 1, 1, 0, false, builtinSplit)
-	register("Join", 1, 1, 0, false, builtinJoin)
-	register("StartsWith", 1, 1, 0, false, builtinStartsWith)
-	register("EndsWith", 1, 1, 0, false, builtinEndsWith)
-	register("Replace", 2, 2, 0, false, builtinReplace)
-	register("Substring", 1, 2, 0, false, builtinSubstring)
+	register("Upper", builtinUpper)
+	register("Lower", builtinLower)
+	register("Trim", builtinTrim)
+	register("TrimPrefix", builtinTrimPrefix)
+	register("TrimSuffix", builtinTrimSuffix)
+	register("Split", builtinSplit)
+	register("Join", builtinJoin)
+	register("StartsWith", builtinStartsWith)
+	register("EndsWith", builtinEndsWith)
+	register("Replace", builtinReplace)
+	register("Substring", builtinSubstring)
 
 	// Pattern matching
-	register("Match", 1, 1, 0, false, builtinMatch)
+	register("Match", builtinMatch)
 
 	// Utility builtins
-	register("TypeOf", 0, 0, 0, false, builtinTypeOf)
-	register("IsNil", 0, 0, 0, false, builtinIsNil)
-	register("Default", 1, 1, 0, false, builtinDefault)
-	register("Coalesce", 1, -1, 0, false, builtinCoalesce) // -1 means unlimited args
+	register("TypeOf", builtinTypeOf)
+	register("IsNil", builtinIsNil)
+	register("Default", builtinDefault)
+	register("Coalesce", builtinCoalesce)
 }
 
-func register(name string, minArgs, maxArgs, maxParams int, acceptBody bool, fn builtinFunc) {
-	// Store with lowercase key since evaluator normalizes to lowercase for lookup.
-	// Display name (name field) keeps original casing for error messages/docs.
-	builtinRegistry[strings.ToLower(name)] = builtinDef{
-		name:       name,
-		minArgs:    minArgs,
-		maxArgs:    maxArgs,
-		maxParams:  maxParams,
-		acceptBody: acceptBody,
-		fn:         fn,
+// register binds an implementation to the catalogue entry of the same name.
+// A name the catalogue does not define is a programming error caught at init.
+func register(name string, fn builtinFunc) {
+	spec, ok := expr.LookupBuiltin(name)
+	if !ok {
+		panic("eval: builtin " + name + " is not in the expr catalogue")
 	}
+	builtinRegistry[strings.ToLower(name)] = builtinDef{spec: spec, fn: fn}
 }
 
 // lookupBuiltin returns the builtin definition if it exists.
