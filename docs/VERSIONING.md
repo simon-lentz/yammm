@@ -851,11 +851,11 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 ## Unreleased
 
-*Two blocks: unit 5's fix pass, which is NOT yet merged, and unit 4's, which is merged to `main`. Each says which.*
+*Two blocks: unit 5's pass-A fix pass, merged to `main` as `1dfec2d` (PR #104, 2026-09-04) with the unit NOT closed — pass B, its fix pass and the clause-5 round will add to it — and unit 4's, merged as `fabed40`. Each says which.*
 
-### Condition-1 unit 5 — `instance/` and `internal/value/`, not yet merged
+### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); the unit is not closed
 
-*Written in the fix pass that landed the behaviour, not at the tag (A-227). The declaration delta below is enumerated from the diff; `gorelease -base=v0.20.0` at the tag re-measures it, and the number it reports replaces this sentence.*
+*Written in the fix pass that landed the behaviour, not at the tag (A-227). The declaration delta below was enumerated from the diff and confirmed by `gorelease -base=v0.20.0` at `e8547b6`, the tree `main`'s `1dfec2d` holds: across both units' cargo, **three incompatible changes and thirty-eight additions**, suggested `v0.21.0` — this unit's share one removal and ten additions, matching the list below symbol for symbol. The tag-time run re-confirms it.*
 
 Minor tier, under the pre-1.0 subtractive rules. Fourteen repairs from the unit's round (A-237…A-250), every one a model change: one member index and one fold rule for every input key, one path rule, one type-identity rendering, one meaning per diagnostic code, one stored-form rule, and one composed-nesting bound shared with the wire.
 
