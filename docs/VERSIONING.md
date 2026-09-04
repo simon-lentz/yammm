@@ -851,11 +851,53 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 ## Unreleased
 
-*Two blocks: unit 5's pass-A fix pass, merged to `main` as `1dfec2d` (PR #104, 2026-09-04) with the unit NOT closed — pass B, its fix pass and the clause-5 round will add to it — and unit 4's, merged as `fabed40`. Each says which.*
+*Two blocks: unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass in the working tree, the unit NOT closed; the clause-5 round will add to it — and unit 4's, merged as `fabed40`. Each says which.*
 
-### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); the unit is not closed
+### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass in the working tree; the unit is not closed
 
-*Written in the fix pass that landed the behaviour, not at the tag (A-227). The declaration delta below was enumerated from the diff and confirmed by `gorelease -base=v0.20.0` at `e8547b6`, the tree `main`'s `1dfec2d` holds: across both units' cargo, **three incompatible changes and thirty-eight additions**, suggested `v0.21.0` — this unit's share one removal and ten additions, matching the list below symbol for symbol. The tag-time run re-confirms it.*
+*Written in the fix pass that landed the behaviour, not at the tag (A-227). Pass A's declaration delta was enumerated from the diff and confirmed by `gorelease -base=v0.20.0` at `e8547b6`: across both units' cargo, **three incompatible changes and thirty-eight additions**, suggested `v0.21.0` — this unit's share one removal and ten additions, matching the list below symbol for symbol. **Pass B's block follows pass A's; its declaration delta is enumerated from the diff and the tag-time `gorelease` run re-measures both.***
+
+#### Pass B — the evaluator, the value rule and the static checker (A-253…A-261)
+
+Nine repairs from the unit's second reading pass, every one a model change, ratified in one sitting and delivered under TDD: one equality rule beside the total order, receiver kinds that say what the evaluator accepts, exact integer arithmetic, one representation for an absent lambda body, a ternary that keeps the subkind its branches agree on, one wrap per invariant scope, and the deletions and prose those retire.
+
+**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0` — three ways. Its unit-lane suite against this working tree fails **exactly the four top-level tests unit 4's hash re-key fails** (`TestGeneratedPackagesMatchSchemas`, `TestSchemaIdentityIsEmbedded`, `TestWireGolden_DateShape`, `TestWireGolden_TimestampShapes`, in the same six packages), byte-identical to the set measured at `1dfec2d`; the suite at the pin is green. **Its six schemas load clean under this tree's checker with zero diagnostics.** Its thirty invariants contain no integer arithmetic, no `in`, no composition and no lambda parameter — the six `+` are String concatenation over `required` operands — so no repair below changes what any of them evaluates to.
+
+##### Breaking — the DSL and its evaluation
+
+- **Equality is structural and never errors.** `==` and `!=` on two instances compare them member by member, recursively; `in`, `Contains` and `Unique` use the same rule. `LINES[0] == LINES[1]` drew `E_EVAL_ERROR` where `docs/SPEC.md` says equality never errors; `LINES -> Contains(LINES[0])` was false and `Unique` kept two identical children. `1 == 1.0` and `NaN == NaN` are unchanged. The ordered comparisons still refuse an instance.
+- **Integer arithmetic is exact within `int64`; a result outside it is an evaluation error.** `+`, `-`, `*`, `/` (the minimum divided by `-1`), unary `-` of the minimum, `Sum` and `Abs` wrapped silently — `n + 1 > 0` was *false* at `MaxInt64`, `n -> Abs >= 0` *false* at `MinInt64` — and now draw `E_EVAL_ERROR` as division and modulo by zero do. Float arithmetic is unchanged.
+- **`+` on a `nil` operand is an evaluation error**, as `-`, `*` and `/` already were. `nil + nil` evaluated to an empty list and `nil + [1]` to `[1]`, through the collection builtins' nil-is-empty rule; an absent list under `+` is written `(xs -> Default([])) + [1]`.
+- **A lambda body that is the nil literal is a body.** `x -> Then |$v| { nil }` and `{ _ }` were refused at load as *"Then requires a lambda"*: the parser emitted one node for an absent body and for a written nil one. An absent body is now a nil `Expression`. **This moves `StructuralHash` for every schema carrying a body-less pipeline call** (`id -> Len`, `x -> IsNil`), measured: such a schema hashes differently at `1dfec2d` and here, while one whose calls all carry a body, or none, hashes the same. **The change rides `StructuralHashVersion` 4, which is unreleased** — the last tag carries 3 — so the consumer regenerates once for `v0.21.0` either way.
+
+##### Breaking — the static invariant checker, `schema`
+
+- **A receiver the builtin refuses on every input is refused at load** (`E_INVALID_INVARIANT`), where the pipeline loaded clean and failed every instance with `E_EVAL_ERROR`: a number or boolean into a string builtin (`age -> Upper`), a string into a numeric one (`name -> Abs`), a number into `Len`, `Min` or `Max` without an argument, a list of numbers into `Join`, a list of strings into `Sum`, an instance into `Min`/`Max` with an argument, and a scalar on the right of `in`. `Compare` alone keeps any scalar, as it ranks by strata.
+- **`+` types as what its operands are** — a list of two lists, a string of two strings, a number of two numbers — and **refuses any other pairing** at load. `([1] + [2]) -> First` was refused as *"First takes a list"* although SPEC defines `[1] + [2]` as `[1, 2]`; `LINES[0] + 1` loaded clean. A list literal keeps its elements' shared subkind, and a `List<T>` property its element's, so `["a"] -> Join(",")` and `[1, 2] -> Sum` type exactly.
+- **A ternary whose branches share a kind but differ in subkind types as a scalar of unknown kind**, not as its then-branch. `(flag ? { name : age })[0]` was admitted as a string; it is admitted as unknown, and `(flag ? { age : age })[0]` is refused as a number.
+- Every other binary operator, unary minus and `!` type as a number or boolean, so `(a == b)[0]` and `(a - b) -> Upper` are refused at load.
+
+##### Breaking — Go API
+
+- **`expr.IsNilLiteral` is removed** from the public `schema/expr`: its *"a nil expression is a nil literal"* arm was the conflation above, and after the parser change its three callers test `child != nil`.
+- **`eval.Scope.WithSelf` is removed** (internal): `PropertyScopeFromMap` binds `$self` itself, and `$self` rebinding goes through `WithVar` via a parameter named `self`.
+- **`value.Less` is removed** (internal): no production caller.
+
+##### Additive — Go API
+
+- `schema/expr`: `ReceiverKind` gains `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg` (the receiver's mirror of `ResultElementOrArg`), `RecvStringList` and `RecvNumericList`; twenty-one catalogue rows move to them.
+- `immutable.PropertiesOf(Map[string]) Properties` — a `Properties` view over a wrapped map's entries, shared, not copied.
+- `value.Equal(a, b any) bool` (internal) — the structural equality above.
+
+##### Behaviour, non-breaking
+
+- **`instance.CheckValue` and `CanonicalValue` name the fact that holds** for a float refused as an Integer: *"whole float outside the int64 range"* where a whole `1e19` was reported as *"float with fractional part"*. `value.IsWholeNumber` now answers only wholeness; `GetInt64FromFloat` carries the range; the `IsInteger` type checker uses the latter, so `1e19 =~ Integer` is false as before.
+- **An invariant scope is built with one wrap of the instance's members**, where `PropertyScopeFromMap(m).WithSelf(m)` wrapped them twice: 904 → 423 allocations on a 40-property instance, measured, with `$self` reading the same wrapped values the property lookup reads.
+- Dead code deleted, each proven unreachable: `IsNil`'s `reflect.Interface` arm, `parseTimestamp`'s RFC3339Nano fallback, two range checks inside `CompareInt64Float64`'s fractional branch, `checkPattern`'s nil guard.
+
+##### Prose
+
+- `docs/SPEC.md`: the equality rule (structural, never errors, shared by `in`/`Contains`/`Unique`); integer overflow and `nil` under the arithmetic operators; `+`'s operand rule; `Round` *"keeps the operand's kind, as `Floor` and `Ceil` do"* where it said *"to nearest integer"* (the code preserved the kind all along, measured). `instance/internal/eval/doc.go` listed all 43 builtins in a spelling the language does not resolve for seven of them (`all_or_none`, `type_of`, …); it lists the catalogue's names. `internal/value/doc.go` named a package path that does not exist and a function that had no caller.
 
 Minor tier, under the pre-1.0 subtractive rules. Fourteen repairs from the unit's round (A-237…A-250), every one a model change: one member index and one fold rule for every input key, one path rule, one type-identity rendering, one meaning per diagnostic code, one stored-form rule, and one composed-nesting bound shared with the wire.
 

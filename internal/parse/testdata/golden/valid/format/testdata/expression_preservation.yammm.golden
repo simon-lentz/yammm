@@ -62,7 +62,7 @@
         },
         {
           "msg": "\"replace\"",
-          "expr": "(Replace (p \"items\") (args \"old\" \"new\") (params ) nil)",
+          "expr": "(Replace (p \"items\") (args \"old\" \"new\") (params ) \u003cnil\u003e)",
           "expr_span": {
             "s": 256,
             "e": 286

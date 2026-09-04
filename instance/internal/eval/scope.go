@@ -43,10 +43,6 @@ type Scope interface {
 	// WithVar returns a new Scope with the additional variable binding.
 	// If the name is already bound, the new binding shadows the old one.
 	WithVar(name string, value any) Scope
-
-	// WithSelf returns a new Scope with $self bound to the given value.
-	// This is syntactic sugar for WithVar("self", value).
-	WithSelf(self any) Scope
 }
 
 // EmptyScope returns an empty Scope with no bindings.
@@ -65,12 +61,16 @@ func PropertyScope(props immutable.Properties) Scope {
 	}
 }
 
-// PropertyScopeFromMap returns a Scope backed by a raw property map.
-// The map is wrapped using immutable.WrapProperties with WithClone to ensure isolation.
+// PropertyScopeFromMap returns a Scope backed by a raw property map, with
+// $self bound to it. The map is wrapped ONCE, with WithClone so the caller's
+// map is isolated: the property lookup reads the wrap as a Properties and
+// $self reads it as a Map, sharing the entries. A second wrap for $self
+// doubled every instance's scope-building allocations.
 func PropertyScopeFromMap(props map[string]any) Scope {
+	m := immutable.WrapMap(props, immutable.WithClone(true))
 	return &propertyScope{
-		props: immutable.WrapProperties(props, immutable.WithClone(true)),
-		vars:  make(map[string]immutable.Value),
+		props: immutable.PropertiesOf(m),
+		vars:  map[string]immutable.Value{"self": immutable.Wrap(m)},
 	}
 }
 
@@ -95,10 +95,6 @@ func (s *mapScope) WithVar(name string, value any) Scope {
 	maps.Copy(newVars, s.vars)
 	newVars[name] = immutable.Wrap(value)
 	return &mapScope{vars: newVars}
-}
-
-func (s *mapScope) WithSelf(self any) Scope {
-	return s.WithVar("self", self)
 }
 
 // propertyScope is a scope backed by immutable.Properties.
@@ -134,8 +130,4 @@ func (s *propertyScope) WithVar(name string, value any) Scope {
 		props: s.props,
 		vars:  newVars,
 	}
-}
-
-func (s *propertyScope) WithSelf(self any) Scope {
-	return s.WithVar("self", self)
 }

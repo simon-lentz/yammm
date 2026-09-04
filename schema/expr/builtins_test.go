@@ -41,7 +41,8 @@ func TestBuiltins_FieldsAgree(t *testing.T) {
 		}
 		elementOfReceiver := s.Params == expr.BindElement || s.Params == expr.BindAccumulatorElement ||
 			s.Result == expr.ResultElement || s.Result == expr.ResultFlattened
-		takesList := s.Receiver == expr.RecvList || s.Receiver == expr.RecvScalarList
+		takesList := s.Receiver == expr.RecvList || s.Receiver == expr.RecvScalarList ||
+			s.Receiver == expr.RecvStringList || s.Receiver == expr.RecvNumericList
 		if elementOfReceiver && !takesList {
 			t.Errorf("%s: binds or yields an element of its receiver but does not take a list", s.Name)
 		}

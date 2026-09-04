@@ -1327,7 +1327,9 @@ Parentheses group as usual.
 %    modulo (integers only)
 ```
 
-`+` is polymorphic three ways: numbers add (mixed integer/float promotes to float), strings concatenate, and lists concatenate (`[1] + [2]` is `[1, 2]`).
+`+` is polymorphic three ways: numbers add (mixed integer/float promotes to float), strings concatenate, and lists concatenate (`[1] + [2]` is `[1, 2]`). The static check refuses any other pairing at load — a list beside a scalar, a string beside a number, an instance or an association key on either side.
+
+Integer arithmetic is exact within `int64`. A result outside it — `+`, `-`, `*`, `/` (the minimum divided by `-1`), unary `-` of the minimum, `Sum`, `Abs` — is an evaluation error, as division and modulo by zero are; it never wraps and never promotes to a float. An arithmetic operator applied to `nil` is an evaluation error too, `+` included: guard an absent value with `IsNil`, `Then`, `Lest` or `Default` — an absent list under `+` is written `(xs -> Default([])) + [1]`.
 
 #### Comparison Operators
 
@@ -1340,7 +1342,7 @@ Parentheses group as usual.
 >=   greater than or equal
 ```
 
-`==` and `!=` do not raise evaluation errors across mismatched operand types: `==` evaluates to not-equal (false) and `!=` to true, and `in` evaluates to false when element types do not match.
+`==` and `!=` do not raise evaluation errors across mismatched operand types: `==` evaluates to not-equal (false) and `!=` to true, and `in` evaluates to false when element types do not match. Equality is **structural** and never errors: two instances are equal when they hold the same members and each member is equal by this rule, recursively; two lists when their elements are pairwise equal; `1 == 1.0` and `NaN == NaN` hold. `in`, `Contains` and `Unique` use the same equality, so `LINES -> Contains(LINES[0])` is true and two identical composed children are one under `Unique`. The ordered comparisons below still refuse an instance.
 
 Ordered comparisons (`<`, `<=`, `>`, `>=`) follow a **total order across type strata** — `nil` < booleans < numbers < strings < lists — so a mixed-type ordered comparison is defined, not false: `1 < "a"` is true, `nil < 0` is true, and `false < true` is true. Within the numeric stratum, integers and floats compare exactly. Floats order `-Inf` < finite < `+Inf` < `NaN`, and `NaN` equals `NaN`, so `Sort`, `Unique`, and `Contains` treat non-finite values consistently. An ordered comparison on an unsupported shape (a map) is an evaluation error.
 
@@ -1558,7 +1560,7 @@ Results on an empty collection are a mixed family:
 | `Abs` | Absolute value |
 | `Floor` | Floor of float |
 | `Ceil` | Ceiling of float |
-| `Round` | Round to nearest integer (banker's rounding) |
+| `Round` | Round to the nearest whole number (banker's rounding); the result keeps the operand's kind, as `Floor` and `Ceil` do — a Float yields a Float |
 | `Min` | Minimum value: `a -> Min(b)` or `items -> Min` |
 | `Max` | Maximum value: `a -> Max(b)` or `items -> Max` |
 | `Compare` | Three-way comparison: `a -> Compare(b)` returns -1, 0, or 1 |

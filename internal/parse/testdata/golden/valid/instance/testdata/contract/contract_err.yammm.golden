@@ -43,7 +43,7 @@
         },
         {
           "msg": "\"x_min_empty\"",
-          "expr": "(== (Min ([]) (args ) (params ) nil) nil)",
+          "expr": "(== (Min ([]) (args ) (params ) \u003cnil\u003e) nil)",
           "expr_span": {
             "s": 294,
             "e": 312
@@ -54,69 +54,57 @@
           }
         },
         {
-          "msg": "\"x_upper_nonstring\"",
-          "expr": "(== (Upper 5 (args ) (params ) nil) \"5\")",
-          "expr_span": {
-            "s": 336,
-            "e": 353
-          },
-          "span": {
-            "s": 314,
-            "e": 353
-          }
-        },
-        {
           "msg": "\"x_int_div_zero\"",
           "expr": "(== (/ 1 0) 0)",
           "expr_span": {
-            "s": 374,
-            "e": 384
+            "s": 333,
+            "e": 343
           },
           "span": {
-            "s": 355,
-            "e": 384
+            "s": 314,
+            "e": 343
           }
         },
         {
           "msg": "\"x_mod_zero\"",
           "expr": "(== (% 1 0) 0)",
           "expr_span": {
-            "s": 401,
-            "e": 411
+            "s": 360,
+            "e": 370
           },
           "span": {
-            "s": 386,
-            "e": 411
+            "s": 345,
+            "e": 370
           }
         },
         {
           "msg": "\"x_nonbool_invariant_result\"",
           "expr": "(+ 5 1)",
           "expr_span": {
-            "s": 444,
-            "e": 449
+            "s": 403,
+            "e": 408
           },
           "span": {
-            "s": 413,
-            "e": 449
+            "s": 372,
+            "e": 408
           }
         },
         {
           "msg": "\"f_nil_result_is_falsey\"",
           "expr": "(Then nil (args ) (params v) true)",
           "expr_span": {
-            "s": 478,
-            "e": 503
+            "s": 437,
+            "e": 462
           },
           "span": {
-            "s": 451,
-            "e": 503
+            "s": 410,
+            "e": 462
           }
         }
       ],
       "span": {
         "s": 23,
-        "e": 505
+        "e": 464
       }
     }
   ]

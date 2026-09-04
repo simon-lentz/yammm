@@ -129,8 +129,13 @@ func propertyType(con Constraint) staticType {
 		return unknownType
 	}
 	switch con.Kind() {
-	case KindList, KindVector:
+	case KindList:
+		if lc, ok := con.(ListConstraint); ok {
+			return listOf(propertyType(lc.Element()))
+		}
 		return listOf(scalarType)
+	case KindVector:
+		return listOf(otherScalarType)
 	case KindAlias:
 		if a, ok := con.(AliasConstraint); ok {
 			return propertyType(a.Resolved())
@@ -160,13 +165,84 @@ func (c *completer) invariantErrorf(inv *Invariant, code diag.Code, format strin
 	c.errorf(inv.Span(), code, "%s", msg)
 }
 
-// binaryOps are the operators whose operands are walked and whose result is a
-// scalar. Everything else an S-expression can name is a builtin or an error.
+// binaryOps are the operators whose operands are walked. Every one but `+`
+// yields a number or a boolean; `+` yields what its operands are (docs/SPEC.md:
+// numbers add, strings concatenate, lists concatenate). Everything else an
+// S-expression can name is a builtin or an error.
 var binaryOps = map[string]bool{
 	"+": true, "-": true, "*": true, "/": true, "%": true,
 	">": true, ">=": true, "<": true, "<=": true,
 	"in": true, "=~": true, "!~": true, "==": true, "!=": true,
 	"&&": true, "||": true, "^": true,
+}
+
+// mergeScalar is the type of a value that is one of two scalars: the shared
+// subkind when both agree, else a scalar of unknown kind.
+func mergeScalar(a, b staticType) staticType {
+	if a.kind == kindScalar && b.kind == kindScalar && a.scalar == b.scalar {
+		return a
+	}
+	return scalarType
+}
+
+// typeBinary types a binary operator's result and checks the two operand
+// rules the evaluator refuses on every input: `+` takes two numbers, two
+// strings or two lists, and `in` takes a list on its right.
+func (c *completer) typeBinary(op string, children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
+	var l, r staticType
+	for i, child := range children {
+		t := c.typeExpr(child, sc, owner, inv)
+		switch i {
+		case 0:
+			l = t
+		case 1:
+			r = t
+		}
+	}
+	switch op {
+	case "+":
+		return c.typePlus(l, r, owner, inv)
+	case "in":
+		if r.kind == kindScalar || r.kind == kindInstance || r.kind == kindKey {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"in takes a list on its right in invariant %q on type %q", inv.Name(), owner.Name())
+		}
+	}
+	return otherScalarType
+}
+
+// typePlus types `+`: two lists concatenate to a list of their merged element,
+// two strings to a string, two numbers to a number. An instance or a key is
+// refused, as is a list beside a scalar or a string beside a number; an
+// operand of unknown kind is admitted and the result is unknown.
+func (c *completer) typePlus(l, r staticType, owner *Type, inv *Invariant) staticType {
+	for _, t := range []staticType{l, r} {
+		if t.kind == kindInstance || t.kind == kindKey {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"+ takes two numbers, two strings or two lists in invariant %q on type %q", inv.Name(), owner.Name())
+			return unknownType
+		}
+	}
+	if l.kind == kindUnknown || r.kind == kindUnknown {
+		return unknownType
+	}
+	if l.kind == kindList && r.kind == kindList {
+		return listOf(mergeScalar(l.element(), r.element()))
+	}
+	if l.kind == kindList || r.kind == kindList {
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+			"+ takes two numbers, two strings or two lists in invariant %q on type %q", inv.Name(), owner.Name())
+		return unknownType
+	}
+	if l.scalar == scalarAny || r.scalar == scalarAny {
+		return scalarType
+	}
+	if l.scalar != r.scalar {
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+			"+ takes two numbers, two strings or two lists in invariant %q on type %q", inv.Name(), owner.Name())
+		return unknownType
+	}
+	return l
 }
 
 // validateInvariantExpressions types every own invariant of every type and
@@ -241,9 +317,16 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 		return c.typeIndexExpr(children, sc, owner, inv)
 	case "[]":
 		elem := scalarType
-		for _, child := range children {
-			if c.typeExpr(child, sc, owner, inv).kind != kindScalar {
+		for i, child := range children {
+			t := c.typeExpr(child, sc, owner, inv)
+			switch {
+			case t.kind != kindScalar:
 				elem = unknownType
+			case elem.kind == kindUnknown:
+			case i == 0:
+				elem = t
+			default:
+				elem = mergeScalar(elem, t)
 			}
 		}
 		return listOf(elem)
@@ -260,6 +343,9 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 		then := c.typeExpr(children[1], sc, owner, inv)
 		otherwise := c.typeExpr(children[2], sc, owner, inv)
 		if then.kind == otherwise.kind && then.typ == otherwise.typ && then.kind != kindList {
+			if then.kind == kindScalar {
+				return mergeScalar(then, otherwise)
+			}
 			return then
 		}
 		return unknownType
@@ -267,14 +353,11 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 		for _, child := range children {
 			c.typeExpr(child, sc, owner, inv)
 		}
-		return scalarType
+		return otherScalarType
 	}
 
 	if binaryOps[op] {
-		for _, child := range children {
-			c.typeExpr(child, sc, owner, inv)
-		}
-		return scalarType
+		return c.typeBinary(op, children, sc, owner, inv)
 	}
 
 	if spec, ok := expr.LookupBuiltin(op); ok {
@@ -313,7 +396,7 @@ func (c *completer) walkCallParts(children []expr.Expression, sc *staticScope, o
 			c.typeExpr(ch, sc, owner, inv)
 			continue
 		}
-		if !expr.IsNilLiteral(ch) {
+		if ch != nil {
 			body = ch
 		}
 	}
@@ -510,7 +593,7 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 				params = p
 				continue
 			}
-			if !expr.IsNilLiteral(child) {
+			if child != nil {
 				body = child
 			}
 		}
@@ -519,23 +602,7 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 		c.typeExpr(a, sc, owner, inv)
 	}
 
-	switch spec.Receiver {
-	case expr.RecvList, expr.RecvScalarList:
-		if recv.kind == kindScalar || recv.kind == kindInstance || recv.kind == kindKey {
-			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-				"%s takes a list, and its receiver is not one in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
-		}
-		if spec.Receiver == expr.RecvScalarList && recv.kind == kindList && recv.element().kind == kindInstance {
-			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-				"%s takes a list of scalars, and its receiver holds instances in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
-		}
-	case expr.RecvScalar:
-		if recv.kind == kindList || recv.kind == kindInstance {
-			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-				"%s takes a scalar, and its receiver is not one in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
-		}
-	case expr.RecvAny:
-	}
+	c.checkReceiver(spec, recv, len(args), owner, inv)
 
 	switch {
 	case len(args) < spec.MinArgs:
@@ -612,4 +679,67 @@ func paramOr(params []string, i int, implicit string) string {
 		return params[i]
 	}
 	return implicit
+}
+
+// checkReceiver refuses a receiver the builtin refuses on every input, by the
+// catalogue's [expr.ReceiverKind]. A receiver of unknown kind, or a scalar of
+// unknown subkind, is admitted: the checker refuses only what it knows.
+func (c *completer) checkReceiver(spec expr.BuiltinSpec, recv staticType, nargs int, owner *Type, inv *Invariant) {
+	refuse := func(what string) {
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+			"%s takes %s, and its receiver is not one in invariant %q on type %q", spec.Name, what, inv.Name(), owner.Name())
+	}
+	notList := recv.kind == kindScalar || recv.kind == kindInstance || recv.kind == kindKey
+	elem := recv.element()
+	switch spec.Receiver {
+	case expr.RecvList:
+		if notList {
+			refuse("a list")
+		}
+	case expr.RecvScalarList:
+		if notList {
+			refuse("a list")
+		} else if elem.kind == kindInstance {
+			refuse("a list of scalars")
+		}
+	case expr.RecvStringList:
+		if notList {
+			refuse("a list")
+		} else if elem.kind == kindInstance || elem.scalar == scalarOther {
+			refuse("a list of strings")
+		}
+	case expr.RecvNumericList:
+		if notList {
+			refuse("a list")
+		} else if elem.kind == kindInstance || elem.scalar == scalarString {
+			refuse("a list of numbers")
+		}
+	case expr.RecvScalar:
+		if recv.kind == kindList || recv.kind == kindInstance {
+			refuse("a scalar")
+		}
+	case expr.RecvString:
+		if recv.kind == kindList || recv.kind == kindInstance || recv.scalar == scalarOther {
+			refuse("a string")
+		}
+	case expr.RecvNumeric:
+		if recv.kind == kindList || recv.kind == kindInstance || recv.kind == kindKey || recv.scalar == scalarString {
+			refuse("a number")
+		}
+	case expr.RecvSized:
+		if recv.kind == kindScalar && recv.scalar == scalarOther {
+			refuse("a string, a list or a map")
+		}
+	case expr.RecvListOrArg:
+		switch {
+		case nargs == 0 && notList:
+			refuse("a list")
+		case nargs == 0 && elem.kind == kindInstance:
+			refuse("a list of scalars")
+		case nargs > 0 && recv.kind == kindInstance:
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"%s ranks its receiver against its argument, and an instance cannot be ordered in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
+		}
+	case expr.RecvAny:
+	}
 }

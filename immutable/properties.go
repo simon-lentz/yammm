@@ -52,6 +52,21 @@ func WrapProperties(props map[string]any, opts ...Option) Properties {
 	}
 }
 
+// PropertiesOf returns a Properties over the entries of m, sharing them: both
+// are immutable, so one wrapped map can be read as a Properties (folded
+// lookup, sorted iteration) and as a [Map] without a second wrap.
+func PropertiesOf(m Map[string]) Properties {
+	if m.entries == nil {
+		return Properties{}
+	}
+	sortedKeys := slices.Sorted(maps.Keys(m.entries))
+	return Properties{
+		entries:     m.entries,
+		sortedKeys:  sortedKeys,
+		foldedIndex: computeFoldedIndex(sortedKeys),
+	}
+}
+
 // Get returns the value for the given property name and true if it exists.
 // Returns (zero Value, false) if the property does not exist.
 //

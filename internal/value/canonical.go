@@ -94,10 +94,9 @@ func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
 		}
 		return t, nil
 	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
-	}
-	t, err := time.Parse(time.RFC3339Nano, s)
+	// RFC3339 parses fractional seconds too, so no RFC3339Nano fallback is
+	// needed: nothing that layout accepts, this one refuses.
+	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("value: %q is not an RFC 3339 timestamp", s)
 	}

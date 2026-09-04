@@ -50,18 +50,6 @@ func TestMapScope_WithVar(t *testing.T) {
 	})
 }
 
-func TestMapScope_WithSelf(t *testing.T) {
-	scope := eval.EmptyScope()
-
-	data := map[string]any{"name": "Alice"}
-	newScope := scope.WithSelf(data)
-
-	val, found := newScope.Lookup("self")
-	assert.True(t, found)
-	// The value is wrapped in an immutable type
-	assert.NotNil(t, val.Unwrap())
-}
-
 // A variable name never folds: LookupFold on a variable-only scope is the
 // exact lookup, whichever spelling reaches it.
 func TestMapScope_LookupFold(t *testing.T) {
@@ -187,20 +175,6 @@ func TestPropertyScope_LookupFold_VariablePrecedence(t *testing.T) {
 	val, found = differing.LookupFold("name")
 	assert.True(t, found)
 	assert.Equal(t, "FromProps", val.Unwrap())
-}
-
-func TestPropertyScope_WithSelf(t *testing.T) {
-	props := immutable.WrapProperties(map[string]any{
-		"name": "Alice",
-	})
-	scope := eval.PropertyScope(props)
-
-	selfData := map[string]any{"id": int64(42)}
-	newScope := scope.WithSelf(selfData)
-
-	val, found := newScope.Lookup("self")
-	assert.True(t, found)
-	assert.NotNil(t, val.Unwrap())
 }
 
 func TestPropertyScope_LookupFold_NotFound(t *testing.T) {

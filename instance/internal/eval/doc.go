@@ -32,14 +32,16 @@
 //
 // # Built-in Functions
 //
-// The evaluator supports all DSL built-in functions:
+// The evaluator implements every builtin the catalogue in
+// [github.com/simon-lentz/yammm/schema/expr] defines, under the names the
+// DSL resolves case-insensitively:
 //
-//   - Collection: map, filter, count, all, any, all_or_none, reduce, compact, unique, len, sum, first, last, sort, reverse, flatten, contains
-//   - Numeric: abs, floor, ceil, round, min, max, compare
-//   - String: upper, lower, trim, trim_prefix, trim_suffix, split, join, starts_with, ends_with, replace, substring
-//   - Control flow: then, lest, with
-//   - Pattern matching: match
-//   - Utility: type_of, is_nil, default, coalesce
+//   - Collection: Map, Filter, Count, All, Any, AllOrNone, Reduce, Compact, Unique, Len, Sum, First, Last, Sort, Reverse, Flatten, Contains
+//   - Numeric: Abs, Floor, Ceil, Round, Min, Max, Compare
+//   - String: Upper, Lower, Trim, TrimPrefix, TrimSuffix, Split, Join, StartsWith, EndsWith, Replace, Substring
+//   - Control flow: Then, Lest, With
+//   - Pattern matching: Match
+//   - Utility: TypeOf, IsNil, Default, Coalesce
 //
 // # Configuration
 //

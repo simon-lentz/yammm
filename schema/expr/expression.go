@@ -178,17 +178,6 @@ func StringLiteral(expr Expression) (string, bool) {
 	return str, ok
 }
 
-// IsNilLiteral checks if an expression represents a nil value.
-func IsNilLiteral(expr Expression) bool {
-	if expr == nil {
-		return true
-	}
-	if lit, ok := expr.(*Literal); ok {
-		return lit.Val == nil
-	}
-	return false
-}
-
 // IsRegexpLiteral checks if an expression is a regexp literal.
 func IsRegexpLiteral(expr Expression) bool {
 	if lit, ok := expr.(*Literal); ok {

@@ -899,7 +899,7 @@ func (v *Validator) evaluateInvariants(
 		}
 		if scope == nil {
 			members := v.invariantScope(typ, props, edges, composed)
-			scope = eval.PropertyScopeFromMap(members).WithSelf(members)
+			scope = eval.PropertyScopeFromMap(members)
 		}
 
 		result, err := v.evaluator.EvaluateBool(expr, scope) //nolint:contextcheck // Evaluator API doesn't accept context

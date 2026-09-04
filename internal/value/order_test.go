@@ -5,7 +5,6 @@ import (
 	"math"
 	"math/rand"
 	"regexp"
-	"slices"
 	"testing"
 	"testing/quick"
 	"time"
@@ -151,8 +150,8 @@ func TestTypeStrata_ImmutableSliceIsASlice(t *testing.T) {
 	}
 }
 
-// A json.Number is numeric everywhere in this package. ClassifyWithRegistry
-// has always called it Int/Float; before TypeStrata agreed, a lexical number
+// A json.Number is numeric everywhere in this package. Classify has always
+// called it Int/Float; before TypeStrata agreed, a lexical number
 // took the String strata and compared against int64 by strata RANK — answering
 // "greater" with no error rather than comparing the two numbers.
 //
@@ -666,71 +665,6 @@ func sign(n int) int {
 	default:
 		return -1
 	}
-}
-
-func TestLess(t *testing.T) {
-	t.Run("matches Order", func(t *testing.T) {
-		inputs := []struct {
-			a    any
-			b    any
-			want bool
-		}{
-			{nil, false, true},
-			{false, nil, false},
-			{int64(1), int64(2), true},
-			{uint64(1), uint64(2), true},
-			{float64(3), float64(3), false},
-			{"a", "b", true},
-			{[]any{"a"}, []any{"a", "b"}, true},
-		}
-		for _, tc := range inputs {
-			got, err := value.Less(tc.a, tc.b)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			assertEqual(t, tc.want, got)
-
-			ord, err := value.Order(tc.a, tc.b)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			assertEqual(t, ord < 0, got)
-		}
-	})
-
-	t.Run("errors propagate", func(t *testing.T) {
-		_, err := value.Less(struct{}{}, 1)
-		if err == nil {
-			t.Error("expected error for struct comparison")
-		}
-	})
-
-	t.Run("usable with sort helpers", func(t *testing.T) {
-		values := []any{"b", "a", "c"}
-		slices.SortFunc(values, func(a, b any) int {
-			lessAB, err := value.Less(a, b)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if lessAB {
-				return -1
-			}
-			lessBA, err := value.Less(b, a)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if lessBA {
-				return 1
-			}
-			return 0
-		})
-		expected := []any{"a", "b", "c"}
-		for i := range values {
-			if values[i] != expected[i] {
-				t.Errorf("at index %d: expected %v, got %v", i, expected[i], values[i])
-			}
-		}
-	})
 }
 
 func TestGetInt64(t *testing.T) {
@@ -1711,10 +1645,11 @@ func TestIsWholeNumber(t *testing.T) {
 		{"negative_infinity", math.Inf(-1), false},
 		{"nan", math.NaN(), false},
 
-		// Out of int64 range
-		{"too_large", float64(1 << 63), false}, // 2^63 is too large for int64
-		{"too_large_positive", 1e20, false},    // Way too large
-		{"too_large_negative", -1e20, false},   // Way too negative (but still in range!)
+		// Whole but outside int64: whole all the same. GetInt64FromFloat
+		// carries the range and refuses these (whole_test.go).
+		{"too_large", float64(1 << 63), true},
+		{"too_large_positive", 1e20, true},
+		{"too_large_negative", -1e20, true},
 	}
 
 	for _, tt := range tests {
@@ -1792,11 +1727,15 @@ func TestGetInt64FromFloat_Quick(t *testing.T) {
 func TestIsWholeNumber_BoundaryConditions(t *testing.T) {
 	// Test specific boundary values around int64 limits
 
-	// float64(1<<63) is exactly 2^63, which is > MaxInt64 (2^63 - 1)
-	t.Run("at_2_63_is_false", func(t *testing.T) {
+	// float64(1<<63) is exactly 2^63: a whole number that is > MaxInt64
+	// (2^63 - 1), so it is whole and does not convert.
+	t.Run("at_2_63_is_whole_but_does_not_fit", func(t *testing.T) {
 		f := float64(1 << 63)
-		if value.IsWholeNumber(f) {
-			t.Errorf("IsWholeNumber(2^63) should be false, 2^63 exceeds MaxInt64")
+		if !value.IsWholeNumber(f) {
+			t.Errorf("IsWholeNumber(2^63) should be true: it has no fractional part")
+		}
+		if _, ok := value.GetInt64FromFloat(f); ok {
+			t.Errorf("GetInt64FromFloat(2^63) should refuse: 2^63 exceeds MaxInt64")
 		}
 	})
 

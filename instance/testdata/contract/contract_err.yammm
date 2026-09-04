@@ -7,7 +7,6 @@ type T {
 	// exact message the driving test asserts, f_* E_INVARIANT_FAIL (nil is falsey).
 	! "x_reduce_empty_no_init" ([] -> Reduce |$a, $x| { $a }) == nil
 	! "x_min_empty" ([] -> Min) == nil
-	! "x_upper_nonstring" 5 -> Upper == "5"
 	! "x_int_div_zero" 1 / 0 == 0
 	! "x_mod_zero" 1 % 0 == 0
 	! "x_nonbool_invariant_result" 5 + 1

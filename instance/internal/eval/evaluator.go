@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strings"
 
@@ -60,9 +61,13 @@ func (e *Evaluator) EvaluateBool(expression expr.Expression, scope Scope) (bool,
 	return b, nil
 }
 
-// evaluate is the internal evaluation dispatcher.
+// evaluate is the internal evaluation dispatcher. A nil expression — an
+// absent lambda body, or an absent operand — evaluates to nil, as the public
+// [Evaluator.Evaluate] promises.
 func (e *Evaluator) evaluate(expression expr.Expression, scope Scope) (any, error) {
 	switch ex := expression.(type) {
+	case nil:
+		return nil, nil //nolint:nilnil // nil expression evaluates to nil
 	case *expr.Literal:
 		return ex.Val, nil
 	case expr.Op:
@@ -334,7 +339,7 @@ func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 		return val, nil
 	}
 
-	// Try as immutable.Map[string] (e.g. $self bound via WithSelf)
+	// Try as immutable.Map[string] (e.g. $self, which PropertyScopeFromMap binds)
 	if m, ok := obj.(immutable.Map[string]); ok {
 		val, exists := m.Get(name)
 		if !exists {
@@ -513,11 +518,9 @@ func (e *Evaluator) evalBuiltin(def builtinDef, children []expr.Expression, scop
 			continue
 		}
 
-		// Otherwise it's the body expression (don't evaluate yet).
-		// VisitFcall normalizes missing bodies to NewLiteral(nil) (a non-nil
-		// *Literal wrapping nil). Treat that as "no body" so callBuiltin's
-		// acceptBody validation works correctly for source-compiled ASTs.
-		if !expr.IsNilLiteral(child) {
+		// Otherwise it's the body expression (don't evaluate yet). The
+		// parser leaves an absent body nil; a nil LITERAL is a body.
+		if child != nil {
 			body = child
 		}
 	}
@@ -532,9 +535,18 @@ func (e *Evaluator) add(args []any) (any, error) {
 	}
 
 	left, right := args[0], args[1]
+	if left == nil || right == nil {
+		// nil is an error under + as under -, * and /; asSlice's nil-is-empty
+		// rule is the collection builtins', not an operator's.
+		return nil, errors.New("+ of nil operand")
+	}
 
 	// Try numeric addition
-	if result, ok := e.numericOp(left, right, func(a, b int64) any { return a + b }, func(a, b float64) any { return a + b }); ok {
+	result, err := e.numericOp(left, right, checkedAdd, func(a, b float64) any { return a + b })
+	if err != nil {
+		return nil, err
+	}
+	if result != nil {
 		return result, nil
 	}
 
@@ -563,8 +575,11 @@ func (e *Evaluator) sub(args []any) (any, error) {
 		return nil, errors.New("- requires 2 operands")
 	}
 
-	result, ok := e.numericOp(args[0], args[1], func(a, b int64) any { return a - b }, func(a, b float64) any { return a - b })
-	if !ok {
+	result, err := e.numericOp(args[0], args[1], checkedSub, func(a, b float64) any { return a - b })
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
 		return nil, errors.New("- of non-numeric values")
 	}
 	return result, nil
@@ -575,8 +590,11 @@ func (e *Evaluator) mul(args []any) (any, error) {
 		return nil, errors.New("* requires 2 operands")
 	}
 
-	result, ok := e.numericOp(args[0], args[1], func(a, b int64) any { return a * b }, func(a, b float64) any { return a * b })
-	if !ok {
+	result, err := e.numericOp(args[0], args[1], checkedMul, func(a, b float64) any { return a * b })
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
 		return nil, errors.New("* of non-numeric values")
 	}
 	return result, nil
@@ -591,17 +609,21 @@ func (e *Evaluator) div(args []any) (any, error) {
 	li, liok := value.GetInt64(args[0])
 	ri, riok := value.GetInt64(args[1])
 	if liok && riok {
-		if ri == 0 {
-			return nil, errors.New("division by zero")
+		q, err := checkedDiv(li, ri)
+		if err != nil {
+			return nil, err
 		}
-		return li / ri, nil
+		return q, nil
 	}
 
 	// Float division (returns ±Inf for /0, which is valid IEEE 754)
-	result, ok := e.numericOp(args[0], args[1],
-		func(a, b int64) any { return a / b }, // Won't reach here - integer case handled above
+	result, err := e.numericOp(args[0], args[1],
+		checkedDiv, // unreachable: the integer case returned above
 		func(a, b float64) any { return a / b })
-	if !ok {
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
 		return nil, errors.New("/ of non-numeric values")
 	}
 	return result, nil
@@ -632,6 +654,9 @@ func (e *Evaluator) negate(args []any) (any, error) {
 	}
 
 	if i, ok := value.GetInt64(args[0]); ok {
+		if i == math.MinInt64 {
+			return nil, errors.New("integer overflow in -x")
+		}
 		return -i, nil
 	}
 	if f, ok := value.GetFloat64(args[0]); ok {
@@ -640,12 +665,20 @@ func (e *Evaluator) negate(args []any) (any, error) {
 	return nil, errors.New("-x of non-numeric value")
 }
 
-// numericOp applies integer or float operation based on operand types.
-func (e *Evaluator) numericOp(left, right any, intOp func(int64, int64) any, floatOp func(float64, float64) any) (any, bool) {
+// numericOp applies the integer operation when both operands are integers
+// and the float operation when either is a float, promoting the other. It
+// returns (nil, nil) when neither operand is numeric. Integer arithmetic is
+// exact within int64 (docs/SPEC.md): an integer operation that leaves the
+// domain returns its error, and the caller never sees a wrapped result.
+func (e *Evaluator) numericOp(left, right any, intOp func(int64, int64) (int64, error), floatOp func(float64, float64) any) (any, error) {
 	li, liok := value.GetInt64(left)
 	ri, riok := value.GetInt64(right)
 	if liok && riok {
-		return intOp(li, ri), true
+		r, err := intOp(li, ri)
+		if err != nil {
+			return nil, err
+		}
+		return r, nil
 	}
 
 	lf, lfok := value.GetFloat64(left)
@@ -653,54 +686,71 @@ func (e *Evaluator) numericOp(left, right any, intOp func(int64, int64) any, flo
 
 	// Promote integers to floats if needed
 	if liok && rfok {
-		return floatOp(float64(li), rf), true
+		return floatOp(float64(li), rf), nil
 	}
 	if lfok && riok {
-		return floatOp(lf, float64(ri)), true
+		return floatOp(lf, float64(ri)), nil
 	}
 	if lfok && rfok {
-		return floatOp(lf, rf), true
+		return floatOp(lf, rf), nil
 	}
 
-	return nil, false
+	return nil, nil //nolint:nilnil // neither operand is numeric; the caller names the operator
 }
 
-// nilEquality decides a == b when either side is nil: the null-guard idiom
-// holds for every value kind, an instance included, which the total order
-// cannot rank. The second result is false when neither side is nil.
-func nilEquality(a, b any) (equal, decided bool) {
-	if a == nil || b == nil {
-		return (a == nil) == (b == nil), true
+// checkedAdd, checkedSub, checkedMul and checkedDiv are int64 arithmetic
+// that refuses to leave the int64 domain, as the zero guards in div and mod
+// refuse a zero divisor.
+func checkedAdd(a, b int64) (int64, error) {
+	if (b > 0 && a > math.MaxInt64-b) || (b < 0 && a < math.MinInt64-b) {
+		return 0, errors.New("integer overflow in +")
 	}
-	return false, false
+	return a + b, nil
 }
 
+func checkedSub(a, b int64) (int64, error) {
+	if (b < 0 && a > math.MaxInt64+b) || (b > 0 && a < math.MinInt64+b) {
+		return 0, errors.New("integer overflow in -")
+	}
+	return a - b, nil
+}
+
+func checkedMul(a, b int64) (int64, error) {
+	if a == 0 || b == 0 {
+		return 0, nil
+	}
+	p := a * b
+	if p/b != a || (a == -1 && b == math.MinInt64) || (b == -1 && a == math.MinInt64) {
+		return 0, errors.New("integer overflow in *")
+	}
+	return p, nil
+}
+
+func checkedDiv(a, b int64) (int64, error) {
+	if b == 0 {
+		return 0, errors.New("division by zero")
+	}
+	if a == math.MinInt64 && b == -1 {
+		return 0, errors.New("integer overflow in /")
+	}
+	return a / b, nil
+}
+
+// equal and notEqual never error (docs/SPEC.md): [value.Equal] decides
+// equality structurally, for instances the total order cannot rank as for
+// the scalars and lists it can.
 func (e *Evaluator) equal(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("== requires 2 operands")
 	}
-	if eq, decided := nilEquality(args[0], args[1]); decided {
-		return eq, nil
-	}
-	cmp, err := value.Order(args[0], args[1])
-	if err != nil {
-		return nil, fmt.Errorf("== comparison error: %w", err)
-	}
-	return cmp == 0, nil
+	return value.Equal(args[0], args[1]), nil
 }
 
 func (e *Evaluator) notEqual(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("!= requires 2 operands")
 	}
-	if eq, decided := nilEquality(args[0], args[1]); decided {
-		return !eq, nil
-	}
-	cmp, err := value.Order(args[0], args[1])
-	if err != nil {
-		return nil, fmt.Errorf("!= comparison error: %w", err)
-	}
-	return cmp != 0, nil
+	return !value.Equal(args[0], args[1]), nil
 }
 
 func (e *Evaluator) lessThan(args []any) (any, error) {
@@ -798,11 +848,7 @@ func (e *Evaluator) inOp(args []any) (any, error) {
 	}
 
 	for _, elem := range slice {
-		cmp, err := value.Order(left, elem)
-		if err != nil {
-			continue // incomparable types are not equal
-		}
-		if cmp == 0 {
+		if value.Equal(left, elem) {
 			return true, nil
 		}
 	}

@@ -89,6 +89,29 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`placed_by != nil`,
 		// a bare lambda variable name resolves like the evaluator's scope does
 		`LINES -> All |$l| { l != nil }`,
+		// a body that is the nil literal is a body, not an absent one
+		`(name -> Then |$n| { nil }) == nil`,
+		`(name -> Then |$n| { _ }) == nil`,
+		// + concatenates lists and strings, as SPEC defines it
+		`([1] + [2]) -> First == 1`,
+		`(tags + ["x"]) -> Len == 3`,
+		`("a" + "b") -> Len == 2`,
+		// the receiver kinds: a string builtin on a string, a numeric one on a number
+		`name -> Upper == "N"`,
+		`MAIN_LINE.qty -> Abs > 0`,
+		`MAIN_LINE.qty -> Max(1) >= 1`,
+		`name -> Compare("a") >= 0`,
+		`["a", "b"] -> Join(",") == "a,b"`,
+		`[1, 2] -> Sum == 3`,
+		`tags -> Len > 0`,
+		`name -> Len > 0`,
+		// a ternary whose branches disagree in subkind is a scalar of unknown kind
+		`(name != "" ? { name : MAIN_LINE.qty }) -> Upper != ""`,
+		// equality on instances is structural, and a boolean result is a number-or-boolean scalar
+		`LINES[0] != LINES[1]`,
+		`[LINES[0], LINES[0]] -> Unique -> Len == 1`,
+		`LINES -> Contains(LINES[0])`,
+		`LINES[0] in LINES`,
 	}
 	for _, inv := range accept {
 		t.Run("accepts "+inv, func(t *testing.T) {
@@ -141,12 +164,28 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// builtin on a list, an ordering builtin on instances
 		{`name -> Filter |$c| { true } -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
 		{`PLACED_BY -> Sort -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
-		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a scalar"},
+		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a string"},
 		{`LINES -> Sort -> First.qty > 0`, diag.E_INVALID_INVARIANT, "list of scalars"},
 		// the bracket takes one index, and a number cannot be indexed
 		{`tags[] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
 		{`tags[0, 1] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
 		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
+		// a receiver the builtin refuses on every input: a number into a string
+		// builtin, a string into a numeric one, a number into Len, Min or Max
+		{`MAIN_LINE.qty -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`name -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`MAIN_LINE.qty -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map"},
+		{`MAIN_LINE.qty -> Min == 1`, diag.E_INVALID_INVARIANT, "takes a list"},
+		{`MAIN_LINE -> Max(1) != nil`, diag.E_INVALID_INVARIANT, "cannot be ordered"},
+		{`LINES -> Map |$l| { $l.qty } -> Join(",") != ""`, diag.E_INVALID_INVARIANT, "list of strings"},
+		{`tags -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers"},
+		// in takes a list on its right
+		{`name in name`, diag.E_INVALID_INVARIANT, "in takes a list"},
+		// a ternary keeps the subkind its branches agree on
+		{`(name != "" ? { MAIN_LINE.qty : MAIN_LINE.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`(name != "" ? { name : name }) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		// a boolean result cannot be indexed
+		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
 	}
 	for _, tc := range refuse {
 		t.Run("refuses "+tc.inv, func(t *testing.T) {

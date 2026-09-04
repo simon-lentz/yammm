@@ -252,7 +252,7 @@ func TestEvaluator_NumericVarSet(t *testing.T) {
 
 func TestEvaluator_Variable_Self(t *testing.T) {
 	ev := eval.NewEvaluator()
-	scope := eval.EmptyScope().WithSelf(map[string]any{"name": "Test", "value": int64(42)})
+	scope := eval.EmptyScope().WithVar("self", map[string]any{"name": "Test", "value": int64(42)})
 
 	result, err := ev.Evaluate(sx("$", lit("self")), scope)
 	require.NoError(t, err)

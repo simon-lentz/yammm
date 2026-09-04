@@ -34,7 +34,6 @@
 // The package provides helper functions for inspecting expression nodes:
 //
 //   - [StringLiteral]: extract a string value from a Literal expression
-//   - [IsNilLiteral]: check if an expression is a nil literal
 //   - [IsRegexpLiteral]: check if an expression is a compiled regexp
 //   - [ArgsLiteral]: extract argument list from a Literal expression
 //   - [ParamsLiteral]: extract parameter names from a Literal expression

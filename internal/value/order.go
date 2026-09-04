@@ -218,17 +218,6 @@ func Order(left, right any) (int, error) {
 	return 0, fmt.Errorf("value: unknown strata for comparison between %T and %T", left, right)
 }
 
-// Less returns true when left is strictly less than right according to Order. This is a
-// convenience for wiring canonical ordering into sort helpers; callers must handle the returned
-// error for unsupported inputs.
-func Less(left, right any) (bool, error) {
-	cmp, err := Order(left, right)
-	if err != nil {
-		return false, err
-	}
-	return cmp < 0, nil
-}
-
 // GetInt64 extracts an int64 from any integer type.
 // Returns (value, true) if the input is any signed or unsigned integer type.
 // Returns (0, false) if the input is not an integer type or if unsigned values
@@ -364,36 +353,29 @@ func GetString(val any) (string, bool) {
 	return "", false
 }
 
-// IsWholeNumber reports whether f is a finite float64 that represents
-// a whole number within int64 range. Used for Integer constraint coercion.
-//
-// Returns true if:
-//   - f is finite (not NaN, not Inf)
-//   - math.Trunc(f) == f (no fractional part)
-//   - f is within [MinInt64, MaxInt64) range
+// IsWholeNumber reports whether f is finite and has no fractional part. It
+// says nothing about range: see [GetInt64FromFloat] for the int64 bound.
 func IsWholeNumber(f float64) bool {
-	if !IsFinite(f) {
-		return false
-	}
-	if math.Trunc(f) != f {
-		return false
-	}
-	// Check int64 bounds.
-	// Note: float64(MaxInt64) rounds UP to 2^63, so we need f < 2^63.
-	// Note: float64(MinInt64) is exactly -2^63.
-	const maxInt64AsFloat = float64(1 << 63)  // 2^63
-	const minInt64AsFloat = -float64(1 << 63) // -2^63
-	return f >= minInt64AsFloat && f < maxInt64AsFloat
+	return IsFinite(f) && math.Trunc(f) == f
 }
 
-// GetInt64FromFloat extracts an int64 from a float64 that represents a whole number.
-// Returns (value, true) if f is a finite whole number within int64 range.
-// Returns (0, false) otherwise (fractional, NaN, Inf, or out of range).
+// GetInt64FromFloat extracts an int64 from a float64 that is whole AND within
+// int64. It reports false for a fractional, non-finite or out-of-range value;
+// a caller that must say which is which tests [IsWholeNumber] and [IsFinite].
 func GetInt64FromFloat(f float64) (int64, bool) {
-	if !IsWholeNumber(f) {
+	if !IsWholeNumber(f) || !fitsInt64(f) {
 		return 0, false
 	}
 	return int64(f), true
+}
+
+// fitsInt64 reports whether a whole float64 is within int64: float64(MaxInt64)
+// rounds up to 2^63, so the upper bound is exclusive; float64(MinInt64) is
+// exactly -2^63.
+func fitsInt64(f float64) bool {
+	const maxInt64AsFloat = float64(1 << 63)
+	const minInt64AsFloat = -float64(1 << 63)
+	return f >= minInt64AsFloat && f < maxInt64AsFloat
 }
 
 // GetUint64 extracts a uint64 from any unsigned integer type.
@@ -475,15 +457,9 @@ func CompareInt64Float64(i int64, f float64) int {
 	trunc, frac := math.Modf(f)
 
 	if frac != 0 {
-		// f is not a whole number - compare i with the truncated value
-		// Range check for trunc
-		if trunc > float64(math.MaxInt64) {
-			return -1 // trunc > MaxInt64, so f > any int64
-		}
-		if trunc < float64(math.MinInt64) {
-			return 1 // trunc < MinInt64, so f < any int64
-		}
-
+		// f is not a whole number: compare i with the truncated value. A
+		// float64 with a fractional part has magnitude below 2^52, so trunc
+		// is always within int64.
 		fi := int64(trunc)
 		if i < fi {
 			return -1

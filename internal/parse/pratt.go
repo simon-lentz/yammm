@@ -302,8 +302,9 @@ func (p *exprParser) lcWord(t *lexer.Token) (expr.Expression, error) {
 }
 
 // fcall parses the optional (args), |params| and { body } tail of a pipeline
-// call, producing the five-element shape with absent parts normalized to empty
-// rather than left nil.
+// call, producing the five-element shape. Absent args and params are empty
+// lists; an absent body is a nil Expression, so a body that is the nil
+// literal — `{ nil }` or `{ _ }` — stays a body.
 func (p *exprParser) fcall(lhs expr.Expression, name string) (expr.Expression, error) {
 	var args, params, body expr.Expression
 	if p.lx.Peek().Type == p.tok.lpar {
@@ -337,9 +338,6 @@ func (p *exprParser) fcall(lhs expr.Expression, name string) (expr.Expression, e
 	}
 	if params == nil {
 		params = expr.NewLiteral([]string{})
-	}
-	if body == nil {
-		body = expr.NewLiteral(nil)
 	}
 	return expr.SExpr{expr.Op(name), lhs, args, params, body}, nil
 }

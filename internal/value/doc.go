@@ -6,7 +6,8 @@
 //
 // This package is internal to the YAMMM module and is not importable by external
 // consumers per Go's internal/ package semantics. It is used by the instance
-// validation layer (instance/eval) for type coercion and constraint evaluation.
+// validation layer (instance/internal/eval) for type coercion and constraint
+// evaluation.
 //
 // # Value Comparison
 //
@@ -15,7 +16,8 @@
 //
 //   - [TypeStrata] classifies values into ordered strata: Nil < Bool < Numeric < String < Slice
 //   - [Order] compares two values, returning -1/0/1 for ordering
-//   - [Less] is a convenience wrapper for sort operations
+//   - [Equal] decides equality structurally and never errors: what the total
+//     order cannot rank — an instance — it compares member by member
 //
 // Supported types for comparison:
 //   - nil

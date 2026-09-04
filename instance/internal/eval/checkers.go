@@ -191,10 +191,14 @@ func (ch *Checker) coerceInteger(val any) (any, error) {
 		if i, ok := value.GetInt64FromFloat(f); ok {
 			return i, nil
 		}
-		if !value.IsFinite(f) {
+		switch {
+		case !value.IsFinite(f):
 			return nil, errors.New("cannot coerce non-finite float (NaN or Inf) to int64")
+		case !value.IsWholeNumber(f):
+			return nil, fmt.Errorf("cannot coerce float with fractional part %v to int64", f)
+		default:
+			return nil, fmt.Errorf("cannot coerce whole float %v outside the int64 range to int64", f)
 		}
-		return nil, fmt.Errorf("cannot coerce float with fractional part %v to int64", f)
 	}
 
 	// Reflection fallback for custom integer types recognized by registry
@@ -337,10 +341,14 @@ func (ch *Checker) checkInteger(val any, c schema.Constraint) error {
 		}
 		i, ok = value.GetInt64FromFloat(f)
 		if !ok {
-			if !value.IsFinite(f) {
+			switch {
+			case !value.IsFinite(f):
 				return constraintFail("expected integer, got non-finite float (NaN or Inf)")
+			case !value.IsWholeNumber(f):
+				return typeMismatch("expected integer, got float with fractional part: %v", f)
+			default:
+				return constraintFail("expected integer, got whole float outside the int64 range: %v", f)
 			}
-			return typeMismatch("expected integer, got float with fractional part: %v", f)
 		}
 	default:
 		return typeMismatch("expected integer, got %T", val)
@@ -512,7 +520,7 @@ func checkPattern(val any, c schema.Constraint) error {
 	compiled := pc.CompiledPatterns()
 	patterns := pc.Patterns()
 	for i, pattern := range compiled {
-		if pattern != nil && !pattern.MatchString(s) {
+		if !pattern.MatchString(s) {
 			return constraintFail("value %q does not match pattern %s", s, patterns[i])
 		}
 	}
@@ -690,8 +698,10 @@ func IsInteger() TypeChecker {
 		case value.IntKind:
 			return true, ""
 		case value.FloatKind:
-			if f, ok := value.GetFloat64(val); ok && value.IsWholeNumber(f) {
-				return true, ""
+			if f, ok := value.GetFloat64(val); ok {
+				if _, fits := value.GetInt64FromFloat(f); fits {
+					return true, ""
+				}
 			}
 		}
 		return false, fmt.Sprintf("expected integer, got %T", val)

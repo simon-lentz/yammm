@@ -368,16 +368,14 @@ func builtinUnique(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expr
 		return []any{}, nil
 	}
 
-	// Use value.Order for all comparisons to ensure semantic equality.
-	// This handles edge cases like NaN correctly (NaN == NaN per DSL total ordering,
-	// not IEEE 754 where NaN != NaN). Using map keys for comparable types would
-	// break this semantic because Go's map equality follows IEEE 754.
+	// value.Equal is the DSL's equality: NaN equals NaN, 1 equals 1.0, and
+	// an instance equals another structurally. A Go map keyed on the element
+	// would follow IEEE 754 and could not hold an instance at all.
 	result := make([]any, 0, len(slice))
 	for _, elem := range slice {
 		found := false
 		for _, r := range result {
-			cmp, err := value.Order(elem, r)
-			if err == nil && cmp == 0 {
+			if value.Equal(elem, r) {
 				found = true
 				break
 			}
@@ -448,7 +446,11 @@ func builtinSum(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 			hasFloat = true
 			floatSum += f
 		} else if i, ok := value.GetInt64(elem); ok {
-			intSum += i
+			sum, err := checkedAdd(intSum, i)
+			if err != nil {
+				return nil, errors.New("integer overflow in Sum")
+			}
+			intSum = sum
 			floatSum += float64(i)
 		} else {
 			return nil, fmt.Errorf("Sum() expects numeric elements, got %T", elem)
@@ -578,8 +580,7 @@ func builtinContains(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr
 
 	target := args[0]
 	for _, elem := range slice {
-		cmp, err := value.Order(elem, target)
-		if err == nil && cmp == 0 {
+		if value.Equal(elem, target) {
 			return true, nil
 		}
 	}
@@ -626,6 +627,9 @@ func builtinAbs(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 		return math.Abs(f), nil
 	}
 	if i, ok := value.GetInt64(lhs); ok {
+		if i == math.MinInt64 {
+			return nil, errors.New("integer overflow in Abs")
+		}
 		if i < 0 {
 			return -i, nil
 		}
@@ -1036,11 +1040,11 @@ func builtinIsNil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 	if lhs == nil {
 		return true, nil
 	}
-	// Check for nil interface values
+	// A typed nil: reflect.ValueOf never yields Kind Interface, so that
+	// kind is not listed.
 	rv := reflect.ValueOf(lhs)
-	if rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface ||
-		rv.Kind() == reflect.Map || rv.Kind() == reflect.Slice ||
-		rv.Kind() == reflect.Chan || rv.Kind() == reflect.Func {
+	if rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Map ||
+		rv.Kind() == reflect.Slice || rv.Kind() == reflect.Chan || rv.Kind() == reflect.Func {
 		return rv.IsNil(), nil
 	}
 	return false, nil

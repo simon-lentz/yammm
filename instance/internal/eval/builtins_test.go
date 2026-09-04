@@ -12,17 +12,14 @@ import (
 )
 
 // makeBuiltinCall builds the five-element pipeline call the parser emits for
-// "receiver -> name(args) |params| { body }": absent parts are present as empty
-// lists and a nil literal, exactly as the parser normalizes them.
+// "receiver -> name(args) |params| { body }": absent args and params are empty
+// lists and an absent body is nil, exactly as the parser leaves them.
 func makeBuiltinCall(receiver expr.Expression, name string, args []expr.Expression, params []string, body expr.Expression) expr.SExpr {
 	if args == nil {
 		args = []expr.Expression{}
 	}
 	if params == nil {
 		params = []string{}
-	}
-	if body == nil {
-		body = expr.NewLiteral(nil)
 	}
 	return expr.SExpr{expr.Op(name), receiver, expr.NewLiteral(args), expr.NewLiteral(params), body}
 }

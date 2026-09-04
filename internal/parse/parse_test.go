@@ -252,6 +252,8 @@ func TestParse_BareCommaCallHasNonNilArguments(t *testing.T) {
 // Go value for a literal, args[...] and params[...] for a call's lists.
 func sexprString(e expr.Expression) string {
 	switch v := e.(type) {
+	case nil:
+		return "<absent>"
 	case expr.SExpr:
 		parts := []string{v.Op()}
 		for _, c := range v.Children() {
@@ -284,14 +286,14 @@ func sexprString(e expr.Expression) string {
 func TestParse_PostfixOperatorsChainLeftToRight(t *testing.T) {
 	cases := []struct{ src, want string }{
 		{"$self.tags[0]", `(@ (. ($ "self") "tags") 0)`},
-		{"$self.name -> Len", `(Len (. ($ "self") "name") args[] params[] <nil>)`},
-		{"$i.sku -> Len > 0", `(> (Len (. ($ "i") "sku") args[] params[] <nil>) 0)`},
+		{"$self.name -> Len", `(Len (. ($ "self") "name") args[] params[] <absent>)`},
+		{"$i.sku -> Len > 0", `(> (Len (. ($ "i") "sku") args[] params[] <absent>) 0)`},
 		{"LINES[0].qty", `(. (@ (p "LINES") 0) "qty")`},
 		{"a.b.c", `(. (. (p "a") "b") "c")`},
-		{"xs -> First.name", `(. (First (p "xs") args[] params[] <nil>) "name")`},
+		{"xs -> First.name", `(. (First (p "xs") args[] params[] <absent>) "name")`},
 		{"-x[0]", `(@ (-x (p "x")) 0)`},
 		{"!x[0]", `(! (@ (p "x") 0))`},
-		{"!xs -> Len", `(! (Len (p "xs") args[] params[] <nil>))`},
+		{"!xs -> Len", `(! (Len (p "xs") args[] params[] <absent>))`},
 	}
 	for _, tc := range cases {
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + tc.src + "\n}\n"

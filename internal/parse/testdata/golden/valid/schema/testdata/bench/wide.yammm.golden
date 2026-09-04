@@ -437,7 +437,7 @@
         },
         {
           "msg": "\"the name is not blank\"",
-          "expr": "(\u003e (Len (p \"name\") (args ) (params ) nil) 0)",
+          "expr": "(\u003e (Len (p \"name\") (args ) (params ) \u003cnil\u003e) 0)",
           "expr_span": {
             "s": 1011,
             "e": 1026
@@ -1741,7 +1741,7 @@
       "invariants": [
         {
           "msg": "\"an exception carries a note\"",
-          "expr": "(|| (!= (p \"kind\") \"exception\") (\u003e (Len (p \"note\") (args ) (params ) nil) 0))",
+          "expr": "(|| (!= (p \"kind\") \"exception\") (\u003e (Len (p \"note\") (args ) (params ) \u003cnil\u003e) 0))",
           "expr_span": {
             "s": 3580,
             "e": 3618
@@ -2131,7 +2131,7 @@
       "invariants": [
         {
           "msg": "\"a contact is reachable\"",
-          "expr": "(\u003e (Len (p \"email\") (args ) (params ) nil) 0)",
+          "expr": "(\u003e (Len (p \"email\") (args ) (params ) \u003cnil\u003e) 0)",
           "expr_span": {
             "s": 4395,
             "e": 4411

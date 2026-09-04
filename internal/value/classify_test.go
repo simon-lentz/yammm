@@ -382,7 +382,7 @@ func ptrptr[T any](v T) **T {
 }
 
 func TestClassify_PointerDereferencing(t *testing.T) {
-	// ClassifyWithRegistry should automatically dereference pointers
+	// Classify dereferences pointers
 	t.Run("*int returns IntKind", func(t *testing.T) {
 		input := new(42)
 		kind, norm := value.Classify(input)

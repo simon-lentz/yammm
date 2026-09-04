@@ -157,7 +157,7 @@
         },
         {
           "msg": "\"member_then_pipeline\"",
-          "expr": "(\u003e (Len (. ($ \"self\") \"name\") (args ) (params ) nil) 0)",
+          "expr": "(\u003e (Len (. ($ \"self\") \"name\") (args ) (params ) \u003cnil\u003e) 0)",
           "expr_span": {
             "s": 252,
             "e": 273
@@ -181,7 +181,7 @@
         },
         {
           "msg": "\"lambda_member_then_pipeline\"",
-          "expr": "(All (p \"LINES\") (args ) (params l) (\u003e (Len (. ($ \"l\") \"sku\") (args ) (params ) nil) 0))",
+          "expr": "(All (p \"LINES\") (args ) (params l) (\u003e (Len (. ($ \"l\") \"sku\") (args ) (params ) \u003cnil\u003e) 0))",
           "expr_span": {
             "s": 347,
             "e": 386
@@ -193,7 +193,7 @@
         },
         {
           "msg": "\"pipeline_then_member\"",
-          "expr": "(\u003e (. (First (p \"LINES\") (args ) (params ) nil) \"qty\") 0)",
+          "expr": "(\u003e (. (First (p \"LINES\") (args ) (params ) \u003cnil\u003e) \"qty\") 0)",
           "expr_span": {
             "s": 413,
             "e": 435

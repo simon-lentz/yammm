@@ -114,7 +114,7 @@ type T {
 	! "d_mod_sign_of_dividend" (-7) % 3 == -1
 	! "p_promote_int_float" 1 + 2.5 == 3.5
 	! "p_string_concat" "a" + "b" == "ab"
-	! "d_list_concat" ([1] + [2]) -> Len == 2
+	! "d_list_concat" ([1] + [2]) -> First == 1
 
 	// --- Operators: membership, match, logic ---
 	! "p_in" 2 in [1, 2]
