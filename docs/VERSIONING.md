@@ -851,11 +851,11 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 ## Unreleased
 
-*Two blocks: unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass in the working tree, the unit NOT closed; the clause-5 round will add to it — and unit 4's, merged as `fabed40`. Each says which.*
+*Two blocks: unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass committed as `e70a383`, the unit NOT closed; the clause-5 round will add to it — and unit 4's, merged as `fabed40`. Each says which.*
 
-### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass in the working tree; the unit is not closed
+### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass committed as `e70a383`; the unit is not closed
 
-*Written in the fix pass that landed the behaviour, not at the tag (A-227). Pass A's declaration delta was enumerated from the diff and confirmed by `gorelease -base=v0.20.0` at `e8547b6`: across both units' cargo, **three incompatible changes and thirty-seven additions** (recounted from the persisted run; an earlier sentence here said thirty-eight), suggested `v0.21.0` — this unit's share one removal and ten additions, matching the list below symbol for symbol. **Pass B's block follows pass A's, measured by `gorelease -base=v0.20.0` at its commit `2b28aab`: across both units' cargo, four incompatible changes — `E_RELATION_NORMALIZATION_COLLISION` and `Type.CanonicalPropertyMap` removed, `StructuralHashVersion` 3 → 4, and `expr.IsNilLiteral` removed — and forty-four additions, suggested `v0.21.0`; pass B's share is the one removal and seven additions named below. **The clause-3/4 block follows pass B's, measured by `gorelease -base=v0.20.0` on a `git ls-files` export of the working tree: ten incompatible and forty-six additive across units 4 and 5, suggested `v0.21.0` — this pass's share the four `instance` removals, the two `Kind` value shifts and the two `schema/expr` additions named below; re-measured at its commit.** The tag-time run re-confirms it.***
+*Written in the fix pass that landed the behaviour, not at the tag (A-227). Pass A's declaration delta was enumerated from the diff and confirmed by `gorelease -base=v0.20.0` at `e8547b6`: across both units' cargo, **three incompatible changes and thirty-seven additions** (recounted from the persisted run; an earlier sentence here said thirty-eight), suggested `v0.21.0` — this unit's share one removal and ten additions, matching the list below symbol for symbol. **Pass B's block follows pass A's, measured by `gorelease -base=v0.20.0` at its commit `2b28aab`: across both units' cargo, four incompatible changes — `E_RELATION_NORMALIZATION_COLLISION` and `Type.CanonicalPropertyMap` removed, `StructuralHashVersion` 3 → 4, and `expr.IsNilLiteral` removed — and forty-four additions, suggested `v0.21.0`; pass B's share is the one removal and seven additions named below. **The clause-3/4 block follows pass B's, measured by `gorelease -base=v0.20.0` at its commit `e70a383`: ten incompatible and forty-six additive across units 4 and 5, suggested `v0.21.0` — this pass's share the four `instance` removals, the two `Kind` value shifts and the two `schema/expr` additions named below (identical to the working-tree export run that preceded the commit).** The tag-time run re-confirms it.***
 
 #### Pass B — the evaluator, the value rule and the static checker (A-253…A-261)
 
@@ -901,9 +901,9 @@ Nine repairs from the unit's second reading pass, every one a model change, rati
 
 #### The clause-3/4 pass — the acknowledge and corpus lanes of both passes, dispositioned and fixed
 
-Sixty-six fixes from the 130 acknowledge- and corpus-lane findings of both reading passes (93 fixed counting those an earlier pass retired; 17 deferred with a trigger; 10 wontfix with a reason — the ledger's §21), delivered under TDD in four batches. Two of them change a language rule and are recorded as derived decisions awaiting confirmation (A-262, A-263).
+Sixty-six fixes from the 130 acknowledge- and corpus-lane findings of both reading passes (93 fixed counting those an earlier pass retired; 17 deferred with a trigger; 10 wontfix with a reason — the ledger's §21), delivered under TDD in four batches. Two of them change a language rule and were recorded as derived decisions (A-262, A-263), confirmed by A-264.
 
-**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0` — twice, before and after the pass's last follow-ups: its unit-lane suite against this working tree fails **exactly the four hash re-key tests unit 4's re-key fails**, byte-identical to pass A's and pass B's sets, and the suite at the pin is green; **the clause-3/4 delta is empty.**
+**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0` — three times, before and after the pass's last follow-ups and at the commit `e70a383`: its unit-lane suite against this tree fails **exactly the four hash re-key tests unit 4's re-key fails**, byte-identical to pass A's and pass B's sets, and the suite at the pin is green; **the clause-3/4 delta is empty.**
 
 ##### Breaking — behaviour, `instance`
 
@@ -926,9 +926,9 @@ Sixty-six fixes from the 130 acknowledge- and corpus-lane findings of both readi
 
 ##### Breaking — the static invariant checker, `schema`
 
-- **`=~` against `Vector`, `List`, `Enum` or `Pattern` is refused at load** (`E_INVALID_INVARIANT`): they are datatype keywords but not type checks, and the invariant failed every instance. The seven checkable kinds are one set, `expr.IsDatatypeCheck`, read by both layers (A-262, derived).
-- **`Default`'s fallback must be of the receiver's kind** — a list for a list, a string for a string or an association key — and the result is typed as their merge, so the stage after `Default` is typed by a value the checker predicted; `(tags -> Default("none") -> First)` loaded clean and failed every instance (A-263, derived).
-- **`Min`/`Max` with an argument refuse a list receiver at load** (A-263, derived).
+- **`=~` against `Vector`, `List`, `Enum` or `Pattern` is refused at load** (`E_INVALID_INVARIANT`): they are datatype keywords but not type checks, and the invariant failed every instance. The seven checkable kinds are one set, `expr.IsDatatypeCheck`, read by both layers (A-262, confirmed by A-264).
+- **`Default`'s fallback must be of the receiver's kind** — a list for a list, a string for a string or an association key — and the result is typed as their merge, so the stage after `Default` is typed by a value the checker predicted; `(tags -> Default("none") -> First)` loaded clean and failed every instance (A-263, confirmed by A-264).
+- **`Min`/`Max` with an argument refuse a list receiver at load** (A-263, confirmed by A-264).
 - A `List<List<T>>` element is typed as a list, pinned by rows (the descent shipped with A-254).
 
 ##### Breaking — Go API
